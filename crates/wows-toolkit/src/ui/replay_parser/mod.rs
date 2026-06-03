@@ -2867,16 +2867,22 @@ pub struct Replay {
 fn clan_color_for_player(player: &Player) -> Option<Color32> {
     let state = player.initial_state();
     if state.clan().is_empty() {
-        None
-    } else {
-        let clan_color = state.raw_with_names().get("clanColor").expect("no clan color?");
-        let clan_color = clan_color.as_i64().expect("clan color is not an i64");
-        Some(Color32::from_rgb(
+        return None;
+    }
+    // Older replays omit clanColor; fall back to the player's team color so the
+    // clan tag still renders instead of panicking.
+    let clan_color = match state.raw_with_names().get("clanColor").and_then(|c| c.as_i64()) {
+        Some(clan_color) => Color32::from_rgb(
             ((clan_color & 0xFF0000) >> 16) as u8,
             ((clan_color & 0xFF00) >> 8) as u8,
             (clan_color & 0xFF) as u8,
-        ))
-    }
+        ),
+        None => {
+            tracing::warn!("player '{}' has no clanColor; using team color", state.username());
+            player_color_for_team_relation(player.relation())
+        }
+    };
+    Some(clan_color)
 }
 
 impl Replay {
@@ -2984,7 +2990,7 @@ impl Replay {
                 self.game_constants.as_deref(),
             );
             let mut p =
-                wows_replays::packet2::Parser::with_build(self.resource_loader.entity_specs(), replay_version.build);
+                wows_replays::packet2::Parser::with_version(self.resource_loader.entity_specs(), replay_version);
             let mut remaining = self.replay_file.packet_data.as_slice();
             while !remaining.is_empty() {
                 match p.parse_packet(&mut remaining) {

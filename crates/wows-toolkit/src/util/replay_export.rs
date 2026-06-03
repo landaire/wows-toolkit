@@ -14,6 +14,7 @@ use wowsunpack::game_params::types::Species;
 
 use wows_replays::types::Relation;
 
+use crate::util::player_color_for_team_relation;
 use crate::ui::replay_parser::Damage;
 use crate::ui::replay_parser::Hits;
 use crate::ui::replay_parser::PlayerReport;
@@ -121,14 +122,27 @@ pub struct Player {
 impl From<&wows_replays::analyzer::battle_controller::Player> for Player {
     fn from(value: &wows_replays::analyzer::battle_controller::Player) -> Self {
         let state = value.initial_state();
-        let clan_color = state.raw_with_names().get("clanColor").expect("no clan color?");
-        let clan_color = clan_color.as_i64().expect("clan color is not an i64") & 0xFFFFFF;
+        let clan = state.clan().to_string();
+        // Clanless players never had a clan color, and older replays omit
+        // clanColor for everyone; in that case fall back to the team color.
+        let clan_color_rgb = if clan.is_empty() {
+            0
+        } else {
+            match state.raw_with_names().get("clanColor").and_then(|c| c.as_i64()) {
+                Some(clan_color) => (clan_color & 0xFFFFFF) as u32,
+                None => {
+                    tracing::warn!("player '{}' has no clanColor; using team color", state.username());
+                    let color = player_color_for_team_relation(value.relation());
+                    ((color.r() as u32) << 16) | ((color.g() as u32) << 8) | (color.b() as u32)
+                }
+            }
+        };
         Self {
             db_id: state.db_id(),
             realm: state.realm().map(str::to_owned),
             name: state.username().to_string(),
-            clan: state.clan().to_string(),
-            clan_color_rgb: clan_color as u32,
+            clan,
+            clan_color_rgb,
             division_id: if state.division_id() > 0 { Some(state.division_id() as u32) } else { None },
             team_id: state.team_id() as u32,
             is_replay_perspective: value.relation().is_self(),
