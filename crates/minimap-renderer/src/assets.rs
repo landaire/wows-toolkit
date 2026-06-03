@@ -696,11 +696,38 @@ fn compute_scale_factor(font: &FontArc) -> f32 {
     1.0
 }
 
+/// Load a Latin sans-serif font from a well-known OS location, used when the game
+/// VFS carries no usable TrueType face (older clients ship bitmap fonts only).
+fn load_system_fallback_font() -> Option<(FontArc, Vec<u8>)> {
+    const CANDIDATES: &[&str] = &[
+        // Windows
+        r"C:\Windows\Fonts\segoeui.ttf",
+        r"C:\Windows\Fonts\arial.ttf",
+        // macOS
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial.ttf",
+        // Linux
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    ];
+    for path in CANDIDATES {
+        if let Ok(bytes) = std::fs::read(path)
+            && let Ok(font) = FontArc::try_from_vec(bytes.clone())
+        {
+            debug!(path, "Loaded system fallback font");
+            return Some((font, bytes));
+        }
+    }
+    None
+}
+
 /// Load game fonts from packed game files.
 ///
 /// Tries to load Warhelios Bold as the primary font. CJK fallback fonts
 /// (Korean, Japanese, Chinese) are loaded if present. Each font gets a
-/// scale correction factor computed automatically.
+/// scale correction factor computed automatically. Falls back to a system font
+/// when the game VFS has no TrueType face (older bitmap-font clients).
 pub fn load_game_fonts(vfs: &VfsPath) -> GameFonts {
     let load_font = |path: &str| -> Option<(FontArc, Vec<u8>)> {
         let buf = read_vfs_file(vfs, path)?;
@@ -720,10 +747,15 @@ pub fn load_game_fonts(vfs: &VfsPath) -> GameFonts {
     let (primary, primary_bytes) = load_font("gui/fonts/Warhelios.ttf")
         .or_else(|| load_font("gui/fonts/Warhelios_Regular.ttf"))
         .or_else(|| load_font("gui/fonts/Warhelios_Bold.ttf"))
-        .expect(
-            "Failed to load Warhelios font from game files. \
-             Make sure the game directory is correct.",
-        );
+        .or_else(|| {
+            // Pre-TTF clients (e.g. 0.9.x) ship only bitmap fonts, so their VFS has no
+            // usable TrueType face. Fall back to a system sans-serif so old replays
+            // still render text instead of crashing -- the exact face is unimportant
+            // for the minimap overlay.
+            warn!("no Warhelios TTF in game files (older client?); falling back to a system font");
+            load_system_fallback_font()
+        })
+        .expect("no usable font found in the game files or on the system");
 
     let fallback_paths = [
         "gui/fonts/WarheliosKO_Bold.ttf",
