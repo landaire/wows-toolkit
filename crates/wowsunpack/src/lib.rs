@@ -16,7 +16,8 @@ pub mod error;
 #[cfg(feature = "parsing")]
 pub mod export;
 /// Version-aware GUI asset resolution: request assets by type, not file path.
-#[cfg(feature = "parsing")]
+/// Resolves and reads through the VFS, so it requires the `vfs` feature.
+#[cfg(feature = "vfs")]
 pub mod game_assets;
 /// Constants parsed from the game's XML files in `res/gui/data/constants/`
 #[cfg(feature = "parsing")]
