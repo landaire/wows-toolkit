@@ -598,7 +598,7 @@ impl RealtimeArmorViewer {
 
         let shot = matched_shot?;
 
-        let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+        let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell)?;
         let impact_result = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);
 
         let model_center = self.pane.loaded_armor.as_ref().map(|a| a.center()).unwrap_or(Vec3::zeros());

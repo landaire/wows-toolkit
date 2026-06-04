@@ -13,6 +13,11 @@ use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::ShellInfo;
 use wowsunpack::game_params::types::Species;
 
+/// AP overmatch ratio: a plate is overmatched when `caliber_mm > thickness_mm * OVERMATCH_RATIO`.
+/// This is the community-established value; the real check is engine-side and is not
+/// present in GameParams, so it cannot be data-validated and must be kept in sync by hand.
+pub const OVERMATCH_RATIO: f32 = 14.3;
+
 /// A ship added to the comparison list.
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
@@ -50,8 +55,8 @@ pub fn check_penetration(shell: &ShellInfo, thickness_mm: f32, ifhe: bool) -> Op
             Some(if pen >= thickness_mm { PenResult::Penetrates } else { PenResult::Bounces })
         }
         AmmoType::AP => {
-            // Overmatch: caliber > armor * 14.3
-            Some(if shell.caliber.value() > thickness_mm * 14.3 {
+            // Overmatch: caliber > armor * OVERMATCH_RATIO
+            Some(if shell.caliber.value() > thickness_mm * OVERMATCH_RATIO {
                 PenResult::Penetrates
             } else {
                 PenResult::AngleDependent
@@ -182,7 +187,7 @@ use crate::armor_viewer::ballistics::ShellParams;
 /// Outcome of a shell hitting a single plate.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PlateOutcome {
-    /// Caliber > 14.3 * thickness — always penetrates, ignores ricochet.
+    /// Caliber > OVERMATCH_RATIO * thickness — always penetrates, ignores ricochet.
     Overmatch,
     /// Shell penetrates (raw_pen >= effective_thickness).
     Penetrate,
@@ -270,7 +275,8 @@ pub fn simulate_shell_through_hits(
 
     let mut velocity = impact.impact_velocity as f32;
     let caliber_mm = (params.caliber * 1000.0) as f32;
-    let normalization_rad = params.normalization as f32;
+    // Uncapped shells (bulletCap == false) receive no normalization.
+    let normalization_rad = if params.cap { params.normalization as f32 } else { 0.0 };
     let ricochet1_rad = params.ricochet1 as f32;
     let fuse_threshold_mm = params.threshold as f32;
     let fuse_time = params.fuse_time as f32;
@@ -313,7 +319,7 @@ pub fn simulate_shell_through_hits(
 
         let raw_pen = p_ppc * velocity.powf(1.38);
         let angle_from_normal_rad = hit.angle_deg.to_radians();
-        let is_overmatch = caliber_mm > hit.thickness_mm * 14.3;
+        let is_overmatch = caliber_mm > hit.thickness_mm * OVERMATCH_RATIO;
 
         // Check ricochet (only if not overmatch)
         if !is_overmatch && angle_from_normal_rad >= ricochet1_rad {
@@ -538,7 +544,7 @@ pub fn compare_with_server(
     first_hit_thickness: Millimeters,
 ) -> ComparisonVerdict {
     let caliber = Millimeters::new((params.caliber * 1000.0) as f32);
-    let is_overmatch = caliber > first_hit_thickness * 14.3;
+    let is_overmatch = caliber > first_hit_thickness * OVERMATCH_RATIO;
     let ricochet0_deg = params.ricochet0.to_degrees() as f32;
     let ricochet1_deg = params.ricochet1.to_degrees() as f32;
 

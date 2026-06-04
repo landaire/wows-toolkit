@@ -19,7 +19,10 @@ const M_AIR: f64 = 0.0289644; // molar mass of air (kg/mol)
 const GM_RL: f64 = (G * M_AIR) / (R_GAS * L);
 
 // Game-specific constants
-const TIME_MULTIPLIER: f64 = 2.75; // shell time multiplier
+// Shell flight-time multiplier (jcw780's calibrated value), used only to convert
+// real flight seconds into in-game time-to-target. Distinct from the game's ship
+// time scale (SHIP_TIME_SCALE) and not interchangeable with it.
+const TIME_MULTIPLIER: f64 = 2.75;
 const VELOCITY_POWER: f64 = 1.38; // 2 * 0.69, penetration velocity exponent
 
 // Simulation parameters
@@ -46,26 +49,42 @@ pub struct ShellParams {
     pub k: f64,
     /// Combined penetration coefficient: 1e-7 * krupp * mass^0.69 * caliber^(-1.07)
     pub p_ppc: f64,
+    /// Whether the shell is capped. Uncapped shells receive no normalization.
+    pub cap: bool,
 }
 
 impl ShellParams {
-    pub fn from_shell_info(shell: &ShellInfo) -> Self {
+    /// Build ballistic parameters from a shell.
+    ///
+    /// Returns `None` (with a logged reason) when the shell lacks data that has no
+    /// safe default — `normalization` or `fuse_threshold`. Substituting 0.0 for
+    /// either would silently change penetration outcomes, so we skip the shell
+    /// rather than guess. Every real gun shell in GameParams carries both fields.
+    pub fn from_shell_info(shell: &ShellInfo) -> Option<Self> {
         let caliber = shell.caliber.value() as f64 / 1000.0; // mm -> m
         let mass = shell.mass_kg as f64;
         let v0 = shell.muzzle_velocity as f64;
         let krupp = shell.krupp as f64;
         let cd = shell.air_drag as f64;
-        let normalization = (shell.normalization as f64).to_radians();
+        let Some(normalization_deg) = shell.normalization else {
+            tracing::warn!("shell '{}' has no normalization angle; skipping ballistic sim", shell.name);
+            return None;
+        };
+        let Some(threshold_mm) = shell.fuse_threshold else {
+            tracing::warn!("shell '{}' has no fuse threshold; skipping ballistic sim", shell.name);
+            return None;
+        };
+        let normalization = (normalization_deg as f64).to_radians();
         let ricochet0 = (shell.ricochet_angle as f64).to_radians();
         let ricochet1 = (shell.always_ricochet_angle as f64).to_radians();
         let fuse_time = shell.fuse_time as f64;
-        let threshold = shell.fuse_threshold as f64;
+        let threshold = threshold_mm as f64;
 
         let r = caliber / 2.0;
         let k = 0.5 * cd * r * r * PI / mass;
         let p_ppc = 1e-7 * krupp * mass.powf(0.69) * caliber.powf(-1.07);
 
-        ShellParams {
+        Some(ShellParams {
             caliber,
             mass,
             v0,
@@ -78,7 +97,8 @@ impl ShellParams {
             threshold,
             k,
             p_ppc,
-        }
+            cap: shell.cap,
+        })
     }
 }
 

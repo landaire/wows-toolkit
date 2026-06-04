@@ -1715,7 +1715,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                 .or_else(|| comparison_ships.iter().flat_map(|s| s.shells.iter()).next());
 
                             let ballistic_impact = first_shell.and_then(|shell| {
-                                let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+                                let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell)?;
                                 crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
                             });
 
@@ -1781,9 +1781,10 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                         .iter()
                                         .find(|s| s.ammo_type == AmmoType::AP)
                                         .or_else(|| ship.shells.first());
-                                    if let Some(shell) = shell {
-                                        let params =
-                                            crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+                                    if let Some(shell) = shell
+                                        && let Some(params) =
+                                            crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell)
+                                    {
                                         if let Some(impact) =
                                             crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
                                         {
@@ -1813,7 +1814,11 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                             let mut last_visible_hit: Option<usize> = None;
                             for (ship_idx, ship) in comparison_ships.iter().enumerate() {
                                 for shell in ship.shells.iter().filter(|s| s.ammo_type == AmmoType::AP) {
-                                    let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+                                    let Some(params) =
+                                        crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell)
+                                    else {
+                                        continue;
+                                    };
                                     let shell_impact = if range_meters.value() > 0.0 {
                                         crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
                                     } else {
@@ -2612,7 +2617,9 @@ pub(crate) fn show_armor_tooltip(
                     }
                     AmmoType::SAP => format!("{:.0}mm pen", shell.sap_pen_mm.unwrap_or(0.0)),
                     AmmoType::AP => {
-                        if shell.caliber.value() > info.thickness_mm * 14.3 {
+                        if shell.caliber.value()
+                            > info.thickness_mm * crate::armor_viewer::penetration::OVERMATCH_RATIO
+                        {
                             "overmatch".to_string()
                         } else {
                             "angle-dependent".to_string()
@@ -3116,8 +3123,8 @@ fn recompute_trajectory_for_range(
     // Update shell direction from first shell's impact angle
     if let Some(shell) = first_shell
         && range_meters.value() > 0.0
+        && let Some(params) = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell)
     {
-        let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
         if let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_meters) {
             let horiz_angle = impact.impact_angle_horizontal as f32;
             let cos_h = horiz_angle.cos();
@@ -3135,8 +3142,9 @@ fn recompute_trajectory_for_range(
     if range_meters.value() > 0.0 {
         for (ship_idx, ship) in comparison_ships.iter().enumerate() {
             let shell = ship.shells.iter().find(|s| s.ammo_type == AmmoType::AP).or_else(|| ship.shells.first());
-            if let Some(shell) = shell {
-                let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+            if let Some(shell) = shell
+                && let Some(params) = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell)
+            {
                 if let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_meters) {
                     let (arc_2d, height_ratio) =
                         crate::armor_viewer::ballistics::simulate_arc_points(&params, impact.launch_angle, 60);
@@ -3167,7 +3175,9 @@ fn recompute_trajectory_for_range(
     let mut new_last_visible: Option<usize> = None;
     for (ship_idx, ship) in comparison_ships.iter().enumerate() {
         for shell in ship.shells.iter().filter(|s| s.ammo_type == AmmoType::AP) {
-            let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+            let Some(params) = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell) else {
+                continue;
+            };
             let shell_impact = if range_meters.value() > 0.0 {
                 crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
             } else {
@@ -3336,24 +3346,24 @@ fn update_shell_sim_cache(
         .enumerate()
         .flat_map(|(si, ship)| {
             ship.shells.iter().map(move |shell| {
+                // A shell with no simulable params (missing normalization/fuse) still gets a
+                // cache entry so it stays in the list, but with no impact/sim.
                 let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-                let impact = if shell.ammo_type == AmmoType::AP && range_meters.value() > 0.0 {
-                    crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
-                } else {
-                    None
+                let impact = match (&params, shell.ammo_type == AmmoType::AP && range_meters.value() > 0.0) {
+                    (Some(params), true) => crate::armor_viewer::ballistics::solve_for_range(params, range_meters),
+                    _ => None,
                 };
-                let sim = if shell.ammo_type == AmmoType::AP {
-                    impact.as_ref().map(|imp| {
+                let sim = match (&params, shell.ammo_type == AmmoType::AP) {
+                    (Some(params), true) => impact.as_ref().map(|imp| {
                         crate::armor_viewer::penetration::simulate_shell_through_hits(
-                            &params,
+                            params,
                             imp,
                             hits,
                             direction,
                             continue_on_ricochet,
                         )
-                    })
-                } else {
-                    None
+                    }),
+                    _ => None,
                 };
                 crate::armor_viewer::state::CachedShellSim {
                     ship_name: ship.display_name.clone(),
