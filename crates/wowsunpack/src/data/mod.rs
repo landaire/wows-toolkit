@@ -117,6 +117,14 @@ impl Version {
         format!("{}.{}.{}", self.major, self.minor, self.patch)
     }
 
+    /// A base version `(major, minor, patch)` with no build component. Useful for
+    /// keying version-gated tables, where entries take effect at a friendly
+    /// version regardless of build. Compare against a full version with
+    /// [`Self::is_at_least`], which ignores the build field.
+    pub const fn base(major: u32, minor: u32, patch: u32) -> Version {
+        Version { major, minor, patch, build: 0 }
+    }
+
     pub fn is_at_least(&self, other: &Version) -> bool {
         if self.major > other.major {
             true

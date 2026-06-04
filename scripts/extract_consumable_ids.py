@@ -14,10 +14,10 @@ Era coverage:
   - era-1/era-3: ConsumablesConstants.pyc absent; falls back to scanning the zip's
     file list for candidate modules and deobfuscating each until one yields the map.
 
-Output: JSON { friendly_version: { "0": "crashCrew", ... } } plus a per-version
-status line on stderr.
+Output: `crates/wowsunpack/consumable_layouts.toml`, run-length encoded by base
+version (one `[[layout]]` per change in the id map), plus per-version status on
+stderr. `crates/wowsunpack/build.rs` turns that TOML into the lookup table.
 """
-import json
 import os
 import re
 import shutil
@@ -224,7 +224,7 @@ def extract_version(version_dir, workdir, full_fallback=False):
 def main():
     args = [a for a in sys.argv[1:] if a != "--full"]
     full_fallback = "--full" in sys.argv
-    out_path = args[0] if len(args) > 0 else os.path.join(".scratch", "consumable_ids.json")
+    out_path = args[0] if len(args) > 0 else os.path.join("crates", "wowsunpack", "consumable_layouts.toml")
     only = args[1] if len(args) > 1 else None  # optional substring filter
     dirs = sorted(
         d
@@ -263,7 +263,8 @@ def main():
     for c, a, b, v in conflicts:
         sys.stderr.write(f"WARN const {c} maps to both {a!r} and {b!r} (at {v})\n")
 
-    result = {}
+    # Resolve each version's id -> name map.
+    per_version = {}  # friendly -> {id_str: name}
     missing_names = set()
     for friendly, v in raw.items():
         names = {**canonical, **v["names"]}  # prefer the version's own names
@@ -273,14 +274,48 @@ def main():
                 id_map[str(cid)] = names[const]
             elif not const.startswith(("CONSUMABLE_UNUSED",)):
                 missing_names.add(const)
-        result[friendly] = {"build": v["build"], "ids": {k: id_map[k] for k in sorted(id_map, key=int)}}
+        per_version[friendly] = {k: id_map[k] for k in sorted(id_map, key=int)}
 
     if missing_names:
         sys.stderr.write(f"\nconsts with no canonical name (skipped): {sorted(missing_names)}\n")
+
+    def vkey(friendly):
+        parts = [int(x) for x in friendly.split(".")]
+        return tuple((parts + [0, 0, 0])[:3])
+
+    # Run-length encode into layouts: keep one entry per change in the id map,
+    # ordered by base version. build.rs reads this TOML verbatim.
+    layouts = []  # (base_version_str, id_map)
+    prev = None
+    for friendly in sorted(per_version, key=vkey):
+        id_map = per_version[friendly]
+        if id_map != prev:
+            layouts.append((".".join(str(x) for x in vkey(friendly)), id_map))
+            prev = id_map
+
+    lines = [
+        "# Per-version consumable id -> internal-name tables.",
+        "#",
+        "# Recovered by static analysis of the obfuscated consumable-constants module in",
+        "# each shipped client build. Keyed on friendly base version (major.minor.patch):",
+        "# a replay resolves to the latest layout whose version it is at least.",
+        "#",
+        "# Source of truth for crates/wowsunpack/build.rs, which generates the lookup",
+        "# table at compile time. Regenerate with scripts/extract_consumable_ids.py.",
+        "",
+    ]
+    for base, id_map in layouts:
+        lines.append("[[layout]]")
+        lines.append(f'version = "{base}"')
+        lines.append("[layout.ids]")
+        for k in sorted(id_map, key=int):
+            lines.append(f'{k} = "{id_map[k]}"')
+        lines.append("")
+
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
-    sys.stderr.write(f"\nwrote {out_path} ({len(result)} versions)\n")
+    with open(out_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    sys.stderr.write(f"\nwrote {out_path} ({len(layouts)} layouts from {len(per_version)} versions)\n")
 
 
 if __name__ == "__main__":
