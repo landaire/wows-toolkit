@@ -16,6 +16,7 @@ use wowsunpack::data::Version;
 pub use wowsunpack::data::ship_config::ShipConfig;
 use wowsunpack::data::ship_config::parse_ship_config;
 use wowsunpack::game_params::types::BigWorldDistance;
+use wowsunpack::game_params::types::CAPTAIN_SKILL_REWORK_VERSION;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Species;
@@ -1088,7 +1089,7 @@ where
                     .map(|vehicle_rc| {
                         let mut vehicle: VehicleEntity = RefCell::borrow(vehicle_rc).clone();
 
-                        // Add battle results info to vehicle
+                        // Add battle results info to vehicle (results blob only).
                         if let Some(battle_results) =
                             parsed_battle_results.as_ref().and_then(|results| results.as_object())
                         {
@@ -1097,10 +1098,14 @@ where
                                     infos.get(player.initial_state.db_id.to_string().as_str()).cloned()
                                 })
                             });
+                        }
 
-                            if let Some(frags) = self.frags.get(&player.initial_state.entity_id()) {
-                                vehicle.frags = frags.iter().map(DeathInfo::from).collect();
-                            }
+                        // Frags come from ShipDestroyed events, which are tracked
+                        // independently of the post-battle results blob. Attribute
+                        // them unconditionally so kills show on older replays (e.g.
+                        // 0.9.10) that carry no results.
+                        if let Some(frags) = self.frags.get(&player.initial_state.entity_id()) {
+                            vehicle.frags = frags.iter().map(DeathInfo::from).collect();
                         }
 
                         vehicle
@@ -1386,6 +1391,55 @@ where
                 _ => {}
             }
         }
+
+        // Match: state -> controlPoints -> [N] -> SetKey{teamId|invaderTeam|progress|...}.
+        // Older clients (e.g. 0.9.10) drive capture-point ownership and progress by
+        // mutating the BattleLogic `state.controlPoints` array (seeded on create)
+        // rather than via InteractiveZone entities.
+        if let [PropertyNestLevel::DictKey("controlPoints"), PropertyNestLevel::ArrayIndex(cp_idx)] = levels.as_slice()
+            && let UpdateAction::SetKey { key, value } = action
+            && let Some(cp) = self.capture_points.get_mut(*cp_idx)
+        {
+            match *key {
+                "teamId" => {
+                    if let Some(v) = value.as_i64() {
+                        cp.team_id = v;
+                    }
+                }
+                "invaderTeam" => {
+                    if let Some(v) = value.as_i64() {
+                        cp.invader_team = v;
+                    }
+                }
+                "hasInvaders" => {
+                    if let Some(v) = value.as_i64() {
+                        cp.has_invaders = v != 0;
+                    }
+                }
+                "bothInside" => {
+                    if let Some(v) = value.as_i64() {
+                        cp.both_inside = v != 0;
+                    }
+                }
+                "isEnabled" => {
+                    if let Some(v) = value.as_i64() {
+                        cp.is_enabled = v != 0;
+                    }
+                }
+                "progress" => match value {
+                    // [current, period]; renderer reads `.0` as the captured fraction.
+                    ArgValue::Array(p) if p.len() >= 2 => {
+                        cp.progress = (p[0].as_f32().unwrap_or(0.0) as f64, p[1].as_f32().unwrap_or(0.0) as f64);
+                    }
+                    _ => {
+                        if let Some(f) = value.as_f32() {
+                            cp.progress.0 = f as f64;
+                        }
+                    }
+                },
+                _ => {}
+            }
+        }
     }
 
     fn handle_entity_create_with_clock(&mut self, _clock: GameClock, packet: &EntityCreatePacket<'_>) {
@@ -1528,6 +1582,22 @@ where
                     for entry in local_weather {
                         if let Some(zone) = Self::parse_weather_zone(entry) {
                             self.local_weather_zones.push(zone);
+                        }
+                    }
+                }
+
+                // Older clients (e.g. 0.9.10) don't spawn InteractiveZone entities for
+                // capture points. Instead, BattleLogic carries a flat `controlPoints`
+                // array under `state`, with each cap's position/radius/team/progress
+                // inline. Seed `capture_points` from it so the minimap can draw them.
+                if self.capture_points.is_empty()
+                    && let Some(state) = packet.props.get("state")
+                    && let Some(state_dict) = Self::as_dict(state)
+                    && let Some(ArgValue::Array(control_points)) = state_dict.get("controlPoints")
+                {
+                    for (idx, entry) in control_points.iter().enumerate() {
+                        if let Some(cp) = self.parse_legacy_control_point(idx, entry) {
+                            self.capture_points.push(cp);
                         }
                     }
                 }
@@ -1674,6 +1744,49 @@ where
         }
     }
 
+    /// Parse a single legacy (pre-InteractiveZone, e.g. 0.9.10) `controlPoints`
+    /// entry -- a flat FixedDict on BattleLogic -- into a [`CapturePointState`].
+    fn parse_legacy_control_point(&self, idx: usize, entry: &ArgValue<'_>) -> Option<CapturePointState> {
+        let dict = Self::as_dict(entry)?;
+        let position = match dict.get("position") {
+            Some(ArgValue::Vector2((x, z))) => Some(WorldPos { x: *x, y: 0.0, z: *z }),
+            Some(ArgValue::Array(p)) if p.len() >= 2 => {
+                Some(WorldPos { x: p[0].as_f32().unwrap_or(0.0), y: 0.0, z: p[1].as_f32().unwrap_or(0.0) })
+            }
+            _ => None,
+        };
+        let radius = dict.get("radius").and_then(|v| v.as_f32()).unwrap_or(0.0);
+        let team_id = dict.get("teamId").and_then(|v| v.as_i64()).unwrap_or(-1);
+        let invader_team = dict.get("invaderTeam").and_then(|v| v.as_i64()).unwrap_or(-1);
+        let has_invaders = dict.get("hasInvaders").and_then(|v| v.as_i64()).unwrap_or(0) != 0;
+        let both_inside = dict.get("bothInside").and_then(|v| v.as_i64()).unwrap_or(0) != 0;
+        let is_enabled = dict.get("isEnabled").and_then(|v| v.as_i64()).unwrap_or(1) != 0;
+        let control_point_type = dict
+            .get("controlPointType")
+            .and_then(|v| v.as_i64())
+            .and_then(|id| ControlPointType::from_id(id as i32, self.constants().battle(), self.version));
+        // `progress` arrives as [current, period]; the renderer treats `.0` as the
+        // captured fraction (0..1) and `.1` as the timer.
+        let progress = match dict.get("progress") {
+            Some(ArgValue::Array(p)) if p.len() >= 2 => {
+                (p[0].as_f32().unwrap_or(0.0) as f64, p[1].as_f32().unwrap_or(0.0) as f64)
+            }
+            _ => (0.0, 0.0),
+        };
+        Some(CapturePointState {
+            index: idx,
+            position,
+            radius,
+            control_point_type,
+            team_id,
+            invader_team,
+            progress,
+            has_invaders,
+            both_inside,
+            is_enabled,
+        })
+    }
+
     /// Extract a 2D world position from a weather zone value (Vector2 or 2-element Array).
     fn extract_weather_position(value: &ArgValue<'_>) -> Option<WorldPos> {
         match value {
@@ -1811,7 +1924,15 @@ macro_rules! set_arg_value {
         set_arg_value!($set_var, $args, $key, uint_32_ref, u32)
     };
     ($set_var:expr, $args:ident, $key:expr, f32) => {
-        set_arg_value!($set_var, $args, $key, float_32_ref, f32)
+        // Accept Float32, Float64, or integer encodings. Older clients vary the
+        // wire type (e.g. 0.9.10 sends `health` as Float64); a strict
+        // `float_32_ref()` would silently drop those, freezing the value (HP bars
+        // never moved). `as_f32()` converts any numeric variant.
+        if let Some(value) = $args.get($key)
+            && let Some(converted) = value.as_f32()
+        {
+            $set_var = converted
+        }
     };
     ($set_var:expr, $args:ident, $key:expr, bool) => {
         // Skip rather than panic if an older version encodes this field with a
@@ -1887,7 +2008,7 @@ macro_rules! arg_value_to_type {
 }
 
 impl UpdateFromReplayArgs for CrewModifiersCompactParams {
-    fn update_from_args(&mut self, args: &HashMap<&str, ArgValue<'_>>, _version: Version, _constants: &GameConstants) {
+    fn update_from_args(&mut self, args: &HashMap<&str, ArgValue<'_>>, version: Version, _constants: &GameConstants) {
         const PARAMS_ID_KEY: &str = "paramsId";
         const IS_IN_ADAPTION_KEY: &str = "isInAdaption";
         const LEARNED_SKILLS_KEY: &str = "learnedSkills";
@@ -1899,35 +2020,45 @@ impl UpdateFromReplayArgs for CrewModifiersCompactParams {
             self.is_in_adaption = arg_value_to_type!(args, IS_IN_ADAPTION_KEY, bool);
         }
 
-        // Older crew-skill layouts (e.g. pre-submarine) have a different shape
-        // for `learnedSkills`, so tolerate a missing/short/differently-typed
-        // value rather than panicking. Missing per-species entries default to
-        // an empty skill list.
-        if let Some(learned_skills) = args.get(LEARNED_SKILLS_KEY).and_then(|v| v.array_ref()) {
-            let skills_from_idx = |idx: usize| -> Vec<u8> {
-                learned_skills
-                    .get(idx)
-                    .and_then(|v| v.array_ref())
-                    .map(|a| a.iter().filter_map(|x| x.uint_8_ref().copied()).collect())
-                    .unwrap_or_default()
-            };
+        // The captain-skill rework changed the `learnedSkills` shape. Gate on the
+        // version (the boundary is exact -- 0.9.x is always a bitmask, 0.10.0+ is
+        // always per-species arrays) and still type-check inside each branch so a
+        // malformed/missing value yields an empty skill set rather than a panic.
+        let rework = Version {
+            major: CAPTAIN_SKILL_REWORK_VERSION.0,
+            minor: CAPTAIN_SKILL_REWORK_VERSION.1,
+            patch: CAPTAIN_SKILL_REWORK_VERSION.2,
+            build: 0,
+        };
+        if version.is_at_least(&rework) {
+            // Post-rework: per-species arrays of skill-type ids.
+            if let Some(learned_skills) = args.get(LEARNED_SKILLS_KEY).and_then(|v| v.array_ref()) {
+                let skills_from_idx = |idx: usize| -> Vec<u8> {
+                    learned_skills
+                        .get(idx)
+                        .and_then(|v| v.array_ref())
+                        .map(|a| a.iter().filter_map(|x| x.uint_8_ref().copied()).collect())
+                        .unwrap_or_default()
+                };
 
-            let skills = Skills {
-                aircraft_carrier: skills_from_idx(0),
-                battleship: skills_from_idx(1),
-                cruiser: skills_from_idx(2),
-                destroyer: skills_from_idx(3),
-                auxiliary: skills_from_idx(4),
-                submarine: skills_from_idx(5),
-            };
-
-            self.learned_skills = skills;
+                self.learned_skills = Skills {
+                    aircraft_carrier: skills_from_idx(0),
+                    battleship: skills_from_idx(1),
+                    cruiser: skills_from_idx(2),
+                    destroyer: skills_from_idx(3),
+                    auxiliary: skills_from_idx(4),
+                    submarine: skills_from_idx(5),
+                };
+            }
         } else if let Some(ArgValue::Uint64(mask)) = args.get(LEARNED_SKILLS_KEY) {
             // Pre-rework clients (<= 0.9.x) encode learned skills as a single bitmask
-            // over skill-type ids -- bit i set means skill type i is learned -- with no
-            // per-species split (a captain carried one shared skill set). Apply the
-            // decoded list to every species so it resolves regardless of ship type.
-            let ids: Vec<u8> = (0..64u32).filter(|i| mask & (1u64 << i) != 0).map(|i| i as u8).collect();
+            // over skill-type ids -- with no per-species split (a captain carried one
+            // shared skill set). The mask is 1-indexed: `skillType` values start at 1,
+            // so bit `i` set means skill type `i + 1` is learned. (Decoding bit `i` as
+            // skill type `i` resolves to wrong/nonexistent skills -- e.g. a Destroyer
+            // captain appearing to have CV skills.) Apply the decoded list to every
+            // species so it resolves regardless of ship type.
+            let ids: Vec<u8> = (0..64u32).filter(|i| mask & (1u64 << i) != 0).map(|i| (i + 1) as u8).collect();
             self.learned_skills = Skills {
                 aircraft_carrier: ids.clone(),
                 battleship: ids.clone(),
@@ -2469,6 +2600,15 @@ impl UpdateFromReplayArgs for VehicleProps {
         // TODO: debugText
 
         set_arg_value!(self.health, args, HEALTH_KEY, f32);
+        // Older clients (e.g. 0.9.10) never broadcast maxHealth -- the Vehicle
+        // EntityCreate carries only `health` (full HP at spawn) and there are no
+        // maxHealth updates -- so `max_health` would stay 0 and the HP-bar
+        // fraction (health / max_health) breaks. Treat the highest health ever
+        // observed as the max. Newer clients set maxHealth explicitly and health
+        // never exceeds it, so this is a no-op there.
+        if self.health > self.max_health {
+            self.max_health = self.health;
+        }
         set_arg_value!(self.engine_dir, args, ENGINE_DIR_KEY, i8);
 
         // TODO: state
@@ -3203,8 +3343,23 @@ where
                                 smoke.points.push(WorldPos::default());
                             }
                             for (i, v) in values.iter().enumerate() {
-                                if let ArgValue::Vector3((x, y, z)) = v {
-                                    smoke.points[start + i] = WorldPos { x: *x, y: *y, z: *z };
+                                // Smoke puff coordinates are Vector3 in modern replays but
+                                // Vector2 [x, z] in older ones (e.g. 0.9.10); some clients
+                                // also encode them as a 2-element float array. Accept all
+                                // three so the trail accumulates past the creation puff.
+                                let pos = match v {
+                                    ArgValue::Vector3((x, y, z)) => Some(WorldPos { x: *x, y: *y, z: *z }),
+                                    ArgValue::Vector2((x, z)) => Some(WorldPos { x: *x, y: 0.0, z: *z }),
+                                    ArgValue::Array(arr) if arr.len() >= 2 => {
+                                        match (arr[0].float_32_ref(), arr[1].float_32_ref()) {
+                                            (Some(x), Some(z)) => Some(WorldPos { x: *x, y: 0.0, z: *z }),
+                                            _ => None,
+                                        }
+                                    }
+                                    _ => None,
+                                };
+                                if let Some(pos) = pos {
+                                    smoke.points[start + i] = pos;
                                 }
                             }
                         }
