@@ -88,9 +88,7 @@ pub fn probe_status(status: &mut EncoderStatus) {
         Err(e) => {
             status.gpu_error = Some(e.to_string());
             for codec in VideoCodec::ALL {
-                status
-                    .gpu_codecs
-                    .insert(codec, CodecSupport::Unsupported("Vulkan device unavailable".into()));
+                status.gpu_codecs.insert(codec, CodecSupport::Unsupported("Vulkan device unavailable".into()));
             }
             return;
         }
@@ -144,8 +142,7 @@ impl GpuEncoder {
         codec: VideoCodec,
         config: EncoderConfig,
     ) -> rootcause::Result<Self, VideoError> {
-        let (_instance, device, _name) =
-            open_device().map_err(|e| report!(VideoError::EncoderInit(e.to_string())))?;
+        let (_instance, device, _name) = open_device().map_err(|e| report!(VideoError::EncoderInit(e.to_string())))?;
 
         let input_parameters = VideoParameters {
             width: NonZeroU32::new(width).expect("non-zero width"),
@@ -185,12 +182,7 @@ impl GpuEncoder {
         Ok(Self { inner, nv12_buf: vec![0u8; nv12_size], frame_count: 0 })
     }
 
-    pub fn encode_frame(
-        &mut self,
-        rgb: &[u8],
-        width: u32,
-        height: u32,
-    ) -> rootcause::Result<Vec<u8>, VideoError> {
+    pub fn encode_frame(&mut self, rgb: &[u8], width: u32, height: u32) -> rootcause::Result<Vec<u8>, VideoError> {
         let y_len = (width * height) as usize;
         let uv_len = (width * height / 2) as usize;
 

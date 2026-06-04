@@ -14,8 +14,13 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, bail, Context, Result};
-use cbc::cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
+use anyhow::anyhow;
+use anyhow::bail;
+use anyhow::Context;
+use anyhow::Result;
+use cbc::cipher::block_padding::NoPadding;
+use cbc::cipher::BlockDecryptMut;
+use cbc::cipher::KeyIvInit;
 use des::Des;
 use flate2::read::GzDecoder;
 use std::io::Read;
@@ -45,9 +50,7 @@ pub fn decode_gch(file_bytes: &[u8]) -> Result<Vec<u8>> {
     }
 
     let mut out = Vec::new();
-    GzDecoder::new(&buf[..])
-        .read_to_end(&mut out)
-        .context("GZip decompress failed")?;
+    GzDecoder::new(&buf[..]).read_to_end(&mut out).context("GZip decompress failed")?;
     Ok(out)
 }
 
@@ -94,11 +97,9 @@ impl Report {
     /// The three python.log variants captured by WGCheck, in (label, text) form.
     pub fn python_logs(&self) -> Vec<(&'static str, &str)> {
         let mut out = Vec::new();
-        for (label, field) in [
-            ("python.log", "PythonLog"),
-            ("win32/python.log", "PythonLog32"),
-            ("win64/python.log", "PythonLog64"),
-        ] {
+        for (label, field) in
+            [("python.log", "PythonLog"), ("win32/python.log", "PythonLog32"), ("win64/python.log", "PythonLog64")]
+        {
             if let Some(s) = self.str(field) {
                 if !s.is_empty() {
                     out.push((label, s));
@@ -131,7 +132,10 @@ enum Value {
 
 enum Obj {
     Str(String),
-    Class { name: String, members: Vec<(String, Value)> },
+    Class {
+        name: String,
+        members: Vec<(String, Value)>,
+    },
     /// Arrays and byte blobs are kept only as a short description.
     Summary(String),
 }
@@ -168,13 +172,7 @@ enum Step {
 }
 
 pub fn parse_nrbf(data: &[u8]) -> Result<Report> {
-    let mut p = Parser {
-        b: data,
-        pos: 0,
-        objects: HashMap::new(),
-        layouts: HashMap::new(),
-        root_id: 0,
-    };
+    let mut p = Parser { b: data, pos: 0, objects: HashMap::new(), layouts: HashMap::new(), root_id: 0 };
     p.run()?;
     p.into_report()
 }
@@ -204,10 +202,7 @@ impl<'a> Parser<'a> {
     }
 
     fn into_report(self) -> Result<Report> {
-        let root = self
-            .objects
-            .get(&self.root_id)
-            .ok_or_else(|| anyhow!("root object {} not found", self.root_id))?;
+        let root = self.objects.get(&self.root_id).ok_or_else(|| anyhow!("root object {} not found", self.root_id))?;
         let (name, members) = match root {
             Obj::Class { name, members } => (name.clone(), members),
             _ => bail!("root object is not a class"),
@@ -243,10 +238,10 @@ impl<'a> Parser<'a> {
     fn read_step(&mut self) -> Result<Step> {
         let tag = self.u8()?;
         Ok(match tag {
-            11 => Step::End,                          // MessageEnd
-            10 => Step::Nulls(1),                     // ObjectNull
-            13 => Step::Nulls(self.u8()? as usize),   // ObjectNullMultiple256
-            14 => Step::Nulls(self.i32()? as usize),  // ObjectNullMultiple
+            11 => Step::End,                         // MessageEnd
+            10 => Step::Nulls(1),                    // ObjectNull
+            13 => Step::Nulls(self.u8()? as usize),  // ObjectNullMultiple256
+            14 => Step::Nulls(self.i32()? as usize), // ObjectNullMultiple
             _ => Step::Value(self.read_record(tag)?),
         })
     }
@@ -291,8 +286,7 @@ impl<'a> Parser<'a> {
         }
         self.layouts.insert(obj_id, layout.clone());
         let members = self.read_members(&layout)?;
-        self.objects
-            .insert(obj_id, Obj::Class { name: layout.name, members });
+        self.objects.insert(obj_id, Obj::Class { name: layout.name, members });
         Ok(Value::Ref(obj_id))
     }
 
@@ -306,8 +300,7 @@ impl<'a> Parser<'a> {
             .cloned()
             .ok_or_else(|| anyhow!("ClassWithId references unknown metadata id {meta_id}"))?;
         let members = self.read_members(&layout)?;
-        self.objects
-            .insert(obj_id, Obj::Class { name: layout.name, members });
+        self.objects.insert(obj_id, Obj::Class { name: layout.name, members });
         Ok(Value::Ref(obj_id))
     }
 
@@ -414,8 +407,7 @@ impl<'a> Parser<'a> {
         for _ in 0..len {
             self.read_primitive(prim)?;
         }
-        self.objects
-            .insert(obj_id, Obj::Summary(format!("primitive[{prim}] len {len}")));
+        self.objects.insert(obj_id, Obj::Summary(format!("primitive[{prim}] len {len}")));
         Ok(Value::Ref(obj_id))
     }
 
@@ -429,7 +421,7 @@ impl<'a> Parser<'a> {
             total = total.saturating_mul(l);
         }
         // Offset variants (3,4,5) carry lower bounds per rank.
-        if matches!(array_type, 3 | 4 | 5) {
+        if matches!(array_type, 3..=5) {
             for _ in 0..rank {
                 let _lb = self.i32()?;
             }
@@ -474,8 +466,7 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        self.objects
-            .insert(obj_id, Obj::Summary(format!("array rank {rank} len {total}")));
+        self.objects.insert(obj_id, Obj::Summary(format!("array rank {rank} len {total}")));
         Ok(Value::Ref(obj_id))
     }
 
@@ -484,8 +475,8 @@ impl<'a> Parser<'a> {
     fn read_primitive(&mut self, prim: u8) -> Result<Value> {
         Ok(match prim {
             1 => Value::Bool(self.u8()? != 0),
-            2 => Value::Int(self.u8()? as i64),       // Byte
-            3 => Value::Int(self.read_char()? as i64), // Char
+            2 => Value::Int(self.u8()? as i64),                          // Byte
+            3 => Value::Int(self.read_char()? as i64),                   // Char
             5 => Value::Float(self.lp_string()?.parse().unwrap_or(0.0)), // Decimal
             6 => Value::Float(f64::from_le_bytes(self.take(8)?.try_into().unwrap())),
             7 => Value::Int(i16::from_le_bytes(self.take(2)?.try_into().unwrap()) as i64),

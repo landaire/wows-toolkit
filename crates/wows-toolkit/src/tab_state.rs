@@ -860,7 +860,9 @@ impl TabState {
                     if let Some(deps) = self.replay_dependencies() {
                         update_background_task!(
                             self.background_tasks,
-                            ReplayLoader::from_replay(deps, replay.clone()).source(ReplaySource::SessionStatsOnly).load()
+                            ReplayLoader::from_replay(deps, replay.clone())
+                                .source(ReplaySource::SessionStatsOnly)
+                                .load()
                         );
                     }
                 }

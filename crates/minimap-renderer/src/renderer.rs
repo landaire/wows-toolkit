@@ -2322,11 +2322,7 @@ impl<'a> MinimapRenderer<'a> {
 /// True if the most recent connection-change event for this player at or
 /// before `clock` is `Disconnected`. Returns false when there are no events
 /// recorded (player has been connected since arena start).
-fn is_player_disconnected_at(
-    controller: &dyn BattleControllerState,
-    entity_id: EntityId,
-    clock: GameClock,
-) -> bool {
+fn is_player_disconnected_at(controller: &dyn BattleControllerState, entity_id: EntityId, clock: GameClock) -> bool {
     let Some(player) = controller.player_entities().get(&entity_id) else {
         return false;
     };

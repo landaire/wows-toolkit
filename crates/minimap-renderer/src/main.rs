@@ -18,6 +18,8 @@ use wows_replays::ReplayFile;
 use wows_replays::analyzer::battle_controller::merged::MergedReplays;
 use wows_replays::game_constants::GameConstants;
 
+use wows_minimap_renderer::EncoderKind;
+use wows_minimap_renderer::VideoCodec;
 use wows_minimap_renderer::assets::load_building_icons;
 use wows_minimap_renderer::assets::load_consumable_icons;
 use wows_minimap_renderer::assets::load_death_cause_icons;
@@ -31,10 +33,8 @@ use wows_minimap_renderer::assets::load_powerup_icons;
 use wows_minimap_renderer::assets::load_ship_icons;
 use wows_minimap_renderer::config::RendererConfig;
 use wows_minimap_renderer::drawing::ImageTarget;
-use wows_minimap_renderer::renderer::MinimapRenderer;
-use wows_minimap_renderer::EncoderKind;
-use wows_minimap_renderer::VideoCodec;
 use wows_minimap_renderer::encoder::Mode as EncoderMode;
+use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::video::CodecChoice;
 use wows_minimap_renderer::video::DumpMode;
 use wows_minimap_renderer::video::RenderStage;
@@ -568,11 +568,8 @@ fn main() -> Result<(), Report> {
 }
 
 fn available_codecs_for(kind: EncoderKind, status: &wows_minimap_renderer::encoder::EncoderStatus) -> String {
-    let mut names: Vec<&str> = VideoCodec::ALL
-        .into_iter()
-        .filter(|c| status.supports(kind, *c))
-        .map(VideoCodec::as_str)
-        .collect();
+    let mut names: Vec<&str> =
+        VideoCodec::ALL.into_iter().filter(|c| status.supports(kind, *c)).map(VideoCodec::as_str).collect();
     if names.is_empty() {
         names.push("(none)");
     }

@@ -1257,16 +1257,7 @@ impl<'argtype> Parser<'argtype> {
         let map_name = std::str::from_utf8(map_name).map_err(|e| failure(ParseError::from(e)))?;
         let matrix: &'a [u8] = take(4usize * 4 * 4).parse_next(i)?;
         let unknown = le_u8.parse_next(i)?;
-        let packet = MapPacket {
-            space_id,
-            arena_id,
-            unknown1,
-            unknown2,
-            blob,
-            map_name,
-            matrix,
-            unknown,
-        };
+        let packet = MapPacket { space_id, arena_id, unknown1, unknown2, blob, map_name, matrix, unknown };
         Ok(PacketType::Map(packet))
     }
 

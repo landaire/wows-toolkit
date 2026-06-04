@@ -51,8 +51,7 @@ pub fn check_encoder() -> crate::encoder::EncoderStatus {
 }
 
 /// Codec selection passed to `VideoEncoder`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CodecChoice {
     /// Pick the best codec for the prevailing mode at init time.
     #[default]
@@ -60,7 +59,6 @@ pub enum CodecChoice {
     /// Use the named codec.
     Explicit(VideoCodec),
 }
-
 
 /// Stored encoded output per frame, with metadata muxide needs.
 struct EncodedSample {
@@ -149,7 +147,8 @@ impl VideoEncoder {
     /// limit, so the chosen bitrate is the worst-case rate that still hits
     /// the target even for a maximum-length clip.
     pub fn target_max_file_size(&mut self, target_size_bytes: u64) {
-        self.encoder_config = crate::encoder::EncoderConfig::from_target_size(target_size_bytes, OUTPUT_DURATION as f32);
+        self.encoder_config =
+            crate::encoder::EncoderConfig::from_target_size(target_size_bytes, OUTPUT_DURATION as f32);
     }
 
     pub fn set_battle_duration(&mut self, duration: GameClock) {
@@ -179,13 +178,8 @@ impl VideoEncoder {
             CodecChoice::Explicit(c) => c,
             CodecChoice::Auto => status.best_codec(matches!(self.mode, Mode::ForceCpu)),
         };
-        let created = EncoderBackend::create(
-            self.canvas_width,
-            self.canvas_height,
-            codec,
-            self.mode,
-            self.encoder_config,
-        )?;
+        let created =
+            EncoderBackend::create(self.canvas_width, self.canvas_height, codec, self.mode, self.encoder_config)?;
         self.active_codec = Some(created.codec);
         self.backend = Some(created.backend);
         info!(
@@ -463,11 +457,7 @@ impl VideoEncoder {
                 .map_err(|e| report!(VideoError::MuxFailed(format!("write_video frame {idx}: {e:?}"))))?;
 
             if let Some(ref cb) = self.progress_callback {
-                cb(RenderProgress {
-                    stage: RenderStage::Muxing,
-                    current: (idx + 1) as u64,
-                    total,
-                });
+                cb(RenderProgress { stage: RenderStage::Muxing, current: (idx + 1) as u64, total });
             }
         }
 

@@ -141,8 +141,9 @@ pub async fn download_build(
     on_progress: impl Fn(u64, u64),
 ) -> Result<u32, Report> {
     let index = fetch_builds_index(client, base_url).await?;
-    let (entry, exact) =
-        index.resolve_build(target_build, version_hint).ok_or_else(|| report!("no game data published for build {target_build}"))?;
+    let (entry, exact) = index
+        .resolve_build(target_build, version_hint)
+        .ok_or_else(|| report!("no game data published for build {target_build}"))?;
     let entry = entry.clone();
     if !exact {
         tracing::info!(
@@ -171,8 +172,9 @@ pub async fn download_build(
 
     // The build's metadata lists every content hash it references.
     let meta_url = format!("{base_url}/{}/metadata.toml", entry.dir);
-    let meta_text =
-        get_text(client, &meta_url).await?.ok_or_else(|| report!("remote metadata.toml not found for {}", entry.dir))?;
+    let meta_text = get_text(client, &meta_url)
+        .await?
+        .ok_or_else(|| report!("remote metadata.toml not found for {}", entry.dir))?;
     let metadata: BuildMetadata = toml::from_str(&meta_text).attach_with(|| "failed to parse remote metadata.toml")?;
 
     // Download every referenced object not already in the local CAS.
@@ -223,12 +225,7 @@ pub async fn download_build(
 }
 
 /// Download a single content object and store it in the CAS, verifying its hash.
-async fn download_object(
-    client: &reqwest::Client,
-    base_url: &str,
-    cas_root: &Path,
-    hash: &str,
-) -> Result<(), Report> {
+async fn download_object(client: &reqwest::Client, base_url: &str, cas_root: &Path, hash: &str) -> Result<(), Report> {
     let url = format!("{base_url}/{}/{}/{}", cas::CAS_DIR, &hash[..2], &hash[2..]);
     let bytes = get_bytes(client, &url).await?.ok_or_else(|| report!("content object {hash} missing from remote"))?;
     let actual = cas::hash_bytes(&bytes);

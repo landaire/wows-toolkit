@@ -430,9 +430,8 @@ impl PlayerStateData {
     ) -> Self {
         // Older arena-state layouts (pre-0.10.7) only provide a subset of these
         // fields, so every lookup must tolerate a missing key rather than unwrap.
-        let get_str = |key| {
-            mapped_values.get(key).and_then(|v: &pickled::Value| v.string_ref()).map(|s| s.inner().clone())
-        };
+        let get_str =
+            |key| mapped_values.get(key).and_then(|v: &pickled::Value| v.string_ref()).map(|s| s.inner().clone());
         let get_i64 = |key| mapped_values.get(key).and_then(|v: &pickled::Value| v.i64_ref().copied());
 
         let username = get_str(Self::KEY_NAME).unwrap_or_default();
@@ -698,9 +697,9 @@ impl PlayerStateData {
     /// Lets callers reconstruct a ship's build for players never seen via
     /// `EntityCreate` (i.e. enemies that stay outside detection all match).
     pub fn ship_config_dump(&self) -> Option<Vec<u8>> {
-        self.raw_with_names.get(Self::KEY_SHIP_CONFIG_DUMP).and_then(|v| {
-            v.as_array().map(|arr| arr.iter().filter_map(|n| n.as_u64().map(|u| u as u8)).collect())
-        })
+        self.raw_with_names
+            .get(Self::KEY_SHIP_CONFIG_DUMP)
+            .and_then(|v| v.as_array().map(|arr| arr.iter().filter_map(|n| n.as_u64().map(|u| u as u8)).collect()))
     }
 
     pub fn raw(&self) -> &HashMap<i64, String> {

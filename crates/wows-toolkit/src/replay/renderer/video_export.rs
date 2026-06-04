@@ -32,7 +32,14 @@ pub(super) fn execute_video_export(
     *video_export_progress.lock() = None;
 
     match action {
-        PendingVideoExport::SaveToFile { output_path, options, prefer_cpu, codec, actual_game_duration, encoder_config } => {
+        PendingVideoExport::SaveToFile {
+            output_path,
+            options,
+            prefer_cpu,
+            codec,
+            actual_game_duration,
+            encoder_config,
+        } => {
             save_as_video(
                 output_path,
                 video_export_data.raw_meta.clone(),

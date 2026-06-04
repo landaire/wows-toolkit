@@ -153,8 +153,10 @@ impl TranslatedBuild {
                 })
                 .collect(),
             captain_skills: vehicle_entity.commander_skills(species).map(|skills| {
-                let mut skills: Vec<TranslatedCrewSkill> =
-                    skills.iter().map(|skill| TranslatedCrewSkill::new(skill, species, metadata_provider, version)).collect();
+                let mut skills: Vec<TranslatedCrewSkill> = skills
+                    .iter()
+                    .map(|skill| TranslatedCrewSkill::new(skill, species, metadata_provider, version))
+                    .collect();
 
                 skills.sort_by_key(|skill| skill.tier);
 

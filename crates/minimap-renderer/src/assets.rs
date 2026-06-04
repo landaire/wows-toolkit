@@ -212,8 +212,7 @@ pub fn load_ship_icons(vfs: &VfsPath, version: Option<&Version>) -> HashMap<Stri
 
 /// Load all plane icons from game files into a HashMap keyed by name (e.g. "fighter_ally").
 pub fn load_plane_icons(vfs: &VfsPath, version: Option<&Version>) -> HashMap<String, RgbaImage> {
-    let kinds =
-        [PlaneMarkerKind::Consumables, PlaneMarkerKind::Controllable, PlaneMarkerKind::AirSupport];
+    let kinds = [PlaneMarkerKind::Consumables, PlaneMarkerKind::Controllable, PlaneMarkerKind::AirSupport];
     let suffixes = ["ally", "enemy", "own", "division", "teamkiller"];
     let base_names = [
         // controllable

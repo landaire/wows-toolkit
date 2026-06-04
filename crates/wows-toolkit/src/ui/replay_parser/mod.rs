@@ -1611,9 +1611,7 @@ impl UiReport {
                 let (name_rect, _) =
                     ui.allocate_exact_size(Vec2::new(NAME_COL_WIDTH, ROW_HEIGHT), egui::Sense::hover());
                 let mut name_ui = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(name_rect)
-                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    egui::UiBuilder::new().max_rect(name_rect).layout(egui::Layout::left_to_right(egui::Align::Center)),
                 );
                 if let Some(icon) = icon.as_ref() {
                     let image = Image::new(ImageSource::Bytes {
@@ -1633,8 +1631,7 @@ impl UiReport {
 
                 ui.add_sized([COUNT_COL_WIDTH, ROW_HEIGHT], egui::Label::new(&remaining_text))
                     .on_hover_text(&hover_text);
-                ui.add_sized([COUNT_COL_WIDTH, ROW_HEIGHT], egui::Label::new(&total_text))
-                    .on_hover_text(&hover_text);
+                ui.add_sized([COUNT_COL_WIDTH, ROW_HEIGHT], egui::Label::new(&total_text)).on_hover_text(&hover_text);
             });
         }
     }
@@ -2152,8 +2149,7 @@ impl UiReport {
                     }
                     ReplayColumn::Heals => {
                         if let Some(heal_count) = report.heal_count {
-                            ui.label(format!("{heal_count}"))
-                                .on_hover_text(t!("ui.replay.column.heals_tooltip"));
+                            ui.label(format!("{heal_count}")).on_hover_text(t!("ui.replay.column.heals_tooltip"));
                         } else {
                             ui.label("-").on_hover_text(t!("ui.replay.column.heals_no_repair_tooltip"));
                         }

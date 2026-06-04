@@ -225,8 +225,7 @@ impl RendererAssetCache {
     }
 
     pub fn get_or_load_signal_flag_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
-        self.signal_flag_icons
-            .get_or_load(version, || convert_icons(assets::load_signal_flag_icons(vfs, 36, version)))
+        self.signal_flag_icons.get_or_load(version, || convert_icons(assets::load_signal_flag_icons(vfs, 36, version)))
     }
 
     pub fn get_or_load_game_fonts(&mut self, vfs: &VfsPath, version: Option<&Version>) -> GameFonts {

@@ -14,7 +14,6 @@ use wowsunpack::game_params::types::Species;
 
 use wows_replays::types::Relation;
 
-use crate::util::player_color_for_team_relation;
 use crate::ui::replay_parser::Damage;
 use crate::ui::replay_parser::Hits;
 use crate::ui::replay_parser::PlayerReport;
@@ -22,6 +21,7 @@ use crate::ui::replay_parser::PotentialDamage;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SkillInfo;
 use crate::ui::replay_parser::TranslatedBuild;
+use crate::util::player_color_for_team_relation;
 
 #[derive(Serialize)]
 pub struct Match {

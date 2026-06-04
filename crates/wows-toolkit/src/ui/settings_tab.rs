@@ -215,10 +215,7 @@ impl ToolkitTabViewer<'_> {
                         ui.horizontal(|ui| {
                             let checking = self.tab_state.checking_game_data_updates;
                             if ui
-                                .add_enabled(
-                                    !checking,
-                                    egui::Button::new(t!("ui.settings.wows.cache.check_updates")),
-                                )
+                                .add_enabled(!checking, egui::Button::new(t!("ui.settings.wows.cache.check_updates")))
                                 .clicked()
                             {
                                 self.tab_state.check_game_data_updates();

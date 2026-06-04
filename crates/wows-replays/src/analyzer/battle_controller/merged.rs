@@ -99,8 +99,7 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
         replays.push(primary);
         replays.extend(merges.iter());
 
-        let parsers: Vec<Parser<'specs>> =
-            (0..replay_count).map(|_| Parser::with_version(specs, version)).collect();
+        let parsers: Vec<Parser<'specs>> = (0..replay_count).map(|_| Parser::with_version(specs, version)).collect();
         let remainings: Vec<&[u8]> = replays.iter().map(|r| r.packet_data.as_slice()).collect();
 
         let mut self_teams = Vec::with_capacity(replay_count);

@@ -161,7 +161,8 @@ impl ToolkitTabViewer<'_> {
                         // Load nation flags for each nation in the catalog.
                         for nation_group in &catalog.nations {
                             if !state.nation_flag_textures.contains_key(&nation_group.nation)
-                                && let Some(asset) = crate::task::load_nation_flag(&wd.vfs, &nation_group.nation, wd.version())
+                                && let Some(asset) =
+                                    crate::task::load_nation_flag(&wd.vfs, &nation_group.nation, wd.version())
                             {
                                 state.nation_flag_textures.insert(nation_group.nation.clone(), asset);
                             }
@@ -1784,23 +1785,21 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                     if let Some(shell) = shell
                                         && let Some(params) =
                                             crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell)
-                                    {
-                                        if let Some(impact) =
+                                        && let Some(impact) =
                                             crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
-                                        {
-                                            let arc_points_3d = crate::armor_viewer::common::build_ballistic_arc_3d(
-                                                &params,
-                                                &impact,
-                                                approach_xz,
-                                                first_hit_pos,
-                                                model_extent,
-                                            );
-                                            ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
-                                                ship_index: ship_idx,
-                                                arc_points_3d,
-                                                ballistic_impact: Some(impact),
-                                            });
-                                        }
+                                    {
+                                        let arc_points_3d = crate::armor_viewer::common::build_ballistic_arc_3d(
+                                            &params,
+                                            &impact,
+                                            approach_xz,
+                                            first_hit_pos,
+                                            model_extent,
+                                        );
+                                        ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
+                                            ship_index: ship_idx,
+                                            arc_points_3d,
+                                            ballistic_impact: Some(impact),
+                                        });
                                     }
                                 }
                             }
@@ -2617,8 +2616,7 @@ pub(crate) fn show_armor_tooltip(
                     }
                     AmmoType::SAP => format!("{:.0}mm pen", shell.sap_pen_mm.unwrap_or(0.0)),
                     AmmoType::AP => {
-                        if shell.caliber.value()
-                            > info.thickness_mm * crate::armor_viewer::penetration::OVERMATCH_RATIO
+                        if shell.caliber.value() > info.thickness_mm * crate::armor_viewer::penetration::OVERMATCH_RATIO
                         {
                             "overmatch".to_string()
                         } else {
@@ -3124,13 +3122,12 @@ fn recompute_trajectory_for_range(
     if let Some(shell) = first_shell
         && range_meters.value() > 0.0
         && let Some(params) = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell)
+        && let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
     {
-        if let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_meters) {
-            let horiz_angle = impact.impact_angle_horizontal as f32;
-            let cos_h = horiz_angle.cos();
-            let sin_h = horiz_angle.sin();
-            result.direction = Vec3::new(approach_xz[0] * cos_h, -sin_h, approach_xz[2] * cos_h).normalize();
-        }
+        let horiz_angle = impact.impact_angle_horizontal as f32;
+        let cos_h = horiz_angle.cos();
+        let sin_h = horiz_angle.sin();
+        result.direction = Vec3::new(approach_xz[0] * cos_h, -sin_h, approach_xz[2] * cos_h).normalize();
     }
 
     // Recompute per-ship arcs
@@ -3144,26 +3141,25 @@ fn recompute_trajectory_for_range(
             let shell = ship.shells.iter().find(|s| s.ammo_type == AmmoType::AP).or_else(|| ship.shells.first());
             if let Some(shell) = shell
                 && let Some(params) = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell)
+                && let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
             {
-                if let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_meters) {
-                    let (arc_2d, height_ratio) =
-                        crate::armor_viewer::ballistics::simulate_arc_points(&params, impact.launch_angle, 60);
-                    let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
-                    let arc_points_3d: Vec<Vec3> = arc_2d
-                        .iter()
-                        .map(|(xf, yf)| {
-                            let xf = *xf as f32;
-                            let yf = *yf as f32;
-                            let along = (1.0 - xf) * arc_horiz_extent;
-                            first_hit_pos - approach_xz * along + Vec3::new(0.0, yf * arc_height_extent, 0.0)
-                        })
-                        .collect();
-                    new_ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
-                        ship_index: ship_idx,
-                        arc_points_3d,
-                        ballistic_impact: Some(impact),
-                    });
-                }
+                let (arc_2d, height_ratio) =
+                    crate::armor_viewer::ballistics::simulate_arc_points(&params, impact.launch_angle, 60);
+                let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
+                let arc_points_3d: Vec<Vec3> = arc_2d
+                    .iter()
+                    .map(|(xf, yf)| {
+                        let xf = *xf as f32;
+                        let yf = *yf as f32;
+                        let along = (1.0 - xf) * arc_horiz_extent;
+                        first_hit_pos - approach_xz * along + Vec3::new(0.0, yf * arc_height_extent, 0.0)
+                    })
+                    .collect();
+                new_ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
+                    ship_index: ship_idx,
+                    arc_points_3d,
+                    ballistic_impact: Some(impact),
+                });
             }
         }
     }

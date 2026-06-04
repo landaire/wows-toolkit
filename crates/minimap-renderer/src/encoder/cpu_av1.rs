@@ -80,9 +80,8 @@ impl CpuAv1Encoder {
         cfg.enable_timing_info = true;
 
         let config = Config::new().with_encoder_config(cfg);
-        let ctx: Context<u8> = config
-            .new_context()
-            .map_err(|e| report!(VideoError::EncoderInit(format!("rav1e context: {e:?}"))))?;
+        let ctx: Context<u8> =
+            config.new_context().map_err(|e| report!(VideoError::EncoderInit(format!("rav1e context: {e:?}"))))?;
 
         let y_size = (width * height) as usize;
         let chroma_size = ((width / 2) * (height / 2)) as usize;
@@ -176,9 +175,5 @@ impl CpuAv1Encoder {
 }
 
 fn into_av1_packet(p: Packet<u8>) -> Av1Packet {
-    Av1Packet {
-        is_keyframe: matches!(p.frame_type, FrameType::KEY),
-        input_frameno: p.input_frameno,
-        data: p.data,
-    }
+    Av1Packet { is_keyframe: matches!(p.frame_type, FrameType::KEY), input_frameno: p.input_frameno, data: p.data }
 }

@@ -405,8 +405,7 @@ mod tests {
         // section, naval flag, or crew tail. Simulate by building a full blob with
         // empty ecoboosts and lopping off the trailing four u32s (ecoboost count +
         // naval flag + isOwned + lastBoardedCrew).
-        let mut blob =
-            build_blob(2000, &[10, 20, 30], &[200, 201], &[300], &[], &[400, 401], &[], &[], 0, 0, false);
+        let mut blob = build_blob(2000, &[10, 20, 30], &[200, 201], &[300], &[], &[400, 401], &[], &[], 0, 0, false);
         blob.truncate(blob.len() - 16);
 
         let config = parse_ship_config(&blob, &version_12_3()).unwrap();

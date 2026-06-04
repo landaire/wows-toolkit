@@ -1,11 +1,15 @@
 //! `wgcheck`: read WGCheck `.gch` report archives and pull the python logs.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
-use wgcheck::{parse_gch, Member};
+use anyhow::Context;
+use anyhow::Result;
+use clap::Parser;
+use clap::Subcommand;
+use wgcheck::parse_gch;
+use wgcheck::Member;
 
 #[derive(Parser)]
 #[command(about = "Parse WGCheck (.gch) reports and extract python logs")]

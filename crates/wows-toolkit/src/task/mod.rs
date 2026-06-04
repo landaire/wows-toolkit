@@ -41,6 +41,8 @@ pub enum ReplaySource {
 }
 
 // Re-export everything so `use crate::task::*` still works
+pub use game_data_download::start_game_data_download_task;
+pub use game_data_download::start_game_data_update_check_task;
 pub use networking::NetworkJob;
 pub use networking::NetworkResult;
 pub use networking::load_personal_rating_data;
@@ -49,8 +51,6 @@ pub use networking::load_versioned_constants_from_disk_with_fallback;
 pub use networking::start_download_update_task;
 pub use networking::start_networking_thread;
 pub use networking::start_twitch_task;
-pub use game_data_download::start_game_data_download_task;
-pub use game_data_download::start_game_data_update_check_task;
 pub use replays::BackgroundParserThread;
 pub use replays::DataExportSettings;
 pub use replays::ReplayBackgroundParserThreadMessage;

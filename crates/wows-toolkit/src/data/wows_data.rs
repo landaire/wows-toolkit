@@ -290,9 +290,7 @@ impl WoWsDataMap {
             let mut best: Option<(u32, serde_json::Value)> = None;
             for data in builds.values() {
                 let guard = data.read();
-                if guard.build_number < build
-                    && best.as_ref().map_or(true, |(b, _)| guard.build_number > *b)
-                {
+                if guard.build_number < build && best.as_ref().is_none_or(|(b, _)| guard.build_number > *b) {
                     best = Some((guard.build_number, guard.replay_constants.read().clone()));
                 }
             }
@@ -645,7 +643,8 @@ impl ReplayLoader {
                 error!("Failed to load game data for build {}", build);
                 let replay_path = replay.read().source_path.clone();
                 let report: rootcause::Report =
-                    ToolkitError::ReplayBuildUnavailable { build, version: replay_version.to_path(), replay_path }.into();
+                    ToolkitError::ReplayBuildUnavailable { build, version: replay_version.to_path(), replay_path }
+                        .into();
                 let _ = tx.send(Err(report.attach("try installing the matching game client version")));
                 return;
             };

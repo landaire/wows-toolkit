@@ -261,7 +261,15 @@ pub fn complete_build(game_dir: &Path, build: u32, output_base: &Path, with_gui:
 
     let map_count =
         extract_map_files_cas(&vfs, "spaces", MAP_FILES_SPACES, &vfs_dir, &cas_root, &mut metadata.files, None)?;
-    extract_map_files_cas(&vfs, "content/gameplay", MAP_FILES_GAMEPLAY, &vfs_dir, &cas_root, &mut metadata.files, None)?;
+    extract_map_files_cas(
+        &vfs,
+        "content/gameplay",
+        MAP_FILES_GAMEPLAY,
+        &vfs_dir,
+        &cas_root,
+        &mut metadata.files,
+        None,
+    )?;
     if map_count == 0 {
         bail!("no maps extracted for build {build}; refusing to record an incomplete build");
     }
@@ -391,11 +399,8 @@ pub fn sync_from_local(
     let entries: Vec<BuildEntry> = match selector {
         SyncSelector::All => source_index.builds.clone(),
         SyncSelector::Latest => {
-            let latest = source_index
-                .builds
-                .iter()
-                .max_by_key(|e| e.build)
-                .ok_or_else(|| report!("source has no builds"))?;
+            let latest =
+                source_index.builds.iter().max_by_key(|e| e.build).ok_or_else(|| report!("source has no builds"))?;
             vec![latest.clone()]
         }
         SyncSelector::Build(b) => {
@@ -454,8 +459,8 @@ fn copy_build_from_local(
             continue;
         }
         let src_obj = cas::cas_path(&src_cas, &hash);
-        let data = std::fs::read(&src_obj)
-            .attach_with(|| format!("source content object {} missing", src_obj.display()))?;
+        let data =
+            std::fs::read(&src_obj).attach_with(|| format!("source content object {} missing", src_obj.display()))?;
         let actual = cas::hash_bytes(&data);
         if actual != hash {
             bail!("source content object {hash} hashed to {actual}");
@@ -482,8 +487,8 @@ fn copy_build_from_local(
     // Versioned constants, when present alongside the source build.
     let src_constants = src_dir.join("constants.json");
     if src_constants.exists() {
-        let bytes = std::fs::read(&src_constants)
-            .attach_with(|| format!("failed to read {}", src_constants.display()))?;
+        let bytes =
+            std::fs::read(&src_constants).attach_with(|| format!("failed to read {}", src_constants.display()))?;
         let dest = output_dir.join("constants.json");
         std::fs::create_dir_all(dest.parent().unwrap())?;
         std::fs::write(&dest, &bytes).attach_with(|| format!("failed to write {}", dest.display()))?;
@@ -860,9 +865,8 @@ pub fn gc_unreferenced(output_base: &Path) -> Result<usize, Report> {
     }
 
     let mut live = std::collections::HashSet::new();
-    for entry in std::fs::read_dir(output_base)
-        .attach_with(|| format!("Failed to read {}", output_base.display()))?
-        .flatten()
+    for entry in
+        std::fs::read_dir(output_base).attach_with(|| format!("Failed to read {}", output_base.display()))?.flatten()
     {
         let meta_path = entry.path().join("metadata.toml");
         if !meta_path.exists() {
@@ -946,9 +950,8 @@ fn merge_cas_objects(legacy: &Path, dest: &Path) -> Result<(), Report> {
 /// Re-create every build's `vfs/` and derived symlinks against `cas_root`,
 /// using the hashes recorded in each `metadata.toml`. Idempotent.
 fn relink_all_builds(output_base: &Path, cas_root: &Path) -> Result<(), Report> {
-    for entry in std::fs::read_dir(output_base)
-        .attach_with(|| format!("Failed to read {}", output_base.display()))?
-        .flatten()
+    for entry in
+        std::fs::read_dir(output_base).attach_with(|| format!("Failed to read {}", output_base.display()))?.flatten()
     {
         let build_dir = entry.path();
         let Some(meta) = BuildMetadata::load(&build_dir.join("metadata.toml")) else {
@@ -982,9 +985,8 @@ fn relink_all_builds(output_base: &Path, cas_root: &Path) -> Result<(), Report> 
 pub fn migrate_to_cas(output_base: &Path) -> Result<usize, Report> {
     let cas_root = cas::cas_root(output_base);
     let mut migrated = 0;
-    for entry in std::fs::read_dir(output_base)
-        .attach_with(|| format!("Failed to read {}", output_base.display()))?
-        .flatten()
+    for entry in
+        std::fs::read_dir(output_base).attach_with(|| format!("Failed to read {}", output_base.display()))?.flatten()
     {
         let build_dir = entry.path();
         let meta_path = build_dir.join("metadata.toml");
@@ -1011,9 +1013,7 @@ fn migrate_build_to_cas(build_dir: &Path, cas_root: &Path, metadata: &mut BuildM
     let vfs_dir = build_dir.join("vfs");
     let mut stack = vec![vfs_dir.clone()];
     while let Some(dir) = stack.pop() {
-        for entry in
-            std::fs::read_dir(&dir).attach_with(|| format!("Failed to read {}", dir.display()))?.flatten()
-        {
+        for entry in std::fs::read_dir(&dir).attach_with(|| format!("Failed to read {}", dir.display()))?.flatten() {
             let path = entry.path();
             let file_type = entry.file_type().attach_with(|| format!("Failed to stat {}", path.display()))?;
             if file_type.is_dir() {
@@ -1024,7 +1024,8 @@ fn migrate_build_to_cas(build_dir: &Path, cas_root: &Path, metadata: &mut BuildM
             if file_type.is_symlink() {
                 continue;
             }
-            let rel = path.strip_prefix(&vfs_dir).expect("walked path is under vfs_dir").to_string_lossy().replace('\\', "/");
+            let rel =
+                path.strip_prefix(&vfs_dir).expect("walked path is under vfs_dir").to_string_lossy().replace('\\', "/");
             let data = std::fs::read(&path).attach_with(|| format!("Failed to read {}", path.display()))?;
             let hash = cas::store(cas_root, &data)?;
             std::fs::remove_file(&path).attach_with(|| format!("Failed to remove {}", path.display()))?;

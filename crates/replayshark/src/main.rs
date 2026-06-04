@@ -794,8 +794,7 @@ fn run_players_query(
     for player in report.players() {
         let state = player.initial_state();
         let vehicle = player.vehicle();
-        let ship_name =
-            provider.localized_name_from_param(vehicle).unwrap_or_else(|| vehicle.index().to_string());
+        let ship_name = provider.localized_name_from_param(vehicle).unwrap_or_else(|| vehicle.index().to_string());
 
         if let Some(n) = &name_lc
             && !state.username().to_lowercase().contains(n)
@@ -828,9 +827,7 @@ fn run_players_query(
     }
 
     rows.sort_by(|a, b| {
-        a.team_id
-            .cmp(&b.team_id)
-            .then_with(|| a.player_name.to_lowercase().cmp(&b.player_name.to_lowercase()))
+        a.team_id.cmp(&b.team_id).then_with(|| a.player_name.to_lowercase().cmp(&b.player_name.to_lowercase()))
     });
 
     if as_json {
@@ -850,10 +847,7 @@ fn run_players_query(
             println!("{value}");
         }
     } else {
-        println!(
-            "{:<9} {:<20} {:<4} {:<6} {:<22} {:<11} {}",
-            "ENTITY", "PLAYER", "TEAM", "REL", "SHIP", "SHIP_ID", "BOT"
-        );
+        println!("{:<9} {:<20} {:<4} {:<6} {:<22} {:<11} BOT", "ENTITY", "PLAYER", "TEAM", "REL", "SHIP", "SHIP_ID");
         for r in &rows {
             println!(
                 "{:<9} {:<20} {:<4} {:<6} {:<22} {:<11} {}",
@@ -1030,16 +1024,8 @@ fn main() {
                 }
             }
             QueryCommands::Players { replay, name, entity_id, ship, json } => {
-                run_players_query(
-                    &replay,
-                    game_dir,
-                    extracted,
-                    name.as_deref(),
-                    entity_id,
-                    ship.as_deref(),
-                    json,
-                )
-                .expect("failed to query players");
+                run_players_query(&replay, game_dir, extracted, name.as_deref(), entity_id, ship.as_deref(), json)
+                    .expect("failed to query players");
             }
             QueryCommands::GameVersion { replays } => {
                 for replay_path in &replays {

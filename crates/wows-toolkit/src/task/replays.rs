@@ -138,7 +138,8 @@ pub fn load_ship_icons(vfs: &VfsPath, version: Option<&Version>) -> HashMap<Spec
     ];
 
     HashMap::from_iter(species.iter().filter_map(|species| {
-        let resolved = GuiAsset::ShipClassIcon { species: *species, state: ShipIconState::Alive }.resolve(vfs, version)?;
+        let resolved =
+            GuiAsset::ShipClassIcon { species: *species, state: ShipIconState::Alive }.resolve(vfs, version)?;
         let path = resolved.as_str().trim_start_matches('/').to_string();
         let mut data = Vec::new();
         resolved.open_file().ok()?.read_to_end(&mut data).ok()?;

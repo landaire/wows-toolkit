@@ -999,11 +999,7 @@ where
             }
 
             let captain_id = props.crew_modifiers_compact_params.params_id;
-            let captain = if captain_id.raw() != 0 {
-                self.game_resources.game_param_by_id(captain_id)
-            } else {
-                None
-            };
+            let captain = if captain_id.raw() != 0 { self.game_resources.game_param_by_id(captain_id) } else { None };
 
             let vehicle = Rc::new(RefCell::new(VehicleEntity {
                 id: entity_id,
@@ -3246,11 +3242,9 @@ where
                     // Relation is meaningless without the self player's team; a spawn
                     // arriving before the roster is established is unexpected, so fail
                     // fast rather than mislabel the player.
-                    let self_team = self_team_id.expect(
-                        "NewPlayerSpawnedInBattle before self player resolved: cannot derive relation",
-                    );
-                    let relation =
-                        if player.team_id() == self_team { Relation::new(1) } else { Relation::new(2) };
+                    let self_team = self_team_id
+                        .expect("NewPlayerSpawnedInBattle before self player resolved: cannot derive relation");
+                    let relation = if player.team_id() == self_team { Relation::new(1) } else { Relation::new(2) };
                     if let Some(battle_player) = Player::from_spawned_player(player, self.game_resources, relation) {
                         let battle_player = Rc::new(battle_player);
                         self.player_entities.insert(entity_id, battle_player);

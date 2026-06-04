@@ -161,9 +161,9 @@ impl EncoderStatus {
 
     /// Iterate over codecs that are usable via either GPU or CPU.
     pub fn supported_codecs(&self) -> impl Iterator<Item = VideoCodec> + '_ {
-        VideoCodec::ALL.into_iter().filter(|c| {
-            self.supports(EncoderKind::Gpu, *c) || self.supports(EncoderKind::Cpu, *c)
-        })
+        VideoCodec::ALL
+            .into_iter()
+            .filter(|c| self.supports(EncoderKind::Gpu, *c) || self.supports(EncoderKind::Cpu, *c))
     }
 }
 
@@ -224,15 +224,10 @@ pub fn check_encoder() -> EncoderStatus {
     }
     #[cfg(not(feature = "cpu-av1"))]
     {
-        status
-            .cpu_codecs
-            .insert(VideoCodec::Av1, CodecSupport::Unsupported("rav1e backend not compiled in".into()));
+        status.cpu_codecs.insert(VideoCodec::Av1, CodecSupport::Unsupported("rav1e backend not compiled in".into()));
     }
 
-    status.cpu_codecs.insert(
-        VideoCodec::H265,
-        CodecSupport::Unsupported("no CPU H.265 backend available".into()),
-    );
+    status.cpu_codecs.insert(VideoCodec::H265, CodecSupport::Unsupported("no CPU H.265 backend available".into()));
 
     #[cfg(all(feature = "videotoolbox", target_os = "macos"))]
     {
@@ -241,9 +236,7 @@ pub fn check_encoder() -> EncoderStatus {
         status
             .gpu_codecs
             .insert(VideoCodec::H265, CodecSupport::Unsupported("VideoToolbox H.265 not yet wired up".into()));
-        status
-            .gpu_codecs
-            .insert(VideoCodec::Av1, CodecSupport::Unsupported("no AV1 GPU encoder".into()));
+        status.gpu_codecs.insert(VideoCodec::Av1, CodecSupport::Unsupported("no AV1 GPU encoder".into()));
     }
 
     #[cfg(all(feature = "vulkan", not(target_os = "macos")))]
@@ -258,9 +251,7 @@ pub fn check_encoder() -> EncoderStatus {
     {
         status.gpu_error = Some("GPU encoder not compiled in".to_string());
         for codec in VideoCodec::ALL {
-            status
-                .gpu_codecs
-                .insert(codec, CodecSupport::Unsupported("GPU backend not compiled in".into()));
+            status.gpu_codecs.insert(codec, CodecSupport::Unsupported("GPU backend not compiled in".into()));
         }
     }
 
@@ -426,13 +417,11 @@ impl EncoderBackend {
             #[cfg(all(feature = "videotoolbox", target_os = "macos"))]
             Self::VideoToolbox(enc) => Ok(vec![EncodedFrame::AnnexB(enc.encode_frame(rgb, width, height)?)]),
             #[cfg(feature = "cpu")]
-            Self::CpuH264(enc) => Ok(vec![EncodedFrame::AnnexB(
-                enc.encode_frame(rgb, width as usize, height as usize)?,
-            )]),
-            #[cfg(feature = "cpu-av1")]
-            Self::CpuAv1(enc) => {
-                Ok(enc.encode_frame(rgb)?.into_iter().map(EncodedFrame::Av1Packet).collect())
+            Self::CpuH264(enc) => {
+                Ok(vec![EncodedFrame::AnnexB(enc.encode_frame(rgb, width as usize, height as usize)?)])
             }
+            #[cfg(feature = "cpu-av1")]
+            Self::CpuAv1(enc) => Ok(enc.encode_frame(rgb)?.into_iter().map(EncodedFrame::Av1Packet).collect()),
             #[cfg(not(any(
                 feature = "cpu",
                 feature = "cpu-av1",
