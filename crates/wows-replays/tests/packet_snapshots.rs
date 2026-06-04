@@ -60,7 +60,7 @@ fn snapshot_first_n_packets(replay_filename: &str, n: usize) {
 
     let resources = game_data::load_game_resources(&game_dir, &version).expect("should load game resources");
 
-    let mut parser = Parser::with_build(&resources.specs, version.build);
+    let mut parser = Parser::with_version(&resources.specs, version);
     let decoder = PacketDecoder::builder().version(version).build();
 
     let replay_stem = replay_filename.trim_end_matches(".wowsreplay");

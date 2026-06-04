@@ -100,7 +100,7 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
         replays.extend(merges.iter());
 
         let parsers: Vec<Parser<'specs>> =
-            (0..replay_count).map(|_| Parser::with_build(specs, version.build)).collect();
+            (0..replay_count).map(|_| Parser::with_version(specs, version)).collect();
         let remainings: Vec<&[u8]> = replays.iter().map(|r| r.packet_data.as_slice()).collect();
 
         let mut self_teams = Vec::with_capacity(replay_count);
@@ -271,7 +271,7 @@ fn scan_self_team(
     version: Version,
     replay: &ReplayFile,
 ) -> Option<TeamId> {
-    let mut parser = Parser::with_build(specs, version.build);
+    let mut parser = Parser::with_version(specs, version);
     let decoder = PacketDecoder::builder()
         .version(version)
         .battle_constants(game_constants.battle())
@@ -298,7 +298,7 @@ fn scan_self_team(
 /// extract its arena id. Lets callers reject merge candidates that
 /// don't belong to the same match *before* a full re-parse is kicked off.
 pub fn scan_arena_id(specs: &[EntitySpec], version: Version, replay: &ReplayFile) -> Option<ArenaId> {
-    let mut parser = Parser::with_build(specs, version.build);
+    let mut parser = Parser::with_version(specs, version);
     let mut remaining = &replay.packet_data[..];
     while !remaining.is_empty() {
         let packet = parser.parse_packet(&mut remaining).ok()?;
@@ -314,7 +314,7 @@ pub fn scan_arena_id(specs: &[EntitySpec], version: Version, replay: &ReplayFile
 
 /// Walk a replay's stream and return the largest packet clock observed.
 fn scan_last_clock(specs: &[EntitySpec], version: Version, replay: &ReplayFile) -> GameClock {
-    let mut parser = Parser::with_build(specs, version.build);
+    let mut parser = Parser::with_version(specs, version);
     let mut remaining = &replay.packet_data[..];
     let mut last = GameClock(0.0);
     while !remaining.is_empty() {
@@ -402,7 +402,7 @@ pub fn gather_damage_events<G: ResourceLoader>(
 
     for replay in replays {
         let mut controller = BattleController::new(&replay.meta, game_resources, Some(constants));
-        let mut parser = Parser::with_build(specs, version.build);
+        let mut parser = Parser::with_version(specs, version);
         let mut remaining = &replay.packet_data[..];
         while !remaining.is_empty() {
             let Ok(packet) = parser.parse_packet(&mut remaining) else { break };
@@ -485,7 +485,7 @@ pub fn gather_replay_facts(
 
     for (replay_idx, replay) in replays.iter().enumerate() {
         let before = combined.len();
-        let mut parser = Parser::with_build(specs, version.build);
+        let mut parser = Parser::with_version(specs, version);
         let decoder = PacketDecoder::builder()
             .version(version)
             .battle_constants(constants.battle())

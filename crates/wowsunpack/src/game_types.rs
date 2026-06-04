@@ -322,6 +322,38 @@ impl From<u32> for Relation {
     }
 }
 
+/// Lock mode for a weapon, from the `WeaponLocks` enum in the game client
+/// (`scripts/Components/__init__.pyc`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum WeaponLockType {
+    /// `LOCK_NONE` — no lock (an unlock).
+    None,
+    /// `LOCK_ABSOLUTE` — lock onto a fixed point in world space.
+    Absolute,
+    /// `LOCK_RELATIVE` — lock onto a point relative to the firing ship.
+    Relative,
+    /// `LOCK_TARGET` — hard lock onto a target entity.
+    Target,
+}
+
+impl WeaponLockType {
+    /// Map a raw on-wire value to a `WeaponLockType`. Unrecognized values are
+    /// preserved as `Unknown(raw)`.
+    pub fn from_raw(raw: u32) -> crate::recognized::Recognized<Self, u32> {
+        use crate::recognized::Recognized;
+        let known = match raw {
+            0 => Self::None,
+            1 => Self::Absolute,
+            2 => Self::Relative,
+            3 => Self::Target,
+            _ => return Recognized::Unknown(raw),
+        };
+        Recognized::Known(known)
+    }
+}
+
 /// Packed minimap squadron identifier.
 /// Encodes `(avatar_id: u32, index: u3, purpose: u3, departures: u1)` in the low 39 bits.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1539,6 +1571,25 @@ impl WeaponType {
             WeaponType::Planes => "Planes",
             WeaponType::Pinger => "Sonar",
         }
+    }
+
+    /// Map a raw value from the client's integer `WeaponType` enum
+    /// (`scripts/WeaponType.pyc`, e.g. in the `onSetWeaponLock` packet) to a
+    /// variant. That enum is wider than the selectable weapons modeled here;
+    /// non-selectable types (air defense, depth charges, lasers, waves, air
+    /// support, missiles, squadron) and the -1 `NONE` sentinel are preserved as
+    /// `Unknown(raw)`.
+    pub fn from_raw(raw: u32) -> crate::recognized::Recognized<Self, u32> {
+        use crate::recognized::Recognized;
+        let known = match raw as i32 {
+            0 => Self::Artillery,
+            1 => Self::Secondaries,
+            2 => Self::Torpedoes,
+            3 => Self::Planes,
+            6 => Self::Pinger,
+            _ => return Recognized::Unknown(raw),
+        };
+        Recognized::Known(known)
     }
 }
 

@@ -161,8 +161,8 @@ pub fn extract_cap_layout_from_replay<G: ResourceLoader>(
     let mut controller = BattleController::new(&replay_file.meta, resource_loader, game_constants);
     controller.set_track_shots(false);
 
-    let replay_build = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe).build;
-    let mut parser = Parser::with_build(resource_loader.entity_specs(), replay_build);
+    let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+    let mut parser = Parser::with_version(resource_loader.entity_specs(), replay_version);
     let mut remaining = replay_file.packet_data.as_slice();
 
     while !remaining.is_empty() {

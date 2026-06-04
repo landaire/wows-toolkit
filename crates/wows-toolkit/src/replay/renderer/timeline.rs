@@ -159,8 +159,8 @@ pub(super) fn extract_timeline_events(
 ) -> TimelineExtractionResult {
     let mut events = Vec::new();
     let mut controller = BattleController::new(&replay_file.meta, game_metadata, game_constants);
-    let replay_build = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe).build;
-    let mut parser = wows_replays::packet2::Parser::with_build(game_metadata.entity_specs(), replay_build);
+    let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+    let mut parser = wows_replays::packet2::Parser::with_version(game_metadata.entity_specs(), replay_version);
 
     // Player info lookups (populated once players are available)
     let mut ship_names: HashMap<EntityId, String> = HashMap::new();
@@ -641,8 +641,8 @@ pub(super) fn extract_all_shots(
     };
     let mut controller = BattleController::new(&replay_file.meta, game_metadata, game_constants);
     // shot tracking ON (default)
-    let replay_build = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe).build;
-    let mut parser = wows_replays::packet2::Parser::with_build(game_metadata.entity_specs(), replay_build);
+    let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+    let mut parser = wows_replays::packet2::Parser::with_version(game_metadata.entity_specs(), replay_version);
 
     // Pre-allocate per-ship timelines from hints
     let mut timelines: HashMap<EntityId, ShipShotTimeline> = shot_count_hints

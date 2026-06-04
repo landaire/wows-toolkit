@@ -17,6 +17,10 @@ use crate::error::*;
 use crate::types::EntityId;
 use crate::types::GameClock;
 use crate::types::GameParamId;
+use crate::types::WeaponLockType;
+use crate::types::WeaponType;
+use wowsunpack::data::Version;
+use wowsunpack::recognized::Recognized;
 use wowsunpack::rpc::entitydefs::*;
 use wowsunpack::rpc::typedefs::ArgValue;
 
@@ -263,19 +267,22 @@ pub struct OwnShipPacket {
     pub entity_id: EntityId,
 }
 
-/// Packet 0x30: `onSetWeaponLock` — weapon lock state change. Triggers
-/// `setWeaponLockCallback` in the Python layer. Confirmed via
-/// `WGReplayController::_py_onSetWeaponLock`.
+/// Packet 0x30: `onSetWeaponLock` — weapon lock state change. The cell broadcasts
+/// it to clients; `WGReplayController::_py_onSetWeaponLock` records the call.
 ///
-/// Fields derived from `weaponLockFlags`, `WeaponType` enum, and `LOCK_NONE`
-/// constants in the game client.
+/// Wire layout is three `u32`s: `(weaponType, lockType, targetId)`. The Python
+/// client's lock API uses this same argument order throughout
+/// (`setWeaponLock(weaponType, lockType, targetId, ...)`). Note the recorded
+/// broadcast carries no aim point — the trailing `tarPos` exists only on the
+/// upstream client->cell `setWeaponLock` call, not here.
 #[derive(Debug, Serialize, Clone)]
 pub struct SetWeaponLockPacket {
-    /// Lock state (0 = LOCK_NONE / unlock).
-    pub lock_state: u32,
-    /// Weapon type from `WeaponType` enum (e.g. ARTILLERY, TORPEDO, WAVES).
-    pub weapon_type: u32,
-    /// Entity ID of the lock target.
+    /// Which weapon system this lock applies to.
+    pub weapon_type: Recognized<WeaponType, u32>,
+    /// The lock mode (none / absolute point / relative point / target).
+    pub lock_type: Recognized<WeaponLockType, u32>,
+    /// Entity ID of the lock target. Meaningful only when `lock_type` is
+    /// `Target`; otherwise typically 0.
     pub target_id: EntityId,
 }
 
@@ -430,31 +437,34 @@ pub enum PacketTypeId {
     Unknown(u32),
 }
 
-/// First build using the modern BigWorld packet-ID layout where `BattleResults`
-/// occupies `0x22` and every packet at `0x23` and beyond shifted up by one slot
-/// from the legacy layout.
+/// Game version (major, minor, patch) at which the modern BigWorld packet-ID
+/// layout begins: `BattleResults` occupies `0x22` and every packet at `0x23`
+/// and beyond shifts up one slot from the legacy layout.
 ///
-/// Determined empirically from per-version packet-ID histograms: build 6965290
-/// (12.3.1) is the latest known to use the legacy layout; build 7499736 (12.8.0)
-/// is the earliest known to use the modern layout. Picking 12.4.0 as the cutoff
-/// is the cleanest convention; revise if a replay between 12.3.1 and 12.4.0
-/// turns out to use the modern layout.
-pub const MODERN_PACKET_MAPPING_MIN_BUILD: u32 = 7062104;
+/// Determined empirically from per-version raw packet-ID histograms (the
+/// 32-byte PlayerOrientation and 60-byte Camera packets pin the layout): 12.3.1,
+/// 12.4.0 and 12.5.0 use the legacy layout (PlayerOrientation `0x2b`, Camera
+/// `0x24`); 12.6.0 is the first modern build (PlayerOrientation `0x2c`, Camera
+/// `0x25`). Gating on the semantic version rather than the raw build number is
+/// deliberate: regional clients share a version but have different build numbers.
+pub const MODERN_PACKET_LAYOUT_MIN_VERSION: (u32, u32, u32) = (12, 6, 0);
 
 impl PacketTypeId {
-    /// Map a raw wire identifier to a `PacketTypeId` using the modern layout
-    /// (build >= [`MODERN_PACKET_MAPPING_MIN_BUILD`]). Unrecognised values
-    /// become `Unknown(raw)`.
+    /// Map a raw wire identifier using the modern layout. Unrecognised values
+    /// become `Unknown(raw)`. Prefer [`Self::from_raw_for_version`] when the
+    /// replay's version is known so older replays dispatch correctly across the
+    /// layout shift.
     pub fn from_raw(raw: u32) -> Self {
-        Self::from_raw_for_build(raw, u32::MAX)
+        Self::from_raw_modern(raw)
     }
 
-    /// Build-aware variant of [`Self::from_raw`]. Before
-    /// [`MODERN_PACKET_MAPPING_MIN_BUILD`] the wire layout had no `BattleResults`
+    /// Version-keyed packet-ID mapping. Before
+    /// [`MODERN_PACKET_LAYOUT_MIN_VERSION`] the wire layout had no `BattleResults`
     /// packet and ran each subsequent ID one slot lower (0x22 was
-    /// NestedPropertyUpdate, 0x24 Camera, 0x27 Map, 0x2c PlayerOrientation, etc.).
-    pub fn from_raw_for_build(raw: u32, build: u32) -> Self {
-        if build >= MODERN_PACKET_MAPPING_MIN_BUILD { Self::from_raw_modern(raw) } else { Self::from_raw_legacy(raw) }
+    /// NestedPropertyUpdate, 0x24 Camera, 0x27 Map, 0x2b PlayerOrientation, etc.).
+    pub fn from_raw_for_version(raw: u32, version: &Version) -> Self {
+        let v = (version.major, version.minor, version.patch);
+        if v >= MODERN_PACKET_LAYOUT_MIN_VERSION { Self::from_raw_modern(raw) } else { Self::from_raw_legacy(raw) }
     }
 
     fn from_raw_modern(raw: u32) -> Self {
@@ -633,21 +643,21 @@ pub struct RawPacket<'a> {
 /// stream it yields one `Err` and then stops.
 pub struct RawPacketIterator<'a> {
     remaining: &'a [u8],
-    build: u32,
+    version: Option<Version>,
 }
 
 impl<'a> RawPacketIterator<'a> {
     /// Walk a packet stream assuming the modern packet-ID layout. For replays
-    /// from older builds, use [`Self::with_build`] so packet IDs dispatch
-    /// correctly across the protocol shift documented at
-    /// [`MODERN_PACKET_MAPPING_MIN_BUILD`].
+    /// from older versions, use [`Self::with_version`] so packet IDs dispatch
+    /// correctly across the layout shift at
+    /// [`MODERN_PACKET_LAYOUT_MIN_VERSION`].
     pub fn new(packet_data: &'a [u8]) -> Self {
-        Self { remaining: packet_data, build: u32::MAX }
+        Self { remaining: packet_data, version: None }
     }
 
-    /// Walk a packet stream using the packet-ID layout that matches `build`.
-    pub fn with_build(packet_data: &'a [u8], build: u32) -> Self {
-        Self { remaining: packet_data, build }
+    /// Walk a packet stream using the packet-ID layout that matches `version`.
+    pub fn with_version(packet_data: &'a [u8], version: Version) -> Self {
+        Self { remaining: packet_data, version: Some(version) }
     }
 }
 
@@ -658,10 +668,14 @@ impl<'a> Iterator for RawPacketIterator<'a> {
         if self.remaining.is_empty() {
             return None;
         }
-        let build = self.build;
+        let version = self.version;
         let result = (|| {
             let packet_size = le_u32.parse_next(&mut self.remaining)?;
-            let packet_type = PacketTypeId::from_raw_for_build(le_u32.parse_next(&mut self.remaining)?, build);
+            let raw_type = le_u32.parse_next(&mut self.remaining)?;
+            let packet_type = match &version {
+                Some(v) => PacketTypeId::from_raw_for_version(raw_type, v),
+                None => PacketTypeId::from_raw(raw_type),
+            };
             let raw_clock = le_f32.parse_next(&mut self.remaining)?;
             let payload = take(packet_size as usize).parse_next(&mut self.remaining)?;
             Ok(RawPacket { packet_size, packet_type, clock: GameClock(raw_clock), payload })
@@ -682,21 +696,22 @@ pub struct Entity<'argtype> {
 pub struct Parser<'argtype> {
     specs: &'argtype [EntitySpec],
     entities: HashMap<u32, Entity<'argtype>>,
-    build: u32,
+    /// The replay's game version, used to select the packet-ID layout. `None`
+    /// assumes the modern layout (when the version isn't known).
+    version: Option<Version>,
 }
 
 impl<'argtype> Parser<'argtype> {
-    /// Build a parser assuming the modern packet-ID layout. Equivalent to
-    /// [`Self::with_build`] with `u32::MAX`; prefer that variant when the
-    /// replay's build is known so old replays dispatch correctly across the
-    /// protocol shift at [`MODERN_PACKET_MAPPING_MIN_BUILD`].
+    /// Build a parser assuming the modern packet-ID layout. Prefer
+    /// [`Self::with_version`] when the replay's version is known so old replays
+    /// dispatch correctly across the protocol shift at 12.6.0.
     pub fn new(entities: &'argtype [EntitySpec]) -> Parser<'argtype> {
-        Self::with_build(entities, u32::MAX)
+        Parser { specs: entities, entities: HashMap::new(), version: None }
     }
 
-    /// Build a parser that dispatches packet IDs for the given build number.
-    pub fn with_build(entities: &'argtype [EntitySpec], build: u32) -> Parser<'argtype> {
-        Parser { specs: entities, entities: HashMap::new(), build }
+    /// Build a parser that dispatches packet IDs for the given game version.
+    pub fn with_version(entities: &'argtype [EntitySpec], version: Version) -> Parser<'argtype> {
+        Parser { specs: entities, entities: HashMap::new(), version: Some(version) }
     }
 
     fn parse_entity_property_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'argtype>> {
@@ -740,7 +755,9 @@ impl<'argtype> Parser<'argtype> {
         let method_id = le_u32.parse_next(i)?;
         let payload_length = le_u32.parse_next(i)?;
         let payload: &'a [u8] = take(payload_length as usize).parse_next(i)?;
-        assert!(i.is_empty());
+        if !i.is_empty() {
+            return Err(failure(ParseError::InvalidPacketData));
+        }
 
         // Return structured errors rather than panicking on a stream that
         // references an entity before its creation packet.
@@ -781,7 +798,12 @@ impl<'argtype> Parser<'argtype> {
         i: &mut &'replay [u8],
     ) -> PResult<PacketType<'replay, 'argtype>> {
         let len = le_u32.parse_next(i)?;
-        assert_eq!(len as usize, i.len());
+        // A mismatch here means the packet was not really battle-results in this
+        // build's layout (packet-id mapping differs by version). Fail gracefully
+        // rather than asserting so a single mis-mapped packet can't crash a batch.
+        if len as usize != i.len() {
+            return Err(failure(ParseError::InvalidPacketData));
+        }
         let battle_results: &'replay [u8] = take(len as usize).parse_next(i)?;
 
         let results = std::str::from_utf8(battle_results).map_err(|e| failure(ParseError::from(e)))?;
@@ -797,18 +819,25 @@ impl<'argtype> Parser<'argtype> {
         let is_slice = le_u8.parse_next(i)?;
         let payload_size = le_u32.parse_next(i)?;
         let payload: &[u8] = i;
-        assert_eq!(payload_size as usize, payload.len());
+        if payload_size as usize != payload.len() {
+            return Err(failure(ParseError::InvalidPacketData));
+        }
 
-        let entity = self.entities.get_mut(&entity_id).unwrap();
+        let entity =
+            self.entities.get_mut(&entity_id).ok_or_else(|| failure(ParseError::UnknownEntity { entity_id }))?;
         let entity_type = entity.entity_type;
 
         let spec = &self.specs[entity_type as usize - 1];
 
-        assert!(is_slice & 0xFE == 0);
+        if is_slice & 0xFE != 0 {
+            return Err(failure(ParseError::InvalidPacketData));
+        }
 
         let mut reader = crate::nested_property_path::BitReader::new(payload);
         let cont = reader.read_u8(1);
-        assert!(cont == 1);
+        if cont != 1 {
+            return Err(failure(ParseError::InvalidPacketData));
+        }
         let prop_idx = reader.read_u8(spec.properties.len().next_power_of_two().trailing_zeros() as u8);
         if prop_idx as usize >= entity.properties.len() {
             // This is almost certainly a nested property set on the player avatar.
@@ -840,7 +869,8 @@ impl<'argtype> Parser<'argtype> {
     fn parse_version_packet<'replay, 'b>(&'b self, i: &mut &'replay [u8]) -> PResult<PacketType<'replay, 'argtype>> {
         let len = le_u32.parse_next(i)?;
         let data: &[u8] = take(len as usize).parse_next(i)?;
-        Ok(PacketType::Version(std::str::from_utf8(data).unwrap().to_string()))
+        let version = std::str::from_utf8(data).map_err(|e| failure(ParseError::from(e)))?;
+        Ok(PacketType::Version(version.to_string()))
     }
 
     fn parse_camera_mode_packet<'replay, 'b>(
@@ -878,7 +908,9 @@ impl<'argtype> Parser<'argtype> {
     }
 
     fn parse_player_orientation_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
-        assert!(i.len() == 0x20);
+        if i.len() != 0x20 {
+            return Err(failure(ParseError::InvalidPacketData));
+        }
         let pid = le_u32.parse_next(i)?;
         let parent_id = le_u32.parse_next(i)?;
         let position = parse_vec3.parse_next(i)?;
@@ -961,12 +993,12 @@ impl<'argtype> Parser<'argtype> {
     }
 
     fn parse_set_weapon_lock_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
-        let lock_state = le_u32.parse_next(i)?;
         let weapon_type = le_u32.parse_next(i)?;
+        let lock_type = le_u32.parse_next(i)?;
         let target_id = le_u32.parse_next(i)?;
         Ok(PacketType::SetWeaponLock(SetWeaponLockPacket {
-            lock_state,
-            weapon_type,
+            weapon_type: WeaponType::from_raw(weapon_type),
+            lock_type: WeaponLockType::from_raw(lock_type),
             target_id: EntityId::from(target_id),
         }))
     }
@@ -1008,7 +1040,10 @@ impl<'argtype> Parser<'argtype> {
     fn parse_base_player_create<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
         let entity_id = le_u32.parse_next(i)?;
         let entity_type = le_u16.parse_next(i)?;
-        let spec = &self.specs[entity_type as usize - 1];
+        let spec = (entity_type as usize)
+            .checked_sub(1)
+            .and_then(|idx| self.specs.get(idx))
+            .ok_or_else(|| failure(ParseError::EntityTypeOutOfBounds { entity_type, spec_count: self.specs.len() }))?;
 
         let mut props: HashMap<&str, _> = HashMap::new();
         let mut stored_props: Vec<_> = vec![];
@@ -1056,7 +1091,10 @@ impl<'argtype> Parser<'argtype> {
     fn parse_base_player_create_stub<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
         let entity_id = le_u32.parse_next(i)?;
         let entity_type = le_u16.parse_next(i)?;
-        let spec = &self.specs[entity_type as usize - 1];
+        let spec = (entity_type as usize)
+            .checked_sub(1)
+            .and_then(|idx| self.specs.get(idx))
+            .ok_or_else(|| failure(ParseError::EntityTypeOutOfBounds { entity_type, spec_count: self.specs.len() }))?;
 
         let component_data = i.to_vec();
         *i = &[];
@@ -1131,7 +1169,7 @@ impl<'argtype> Parser<'argtype> {
         let props_data: &'a [u8] = take(props_len as usize).parse_next(i)?;
 
         if !self.entities.contains_key(&entity_id) {
-            panic!("Cell player, entity id {}, was created before base player!", entity_id);
+            return Err(failure(ParseError::UnknownEntity { entity_id }));
         }
 
         // The value can be parsed into all internal properties
@@ -1216,6 +1254,7 @@ impl<'argtype> Parser<'argtype> {
         let blob: &'a [u8] = take(128usize).parse_next(i)?;
         let string_size = le_u32.parse_next(i)?;
         let map_name: &'a [u8] = take(string_size as usize).parse_next(i)?;
+        let map_name = std::str::from_utf8(map_name).map_err(|e| failure(ParseError::from(e)))?;
         let matrix: &'a [u8] = take(4usize * 4 * 4).parse_next(i)?;
         let unknown = le_u8.parse_next(i)?;
         let packet = MapPacket {
@@ -1224,8 +1263,7 @@ impl<'argtype> Parser<'argtype> {
             unknown1,
             unknown2,
             blob,
-            // TODO: Use a winnow combinator for this (for error handling)
-            map_name: std::str::from_utf8(map_name).unwrap(),
+            map_name,
             matrix,
             unknown,
         };
@@ -1298,7 +1336,11 @@ impl<'argtype> Parser<'argtype> {
 
     pub fn parse_packet<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<Packet<'a, 'b>> {
         let packet_size = le_u32.parse_next(i)?;
-        let packet_type = PacketTypeId::from_raw_for_build(le_u32.parse_next(i)?, self.build);
+        let raw_type = le_u32.parse_next(i)?;
+        let packet_type = match &self.version {
+            Some(version) => PacketTypeId::from_raw_for_version(raw_type, version),
+            None => PacketTypeId::from_raw(raw_type),
+        };
         let raw_clock = le_f32.parse_next(i)?;
         let clock = GameClock(raw_clock);
         let packet_data: &'a [u8] = take(packet_size as usize).parse_next(i)?;
@@ -1317,5 +1359,68 @@ impl<'argtype> Parser<'argtype> {
             }
         };
         Ok(Packet { packet_size, packet_type, clock, payload, raw, leftover })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn version(major: u32, minor: u32, patch: u32) -> Version {
+        Version { major, minor, patch, build: 0 }
+    }
+
+    /// The layout boundary is at 12.6.0: 12.5.0 and earlier use the legacy
+    /// packet-ID table, 12.6.0 and later the modern one. Confirmed empirically
+    /// from per-version raw packet-ID histograms (32-byte PlayerOrientation and
+    /// 60-byte Camera packets pin the layout): 12.3.1/12.4.0/12.5.0 carry
+    /// PlayerOrientation at 0x2b and Camera at 0x24; 12.6.0 shifts them to 0x2c
+    /// and 0x25. Builds 12.4.0/12.5.0 once mis-mapped to the modern table and
+    /// produced zero decodable position tracks.
+    #[test]
+    fn layout_boundary_is_12_6_0() {
+        // Legacy side: PlayerOrientation 0x2b, Camera 0x24, SetWeaponLock 0x2f.
+        for v in [version(12, 3, 1), version(12, 4, 0), version(12, 5, 0)] {
+            assert_eq!(PacketTypeId::from_raw_for_version(0x2b, &v), PacketTypeId::PlayerOrientation);
+            assert_eq!(PacketTypeId::from_raw_for_version(0x24, &v), PacketTypeId::Camera);
+            assert_eq!(PacketTypeId::from_raw_for_version(0x2f, &v), PacketTypeId::SetWeaponLock);
+            assert_eq!(PacketTypeId::from_raw_for_version(0x22, &v), PacketTypeId::NestedPropertyUpdate);
+        }
+
+        // Modern side: everything from 0x23 up shifts one slot, BattleResults
+        // claims 0x22.
+        for v in [version(12, 6, 0), version(13, 0, 0), version(15, 4, 0)] {
+            assert_eq!(PacketTypeId::from_raw_for_version(0x2c, &v), PacketTypeId::PlayerOrientation);
+            assert_eq!(PacketTypeId::from_raw_for_version(0x25, &v), PacketTypeId::Camera);
+            assert_eq!(PacketTypeId::from_raw_for_version(0x30, &v), PacketTypeId::SetWeaponLock);
+            assert_eq!(PacketTypeId::from_raw_for_version(0x22, &v), PacketTypeId::BattleResults);
+            assert_eq!(PacketTypeId::from_raw_for_version(0x23, &v), PacketTypeId::NestedPropertyUpdate);
+        }
+    }
+
+    /// Packets below the shift (0x00..=0x21) are identical in both layouts, so
+    /// version gating must not perturb them.
+    #[test]
+    fn pre_shift_packets_are_layout_invariant() {
+        let legacy = version(12, 5, 0);
+        let modern = version(12, 6, 0);
+        for raw in [0x00, 0x01, 0x05, 0x07, 0x08, 0x0a, 0x18, 0x1d, 0x20] {
+            assert_eq!(
+                PacketTypeId::from_raw_for_version(raw, &legacy),
+                PacketTypeId::from_raw_for_version(raw, &modern),
+                "raw 0x{raw:02x} should map identically across the layout shift"
+            );
+        }
+    }
+
+    /// Every mapped variant round-trips through `raw()` in the modern table.
+    #[test]
+    fn modern_raw_roundtrip() {
+        for raw in 0x00..=0x40u32 {
+            let id = PacketTypeId::from_raw_modern(raw);
+            if !matches!(id, PacketTypeId::Unknown(_)) {
+                assert_eq!(id.raw(), raw, "0x{raw:02x} did not round-trip");
+            }
+        }
     }
 }
