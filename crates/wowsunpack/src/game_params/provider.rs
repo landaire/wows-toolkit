@@ -335,7 +335,9 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> 
                     let flat: BTreeMap<HashableValue, Value> = skill_data
                         .iter()
                         .filter(|(key, _)| {
-                            key.string_ref().map(|s| !SKILL_STRUCTURAL_KEYS.contains(&s.inner().as_str())).unwrap_or(false)
+                            key.string_ref()
+                                .map(|s| !SKILL_STRUCTURAL_KEYS.contains(&s.inner().as_str()))
+                                .unwrap_or(false)
                         })
                         .map(|(key, value)| (key.clone(), value.clone()))
                         .collect();
@@ -357,7 +359,8 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> 
                         .build()
                 }
                 None => {
-                    let t = skill_data.get(&pk("tier")).and_then(|v| v.i64_ref()).map(|&v| v as usize).unwrap_or_default();
+                    let t =
+                        skill_data.get(&pk("tier")).and_then(|v| v.i64_ref()).map(|&v| v as usize).unwrap_or_default();
                     CrewSkillTiers::builder()
                         .aircraft_carrier(t)
                         .auxiliary(t)
@@ -407,7 +410,9 @@ fn build_crew_personality(personality: &BTreeMap<HashableValue, Value>) -> CrewP
         .build();
 
     CrewPersonality::builder()
-        .can_reset_skills_for_free(game_param_to_type!(personality, "canResetSkillsForFree", Option<bool>).unwrap_or_default())
+        .can_reset_skills_for_free(
+            game_param_to_type!(personality, "canResetSkillsForFree", Option<bool>).unwrap_or_default(),
+        )
         .cost_credits(game_param_to_type!(personality, "costCR", Option<usize>).unwrap_or_default())
         .cost_elite_xp(game_param_to_type!(personality, "costELXP", Option<usize>).unwrap_or_default())
         .cost_gold(game_param_to_type!(personality, "costGold", Option<usize>).unwrap_or_default())
@@ -461,37 +466,21 @@ fn build_ability_category(category_data: &BTreeMap<HashableValue, Value>) -> Abi
         panic!("could not get reloadTime");
     };
 
-    // Extract detection radius fields from "logic" sub-object
-    let logic =
-        category_data.get(&HashableValue::String("logic".to_owned().into())).and_then(|v| v.dict_or_object_dict());
+    // Detection radius fields. Newer clients nest these under a "logic" sub-object;
+    // older ones (e.g. 0.9.x) put them directly on the category. Read from "logic"
+    // when present, otherwise fall back to the category root -- without this, radar
+    // and hydro range circles never resolve for pre-rework replays.
+    let logic = category_data.get(&pk("logic")).and_then(|v| v.dict_or_object_dict());
+    let read_f32 = |key: &str| -> Option<f32> {
+        let hk = pk(key);
+        let conv = |v: &Value| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32));
+        logic.as_ref().and_then(|l| l.inner().get(&hk).and_then(conv)).or_else(|| category_data.get(&hk).and_then(conv))
+    };
 
-    let dist_ship = logic.as_ref().and_then(|l| {
-        l.inner()
-            .get(&HashableValue::String("distShip".to_owned().into()))
-            .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
-            .map(BigWorldDistance::from)
-    });
-
-    let dist_torpedo = logic.as_ref().and_then(|l| {
-        l.inner()
-            .get(&HashableValue::String("distTorpedo".to_owned().into()))
-            .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
-            .map(BigWorldDistance::from)
-    });
-
-    let hydrophone_wave_radius = logic.as_ref().and_then(|l| {
-        l.inner()
-            .get(&HashableValue::String("hydrophoneWaveRadius".to_owned().into()))
-            .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
-            .map(Meters::from)
-    });
-
-    let patrol_radius = logic.as_ref().and_then(|l| {
-        l.inner()
-            .get(&HashableValue::String("radius".to_owned().into()))
-            .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
-            .map(BigWorldDistance::from)
-    });
+    let dist_ship = read_f32("distShip").map(BigWorldDistance::from);
+    let dist_torpedo = read_f32("distTorpedo").map(BigWorldDistance::from);
+    let hydrophone_wave_radius = read_f32("hydrophoneWaveRadius").map(Meters::from);
+    let patrol_radius = read_f32("radius").map(BigWorldDistance::from);
 
     AbilityCategory::builder()
         .maybe_special_sound_id(game_param_to_type!(category_data, "SpecialSoundID", Option<String>))
