@@ -1,10 +1,13 @@
 name: Deploy site to GitHub Pages
 
 on:
-  # Deploy on every push to main (site content updates).
+  # Deploy on every push to main (site content updates), and rebuild the
+  # tactics WASM on a release tag. The release is cut by build.yml using
+  # GITHUB_TOKEN, which suppresses the release event, so we key off the tag.
   push:
     branches: [main]
-  # Rebuild tactics WASM when a release is published.
+    tags: ["v*"]
+  # Also rebuild tactics for a manually published release.
   release:
     types: [published]
   # Manual trigger — optionally skip tactics rebuild.
@@ -26,7 +29,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUILD_TACTICS: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.build_tactics) }}
+  BUILD_TACTICS: ${{ github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.build_tactics) }}
 
 jobs:
   deploy:

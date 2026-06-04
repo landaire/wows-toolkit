@@ -1,15 +1,49 @@
 on:
-  release:
-    types: [created]
+  push:
+    tags: ["v*"]
 
 permissions:
   id-token: write
   contents: write
 
 jobs:
+  # ── Create the release the build jobs attach to ───────────────────────
+  create-release:
+    name: Create release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract changelog section for this tag
+        id: notes
+        # Pull the CHANGELOG.md section for the tag (## [x.y.z] ... up to the
+        # next ## [ heading) and use it as the release body. Fall back to
+        # auto-generated notes if the tag has no changelog entry.
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # index() over a regex match so the literal [ ] in the heading need no
+          # escaping (gawk mishandles \[ in a dynamic regex).
+          awk -v ver="$version" '
+            index($0, "## [" ver "]") == 1 { flag = 1; next }
+            flag && index($0, "## [") == 1 { exit }
+            flag { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' > release_notes.md
+          if grep -q '[^[:space:]]' release_notes.md; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          generate_release_notes: ${{ steps.notes.outputs.found == 'false' }}
+
   # ── Windows (signed) ──────────────────────────────────────────────────
   windows:
     name: Windows
+    needs: create-release
     runs-on: windows-latest
     environment: release-signing
     steps:
@@ -62,19 +96,20 @@ jobs:
       - name: Create zip archive
         run: |
           Copy-Item -Recurse "crates/wt-translations/translations" "translations"
-          Compress-Archive -Path "target/x86_64-pc-windows-msvc/release/wows_toolkit.exe","target/x86_64-pc-windows-msvc/release/wows_toolkit.pdb","README.md","translations" -DestinationPath "wows_toolkit_${{ github.event.release.tag_name }}_windows.zip"
+          Compress-Archive -Path "target/x86_64-pc-windows-msvc/release/wows_toolkit.exe","target/x86_64-pc-windows-msvc/release/wows_toolkit.pdb","README.md","translations" -DestinationPath "wows_toolkit_${{ github.ref_name }}_windows.zip"
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            wows_toolkit_${{ github.event.release.tag_name }}_windows.zip
+            wows_toolkit_${{ github.ref_name }}_windows.zip
             target/x86_64-pc-windows-msvc/release/wows_toolkit.pdb
             target/wix/*.msi
 
   # ── Linux (Flatpak) ───────────────────────────────────────────────────
   linux:
     name: Linux Flatpak
+    needs: create-release
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -160,6 +195,7 @@ jobs:
   # ── macOS (universal .app in .dmg) ────────────────────────────────────
   macos:
     name: macOS
+    needs: create-release
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -205,7 +241,7 @@ jobs:
       - name: Create .app bundle
         run: |
           APP="WoWs Toolkit.app"
-          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${{ github.ref_name }}"
 
           mkdir -p "$APP/Contents/MacOS"
           mkdir -p "$APP/Contents/Resources"
@@ -247,9 +283,9 @@ jobs:
           hdiutil create -volname "WoWs Toolkit" \
             -srcfolder "WoWs Toolkit.app" \
             -ov -format UDZO \
-            "wows_toolkit_${{ github.event.release.tag_name }}_macos.dmg"
+            "wows_toolkit_${{ github.ref_name }}_macos.dmg"
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
-          files: wows_toolkit_${{ github.event.release.tag_name }}_macos.dmg
+          files: wows_toolkit_${{ github.ref_name }}_macos.dmg
