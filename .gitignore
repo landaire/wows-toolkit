@@ -11,4 +11,10 @@ game_data/
 wix/banner.bmp
 wix/license.rtf
 scratch/
+.scratch/
 .tooling/
+__pycache__/
+*.tmp
+strings.csv
+# Steam depot manifest dumps
+/55299*.txt

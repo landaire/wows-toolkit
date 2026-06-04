@@ -1,17 +1,12 @@
 # Discovered builds from bulk archive
 
-[versions.9773198]
-# date = "13 May 2025 – 08:02:36 UTC"
-depot_id = 552993
-manifest_id = "1171282057117057621"
+[versions.7919265]
+# date = "9 January 2024 – 08:06:23 UTC"
+client_depot_id = 552993
+client_manifest_id = "2666502953567158472"
 
-[versions.9953613]
-# date = "13 May 2025 – 08:02:36 UTC"
-depot_id = 552993
-manifest_id = "1171282057117057621"
-
-[versions.11791718]
-# date = "13 January 2026 – 08:05:22 UTC"
-depot_id = 552993
-manifest_id = "5378837858148216116"
+[versions.8385097]
+# date = "14 May 2024 – 08:04:08 UTC"
+client_depot_id = 552993
+client_manifest_id = "447311930817609564"
 
