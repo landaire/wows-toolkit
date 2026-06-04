@@ -478,7 +478,7 @@ where
 
     let mut analyzer = build(&replay_file.meta);
 
-    let mut parser = wows_replays::packet2::Parser::with_build(&specs, replay_version.build);
+    let mut parser = wows_replays::packet2::Parser::with_version(&specs, replay_version);
     let mut remaining = &replay_file.packet_data[..];
     while !remaining.is_empty() {
         let packet = parser.parse_packet(&mut remaining).map_err(|e| rootcause::report!(ParseError::from(e)))?;
@@ -776,7 +776,7 @@ fn run_players_query(
     let mut controller = BattleController::new(&replay_file.meta, &provider, Some(&constants));
     controller.set_track_shots(false);
 
-    let mut parser = wows_replays::packet2::Parser::with_build(provider.entity_specs(), version.build);
+    let mut parser = wows_replays::packet2::Parser::with_version(provider.entity_specs(), version);
     let mut remaining = replay_file.packet_data.as_slice();
     while !remaining.is_empty() {
         match parser.parse_packet(&mut remaining) {
