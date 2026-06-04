@@ -1,0 +1,16 @@
+[package]
+name = "wgcheck"
+version = "0.1.0"
+edition = "2021"
+description = "Parser for WGCheck (.gch) report archives: DES + GZip + .NET BinaryFormatter (NRBF)"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+flate2 = "1"
+des = "0.8"
+cbc = "0.1"
+
+[[bin]]
+name = "wgcheck"
+path = "src/main.rs"
