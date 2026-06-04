@@ -10,7 +10,16 @@ use variantly::Variantly;
 
 use crate::Rc;
 use crate::data::ResourceLoader;
+use crate::data::Version;
 use crate::game_types::GameParamId;
+
+/// Friendly game version (major, minor, patch) at which the captain-skill rework
+/// landed. Before this, a captain's learned skills are a single `learnedSkills`
+/// UINT64 bitmask (1-indexed over skill types) and skill strings key as
+/// `IDS_SKILL_<UPPERCASE>`; from this version on, learned skills are per-species
+/// arrays of skill-type ids and strings key as `IDS_SKILL_<UPPER_SNAKE>`.
+/// Verified empirically across 0.9.0-0.9.12 (bitmask) vs 0.10.0+ (arrays).
+pub const CAPTAIN_SKILL_REWORK_VERSION: (u32, u32, u32) = (0, 10, 0);
 
 use super::provider::GameMetadataProvider;
 
@@ -1737,20 +1746,44 @@ impl CrewSkill {
         self.internal_name.as_ref()
     }
 
-    pub fn translated_name(&self, metadata_provider: &GameMetadataProvider) -> Option<String> {
+    /// Build the gettext id for a skill string, choosing the key style by game
+    /// version. The captain-skill rework ([`CAPTAIN_SKILL_REWORK_VERSION`])
+    /// changed both the skill data shape and the translation keys: pre-rework
+    /// skills key as `<prefix>_<UPPERCASE>` (the internal name is the modifier,
+    /// e.g. `PriorityTargetModifier` -> `IDS_SKILL_PRIORITYTARGETMODIFIER`),
+    /// while the rework switched to `<prefix>_<UPPER_SNAKE>`. The non-matching
+    /// style is returned as a fallback so a stray key from either era still
+    /// resolves.
+    fn skill_translation_keys(&self, prefix: &str, version: &Version) -> (String, String) {
         use convert_case::Case;
         use convert_case::Casing;
-        let translation_id = format!("IDS_SKILL_{}", self.internal_name().to_case(Case::UpperSnake));
-
-        metadata_provider.localized_name_from_id(&translation_id)
+        let snake = format!("{prefix}_{}", self.internal_name().to_case(Case::UpperSnake));
+        let plain = format!("{prefix}_{}", self.internal_name().to_uppercase());
+        let rework = Version {
+            major: CAPTAIN_SKILL_REWORK_VERSION.0,
+            minor: CAPTAIN_SKILL_REWORK_VERSION.1,
+            patch: CAPTAIN_SKILL_REWORK_VERSION.2,
+            build: 0,
+        };
+        if version.is_at_least(&rework) { (snake, plain) } else { (plain, snake) }
     }
 
-    pub fn translated_description(&self, metadata_provider: &GameMetadataProvider) -> Option<String> {
-        use convert_case::Case;
-        use convert_case::Casing;
-        let translation_id = format!("IDS_SKILL_DESC_{}", self.internal_name().to_case(Case::UpperSnake));
+    pub fn translated_name(&self, metadata_provider: &GameMetadataProvider, version: &Version) -> Option<String> {
+        let (primary, fallback) = self.skill_translation_keys("IDS_SKILL", version);
+        metadata_provider
+            .localized_name_from_id(&primary)
+            .or_else(|| metadata_provider.localized_name_from_id(&fallback))
+    }
 
-        let description = metadata_provider.localized_name_from_id(&translation_id);
+    pub fn translated_description(
+        &self,
+        metadata_provider: &GameMetadataProvider,
+        version: &Version,
+    ) -> Option<String> {
+        let (primary, fallback) = self.skill_translation_keys("IDS_SKILL_DESC", version);
+        let description = metadata_provider
+            .localized_name_from_id(&primary)
+            .or_else(|| metadata_provider.localized_name_from_id(&fallback));
 
         description.and_then(|desc| if desc.is_empty() || desc == " " { None } else { Some(desc) })
     }
@@ -1953,10 +1986,18 @@ pub struct ShellInfo {
     pub ricochet_angle: f32,
     pub always_ricochet_angle: f32,
     pub fuse_time: f32,
-    pub fuse_threshold: f32,
+    /// Fuse arming threshold in mm. `None` when the projectile carries no fuse
+    /// data; there is no safe numeric default (0.0 would arm on any plate).
+    pub fuse_threshold: Option<f32>,
     pub burn_prob: f32,
     pub air_drag: f32,
-    pub normalization: f32,
+    /// Cap normalization angle in degrees. `None` when the projectile defines no
+    /// normalization; there is no safe numeric default (0.0 changes penetration).
+    pub normalization: Option<f32>,
+    /// Whether the shell is capped (`bulletCap`). Capped shells benefit from
+    /// normalization; uncapped shells do not. Defaults to the game's `Ammo`
+    /// base-class value (`true`) when the field is absent.
+    pub cap: bool,
 }
 
 #[derive(Clone, Builder, Debug)]
@@ -2103,10 +2144,11 @@ impl Projectile {
             ricochet_angle: self.bullet_ricochet_at.unwrap_or(45.0),
             always_ricochet_angle: self.bullet_always_ricochet_at.unwrap_or(60.0),
             fuse_time: self.bullet_detonator.unwrap_or(0.033),
-            fuse_threshold: self.bullet_detonator_threshold.unwrap_or(0.0),
+            fuse_threshold: self.bullet_detonator_threshold,
             burn_prob: self.burn_prob.unwrap_or(-0.5),
             air_drag: self.bullet_air_drag.unwrap_or(0.0),
-            normalization: self.bullet_cap_normalize_max_angle.unwrap_or(0.0),
+            normalization: self.bullet_cap_normalize_max_angle,
+            cap: self.bullet_cap.unwrap_or(true),
         }
     }
 }

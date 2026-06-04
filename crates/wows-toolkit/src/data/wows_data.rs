@@ -176,16 +176,95 @@ impl WoWsDataMap {
         self.resolve_build_with_version(build, None)
     }
 
-    /// Ship class icons from the newest loaded build. Used as a fallback when an older
-    /// replay's own build predates these assets -- pre-12.0 clients shipped no
+    /// Open the newest dumped build's VFS by build number, recovering its
+    /// semantic version from the index. Used to borrow GUI assets (ship/ribbon
+    /// icons) for an older replay whose own build predates per-file icons, when
+    /// no build new enough to carry them is currently loaded. Opening the VFS is
+    /// cheap (a `PhysicalFS` over the dump dir); only the handful of icon files
+    /// are read. Returns `None` when there is no dump index or extracted VFS.
+    fn newest_dump_gui_vfs(&self) -> Option<(VfsPath, Option<Version>)> {
+        let base = crate::task::replays::game_data_dump_base_with_override(&self.game_data_cache_dir)?;
+        let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
+        let entry = index.builds.iter().max_by_key(|e| e.build)?;
+        let vfs_root = base.join(&entry.dir).join("vfs");
+        if !vfs_root.exists() {
+            return None;
+        }
+        let vfs = VfsPath::new(wowsunpack::vfs::impls::physical::PhysicalFS::new(&vfs_root));
+        let mut parts = entry.version.split('.').filter_map(|p| p.trim().parse::<u32>().ok());
+        let version = parts.next().map(|major| Version {
+            major,
+            minor: parts.next().unwrap_or(0),
+            patch: parts.next().unwrap_or(0),
+            build: entry.build,
+        });
+        Some((vfs, version))
+    }
+
+    /// Ship class icons from the newest build available. Used as a fallback when an
+    /// older replay's own build predates these assets -- pre-12.0 clients shipped no
     /// `gui/fla/minimap/ship_icons`, so those dumps have an empty icon set. The class
     /// icons (DD/CA/BB/CV) are generic, so borrowing the current build's is correct.
+    /// Prefers the newest loaded build; if that build also lacks them (e.g. only an
+    /// old replay is loaded), reads them straight from the newest dump on disk.
     pub fn newest_ship_icons(&self) -> HashMap<Species, Arc<GameAsset>> {
-        let builds = self.builds.read();
-        builds
+        let loaded = self
+            .builds
+            .read()
             .values()
             .max_by_key(|data| data.read().build_number)
             .map(|data| data.read().ship_icons.clone())
+            .unwrap_or_default();
+        if !loaded.is_empty() {
+            return loaded;
+        }
+        self.newest_dump_gui_vfs()
+            .map(|(vfs, version)| crate::task::load_ship_icons(&vfs, version.as_ref()))
+            .unwrap_or_default()
+    }
+
+    /// Ribbon icons from the newest build available. Used as a fallback when an older
+    /// replay's own build has no per-file ribbon PNGs -- Flash-era clients (~0.9.5
+    /// through 0.10.4) and older embed ribbons as vector symbols inside
+    /// `achievements.swf`, so those dumps have an empty ribbon icon set. The icons
+    /// are keyed by stable ribbon names (`ribbon_main_caliber`, ...), so borrowing
+    /// the current build's is correct for the ribbon types an old replay can earn.
+    /// Prefers the newest loaded build, then falls back to the newest dump on disk.
+    pub fn newest_ribbon_icons(&self) -> HashMap<String, Arc<GameAsset>> {
+        let loaded = self
+            .builds
+            .read()
+            .values()
+            .max_by_key(|data| data.read().build_number)
+            .map(|data| data.read().ribbon_icons.clone())
+            .unwrap_or_default();
+        if !loaded.is_empty() {
+            return loaded;
+        }
+        self.newest_dump_gui_vfs()
+            .map(|(vfs, version)| {
+                crate::task::load_ribbon_icons(&vfs, wowsunpack::game_assets::GuiAssetDir::Ribbons, version.as_ref())
+            })
+            .unwrap_or_default()
+    }
+
+    /// Subribbon icons from the newest build available. Companion to
+    /// [`Self::newest_ribbon_icons`] for the same Flash-era fallback.
+    pub fn newest_subribbon_icons(&self) -> HashMap<String, Arc<GameAsset>> {
+        let loaded = self
+            .builds
+            .read()
+            .values()
+            .max_by_key(|data| data.read().build_number)
+            .map(|data| data.read().subribbon_icons.clone())
+            .unwrap_or_default();
+        if !loaded.is_empty() {
+            return loaded;
+        }
+        self.newest_dump_gui_vfs()
+            .map(|(vfs, version)| {
+                crate::task::load_ribbon_icons(&vfs, wowsunpack::game_assets::GuiAssetDir::SubRibbons, version.as_ref())
+            })
             .unwrap_or_default()
     }
 

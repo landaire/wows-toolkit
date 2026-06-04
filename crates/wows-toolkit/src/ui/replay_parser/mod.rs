@@ -505,6 +505,9 @@ fn resolve_player_consumables(
 #[allow(non_camel_case_types)]
 pub struct UiReport {
     match_timestamp: Timestamp,
+    /// The replay's game version, used to select version-specific parsing (e.g.
+    /// the captain-skill translation key style).
+    version: wowsunpack::data::Version,
     self_player: Option<Arc<Player>>,
     player_reports: Vec<PlayerReport>,
     sorted: bool,
@@ -523,6 +526,11 @@ pub struct UiReport {
     merge_active: bool,
     battle_result: Option<BattleResult>,
     resolved_results: Option<serde_json::Value>,
+    /// Ribbon icons from the newest loaded build, used to fill gaps when this
+    /// replay's own build ships none (Flash-era and older). See
+    /// [`crate::data::wows_data::WoWsDataMap::newest_ribbon_icons`].
+    fallback_ribbon_icons: HashMap<String, Arc<GameAsset>>,
+    fallback_subribbon_icons: HashMap<String, Arc<GameAsset>>,
 }
 
 impl UiReport {
@@ -1167,7 +1175,7 @@ impl UiReport {
                 received_damage_report,
                 kills,
                 observed_kills,
-                translated_build: TranslatedBuild::new(player, metadata_provider),
+                translated_build: TranslatedBuild::new(player, metadata_provider, &report.version()),
                 hits,
                 hits_report,
                 hits_text,
@@ -1304,6 +1312,7 @@ impl UiReport {
 
         Self {
             match_timestamp,
+            version: report.version(),
             player_reports,
             self_player,
             replay_sort: Arc::clone(&deps.replay_sort),
@@ -1341,6 +1350,8 @@ impl UiReport {
             debug_mode: deps.is_debug_mode,
             merge_active,
             resolved_results,
+            fallback_ribbon_icons: deps.wows_data_map.newest_ribbon_icons(),
+            fallback_subribbon_icons: deps.wows_data_map.newest_subribbon_icons(),
         }
     }
 
@@ -1794,7 +1805,17 @@ impl UiReport {
                             }
 
                             let disconnect_hover_text = if player.connection_change_info().is_empty() {
-                                Some(t!("ui.replay.player.never_connected").into())
+                                // An empty connection history means either a genuine no-show
+                                // (in the roster but never loaded) or that this client just
+                                // doesn't broadcast usable connection state (older replays,
+                                // e.g. 0.9.10, report everyone as not-connected at the arena
+                                // snapshot and never update it). A player who spawned a ship
+                                // was obviously connected, so only flag the ones who never did.
+                                if player.vehicle_entity().is_some() {
+                                    None
+                                } else {
+                                    Some(t!("ui.replay.player.never_connected").into())
+                                }
                             } else if player.connection_change_info().iter().any(|connection_info| {
                                 ConnectionChangeKind::Disconnected == connection_info.event_kind()
                                     && !connection_info.had_death_event()
@@ -2228,11 +2249,21 @@ impl UiReport {
                                 let wows_data = self.wows_data.read();
                                 for ribbon in ribbons {
                                     ui.horizontal(|ui| {
-                                        // Try to find the icon - check subribbons first, then ribbons
+                                        // Prefer the replay build's own icon; fall back to the
+                                        // newest loaded build when this build ships none (Flash-era
+                                        // ~0.9.5-0.10.4 and older embed ribbons in achievements.swf),
+                                        // and finally to text only if even the latest build lacks it.
                                         let icon = if ribbon.is_subribbon {
-                                            wows_data.subribbon_icons.get(&format!("sub{}", ribbon.icon_key))
+                                            let key = format!("sub{}", ribbon.icon_key);
+                                            wows_data
+                                                .subribbon_icons
+                                                .get(&key)
+                                                .or_else(|| self.fallback_subribbon_icons.get(&key))
                                         } else {
-                                            wows_data.ribbon_icons.get(&ribbon.icon_key)
+                                            wows_data
+                                                .ribbon_icons
+                                                .get(&ribbon.icon_key)
+                                                .or_else(|| self.fallback_ribbon_icons.get(&ribbon.icon_key))
                                         };
 
                                         let size = if ribbon.is_subribbon { (32.0, 32.0) } else { (64.0, 64.0) };
@@ -2244,12 +2275,6 @@ impl UiReport {
                                             })
                                             .fit_to_exact_size(size.into());
                                             ui.add(image).on_hover_text(&ribbon.description);
-                                        } else {
-                                            tracing::warn!(
-                                                "Failed to resolve ribbon icon: {} (is_subribbon: {})",
-                                                ribbon.icon_key,
-                                                ribbon.is_subribbon,
-                                            );
                                         }
 
                                         ui.label(format!("{} ({}x)", &ribbon.display_name, ribbon.count))
@@ -2476,7 +2501,7 @@ impl UiReport {
             }
 
             // Translated build
-            report.translated_build = models::TranslatedBuild::new(&report.player, metadata_provider);
+            report.translated_build = models::TranslatedBuild::new(&report.player, metadata_provider, &self.version);
 
             // Achievements (icon_key holds the ui_name used for translation lookup)
             for achievement in &mut report.achievements {

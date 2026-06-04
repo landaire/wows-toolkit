@@ -1376,7 +1376,7 @@ impl GameMetadataProvider {
             Ok(Cow::Owned(file_data))
         });
 
-        let specs = Arc::new(parse_scripts(&data_file_loader).unwrap());
+        let specs = Arc::new(parse_scripts(&data_file_loader)?);
 
         Ok(GameMetadataProvider {
             params: params.into(),

@@ -53,7 +53,7 @@ pub(super) fn playback_thread(
     open: Arc<AtomicBool>,
 ) {
     // 1. Get VFS, game metadata, and game constants from the app
-    let (vfs, version, game_metadata, game_constants) = {
+    let (vfs, version, game_metadata, game_constants, icon_vfs, icon_version) = {
         let data = wows_data.read();
         let gm = match data.game_metadata.clone() {
             Some(gm) => gm,
@@ -62,22 +62,27 @@ pub(super) fn playback_thread(
                 return;
             }
         };
-        (data.vfs.clone(), data.version().copied(), gm, Arc::clone(&data.game_constants))
+        // Old builds ship no per-file icons; borrow them from the newest dump.
+        let (icon_vfs, icon_version) = super::icon_asset_source(&data);
+        (data.vfs.clone(), data.version().copied(), gm, Arc::clone(&data.game_constants), icon_vfs, icon_version)
     };
     let version = version.as_ref();
+    let icon_version = icon_version.as_ref();
 
-    // 2. Load visual assets (cached across renderer instances)
+    // 2. Load visual assets (cached across renderer instances). Icons resolve
+    // against `icon_vfs` (the newest dump for old replays); map and fonts use
+    // the replay's own VFS.
     let (map_info, game_fonts, map_image_for_announce) = {
         let mut cache = asset_cache.lock();
-        let ship_icons = cache.get_or_load_ship_icons(&vfs, version);
-        let plane_icons = cache.get_or_load_plane_icons(&vfs, version);
-        let building_icons = cache.get_or_load_building_icons(&vfs, version);
-        let consumable_icons = cache.get_or_load_consumable_icons(&vfs, version);
-        let death_cause_icons = cache.get_or_load_death_cause_icons(&vfs, version);
-        let powerup_icons = cache.get_or_load_powerup_icons(&vfs, version);
-        let crew_skill_icons = cache.get_or_load_crew_skill_icons(&vfs, version);
-        let modernization_icons = cache.get_or_load_modernization_icons(&vfs, version);
-        let signal_flag_icons = cache.get_or_load_signal_flag_icons(&vfs, version);
+        let ship_icons = cache.get_or_load_ship_icons(&icon_vfs, icon_version);
+        let plane_icons = cache.get_or_load_plane_icons(&icon_vfs, icon_version);
+        let building_icons = cache.get_or_load_building_icons(&icon_vfs, icon_version);
+        let consumable_icons = cache.get_or_load_consumable_icons(&icon_vfs, icon_version);
+        let death_cause_icons = cache.get_or_load_death_cause_icons(&icon_vfs, icon_version);
+        let powerup_icons = cache.get_or_load_powerup_icons(&icon_vfs, icon_version);
+        let crew_skill_icons = cache.get_or_load_crew_skill_icons(&icon_vfs, icon_version);
+        let modernization_icons = cache.get_or_load_modernization_icons(&icon_vfs, icon_version);
+        let signal_flag_icons = cache.get_or_load_signal_flag_icons(&icon_vfs, icon_version);
         let game_fonts = cache.get_or_load_game_fonts(&vfs, version);
         let (map_image, map_info) = cache.get_or_load_map(&map_name, &vfs, version);
 
@@ -1076,6 +1081,7 @@ struct FrameSnapshot {
 fn build_display_from_resolved(
     build: &wows_replay_insights::build::ResolvedBuild,
     metadata: &GameMetadataProvider,
+    version: &Version,
 ) -> super::PlayerBuildDisplay {
     use convert_case::Case;
     use convert_case::Casing;
@@ -1102,8 +1108,8 @@ fn build_display_from_resolved(
                     let internal = skill.internal_name();
                     super::SkillDisplay {
                         icon_key: internal.to_case(Case::Snake),
-                        name: skill.translated_name(metadata).unwrap_or_else(|| internal.to_string()),
-                        description: skill.translated_description(metadata).unwrap_or_default(),
+                        name: skill.translated_name(metadata, version).unwrap_or_else(|| internal.to_string()),
+                        description: skill.translated_description(metadata, version).unwrap_or_default(),
                         tier: skill_tier_for_species(skill, build.species),
                         skill_type: skill.skill_type() as u32,
                     }
@@ -1198,7 +1204,7 @@ fn snapshot_player_builds<F: FnMut(EntityId) -> bool>(
         ) else {
             continue;
         };
-        out.push((entity_id, Arc::new(build_display_from_resolved(&build, metadata))));
+        out.push((entity_id, Arc::new(build_display_from_resolved(&build, metadata, &version))));
     }
     out
 }

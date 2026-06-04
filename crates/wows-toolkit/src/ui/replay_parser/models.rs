@@ -8,6 +8,7 @@ use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::VehicleEntity;
 use wows_replays::types::AccountId;
 use wows_replays::types::Relation;
+use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -100,7 +101,7 @@ pub struct TranslatedBuild {
 }
 
 impl TranslatedBuild {
-    pub fn new(player: &Player, metadata_provider: &GameMetadataProvider) -> Option<Self> {
+    pub fn new(player: &Player, metadata_provider: &GameMetadataProvider, version: &Version) -> Option<Self> {
         let vehicle_entity = player.vehicle_entity()?;
         let config = vehicle_entity.props().ship_config();
         let species = *player.vehicle().species()?.known()?;
@@ -153,7 +154,7 @@ impl TranslatedBuild {
                 .collect(),
             captain_skills: vehicle_entity.commander_skills(species).map(|skills| {
                 let mut skills: Vec<TranslatedCrewSkill> =
-                    skills.iter().map(|skill| TranslatedCrewSkill::new(skill, species, metadata_provider)).collect();
+                    skills.iter().map(|skill| TranslatedCrewSkill::new(skill, species, metadata_provider, version)).collect();
 
                 skills.sort_by_key(|skill| skill.tier);
 
@@ -175,11 +176,16 @@ pub struct TranslatedCrewSkill {
 }
 
 impl TranslatedCrewSkill {
-    pub fn new(skill: &CrewSkill, species: Species, metadata_provider: &GameMetadataProvider) -> Self {
+    pub fn new(
+        skill: &CrewSkill,
+        species: Species,
+        metadata_provider: &GameMetadataProvider,
+        version: &Version,
+    ) -> Self {
         Self {
             tier: skill.tier().get_for_species(species),
-            name: skill.translated_name(metadata_provider),
-            description: skill.translated_description(metadata_provider),
+            name: skill.translated_name(metadata_provider, version),
+            description: skill.translated_description(metadata_provider, version),
             internal_name: skill.internal_name().to_string(),
         }
     }

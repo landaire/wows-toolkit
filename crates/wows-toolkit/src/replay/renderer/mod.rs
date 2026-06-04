@@ -147,6 +147,49 @@ fn convert_icons(raw: HashMap<String, image::RgbaImage>) -> IconMap {
         .collect()
 }
 
+/// Choose the VFS and version to load the renderer's GUI icons from.
+///
+/// Builds new enough to ship per-file icons use their own VFS. Older builds
+/// (pre-12.0 clients shipped no `gui/fla/minimap/ship_icons`, so the minimap
+/// falls back to plain circles) borrow every icon set from the newest dump on
+/// disk, located via the dump cache base -- the parent of this build's own dump
+/// dir. The map image and fonts always stay on the replay's own VFS.
+pub(super) fn icon_asset_source(data: &crate::data::wows_data::WorldOfWarshipsData) -> (VfsPath, Option<Version>) {
+    let own = || (data.vfs.clone(), data.version().copied());
+
+    // Cheap existence probe (no SVG decode): does this build ship class icons?
+    let has_icons = wowsunpack::game_assets::GuiAsset::ShipClassIcon {
+        species: wowsunpack::game_params::types::Species::Destroyer,
+        state: wowsunpack::game_assets::ShipIconState::Alive,
+    }
+    .resolve(&data.vfs, data.version())
+    .is_some();
+    if has_icons {
+        return own();
+    }
+
+    let Some(base) = data.dump_dir.as_ref().and_then(|d| d.parent()) else {
+        return own();
+    };
+    let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
+    let Some(entry) = index.builds.iter().max_by_key(|e| e.build) else {
+        return own();
+    };
+    let vfs_root = base.join(&entry.dir).join("vfs");
+    if !vfs_root.exists() {
+        return own();
+    }
+    let vfs = VfsPath::new(wowsunpack::vfs::impls::physical::PhysicalFS::new(&vfs_root));
+    let mut parts = entry.version.split('.').filter_map(|p| p.trim().parse::<u32>().ok());
+    let version = parts.next().map(|major| Version {
+        major,
+        minor: parts.next().unwrap_or(0),
+        patch: parts.next().unwrap_or(0),
+        build: entry.build,
+    });
+    (vfs, version)
+}
+
 impl RendererAssetCache {
     pub fn get_or_load_ship_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
         self.ship_icons.get_or_load(version, || convert_icons(assets::load_ship_icons(vfs, version)))
@@ -854,21 +897,25 @@ pub fn launch_client_renderer(
         modernization_icons,
         signal_flag_icons,
         game_fonts,
-    ) = if let Some((vfs, version)) = wows_data.map(|d| {
+    ) = if let Some((vfs, version, icon_vfs, icon_version)) = wows_data.map(|d| {
         let guard = d.read();
-        (guard.vfs.clone(), guard.version().copied())
+        let (icon_vfs, icon_version) = icon_asset_source(&guard);
+        (guard.vfs.clone(), guard.version().copied(), icon_vfs, icon_version)
     }) {
         let version = version.as_ref();
+        let icon_version = icon_version.as_ref();
         let mut cache = asset_cache.lock();
-        let si = cache.get_or_load_ship_icons(&vfs, version);
-        let pi = cache.get_or_load_plane_icons(&vfs, version);
-        let bi = cache.get_or_load_building_icons(&vfs, version);
-        let ci = cache.get_or_load_consumable_icons(&vfs, version);
-        let di = cache.get_or_load_death_cause_icons(&vfs, version);
-        let pwi = cache.get_or_load_powerup_icons(&vfs, version);
-        let ski = cache.get_or_load_crew_skill_icons(&vfs, version);
-        let mi = cache.get_or_load_modernization_icons(&vfs, version);
-        let sfi = cache.get_or_load_signal_flag_icons(&vfs, version);
+        // Icons resolve against `icon_vfs` (the newest dump for old replays that
+        // ship none); fonts stay on the replay's own VFS.
+        let si = cache.get_or_load_ship_icons(&icon_vfs, icon_version);
+        let pi = cache.get_or_load_plane_icons(&icon_vfs, icon_version);
+        let bi = cache.get_or_load_building_icons(&icon_vfs, icon_version);
+        let ci = cache.get_or_load_consumable_icons(&icon_vfs, icon_version);
+        let di = cache.get_or_load_death_cause_icons(&icon_vfs, icon_version);
+        let pwi = cache.get_or_load_powerup_icons(&icon_vfs, icon_version);
+        let ski = cache.get_or_load_crew_skill_icons(&icon_vfs, icon_version);
+        let mi = cache.get_or_load_modernization_icons(&icon_vfs, icon_version);
+        let sfi = cache.get_or_load_signal_flag_icons(&icon_vfs, icon_version);
         let gf = cache.get_or_load_game_fonts(&vfs, version);
         (si, pi, bi, ci, di, pwi, ski, mi, sfi, Some(gf))
     } else {

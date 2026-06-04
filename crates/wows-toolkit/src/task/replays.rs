@@ -522,7 +522,12 @@ pub fn load_wows_data_from_dump(
     let metadata_provider = match wowsunpack::game_params::cache::load(&rkyv_path) {
         Some(params) => {
             debug!("Loaded GameParams from rkyv: {}", rkyv_path.display());
-            GameMetadataProvider::from_params_no_specs(params)
+            // Pair the fast rkyv params with entity specs parsed from the dump's
+            // VFS (`scripts/entity_defs`). The specs are required to parse replay
+            // packets (BasePlayerCreate indexes them by entity type); without them
+            // any dump-loaded replay -- i.e. any build not in the live install --
+            // panics in the packet parser.
+            GameMetadataProvider::from_params_with_vfs(params, &vfs)
                 .map_err(|e| report!("Failed to build GameMetadataProvider from dump: {e:?}"))?
         }
         None => {
