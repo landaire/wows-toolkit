@@ -6,7 +6,7 @@ on:
   # GITHUB_TOKEN, which suppresses the release event, so we key off the tag.
   push:
     branches: [main]
-    tags: ["v*"]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
   # Also rebuild tactics for a manually published release.
   release:
     types: [published]
