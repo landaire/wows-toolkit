@@ -106,8 +106,21 @@ fn discover_builds(workspace_root: &Path) -> Vec<u32> {
 /// Build numbers referenced by tests that may not be locally available.
 /// Declared here so check-cfg doesn't warn about unknown cfgs.
 const KNOWN_TEST_BUILDS: &[u32] = &[
+    297724,   // v0.6.13
+    303746,   // v0.6.14
+    329111,   // v0.7.3
+    344738,   // v0.7.5
+    1427460,  // v0.8.2
+    1631917,  // v0.8.5
+    2171354,  // v0.9.0
+    3343484,  // v0.10.0
+    4046169,  // v0.10.5
+    5045210,  // v0.11.0
+    6359964,  // v0.11.9
     6965290,  // v12.3 (S-189 submarine replay)
+    7266701,  // v12.6
     8151735,  // v13.2 (Annapolis replay)
+    8260685,  // v13.3
     9129736,  // v13.10 (Colbert replay)
     9531281,  // v14.1 (Hull DD replay)
     9643943,  // v14.2 (Oland replay)
