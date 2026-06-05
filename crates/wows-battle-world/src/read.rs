@@ -8,6 +8,8 @@ use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::VehicleProps;
 use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
+use wows_replays::analyzer::battle_controller::state::ActivePlane;
+use wows_replays::analyzer::battle_controller::state::ActiveWard;
 use wows_replays::analyzer::battle_controller::state::ConsumableInventory;
 use wows_replays::analyzer::battle_controller::state::DeadShip;
 use wows_replays::analyzer::battle_controller::state::KillRecord;
@@ -19,7 +21,9 @@ use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
 use wowsunpack::game_types::Ribbon;
 
-use crate::components::{Aim, Building, Consumables, EntityKind, GameId, MinimapPlacement, SmokeScreen, Transform3d, Vehicle, VehicleState};
+use wowsunpack::game_types::PlaneId;
+
+use crate::components::{Aim, Building, Consumables, EntityKind, GameId, MinimapPlacement, Plane, PlaneState, SmokeScreen, Transform3d, Vehicle, VehicleState, Ward, WardState};
 use crate::resources::{ChatLog, DamageLedger, DeadShips, KillLog, PlayerIndex, SelfStats};
 use crate::world::BattleWorld;
 
@@ -123,6 +127,42 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         q.iter(world)
             .filter(|(_, c)| !c.slots.is_empty())
             .map(|(gid, c)| (gid.0, c.slots.clone()))
+            .collect()
+    }
+
+    /// Active plane squadrons keyed by plane id.
+    pub fn active_planes(&mut self) -> HashMap<PlaneId, ActivePlane> {
+        let world = self.world_mut();
+        let mut q = world.query::<(&PlaneState, &Plane)>();
+        q.iter(world)
+            .map(|(state, _)| {
+                let ap = ActivePlane {
+                    plane_id: state.plane_id,
+                    owner_id: state.owner_id,
+                    team_id: state.team_id.raw() as u32,
+                    params_id: state.params_id,
+                    position: state.position,
+                    last_updated: state.last_updated,
+                };
+                (state.plane_id, ap)
+            })
+            .collect()
+    }
+
+    /// Active fighter patrol wards keyed by plane id.
+    pub fn active_wards(&mut self) -> HashMap<PlaneId, ActiveWard> {
+        let world = self.world_mut();
+        let mut q = world.query::<(&WardState, &Ward)>();
+        q.iter(world)
+            .map(|(state, _)| {
+                let aw = ActiveWard {
+                    plane_id: state.plane_id,
+                    position: state.position,
+                    radius: state.radius,
+                    owner_id: state.owner_id,
+                };
+                (state.plane_id, aw)
+            })
             .collect()
     }
 

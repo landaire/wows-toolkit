@@ -211,7 +211,7 @@ pub struct ActiveTorpedo {
 }
 
 /// An active plane squadron on the minimap.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ActivePlane {
     pub plane_id: PlaneId,
     pub owner_id: EntityId,
@@ -224,7 +224,7 @@ pub struct ActivePlane {
 
 /// A fighter patrol ward — a stationary circle where fighters patrol.
 /// Created by `receive_wardAdded`, removed by `receive_wardRemoved`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ActiveWard {
     pub plane_id: PlaneId,
     /// Patrol center position (world coordinates)

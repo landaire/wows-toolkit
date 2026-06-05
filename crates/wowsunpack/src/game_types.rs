@@ -422,7 +422,7 @@ impl From<u32> for ShotId {
 
 /// World-space position in BigWorld coordinates.
 /// X = east/west, Y = up/down (altitude), Z = north/south. Origin at map center.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct WorldPos {

@@ -1,5 +1,6 @@
 //! Packet ingestion: translates decoded packet payloads into ECS state changes.
 
+pub mod aviation;
 pub mod chat;
 pub mod combat;
 pub mod consumables;
@@ -137,11 +138,21 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::GunSync { entity_id, weapon_type, gun_id, yaw, .. } => {
             vehicles::handle_gun_sync(entity_id, weapon_type, gun_id, yaw, world);
         }
-        DecodedPacketPayload::PlaneAdded { .. } => {}
-        DecodedPacketPayload::WardAdded { .. } => {}
-        DecodedPacketPayload::WardRemoved { .. } => {}
-        DecodedPacketPayload::PlaneRemoved { .. } => {}
-        DecodedPacketPayload::PlanePosition { .. } => {}
+        DecodedPacketPayload::PlaneAdded { entity_id, plane_id, team_id, params_id, position } => {
+            aviation::handle_plane_added(entity_id, plane_id, team_id, params_id, position, clock, world);
+        }
+        DecodedPacketPayload::PlanePosition { entity_id: _, plane_id, position } => {
+            aviation::handle_plane_position(plane_id, position, clock, world);
+        }
+        DecodedPacketPayload::PlaneRemoved { entity_id: _, plane_id } => {
+            aviation::handle_plane_removed(plane_id, options.source_team, world);
+        }
+        DecodedPacketPayload::WardAdded { entity_id: _, plane_id, position, radius, owner_id } => {
+            aviation::handle_ward_added(plane_id, position, radius, owner_id, world);
+        }
+        DecodedPacketPayload::WardRemoved { entity_id: _, plane_id } => {
+            aviation::handle_ward_removed(plane_id, world);
+        }
         DecodedPacketPayload::SetAmmoForWeapon { entity_id, weapon_type, ammo_param_id, .. } => {
             vehicles::handle_set_ammo_for_weapon(entity_id, weapon_type, ammo_param_id, world);
         }
