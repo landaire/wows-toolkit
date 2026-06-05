@@ -25,6 +25,11 @@ use wowsunpack::rpc::entitydefs::EntitySpec;
 use wowsunpack::vfs::VfsPath;
 use wowsunpack::vfs::impls::physical::PhysicalFS;
 
+pub type SeededPair = (
+    BattleController<'static, 'static, GameMetadataProvider>,
+    wows_battle_world::BattleWorld<'static, 'static, GameMetadataProvider>,
+);
+
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -118,6 +123,52 @@ pub fn both(
     let mut old = BattleController::new(meta, res.provider, Some(res.constants));
     let mut new_world =
         wows_battle_world::BattleWorld::new(meta, res.provider, Some(res.constants));
+
+    let mut parser = wows_replays::packet2::Parser::with_version(specs, version);
+    let mut remaining = &replay.packet_data[..];
+    while !remaining.is_empty() {
+        let packet = parser.parse_packet(&mut remaining).expect("packet parse");
+        old.process(&packet);
+        new_world.process(&packet);
+    }
+    old.finish();
+    new_world.finish();
+
+    (old, new_world)
+}
+
+/// Like `both`, but seeds consumable inventories on both controllers before the
+/// packet loop. Uses `gather_replay_facts` + `build_inventory_from_facts` to
+/// derive per-entity slot definitions without requiring a two-pass parse.
+///
+/// This mirrors the production path in the toolkit renderer, which scans for
+/// VehicleFacts first then seeds before replaying packets.
+pub fn both_seeded(filename: &str) -> SeededPair {
+    use wows_replay_insights::build::{build_inventory_from_facts, seed_consumable_inventories_from_facts};
+    use wows_replays::analyzer::battle_controller::merged::gather_replay_facts;
+
+    let path = fixtures_dir().join(filename);
+    let replay = ReplayFile::from_file(&path).unwrap_or_else(|e| panic!("failed to parse {filename}: {e:?}"));
+    let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
+
+    let res = resources_for_build(&version);
+    let specs: &'static [EntitySpec] = res.provider.entity_specs();
+
+    let facts = gather_replay_facts(res.constants, version, specs, &[&replay]);
+
+    let meta: &'static wows_replays::ReplayMeta = Box::leak(Box::new(replay.meta));
+
+    let mut old = BattleController::new(meta, res.provider, Some(res.constants));
+    let mut new_world =
+        wows_battle_world::BattleWorld::new(meta, res.provider, Some(res.constants));
+
+    seed_consumable_inventories_from_facts(&mut old, &facts, res.provider, version);
+    for (entity_id, fact) in &facts {
+        let inv = build_inventory_from_facts(fact, res.provider, version);
+        if !inv.is_empty() {
+            new_world.set_consumable_inventory(*entity_id, inv);
+        }
+    }
 
     let mut parser = wows_replays::packet2::Parser::with_version(specs, version);
     let mut remaining = &replay.packet_data[..];

@@ -120,7 +120,7 @@ pub struct ScoringRules {
 }
 
 /// An active consumable on a ship.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ActiveConsumable {
     pub consumable: Recognized<Consumable>,
     pub activated_at: GameClock,
@@ -134,7 +134,7 @@ pub struct ActiveConsumable {
 /// Seeded externally (e.g. via `wows_replay_insights::build::seed_consumable_inventories`)
 /// after the controller is set up. The controller updates `charges_used` on
 /// each observed activation and stamps `active_until` for active timing.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ConsumableInventory {
     pub slot_index: u8,
     /// Raw GameParams `consumableType` string. Used to match activation events

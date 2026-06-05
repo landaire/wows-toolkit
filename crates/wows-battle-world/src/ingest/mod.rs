@@ -2,6 +2,7 @@
 
 pub mod chat;
 pub mod combat;
+pub mod consumables;
 pub mod entities;
 pub mod positions;
 pub mod vehicles;
@@ -120,7 +121,9 @@ pub fn dispatch<G: ResourceLoader>(
         }
         DecodedPacketPayload::PropertyUpdate(_) => {}
         DecodedPacketPayload::BattleEnd { .. } => {}
-        DecodedPacketPayload::Consumable { .. } => {}
+        DecodedPacketPayload::Consumable { entity, consumable, duration, usage_params } => {
+            consumables::handle_consumable(entity, consumable.clone(), duration, usage_params, clock, world);
+        }
         DecodedPacketPayload::CruiseState { .. } => {}
         DecodedPacketPayload::Map(_) => {}
         DecodedPacketPayload::Version(_) => {}

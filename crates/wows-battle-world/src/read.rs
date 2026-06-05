@@ -7,6 +7,8 @@ use wows_replays::analyzer::battle_controller::DamageEvent;
 use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::VehicleProps;
+use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
+use wows_replays::analyzer::battle_controller::state::ConsumableInventory;
 use wows_replays::analyzer::battle_controller::state::DeadShip;
 use wows_replays::analyzer::battle_controller::state::KillRecord;
 use wows_replays::analyzer::decoder::DamageStatEntry;
@@ -17,7 +19,7 @@ use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
 use wowsunpack::game_types::Ribbon;
 
-use crate::components::{Aim, Building, EntityKind, GameId, MinimapPlacement, SmokeScreen, Transform3d, Vehicle, VehicleState};
+use crate::components::{Aim, Building, Consumables, EntityKind, GameId, MinimapPlacement, SmokeScreen, Transform3d, Vehicle, VehicleState};
 use crate::resources::{ChatLog, DamageLedger, DeadShips, KillLog, PlayerIndex, SelfStats};
 use crate::world::BattleWorld;
 
@@ -102,6 +104,26 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
     /// Populated after OnArenaStateReceived; empty before that packet arrives.
     pub fn player_entities(&self) -> &HashMap<EntityId, Rc<Player>> {
         &self.world().resource::<PlayerIndex>().0
+    }
+
+    /// Active consumable activations keyed by entity id.
+    pub fn active_consumables(&mut self) -> HashMap<EntityId, Vec<ActiveConsumable>> {
+        let world = self.world_mut();
+        let mut q = world.query::<(&GameId, &Consumables)>();
+        q.iter(world)
+            .filter(|(_, c)| !c.active.is_empty())
+            .map(|(gid, c)| (gid.0, c.active.clone()))
+            .collect()
+    }
+
+    /// Consumable inventory slots keyed by entity id.
+    pub fn consumable_inventories(&mut self) -> HashMap<EntityId, Vec<ConsumableInventory>> {
+        let world = self.world_mut();
+        let mut q = world.query::<(&GameId, &Consumables)>();
+        q.iter(world)
+            .filter(|(_, c)| !c.slots.is_empty())
+            .map(|(gid, c)| (gid.0, c.slots.clone()))
+            .collect()
     }
 
     /// Entity kinds (Vehicle/Building/SmokeScreen) for every tracked game entity.

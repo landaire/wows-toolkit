@@ -11218,6 +11218,7 @@ dependencies = [
  "toml 1.1.2+spec-1.1.0",
  "tracing",
  "wows-data-mgr",
+ "wows-replay-insights",
  "wows_replays",
  "wowsunpack",
 ]
