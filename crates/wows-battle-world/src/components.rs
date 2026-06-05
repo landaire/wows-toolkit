@@ -156,17 +156,6 @@ pub struct Consumables {
 #[derive(Component, Debug, Clone)]
 pub struct PlayerLink(pub Rc<Player>);
 
-/// Current visibility state from Vehicle entity properties.
-///
-/// Kept separate from VehicleState so minimap rendering does not require full
-/// vehicle-property parsing to be wired up.
-#[derive(Component, Debug, Clone, Copy, Default)]
-pub struct VehicleVisibility {
-    pub visibility_flags: crate::units::VisibilityFlags,
-    pub is_invisible: bool,
-    pub team_id: i8,
-}
-
 // -- Non-vehicle entity state --
 
 /// State for a building entity (drops the redundant id field; `GameId` carries it).

@@ -2,6 +2,7 @@
 
 pub mod entities;
 pub mod positions;
+pub mod vehicles;
 
 use bevy_ecs::world::World;
 use wows_replays::analyzer::decoder::DecodedPacketPayload;
@@ -40,10 +41,21 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::ShipDestroyed { .. } => {}
         DecodedPacketPayload::EntityMethod(_) => {}
         DecodedPacketPayload::EntityProperty(prop) => {
-            entities::handle_vehicle_visibility_property(prop.entity_id, prop.property, &prop.value, world);
+            vehicles::handle_vehicle_property(
+                prop.entity_id,
+                prop.property,
+                &prop.value,
+                world,
+                version,
+                constants,
+            );
         }
-        DecodedPacketPayload::BasePlayerCreate(_) => {}
-        DecodedPacketPayload::CellPlayerCreate(_) => {}
+        DecodedPacketPayload::BasePlayerCreate(base) => {
+            vehicles::apply_player_create_props(base.entity_id, &base.props, world, version, constants);
+        }
+        DecodedPacketPayload::CellPlayerCreate(cell) => {
+            vehicles::apply_player_create_props(cell.entity_id, &cell.props, world, version, constants);
+        }
         DecodedPacketPayload::EntityEnter(_) => {}
         DecodedPacketPayload::EntityLeave(leave) => {
             entities::handle_entity_leave(leave.entity_id, world);
@@ -97,13 +109,17 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::TorpedoesReceived { .. } => {}
         DecodedPacketPayload::TorpedoDirection { .. } => {}
         DecodedPacketPayload::ShotKills { .. } => {}
-        DecodedPacketPayload::GunSync { .. } => {}
+        DecodedPacketPayload::GunSync { entity_id, weapon_type, gun_id, yaw, .. } => {
+            vehicles::handle_gun_sync(entity_id, weapon_type, gun_id, yaw, world);
+        }
         DecodedPacketPayload::PlaneAdded { .. } => {}
         DecodedPacketPayload::WardAdded { .. } => {}
         DecodedPacketPayload::WardRemoved { .. } => {}
         DecodedPacketPayload::PlaneRemoved { .. } => {}
         DecodedPacketPayload::PlanePosition { .. } => {}
-        DecodedPacketPayload::SetAmmoForWeapon { .. } => {}
+        DecodedPacketPayload::SetAmmoForWeapon { entity_id, weapon_type, ammo_param_id, .. } => {
+            vehicles::handle_set_ammo_for_weapon(entity_id, weapon_type, ammo_param_id, world);
+        }
         DecodedPacketPayload::EntityControl(_) => {}
         DecodedPacketPayload::NonVolatilePosition(sd) => {
             let pos = WorldPos { x: sd.position.x, y: sd.position.y, z: sd.position.z };

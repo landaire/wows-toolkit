@@ -9,7 +9,7 @@ use wows_replays::types::GameClock;
 use wowsunpack::game_types::WorldPos;
 
 use crate::components::{
-    GameId, MinimapPlacement, SmokeScreen, SmokeScreenState, Transform3d, VehicleVisibility,
+    GameId, MinimapPlacement, SmokeScreen, SmokeScreenState, Transform3d, VehicleState,
 };
 use crate::ids::SourceTeam;
 use crate::resources::EntityIndex;
@@ -71,9 +71,9 @@ pub fn handle_minimap_updates(
         if let Some(team) = source_team.0
             && let Some(ecs_entity) = world.resource::<EntityIndex>().get(update.entity_id)
                 && let Ok(er) = world.get_entity(ecs_entity)
-                    && let Some(vis) = er.get::<VehicleVisibility>() {
+                    && let Some(vs) = er.get::<VehicleState>() {
                         use wows_replays::types::TeamId;
-                        let entity_team = TeamId::from(vis.team_id as i64);
+                        let entity_team = TeamId::from(vs.0.team_id() as i64);
                         if entity_team != team {
                             continue;
                         }
@@ -94,12 +94,15 @@ pub fn handle_minimap_updates(
             (update.position, Degrees(update.heading))
         };
 
-        // Pull visibility_flags and is_invisible from the vehicle's current VehicleVisibility.
+        // Pull visibility_flags and is_invisible from the vehicle's current VehicleState.
         let (visibility_flags, is_invisible) = world
             .resource::<EntityIndex>()
             .get(update.entity_id)
             .and_then(|e| world.get_entity(e).ok())
-            .and_then(|er| er.get::<VehicleVisibility>().map(|v| (v.visibility_flags, v.is_invisible)))
+            .and_then(|er| {
+                er.get::<VehicleState>()
+                    .map(|vs| (VisibilityFlags(vs.0.visibility_flags()), vs.0.is_invisible()))
+            })
             .unwrap_or((VisibilityFlags(0), false));
 
         let placement = MinimapPlacement {

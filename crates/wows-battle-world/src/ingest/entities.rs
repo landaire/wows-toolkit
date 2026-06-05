@@ -22,8 +22,7 @@ use wowsunpack::game_types::WorldPos;
 
 use crate::components::{
     Building, BuildingState, BuffZone, BuffZoneData, CapturePoint, CapturePointData, GameId,
-    SmokeScreen, SmokeScreenState, Transform3d, Vehicle, VehicleVisibility, WeatherZone,
-    WeatherZoneData,
+    SmokeScreen, SmokeScreenState, Transform3d, Vehicle, VehicleState, WeatherZone, WeatherZoneData,
 };
 use crate::resources::{CapturePointOrder, EntityIndex, InteractiveZoneIndex};
 
@@ -66,15 +65,10 @@ fn handle_vehicle_create<G: ResourceLoader>(
     version: Version,
 ) {
     let props = VehicleProps::from_create_props(&packet.props, version, constants);
-
-    let team_id = props.team_id();
-    let visibility_flags = crate::units::VisibilityFlags(props.visibility_flags());
-    let is_invisible = props.is_invisible();
-
     let entity = spawn_or_get(world, packet.entity_id);
     if let Ok(mut e) = world.get_entity_mut(entity) {
         e.insert(Vehicle);
-        e.insert(VehicleVisibility { visibility_flags, is_invisible, team_id });
+        e.insert(VehicleState(props));
     }
 }
 
@@ -292,41 +286,6 @@ fn handle_interactive_zone_create(
     }
 }
 
-/// Handle EntityProperty updates for the two vehicle visibility fields consumed
-/// by MinimapUpdate: visibilityFlags and isInvisible.
-///
-/// Full VehicleProps update is a later task; this is the minimal piece required
-/// for minimap parity.
-pub fn handle_vehicle_visibility_property(
-    entity_id: EntityId,
-    property: &str,
-    value: &ArgValue<'_>,
-    world: &mut World,
-) {
-    let Some(ecs_entity) = world.resource::<EntityIndex>().get(entity_id) else {
-        return;
-    };
-    match property {
-        "visibilityFlags" => {
-            if let Some(v) = value.as_i64()
-                && let Ok(mut er) = world.get_entity_mut(ecs_entity)
-                && let Some(mut vis) = er.get_mut::<VehicleVisibility>()
-            {
-                vis.visibility_flags = crate::units::VisibilityFlags(v as u32);
-            }
-        }
-        "isInvisible" => {
-            if let Some(v) = value.as_i64()
-                && let Ok(mut er) = world.get_entity_mut(ecs_entity)
-                && let Some(mut vis) = er.get_mut::<VehicleVisibility>()
-            {
-                vis.is_invisible = v != 0;
-            }
-        }
-        _ => {}
-    }
-}
-
 /// Seed Vehicle entities for every participant listed in OnArenaStateReceived.
 ///
 /// Mirrors BattleController::seed_vehicles_from_arena_state: pre-creates entities
@@ -348,14 +307,10 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
         let args = arena_state_to_args(player);
         let props = VehicleProps::from_create_props(&args, version, constants);
 
-        let team_id = props.team_id();
-        let visibility_flags = crate::units::VisibilityFlags(props.visibility_flags());
-        let is_invisible = props.is_invisible();
-
         let entity = spawn_or_get(world, entity_id);
         if let Ok(mut e) = world.get_entity_mut(entity) {
             e.insert(Vehicle);
-            e.insert(VehicleVisibility { visibility_flags, is_invisible, team_id });
+            e.insert(VehicleState(props));
         }
     }
 }

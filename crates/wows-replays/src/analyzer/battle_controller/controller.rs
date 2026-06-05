@@ -2451,6 +2451,16 @@ impl VehicleProps {
     pub fn burning_flags(&self) -> u16 {
         self.burning_flags
     }
+
+    /// Apply a single named property update (mirrors `UpdateFromReplayArgs::update_by_name`).
+    pub fn update_by_name(&mut self, name: &str, value: &ArgValue<'_>, version: Version, constants: &GameConstants) {
+        <Self as UpdateFromReplayArgs>::update_by_name(self, name, value, version, constants);
+    }
+
+    /// Apply a batch of named property updates (mirrors `UpdateFromReplayArgs::update_from_args`).
+    pub fn update_from_args(&mut self, args: &HashMap<&str, ArgValue<'_>>, version: Version, constants: &GameConstants) {
+        <Self as UpdateFromReplayArgs>::update_from_args(self, args, version, constants);
+    }
 }
 
 impl UpdateFromReplayArgs for VehicleProps {
