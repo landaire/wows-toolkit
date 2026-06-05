@@ -396,8 +396,11 @@ impl PlayerStateData {
             h.insert(Self::KEY_IS_BOT, 13);
             h.insert(Self::KEY_IS_HIDDEN, 14);
             h.insert(Self::KEY_IS_T_SHOOTER, 15);
-            h.insert(Self::KEY_KILLED_BUILDINGS_COUNT, 16);
-            h.insert(Self::KEY_KEY_TARGET_MARKERS, 17);
+            // Fields are indexed by alphabetical sort position of their names
+            // (the client serializes the shared-data dict via `enumerate(sorted(...))`),
+            // and "keyTargetMarkers" sorts before "killedBuildingsCount".
+            h.insert(Self::KEY_KEY_TARGET_MARKERS, 16);
+            h.insert(Self::KEY_KILLED_BUILDINGS_COUNT, 17);
             h.insert(Self::KEY_MAX_HEALTH, 18);
             h.insert(Self::KEY_NAME, 19);
             h.insert(Self::KEY_REALM, 20);
@@ -1201,10 +1204,12 @@ pub enum DecodedPacketPayload<'replay, 'argtype, 'rawpacket> {
     /// Turret rotation sync for a ship
     GunSync {
         entity_id: EntityId,
-        /// Gun group (0 = main battery)
-        group: u32,
-        /// Turret index within the group
-        turret: u32,
+        /// `WeaponType` (ARTILLERY = 0 = main battery, ATBA = 1, TORPEDO = 2, ...).
+        /// The enum is generated from `idGenerator(-1)`, so NONE = -1 and the
+        /// first real weapon, ARTILLERY, is 0.
+        weapon_type: u32,
+        /// Gun index within the weapon group.
+        gun_id: u32,
         /// Turret yaw in radians relative to ship heading (0 = forward, PI = aft)
         yaw: f32,
         /// Barrel elevation in radians
@@ -1958,20 +1963,22 @@ where
             };
             DecodedPacketPayload::Ribbon(ribbon)
         } else if *method == "receiveDamagesOnShip" {
+            // ARRAY<DAMAGES>, DAMAGES = { vehicleID: ENTITY_ID, damage: FLOAT }.
+            let Some(ArgValue::Array(elems)) = args.first() else {
+                return DecodedPacketPayload::EntityMethod(packet);
+            };
             let mut v = vec![];
-            for elem in match &args[0] {
-                ArgValue::Array(a) => a,
-                _ => panic!(),
-            } {
-                let map = match elem {
-                    ArgValue::FixedDict(m) => m,
-                    _ => panic!(),
+            for elem in elems {
+                let ArgValue::FixedDict(map) = elem else {
+                    continue;
                 };
-                let aggressor_raw: i32 = map.get("vehicleID").unwrap().try_into().unwrap();
-                v.push(DamageReceived {
-                    aggressor: EntityId::from(aggressor_raw),
-                    damage: map.get("damage").unwrap().try_into().unwrap(),
-                });
+                let (Some(aggressor_raw), Some(damage)) = (
+                    map.get("vehicleID").and_then(|a| a.as_i32()),
+                    map.get("damage").and_then(|a| a.as_f32()),
+                ) else {
+                    continue;
+                };
+                v.push(DamageReceived { aggressor: EntityId::from(aggressor_raw), damage });
             }
             DecodedPacketPayload::DamageReceived { victim: *entity_id, aggressors: v }
         } else if *method == "onCheckGamePing" {
@@ -2269,7 +2276,7 @@ where
             DecodedPacketPayload::TorpedoesReceived { avatar_id: AvatarId::from(*entity_id), torpedoes }
         } else if *method == "receiveShotKills" {
             // SHOTKILLS_PACK: Array of { ownerID: PLAYER_ID, hitType: UINT8, kills: Array<SHOTKILL> }
-            // SHOTKILL: { pos: VECTOR3, shotID: SHOT_ID }
+            // SHOTKILL: { pos: VECTOR3, shotID: SHOT_ID, terminalBallisticsInfo: TERMINAL_BALLISTICS_INFO (AllowNone) }
             let packs = match &args[0] {
                 ArgValue::Array(a) => a,
                 _ => return DecodedPacketPayload::EntityMethod(packet),
@@ -2324,25 +2331,23 @@ where
             }
             DecodedPacketPayload::ShotKills { avatar_id: AvatarId::from(*entity_id), hits }
         } else if *method == "receiveTorpedoDirection" {
-            // args: [owner_id, shot_id, position, target_yaw, ?, speed_coef, rotation_yaw, ?, is_chasing]
-            let owner_id: EntityId = match &args[0] {
-                ArgValue::Int32(v) => EntityId::from(*v),
-                ArgValue::Uint32(v) => EntityId::from(*v),
+            // args: [ownerId PLAYER_ID, torpedoId SHOT_ID(UINT16), serverPos VECTOR3,
+            //        targetYaw FLOAT, targetDepth FLOAT, speedCoef FLOAT, curYawSpeed FLOAT,
+            //        curPitchSpeed FLOAT, canReachDepth BOOL]. Use width-tolerant integer
+            // reads: torpedoId is a UINT16 on the wire and must not bail the decode.
+            let Some(owner_id) = args.first().and_then(|a| a.as_i32()).map(EntityId::from) else {
+                return DecodedPacketPayload::EntityMethod(packet);
+            };
+            let Some(shot_id) = args.get(1).and_then(|a| a.as_u32()).map(ShotId::from) else {
+                return DecodedPacketPayload::EntityMethod(packet);
+            };
+            let position = Self::extract_vec3(args.get(2));
+            let target_yaw = match args.get(3) {
+                Some(ArgValue::Float32(v)) => *v,
                 _ => return DecodedPacketPayload::EntityMethod(packet),
             };
-            let shot_id: ShotId = match &args[1] {
-                ArgValue::Int32(v) => ShotId::from(*v as u32),
-                ArgValue::Uint32(v) => ShotId::from(*v),
-                ArgValue::Uint8(v) => ShotId::from(*v as u32),
-                _ => return DecodedPacketPayload::EntityMethod(packet),
-            };
-            let position = Self::extract_vec3(Some(&args[2]));
-            let target_yaw = match &args[3] {
-                ArgValue::Float32(v) => *v,
-                _ => return DecodedPacketPayload::EntityMethod(packet),
-            };
-            let speed_coef = match &args[5] {
-                ArgValue::Float32(v) => *v,
+            let speed_coef = match args.get(5) {
+                Some(ArgValue::Float32(v)) => *v,
                 _ => 1.0,
             };
             DecodedPacketPayload::TorpedoDirection { owner_id, shot_id, position, target_yaw, speed_coef }
@@ -2419,7 +2424,7 @@ where
                 position: WorldPos2D { x: position.0, z: position.1 },
             }
         } else if *method == "receive_wardAdded" {
-            // args: [squadronId, position, unknown, radius, relation, ownerId, unknown2]
+            // args: [squadronId, position, time, radius, teamId, ownerId, wardType]
             let plane_id: PlaneId = match &args[0] {
                 ArgValue::Uint64(v) => PlaneId::from(*v),
                 ArgValue::Int64(v) => PlaneId::from(*v),
@@ -2466,13 +2471,13 @@ where
             };
             DecodedPacketPayload::WardRemoved { entity_id: *entity_id, plane_id }
         } else if *method == "syncGun" {
-            // args: [group: int, turret: int, yaw: f32, pitch: f32, state: int, f32, array]
-            let group = match &args[0] {
+            // args: [weaponType: u8, gunId: u8, yaw: f32, pitch: f32, alive, reloadPerc, loadedAmmo]
+            let weapon_type = match &args[0] {
                 ArgValue::Uint8(v) => *v as u32,
                 ArgValue::Int8(v) => *v as u32,
                 _ => return DecodedPacketPayload::EntityMethod(packet),
             };
-            let turret = match &args[1] {
+            let gun_id = match &args[1] {
                 ArgValue::Uint8(v) => *v as u32,
                 ArgValue::Int8(v) => *v as u32,
                 _ => return DecodedPacketPayload::EntityMethod(packet),
@@ -2485,7 +2490,7 @@ where
                 ArgValue::Float32(v) => *v,
                 _ => return DecodedPacketPayload::EntityMethod(packet),
             };
-            DecodedPacketPayload::GunSync { entity_id: *entity_id, group, turret, yaw, pitch }
+            DecodedPacketPayload::GunSync { entity_id: *entity_id, weapon_type, gun_id, yaw, pitch }
         } else if *method == "setAmmoForWeapon" {
             // args: [weaponType: u8, ammoParamsId: u32, isReload: bool (optional in older replays)]
             let weapon_type = match &args[0] {

@@ -3563,11 +3563,11 @@ where
             crate::analyzer::decoder::DecodedPacketPayload::WardRemoved { plane_id, .. } => {
                 self.active_wards.remove(&plane_id);
             }
-            crate::analyzer::decoder::DecodedPacketPayload::GunSync { entity_id, group, turret, yaw, .. } => {
-                // Only track main battery (group 0)
-                if group == 0 {
+            crate::analyzer::decoder::DecodedPacketPayload::GunSync { entity_id, weapon_type, gun_id, yaw, .. } => {
+                // Only track main battery (WeaponType::ARTILLERY == 0)
+                if weapon_type == 0 {
                     let turrets = self.turret_yaws.entry(entity_id).or_default();
-                    let idx = turret as usize;
+                    let idx = gun_id as usize;
                     if turrets.len() <= idx {
                         turrets.resize(idx + 1, 0.0);
                     }
