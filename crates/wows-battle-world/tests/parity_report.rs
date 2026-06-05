@@ -140,6 +140,11 @@ fn assert_report_parity(old: &OldReport, new: &NewReport, label: &str) {
             );
             if let (Some(ov), Some(nv)) = (ov, nv) {
                 assert_eq!(ov.id(), nv.id(), "[{label}] player[{id:?}].vehicle.id");
+                assert_eq!(
+                    ov.captain().map(|p| p.id()),
+                    nv.captain().map(|p| p.id()),
+                    "[{label}] player[{id:?}].vehicle.captain id"
+                );
                 // The self player's damage is summed from a HashMap of damage
                 // stats; iteration order differs between the two HashMaps, so the
                 // f64 accumulation rounds in the last bit. The mathematical sum is

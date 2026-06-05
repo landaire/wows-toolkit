@@ -35,6 +35,7 @@ use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::ElapsedClock;
 
 use crate::components::BuildingState;
+use crate::components::Captain;
 use crate::components::GameId;
 use crate::components::VehicleState;
 use crate::resources::ChatLog;
@@ -238,6 +239,9 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         // Frags are attributed unconditionally so kills show on older replays that
         // carry no post-battle results blob.
         let mut frags_by_killer: HashMap<EntityId, Vec<DeathInfo>> = HashMap::new();
+        // First kill per victim in packet order; deterministic unlike the original's
+        // HashMap iteration (only differs when a victim id appears in multiple
+        // ShipDestroyed events, e.g. operation respawns).
         let mut death_by_victim: HashMap<EntityId, DeathInfo> = HashMap::new();
         for kill in &self.world().resource::<KillLog>().0 {
             frags_by_killer.entry(kill.killer).or_default().push(DeathInfo::from(kill));
@@ -393,14 +397,11 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         parsed_battle_results: Option<&serde_json::Value>,
     ) -> Option<VehicleEntity> {
         let ecs_entity = self.world().resource::<EntityIndex>().get(entity_id)?;
-        let props = self.world().get_entity(ecs_entity).ok()?.get::<VehicleState>()?.0.clone();
-
-        let captain_id = props.crew_modifiers_compact_params().params_id();
-        let captain = if captain_id.raw() != 0 {
-            self.resources().game_param_by_id(captain_id)
-        } else {
-            None
-        };
+        let entity_ref = self.world().get_entity(ecs_entity).ok()?;
+        let props = entity_ref.get::<VehicleState>()?.0.clone();
+        // Read the captain frozen at EntityCreate time, mirroring BattleController
+        // which resolves captain from create-time props and never refreshes it.
+        let captain = entity_ref.get::<Captain>().and_then(|c| c.0.clone());
 
         let damage = if is_self {
             authoritative_self_damage

@@ -26,9 +26,9 @@ use wowsunpack::game_params::types::BigWorldDistance;
 use wowsunpack::game_types::WorldPos;
 
 use crate::components::{
-    Building, BuildingState, BuffZone, BuffZoneData, CapturePoint, CapturePointData, GameId,
-    PlayerLink, SmokeScreen, SmokeScreenState, Transform3d, Vehicle, VehicleState, WeatherZone,
-    WeatherZoneData,
+    Building, BuildingState, BuffZone, BuffZoneData, Captain, CapturePoint, CapturePointData,
+    GameId, PlayerLink, SmokeScreen, SmokeScreenState, Transform3d, Vehicle, VehicleState,
+    WeatherZone, WeatherZoneData,
 };
 use crate::resources::{CapturePointOrder, EntityIndex, InteractiveZoneIndex, InteractiveZoneRef, KillLog, MetadataPlayers, PendingDropParams, PlayerIndex, WeatherZoneOrder};
 
@@ -66,17 +66,27 @@ pub fn handle_entity_create<G: ResourceLoader>(
 fn handle_vehicle_create<G: ResourceLoader>(
     packet: &EntityCreatePacket<'_>,
     world: &mut World,
-    _resources: &G,
+    resources: &G,
     constants: &GameConstants,
     version: Version,
 ) {
     let props = VehicleProps::from_create_props(&packet.props, version, constants);
+    let captain_id = props.crew_modifiers_compact_params().params_id();
+    let captain = if captain_id.raw() != 0 {
+        resources.game_param_by_id(captain_id).or_else(|| {
+            warn!("failed to get captain param for id={}", captain_id);
+            None
+        })
+    } else {
+        None
+    };
     // Snapshot player link before borrowing the entity mutably.
     let player_rc = world.resource::<PlayerIndex>().0.get(&packet.entity_id).cloned();
     let entity = spawn_or_get(world, packet.entity_id);
     if let Ok(mut e) = world.get_entity_mut(entity) {
         e.insert(Vehicle);
         e.insert(VehicleState(props));
+        e.insert(Captain(captain));
         // Attach player link when the player was registered via NewPlayerSpawnedInBattle
         // before this EntityCreate arrived.
         if let Some(rc) = player_rc {
@@ -440,12 +450,23 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
         // instead of 0 until the first EntityProperty(health) arrives.
         props.seed_initial_health();
 
+        let captain_id = props.crew_modifiers_compact_params().params_id();
+        let captain = if captain_id.raw() != 0 {
+            resources.game_param_by_id(captain_id).or_else(|| {
+                warn!("failed to get captain param for id={}", captain_id);
+                None
+            })
+        } else {
+            None
+        };
+
         // Snapshot player_rc before entity_mut borrow.
         let player_rc = world.resource::<PlayerIndex>().0.get(&entity_id).cloned();
         let entity = spawn_or_get(world, entity_id);
         if let Ok(mut e) = world.get_entity_mut(entity) {
             e.insert(Vehicle);
             e.insert(VehicleState(props));
+            e.insert(Captain(captain));
             if let Some(player_rc) = player_rc {
                 e.insert(PlayerLink(player_rc));
             }

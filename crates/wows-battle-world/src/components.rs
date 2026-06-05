@@ -5,6 +5,7 @@ use wows_replays::Rc;
 use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::VehicleProps;
 use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
+use wowsunpack::game_params::types::Param;
 use wows_replays::analyzer::battle_controller::state::ActivePlane;
 use wows_replays::analyzer::battle_controller::state::ActiveWard;
 use wows_replays::analyzer::battle_controller::state::BuffZoneState;
@@ -141,6 +142,13 @@ pub struct Consumables {
 /// Send+Sync (required by bevy Component) holds only if the `arc` feature makes `wows_replays::Rc = Arc`.
 #[derive(Component, Debug, Clone)]
 pub struct PlayerLink(pub Rc<Player>);
+
+/// Captain (crew) resolved at EntityCreate time; never updated on later property changes.
+///
+/// Mirrors the BattleController: captain is frozen from the create-time crew params id.
+/// None when the params_id is 0 (common for the self player before crewModifiersCompactParams arrives).
+#[derive(Component, Debug, Clone)]
+pub struct Captain(pub Option<Rc<Param>>);
 
 // -- Non-vehicle entity state --
 
