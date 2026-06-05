@@ -1,0 +1,25 @@
+[package]
+name = "wows-battle-world"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+wows_replays = { workspace = true, features = ["arc", "parsing"] }
+wowsunpack = { workspace = true, features = ["arc"] }
+rootcause = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# 0.18.1: highest version compatible with workspace rust-version = "1.92" (verified 2026-06-04)
+bevy_ecs = "0.18.1"
+
+[features]
+default = []
+# Mirrors wows-replays: loads a real WoWS install for differential tests.
+vfs = ["wows_replays/vfs"]
+
+[dev-dependencies]
+insta = { workspace = true }
+wowsunpack = { workspace = true, features = ["arc", "vfs"] }
+wows-data-mgr = { workspace = true }

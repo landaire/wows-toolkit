@@ -13,6 +13,7 @@ members = [
     "crates/wt-translations",
     "crates/wows-replay-insights",
     "crates/wgcheck",
+    "crates/wows-battle-world",
 ]
 
 [workspace.package]
