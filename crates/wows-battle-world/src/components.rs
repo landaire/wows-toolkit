@@ -21,11 +21,16 @@ use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::GameParamId;
 use wows_replays::types::NormalizedPos;
+use wows_replays::types::TeamId;
 use wows_replays::types::WorldPos;
 use wowsunpack::game_params::types::BigWorldDistance;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_types::PlaneId;
 use wowsunpack::game_types::WorldPos2D;
+
+use crate::units::Degrees;
+use crate::units::Radians;
+use crate::units::VisibilityFlags;
 
 // -- Kind markers (zero-sized, tag the archetype) --
 
@@ -77,9 +82,9 @@ pub struct GameId(pub EntityId);
 #[derive(Component, Debug, Clone)]
 pub struct Transform3d {
     pub pos: WorldPos,
-    pub yaw: f32,
-    pub pitch: f32,
-    pub roll: f32,
+    pub yaw: Radians,
+    pub pitch: Radians,
+    pub roll: Radians,
     pub last_updated: GameClock,
 }
 
@@ -88,10 +93,10 @@ pub struct Transform3d {
 pub struct MinimapPlacement {
     pub pos: NormalizedPos,
     /// Heading in degrees.
-    pub heading: f32,
+    pub heading: Degrees,
     pub visible: bool,
     /// Bitmask of special detection reasons (radar, hydro, etc.).
-    pub visibility_flags: u32,
+    pub visibility_flags: VisibilityFlags,
     /// True when the entity is invisible (e.g. submarine submerged).
     pub is_invisible: bool,
     pub last_updated: GameClock,
@@ -118,10 +123,10 @@ pub struct VehicleRecord {
 /// Main battery turret orientation and ammo selection.
 #[derive(Component, Debug, Clone)]
 pub struct Aim {
-    /// Per-turret yaws in radians (group 0 only, relative to ship heading).
-    pub turret_yaws: Vec<f32>,
-    /// World-space gun aim yaw in radians, from `targetLocalPos`.
-    pub target_yaw: Option<f32>,
+    /// Per-turret yaws (group 0 only, relative to ship heading).
+    pub turret_yaws: Vec<Radians>,
+    /// World-space gun aim yaw, from `targetLocalPos`.
+    pub target_yaw: Option<Radians>,
     /// Currently selected ammo `GameParamId`, artillery only.
     pub selected_ammo: Option<GameParamId>,
 }
@@ -146,7 +151,7 @@ pub struct BuildingState {
     pub is_alive: bool,
     pub is_hidden: bool,
     pub is_suppressed: bool,
-    pub team_id: i8,
+    pub team_id: TeamId,
     pub params_id: GameParamId,
 }
 
@@ -157,7 +162,7 @@ impl From<&BuildingEntity> for BuildingState {
             is_alive: b.is_alive,
             is_hidden: b.is_hidden,
             is_suppressed: b.is_suppressed,
-            team_id: b.team_id,
+            team_id: TeamId::from(b.team_id),
             params_id: b.params_id,
         }
     }
@@ -182,7 +187,7 @@ impl From<&SmokeScreenEntity> for SmokeScreenState {
 pub struct PlaneState {
     pub plane_id: PlaneId,
     pub owner_id: EntityId,
-    pub team_id: u32,
+    pub team_id: TeamId,
     pub params_id: GameParamId,
     pub position: WorldPos2D,
     pub last_updated: GameClock,
@@ -193,7 +198,7 @@ impl From<&ActivePlane> for PlaneState {
         Self {
             plane_id: p.plane_id,
             owner_id: p.owner_id,
-            team_id: p.team_id,
+            team_id: TeamId::from(p.team_id),
             params_id: p.params_id,
             position: p.position,
             last_updated: p.last_updated,

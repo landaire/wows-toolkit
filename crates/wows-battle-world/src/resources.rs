@@ -20,12 +20,10 @@ use wows_replays::types::GameClock;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
 use wowsunpack::game_types::Ribbon;
-use wowsunpack::recognized::Recognized as WuRecognized;
 
-// Re-export so users of this module see a consistent Recognized type.
-// Both aliases point to the same type; we just need one import in this file.
-// wows_replays re-exports wowsunpack::recognized::Recognized as decoder::Recognized.
-// Use the decoder path for FinishType and the wowsunpack path for DamageStatWeapon/Category.
+use crate::units::MatchWinner;
+use crate::units::RawBattleStage;
+use crate::units::SecondsRemaining;
 
 /// Current replay clock.
 #[derive(Resource, Debug, Clone, Copy, Default)]
@@ -40,15 +38,15 @@ pub struct MetadataPlayers(pub Vec<SharedPlayer>);
 pub struct MatchState {
     pub arena_id: Option<ArenaId>,
     /// Raw server battle stage value (1=pre-battle, 0=active, 3=results).
-    pub battle_stage: Option<i64>,
+    pub battle_stage: Option<RawBattleStage>,
     pub battle_start_clock: Option<GameClock>,
     pub battle_end_clock: Option<GameClock>,
     /// Clock when `battleResult` was set on BattleLogic (regulation time ended).
     pub battle_result_clock: Option<GameClock>,
-    pub winning_team: Option<i8>,
+    pub winning_team: Option<MatchWinner>,
     pub finish_type: Option<Recognized<FinishType>>,
     /// Seconds remaining, from BattleLogic `timeLeft`.
-    pub time_left: Option<i64>,
+    pub time_left: Option<SecondsRemaining>,
     pub match_finished: bool,
     /// Serialized battle results blob.
     pub battle_results: Option<String>,
@@ -87,7 +85,7 @@ pub struct ShotHitLog(pub Vec<ResolvedShotHit>);
 pub struct SelfStats {
     pub ribbons: HashMap<Ribbon, usize>,
     pub damage_stats:
-        HashMap<(WuRecognized<DamageStatWeapon>, WuRecognized<DamageStatCategory>), DamageStatEntry>,
+        HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry>,
 }
 
 /// Ordered list of ECS entities for each capture point, by control-point index.
