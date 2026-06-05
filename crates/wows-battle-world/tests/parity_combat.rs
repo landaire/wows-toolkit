@@ -6,7 +6,7 @@ mod support;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 
 fn run_parity(filename: &str) {
-    let (old, mut new_world) = support::both(filename);
+    let (old, new_world) = support::both(filename);
 
     let old_kills = old.kills();
     let new_kills = new_world.kills();
@@ -73,6 +73,18 @@ fn run_parity(filename: &str) {
 
     let old_damage = old.damage_dealt();
     let new_damage = new_world.damage_ledger();
+    {
+        let mut old_keys: Vec<_> = old_damage.keys().copied().collect();
+        let mut new_keys: Vec<_> = new_damage.keys().copied().collect();
+        old_keys.sort();
+        new_keys.sort();
+        assert_eq!(
+            old_keys, new_keys,
+            "damage_dealt aggressor key sets differ in {filename}: old_only={:?} new_only={:?}",
+            old_keys.iter().filter(|k| !new_keys.contains(k)).collect::<Vec<_>>(),
+            new_keys.iter().filter(|k| !old_keys.contains(k)).collect::<Vec<_>>(),
+        );
+    }
     assert_eq!(
         old_damage.len(),
         new_damage.len(),

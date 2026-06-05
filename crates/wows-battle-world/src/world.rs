@@ -32,6 +32,7 @@ use crate::resources::MatchState;
 use crate::resources::MetadataPlayers;
 use crate::resources::PlaneIndex;
 use crate::resources::PlayerIndex;
+use crate::resources::ReplayVehicles;
 use crate::resources::ScoringRules;
 use crate::resources::SelfStats;
 use crate::resources::ShotHitLog;
@@ -57,6 +58,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         let mut world = World::new();
         insert_empty_resources(&mut world);
         seed_metadata_players(&mut world, meta, resources);
+        world.resource_mut::<ReplayVehicles>().0 = meta.vehicles.clone();
         Self { world, meta, resources, constants, version, options: IngestOptions::default() }
     }
 
@@ -78,6 +80,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         self.world.clear_all();
         insert_empty_resources(&mut self.world);
         seed_metadata_players(&mut self.world, self.meta, self.resources);
+        self.world.resource_mut::<ReplayVehicles>().0 = self.meta.vehicles.clone();
 
         // Re-attach consumable slot definitions with dynamic state zeroed.
         for (id, slots) in inventory_snapshot {
@@ -194,6 +197,7 @@ fn insert_empty_resources(world: &mut World) {
     world.insert_resource(WardIndex::default());
     world.insert_resource(DeadShips::default());
     world.insert_resource(PlayerIndex::default());
+    world.insert_resource(ReplayVehicles::default());
 }
 
 /// Build MetadataPlayers from the replay vehicles list.

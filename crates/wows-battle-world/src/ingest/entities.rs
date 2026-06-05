@@ -28,7 +28,7 @@ use crate::components::{
     PlayerLink, SmokeScreen, SmokeScreenState, Transform3d, Vehicle, VehicleState, WeatherZone,
     WeatherZoneData,
 };
-use crate::resources::{CapturePointOrder, EntityIndex, InteractiveZoneIndex, MetadataPlayers, PlayerIndex};
+use crate::resources::{CapturePointOrder, EntityIndex, InteractiveZoneIndex, InteractiveZoneRef, MetadataPlayers, PlayerIndex};
 
 /// Handle an EntityCreate packet.
 pub fn handle_entity_create<G: ResourceLoader>(
@@ -69,10 +69,19 @@ fn handle_vehicle_create<G: ResourceLoader>(
     version: Version,
 ) {
     let props = VehicleProps::from_create_props(&packet.props, version, constants);
+    // Snapshot player link before borrowing the entity mutably.
+    let player_rc = world.resource::<PlayerIndex>().0.get(&packet.entity_id).cloned();
     let entity = spawn_or_get(world, packet.entity_id);
     if let Ok(mut e) = world.get_entity_mut(entity) {
         e.insert(Vehicle);
         e.insert(VehicleState(props));
+        // Attach player link when the player was registered via NewPlayerSpawnedInBattle
+        // before this EntityCreate arrived.
+        if let Some(rc) = player_rc {
+            if !e.contains::<PlayerLink>() {
+                e.insert(PlayerLink(rc));
+            }
+        }
     }
 }
 
@@ -269,7 +278,7 @@ fn handle_interactive_zone_create(
         }
         let entity = world.resource::<EntityIndex>().get(packet.entity_id).unwrap();
         world.resource_mut::<CapturePointOrder>().0[idx] = entity;
-        world.resource_mut::<InteractiveZoneIndex>().0.insert(packet.entity_id, idx);
+        world.resource_mut::<InteractiveZoneIndex>().0.insert(packet.entity_id, InteractiveZoneRef::CapturePoint(idx));
     } else {
         // Buff zone (arms race powerup drop).
         let bz_state = BuffZoneState {
@@ -285,8 +294,7 @@ fn handle_interactive_zone_create(
             e.insert(BuffZone);
             e.insert(BuffZoneData(bz_state));
         }
-        // Register in InteractiveZoneIndex with sentinel usize::MAX, matching original.
-        world.resource_mut::<InteractiveZoneIndex>().0.insert(packet.entity_id, usize::MAX);
+        world.resource_mut::<InteractiveZoneIndex>().0.insert(packet.entity_id, InteractiveZoneRef::BuffZone);
     }
 }
 
@@ -364,7 +372,10 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
         }
 
         let args = arena_state_to_args(player);
-        let props = VehicleProps::from_create_props(&args, version, constants);
+        let mut props = VehicleProps::from_create_props(&args, version, constants);
+        // Arena state does not broadcast live health; seed from max so HP is full
+        // instead of 0 until the first EntityProperty(health) arrives.
+        props.seed_initial_health();
 
         // Snapshot player_rc before entity_mut borrow.
         let player_rc = world.resource::<PlayerIndex>().0.get(&entity_id).cloned();
@@ -379,16 +390,17 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
     }
 }
 
-/// Seed Players and Vehicle entities for mid-battle spawns (Operations reinforcement waves).
+/// Register players from mid-battle spawns (Operations reinforcement waves).
 ///
-/// Mirrors the NewPlayerSpawnedInBattle arm in BattleController. Skips players already
-/// in PlayerIndex. Derives relation from the self player's team_id.
+/// Mirrors NewPlayerSpawnedInBattle in BattleController: only inserts the player
+/// into PlayerIndex. No Vehicle entity is created here; the subsequent EntityCreate
+/// for that player's vehicle handles entity creation and attaches PlayerLink.
 pub fn seed_spawned_players<'a, G: ResourceLoader>(
     players: impl Iterator<Item = &'a PlayerStateData>,
     world: &mut World,
     resources: &G,
-    constants: &GameConstants,
-    version: Version,
+    _constants: &GameConstants,
+    _version: Version,
 ) {
     let players: Vec<&PlayerStateData> = players.collect();
 
@@ -402,45 +414,19 @@ pub fn seed_spawned_players<'a, G: ResourceLoader>(
     for player in &players {
         let entity_id = player.entity_id();
 
-        if !world.resource::<PlayerIndex>().0.contains_key(&entity_id) {
-            if let Some(self_team) = self_team_id {
-                let relation =
-                    if player.team_id() == self_team { Relation::new(1) } else { Relation::new(2) };
-                if let Some(battle_player) =
-                    Player::from_spawned_player(player, resources, relation)
-                {
-                    let battle_player = Rc::new(battle_player);
-                    world.resource_mut::<PlayerIndex>().0.insert(entity_id, battle_player);
-                }
-            } else {
-                warn!("NewPlayerSpawnedInBattle before self player resolved: skipping relation derivation");
-            }
-        }
-
-        // Pre-create/update vehicle entity.
-        if world.resource::<EntityIndex>().get(entity_id).is_some() {
-            if let Some(player_rc) = world.resource::<PlayerIndex>().0.get(&entity_id).cloned() {
-                let ecs_entity = world.resource::<EntityIndex>().get(entity_id).unwrap();
-                if let Ok(mut e) = world.get_entity_mut(ecs_entity) {
-                    if !e.contains::<PlayerLink>() {
-                        e.insert(PlayerLink(player_rc));
-                    }
-                }
-            }
+        if world.resource::<PlayerIndex>().0.contains_key(&entity_id) {
             continue;
         }
 
-        let args = arena_state_to_args(player);
-        let props = VehicleProps::from_create_props(&args, version, constants);
-        // Snapshot player_rc before entity_mut borrow.
-        let player_rc = world.resource::<PlayerIndex>().0.get(&entity_id).cloned();
-        let entity = spawn_or_get(world, entity_id);
-        if let Ok(mut e) = world.get_entity_mut(entity) {
-            e.insert(Vehicle);
-            e.insert(VehicleState(props));
-            if let Some(player_rc) = player_rc {
-                e.insert(PlayerLink(player_rc));
+        if let Some(self_team) = self_team_id {
+            let relation =
+                if player.team_id() == self_team { Relation::new(1) } else { Relation::new(2) };
+            if let Some(battle_player) = Player::from_spawned_player(player, resources, relation) {
+                let battle_player = Rc::new(battle_player);
+                world.resource_mut::<PlayerIndex>().0.insert(entity_id, battle_player);
             }
+        } else {
+            warn!("NewPlayerSpawnedInBattle before self player resolved: skipping relation derivation");
         }
     }
 }

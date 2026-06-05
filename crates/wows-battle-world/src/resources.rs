@@ -17,6 +17,7 @@ use wows_replays::analyzer::battle_controller::state::TeamScore;
 use wows_replays::analyzer::decoder::DamageStatEntry;
 use wows_replays::analyzer::decoder::FinishType;
 use wows_replays::analyzer::decoder::Recognized;
+use wows_replays::VehicleInfoMeta;
 use wows_replays::types::ArenaId;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
@@ -96,9 +97,16 @@ pub struct SelfStats {
 #[derive(Resource, Debug, Clone, Default)]
 pub struct CapturePointOrder(pub Vec<Entity>);
 
-/// Maps game entity id to position-index in the capture point / interactive zone list.
+/// Typed reference stored per interactive-zone entity in InteractiveZoneIndex.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InteractiveZoneRef {
+    CapturePoint(usize),
+    BuffZone,
+}
+
+/// Maps game entity id to its interactive zone role.
 #[derive(Resource, Debug, Clone, Default)]
-pub struct InteractiveZoneIndex(pub HashMap<EntityId, usize>);
+pub struct InteractiveZoneIndex(pub HashMap<EntityId, InteractiveZoneRef>);
 
 /// Maps game EntityId -> ECS Entity. The reverse lookup is available via the `GameId` component.
 #[derive(Resource, Debug, Clone, Default)]
@@ -171,3 +179,9 @@ pub struct DeadShips(pub HashMap<EntityId, DeadShip>);
 /// and NewPlayerSpawnedInBattle; empty until the first roster packet arrives.
 #[derive(Resource, Clone, Default)]
 pub struct PlayerIndex(pub HashMap<EntityId, Rc<Player>>);
+
+/// Replay metadata vehicle list, used as the fallback sender-resolution path
+/// for chat messages sent in the PLAYER_ID era when the sender is not yet in
+/// PlayerIndex.
+#[derive(Resource, Clone, Default)]
+pub struct ReplayVehicles(pub Vec<VehicleInfoMeta>);

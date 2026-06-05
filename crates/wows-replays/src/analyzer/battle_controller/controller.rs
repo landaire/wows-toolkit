@@ -2461,6 +2461,13 @@ impl VehicleProps {
     pub fn update_from_args(&mut self, args: &HashMap<&str, ArgValue<'_>>, version: Version, constants: &GameConstants) {
         <Self as UpdateFromReplayArgs>::update_from_args(self, args, version, constants);
     }
+
+    /// Seed health from max_health when arena state omits a live health value.
+    pub fn seed_initial_health(&mut self) {
+        if self.health == 0.0 && self.max_health > 0.0 {
+            self.health = self.max_health;
+        }
+    }
 }
 
 impl UpdateFromReplayArgs for VehicleProps {

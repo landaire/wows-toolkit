@@ -15,6 +15,7 @@ use wowsunpack::data::Version;
 
 use crate::resources::ChatLog;
 use crate::resources::PlayerIndex;
+use crate::resources::ReplayVehicles;
 
 /// Handle one onChatMessage RPC, mirroring BattleController::handle_chat_message.
 pub fn handle_chat_message<G: ResourceLoader>(
@@ -57,7 +58,14 @@ pub fn handle_chat_message<G: ResourceLoader>(
         })
         .cloned();
 
-    if player.is_none() {
+    // Metadata vehicles are keyed by account id; only useful in the PLAYER_ID era.
+    let meta_vehicle = if by_account && player.is_none() {
+        world.resource::<ReplayVehicles>().0.iter().find(|v| v.id == sender_id).cloned()
+    } else {
+        None
+    };
+
+    if player.is_none() && meta_vehicle.is_none() {
         debug!(
             sender = sender_id.raw(),
             by_account,
@@ -65,11 +73,21 @@ pub fn handle_chat_message<G: ResourceLoader>(
         );
     }
 
-    let resolved_name = player.as_ref().and_then(|p| {
-        let name = p.initial_state().username();
-        if name.is_empty() { None } else { Some(name.to_owned()) }
-    });
-    let sender_relation: Option<Relation> = player.as_ref().map(|p| p.relation());
+    let resolved_name = player
+        .as_ref()
+        .and_then(|p| {
+            let name = p.initial_state().username();
+            if name.is_empty() { None } else { Some(name.to_owned()) }
+        })
+        .or_else(|| {
+            meta_vehicle.as_ref().and_then(|v| {
+                if v.name.is_empty() { None } else { Some(v.name.clone()) }
+            })
+        });
+    let sender_relation: Option<Relation> = player
+        .as_ref()
+        .map(|p| p.relation())
+        .or_else(|| meta_vehicle.as_ref().map(|v| Relation::new(v.relation)));
 
     let is_bot = player.as_ref().map(|p| p.is_bot()).unwrap_or(true);
 
