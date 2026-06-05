@@ -31,6 +31,7 @@ use crate::resources::KillLog;
 use crate::resources::MatchState;
 use crate::resources::MetadataPlayers;
 use crate::resources::PlaneIndex;
+use crate::resources::PlayerIndex;
 use crate::resources::ScoringRules;
 use crate::resources::SelfStats;
 use crate::resources::ShotHitLog;
@@ -192,6 +193,7 @@ fn insert_empty_resources(world: &mut World) {
     world.insert_resource(PlaneIndex::default());
     world.insert_resource(WardIndex::default());
     world.insert_resource(DeadShips::default());
+    world.insert_resource(PlayerIndex::default());
 }
 
 /// Build MetadataPlayers from the replay vehicles list.

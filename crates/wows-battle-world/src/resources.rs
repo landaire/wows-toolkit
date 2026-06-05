@@ -3,8 +3,10 @@
 use std::collections::HashMap;
 
 use bevy_ecs::prelude::*;
+use wows_replays::Rc;
 use wows_replays::analyzer::battle_controller::DamageEvent;
 use wows_replays::analyzer::battle_controller::GameMessage;
+use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::SharedPlayer;
 use wows_replays::analyzer::battle_controller::state::CapturedBuff;
 use wows_replays::analyzer::battle_controller::state::DeadShip;
@@ -162,3 +164,10 @@ impl WardIndex {
 /// queryable; this resource records their last known state at time of death.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct DeadShips(pub HashMap<EntityId, DeadShip>);
+
+/// Maps entity id to the Player built from the arena roster.
+///
+/// Mirrors BattleController.player_entities. Populated on OnArenaStateReceived
+/// and NewPlayerSpawnedInBattle; empty until the first roster packet arrives.
+#[derive(Resource, Clone, Default)]
+pub struct PlayerIndex(pub HashMap<EntityId, Rc<Player>>);

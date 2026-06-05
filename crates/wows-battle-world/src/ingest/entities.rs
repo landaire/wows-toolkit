@@ -5,7 +5,9 @@ use std::str::FromStr as _;
 use bevy_ecs::world::World;
 use tracing::debug;
 use tracing::warn;
+use wows_replays::Rc;
 use wows_replays::analyzer::battle_controller::EntityType;
+use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::VehicleProps;
 use wows_replays::analyzer::decoder::PlayerStateData;
 use wows_replays::game_constants::GameConstants;
@@ -14,6 +16,7 @@ use wowsunpack::rpc::typedefs::ArgValue;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::GameParamId;
+use wows_replays::types::Relation;
 use wows_replays::types::TeamId;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
@@ -22,9 +25,10 @@ use wowsunpack::game_types::WorldPos;
 
 use crate::components::{
     Building, BuildingState, BuffZone, BuffZoneData, CapturePoint, CapturePointData, GameId,
-    SmokeScreen, SmokeScreenState, Transform3d, Vehicle, VehicleState, WeatherZone, WeatherZoneData,
+    PlayerLink, SmokeScreen, SmokeScreenState, Transform3d, Vehicle, VehicleState, WeatherZone,
+    WeatherZoneData,
 };
-use crate::resources::{CapturePointOrder, EntityIndex, InteractiveZoneIndex};
+use crate::resources::{CapturePointOrder, EntityIndex, InteractiveZoneIndex, MetadataPlayers, PlayerIndex};
 
 /// Handle an EntityCreate packet.
 pub fn handle_entity_create<G: ResourceLoader>(
@@ -286,31 +290,157 @@ fn handle_interactive_zone_create(
     }
 }
 
-/// Seed Vehicle entities for every participant listed in OnArenaStateReceived.
+/// Seed Vehicle entities and Player records for every participant in OnArenaStateReceived.
 ///
-/// Mirrors BattleController::seed_vehicles_from_arena_state: pre-creates entities
-/// so even ships that never enter the AoI have a Vehicle component.
+/// Mirrors BattleController's OnArenaStateReceived arm: builds Player objects from the
+/// arena roster (matching via meta_ship_id or fallback name match), inserts them into
+/// PlayerIndex, and attaches PlayerLink to the corresponding vehicle entity. Vehicle
+/// entities are pre-created so even ships outside the AoI have a Vehicle component.
+///
+/// connection_change_info is not populated here; it is filled by the original's
+/// OnArenaStateReceived arm based on is_connected(). That state is deferred.
 pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
     players: impl Iterator<Item = &'a PlayerStateData>,
     world: &mut World,
-    _resources: &G,
+    resources: &G,
     constants: &GameConstants,
     version: Version,
 ) {
     let players: Vec<&PlayerStateData> = players.collect();
-    for player in players {
+
+    // Snapshot metadata players to avoid borrowing world twice.
+    let metadata: Vec<_> = world.resource::<MetadataPlayers>().0.clone();
+
+    for player in &players {
         let entity_id = player.entity_id();
+
+        // Build Player if not already in the index.
+        if !world.resource::<PlayerIndex>().0.contains_key(&entity_id) {
+            let meta = metadata
+                .iter()
+                .find(|m| m.id() == player.meta_ship_id())
+                .or_else(|| {
+                    let name = player.username();
+                    if name.is_empty() {
+                        None
+                    } else {
+                        metadata.iter().find(|m| m.name() == name)
+                    }
+                });
+
+            match meta {
+                None => {
+                    warn!(
+                        "could not map arena player to metadata player (meta_ship_id={})",
+                        player.meta_ship_id()
+                    );
+                }
+                Some(meta) => {
+                    if let Some(battle_player) =
+                        Player::from_arena_player(player, meta.as_ref(), resources)
+                    {
+                        let battle_player = Rc::new(battle_player);
+                        world
+                            .resource_mut::<PlayerIndex>()
+                            .0
+                            .insert(entity_id, battle_player);
+                    }
+                }
+            }
+        }
+
+        // Pre-create the vehicle entity if not already present.
         if world.resource::<EntityIndex>().get(entity_id).is_some() {
+            // Attach PlayerLink if we just built a Player for an already-existing entity.
+            if let Some(player_rc) = world.resource::<PlayerIndex>().0.get(&entity_id).cloned() {
+                let ecs_entity = world.resource::<EntityIndex>().get(entity_id).unwrap();
+                if let Ok(mut e) = world.get_entity_mut(ecs_entity) {
+                    if !e.contains::<PlayerLink>() {
+                        e.insert(PlayerLink(player_rc));
+                    }
+                }
+            }
             continue;
         }
 
         let args = arena_state_to_args(player);
         let props = VehicleProps::from_create_props(&args, version, constants);
 
+        // Snapshot player_rc before entity_mut borrow.
+        let player_rc = world.resource::<PlayerIndex>().0.get(&entity_id).cloned();
         let entity = spawn_or_get(world, entity_id);
         if let Ok(mut e) = world.get_entity_mut(entity) {
             e.insert(Vehicle);
             e.insert(VehicleState(props));
+            if let Some(player_rc) = player_rc {
+                e.insert(PlayerLink(player_rc));
+            }
+        }
+    }
+}
+
+/// Seed Players and Vehicle entities for mid-battle spawns (Operations reinforcement waves).
+///
+/// Mirrors the NewPlayerSpawnedInBattle arm in BattleController. Skips players already
+/// in PlayerIndex. Derives relation from the self player's team_id.
+pub fn seed_spawned_players<'a, G: ResourceLoader>(
+    players: impl Iterator<Item = &'a PlayerStateData>,
+    world: &mut World,
+    resources: &G,
+    constants: &GameConstants,
+    version: Version,
+) {
+    let players: Vec<&PlayerStateData> = players.collect();
+
+    let self_team_id = world
+        .resource::<PlayerIndex>()
+        .0
+        .values()
+        .find(|p| p.relation().is_self())
+        .map(|p| p.initial_state().team_id());
+
+    for player in &players {
+        let entity_id = player.entity_id();
+
+        if !world.resource::<PlayerIndex>().0.contains_key(&entity_id) {
+            if let Some(self_team) = self_team_id {
+                let relation =
+                    if player.team_id() == self_team { Relation::new(1) } else { Relation::new(2) };
+                if let Some(battle_player) =
+                    Player::from_spawned_player(player, resources, relation)
+                {
+                    let battle_player = Rc::new(battle_player);
+                    world.resource_mut::<PlayerIndex>().0.insert(entity_id, battle_player);
+                }
+            } else {
+                warn!("NewPlayerSpawnedInBattle before self player resolved: skipping relation derivation");
+            }
+        }
+
+        // Pre-create/update vehicle entity.
+        if world.resource::<EntityIndex>().get(entity_id).is_some() {
+            if let Some(player_rc) = world.resource::<PlayerIndex>().0.get(&entity_id).cloned() {
+                let ecs_entity = world.resource::<EntityIndex>().get(entity_id).unwrap();
+                if let Ok(mut e) = world.get_entity_mut(ecs_entity) {
+                    if !e.contains::<PlayerLink>() {
+                        e.insert(PlayerLink(player_rc));
+                    }
+                }
+            }
+            continue;
+        }
+
+        let args = arena_state_to_args(player);
+        let props = VehicleProps::from_create_props(&args, version, constants);
+        // Snapshot player_rc before entity_mut borrow.
+        let player_rc = world.resource::<PlayerIndex>().0.get(&entity_id).cloned();
+        let entity = spawn_or_get(world, entity_id);
+        if let Ok(mut e) = world.get_entity_mut(entity) {
+            e.insert(Vehicle);
+            e.insert(VehicleState(props));
+            if let Some(player_rc) = player_rc {
+                e.insert(PlayerLink(player_rc));
+            }
         }
     }
 }

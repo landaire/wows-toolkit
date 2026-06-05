@@ -1,5 +1,6 @@
 //! Packet ingestion: translates decoded packet payloads into ECS state changes.
 
+pub mod chat;
 pub mod combat;
 pub mod entities;
 pub mod positions;
@@ -29,7 +30,19 @@ pub fn dispatch<G: ResourceLoader>(
     clock: GameClock,
 ) {
     match payload {
-        DecodedPacketPayload::Chat { .. } => {}
+        DecodedPacketPayload::Chat { entity_id, sender_id, audience, message, extra_data } => {
+            chat::handle_chat_message(
+                entity_id,
+                sender_id,
+                audience,
+                message,
+                extra_data,
+                clock,
+                world,
+                resources,
+                version,
+            );
+        }
         DecodedPacketPayload::VoiceLine { .. } => {}
         DecodedPacketPayload::Ribbon(ribbon) => {
             combat::handle_ribbon(ribbon, world);
@@ -90,7 +103,7 @@ pub fn dispatch<G: ResourceLoader>(
             player_states: players,
             bot_states: bots,
         } => {
-            entities::seed_vehicles_from_arena_state(
+            entities::seed_spawned_players(
                 players.iter().chain(bots.iter()),
                 world,
                 resources,

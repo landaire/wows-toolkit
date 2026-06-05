@@ -274,7 +274,7 @@ impl std::hash::Hash for Player {
 }
 
 impl Player {
-    fn from_arena_player<G: ResourceLoader>(
+    pub fn from_arena_player<G: ResourceLoader>(
         player: &PlayerStateData,
         metadata_player: &MetadataPlayer,
         resources: &G,
@@ -300,7 +300,7 @@ impl Player {
     /// Create a Player from a mid-battle spawn (e.g. Operations reinforcement wave).
     /// Uses the ship_params_id from the PlayerStateData directly since these players
     /// are not in the replay's JSON metadata.
-    fn from_spawned_player<G: ResourceLoader>(
+    pub fn from_spawned_player<G: ResourceLoader>(
         player: &PlayerStateData,
         resources: &G,
         relation: Relation,

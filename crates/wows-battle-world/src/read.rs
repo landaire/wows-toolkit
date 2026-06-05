@@ -2,7 +2,10 @@
 
 use std::collections::HashMap;
 
+use wows_replays::Rc;
 use wows_replays::analyzer::battle_controller::DamageEvent;
+use wows_replays::analyzer::battle_controller::GameMessage;
+use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::VehicleProps;
 use wows_replays::analyzer::battle_controller::state::DeadShip;
 use wows_replays::analyzer::battle_controller::state::KillRecord;
@@ -15,7 +18,7 @@ use wowsunpack::game_types::DamageStatWeapon;
 use wowsunpack::game_types::Ribbon;
 
 use crate::components::{Aim, Building, EntityKind, GameId, MinimapPlacement, SmokeScreen, Transform3d, Vehicle, VehicleState};
-use crate::resources::{DamageLedger, DeadShips, KillLog, SelfStats};
+use crate::resources::{ChatLog, DamageLedger, DeadShips, KillLog, PlayerIndex, SelfStats};
 use crate::world::BattleWorld;
 
 impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
@@ -87,6 +90,18 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
     ) -> &HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry>
     {
         &self.world().resource::<SelfStats>().damage_stats
+    }
+
+    /// Chat messages received so far, in arrival order.
+    pub fn chat(&self) -> &[GameMessage] {
+        &self.world().resource::<ChatLog>().0
+    }
+
+    /// Players built from the arena roster, keyed by entity id.
+    ///
+    /// Populated after OnArenaStateReceived; empty before that packet arrives.
+    pub fn player_entities(&self) -> &HashMap<EntityId, Rc<Player>> {
+        &self.world().resource::<PlayerIndex>().0
     }
 
     /// Entity kinds (Vehicle/Building/SmokeScreen) for every tracked game entity.
