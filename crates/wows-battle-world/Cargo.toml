@@ -9,6 +9,7 @@ license.workspace = true
 wows_replays = { workspace = true, features = ["arc", "parsing"] }
 wowsunpack = { workspace = true, features = ["arc"] }
 rootcause = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 # 0.18.1: highest version compatible with workspace rust-version = "1.92" (verified 2026-06-04)
