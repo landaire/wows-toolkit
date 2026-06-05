@@ -3,6 +3,7 @@
 
 pub mod components;
 pub mod ids;
+pub mod merged;
 pub mod read;
 pub mod report;
 pub mod resources;
