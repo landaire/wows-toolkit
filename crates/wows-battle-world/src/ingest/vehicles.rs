@@ -5,11 +5,13 @@ use wows_replays::game_constants::GameConstants;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameParamId;
 use wowsunpack::data::Version;
+use wowsunpack::game_types::WeaponType;
+use wowsunpack::recognized::Recognized;
 use wowsunpack::rpc::typedefs::ArgValue;
 
 use crate::components::{Aim, Vehicle, VehicleState};
 use crate::resources::EntityIndex;
-use crate::units::{Radians, WeaponGroup};
+use crate::units::Radians;
 
 /// Update `VehicleState` for a known vehicle entity from an EntityProperty packet.
 ///
@@ -56,7 +58,7 @@ pub fn handle_vehicle_property(
                 er.insert(Aim {
                     turret_yaws: Vec::new(),
                     target_yaw: Some(Radians(yaw)),
-                    selected_ammo: None,
+                    selected_ammo: std::collections::HashMap::new(),
                 });
             }
         }
@@ -71,7 +73,7 @@ pub fn handle_gun_sync(
     yaw: f32,
     world: &mut World,
 ) {
-    if WeaponGroup(weapon_type) != WeaponGroup::MAIN_BATTERY {
+    if WeaponType::from_raw(weapon_type) != Recognized::Known(WeaponType::Artillery) {
         return;
     }
     let Some(ecs_entity) = world.resource::<EntityIndex>().get(entity_id) else {
@@ -90,31 +92,33 @@ pub fn handle_gun_sync(
             let mut turret_yaws = Vec::new();
             turret_yaws.resize(idx + 1, Radians(0.0));
             turret_yaws[idx] = Radians(yaw);
-            er.insert(Aim { turret_yaws, target_yaw: None, selected_ammo: None });
+            er.insert(Aim { turret_yaws, target_yaw: None, selected_ammo: std::collections::HashMap::new() });
         }
     }
 }
 
-/// Handle a SetAmmoForWeapon packet: record selected ammo for the main battery.
+/// Handle a SetAmmoForWeapon packet: record selected ammo keyed by weapon type.
+///
+/// The game sends this only for SELECTABLE_AMMO_WEAPONS (artillery, torpedo, air support).
 pub fn handle_set_ammo_for_weapon(
     entity_id: EntityId,
     weapon_type: u32,
     ammo_param_id: GameParamId,
     world: &mut World,
 ) {
-    if WeaponGroup(weapon_type) != WeaponGroup::MAIN_BATTERY {
-        return;
-    }
+    let key = WeaponType::from_raw(weapon_type);
     let Some(ecs_entity) = world.resource::<EntityIndex>().get(entity_id) else {
         return;
     };
     if let Ok(mut er) = world.get_entity_mut(ecs_entity) {
         let mut aim = er.get_mut::<Aim>();
         if let Some(ref mut a) = aim {
-            a.selected_ammo = Some(ammo_param_id);
+            a.selected_ammo.insert(key, ammo_param_id);
         } else {
             drop(aim);
-            er.insert(Aim { turret_yaws: Vec::new(), target_yaw: None, selected_ammo: Some(ammo_param_id) });
+            let mut selected_ammo = std::collections::HashMap::new();
+            selected_ammo.insert(key, ammo_param_id);
+            er.insert(Aim { turret_yaws: Vec::new(), target_yaw: None, selected_ammo });
         }
     }
 }

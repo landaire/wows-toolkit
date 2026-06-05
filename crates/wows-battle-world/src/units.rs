@@ -22,14 +22,6 @@ pub struct SecondsRemaining(pub i64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RawBattleStage(pub i64);
 
-/// A weapon group index; the original tracks only the main battery.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct WeaponGroup(pub u32);
-
-impl WeaponGroup {
-    pub const MAIN_BATTERY: WeaponGroup = WeaponGroup(0);
-}
-
 /// Match outcome once decided; `Option::None` means the match is not yet decided.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatchWinner {

@@ -7,6 +7,8 @@ use std::collections::HashMap;
 
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 use wows_replays::types::EntityId;
+use wowsunpack::game_types::WeaponType;
+use wowsunpack::recognized::Recognized;
 
 fn run_parity(filename: &str) {
     let (old, mut new_world) = support::both(filename);
@@ -93,7 +95,9 @@ fn run_parity(filename: &str) {
             .map(|a| a.turret_yaws.iter().map(|r| r.0).collect())
             .unwrap_or_default();
         let new_target: Option<f32> = aim.and_then(|a| a.target_yaw.map(|r| r.0));
-        let new_ammo = aim.and_then(|a| a.selected_ammo);
+        let new_ammo = aim.and_then(|a| {
+            a.selected_ammo.get(&Recognized::Known(WeaponType::Artillery)).copied()
+        });
 
         assert_eq!(
             old_turrets.as_slice(), new_turrets.as_slice(),

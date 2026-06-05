@@ -1539,7 +1539,7 @@ impl fmt::Display for BuoyancyState {
 }
 
 /// Selected weapon type, from `SHIP_WEAPON_TYPES` in ships.xml.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 #[derive(Default)]

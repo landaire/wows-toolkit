@@ -26,7 +26,9 @@ use wows_replays::types::WorldPos;
 use wowsunpack::game_params::types::BigWorldDistance;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_types::PlaneId;
+use wowsunpack::game_types::WeaponType;
 use wowsunpack::game_types::WorldPos2D;
+use wowsunpack::recognized::Recognized;
 
 use crate::units::Degrees;
 use crate::units::Radians;
@@ -139,8 +141,8 @@ pub struct Aim {
     pub turret_yaws: Vec<Radians>,
     /// World-space gun aim yaw, from `targetLocalPos`.
     pub target_yaw: Option<Radians>,
-    /// Currently selected ammo `GameParamId`, artillery only.
-    pub selected_ammo: Option<GameParamId>,
+    /// Selected ammo per weapon type (artillery, torpedo, air support per SELECTABLE_AMMO_WEAPONS).
+    pub selected_ammo: std::collections::HashMap<Recognized<WeaponType, u32>, GameParamId>,
 }
 
 /// Consumable activation log and slot inventory for one vehicle.
