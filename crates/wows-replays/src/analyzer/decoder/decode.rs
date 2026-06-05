@@ -157,7 +157,7 @@ impl PlayerStateData {
     pub(crate) const KEY_DOG_TAG: &'static str = "dogTag";
     pub(crate) const KEY_FRAGS_COUNT: &'static str = "fragsCount";
     pub(crate) const KEY_FRIENDLY_FIRE_ENABLED: &'static str = "friendlyFireEnabled";
-    pub(crate) const KEY_ID: &'static str = "id";
+    pub const KEY_ID: &'static str = "id";
     pub(crate) const KEY_INVITATIONS_ENABLED: &'static str = "invitationsEnabled";
     pub(crate) const KEY_IS_ABUSER: &'static str = "isAbuser";
     pub(crate) const KEY_IS_ALIVE: &'static str = "isAlive";

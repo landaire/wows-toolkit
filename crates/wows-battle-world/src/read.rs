@@ -23,9 +23,13 @@ use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::analyzer::battle_controller::state::ScoringRules;
 use wows_replays::analyzer::battle_controller::state::TeamScore;
 use wows_replays::analyzer::decoder::DamageStatEntry;
+use wows_replays::analyzer::decoder::FinishType;
 use wows_replays::analyzer::decoder::Recognized;
+use wows_replays::types::ArenaId;
 use wows_replays::types::EntityId;
+use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
+use wowsunpack::game_types::BattleStage;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
 use wowsunpack::game_types::Ribbon;
@@ -33,7 +37,8 @@ use wowsunpack::game_types::Ribbon;
 use wowsunpack::game_types::PlaneId;
 
 use crate::components::{Aim, Building, BuffZoneData, CapturePointData, Consumables, EntityKind, GameId, MinimapPlacement, Plane, PlaneState, ProjectileState, SmokeScreen, Transform3d, Vehicle, VehicleState, Ward, WardState, WeatherZoneData};
-use crate::resources::{ActiveShotOrder, ActiveTorpedoOrder, CapturePointOrder, CapturedBuffs, ChatLog, DamageLedger, DeadShips, KillLog, PlayerIndex, ScoringRules as ScoringRulesResource, SelfStats, ShotHitLog, TeamScores};
+use crate::resources::{ActiveShotOrder, ActiveTorpedoOrder, CapturePointOrder, CapturedBuffs, ChatLog, DamageLedger, DeadShips, KillLog, MatchState, PlayerIndex, ScoringRules as ScoringRulesResource, SelfStats, ShotHitLog, TeamScores};
+use crate::units::MatchWinner;
 use crate::world::BattleWorld;
 
 impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
@@ -295,5 +300,48 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
     /// Scoring rules from BattleLogic (win threshold, hold reward/period, cap indices).
     pub fn scoring_rules(&self) -> Option<ScoringRules> {
         self.world().resource::<ScoringRulesResource>().0.clone()
+    }
+
+    /// Resolved battle stage, updated from BattleLogic `battleStage` EntityProperty.
+    pub fn battle_stage(&self) -> Option<BattleStage> {
+        self.world().resource::<MatchState>().battle_stage.clone()
+    }
+
+    /// Seconds remaining in the match from BattleLogic `timeLeft`.
+    pub fn time_left(&self) -> Option<i64> {
+        self.world().resource::<MatchState>().time_left.map(|s| s.0)
+    }
+
+    /// Clock when the battle stage first became `Waiting` (pre-battle start).
+    pub fn battle_start_clock(&self) -> Option<GameClock> {
+        self.world().resource::<MatchState>().battle_start_clock
+    }
+
+    /// Clock when `BattleEnd` was received.
+    pub fn battle_end_clock(&self) -> Option<GameClock> {
+        self.world().resource::<MatchState>().battle_end_clock
+    }
+
+    /// Winning team as an i8: 0 or 1 for a team win, -1 for draw, None if undecided.
+    pub fn winning_team(&self) -> Option<i8> {
+        self.world().resource::<MatchState>().winning_team.map(|mw| match mw {
+            MatchWinner::Team(t) => t.raw() as i8,
+            MatchWinner::Draw => -1,
+        })
+    }
+
+    /// How the battle ended.
+    pub fn finish_type(&self) -> Option<&Recognized<FinishType>> {
+        self.world().resource::<MatchState>().finish_type.as_ref()
+    }
+
+    /// Arena id set from the first `OnArenaStateReceived` packet.
+    pub fn arena_id(&self) -> Option<ArenaId> {
+        self.world().resource::<MatchState>().arena_id
+    }
+
+    /// Serialized battle results JSON blob.
+    pub fn battle_results(&self) -> Option<&String> {
+        self.world().resource::<MatchState>().battle_results.as_ref()
     }
 }

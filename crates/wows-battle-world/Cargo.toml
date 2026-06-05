@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 wows_replays = { workspace = true, features = ["arc", "parsing"] }
 wowsunpack = { workspace = true, features = ["arc"] }
+pickled = { workspace = true }
 rootcause = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

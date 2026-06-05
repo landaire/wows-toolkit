@@ -162,6 +162,10 @@ pub struct ConnectionChangeInfo {
 }
 
 impl ConnectionChangeInfo {
+    pub fn new(at_game_duration: Duration, event_kind: ConnectionChangeKind, had_death_event: bool) -> Self {
+        Self { at_game_duration, event_kind, had_death_event }
+    }
+
     pub fn at_game_duration(&self) -> Duration {
         self.at_game_duration
     }
@@ -323,7 +327,7 @@ impl Player {
         self.connection_change_info.read_ref()
     }
 
-    fn connection_change_info_mut(&self) -> crate::RwCellWriteGuard<'_, Vec<ConnectionChangeInfo>> {
+    pub fn connection_change_info_mut(&self) -> crate::RwCellWriteGuard<'_, Vec<ConnectionChangeInfo>> {
         self.connection_change_info.write_ref()
     }
 
@@ -331,7 +335,7 @@ impl Player {
         self.end_state.read_ref()
     }
 
-    fn end_state_mut(&self) -> crate::RwCellWriteGuard<'_, PlayerStateData> {
+    pub fn end_state_mut(&self) -> crate::RwCellWriteGuard<'_, PlayerStateData> {
         self.end_state.write_ref()
     }
 

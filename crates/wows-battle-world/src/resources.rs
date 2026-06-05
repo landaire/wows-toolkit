@@ -21,13 +21,13 @@ use wows_replays::VehicleInfoMeta;
 use wows_replays::types::ArenaId;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
+use wowsunpack::game_types::BattleStage;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
 use wowsunpack::game_types::PlaneId;
 use wowsunpack::game_types::Ribbon;
 
 use crate::units::MatchWinner;
-use crate::units::RawBattleStage;
 use crate::units::SecondsRemaining;
 
 /// Current replay clock.
@@ -42,8 +42,8 @@ pub struct MetadataPlayers(pub Vec<SharedPlayer>);
 #[derive(Resource, Debug, Clone, Default)]
 pub struct MatchState {
     pub arena_id: Option<ArenaId>,
-    /// Raw server battle stage value (1=pre-battle, 0=active, 3=results).
-    pub battle_stage: Option<RawBattleStage>,
+    /// Resolved battle stage, updated from BattleLogic `battleStage` EntityProperty.
+    pub battle_stage: Option<BattleStage>,
     pub battle_start_clock: Option<GameClock>,
     pub battle_end_clock: Option<GameClock>,
     /// Clock when `battleResult` was set on BattleLogic (regulation time ended).

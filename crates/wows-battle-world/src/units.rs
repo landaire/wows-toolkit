@@ -18,10 +18,6 @@ pub struct VisibilityFlags(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SecondsRemaining(pub i64);
 
-/// Unresolved battleStage value (resolved to a stage via constants on read).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct RawBattleStage(pub i64);
-
 /// Match outcome once decided; `Option::None` means the match is not yet decided.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatchWinner {

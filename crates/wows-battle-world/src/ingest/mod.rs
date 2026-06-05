@@ -5,6 +5,7 @@ pub mod chat;
 pub mod combat;
 pub mod consumables;
 pub mod entities;
+pub mod match_state;
 pub mod positions;
 pub mod projectiles;
 pub mod vehicles;
@@ -74,6 +75,14 @@ pub fn dispatch<G: ResourceLoader>(
                 constants,
             );
             zones::handle_entity_property_zone(prop.entity_id, prop.property, &prop.value, world);
+            match_state::handle_entity_property_match(
+                prop.property,
+                &prop.value,
+                clock,
+                world,
+                constants,
+                version,
+            );
         }
         DecodedPacketPayload::BasePlayerCreate(base) => {
             vehicles::apply_player_create_props(base.entity_id, &base.props, world, version, constants);
@@ -89,12 +98,13 @@ pub fn dispatch<G: ResourceLoader>(
             entities::handle_entity_create(clock, entity_create, world, resources, constants, version);
         }
         DecodedPacketPayload::OnArenaStateReceived {
-            arena_id: _,
+            arena_id,
             team_build_type_id: _,
             pre_battles_info: _,
             player_states: players,
             bot_states: bots,
         } => {
+            match_state::handle_arena_id(arena_id, world);
             entities::seed_vehicles_from_arena_state(
                 players.iter().chain(bots.iter()),
                 world,
@@ -103,7 +113,9 @@ pub fn dispatch<G: ResourceLoader>(
                 version,
             );
         }
-        DecodedPacketPayload::OnGameRoomStateChanged { .. } => {}
+        DecodedPacketPayload::OnGameRoomStateChanged { player_states } => {
+            match_state::handle_game_room_state_changed(&player_states, clock, world);
+        }
         DecodedPacketPayload::NewPlayerSpawnedInBattle {
             player_states: players,
             bot_states: bots,
@@ -126,7 +138,9 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::PropertyUpdate(update) => {
             zones::handle_property_update(update, clock, world);
         }
-        DecodedPacketPayload::BattleEnd { .. } => {}
+        DecodedPacketPayload::BattleEnd { winning_team, finish_type } => {
+            match_state::handle_battle_end(winning_team, finish_type, clock, world);
+        }
         DecodedPacketPayload::Consumable { entity, consumable, duration, usage_params } => {
             consumables::handle_consumable(entity, consumable.clone(), duration, usage_params, clock, world);
         }
@@ -196,6 +210,8 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::Unknown(_) => {}
         DecodedPacketPayload::Invalid(_) => {}
         DecodedPacketPayload::Audit(_) => {}
-        DecodedPacketPayload::BattleResults(_) => {}
+        DecodedPacketPayload::BattleResults(json) => {
+            match_state::handle_battle_results(json, world);
+        }
     }
 }
