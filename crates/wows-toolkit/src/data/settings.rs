@@ -162,6 +162,10 @@ pub struct SavedRenderOptions {
     /// Video codec preference. `None` means "best codec for the current backend".
     #[serde(default)]
     pub video_codec: Option<wows_minimap_renderer::VideoCodec>,
+    /// Include the pre-battle phase (spawn and countdown) at the start of an
+    /// exported video. When false, export begins at battle start.
+    #[serde(default)]
+    pub include_pre_battle: bool,
 }
 
 impl Default for SavedRenderOptions {
@@ -206,6 +210,7 @@ impl Default for SavedRenderOptions {
             show_team_rosters: false,
             prefer_cpu_encoder: false,
             video_codec: None,
+            include_pre_battle: false,
         }
     }
 }

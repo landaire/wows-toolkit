@@ -992,11 +992,11 @@ impl WowsToolkitApp {
                     // Register real game fonts from VFS now that data is available.
                     {
                         let wdata = self.tab_state.world_of_warships_data.as_ref().unwrap().read();
-                        let gf = self
-                            .tab_state
-                            .renderer_asset_cache
-                            .lock()
-                            .get_or_load_game_fonts(&wdata.vfs, wdata.version());
+                        let gf = self.tab_state.renderer_asset_cache.lock().get_or_load_game_fonts(
+                            &wdata.vfs,
+                            wdata.version(),
+                            wdata.dump_dir.as_deref(),
+                        );
                         let mut font_defs = ctx.fonts(|r| r.definitions().clone());
                         crate::replay::minimap_view::shapes::register_game_fonts(&mut font_defs, Some(&gf));
                         ctx.set_fonts(font_defs);
@@ -2498,13 +2498,14 @@ impl WowsToolkitApp {
         };
 
         let version = wd.version();
-        let ship_icons = convert_icons(&cache.get_or_load_ship_icons(&wd.vfs, version));
-        let plane_icons = convert_icons(&cache.get_or_load_plane_icons(&wd.vfs, version));
-        let consumable_icons = convert_icons(&cache.get_or_load_consumable_icons(&wd.vfs, version));
-        let death_cause_icons = convert_icons(&cache.get_or_load_death_cause_icons(&wd.vfs, version));
-        let powerup_icons = convert_icons(&cache.get_or_load_powerup_icons(&wd.vfs, version));
+        let dump_dir = wd.dump_dir.as_deref();
+        let ship_icons = convert_icons(&cache.get_or_load_ship_icons(&wd.vfs, version, dump_dir));
+        let plane_icons = convert_icons(&cache.get_or_load_plane_icons(&wd.vfs, version, dump_dir));
+        let consumable_icons = convert_icons(&cache.get_or_load_consumable_icons(&wd.vfs, version, dump_dir));
+        let death_cause_icons = convert_icons(&cache.get_or_load_death_cause_icons(&wd.vfs, version, dump_dir));
+        let powerup_icons = convert_icons(&cache.get_or_load_powerup_icons(&wd.vfs, version, dump_dir));
 
-        let fonts = cache.get_or_load_game_fonts(&wd.vfs, version);
+        let fonts = cache.get_or_load_game_fonts(&wd.vfs, version, dump_dir);
         let game_fonts = Some(GameFontsWire {
             primary: fonts.primary_bytes.clone(),
             fallback_ko: fonts.fallback_bytes.first().cloned(),

@@ -35,6 +35,7 @@ use super::listener::BattleControllerState;
 use std::collections::HashMap;
 use wowsunpack::data::Version;
 use wowsunpack::data::ship_config::ShipConfig;
+use wowsunpack::game_types::BattleStage;
 use wowsunpack::game_types::GameParamId;
 use wowsunpack::rpc::entitydefs::EntitySpec;
 
@@ -65,6 +66,7 @@ pub struct MergedReplays<'specs, 'res, 'data, G: ResourceLoader> {
     arena_ids: Vec<Option<ArenaId>>,
     arena_validated: bool,
     total_duration: GameClock,
+    battle_start_clock: Option<GameClock>,
 }
 
 impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, G> {
@@ -109,6 +111,11 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
             total_duration = GameClock(total_duration.0.max(scan_last_clock(specs, version, r).0));
         }
 
+        // The battleStage transition is a match-wide broadcast carried by the
+        // primary perspective, so the primary's stream is the authoritative
+        // source for when the pre-battle phase ends.
+        let battle_start_clock = scan_battle_start_clock(specs, game_constants, version, primary);
+
         let controller = BattleController::new(&primary.meta, game_params, Some(game_constants));
 
         Ok(Self {
@@ -122,6 +129,7 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
             arena_ids: vec![None; replay_count],
             arena_validated: replay_count <= 1,
             total_duration,
+            battle_start_clock,
         })
     }
 
@@ -141,6 +149,13 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
     /// merged replays. Useful for sizing the output video / progress bar.
     pub fn total_duration(&self) -> GameClock {
         self.total_duration
+    }
+
+    /// Clock at which the pre-battle phase ends and the battle becomes active,
+    /// scanned from the primary replay. `None` if the replay never records the
+    /// transition (e.g. very old replays).
+    pub fn battle_start_clock(&self) -> Option<GameClock> {
+        self.battle_start_clock
     }
 
     /// `true` once every replay's stream has been exhausted.
@@ -306,6 +321,38 @@ pub fn scan_arena_id(specs: &[EntitySpec], version: Version, replay: &ReplayFile
             && let Some(wowsunpack::rpc::typedefs::ArgValue::Int64(v)) = em.args.first()
         {
             return Some(ArenaId::from(*v));
+        }
+    }
+    None
+}
+
+/// Walk a replay's stream to find the first `battleStage` EntityProperty that
+/// resolves to the active battle stage, returning the clock of that packet.
+/// This is the moment the pre-battle countdown ends. Returns `None` if no such
+/// transition is recorded.
+fn scan_battle_start_clock(
+    specs: &[EntitySpec],
+    game_constants: &GameConstants,
+    version: Version,
+    replay: &ReplayFile,
+) -> Option<GameClock> {
+    let mut parser = Parser::with_version(specs, version);
+    let decoder = PacketDecoder::builder()
+        .version(version)
+        .battle_constants(game_constants.battle())
+        .common_constants(game_constants.common())
+        .ships_constants(game_constants.ships())
+        .build();
+    let mut remaining = &replay.packet_data[..];
+    while !remaining.is_empty() {
+        let packet = parser.parse_packet(&mut remaining).ok()?;
+        let clock = packet.clock;
+        if let DecodedPacketPayload::EntityProperty(prop) = decoder.decode(&packet).payload
+            && prop.property == "battleStage"
+            && let Some(raw) = prop.value.as_i64()
+            && matches!(game_constants.common().battle_stage(raw as i32).copied(), Some(BattleStage::Waiting))
+        {
+            return Some(clock);
         }
     }
     None

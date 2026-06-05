@@ -721,13 +721,10 @@ fn load_system_fallback_font() -> Option<(FontArc, Vec<u8>)> {
     None
 }
 
-/// Load game fonts from packed game files.
-///
-/// Tries to load Warhelios Bold as the primary font. CJK fallback fonts
-/// (Korean, Japanese, Chinese) are loaded if present. Each font gets a
-/// scale correction factor computed automatically. Falls back to a system font
-/// when the game VFS has no TrueType face (older bitmap-font clients).
-pub fn load_game_fonts(vfs: &VfsPath) -> GameFonts {
+/// Try to load the game TrueType fonts (Warhelios primary + CJK fallbacks) from
+/// a single VFS. Returns None when the VFS carries no usable Warhelios TTF
+/// (older clients shipped bitmap fonts only).
+fn game_fonts_from_vfs(vfs: &VfsPath) -> Option<GameFonts> {
     let load_font = |path: &str| -> Option<(FontArc, Vec<u8>)> {
         let buf = read_vfs_file(vfs, path)?;
         let raw_bytes = buf.clone();
@@ -745,16 +742,7 @@ pub fn load_game_fonts(vfs: &VfsPath) -> GameFonts {
 
     let (primary, primary_bytes) = load_font("gui/fonts/Warhelios.ttf")
         .or_else(|| load_font("gui/fonts/Warhelios_Regular.ttf"))
-        .or_else(|| load_font("gui/fonts/Warhelios_Bold.ttf"))
-        .or_else(|| {
-            // Pre-TTF clients (e.g. 0.9.x) ship only bitmap fonts, so their VFS has no
-            // usable TrueType face. Fall back to a system sans-serif so old replays
-            // still render text instead of crashing -- the exact face is unimportant
-            // for the minimap overlay.
-            warn!("no Warhelios TTF in game files (older client?); falling back to a system font");
-            load_system_fallback_font()
-        })
-        .expect("no usable font found in the game files or on the system");
+        .or_else(|| load_font("gui/fonts/Warhelios_Bold.ttf"))?;
 
     let fallback_paths = [
         "gui/fonts/WarheliosKO_Bold.ttf",
@@ -771,5 +759,34 @@ pub fn load_game_fonts(vfs: &VfsPath) -> GameFonts {
 
     debug!(fallback_count = fallbacks.len(), primary_scale_factor, "Loaded game fonts");
 
-    GameFonts { primary, fallbacks, primary_scale_factor, fallback_scale_factors, primary_bytes, fallback_bytes }
+    Some(GameFonts { primary, fallbacks, primary_scale_factor, fallback_scale_factors, primary_bytes, fallback_bytes })
+}
+
+/// Build a `GameFonts` from a system sans-serif face, used when no game TTF is
+/// available in any VFS.
+fn system_game_fonts() -> GameFonts {
+    warn!("no Warhelios TTF in game files (older client?); falling back to a system font");
+    let (primary, primary_bytes) =
+        load_system_fallback_font().expect("no usable font found in the game files or on the system");
+    let primary_scale_factor = compute_scale_factor(&primary);
+    GameFonts {
+        primary,
+        fallbacks: Vec::new(),
+        primary_scale_factor,
+        fallback_scale_factors: Vec::new(),
+        primary_bytes,
+        fallback_bytes: Vec::new(),
+    }
+}
+
+/// Load game fonts from a single VFS, falling back to a system font when the
+/// VFS ships no TrueType face.
+pub fn load_game_fonts(vfs: &VfsPath) -> GameFonts {
+    game_fonts_from_vfs(vfs).unwrap_or_else(system_game_fonts)
+}
+
+/// Load game fonts, trying `vfs` first, then `fallback` (e.g. the newest dump on
+/// disk for old replays that ship no TTF), then a system font.
+pub fn load_game_fonts_with_fallback(vfs: &VfsPath, fallback: Option<&VfsPath>) -> GameFonts {
+    game_fonts_from_vfs(vfs).or_else(|| fallback.and_then(game_fonts_from_vfs)).unwrap_or_else(system_game_fonts)
 }

@@ -4989,6 +4989,7 @@ impl ToolkitTabViewer<'_> {
                 self.tab_state.toasts.clone(),
                 prefer_cpu,
                 renderer_settings.video_codec,
+                renderer_settings.include_pre_battle,
             );
             self.tab_state.background_tasks.push(task);
             return;
@@ -5022,6 +5023,7 @@ impl ToolkitTabViewer<'_> {
                 self.tab_state.toasts.clone(),
                 prefer_cpu,
                 renderer_settings.video_codec,
+                renderer_settings.include_pre_battle,
             );
             self.tab_state.background_tasks.push(task);
         }

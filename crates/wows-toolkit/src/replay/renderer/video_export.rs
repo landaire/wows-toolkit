@@ -39,6 +39,7 @@ pub(super) fn execute_video_export(
             codec,
             actual_game_duration,
             encoder_config,
+            include_pre_battle,
         } => {
             save_as_video(
                 output_path,
@@ -57,9 +58,17 @@ pub(super) fn execute_video_export(
                 codec,
                 actual_game_duration,
                 encoder_config,
+                include_pre_battle,
             );
         }
-        PendingVideoExport::CopyToClipboard { options, prefer_cpu, codec, actual_game_duration, encoder_config } => {
+        PendingVideoExport::CopyToClipboard {
+            options,
+            prefer_cpu,
+            codec,
+            actual_game_duration,
+            encoder_config,
+            include_pre_battle,
+        } => {
             let file_name = format!("{}.mp4", video_export_data.replay_name);
             render_video_to_clipboard(
                 file_name,
@@ -72,6 +81,7 @@ pub(super) fn execute_video_export(
                 codec,
                 actual_game_duration,
                 encoder_config,
+                include_pre_battle,
             );
         }
     }
@@ -97,6 +107,7 @@ pub(super) fn save_as_video(
     codec: Option<wows_minimap_renderer::VideoCodec>,
     actual_game_duration: Option<f32>,
     encoder_config: wows_minimap_renderer::EncoderConfig,
+    include_pre_battle: bool,
 ) {
     video_exporting.store(true, Ordering::Relaxed);
 
@@ -116,6 +127,7 @@ pub(super) fn save_as_video(
             codec,
             actual_game_duration,
             encoder_config,
+            include_pre_battle,
         );
 
         match result {
@@ -145,6 +157,7 @@ pub(super) fn render_video_to_clipboard(
     codec: Option<wows_minimap_renderer::VideoCodec>,
     actual_game_duration: Option<f32>,
     encoder_config: wows_minimap_renderer::EncoderConfig,
+    include_pre_battle: bool,
 ) {
     video_exporting.store(true, Ordering::Relaxed);
 
@@ -176,6 +189,7 @@ pub(super) fn render_video_to_clipboard(
             codec,
             actual_game_duration,
             encoder_config,
+            include_pre_battle,
         );
 
         match result {
@@ -219,6 +233,7 @@ fn render_batch(
     progress: &Arc<Mutex<crate::task::BatchVideoExportProgress>>,
     prefer_cpu: bool,
     codec: Option<wows_minimap_renderer::VideoCodec>,
+    include_pre_battle: bool,
 ) -> (usize, usize, Vec<std::path::PathBuf>) {
     let mut succeeded_paths = Vec::new();
     let mut failed = 0usize;
@@ -268,6 +283,7 @@ fn render_batch(
             codec,
             None,
             wows_minimap_renderer::EncoderConfig::default(),
+            include_pre_battle,
         );
 
         let estimated_frames = (replay.game_duration * 7.0) as u64;
@@ -298,6 +314,7 @@ pub fn batch_render_to_folder(
     toasts: crate::tab_state::SharedToasts,
     prefer_cpu: bool,
     codec: Option<wows_minimap_renderer::VideoCodec>,
+    include_pre_battle: bool,
 ) -> crate::task::BackgroundTask {
     let total_frames: u64 = replays.iter().map(|r| (r.game_duration * 7.0) as u64).sum();
     let total_replays = replays.len();
@@ -313,8 +330,16 @@ pub fn batch_render_to_folder(
 
     let progress_clone = Arc::clone(&progress);
     crate::util::thread::spawn_logged("batch-video-export", move || {
-        let (succeeded, failed, _) =
-            render_batch(&replays, &output_dir, &options, &asset_cache, &progress_clone, prefer_cpu, codec);
+        let (succeeded, failed, _) = render_batch(
+            &replays,
+            &output_dir,
+            &options,
+            &asset_cache,
+            &progress_clone,
+            prefer_cpu,
+            codec,
+            include_pre_battle,
+        );
 
         if failed == 0 {
             toasts.lock().success(format!("Batch render complete: {} videos saved", succeeded));
@@ -340,6 +365,7 @@ pub fn batch_render_to_clipboard(
     toasts: crate::tab_state::SharedToasts,
     prefer_cpu: bool,
     codec: Option<wows_minimap_renderer::VideoCodec>,
+    include_pre_battle: bool,
 ) -> crate::task::BackgroundTask {
     let total_frames: u64 = replays.iter().map(|r| (r.game_duration * 7.0) as u64).sum();
     let total_replays = replays.len();
@@ -364,8 +390,16 @@ pub fn batch_render_to_clipboard(
             }
         };
 
-        let (succeeded, failed, paths) =
-            render_batch(&replays, temp_dir.path(), &options, &asset_cache, &progress_clone, prefer_cpu, codec);
+        let (succeeded, failed, paths) = render_batch(
+            &replays,
+            temp_dir.path(),
+            &options,
+            &asset_cache,
+            &progress_clone,
+            prefer_cpu,
+            codec,
+            include_pre_battle,
+        );
 
         if !paths.is_empty()
             && let Ok(mut clipboard) = arboard::Clipboard::new()
@@ -406,17 +440,19 @@ pub(super) fn render_video_blocking(
     codec: Option<wows_minimap_renderer::VideoCodec>,
     actual_game_duration: Option<f32>,
     encoder_config: wows_minimap_renderer::EncoderConfig,
+    include_pre_battle: bool,
 ) -> rootcause::Result<()> {
     use wows_minimap_renderer::drawing::ImageTarget;
     use wows_minimap_renderer::video::VideoEncoder;
 
     // Get game metadata and load assets for the software renderer
-    let (vfs, version, game_metadata, game_constants) = {
+    let (vfs, version, game_metadata, game_constants, dump_dir) = {
         let data = wows_data.read();
         let gm = data.game_metadata.clone().ok_or_else(|| report!("Game metadata not loaded"))?;
-        (data.vfs.clone(), data.version().copied(), gm, Arc::clone(&data.game_constants))
+        (data.vfs.clone(), data.version().copied(), gm, Arc::clone(&data.game_constants), data.dump_dir.clone())
     };
     let version = version.as_ref();
+    let dump_dir = dump_dir.as_deref();
 
     // Load assets — reuse cached raw RGBA data and convert to image types
     let (
@@ -431,13 +467,13 @@ pub(super) fn render_video_blocking(
         game_fonts,
     ) = {
         let mut cache = asset_cache.lock();
-        let ship_raw = cache.get_or_load_ship_icons(&vfs, version);
-        let plane_raw = cache.get_or_load_plane_icons(&vfs, version);
-        let building_raw = cache.get_or_load_building_icons(&vfs, version);
-        let consumable_raw = cache.get_or_load_consumable_icons(&vfs, version);
-        let death_cause_raw = cache.get_or_load_death_cause_icons(&vfs, version);
-        let powerup_raw = cache.get_or_load_powerup_icons(&vfs, version);
-        let game_fonts = cache.get_or_load_game_fonts(&vfs, version);
+        let ship_raw = cache.get_or_load_ship_icons(&vfs, version, dump_dir);
+        let plane_raw = cache.get_or_load_plane_icons(&vfs, version, dump_dir);
+        let building_raw = cache.get_or_load_building_icons(&vfs, version, dump_dir);
+        let consumable_raw = cache.get_or_load_consumable_icons(&vfs, version, dump_dir);
+        let death_cause_raw = cache.get_or_load_death_cause_icons(&vfs, version, dump_dir);
+        let powerup_raw = cache.get_or_load_powerup_icons(&vfs, version, dump_dir);
+        let game_fonts = cache.get_or_load_game_fonts(&vfs, version, dump_dir);
         let (map_raw, map_info) = cache.get_or_load_map(map_name, &vfs, version);
 
         // Convert cached RGBA bytes back to image types for ImageTarget
@@ -548,9 +584,6 @@ pub(super) fn render_video_blocking(
         None => wows_minimap_renderer::video::CodecChoice::Auto,
     });
     encoder.set_encoder_config(encoder_config);
-    if let Some(duration) = actual_game_duration {
-        encoder.set_battle_duration(GameClock(duration));
-    }
     {
         let progress = Arc::clone(progress);
         encoder.set_progress_callback(move |p| {
@@ -577,6 +610,19 @@ pub(super) fn render_video_blocking(
         &*game_metadata,
         version,
     );
+
+    // By default the export starts at battle start, skipping the pre-battle
+    // spawn and countdown. The battle-start clock comes from the scanned
+    // session; falling back to clock 0 renders the full replay.
+    let render_start = if include_pre_battle {
+        GameClock(0.0)
+    } else {
+        session.battle_start_clock().unwrap_or(GameClock(0.0))
+    };
+    encoder.set_render_start(render_start);
+    if let Some(duration) = actual_game_duration {
+        encoder.set_battle_duration(GameClock(duration));
+    }
 
     let mut prev_render_clock = GameClock(0.0);
     while let Some(safe_clock) = session.step().map_err(|e| report!("{e}"))? {

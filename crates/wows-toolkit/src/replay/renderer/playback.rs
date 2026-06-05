@@ -53,7 +53,7 @@ pub(super) fn playback_thread(
     open: Arc<AtomicBool>,
 ) {
     // 1. Get VFS, game metadata, and game constants from the app
-    let (vfs, version, game_metadata, game_constants, icon_vfs, icon_version) = {
+    let (vfs, version, game_metadata, game_constants, dump_dir) = {
         let data = wows_data.read();
         let gm = match data.game_metadata.clone() {
             Some(gm) => gm,
@@ -62,28 +62,26 @@ pub(super) fn playback_thread(
                 return;
             }
         };
-        // Old builds ship no per-file icons; borrow them from the newest dump.
-        let (icon_vfs, icon_version) = super::icon_asset_source(&data);
-        (data.vfs.clone(), data.version().copied(), gm, Arc::clone(&data.game_constants), icon_vfs, icon_version)
+        (data.vfs.clone(), data.version().copied(), gm, Arc::clone(&data.game_constants), data.dump_dir.clone())
     };
     let version = version.as_ref();
-    let icon_version = icon_version.as_ref();
+    let dump_dir = dump_dir.as_deref();
 
-    // 2. Load visual assets (cached across renderer instances). Icons resolve
-    // against `icon_vfs` (the newest dump for old replays); map and fonts use
-    // the replay's own VFS.
+    // 2. Load visual assets (cached across renderer instances). Icons auto-borrow
+    // from the newest dump for old replays that ship none; map and fonts use the
+    // replay's own VFS.
     let (map_info, game_fonts, map_image_for_announce) = {
         let mut cache = asset_cache.lock();
-        let ship_icons = cache.get_or_load_ship_icons(&icon_vfs, icon_version);
-        let plane_icons = cache.get_or_load_plane_icons(&icon_vfs, icon_version);
-        let building_icons = cache.get_or_load_building_icons(&icon_vfs, icon_version);
-        let consumable_icons = cache.get_or_load_consumable_icons(&icon_vfs, icon_version);
-        let death_cause_icons = cache.get_or_load_death_cause_icons(&icon_vfs, icon_version);
-        let powerup_icons = cache.get_or_load_powerup_icons(&icon_vfs, icon_version);
-        let crew_skill_icons = cache.get_or_load_crew_skill_icons(&icon_vfs, icon_version);
-        let modernization_icons = cache.get_or_load_modernization_icons(&icon_vfs, icon_version);
-        let signal_flag_icons = cache.get_or_load_signal_flag_icons(&icon_vfs, icon_version);
-        let game_fonts = cache.get_or_load_game_fonts(&vfs, version);
+        let ship_icons = cache.get_or_load_ship_icons(&vfs, version, dump_dir);
+        let plane_icons = cache.get_or_load_plane_icons(&vfs, version, dump_dir);
+        let building_icons = cache.get_or_load_building_icons(&vfs, version, dump_dir);
+        let consumable_icons = cache.get_or_load_consumable_icons(&vfs, version, dump_dir);
+        let death_cause_icons = cache.get_or_load_death_cause_icons(&vfs, version, dump_dir);
+        let powerup_icons = cache.get_or_load_powerup_icons(&vfs, version, dump_dir);
+        let crew_skill_icons = cache.get_or_load_crew_skill_icons(&vfs, version, dump_dir);
+        let modernization_icons = cache.get_or_load_modernization_icons(&vfs, version, dump_dir);
+        let signal_flag_icons = cache.get_or_load_signal_flag_icons(&vfs, version, dump_dir);
+        let game_fonts = cache.get_or_load_game_fonts(&vfs, version, dump_dir);
         let (map_image, map_info) = cache.get_or_load_map(&map_name, &vfs, version);
 
         let map_image_for_announce = map_image.clone();

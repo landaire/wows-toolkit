@@ -173,6 +173,10 @@ pub struct MinimapRenderer<'a> {
     ship_ability_icons: HashMap<(EntityId, Recognized<Consumable>), String>,
     /// Per-ship consumable variants for detection radius lookup: (entity_id, Consumable) -> (ability_name, variant_name)
     ship_ability_variants: HashMap<(EntityId, Recognized<Consumable>), (String, String)>,
+    /// Detection radius per ship consumable, resolved from the ship's equipped
+    /// abilities: (entity_id, Consumable) -> radius. Fallback for when the
+    /// default-ability-slot variant lookup is unavailable (e.g. old replays).
+    ship_ability_radii: HashMap<(EntityId, Recognized<Consumable>), Meters>,
     /// Per-player clan tag: entity_id -> clan tag string
     player_clan_tags: HashMap<EntityId, String>,
     /// Per-player clan color: entity_id -> RGB color (None = use team color)
@@ -240,6 +244,7 @@ impl<'a> MinimapRenderer<'a> {
             player_relations: HashMap::new(),
             ship_ability_icons: HashMap::new(),
             ship_ability_variants: HashMap::new(),
+            ship_ability_radii: HashMap::new(),
             player_clan_tags: HashMap::new(),
             player_clan_colors: HashMap::new(),
             resolved_entities: HashSet::new(),
@@ -312,6 +317,7 @@ impl<'a> MinimapRenderer<'a> {
         self.player_relations.clear();
         self.ship_ability_icons.clear();
         self.ship_ability_variants.clear();
+        self.ship_ability_radii.clear();
         self.player_clan_tags.clear();
         self.player_clan_colors.clear();
         self.resolved_entities.clear();
@@ -461,6 +467,12 @@ impl<'a> MinimapRenderer<'a> {
                 };
                 let consumable_type = cat.consumable_type_raw().to_string();
                 let consumable = Consumable::from_consumable_type(&consumable_type, self.version);
+                // Cache the detection radius from the equipped ability so radar/hydro
+                // activation circles render even when the default-ability-slot
+                // variant lookup is unavailable.
+                if let Some(radius) = ability.categories().values().find_map(|c| c.detection_radius()) {
+                    self.ship_ability_radii.insert((*entity_id, consumable.clone()), radius);
+                }
                 self.ship_ability_icons.insert((*entity_id, consumable), param.name().to_string());
             }
         }
@@ -482,12 +494,49 @@ impl<'a> MinimapRenderer<'a> {
     /// Returns radius in meters, or None if not a detection consumable
     /// or if the lookup fails.
     fn get_consumable_radius(&self, entity_id: EntityId, consumable: Recognized<Consumable>) -> Option<Meters> {
-        // Look up ship-specific ability variant (cached from populate_players)
-        let (ability_name, variant_name) = self.ship_ability_variants.get(&(entity_id, consumable))?;
-        let param = GameParamProvider::game_param_by_name(self.game_params, ability_name)?;
-        let ability = param.ability()?;
-        let cat = ability.get_category(variant_name)?;
-        cat.detection_radius()
+        // Preferred: the exact equipped variant cached from the ship's default
+        // ability slots (populate_players).
+        if let Some((ability_name, variant_name)) = self.ship_ability_variants.get(&(entity_id, consumable.clone()))
+            && let Some(param) = GameParamProvider::game_param_by_name(self.game_params, ability_name)
+            && let Some(ability) = param.ability()
+            && let Some(cat) = ability.get_category(variant_name)
+            && let Some(radius) = cat.detection_radius()
+        {
+            return Some(radius);
+        }
+        // Fallback: radius resolved from the ship's equipped abilities
+        // (update_ship_abilities), which is available even when the slot variant
+        // lookup above is not (e.g. old replays).
+        self.ship_ability_radii.get(&(entity_id, consumable)).copied()
+    }
+
+    /// Resolve a radar/hydro consumable's detection radius via the ship's range
+    /// data, the same source the static ship-config circles use. A final
+    /// fallback for when the per-ship ability caches carry no radius.
+    fn consumable_radius_from_ranges(
+        &self,
+        controller: &dyn BattleControllerState,
+        entity_id: EntityId,
+        consumable: Recognized<Consumable>,
+    ) -> Option<Meters> {
+        let consumable = consumable.into_known()?;
+        if !matches!(consumable, Consumable::Radar | Consumable::HydroacousticSearch) {
+            return None;
+        }
+        let &ship_param_id = self.ship_param_ids.get(&entity_id)?;
+        let ship_param = GameParamProvider::game_param_by_id(self.game_params, ship_param_id)?;
+        let vehicle = ship_param.vehicle()?;
+        let hull_name = controller.entities_by_id().get(&entity_id).and_then(|e| e.vehicle_ref()).and_then(|v| {
+            let v = v.borrow();
+            let hull_id = v.props().ship_config().hull()?;
+            GameParamProvider::game_param_by_id(self.game_params, hull_id).map(|p| p.name().to_string())
+        });
+        let ranges = vehicle.resolve_ranges(Some(self.game_params), hull_name.as_deref(), self.version);
+        match consumable {
+            Consumable::Radar => ranges.radar_m,
+            Consumable::HydroacousticSearch => ranges.hydro_m,
+            _ => None,
+        }
     }
 
     /// Update squadron info for any new planes in the controller.
@@ -1480,7 +1529,10 @@ impl<'a> MinimapRenderer<'a> {
                             Some(Consumable::CallFighters | Consumable::CatapultFighter)
                         ) {
                             // no detection radius for fighters
-                        } else if let Some(radius) = self.get_consumable_radius(*entity_id, active.consumable.clone()) {
+                        } else if let Some(radius) = self
+                            .get_consumable_radius(*entity_id, active.consumable.clone())
+                            .or_else(|| self.consumable_radius_from_ranges(controller, *entity_id, active.consumable.clone()))
+                        {
                             let space_size = map_info.space_size as f32;
                             let px_radius = (radius.value() / 30.0 / space_size * MINIMAP_SIZE as f32) as i32;
                             let color = consumable_radius_color(&active.consumable, is_friendly);

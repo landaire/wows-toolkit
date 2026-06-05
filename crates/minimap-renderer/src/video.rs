@@ -72,6 +72,10 @@ pub struct VideoEncoder {
     dump_mode: Option<DumpMode>,
     dump_all_mode: bool,
     game_duration: f32,
+    /// Clock at which the output video begins. Packets before this are processed
+    /// into controller state but produce no frames, so the rendered window is
+    /// `[start_clock, game_duration]`. Defaults to the replay start (no skip).
+    start_clock: GameClock,
     last_rendered_frame: i64,
     backend: Option<EncoderBackend>,
     samples: Vec<EncodedSample>,
@@ -102,6 +106,7 @@ impl VideoEncoder {
             dump_mode,
             dump_all_mode,
             game_duration: match_time_limit,
+            start_clock: GameClock(0.0),
             last_rendered_frame: -1,
             backend: None,
             samples: Vec::with_capacity(total_frames),
@@ -151,10 +156,28 @@ impl VideoEncoder {
             crate::encoder::EncoderConfig::from_target_size(target_size_bytes, OUTPUT_DURATION as f32);
     }
 
+    /// Begin the output video at `start`, skipping everything before it. Packets
+    /// earlier than `start` still build up controller state but emit no frames.
+    /// Pass `GameClock(0.0)` to render the full replay including the pre-battle
+    /// phase.
+    pub fn set_render_start(&mut self, start: GameClock) {
+        self.start_clock = start;
+    }
+
+    /// Seconds of replay time the output window spans, i.e. from the render
+    /// start to the end of the match.
+    fn window_duration(&self) -> f32 {
+        (self.game_duration - self.start_clock.seconds()).max(0.0)
+    }
+
     pub fn set_battle_duration(&mut self, duration: GameClock) {
         let total_frames = self.total_frames();
-        let frame_duration = self.game_duration / total_frames as f32;
-        self.expected_frames = (duration.seconds() / frame_duration) as u64;
+        let frame_duration = self.window_duration() / total_frames as f32;
+        if frame_duration <= 0.0 {
+            return;
+        }
+        let window_end = (duration.seconds() - self.start_clock.seconds()).max(0.0);
+        self.expected_frames = (window_end / frame_duration) as u64;
     }
 
     pub fn set_progress_callback<F: Fn(RenderProgress) + 'static>(&mut self, callback: F) {
@@ -233,13 +256,19 @@ impl VideoEncoder {
         renderer: &mut MinimapRenderer,
         target: &mut ImageTarget,
     ) {
-        if self.game_duration <= 0.0 || self.encoder_error.is_some() {
+        if self.window_duration() <= 0.0 || self.encoder_error.is_some() {
+            return;
+        }
+
+        // Clocks before the render start are pre-battle; skip them entirely so
+        // frame 0 lands at the battle-start clock.
+        if new_clock.seconds() < self.start_clock.seconds() {
             return;
         }
 
         let total_frames = self.total_frames();
-        let frame_duration = self.game_duration / total_frames as f32;
-        let target_frame = (new_clock.seconds() / frame_duration) as i64;
+        let frame_duration = self.window_duration() / total_frames as f32;
+        let target_frame = ((new_clock.seconds() - self.start_clock.seconds()) / frame_duration) as i64;
 
         let mut writer = BufWriter::new(stdout().lock());
 

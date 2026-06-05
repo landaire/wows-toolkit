@@ -112,6 +112,7 @@ pub struct CliOverrides {
     pub no_team_rosters: bool,
     pub stats_panel: bool,
     pub no_stats_panel: bool,
+    pub include_pre_battle: bool,
 }
 
 /// Renderer configuration, loadable from a TOML file.
@@ -146,6 +147,9 @@ pub struct RendererConfig {
     pub show_score_timer: bool,
     pub show_stats_panel: bool,
     pub show_team_rosters: bool,
+    /// Include the pre-battle phase (spawn and countdown) at the start of the
+    /// video. When false, rendering begins at battle start.
+    pub include_pre_battle: bool,
 }
 
 impl Default for RendererConfig {
@@ -178,6 +182,7 @@ impl Default for RendererConfig {
             show_score_timer: true,
             show_stats_panel: true,
             show_team_rosters: false,
+            include_pre_battle: false,
         }
     }
 }
@@ -307,6 +312,10 @@ show_stats_panel = true
 # consumables). Mutually exclusive with the stats panel.
 show_team_rosters = false
 
+# Include the pre-battle phase (spawn and countdown) at the start of the video.
+# When false, rendering begins at battle start.
+include_pre_battle = false
+
 "#
         .to_string()
     }
@@ -368,6 +377,9 @@ show_team_rosters = false
         }
         if overrides.no_stats_panel {
             self.show_stats_panel = false;
+        }
+        if overrides.include_pre_battle {
+            self.include_pre_battle = true;
         }
     }
 }

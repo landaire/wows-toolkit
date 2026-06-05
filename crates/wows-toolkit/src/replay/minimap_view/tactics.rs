@@ -1421,7 +1421,8 @@ impl TacticsBoardViewer {
         // Upload ship icon textures (lazily, once)
         if state.ship_icons.is_none() {
             let wdata = wows_data.read();
-            let raw_icons = asset_cache.lock().get_or_load_ship_icons(&wdata.vfs, wdata.version());
+            let raw_icons =
+                asset_cache.lock().get_or_load_ship_icons(&wdata.vfs, wdata.version(), wdata.dump_dir.as_deref());
             let mut icons = HashMap::new();
             for (key, asset) in raw_icons.iter() {
                 let image = egui::ColorImage::from_rgba_unmultiplied(

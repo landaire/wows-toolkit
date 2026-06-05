@@ -130,6 +130,10 @@ pub struct RendererAssetCache {
     signal_flag_icons: VersionedAssets,
     game_fonts: HashMap<Option<Version>, GameFonts>,
     maps: HashMap<(Option<Version>, String), CachedMapData>,
+    /// Resolved icon source per game-data version. Memoizing keeps the
+    /// newest-dump fallback (and its log line) to once per version instead of
+    /// once per icon type per frame.
+    icon_sources: HashMap<Option<Version>, IconSource>,
 }
 
 struct CachedMapData {
@@ -147,37 +151,59 @@ fn convert_icons(raw: HashMap<String, image::RgbaImage>) -> IconMap {
         .collect()
 }
 
-/// Choose the VFS and version to load the renderer's GUI icons from.
+/// Where a set of GUI icons is loaded from: a VFS plus the version those icons
+/// belong to (also the cache key). Either the replay's own game data or, for old
+/// builds that ship no per-file icons, the newest dump on disk.
+#[derive(Clone)]
+struct IconSource {
+    vfs: VfsPath,
+    version: Option<Version>,
+}
+
+/// Resolve where to load the renderer's GUI icons from.
 ///
 /// Builds new enough to ship per-file icons use their own VFS. Older builds
 /// (pre-12.0 clients shipped no `gui/fla/minimap/ship_icons`, so the minimap
 /// falls back to plain circles) borrow every icon set from the newest dump on
 /// disk, located via the dump cache base -- the parent of this build's own dump
 /// dir. The map image and fonts always stay on the replay's own VFS.
-pub(super) fn icon_asset_source(data: &crate::data::wows_data::WorldOfWarshipsData) -> (VfsPath, Option<Version>) {
-    let own = || (data.vfs.clone(), data.version().copied());
+fn resolve_icon_source(vfs: &VfsPath, version: Option<&Version>, dump_dir: Option<&std::path::Path>) -> IconSource {
+    let own = || IconSource { vfs: vfs.clone(), version: version.copied() };
 
     // Cheap existence probe (no SVG decode): does this build ship class icons?
     let has_icons = wowsunpack::game_assets::GuiAsset::ShipClassIcon {
         species: wowsunpack::game_params::types::Species::Destroyer,
         state: wowsunpack::game_assets::ShipIconState::Alive,
     }
-    .resolve(&data.vfs, data.version())
+    .resolve(vfs, version)
     .is_some();
     if has_icons {
         return own();
     }
 
-    let Some(base) = data.dump_dir.as_ref().and_then(|d| d.parent()) else {
-        return own();
-    };
+    match newest_dump_source(dump_dir) {
+        Some((vfs, dump_version)) => {
+            tracing::info!(
+                own_build = version.map(|v| v.build),
+                borrowed_build = dump_version.map(|v| v.build),
+                "renderer build ships no GUI icons; borrowing icons from newest dump",
+            );
+            IconSource { vfs, version: dump_version }
+        }
+        None => own(),
+    }
+}
+
+/// The VFS and version of the newest dump on disk, located via the dump cache
+/// base (the parent of a build's own dump dir). Used to borrow GUI assets for
+/// old builds that ship none. Returns None when there's no usable dump.
+fn newest_dump_source(dump_dir: Option<&std::path::Path>) -> Option<(VfsPath, Option<Version>)> {
+    let base = dump_dir.and_then(|d| d.parent())?;
     let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
-    let Some(entry) = index.builds.iter().max_by_key(|e| e.build) else {
-        return own();
-    };
+    let entry = index.builds.iter().max_by_key(|e| e.build)?;
     let vfs_root = base.join(&entry.dir).join("vfs");
     if !vfs_root.exists() {
-        return own();
+        return None;
     }
     let vfs = VfsPath::new(wowsunpack::vfs::impls::physical::PhysicalFS::new(&vfs_root));
     let mut parts = entry.version.split('.').filter_map(|p| p.trim().parse::<u32>().ok());
@@ -187,52 +213,142 @@ pub(super) fn icon_asset_source(data: &crate::data::wows_data::WorldOfWarshipsDa
         patch: parts.next().unwrap_or(0),
         build: entry.build,
     });
-    (vfs, version)
+    Some((vfs, version))
 }
 
 impl RendererAssetCache {
-    pub fn get_or_load_ship_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
-        self.ship_icons.get_or_load(version, || convert_icons(assets::load_ship_icons(vfs, version)))
+    /// Resolve (and memoize) where GUI icons load from for this game data.
+    /// Old builds that ship no icons transparently borrow them from the newest
+    /// dump on disk; callers pass their own VFS/version/dump dir and never need
+    /// to compute the fallback themselves.
+    fn icon_source(&mut self, vfs: &VfsPath, version: Option<&Version>, dump_dir: Option<&std::path::Path>) -> IconSource {
+        if let Some(src) = self.icon_sources.get(&version.copied()) {
+            return src.clone();
+        }
+        let src = resolve_icon_source(vfs, version, dump_dir);
+        self.icon_sources.insert(version.copied(), src.clone());
+        src
     }
 
-    pub fn get_or_load_plane_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
-        self.plane_icons.get_or_load(version, || convert_icons(assets::load_plane_icons(vfs, version)))
+    pub fn get_or_load_ship_icons(
+        &mut self,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        dump_dir: Option<&std::path::Path>,
+    ) -> Arc<IconMap> {
+        let src = self.icon_source(vfs, version, dump_dir);
+        self.ship_icons
+            .get_or_load(src.version.as_ref(), || convert_icons(assets::load_ship_icons(&src.vfs, src.version.as_ref())))
     }
 
-    pub fn get_or_load_building_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
-        self.building_icons.get_or_load(version, || convert_icons(assets::load_building_icons(vfs, version)))
+    pub fn get_or_load_plane_icons(
+        &mut self,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        dump_dir: Option<&std::path::Path>,
+    ) -> Arc<IconMap> {
+        let src = self.icon_source(vfs, version, dump_dir);
+        self.plane_icons
+            .get_or_load(src.version.as_ref(), || convert_icons(assets::load_plane_icons(&src.vfs, src.version.as_ref())))
     }
 
-    pub fn get_or_load_consumable_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
-        self.consumable_icons.get_or_load(version, || convert_icons(assets::load_consumable_icons(vfs, version)))
+    pub fn get_or_load_building_icons(
+        &mut self,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        dump_dir: Option<&std::path::Path>,
+    ) -> Arc<IconMap> {
+        let src = self.icon_source(vfs, version, dump_dir);
+        self.building_icons.get_or_load(src.version.as_ref(), || {
+            convert_icons(assets::load_building_icons(&src.vfs, src.version.as_ref()))
+        })
     }
 
-    pub fn get_or_load_death_cause_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
-        self.death_cause_icons.get_or_load(version, || convert_icons(assets::load_death_cause_icons(vfs, 16, version)))
+    pub fn get_or_load_consumable_icons(
+        &mut self,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        dump_dir: Option<&std::path::Path>,
+    ) -> Arc<IconMap> {
+        let src = self.icon_source(vfs, version, dump_dir);
+        self.consumable_icons.get_or_load(src.version.as_ref(), || {
+            convert_icons(assets::load_consumable_icons(&src.vfs, src.version.as_ref()))
+        })
     }
 
-    pub fn get_or_load_powerup_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
-        self.powerup_icons.get_or_load(version, || convert_icons(assets::load_powerup_icons(vfs, 16, version)))
+    pub fn get_or_load_death_cause_icons(
+        &mut self,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        dump_dir: Option<&std::path::Path>,
+    ) -> Arc<IconMap> {
+        let src = self.icon_source(vfs, version, dump_dir);
+        self.death_cause_icons.get_or_load(src.version.as_ref(), || {
+            convert_icons(assets::load_death_cause_icons(&src.vfs, 16, src.version.as_ref()))
+        })
     }
 
-    pub fn get_or_load_crew_skill_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
-        self.crew_skill_icons.get_or_load(version, || convert_icons(assets::load_crew_skill_icons(vfs, 36, version)))
+    pub fn get_or_load_powerup_icons(
+        &mut self,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        dump_dir: Option<&std::path::Path>,
+    ) -> Arc<IconMap> {
+        let src = self.icon_source(vfs, version, dump_dir);
+        self.powerup_icons.get_or_load(src.version.as_ref(), || {
+            convert_icons(assets::load_powerup_icons(&src.vfs, 16, src.version.as_ref()))
+        })
     }
 
-    pub fn get_or_load_modernization_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
-        self.modernization_icons
-            .get_or_load(version, || convert_icons(assets::load_modernization_icons(vfs, 36, version)))
+    pub fn get_or_load_crew_skill_icons(
+        &mut self,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        dump_dir: Option<&std::path::Path>,
+    ) -> Arc<IconMap> {
+        let src = self.icon_source(vfs, version, dump_dir);
+        self.crew_skill_icons.get_or_load(src.version.as_ref(), || {
+            convert_icons(assets::load_crew_skill_icons(&src.vfs, 36, src.version.as_ref()))
+        })
     }
 
-    pub fn get_or_load_signal_flag_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
-        self.signal_flag_icons.get_or_load(version, || convert_icons(assets::load_signal_flag_icons(vfs, 36, version)))
+    pub fn get_or_load_modernization_icons(
+        &mut self,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        dump_dir: Option<&std::path::Path>,
+    ) -> Arc<IconMap> {
+        let src = self.icon_source(vfs, version, dump_dir);
+        self.modernization_icons.get_or_load(src.version.as_ref(), || {
+            convert_icons(assets::load_modernization_icons(&src.vfs, 36, src.version.as_ref()))
+        })
     }
 
-    pub fn get_or_load_game_fonts(&mut self, vfs: &VfsPath, version: Option<&Version>) -> GameFonts {
+    pub fn get_or_load_signal_flag_icons(
+        &mut self,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        dump_dir: Option<&std::path::Path>,
+    ) -> Arc<IconMap> {
+        let src = self.icon_source(vfs, version, dump_dir);
+        self.signal_flag_icons.get_or_load(src.version.as_ref(), || {
+            convert_icons(assets::load_signal_flag_icons(&src.vfs, 36, src.version.as_ref()))
+        })
+    }
+
+    pub fn get_or_load_game_fonts(
+        &mut self,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        dump_dir: Option<&std::path::Path>,
+    ) -> GameFonts {
         if let Some(cached) = self.game_fonts.get(&version.copied()) {
             return cached.clone();
         }
-        let fonts = assets::load_game_fonts(vfs);
+        // Old clients ship bitmap-only fonts; borrow the TTF from the newest
+        // dump before falling back to a system font.
+        let fallback = newest_dump_source(dump_dir).map(|(vfs, _)| vfs);
+        let fonts = assets::load_game_fonts_with_fallback(vfs, fallback.as_ref());
         self.game_fonts.insert(version.copied(), fonts.clone());
         fonts
     }
@@ -352,6 +468,7 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_team_rosters: opts.show_team_rosters,
         prefer_cpu_encoder: false, // Not part of RenderOptions; set by caller
         video_codec: None,         // Same: caller persists the user's codec choice.
+        include_pre_battle: false, // Same: caller persists the user's choice.
     }
 }
 /// Commands sent from the UI thread to the background playback thread.
@@ -639,6 +756,7 @@ enum PendingVideoExport {
         codec: Option<wows_minimap_renderer::VideoCodec>,
         actual_game_duration: Option<f32>,
         encoder_config: wows_minimap_renderer::EncoderConfig,
+        include_pre_battle: bool,
     },
     /// Render to a temporary file and copy to clipboard.
     CopyToClipboard {
@@ -647,6 +765,7 @@ enum PendingVideoExport {
         codec: Option<wows_minimap_renderer::VideoCodec>,
         actual_game_duration: Option<f32>,
         encoder_config: wows_minimap_renderer::EncoderConfig,
+        include_pre_battle: bool,
     },
 }
 
@@ -691,6 +810,8 @@ pub struct ReplayRendererViewer {
     prefer_cpu_encoder: Arc<AtomicBool>,
     /// User preference: codec for video export. `None` means "best available".
     video_codec: Arc<Mutex<Option<wows_minimap_renderer::VideoCodec>>>,
+    /// User preference: include the pre-battle phase in exported video.
+    include_pre_battle: Arc<AtomicBool>,
     /// Shared window settings tracker for persisting viewport geometry.
     window_settings: crate::tab_state::SharedWindowSettings,
     /// Notify handle to trigger an immediate settings save.
@@ -832,6 +953,7 @@ pub fn launch_replay_renderer(
         gpu_encoder_warning: Arc::new(Mutex::new(None)),
         prefer_cpu_encoder: Arc::new(AtomicBool::new(saved_options.prefer_cpu_encoder)),
         video_codec: Arc::new(Mutex::new(saved_options.video_codec)),
+        include_pre_battle: Arc::new(AtomicBool::new(saved_options.include_pre_battle)),
         window_settings,
         save_notify,
     };
@@ -896,26 +1018,25 @@ pub fn launch_client_renderer(
         modernization_icons,
         signal_flag_icons,
         game_fonts,
-    ) = if let Some((vfs, version, icon_vfs, icon_version)) = wows_data.map(|d| {
+    ) = if let Some((vfs, version, dump_dir)) = wows_data.map(|d| {
         let guard = d.read();
-        let (icon_vfs, icon_version) = icon_asset_source(&guard);
-        (guard.vfs.clone(), guard.version().copied(), icon_vfs, icon_version)
+        (guard.vfs.clone(), guard.version().copied(), guard.dump_dir.clone())
     }) {
         let version = version.as_ref();
-        let icon_version = icon_version.as_ref();
+        let dump_dir = dump_dir.as_deref();
         let mut cache = asset_cache.lock();
-        // Icons resolve against `icon_vfs` (the newest dump for old replays that
-        // ship none); fonts stay on the replay's own VFS.
-        let si = cache.get_or_load_ship_icons(&icon_vfs, icon_version);
-        let pi = cache.get_or_load_plane_icons(&icon_vfs, icon_version);
-        let bi = cache.get_or_load_building_icons(&icon_vfs, icon_version);
-        let ci = cache.get_or_load_consumable_icons(&icon_vfs, icon_version);
-        let di = cache.get_or_load_death_cause_icons(&icon_vfs, icon_version);
-        let pwi = cache.get_or_load_powerup_icons(&icon_vfs, icon_version);
-        let ski = cache.get_or_load_crew_skill_icons(&icon_vfs, icon_version);
-        let mi = cache.get_or_load_modernization_icons(&icon_vfs, icon_version);
-        let sfi = cache.get_or_load_signal_flag_icons(&icon_vfs, icon_version);
-        let gf = cache.get_or_load_game_fonts(&vfs, version);
+        // Icons auto-borrow from the newest dump for old replays that ship none;
+        // fonts stay on the replay's own VFS.
+        let si = cache.get_or_load_ship_icons(&vfs, version, dump_dir);
+        let pi = cache.get_or_load_plane_icons(&vfs, version, dump_dir);
+        let bi = cache.get_or_load_building_icons(&vfs, version, dump_dir);
+        let ci = cache.get_or_load_consumable_icons(&vfs, version, dump_dir);
+        let di = cache.get_or_load_death_cause_icons(&vfs, version, dump_dir);
+        let pwi = cache.get_or_load_powerup_icons(&vfs, version, dump_dir);
+        let ski = cache.get_or_load_crew_skill_icons(&vfs, version, dump_dir);
+        let mi = cache.get_or_load_modernization_icons(&vfs, version, dump_dir);
+        let sfi = cache.get_or_load_signal_flag_icons(&vfs, version, dump_dir);
+        let gf = cache.get_or_load_game_fonts(&vfs, version, dump_dir);
         (si, pi, bi, ci, di, pwi, ski, mi, sfi, Some(gf))
     } else {
         (
@@ -1013,6 +1134,7 @@ pub fn launch_client_renderer(
         gpu_encoder_warning: Arc::new(Mutex::new(None)),
         prefer_cpu_encoder: Arc::new(AtomicBool::new(false)),
         video_codec: Arc::new(Mutex::new(None)),
+        include_pre_battle: Arc::new(AtomicBool::new(false)),
         window_settings,
         save_notify,
     }
@@ -1078,6 +1200,7 @@ impl ReplayRendererViewer {
         let gpu_encoder_warning = self.gpu_encoder_warning.clone();
         let prefer_cpu_encoder = self.prefer_cpu_encoder.clone();
         let video_codec = self.video_codec.clone();
+        let include_pre_battle = self.include_pre_battle.clone();
         let window_settings = self.window_settings.clone();
         let save_notify = self.save_notify.clone();
         let parent_ctx = ctx.clone();
@@ -2658,6 +2781,10 @@ impl ReplayRendererViewer {
                                                     // Apply per-ship range overrides for video export
                                                     let overrides = annotation_arc.lock().ship_range_overrides.clone();
                                                     if !overrides.is_empty() {
+                                                        // The exported video has no UI-side per-ship filter, so the
+                                                        // overrides drive visibility directly and the config gate must
+                                                        // be open for any circles to render.
+                                                        opts.show_ship_config = true;
                                                         opts.ship_config_visibility = ShipConfigVisibility::Filtered(Arc::new(move |eid| {
                                                             overrides.get(&eid).copied()
                                                         }));
@@ -2678,6 +2805,7 @@ impl ReplayRendererViewer {
                                                             codec: codec_pref,
                                                             actual_game_duration,
                                                             encoder_config: wows_minimap_renderer::EncoderConfig::default(),
+                                                            include_pre_battle: include_pre_battle.load(Ordering::Relaxed),
                                                         };
                                                         if prefer_cpu || status.gpu_available() || suppress_gpu_warning.load(Ordering::Relaxed) {
                                                             execute_video_export(action, video_export_data, &toasts, &video_exporting, &video_export_progress);
@@ -2707,6 +2835,10 @@ impl ReplayRendererViewer {
                                                     // Apply per-ship range overrides for video export
                                                     let overrides = annotation_arc.lock().ship_range_overrides.clone();
                                                     if !overrides.is_empty() {
+                                                        // The exported video has no UI-side per-ship filter, so the
+                                                        // overrides drive visibility directly and the config gate must
+                                                        // be open for any circles to render.
+                                                        opts.show_ship_config = true;
                                                         opts.ship_config_visibility = ShipConfigVisibility::Filtered(Arc::new(move |eid| {
                                                             overrides.get(&eid).copied()
                                                         }));
@@ -2720,6 +2852,7 @@ impl ReplayRendererViewer {
                                                         codec: codec_pref,
                                                         actual_game_duration,
                                                         encoder_config: wows_minimap_renderer::EncoderConfig::default(),
+                                                        include_pre_battle: include_pre_battle.load(Ordering::Relaxed),
                                                     };
                                                     if prefer_cpu || status.gpu_available() || suppress_gpu_warning.load(Ordering::Relaxed) {
                                                         execute_video_export(action, video_export_data, &toasts, &video_exporting, &video_export_progress);
@@ -2908,6 +3041,10 @@ impl ReplayRendererViewer {
                                                 if ui.checkbox(&mut cpu, t!("ui.renderer.settings.prefer_cpu")).on_hover_text(t!("ui.renderer.settings.prefer_cpu_tooltip")).changed() {
                                                     prefer_cpu_encoder.store(cpu, Ordering::Relaxed);
                                                 }
+                                                let mut pre_battle = include_pre_battle.load(Ordering::Relaxed);
+                                                if ui.checkbox(&mut pre_battle, t!("ui.renderer.settings.include_pre_battle")).on_hover_text(t!("ui.renderer.settings.include_pre_battle_tooltip")).changed() {
+                                                    include_pre_battle.store(pre_battle, Ordering::Relaxed);
+                                                }
                                                 let status = cached_encoder_status(ui.ctx());
                                                 let default_codec = status.best_codec(cpu);
                                                 let mut current = *video_codec.lock();
@@ -2957,6 +3094,7 @@ impl ReplayRendererViewer {
                                                 saved.show_dead_ships = show_dead;
                                                 saved.prefer_cpu_encoder = prefer_cpu_encoder.load(Ordering::Relaxed);
                                                 saved.video_codec = *video_codec.lock();
+                                                saved.include_pre_battle = include_pre_battle.load(Ordering::Relaxed);
                                                 // Persist self range flags from annotation overrides
                                                 if let Some(self_eid) = self_entity_id {
                                                     let ann = annotation_arc.lock();

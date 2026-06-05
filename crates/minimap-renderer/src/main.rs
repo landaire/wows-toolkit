@@ -150,6 +150,11 @@ struct Args {
     #[arg(long)]
     no_stats_panel: bool,
 
+    /// Include the pre-battle phase (spawn and countdown) at the start of the
+    /// video. By default rendering begins at battle start.
+    #[arg(long)]
+    include_pre_battle: bool,
+
     /// Path to TOML config file
     #[arg(long)]
     config: Option<PathBuf>,
@@ -367,7 +372,9 @@ fn main() -> Result<(), Report> {
         no_team_rosters: args.no_team_rosters,
         stats_panel: args.stats_panel,
         no_stats_panel: args.no_stats_panel,
+        include_pre_battle: args.include_pre_battle,
     });
+    let include_pre_battle = config.include_pre_battle;
     let mut options = config.into_render_options();
     options.ship_config_visibility = wows_minimap_renderer::ShipConfigVisibility::SelfOnly;
 
@@ -527,6 +534,18 @@ fn main() -> Result<(), Report> {
             }
         }
     }
+
+    // By default the video starts at battle start, skipping the pre-battle
+    // spawn and countdown. --include-pre-battle renders from the replay start.
+    let render_start = if include_pre_battle {
+        wows_replays::types::GameClock(0.0)
+    } else {
+        session.battle_start_clock().unwrap_or(wows_replays::types::GameClock(0.0))
+    };
+    if render_start.seconds() > 0.0 {
+        info!(start = %render_start, "Skipping pre-battle phase");
+    }
+    encoder.set_render_start(render_start);
 
     if session.total_duration().seconds() > 0.0 {
         encoder.set_battle_duration(session.total_duration());
