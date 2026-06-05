@@ -50,6 +50,8 @@ pub struct BattleWorld<'res, 'replay, G: ResourceLoader> {
     constants: Option<&'res GameConstants>,
     version: Version,
     options: IngestOptions,
+    /// Cached read-side query states, built on the first `view` call.
+    query_cache: Option<crate::view::QueryCache>,
 }
 
 impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
@@ -63,7 +65,15 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         insert_empty_resources(&mut world);
         seed_metadata_players(&mut world, meta, resources);
         world.resource_mut::<ReplayVehicles>().0 = meta.vehicles.clone();
-        Self { world, meta, resources, constants, version, options: IngestOptions::default() }
+        Self {
+            world,
+            meta,
+            resources,
+            constants,
+            version,
+            options: IngestOptions::default(),
+            query_cache: None,
+        }
     }
 
     /// Reset all mutable state for seeking (re-parse from start).
@@ -146,6 +156,25 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         for entity in entities_with_consumables {
             self.world.entity_mut(entity).remove::<Consumables>();
         }
+    }
+
+    /// Game type string from replay metadata, used to resolve `BattleType`.
+    pub(crate) fn game_type(&self) -> Option<&str> {
+        self.meta.gameType.as_deref()
+    }
+
+    /// Lazily build the read-side query cache, refresh its archetypes, and return
+    /// shared borrows of the world and cache.
+    ///
+    /// Splitting the cache and world fields lets the caller hold both as shared
+    /// borrows while the cache's `*_manual` reads run without further allocation.
+    pub(crate) fn view_parts(&mut self) -> (&World, &crate::view::QueryCache) {
+        if self.query_cache.is_none() {
+            self.query_cache = Some(crate::view::QueryCache::new(&mut self.world));
+        }
+        let cache = self.query_cache.as_mut().expect("cache just initialized");
+        cache.update_archetypes(&self.world);
+        (&self.world, self.query_cache.as_ref().expect("cache present"))
     }
 
     pub(crate) fn world(&self) -> &World {
