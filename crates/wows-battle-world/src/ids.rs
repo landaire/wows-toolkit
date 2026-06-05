@@ -2,8 +2,12 @@
 
 use wows_replays::types::TeamId;
 
-/// Whether artillery shot hits accumulate across the replay or are cleared each
-/// packet (the renderer wants only the current frame's hits).
+/// Controls shot and hit recording.
+///
+/// `Tracked`: record active_shots and shot_hits, and clear shot_hits each packet
+/// so callers see only the current frame's hits (matches BattleController default).
+/// `Untracked`: skip all shot/hit recording entirely (memory optimization for
+/// passes that do not need shot data, e.g. cap_layout / replayshark).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShotTracking {
     Tracked,
@@ -23,6 +27,6 @@ pub struct IngestOptions {
 
 impl Default for IngestOptions {
     fn default() -> Self {
-        Self { shot_tracking: ShotTracking::Untracked, source_team: SourceTeam(None) }
+        Self { shot_tracking: ShotTracking::Tracked, source_team: SourceTeam(None) }
     }
 }

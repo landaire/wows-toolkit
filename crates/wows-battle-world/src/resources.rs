@@ -7,6 +7,7 @@ use wows_replays::analyzer::battle_controller::DamageEvent;
 use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::SharedPlayer;
 use wows_replays::analyzer::battle_controller::state::CapturedBuff;
+use wows_replays::analyzer::battle_controller::state::DeadShip;
 use wows_replays::analyzer::battle_controller::state::KillRecord;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::analyzer::battle_controller::state::ScoringRules as ScoringRulesInner;
@@ -19,6 +20,7 @@ use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
+use wowsunpack::game_types::PlaneId;
 use wowsunpack::game_types::Ribbon;
 
 use crate::units::MatchWinner;
@@ -96,7 +98,7 @@ pub struct CapturePointOrder(pub Vec<Entity>);
 #[derive(Resource, Debug, Clone, Default)]
 pub struct InteractiveZoneIndex(pub HashMap<EntityId, usize>);
 
-/// Bidirectional map between game entity ids and ECS entities.
+/// Maps game EntityId -> ECS Entity. The reverse lookup is available via the `GameId` component.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct EntityIndex(HashMap<EntityId, Entity>);
 
@@ -113,3 +115,50 @@ impl EntityIndex {
         self.0.remove(&id)
     }
 }
+
+/// Maps PlaneId -> ECS Entity for active plane squadrons.
+///
+/// Planes are addressed by PlaneId, not EntityId, so EntityIndex cannot reach them.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct PlaneIndex(HashMap<PlaneId, Entity>);
+
+impl PlaneIndex {
+    pub fn get(&self, id: PlaneId) -> Option<Entity> {
+        self.0.get(&id).copied()
+    }
+
+    pub fn insert(&mut self, id: PlaneId, entity: Entity) {
+        self.0.insert(id, entity);
+    }
+
+    pub fn remove(&mut self, id: PlaneId) -> Option<Entity> {
+        self.0.remove(&id)
+    }
+}
+
+/// Maps PlaneId -> ECS Entity for active fighter patrol wards.
+///
+/// Wards are addressed by PlaneId, not EntityId, so EntityIndex cannot reach them.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct WardIndex(HashMap<PlaneId, Entity>);
+
+impl WardIndex {
+    pub fn get(&self, id: PlaneId) -> Option<Entity> {
+        self.0.get(&id).copied()
+    }
+
+    pub fn insert(&mut self, id: PlaneId, entity: Entity) {
+        self.0.insert(id, entity);
+    }
+
+    pub fn remove(&mut self, id: PlaneId) -> Option<Entity> {
+        self.0.remove(&id)
+    }
+}
+
+/// Dead ships tracked across the match, keyed by EntityId.
+///
+/// Mirrors BattleController.dead_ships. Vehicles persist after death and remain
+/// queryable; this resource records their last known state at time of death.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct DeadShips(pub HashMap<EntityId, DeadShip>);

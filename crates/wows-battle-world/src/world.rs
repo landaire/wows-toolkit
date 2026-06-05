@@ -24,15 +24,18 @@ use crate::resources::CapturedBuffs;
 use crate::resources::ChatLog;
 use crate::resources::Clock;
 use crate::resources::DamageLedger;
+use crate::resources::DeadShips;
 use crate::resources::EntityIndex;
 use crate::resources::InteractiveZoneIndex;
 use crate::resources::KillLog;
 use crate::resources::MatchState;
 use crate::resources::MetadataPlayers;
+use crate::resources::PlaneIndex;
 use crate::resources::ScoringRules;
 use crate::resources::SelfStats;
 use crate::resources::ShotHitLog;
 use crate::resources::TeamScores;
+use crate::resources::WardIndex;
 
 pub struct BattleWorld<'res, 'replay, G: ResourceLoader> {
     world: World,
@@ -59,10 +62,34 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
     /// Reset all mutable state for seeking (re-parse from start).
     ///
     /// Config fields (meta, resources, constants, version, options) are preserved.
+    /// Consumable inventories are preserved with dynamic state zeroed, mirroring
+    /// BattleController::reset_consumable_inventory_state (charges_used=0, active_until=None).
+    /// Call clear_consumable_inventories before reset to drop them entirely.
     pub fn reset(&mut self) {
+        // Snapshot seeded slot definitions before wiping the world.
+        let inventory_snapshot: Vec<(EntityId, Vec<wows_replays::analyzer::battle_controller::state::ConsumableInventory>)> = self
+            .world
+            .query::<(&GameId, &Consumables)>()
+            .iter(&self.world)
+            .map(|(gid, cons)| (gid.0, cons.slots.clone()))
+            .collect();
+
         self.world.clear_all();
         insert_empty_resources(&mut self.world);
         seed_metadata_players(&mut self.world, self.meta, self.resources);
+
+        // Re-attach consumable slot definitions with dynamic state zeroed.
+        for (id, slots) in inventory_snapshot {
+            let mut reset_slots = slots;
+            for slot in reset_slots.iter_mut() {
+                slot.charges_used = 0;
+                slot.active_until = None;
+            }
+            let entity = self.spawn_or_get(id);
+            if let Ok(mut e) = self.world.get_entity_mut(entity) {
+                e.insert(Consumables { active: Vec::new(), slots: reset_slots });
+            }
+        }
     }
 
     pub fn set_shot_tracking(&mut self, tracking: ShotTracking) {
@@ -113,6 +140,21 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         }
     }
 
+    /// Remove a game entity from EntityIndex and despawn its ECS entity.
+    ///
+    /// Entity lifetime policy: vehicles and buildings persist for the whole match
+    /// (dead ships remain queryable and are tracked separately in DeadShips); only
+    /// smoke screens and buff zones are despawned on EntityLeave. This helper is
+    /// the single site that removes from EntityIndex; callers are responsible for
+    /// applying the correct policy.
+    pub fn despawn(&mut self, id: EntityId) {
+        if let Some(entity) = self.world.resource_mut::<EntityIndex>().remove(id) {
+            if self.world.get_entity(entity).is_ok() {
+                self.world.despawn(entity);
+            }
+        }
+    }
+
     /// Get the ECS entity for a game entity id, creating it if absent.
     fn spawn_or_get(&mut self, id: EntityId) -> Entity {
         if let Some(entity) = self.world.resource::<EntityIndex>().get(id) {
@@ -140,6 +182,9 @@ fn insert_empty_resources(world: &mut World) {
     world.insert_resource(CapturePointOrder::default());
     world.insert_resource(InteractiveZoneIndex::default());
     world.insert_resource(EntityIndex::default());
+    world.insert_resource(PlaneIndex::default());
+    world.insert_resource(WardIndex::default());
+    world.insert_resource(DeadShips::default());
 }
 
 /// Build MetadataPlayers from the replay vehicles list.
@@ -179,8 +224,8 @@ impl<'res, 'replay, G: ResourceLoader> wows_replays::analyzer::Analyzer
             self.world.resource_mut::<Clock>().0 = packet.clock;
         }
 
-        // In untracked mode the shot hit log accumulates; in tracked mode it is
-        // cleared each packet so callers see only the current frame's hits.
+        // Tracked: clear each packet so callers see only the current frame's hits.
+        // Untracked: log is never populated, so no clear needed.
         if self.options.shot_tracking == ShotTracking::Tracked {
             self.world.resource_mut::<ShotHitLog>().0.clear();
         }

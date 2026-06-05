@@ -109,6 +109,8 @@ pub struct MinimapPlacement {
 pub struct VehicleState(pub VehicleProps);
 
 /// Aggregated record for one vehicle: captain ref, damage, death, results, frags.
+///
+/// Send+Sync (required by bevy Component) holds only if the `arc` feature makes `wows_replays::Rc = Arc`.
 #[derive(Component, Debug, Clone)]
 pub struct VehicleRecord {
     /// Captain `Param`, if resolved.
@@ -139,6 +141,8 @@ pub struct Consumables {
 }
 
 /// Link to the shared `Player` record for this vehicle.
+///
+/// Send+Sync (required by bevy Component) holds only if the `arc` feature makes `wows_replays::Rc = Arc`.
 #[derive(Component, Debug, Clone)]
 pub struct PlayerLink(pub Rc<Player>);
 
