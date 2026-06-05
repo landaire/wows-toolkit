@@ -218,5 +218,11 @@ fn parity_zones_shimakaze_legacy() {
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_6359964)), ignore)]
 fn parity_zones_cossack_armsrace() {
-    run_parity("20221101_004346_PBSD517-Cossack_37_Ridge.wowsreplay");
+    let filename = "20221101_004346_PBSD517-Cossack_37_Ridge.wowsreplay";
+    let (old, mut new_world) = support::both(filename);
+    assert!(!old.captured_buffs().is_empty(), "captured_buffs must be non-empty in {filename}");
+    assert!(!old.buff_zones().is_empty(), "buff_zones must be non-empty in {filename}");
+    assert!(!new_world.captured_buffs().is_empty(), "new captured_buffs must be non-empty in {filename}");
+    assert!(!new_world.buff_zones().is_empty(), "new buff_zones must be non-empty in {filename}");
+    run_parity(filename);
 }

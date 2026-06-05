@@ -37,7 +37,7 @@ use wowsunpack::game_types::Ribbon;
 use wowsunpack::game_types::PlaneId;
 
 use crate::components::{Aim, Building, BuffZoneData, CapturePointData, Consumables, EntityKind, GameId, MinimapPlacement, Plane, PlaneState, ProjectileState, SmokeScreen, Transform3d, Vehicle, VehicleState, Ward, WardState, WeatherZoneData};
-use crate::resources::{ActiveShotOrder, ActiveTorpedoOrder, CapturePointOrder, CapturedBuffs, ChatLog, DamageLedger, DeadShips, KillLog, MatchState, PlayerIndex, ScoringRules as ScoringRulesResource, SelfStats, ShotHitLog, TeamScores};
+use crate::resources::{ActiveShotOrder, ActiveTorpedoOrder, CapturePointOrder, CapturedBuffs, ChatLog, DamageLedger, DeadShips, KillLog, MatchState, PlayerIndex, ScoringRules as ScoringRulesResource, SelfStats, ShotHitLog, TeamScores, WeatherZoneOrder};
 use crate::units::MatchWinner;
 use crate::world::BattleWorld;
 
@@ -256,16 +256,19 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
     }
 
     /// Capture point states in control-point index order.
+    ///
+    /// Gap indices carry a default CapturePointState so the returned Vec has
+    /// length == max_index+1, matching the original controller's semantics.
     pub fn capture_points(&self) -> Vec<CapturePointState> {
         let order = &self.world().resource::<CapturePointOrder>().0;
         order
             .iter()
-            .filter_map(|&ecs_entity| {
+            .map(|&ecs_entity| {
                 self.world()
                     .get_entity(ecs_entity)
-                    .ok()?
-                    .get::<CapturePointData>()
-                    .map(|d| d.0.clone())
+                    .ok()
+                    .and_then(|er| er.get::<CapturePointData>().map(|d| d.0.clone()))
+                    .unwrap_or_default()
             })
             .collect()
     }
@@ -287,14 +290,22 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         self.world().resource::<CapturedBuffs>().0.clone()
     }
 
-    /// Active local weather zones (squalls/storms) in the order they were created.
-    pub fn local_weather_zones(&mut self) -> Vec<LocalWeatherZone> {
-        let world = self.world_mut();
-        let mut q = world.query::<(bevy_ecs::entity::Entity, &WeatherZoneData)>();
-        let mut pairs: Vec<(bevy_ecs::entity::Entity, LocalWeatherZone)> =
-            q.iter(world).map(|(e, data)| (e, data.0.clone())).collect();
-        pairs.sort_by_key(|(e, _)| *e);
-        pairs.into_iter().map(|(_, z)| z).collect()
+    /// Active local weather zones (squalls/storms) in creation order.
+    ///
+    /// Uses WeatherZoneOrder as the authoritative sequence so bevy entity index
+    /// reuse after despawn cannot corrupt the logical array indices.
+    pub fn local_weather_zones(&self) -> Vec<LocalWeatherZone> {
+        let order = self.world().resource::<WeatherZoneOrder>().0.clone();
+        order
+            .into_iter()
+            .filter_map(|ecs_entity| {
+                self.world()
+                    .get_entity(ecs_entity)
+                    .ok()?
+                    .get::<WeatherZoneData>()
+                    .map(|d| d.0.clone())
+            })
+            .collect()
     }
 
     /// Scoring rules from BattleLogic (win threshold, hold reward/period, cap indices).
@@ -320,6 +331,11 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
     /// Clock when `BattleEnd` was received.
     pub fn battle_end_clock(&self) -> Option<GameClock> {
         self.world().resource::<MatchState>().battle_end_clock
+    }
+
+    /// Clock when `battleResult` was set on BattleLogic (regulation time ended).
+    pub fn battle_result_clock(&self) -> Option<GameClock> {
+        self.world().resource::<MatchState>().battle_result_clock
     }
 
     /// Winning team as an i8: 0 or 1 for a team win, -1 for draw, None if undecided.

@@ -6,6 +6,8 @@ use bevy_ecs::world::World;
 use tracing::debug;
 use tracing::warn;
 use wows_replays::Rc;
+use wows_replays::analyzer::battle_controller::ConnectionChangeInfo;
+use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
 use wows_replays::analyzer::battle_controller::EntityType;
 use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::VehicleProps;
@@ -28,7 +30,7 @@ use crate::components::{
     PlayerLink, SmokeScreen, SmokeScreenState, Transform3d, Vehicle, VehicleState, WeatherZone,
     WeatherZoneData,
 };
-use crate::resources::{CapturePointOrder, EntityIndex, InteractiveZoneIndex, InteractiveZoneRef, MetadataPlayers, PendingDropParams, PlayerIndex};
+use crate::resources::{CapturePointOrder, EntityIndex, InteractiveZoneIndex, InteractiveZoneRef, KillLog, MetadataPlayers, PendingDropParams, PlayerIndex, WeatherZoneOrder};
 
 /// Handle an EntityCreate packet.
 pub fn handle_entity_create<G: ResourceLoader>(
@@ -238,6 +240,7 @@ fn handle_interactive_zone_create(
                 e.insert(WeatherZone);
                 e.insert(WeatherZoneData(wz));
             }
+            world.resource_mut::<WeatherZoneOrder>().0.push(entity);
         }
         return;
     }
@@ -300,11 +303,21 @@ fn handle_interactive_zone_create(
 
         let order_len = world.resource::<CapturePointOrder>().0.len();
         if order_len <= idx {
-            // Grow the ordered vec; use a placeholder entity for gaps.
-            let placeholder = world.spawn(()).id();
-            for _ in order_len..=idx {
-                world.resource_mut::<CapturePointOrder>().0.push(placeholder);
+            // Fill index gaps with default CapturePointData so capture_points()
+            // returns vec length == max_index+1 (mirrors the original's while-push).
+            for gap in order_len..idx {
+                let gap_entity = world.spawn(()).id();
+                if let Ok(mut e) = world.get_entity_mut(gap_entity) {
+                    e.insert(CapturePoint);
+                    let mut default_state = CapturePointState::default();
+                    default_state.index = gap;
+                    e.insert(CapturePointData(default_state));
+                }
+                world.resource_mut::<CapturePointOrder>().0.push(gap_entity);
             }
+            // Reserve the slot for idx; overwritten immediately below.
+            let slot_entity = world.resource::<EntityIndex>().get(packet.entity_id).unwrap();
+            world.resource_mut::<CapturePointOrder>().0.push(slot_entity);
         }
         let entity = world.resource::<EntityIndex>().get(packet.entity_id).unwrap();
         world.resource_mut::<CapturePointOrder>().0[idx] = entity;
@@ -333,14 +346,11 @@ fn handle_interactive_zone_create(
 /// Seed Vehicle entities and Player records for every participant in OnArenaStateReceived.
 ///
 /// Mirrors BattleController's OnArenaStateReceived arm: builds Player objects from the
-/// arena roster (matching via meta_ship_id or fallback name match), inserts them into
-/// PlayerIndex, and attaches PlayerLink to the corresponding vehicle entity. Vehicle
-/// entities are pre-created so even ships outside the AoI have a Vehicle component.
-///
-/// connection_change_info is not populated here; it is filled by the original's
-/// OnArenaStateReceived arm based on is_connected(). That state is deferred.
+/// arena roster, inserts them into PlayerIndex, attaches PlayerLink, and pushes the
+/// initial connection record when `is_connected()` (mirrors controller.rs ~3264-3270).
 pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
     players: impl Iterator<Item = &'a PlayerStateData>,
+    clock: GameClock,
     world: &mut World,
     resources: &G,
     constants: &GameConstants,
@@ -379,6 +389,27 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
                     if let Some(battle_player) =
                         Player::from_arena_player(player, meta.as_ref(), resources)
                     {
+                        // Mirror controller.rs ~3252-3270: check if the vehicle
+                        // was already in entities_by_id and had a frag against it.
+                        let player_has_died = world
+                            .resource::<EntityIndex>()
+                            .get(entity_id)
+                            .is_some_and(|_| {
+                                world
+                                    .resource::<KillLog>()
+                                    .0
+                                    .iter()
+                                    .any(|kill| kill.victim == entity_id)
+                            });
+                        if player.is_connected() {
+                            battle_player.connection_change_info_mut().push(
+                                ConnectionChangeInfo::new(
+                                    clock.to_duration(),
+                                    ConnectionChangeKind::Connected,
+                                    player_has_died,
+                                ),
+                            );
+                        }
                         let battle_player = Rc::new(battle_player);
                         world
                             .resource_mut::<PlayerIndex>()

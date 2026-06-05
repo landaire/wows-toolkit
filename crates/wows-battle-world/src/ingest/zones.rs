@@ -15,7 +15,7 @@ use crate::components::{
 };
 use crate::resources::{
     CapturePointOrder, CapturedBuffs, EntityIndex, InteractiveZoneIndex, InteractiveZoneRef,
-    PendingDropParams, PlayerIndex, ScoringRules, TeamScores,
+    PendingDropParams, PlayerIndex, ScoringRules, TeamScores, WeatherZoneOrder,
 };
 
 /// Extract a dict from FixedDict or NullableFixedDict(Some).
@@ -132,6 +132,7 @@ pub fn seed_battle_logic_state(packet_props: &std::collections::HashMap<&str, Ar
                     e.insert(crate::components::WeatherZone);
                     e.insert(WeatherZoneData(zone));
                 }
+                world.resource_mut::<WeatherZoneOrder>().0.push(ecs_entity);
             }
         }
     }
@@ -293,20 +294,12 @@ pub fn handle_property_update(update: &PropertyUpdatePacket<'_>, clock: GameCloc
 }
 
 fn apply_weather_zone_array_update(action: &UpdateAction<'_>, world: &mut World) {
-    let entities: Vec<bevy_ecs::entity::Entity> = {
-        let mut q = world.query::<(bevy_ecs::entity::Entity, &crate::components::WeatherZone)>();
-        let mut ents: Vec<_> = q.iter(world).map(|(e, _)| e).collect();
-        ents.sort();
-        ents
-    };
-
     match action {
         UpdateAction::SetRange { start, stop: _, values } => {
             let start = *start;
             let needed = start + values.len();
-            // Ensure enough entities exist.
-            let mut entities = entities;
-            while entities.len() < needed {
+            let current_len = world.resource::<WeatherZoneOrder>().0.len();
+            for _ in current_len..needed {
                 let ecs_entity = world.spawn(()).id();
                 if let Ok(mut e) = world.get_entity_mut(ecs_entity) {
                     e.insert(crate::components::WeatherZone);
@@ -318,11 +311,11 @@ fn apply_weather_zone_array_update(action: &UpdateAction<'_>, world: &mut World)
                         entity_id: None,
                     }));
                 }
-                entities.push(ecs_entity);
+                world.resource_mut::<WeatherZoneOrder>().0.push(ecs_entity);
             }
             for (i, value) in values.iter().enumerate() {
                 if let Some(mut zone) = parse_weather_zone(value) {
-                    let ecs_entity = entities[start + i];
+                    let ecs_entity = world.resource::<WeatherZoneOrder>().0[start + i];
                     if let Ok(er) = world.get_entity(ecs_entity) {
                         if let Some(existing) = er.get::<WeatherZoneData>() {
                             zone.entity_id = existing.0.entity_id;
@@ -338,8 +331,8 @@ fn apply_weather_zone_array_update(action: &UpdateAction<'_>, world: &mut World)
         }
         UpdateAction::SetElement { index, value } => {
             let index = *index;
-            let mut entities = entities;
-            while entities.len() <= index {
+            let current_len = world.resource::<WeatherZoneOrder>().0.len();
+            for _ in current_len..=index {
                 let ecs_entity = world.spawn(()).id();
                 if let Ok(mut e) = world.get_entity_mut(ecs_entity) {
                     e.insert(crate::components::WeatherZone);
@@ -351,10 +344,10 @@ fn apply_weather_zone_array_update(action: &UpdateAction<'_>, world: &mut World)
                         entity_id: None,
                     }));
                 }
-                entities.push(ecs_entity);
+                world.resource_mut::<WeatherZoneOrder>().0.push(ecs_entity);
             }
             if let Some(mut zone) = parse_weather_zone(value) {
-                let ecs_entity = entities[index];
+                let ecs_entity = world.resource::<WeatherZoneOrder>().0[index];
                 if let Ok(er) = world.get_entity(ecs_entity) {
                     if let Some(existing) = er.get::<WeatherZoneData>() {
                         zone.entity_id = existing.0.entity_id;
@@ -369,13 +362,17 @@ fn apply_weather_zone_array_update(action: &UpdateAction<'_>, world: &mut World)
         }
         UpdateAction::RemoveRange { start, stop } => {
             let start = *start;
-            let end = (*stop).min(entities.len());
+            let order_len = world.resource::<WeatherZoneOrder>().0.len();
+            let end = (*stop).min(order_len);
             if start < end {
-                for ecs_entity in &entities[start..end] {
+                let to_despawn: Vec<_> =
+                    world.resource::<WeatherZoneOrder>().0[start..end].to_vec();
+                for ecs_entity in &to_despawn {
                     if world.get_entity(*ecs_entity).is_ok() {
                         world.despawn(*ecs_entity);
                     }
                 }
+                world.resource_mut::<WeatherZoneOrder>().0.drain(start..end);
             }
         }
         _ => {}
@@ -383,13 +380,7 @@ fn apply_weather_zone_array_update(action: &UpdateAction<'_>, world: &mut World)
 }
 
 fn apply_weather_zone_field_update(idx: usize, key: &str, value: &ArgValue<'_>, world: &mut World) {
-    let entities: Vec<bevy_ecs::entity::Entity> = {
-        let mut q = world.query::<(bevy_ecs::entity::Entity, &crate::components::WeatherZone)>();
-        let mut ents: Vec<_> = q.iter(world).map(|(e, _)| e).collect();
-        ents.sort();
-        ents
-    };
-    let Some(&ecs_entity) = entities.get(idx) else { return };
+    let Some(ecs_entity) = world.resource::<WeatherZoneOrder>().0.get(idx).copied() else { return };
     let Ok(mut er) = world.get_entity_mut(ecs_entity) else { return };
     let Some(mut data) = er.get_mut::<WeatherZoneData>() else { return };
     match key {

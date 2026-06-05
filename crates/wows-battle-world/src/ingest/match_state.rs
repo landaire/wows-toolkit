@@ -15,6 +15,7 @@ use wowsunpack::data::Version;
 use wowsunpack::game_types::BattleStage;
 use wowsunpack::rpc::typedefs::ArgValue;
 
+use crate::resources::EntityIndex;
 use crate::resources::KillLog;
 use crate::resources::MatchState;
 use crate::resources::PlayerIndex;
@@ -139,11 +140,18 @@ pub fn handle_game_room_state_changed(
         player.end_state_mut().update_from_dict(player_state);
 
         let player_entity_id = player.initial_state().entity_id();
+        // Mirror controller.rs ~3760-3769: only report had_death_event when the
+        // vehicle entity exists; unwrap_or(false) when it has never spawned.
         let player_has_died = world
-            .resource::<KillLog>()
-            .0
-            .iter()
-            .any(|kill| kill.victim == player_entity_id);
+            .resource::<EntityIndex>()
+            .get(player_entity_id)
+            .is_some_and(|_| {
+                world
+                    .resource::<KillLog>()
+                    .0
+                    .iter()
+                    .any(|kill| kill.victim == player_entity_id)
+            });
 
         let connection_event_kind = if player.end_state().is_connected() {
             ConnectionChangeKind::Connected

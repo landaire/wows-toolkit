@@ -22,6 +22,7 @@ use crate::ids::SourceTeam;
 use crate::resources::CapturePointOrder;
 use crate::resources::CapturedBuffs;
 use crate::resources::PendingDropParams;
+use crate::resources::WeatherZoneOrder;
 use crate::resources::ChatLog;
 use crate::resources::Clock;
 use crate::resources::DamageLedger;
@@ -196,6 +197,7 @@ fn insert_empty_resources(world: &mut World) {
     world.insert_resource(ActiveTorpedoOrder::default());
     world.insert_resource(SelfStats::default());
     world.insert_resource(CapturePointOrder::default());
+    world.insert_resource(WeatherZoneOrder::default());
     world.insert_resource(InteractiveZoneIndex::default());
     world.insert_resource(PendingDropParams::default());
     world.insert_resource(EntityIndex::default());

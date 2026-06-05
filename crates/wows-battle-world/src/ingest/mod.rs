@@ -107,6 +107,7 @@ pub fn dispatch<G: ResourceLoader>(
             match_state::handle_arena_id(arena_id, world);
             entities::seed_vehicles_from_arena_state(
                 players.iter().chain(bots.iter()),
+                clock,
                 world,
                 resources,
                 constants,

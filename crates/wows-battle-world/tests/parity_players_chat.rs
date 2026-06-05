@@ -3,6 +3,7 @@
 #[path = "support/mod.rs"]
 mod support;
 
+use wows_replays::analyzer::battle_controller::ConnectionChangeInfo;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 
 fn run_parity(filename: &str) {
@@ -53,6 +54,17 @@ fn run_parity(filename: &str) {
             old_p.vehicle().id(),
             new_p.vehicle().id(),
             "player[{id:?}] vehicle param id mismatch in {filename}",
+        );
+
+        let old_cci: Vec<_> = old_p.connection_change_info().iter().map(|c: &ConnectionChangeInfo| {
+            (c.at_game_duration(), c.event_kind(), c.had_death_event())
+        }).collect();
+        let new_cci: Vec<_> = new_p.connection_change_info().iter().map(|c: &ConnectionChangeInfo| {
+            (c.at_game_duration(), c.event_kind(), c.had_death_event())
+        }).collect();
+        assert_eq!(
+            old_cci, new_cci,
+            "player[{id:?}] connection_change_info mismatch in {filename}: old={old_cci:?} new={new_cci:?}",
         );
     }
 

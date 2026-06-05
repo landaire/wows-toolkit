@@ -21,6 +21,16 @@ use wows_replays::types::EntityId;
 fn run_parity(filename: &str) {
     let (old, mut new_world) = support::both_seeded(filename);
 
+    // Guard: both sides must have at least one entity with a seeded inventory.
+    assert!(
+        !old.consumable_inventories().is_empty(),
+        "consumable_inventories must be non-empty after seeding in {filename}",
+    );
+    assert!(
+        !new_world.consumable_inventories().is_empty(),
+        "new consumable_inventories must be non-empty after seeding in {filename}",
+    );
+
     let old_active = old.active_consumables();
     let new_active = new_world.active_consumables();
 

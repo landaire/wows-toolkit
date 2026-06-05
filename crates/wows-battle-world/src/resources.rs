@@ -124,6 +124,13 @@ pub enum InteractiveZoneRef {
 #[derive(Resource, Debug, Clone, Default)]
 pub struct InteractiveZoneIndex(pub HashMap<EntityId, InteractiveZoneRef>);
 
+/// Ordered list of ECS entities for each weather zone, in creation order.
+///
+/// Mirrors the original's Vec<LocalWeatherZone> push/drain semantics so that
+/// array indices are stable even when bevy reuses Entity indices after despawn.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct WeatherZoneOrder(pub Vec<Entity>);
+
 /// Pre-arrival mapping: InteractiveZone entity id -> drop GameParamId from state.drop.data.
 ///
 /// Populated when a state.drop.data PropertyUpdate arrives before the buff zone entity exists.
