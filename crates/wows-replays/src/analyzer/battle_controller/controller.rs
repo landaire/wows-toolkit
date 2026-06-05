@@ -923,27 +923,53 @@ where
             other => ChatChannel::Unknown(other.to_string()),
         };
 
-        let mut sender_team = None;
-        let mut sender_name = "Unknown".to_owned();
-        let mut player = None;
-        for meta_vehicle in &self.game_meta.vehicles {
-            if meta_vehicle.id == sender_id {
-                sender_name = meta_vehicle.name.clone();
-                sender_team = Some(Relation::new(meta_vehicle.relation));
-                player = self
-                    .player_entities
-                    .values()
-                    .find(|player| player.initial_state.meta_ship_id() == sender_id)
-                    .cloned();
-            }
+        // The chat sender id is the sender's avatar entity id before 0.11.4 and
+        // the account id from 0.11.4 on (the onChatMessage RPC arg changed from
+        // ENTITY_ID to PLAYER_ID). Match the field it actually carries.
+        let by_account = crate::analyzer::decoder::chat_sender_is_account_id(self.version);
+        let player = self
+            .player_entities
+            .values()
+            .find(|player| {
+                let state = player.initial_state();
+                if by_account {
+                    state.meta_ship_id() == sender_id
+                } else {
+                    state.avatar_id().is_some_and(|avatar| AccountId::from(avatar.raw()) == sender_id)
+                }
+            })
+            .cloned();
+        // The replay metadata keys vehicles by account id, so it only helps for
+        // the PLAYER_ID era.
+        let meta_vehicle =
+            by_account.then(|| self.game_meta.vehicles.iter().find(|v| v.id == sender_id)).flatten();
+
+        if player.is_none() && meta_vehicle.is_none() {
+            debug!(
+                sender = sender_id.raw(),
+                by_account,
+                arena_players = self.player_entities.len(),
+                "chat sender did not match any player"
+            );
         }
+
+        let resolved_name = player
+            .as_ref()
+            .map(|p| p.initial_state().username())
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+            .or_else(|| meta_vehicle.map(|v| v.name.clone()).filter(|name| !name.is_empty()));
+        let sender_team =
+            player.as_ref().map(|p| p.relation()).or_else(|| meta_vehicle.map(|v| Relation::new(v.relation)));
 
         // Translate bot/NPC names and messages (they use IDS_ localization keys).
         // If we can't resolve the player, default to treating them as a bot.
         let is_bot = player.as_ref().map(|p| p.is_bot()).unwrap_or(true);
-        if is_bot {
-            sender_name = self.translate_ids(&sender_name);
-        }
+        let sender_name = match resolved_name {
+            Some(name) if is_bot => self.translate_ids(&name),
+            Some(name) => name,
+            None => "Unknown".to_owned(),
+        };
         let message_text = if is_bot { self.translate_ids(message) } else { message.to_string() };
         debug!("chat message from sender {sender_name} in channel {channel:?}: {message_text}");
 

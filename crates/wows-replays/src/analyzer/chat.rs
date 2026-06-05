@@ -59,8 +59,18 @@ impl Analyzer for ChatLogger {
                 );
             }
             DecodedPacketPayload::OnArenaStateReceived { player_states: players, .. } => {
+                // A sender id is either the account id (PLAYER_ID: chat from
+                // 0.11.4 on, and voicelines in every version) or the avatar
+                // entity id (ENTITY_ID: chat before 0.11.4). Key by both so this
+                // one map resolves chat and voiceline across versions; the two
+                // id spaces are disjoint, so there's no ambiguity.
                 for player in players.iter() {
-                    self.usernames.insert(player.meta_ship_id, player.username.clone());
+                    if player.meta_ship_id().raw() != 0 {
+                        self.usernames.insert(player.meta_ship_id(), player.username().to_owned());
+                    }
+                    if let Some(avatar) = player.avatar_id() {
+                        self.usernames.insert(AccountId::from(avatar.raw()), player.username().to_owned());
+                    }
                 }
             }
             _ => {}

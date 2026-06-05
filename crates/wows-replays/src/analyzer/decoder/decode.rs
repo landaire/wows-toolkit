@@ -968,6 +968,16 @@ pub enum CruiseState {
     Unknown(u32),
 }
 
+/// Whether `onChatMessage`'s sender argument is the account id (`PLAYER_ID`)
+/// rather than the sender's avatar entity id (`ENTITY_ID`). The game's entity
+/// definition for this RPC switched the argument from `ENTITY_ID` to `PLAYER_ID`
+/// in 0.11.4, so callers must match the sender against the corresponding player
+/// field (avatar id before, account id after). Voiceline senders are
+/// `PLAYER_ID` in every version and don't need this.
+pub fn chat_sender_is_account_id(version: Version) -> bool {
+    version.is_at_least(&Version::from_client_exe("0,11,4,0"))
+}
+
 #[derive(Debug, Serialize)]
 pub struct ChatMessageExtra {
     pre_battle_sign: i64,
@@ -1624,21 +1634,28 @@ where
             }
             DecodedPacketPayload::Chat {
                 entity_id: *entity_id,
-                sender_id: AccountId::from(*sender_id),
+                // Account ids are unsigned 32-bit on the wire; sign-extending
+                // ids >= 2^31 would never match the positive id from arena
+                // state / replay metadata, leaving senders unresolved.
+                sender_id: AccountId::from(*sender_id as u32),
                 audience: std::str::from_utf8(target).unwrap_or(""),
                 message: std::str::from_utf8(message).unwrap_or(""),
                 extra_data,
             }
         } else if *method == "receive_CommonCMD" {
             let (sender_id, message, is_global) = if version.is_at_least(&Version::from_client_exe("0,12,8,0")) {
-                let sender = *args[0].int_32_ref().expect("receive_CommonCMD: sender is not an i32");
-
-                let blob = args[1].blob_ref().expect("receive_CommonCMD: second argument is not a blob");
-
-                let (message_type, is_global) = match parse_receive_common_cmd_blob(blob.as_ref()) {
-                    Ok(result) => result,
-                    Err(e) => {
-                        eprintln!("Warning: receive_CommonCMD: failed to parse blob: {:?}", e);
+                // The sender is an unsigned account id, so it arrives as a Uint32
+                // (not Int32); `as_i32` accepts any integer variant. Tolerate
+                // arg-layout drift across versions rather than panicking, which
+                // would abort the whole replay parse.
+                let sender = args.first().and_then(|a| a.as_i32()).unwrap_or(0);
+                let (message_type, is_global) = match args.get(1).and_then(|a| a.blob_ref()) {
+                    Some(blob) => parse_receive_common_cmd_blob(blob.as_ref()).unwrap_or_else(|e| {
+                        tracing::warn!("receive_CommonCMD: failed to parse blob: {e:?}");
+                        (VoiceLine::Unknown(0), false)
+                    }),
+                    None => {
+                        tracing::warn!("receive_CommonCMD: second argument is not a blob");
                         (VoiceLine::Unknown(0), false)
                     }
                 };
@@ -1686,7 +1703,8 @@ where
 
             // let (audience, sender_id, line, a, b) = unpack_rpc_args!(args, u8, i32, u8, u32, u64);
 
-            DecodedPacketPayload::VoiceLine { sender_id: AccountId::from(sender_id), is_global, message }
+            // Account ids are unsigned 32-bit on the wire (see onChatMessage).
+            DecodedPacketPayload::VoiceLine { sender_id: AccountId::from(sender_id as u32), is_global, message }
         } else if *method == "onGameRoomStateChanged" {
             let player_states = pickled::de::value_from_slice(
                 args[0].blob_ref().expect("player_states arg is not a blob"),
