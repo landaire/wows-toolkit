@@ -11,7 +11,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 
-fn run_parity(filename: &str) {
+fn run_parity(filename: &str, check_buildings_nonempty: bool) {
     let (old, mut new_world) = support::both(filename);
 
     let view = new_world.view();
@@ -377,46 +377,190 @@ fn run_parity(filename: &str) {
         let new_abs = view.elapsed_to_game_clock(new_elapsed);
         assert_eq!(old_abs, new_abs, "[{filename}] elapsed_to_game_clock");
     }
+
+    // buildings
+    {
+        let old_buildings: HashMap<_, _> = old
+            .entities_by_id()
+            .iter()
+            .filter_map(|(id, entity)| {
+                entity.building_ref().map(|bref| {
+                    let b = std::cell::RefCell::borrow(bref);
+                    (*id, b.clone())
+                })
+            })
+            .collect();
+        let new_buildings = view.buildings();
+        let old_ids: BTreeSet<_> = old_buildings.keys().copied().collect();
+        let new_ids: BTreeSet<_> = new_buildings.keys().copied().collect();
+        assert_eq!(
+            old_ids, new_ids,
+            "[{filename}] buildings id sets differ: old_only={:?} new_only={:?}",
+            old_ids.difference(&new_ids).collect::<Vec<_>>(),
+            new_ids.difference(&old_ids).collect::<Vec<_>>(),
+        );
+        if check_buildings_nonempty {
+            assert!(!old_buildings.is_empty(), "[{filename}] expected non-empty buildings");
+        }
+        for (id, ob) in &old_buildings {
+            let nb = new_buildings
+                .get(id)
+                .unwrap_or_else(|| panic!("[{filename}] buildings missing id={id:?}"));
+            assert_eq!(ob.position, nb.position, "[{filename}] buildings[{id:?}].position");
+            assert_eq!(ob.is_alive, nb.is_alive, "[{filename}] buildings[{id:?}].is_alive");
+            assert_eq!(ob.is_hidden, nb.is_hidden, "[{filename}] buildings[{id:?}].is_hidden");
+            assert_eq!(ob.is_suppressed, nb.is_suppressed, "[{filename}] buildings[{id:?}].is_suppressed");
+            assert_eq!(
+                ob.team_id as i64, nb.team_id.raw(),
+                "[{filename}] buildings[{id:?}].team_id"
+            );
+            assert_eq!(ob.params_id, nb.params_id, "[{filename}] buildings[{id:?}].params_id");
+        }
+    }
+
+    // smoke_screens
+    {
+        let old_smokes: HashMap<_, _> = old
+            .entities_by_id()
+            .iter()
+            .filter_map(|(id, entity)| {
+                entity.smoke_screen_ref().map(|sref| {
+                    let s = std::cell::RefCell::borrow(sref);
+                    (*id, s.clone())
+                })
+            })
+            .collect();
+        let new_smokes = view.smoke_screens();
+        let old_ids: BTreeSet<_> = old_smokes.keys().copied().collect();
+        let new_ids: BTreeSet<_> = new_smokes.keys().copied().collect();
+        assert_eq!(
+            old_ids, new_ids,
+            "[{filename}] smoke_screens id sets differ: old_only={:?} new_only={:?}",
+            old_ids.difference(&new_ids).collect::<Vec<_>>(),
+            new_ids.difference(&old_ids).collect::<Vec<_>>(),
+        );
+        for (id, os) in &old_smokes {
+            let ns = new_smokes
+                .get(id)
+                .unwrap_or_else(|| panic!("[{filename}] smoke_screens missing id={id:?}"));
+            assert_eq!(os.radius, ns.radius, "[{filename}] smoke_screens[{id:?}].radius");
+            assert_eq!(os.position, ns.position, "[{filename}] smoke_screens[{id:?}].position");
+            assert_eq!(os.points, ns.points, "[{filename}] smoke_screens[{id:?}].points");
+        }
+    }
+
+    // vehicle_props single-entity lookup
+    {
+        let old_entities = old.entities_by_id();
+        let mut vehicle_ids: Vec<_> = old_entities
+            .iter()
+            .filter(|(_, e)| e.vehicle_ref().is_some())
+            .map(|(id, _)| *id)
+            .collect();
+        vehicle_ids.sort();
+        for id in vehicle_ids.iter().take(4) {
+            let entity = old_entities.get(id).unwrap();
+            let ovp = std::cell::RefCell::borrow(entity.vehicle_ref().unwrap()).props().clone();
+            let nvp = view
+                .vehicle_props(*id)
+                .unwrap_or_else(|| panic!("[{filename}] vehicle_props({id:?}) returned None"));
+            assert_eq!(ovp.health(), nvp.health(), "[{filename}] vehicle_props({id:?}).health");
+            assert_eq!(ovp.max_health(), nvp.max_health(), "[{filename}] vehicle_props({id:?}).max_health");
+            assert_eq!(ovp.is_alive(), nvp.is_alive(), "[{filename}] vehicle_props({id:?}).is_alive");
+            assert_eq!(ovp.team_id(), nvp.team_id(), "[{filename}] vehicle_props({id:?}).team_id");
+            assert_eq!(
+                ovp.visibility_flags(), nvp.visibility_flags(),
+                "[{filename}] vehicle_props({id:?}).visibility_flags"
+            );
+        }
+    }
 }
 
 // v15.1, pvp, Domination (Vermont BB)
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
 fn parity_view_vermont_pvp() {
-    run_parity("20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay");
+    run_parity("20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay", false);
 }
 
 // v15.1, pvp, Standard (Marceau DD) -- active consumables, planes
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
 fn parity_view_marceau_pvp() {
-    run_parity("20260213_203056_PFSD210-Marceau_22_tierra_del_fuego.wowsreplay");
+    run_parity("20260213_203056_PFSD210-Marceau_22_tierra_del_fuego.wowsreplay", false);
 }
 
-// v15.1, pve, Operation Narai
+// v15.1, pve, Operation Narai -- buildings non-empty guard
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
 fn parity_view_narai_operation() {
-    run_parity("20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay");
+    run_parity("20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay", true);
 }
 
 // v13.3, pvp (V-170 DD)
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_8260685)), ignore)]
 fn parity_view_v170_pvp() {
-    run_parity("20240422_161541_PGSD104-V-170_08_NE_passage.wowsreplay");
+    run_parity("20240422_161541_PGSD104-V-170_08_NE_passage.wowsreplay", false);
 }
 
 // v0.9.0, pvp (Shimakaze)
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_2171354)), ignore)]
 fn parity_view_shimakaze_v0_9() {
-    run_parity("20200117_205708_PJSD012-Shimakaze-1943_45_Zigzag.wowsreplay");
+    run_parity("20200117_205708_PJSD012-Shimakaze-1943_45_Zigzag.wowsreplay", false);
 }
 
 // v0.11.9, pvp, ArmsRace (Cossack) -- buff_zones, captured_buffs
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_6359964)), ignore)]
 fn parity_view_cossack_armsrace() {
-    run_parity("20221101_004346_PBSD517-Cossack_37_Ridge.wowsreplay");
+    run_parity("20221101_004346_PBSD517-Cossack_37_Ridge.wowsreplay", false);
+}
+
+fn run_parity_consumable_inventories(filename: &str) {
+    let (old, mut new_world) = support::both_seeded(filename);
+    let view = new_world.view();
+
+    let old_inv = old.consumable_inventories();
+    let new_inv = view.consumable_inventories();
+
+    let mut old_ids: Vec<_> = old_inv.keys().copied().collect();
+    let mut new_ids: Vec<_> = new_inv.keys().copied().collect();
+    old_ids.sort();
+    new_ids.sort();
+    assert_eq!(
+        old_ids, new_ids,
+        "[{filename}] consumable_inventories key sets differ: old_only={:?} new_only={:?}",
+        old_ids.iter().filter(|k| !new_ids.contains(k)).collect::<Vec<_>>(),
+        new_ids.iter().filter(|k| !old_ids.contains(k)).collect::<Vec<_>>(),
+    );
+    for (entity_id, old_slots) in old_inv {
+        let new_slots = new_inv
+            .get(entity_id)
+            .unwrap_or_else(|| panic!("[{filename}] consumable_inventories missing id={entity_id:?}"));
+        assert_eq!(
+            old_slots.len(), new_slots.len(),
+            "[{filename}] consumable_inventories[{entity_id:?}] slot count mismatch",
+        );
+        for (i, (o, n)) in old_slots.iter().zip(new_slots.iter()).enumerate() {
+            assert_eq!(o, n, "[{filename}] consumable_inventories[{entity_id:?}][{i}] mismatch");
+        }
+    }
+}
+
+// consumable_inventories via seeded path -- vermont pvp
+#[test]
+#[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
+fn parity_view_consumable_inventories_vermont() {
+    run_parity_consumable_inventories(
+        "20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay",
+    );
+}
+
+// consumable_inventories via seeded path -- narai operation
+#[test]
+#[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
+fn parity_view_consumable_inventories_narai() {
+    run_parity_consumable_inventories("20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay");
 }
