@@ -18,3 +18,5 @@ __pycache__/
 strings.csv
 # Steam depot manifest dumps
 /55299*.txt
+# Superpowers planning docs (local only, not source-controlled)
+docs/superpowers/
