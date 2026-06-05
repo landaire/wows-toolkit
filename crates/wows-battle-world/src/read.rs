@@ -2,11 +2,20 @@
 
 use std::collections::HashMap;
 
+use wows_replays::analyzer::battle_controller::DamageEvent;
 use wows_replays::analyzer::battle_controller::VehicleProps;
+use wows_replays::analyzer::battle_controller::state::DeadShip;
+use wows_replays::analyzer::battle_controller::state::KillRecord;
+use wows_replays::analyzer::decoder::DamageStatEntry;
+use wows_replays::analyzer::decoder::Recognized;
 use wows_replays::types::EntityId;
 use wowsunpack::data::ResourceLoader;
+use wowsunpack::game_types::DamageStatCategory;
+use wowsunpack::game_types::DamageStatWeapon;
+use wowsunpack::game_types::Ribbon;
 
 use crate::components::{Aim, Building, EntityKind, GameId, MinimapPlacement, SmokeScreen, Transform3d, Vehicle, VehicleState};
+use crate::resources::{DamageLedger, DeadShips, KillLog, SelfStats};
 use crate::world::BattleWorld;
 
 impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
@@ -50,6 +59,34 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         let world = self.world_mut();
         let mut q = world.query::<(&GameId, &Aim)>();
         q.iter(world).map(|(gid, aim)| (gid.0, aim.clone())).collect()
+    }
+
+    /// All ship kills in arrival order.
+    pub fn kills(&self) -> &[KillRecord] {
+        &self.world().resource::<KillLog>().0
+    }
+
+    /// Dead ships keyed by victim entity id.
+    pub fn dead_ships(&self) -> &HashMap<EntityId, DeadShip> {
+        &self.world().resource::<DeadShips>().0
+    }
+
+    /// Damage events per aggressor entity id.
+    pub fn damage_ledger(&self) -> &HashMap<EntityId, Vec<DamageEvent>> {
+        &self.world().resource::<DamageLedger>().0
+    }
+
+    /// Ribbon counts for the self player.
+    pub fn self_ribbons(&self) -> &HashMap<Ribbon, usize> {
+        &self.world().resource::<SelfStats>().ribbons
+    }
+
+    /// Cumulative damage stats for the self player.
+    pub fn self_damage_stats(
+        &self,
+    ) -> &HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry>
+    {
+        &self.world().resource::<SelfStats>().damage_stats
     }
 
     /// Entity kinds (Vehicle/Building/SmokeScreen) for every tracked game entity.

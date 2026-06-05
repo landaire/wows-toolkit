@@ -1,5 +1,6 @@
 //! Packet ingestion: translates decoded packet payloads into ECS state changes.
 
+pub mod combat;
 pub mod entities;
 pub mod positions;
 pub mod vehicles;
@@ -30,15 +31,21 @@ pub fn dispatch<G: ResourceLoader>(
     match payload {
         DecodedPacketPayload::Chat { .. } => {}
         DecodedPacketPayload::VoiceLine { .. } => {}
-        DecodedPacketPayload::Ribbon(_) => {}
+        DecodedPacketPayload::Ribbon(ribbon) => {
+            combat::handle_ribbon(ribbon, world);
+        }
         DecodedPacketPayload::Position(pos) => {
             positions::handle_position(&pos, world, clock);
         }
         DecodedPacketPayload::PlayerOrientation(orient) => {
             positions::handle_player_orientation(&orient, world, clock);
         }
-        DecodedPacketPayload::DamageStat(_) => {}
-        DecodedPacketPayload::ShipDestroyed { .. } => {}
+        DecodedPacketPayload::DamageStat(ref entries) => {
+            combat::handle_damage_stat(entries, world);
+        }
+        DecodedPacketPayload::ShipDestroyed { killer, victim, cause } => {
+            combat::handle_ship_destroyed(killer, victim, cause, clock, world);
+        }
         DecodedPacketPayload::EntityMethod(_) => {}
         DecodedPacketPayload::EntityProperty(prop) => {
             vehicles::handle_vehicle_property(
@@ -92,7 +99,9 @@ pub fn dispatch<G: ResourceLoader>(
             );
         }
         DecodedPacketPayload::CheckPing(_) => {}
-        DecodedPacketPayload::DamageReceived { .. } => {}
+        DecodedPacketPayload::DamageReceived { victim, ref aggressors } => {
+            combat::handle_damage_received(victim, aggressors, clock, world);
+        }
         DecodedPacketPayload::MinimapUpdate { updates, .. } => {
             positions::handle_minimap_updates(&updates, world, clock, options.source_team);
         }

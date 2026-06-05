@@ -140,6 +140,10 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         }
     }
 
+    pub(crate) fn world(&self) -> &World {
+        &self.world
+    }
+
     pub(crate) fn world_mut(&mut self) -> &mut World {
         &mut self.world
     }
