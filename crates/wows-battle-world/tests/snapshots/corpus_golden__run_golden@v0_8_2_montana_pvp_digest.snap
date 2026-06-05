@@ -1,0 +1,1786 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: digest_snapshot(filename)
+---
+positions:
+  - id: 1342953
+    x: 191.985
+    y: 0
+    z: 326.181
+    yaw: 1.402
+    pitch: 0
+    roll: 0.061
+  - id: 1342955
+    x: 22.984
+    y: 0
+    z: -82.916
+    yaw: -1.687
+    pitch: 0
+    roll: 0.031
+  - id: 1342957
+    x: -413.581
+    y: 0
+    z: -538.862
+    yaw: -1.101
+    pitch: 0
+    roll: 0.006
+  - id: 1342959
+    x: 272.679
+    y: 0
+    z: -32.742
+    yaw: -0.291
+    pitch: 0
+    roll: -0.006
+  - id: 1342960
+    x: 6.309
+    y: 0
+    z: 10.45
+    yaw: 0
+    pitch: 0
+    roll: 0
+  - id: 1342961
+    x: 25.8
+    y: -0
+    z: -4.03
+    yaw: 3.097
+    pitch: 0
+    roll: 0.047
+  - id: 1342963
+    x: 46.881
+    y: 0
+    z: 23.293
+    yaw: 1.847
+    pitch: 0
+    roll: 0.006
+  - id: 1342965
+    x: 501.941
+    y: 0
+    z: 79.996
+    yaw: 0.414
+    pitch: 0
+    roll: -0.006
+  - id: 1342967
+    x: -172.264
+    y: 0
+    z: -425.696
+    yaw: -2.083
+    pitch: 0
+    roll: -0.006
+  - id: 1342969
+    x: -610.126
+    y: 0
+    z: 565.942
+    yaw: -0.218
+    pitch: 0
+    roll: -0.012
+  - id: 1342971
+    x: -30.311
+    y: 0
+    z: -6.992
+    yaw: 3
+    pitch: 0
+    roll: 0
+  - id: 1342973
+    x: 482.653
+    y: 0
+    z: -159.505
+    yaw: 0.718
+    pitch: 0
+    roll: -0.006
+  - id: 1342975
+    x: 13.838
+    y: 0
+    z: -231.531
+    yaw: 1.353
+    pitch: 0
+    roll: 0.092
+  - id: 1342977
+    x: -333.987
+    y: 0
+    z: 386.854
+    yaw: 2.059
+    pitch: 0
+    roll: -0.049
+  - id: 1342979
+    x: -17.836
+    y: 0
+    z: 577.906
+    yaw: 1.365
+    pitch: 0
+    roll: -0.043
+  - id: 1342981
+    x: -96.026
+    y: 0
+    z: -67.031
+    yaw: -2.145
+    pitch: 0
+    roll: -0.025
+  - id: 1342983
+    x: 45.263
+    y: 0
+    z: -142.658
+    yaw: -1.138
+    pitch: 0
+    roll: 0.043
+  - id: 1342985
+    x: 206.177
+    y: 0
+    z: 130.506
+    yaw: 1.374
+    pitch: 0
+    roll: 0.018
+  - id: 1342987
+    x: 149.624
+    y: 0
+    z: 150.054
+    yaw: 2.059
+    pitch: 0
+    roll: 0.067
+  - id: 1342989
+    x: 652.646
+    y: 0
+    z: 23.997
+    yaw: -0.095
+    pitch: 0
+    roll: -0.006
+  - id: 1342991
+    x: -34.576
+    y: 0
+    z: 26.198
+    yaw: 0.034
+    pitch: 0
+    roll: 0.031
+  - id: 1342993
+    x: 209.046
+    y: 0
+    z: 203.097
+    yaw: 0.411
+    pitch: 0
+    roll: 0.049
+  - id: 1342995
+    x: 368.449
+    y: 0
+    z: -111.055
+    yaw: -0.976
+    pitch: 0
+    roll: 0
+  - id: 1342997
+    x: -269.285
+    y: 0
+    z: 181.824
+    yaw: 0.577
+    pitch: 0
+    roll: -0.049
+minimap: []
+vehicles:
+  - id: 1342953
+    health: 0
+    max_health: 0
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 1342952
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342955
+    health: 0
+    max_health: 40800
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1342954
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342957
+    health: 63100
+    max_health: 63100
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1342956
+    selected_weapon: Known(Planes)
+    ship_params_id: GameParamId(0)
+  - id: 1342959
+    health: 0
+    max_health: 50600
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1342958
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342961
+    health: 8412.726
+    max_health: 96300
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1342960
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342963
+    health: 0
+    max_health: 12346.325
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 1342962
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342965
+    health: 0
+    max_health: 0
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1342964
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342967
+    health: 0
+    max_health: 53300
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1342966
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342969
+    health: 0
+    max_health: 92400
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 1342968
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342971
+    health: 0
+    max_health: 13151.484
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 1342970
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342973
+    health: 0
+    max_health: 45400
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1342972
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342975
+    health: 0
+    max_health: 0
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 1342974
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342977
+    health: 0
+    max_health: 65400
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 1342976
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342979
+    health: 0
+    max_health: 92400
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1342978
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342981
+    health: 0
+    max_health: 10954.694
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 1342980
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342983
+    health: 0
+    max_health: 8562
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 1342982
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342985
+    health: 0
+    max_health: 21400
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1342984
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342987
+    health: 0
+    max_health: 72450
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1342986
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342989
+    health: 0
+    max_health: 0
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1342988
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342991
+    health: 0
+    max_health: 9395.098
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 1342990
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342993
+    health: 0
+    max_health: 22332.455
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 1342992
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342995
+    health: 33809
+    max_health: 35159
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 1342994
+    selected_weapon: Known(Planes)
+    ship_params_id: GameParamId(0)
+  - id: 1342997
+    health: 0
+    max_health: 105800
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1342996
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 1342999
+    health: 90950
+    max_health: 90950
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 1342998
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+entity_kinds:
+  - id: 1342953
+    kind: Vehicle
+  - id: 1342955
+    kind: Vehicle
+  - id: 1342957
+    kind: Vehicle
+  - id: 1342959
+    kind: Vehicle
+  - id: 1342961
+    kind: Vehicle
+  - id: 1342963
+    kind: Vehicle
+  - id: 1342965
+    kind: Vehicle
+  - id: 1342967
+    kind: Vehicle
+  - id: 1342969
+    kind: Vehicle
+  - id: 1342971
+    kind: Vehicle
+  - id: 1342973
+    kind: Vehicle
+  - id: 1342975
+    kind: Vehicle
+  - id: 1342977
+    kind: Vehicle
+  - id: 1342979
+    kind: Vehicle
+  - id: 1342981
+    kind: Vehicle
+  - id: 1342983
+    kind: Vehicle
+  - id: 1342985
+    kind: Vehicle
+  - id: 1342987
+    kind: Vehicle
+  - id: 1342989
+    kind: Vehicle
+  - id: 1342991
+    kind: Vehicle
+  - id: 1342993
+    kind: Vehicle
+  - id: 1342995
+    kind: Vehicle
+  - id: 1342997
+    kind: Vehicle
+  - id: 1342999
+    kind: Vehicle
+kills:
+  - clock: 135.794
+    killer: 11
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 139.104
+    killer: 11
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 140.243
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 141.234
+    killer: 11
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 142.825
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 625.13
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 627.255
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1116471296\")"
+  - clock: 629.528
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1132778291\")"
+  - clock: 629.834
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1082864435\")"
+  - clock: 951.386
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 954.253
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 955.676
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 956.09
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 956.654
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 957.118
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 958.248
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 958.66
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 958.96
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 959.392
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 959.801
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 960.246
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 960.669
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 961.11
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 961.11
+    killer: 23
+    victim: 1342995
+    cause: "Unknown(\"1129707192\")"
+  - clock: 961.394
+    killer: 23
+    victim: 1342995
+    cause: "Unknown(\"1129707192\")"
+  - clock: 961.54
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 961.668
+    killer: 23
+    victim: 1342995
+    cause: "Unknown(\"1119573770\")"
+  - clock: 961.956
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 962.381
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 962.824
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 963.084
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 963.511
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 963.968
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1137504010\")"
+  - clock: 964.089
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1134395392\")"
+  - clock: 964.226
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1117213491\")"
+  - clock: 964.385
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 964.81
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 965.228
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 965.675
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1132224020\")"
+  - clock: 966.102
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1110291907\")"
+  - clock: 966.382
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1126006784\")"
+  - clock: 966.54
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1144614584\")"
+  - clock: 966.667
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1126006784\")"
+  - clock: 966.825
+    killer: 22
+    victim: 1342995
+    cause: "Unknown(\"1095793377\")"
+  - clock: 994.812
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 997.676
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 998.243
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1144848384\")"
+  - clock: 998.385
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1151172608\")"
+  - clock: 998.543
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1140588544\")"
+  - clock: 1000.389
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1144848384\")"
+  - clock: 1000.544
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1161661235\")"
+  - clock: 1000.671
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1151172608\")"
+  - clock: 1002.671
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1148977152\")"
+  - clock: 1002.836
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1151172608\")"
+  - clock: 1002.95
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1140588544\")"
+  - clock: 1003.395
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1133510656\")"
+  - clock: 1054.522
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 1056.236
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1130483057\")"
+  - clock: 1056.813
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1130483057\")"
+  - clock: 1057.24
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1130483057\")"
+  - clock: 1057.796
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1130483057\")"
+  - clock: 1058.246
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1130483057\")"
+  - clock: 1058.851
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1130483057\")"
+  - clock: 1059.234
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1130483057\")"
+  - clock: 1060.387
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1060.835
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1062.958
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1063.098
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1063.243
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1063.407
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1063.521
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1063.804
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1064.089
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1064.377
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1064.664
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1064.965
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1065.245
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1065.533
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1065.813
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1066.106
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1066.535
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1118218813\")"
+  - clock: 1066.827
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1067.099
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1067.401
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1120489636\")"
+  - clock: 1067.659
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1067.964
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1068.244
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1068.52
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1068.81
+    killer: 26
+    victim: 1342995
+    cause: "Unknown(\"1120489636\")"
+  - clock: 1069.108
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 1071.677
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 1074.371
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1074.965
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1139294863\")"
+  - clock: 1075.394
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1075.975
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1076.375
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1076.797
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1077.379
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1078.508
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1078.821
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1079.126
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1080.963
+    killer: 27
+    victim: 1342995
+    cause: "Unknown(\"1129347645\")"
+  - clock: 1081.099
+    killer: 27
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1081.228
+    killer: 27
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1081.522
+    killer: 27
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1081.948
+    killer: 27
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1082.094
+    killer: 28
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1082.238
+    killer: 28
+    victim: 1342995
+    cause: "Unknown(\"1126785352\")"
+  - clock: 1082.37
+    killer: 28
+    victim: 1342995
+    cause: "Unknown(\"1126993510\")"
+  - clock: 1082.527
+    killer: 28
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1082.654
+    killer: 28
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1082.824
+    killer: 28
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1082.963
+    killer: 28
+    victim: 1342995
+    cause: "Unknown(\"1118986076\")"
+  - clock: 1083.236
+    killer: 27
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1083.529
+    killer: 27
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1083.96
+    killer: 27
+    victim: 1342995
+    cause: "Unknown(\"1119202836\")"
+  - clock: 1084.223
+    killer: 27
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1084.541
+    killer: 27
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1084.814
+    killer: 27
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1085.121
+    killer: 27
+    victim: 1342995
+    cause: "Unknown(\"1126331187\")"
+  - clock: 1085.39
+    killer: 27
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1085.672
+    killer: 27
+    victim: 1342995
+    cause: "Unknown(\"1111518085\")"
+  - clock: 1120.39
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 1123.379
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 1124.677
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1125.101
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1125.682
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1126.236
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1126.805
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1127.238
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1121693204\")"
+  - clock: 1127.807
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1128.374
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1128.799
+    killer: 2
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1131.116
+    killer: 29
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1131.515
+    killer: 29
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1131.795
+    killer: 29
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1132.086
+    killer: 29
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1132.394
+    killer: 29
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1132.668
+    killer: 29
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1132.97
+    killer: 29
+    victim: 1342995
+    cause: "Unknown(\"1126442129\")"
+  - clock: 1161.512
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 1163.518
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1140588544\")"
+  - clock: 1163.672
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1140588544\")"
+  - clock: 1164.376
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1164.975
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1165.385
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1132199936\")"
+  - clock: 1165.512
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1166.099
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1166.667
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1167.089
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1144848384\")"
+  - clock: 1167.234
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1134728446\")"
+  - clock: 1167.809
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1168.538
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1168.807
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1169.24
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1169.665
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1169.955
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1170.37
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1170.809
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1171.239
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1171.526
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1125360681\")"
+  - clock: 1171.964
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1172.38
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1172.661
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1173.106
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1173.528
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1173.967
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1174.251
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1174.669
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1175.085
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1175.394
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1175.81
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1176.235
+    killer: 3
+    victim: 1342995
+    cause: "Unknown(\"1124493763\")"
+  - clock: 1177.96
+    killer: 30
+    victim: 1342995
+    cause: "Unknown(\"1118601265\")"
+  - clock: 1178.551
+    killer: 30
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1178.819
+    killer: 30
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1179.106
+    killer: 30
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1179.227
+    killer: 30
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1179.382
+    killer: 30
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1179.5
+    killer: 30
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1179.663
+    killer: 30
+    victim: 1342995
+    cause: "Unknown(\"1126373089\")"
+  - clock: 1179.965
+    killer: 30
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1180.228
+    killer: 30
+    victim: 1342995
+    cause: "Unknown(\"1121744978\")"
+  - clock: 1181.382
+    killer: 31
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1181.658
+    killer: 31
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1181.942
+    killer: 31
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1182.237
+    killer: 31
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1182.523
+    killer: 31
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1182.825
+    killer: 31
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1206.66
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 1209.409
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1141166899\")"
+  - clock: 1210.81
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1132199936\")"
+  - clock: 1211.231
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1211.808
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1212.216
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1212.833
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1212.833
+    killer: 202
+    victim: 1342995
+    cause: "Unknown(\"1127481344\")"
+  - clock: 1213.237
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1213.821
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1214.374
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1215.09
+    killer: 202
+    victim: 1342995
+    cause: "Unknown(\"1127481344\")"
+  - clock: 1215.237
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1215.52
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1215.99
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1216.248
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1216.53
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1216.955
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1217.247
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1217.247
+    killer: 202
+    victim: 1342995
+    cause: "Unknown(\"1127481344\")"
+  - clock: 1217.947
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1218.254
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1218.652
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1218.956
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1219.245
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1219.546
+    killer: 202
+    victim: 1342995
+    cause: "Unknown(\"1127481344\")"
+  - clock: 1219.678
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1220.368
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1220.959
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1221.385
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1221.685
+    killer: 202
+    victim: 1342995
+    cause: "Unknown(\"1127481344\")"
+  - clock: 1221.979
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1222.524
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1222.982
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1223.546
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128488468\")"
+  - clock: 1223.973
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1224.385
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1088636846\")"
+  - clock: 1224.385
+    killer: 202
+    victim: 1342995
+    cause: "Unknown(\"1127481344\")"
+  - clock: 1224.811
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1224.811
+    killer: 202
+    victim: 1342995
+    cause: "Unknown(\"1127481344\")"
+  - clock: 1225.588
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1226.075
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1126147113\")"
+  - clock: 1226.53
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1227.092
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1227.52
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1228.105
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1122154906\")"
+  - clock: 1228.67
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1129612575\")"
+  - clock: 1229.218
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1116780626\")"
+  - clock: 1229.527
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1229.795
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1230.246
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1128269005\")"
+  - clock: 1230.384
+    killer: 1
+    victim: 1342995
+    cause: "Unknown(\"1127144899\")"
+chat:
+  - clock: 0
+    sender_name: Unknown
+    channel: "Unknown(\"\")"
+    message: ""
+    entity_id: 1342960
+    sender_relation: None
+    player: ~
+capture_points:
+  - index: 0
+    position:
+      - -425
+      - 0
+      - 0
+    radius: 110
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 60
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - -16
+      - 0
+      - 0
+    radius: 80
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: 1
+    progress:
+      - 0.683
+      - 19
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 2
+    position:
+      - 374
+      - 0
+      - 0
+    radius: 95
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: -1
+    progress:
+      - 0
+      - 60
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+team_scores: []
+consumables:
+  - id: 1342953
+    active: 8
+    inventory_slots: 0
+  - id: 1342955
+    active: 6
+    inventory_slots: 0
+  - id: 1342957
+    active: 1
+    inventory_slots: 0
+  - id: 1342959
+    active: 5
+    inventory_slots: 0
+  - id: 1342961
+    active: 7
+    inventory_slots: 0
+  - id: 1342963
+    active: 5
+    inventory_slots: 0
+  - id: 1342965
+    active: 4
+    inventory_slots: 0
+  - id: 1342967
+    active: 8
+    inventory_slots: 0
+  - id: 1342969
+    active: 4
+    inventory_slots: 0
+  - id: 1342971
+    active: 5
+    inventory_slots: 0
+  - id: 1342973
+    active: 5
+    inventory_slots: 0
+  - id: 1342975
+    active: 1
+    inventory_slots: 0
+  - id: 1342977
+    active: 3
+    inventory_slots: 0
+  - id: 1342979
+    active: 11
+    inventory_slots: 0
+  - id: 1342981
+    active: 4
+    inventory_slots: 0
+  - id: 1342983
+    active: 7
+    inventory_slots: 0
+  - id: 1342985
+    active: 4
+    inventory_slots: 0
+  - id: 1342987
+    active: 9
+    inventory_slots: 0
+  - id: 1342989
+    active: 3
+    inventory_slots: 0
+  - id: 1342993
+    active: 5
+    inventory_slots: 0
+  - id: 1342995
+    active: 3
+    inventory_slots: 0
+  - id: 1342997
+    active: 9
+    inventory_slots: 0
+  - id: 1342999
+    active: 3
+    inventory_slots: 0
+planes:
+  - plane_id: PlaneId(12886244883)
+    owner_id: 1342960
+    team_id: 4294967248
+    params_id: GameParamId(33103798)
+  - plane_id: PlaneId(17181212179)
+    owner_id: 1342960
+    team_id: 4294967248
+    params_id: GameParamId(33103798)
+  - plane_id: PlaneId(4296310257)
+    owner_id: 1342960
+    team_id: 4294967280
+    params_id: GameParamId(16707383)
+wards:
+  - plane_id: PlaneId(1476592447638666960)
+    owner_id: 2589344575
+    position:
+      - 0
+      - -13173029000000000000
+      - 0
+    radius: BigWorldDistance(2.0660034e-22)
+  - plane_id: PlaneId(1476594646661922512)
+    owner_id: 1128454207
+    position:
+      - 0
+      - -6586514500000000000
+      - 0
+    radius: BigWorldDistance(-2.5078053e-31)
+  - plane_id: PlaneId(1476596845368016592)
+    owner_id: 56373312
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(8.251541e-28)
+  - plane_id: PlaneId(1476596849662983888)
+    owner_id: 2226103104
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.5664483e-36)
+  - plane_id: PlaneId(1476596854062677712)
+    owner_id: 2325834817
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(7.515988e-37)
+  - plane_id: PlaneId(1476596854062743248)
+    owner_id: 4087524673
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-21399424.0)
+  - plane_id: PlaneId(1476596858147929808)
+    owner_id: 227374143
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(2.9618982e-38)
+  - plane_id: PlaneId(1476596858252918480)
+    owner_id: 1358619712
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(8.283593e-16)
+  - plane_id: PlaneId(1476596879832481488)
+    owner_id: 103046975
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.191745e-36)
+  - plane_id: PlaneId(1476596892612656848)
+    owner_id: 103046975
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.191745e-36)
+  - plane_id: PlaneId(1476596892717448912)
+    owner_id: 103046975
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.191745e-36)
+  - plane_id: PlaneId(1476601243728543728)
+    owner_id: 4164066304
+    position:
+      - 0
+      - -56925900000000000000000000000
+      - 0
+    radius: BigWorldDistance(6.9879e-41)
+  - plane_id: PlaneId(1476605641778200272)
+    owner_id: 3529136191
+    position:
+      - 0
+      - -13173029000000000000
+      - 0
+    radius: BigWorldDistance(3.033045e-35)
+  - plane_id: PlaneId(1476616636900769584)
+    owner_id: 2721479232
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-4.974692e-10)
+  - plane_id: PlaneId(1476625432987500240)
+    owner_id: 476700481
+    position:
+      - 0
+      - -6586514500000000000
+      - 0
+    radius: BigWorldDistance(7.0359e-41)
+  - plane_id: PlaneId(1476632041999925040)
+    owner_id: 3616597310
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(2.6759958)
+  - plane_id: PlaneId(1476636440046436144)
+    owner_id: 1461270590
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-7.698734e-25)
+  - plane_id: PlaneId(1476638626809872080)
+    owner_id: 69265728
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-8207157000000000.0)
+  - plane_id: PlaneId(1476638626914598608)
+    owner_id: 2151681857
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-1.0268428e36)
+  - plane_id: PlaneId(1476638631209631440)
+    owner_id: 4100425281
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-5.1385707e-34)
+  - plane_id: PlaneId(1476638635504533200)
+    owner_id: 803187265
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-5.158869e-19)
+  - plane_id: PlaneId(1476638635504598736)
+    owner_id: 4070360128
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.616447e21)
+  - plane_id: PlaneId(1476638639694773968)
+    owner_id: 1951873088
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(4.978874e-32)
+  - plane_id: PlaneId(1476638643884752592)
+    owner_id: 294890303
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.1888062e-36)
+  - plane_id: PlaneId(1476638652474687184)
+    owner_id: 79417154
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-1.0492789e-8)
+  - plane_id: PlaneId(1476638652684467920)
+    owner_id: 2223685953
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-330433440000000.0)
+  - plane_id: PlaneId(1476638661274336976)
+    owner_id: 2531042113
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(NaN)
+  - plane_id: PlaneId(1476638674054512336)
+    owner_id: 2503342145
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.585317e-39)
+  - plane_id: PlaneId(1476638674159304400)
+    owner_id: 4070974015
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.9208954e-35)
+  - plane_id: PlaneId(1476640825206570800)
+    owner_id: 2525821502
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(6.3255147e-25)
+active_shots: 0
+active_torpedoes: 0
+battle_stage: Some(Waiting)
+time_left: 0
+winning_team: 1
+finish_type: Known(ScoreOnTimeout)
+battle_start_clock: 39.072
+battle_end_clock: 1240.085

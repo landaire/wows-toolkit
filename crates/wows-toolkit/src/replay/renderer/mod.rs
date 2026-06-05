@@ -822,7 +822,7 @@ pub struct ReplayRendererViewer {
 /// primary. Carried alongside the primary's bytes through every renderer
 /// path so the playback thread, video export, and timeline extraction all
 /// produce a merged view via
-/// [`wows_replays::analyzer::battle_controller::merged::MergedReplays`].
+/// [`wows_battle_world::merged::MergedReplays`].
 #[derive(Clone)]
 pub struct AltReplayBytes {
     pub raw_meta: Vec<u8>,

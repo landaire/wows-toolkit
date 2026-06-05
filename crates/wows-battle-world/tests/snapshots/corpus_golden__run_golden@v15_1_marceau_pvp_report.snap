@@ -1,0 +1,622 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: report_snapshot(filename)
+---
+arena_id: ArenaId(5214882342341106)
+version: "Version { major: 15, minor: 1, patch: 0, build: 11965230 }"
+map_name: spaces/22_tierra_del_fuego
+game_mode: domination_3point
+game_type: Known(Random)
+match_group: pvp
+self_player: 565593699
+battle_result: "{\"type\":\"Win\",\"team_id\":0}"
+finish_type: Known(Extermination)
+max_duration: 1200
+played_duration: 1174.554
+extra_duration: 8.287
+players:
+  - account_id: 500425962
+    name: ranma1985
+    entity_id: 1214209
+    team_id: 0
+    meta_ship_id: 939678772
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4284397360)
+  - account_id: 500983845
+    name: krisken
+    entity_id: 1214199
+    team_id: 1
+    meta_ship_id: 805413526
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4284429648)
+  - account_id: 501983621
+    name: hugoka
+    entity_id: 1214205
+    team_id: 1
+    meta_ship_id: 939561000
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179539408)
+  - account_id: 502198039
+    name: penguinslayer
+    entity_id: 1214215
+    team_id: 1
+    meta_ship_id: 939805911
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179572688)
+  - account_id: 503082190
+    name: kiniu5
+    entity_id: 1214213
+    team_id: 0
+    meta_ship_id: 939580347
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3760076496)
+  - account_id: 512472337
+    name: TwistedJoker
+    entity_id: 1214217
+    team_id: 1
+    meta_ship_id: 939681370
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179572720)
+  - account_id: 512994654
+    name: it_FUBAR
+    entity_id: 1214189
+    team_id: 0
+    meta_ship_id: 805317123
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4074714928)
+  - account_id: 527024650
+    name: hotek1
+    entity_id: 1214193
+    team_id: 0
+    meta_ship_id: 805652883
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4259231440)
+  - account_id: 529046938
+    name: 1Stein1
+    entity_id: 1214221
+    team_id: 1
+    meta_ship_id: 805473250
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3655218960)
+  - account_id: 531914142
+    name: Sliwkoland
+    entity_id: 1214207
+    team_id: 1
+    meta_ship_id: 939745715
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3539908400)
+  - account_id: 538045448
+    name: Zodiac164
+    entity_id: 1214231
+    team_id: 0
+    meta_ship_id: 939889909
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4179539152)
+  - account_id: 549388476
+    name: Kero29
+    entity_id: 1214211
+    team_id: 1
+    meta_ship_id: 805686714
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3445536720)
+  - account_id: 558775322
+    name: mnouckk
+    entity_id: 1214219
+    team_id: 0
+    meta_ship_id: 805658076
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3549869904)
+  - account_id: 559184240
+    name: the_seven_Chandrian
+    entity_id: 1214227
+    team_id: 0
+    meta_ship_id: 939869290
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3539941072)
+  - account_id: 559688745
+    name: Heidenpower
+    entity_id: 1214191
+    team_id: 0
+    meta_ship_id: 939804176
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3759585264)
+  - account_id: 564936097
+    name: Wolster_1
+    entity_id: 1214203
+    team_id: 1
+    meta_ship_id: 939902298
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179506480)
+  - account_id: 565593699
+    name: BonnieBlue_prpr
+    entity_id: 1214225
+    team_id: 0
+    meta_ship_id: 939741032
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(4074649424)
+  - account_id: 567916609
+    name: Changer24
+    entity_id: 1214223
+    team_id: 0
+    meta_ship_id: 805406051
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4273977328)
+  - account_id: 568856703
+    name: Damianwar
+    entity_id: 1214187
+    team_id: 1
+    meta_ship_id: 805329026
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4074158064)
+  - account_id: 588344757
+    name: MOMO123_47
+    entity_id: 1214197
+    team_id: 1
+    meta_ship_id: 805763477
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3550394352)
+  - account_id: 596221760
+    name: individum65
+    entity_id: 1214201
+    team_id: 0
+    meta_ship_id: 939841692
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4284429648)
+  - account_id: 598249206
+    name: tomatenyeti
+    entity_id: 1214195
+    team_id: 1
+    meta_ship_id: 805437716
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4074747856)
+  - account_id: 684420539
+    name: Nathanieldark21
+    entity_id: 1214229
+    team_id: 0
+    meta_ship_id: 805619949
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4179539408)
+  - account_id: 689785201
+    name: narjaghan18
+    entity_id: 1214233
+    team_id: 1
+    meta_ship_id: 805465080
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3549870064)
+frags:
+  - killer_account_id: 500425962
+    killer_name: ranma1985
+    victims:
+      - 1214209@Known(ApShell)
+      - 1214209@Known(ApShell)
+  - killer_account_id: 502198039
+    killer_name: penguinslayer
+    victims:
+      - 1214215@Known(HeShell)
+      - 1214215@Known(HeShell)
+      - 1214215@Known(HeShell)
+  - killer_account_id: 512472337
+    killer_name: TwistedJoker
+    victims:
+      - 1214217@Known(Fire)
+  - killer_account_id: 529046938
+    killer_name: 1Stein1
+    victims:
+      - 1214221@Known(HeShell)
+  - killer_account_id: 549388476
+    killer_name: Kero29
+    victims:
+      - 1214211@Known(ApShell)
+  - killer_account_id: 559184240
+    killer_name: the_seven_Chandrian
+    victims:
+      - 1214227@Known(ApShell)
+  - killer_account_id: 559688745
+    killer_name: Heidenpower
+    victims:
+      - 1214191@Known(Torpedo)
+      - 1214191@Known(Torpedo)
+  - killer_account_id: 565593699
+    killer_name: BonnieBlue_prpr
+    victims:
+      - 1214225@Known(HeShell)
+      - 1214225@Known(HeShell)
+      - 1214225@Known(HeShell)
+      - 1214225@Known(Ramming)
+  - killer_account_id: 567916609
+    killer_name: Changer24
+    victims:
+      - 1214223@Known(AerialTorpedo)
+  - killer_account_id: 568856703
+    killer_name: Damianwar
+    victims:
+      - 1214187@Known(Torpedo)
+  - killer_account_id: 588344757
+    killer_name: MOMO123_47
+    victims:
+      - 1214197@Known(HeShell)
+  - killer_account_id: 596221760
+    killer_name: individum65
+    victims:
+      - 1214201@Known(ApShell)
+      - 1214201@Known(Fire)
+  - killer_account_id: 689785201
+    killer_name: narjaghan18
+    victims:
+      - 1214233@Known(Flooding)
+      - 1214233@Known(Torpedo)
+chat:
+  - clock: 114.162
+    sender_name: penguinslayer
+    channel: Global
+    message: first to die buys us all pizza!
+    entity_id: 1214224
+    sender_relation: Some(Relation(2))
+    player: "502198039:penguinslayer"
+  - clock: 133.188
+    sender_name: BonnieBlue_prpr
+    channel: Global
+    message: plot twist your the first to die
+    entity_id: 1214224
+    sender_relation: Some(Relation(0))
+    player: "565593699:BonnieBlue_prpr"
+  - clock: 141.789
+    sender_name: penguinslayer
+    channel: Global
+    message: Nooooooooooo!
+    entity_id: 1214224
+    sender_relation: Some(Relation(2))
+    player: "502198039:penguinslayer"
+  - clock: 187.079
+    sender_name: Heidenpower
+    channel: Team
+    message: essex can you spot carrier one time?
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559688745:Heidenpower"
+  - clock: 199.467
+    sender_name: BonnieBlue_prpr
+    channel: Global
+    message: bremen what exactly are tou gonna accomlish on that rock
+    entity_id: 1214224
+    sender_relation: Some(Relation(0))
+    player: "565593699:BonnieBlue_prpr"
+  - clock: 207.172
+    sender_name: Changer24
+    channel: Team
+    message: if it will be possible
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "567916609:Changer24"
+  - clock: 234.766
+    sender_name: Heidenpower
+    channel: Team
+    message: ty
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559688745:Heidenpower"
+  - clock: 258.459
+    sender_name: Heidenpower
+    channel: Team
+    message: ty
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559688745:Heidenpower"
+  - clock: 296.938
+    sender_name: BonnieBlue_prpr
+    channel: Team
+    message: "RPF: SE~SSE"
+    entity_id: 1214224
+    sender_relation: Some(Relation(0))
+    player: "565593699:BonnieBlue_prpr"
+  - clock: 426.602
+    sender_name: Heidenpower
+    channel: Team
+    message: "wp essex :))"
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559688745:Heidenpower"
+  - clock: 677.027
+    sender_name: BonnieBlue_prpr
+    channel: Team
+    message: "RPF: WSW~W"
+    entity_id: 1214224
+    sender_relation: Some(Relation(0))
+    player: "565593699:BonnieBlue_prpr"
+  - clock: 695.16
+    sender_name: Changer24
+    channel: Global
+    message: FVKING GAY
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "567916609:Changer24"
+  - clock: 729.022
+    sender_name: BonnieBlue_prpr
+    channel: Team
+    message: "RPF: SW~WSW"
+    entity_id: 1214224
+    sender_relation: Some(Relation(0))
+    player: "565593699:BonnieBlue_prpr"
+  - clock: 740.043
+    sender_name: BonnieBlue_prpr
+    channel: Team
+    message: sub behind you aki
+    entity_id: 1214224
+    sender_relation: Some(Relation(0))
+    player: "565593699:BonnieBlue_prpr"
+  - clock: 772.172
+    sender_name: BonnieBlue_prpr
+    channel: Team
+    message: "RPF: N~NNE"
+    entity_id: 1214224
+    sender_relation: Some(Relation(0))
+    player: "565593699:BonnieBlue_prpr"
+  - clock: 818.161
+    sender_name: BonnieBlue_prpr
+    channel: Team
+    message: i can take the tromp
+    entity_id: 1214224
+    sender_relation: Some(Relation(0))
+    player: "565593699:BonnieBlue_prpr"
+  - clock: 823.159
+    sender_name: BonnieBlue_prpr
+    channel: Team
+    message: aki you need to get A and conc pls
+    entity_id: 1214224
+    sender_relation: Some(Relation(0))
+    player: "565593699:BonnieBlue_prpr"
+  - clock: 836.153
+    sender_name: BonnieBlue_prpr
+    channel: Team
+    message: "RPF: ENE~E"
+    entity_id: 1214224
+    sender_relation: Some(Relation(0))
+    player: "565593699:BonnieBlue_prpr"
+  - clock: 991.28
+    sender_name: BonnieBlue_prpr
+    channel: Team
+    message: gato can you get the balao?
+    entity_id: 1214224
+    sender_relation: Some(Relation(0))
+    player: "565593699:BonnieBlue_prpr"
+  - clock: 995.575
+    sender_name: the_seven_Chandrian
+    channel: Team
+    message: he tries
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559184240:the_seven_Chandrian"
+  - clock: 1000.281
+    sender_name: BonnieBlue_prpr
+    channel: Team
+    message: cool cool
+    entity_id: 1214224
+    sender_relation: Some(Relation(0))
+    player: "565593699:BonnieBlue_prpr"
+  - clock: 1005.716
+    sender_name: Heidenpower
+    channel: Team
+    message: ":)"
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559688745:Heidenpower"
+  - clock: 1005.872
+    sender_name: BonnieBlue_prpr
+    channel: Team
+    message: "RPF: W~WNW"
+    entity_id: 1214224
+    sender_relation: Some(Relation(0))
+    player: "565593699:BonnieBlue_prpr"
+  - clock: 1036.994
+    sender_name: the_seven_Chandrian
+    channel: Team
+    message: in range?
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559184240:the_seven_Chandrian"
+  - clock: 1040.565
+    sender_name: BonnieBlue_prpr
+    channel: Team
+    message: not yet
+    entity_id: 1214224
+    sender_relation: Some(Relation(0))
+    player: "565593699:BonnieBlue_prpr"
+  - clock: 1071.584
+    sender_name: the_seven_Chandrian
+    channel: Team
+    message: balao
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559184240:the_seven_Chandrian"
+  - clock: 1132.417
+    sender_name: Heidenpower
+    channel: Team
+    message: 52 sek
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559688745:Heidenpower"
+  - clock: 1136.15
+    sender_name: Heidenpower
+    channel: Team
+    message: to detect
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559688745:Heidenpower"
+  - clock: 1148.877
+    sender_name: the_seven_Chandrian
+    channel: Team
+    message: 35sec
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559184240:the_seven_Chandrian"
+  - clock: 1171.439
+    sender_name: the_seven_Chandrian
+    channel: Team
+    message: "10"
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559184240:the_seven_Chandrian"
+  - clock: 1171.439
+    sender_name: Heidenpower
+    channel: Team
+    message: "10"
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559688745:Heidenpower"
+  - clock: 1203.142
+    sender_name: the_seven_Chandrian
+    channel: Team
+    message: ggwp love
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559184240:the_seven_Chandrian"
+  - clock: 1203.573
+    sender_name: penguinslayer
+    channel: Global
+    message: GG
+    entity_id: 1214224
+    sender_relation: Some(Relation(2))
+    player: "502198039:penguinslayer"
+  - clock: 1205
+    sender_name: the_seven_Chandrian
+    channel: Team
+    message: "+1"
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559184240:the_seven_Chandrian"
+  - clock: 1205.565
+    sender_name: Heidenpower
+    channel: Team
+    message: gg
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559688745:Heidenpower"
+  - clock: 1207.266
+    sender_name: Heidenpower
+    channel: Team
+    message: wp
+    entity_id: 1214224
+    sender_relation: Some(Relation(1))
+    player: "559688745:Heidenpower"
+capture_points:
+  - index: 0
+    position:
+      - -530
+      - 0
+      - 0
+    radius: 120
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - -43
+      - 0
+      - 0
+    radius: 110
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 2
+    position:
+      - 355
+      - 0
+      - 0
+    radius: 110
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 833
+  - team_index: 1
+    score: 858
+self_damage_stats:
+  - weapon: Known(AtbaHe)
+    category: Known(Agro)
+    count: 16
+    total: 30400
+  - weapon: Known(BomberHe)
+    category: Known(Agro)
+    count: 24
+    total: 153600
+  - weapon: Known(BomberHeAsup)
+    category: Known(Agro)
+    count: 47
+    total: 173900
+  - weapon: Known(Burn)
+    category: Known(Enemy)
+    count: 202
+    total: 47622.66
+  - weapon: Known(MainAp)
+    category: Known(Agro)
+    count: 14
+    total: 94200
+  - weapon: Known(MainAp)
+    category: Known(Spot)
+    count: 7
+    total: 17238.17
+  - weapon: Known(MainHe)
+    category: Known(Agro)
+    count: 333
+    total: 961500.06
+  - weapon: Known(MainHe)
+    category: Known(Enemy)
+    count: 221
+    total: 83204.43
+  - weapon: Known(Ram)
+    category: Known(Enemy)
+    count: 1
+    total: 2891.54
+  - weapon: Known(Torpedo)
+    category: Known(Agro)
+    count: 12
+    total: 162103.02
+  - weapon: Known(Torpedo)
+    category: Known(Enemy)
+    count: 1
+    total: 11370.393
+active_consumable_avatars: 24
+active_consumable_total: 123

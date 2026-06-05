@@ -1,0 +1,148 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: report_snapshot(filename)
+---
+arena_id: ArenaId(1482907821473142)
+version: "Version { major: 0, minor: 11, patch: 0, build: 5045210 }"
+map_name: spaces/22_tierra_del_fuego
+game_mode: Domination_Special
+game_type: Known(Brawl)
+match_group: brawl
+self_player: 1031189841
+battle_result: "{\"type\":\"Win\",\"team_id\":0}"
+finish_type: Known(Extermination)
+max_duration: 900
+played_duration: 480.128
+extra_duration: ~
+players:
+  - account_id: 1002088734
+    name: Obi_want
+    entity_id: 345271
+    team_id: 0
+    meta_ship_id: 268483465
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4079957808)
+  - account_id: 1002900728
+    name: 12PKMAIN
+    entity_id: 345269
+    team_id: 1
+    meta_ship_id: 268524353
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4267587280)
+  - account_id: 1003888875
+    name: Grampa_
+    entity_id: 345273
+    team_id: 1
+    meta_ship_id: 402663152
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3765384944)
+  - account_id: 1005424237
+    name: AlteBrown_22
+    entity_id: 345279
+    team_id: 0
+    meta_ship_id: 268447483
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3765319120)
+  - account_id: 1017966530
+    name: 12PK_HogMan
+    entity_id: 345277
+    team_id: 1
+    meta_ship_id: 268483769
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4184782640)
+  - account_id: 1031189841
+    name: Ps2_ros
+    entity_id: 345275
+    team_id: 0
+    meta_ship_id: 268524273
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(4184815344)
+frags:
+  - killer_account_id: 1002088734
+    killer_name: Obi_want
+    victims:
+      - 345271@Known(ApShell)
+  - killer_account_id: 1002900728
+    killer_name: 12PKMAIN
+    victims:
+      - 345269@Known(HeShell)
+      - 345269@Known(Torpedo)
+  - killer_account_id: 1031189841
+    killer_name: Ps2_ros
+    victims:
+      - 345275@Known(CsShell)
+      - 345275@Known(Secondaries)
+chat: []
+capture_points:
+  - index: 0
+    position:
+      - 245
+      - 0
+      - 0
+    radius: 100
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - 365
+      - 0
+      - 0
+    radius: 150
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: 0
+    progress:
+      - 0.033
+      - 0
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 306
+  - team_index: 1
+    score: 866
+self_damage_stats:
+  - weapon: Known(AtbaHe)
+    category: Known(Agro)
+    count: 68
+    total: 111400
+  - weapon: Known(AtbaHe)
+    category: Known(Enemy)
+    count: 17
+    total: 8473.401
+  - weapon: Known(Burn)
+    category: Known(Enemy)
+    count: 72
+    total: 18919.607
+  - weapon: Known(MainAp)
+    category: Known(Agro)
+    count: 18
+    total: 174600
+  - weapon: Known(MainCs)
+    category: Known(Enemy)
+    count: 24
+    total: 31029.389
+  - weapon: Known(MainHe)
+    category: Known(Agro)
+    count: 29
+    total: 58000
+  - weapon: Known(Torpedo)
+    category: Known(Agro)
+    count: 5
+    total: 72000
+active_consumable_avatars: 6
+active_consumable_total: 23

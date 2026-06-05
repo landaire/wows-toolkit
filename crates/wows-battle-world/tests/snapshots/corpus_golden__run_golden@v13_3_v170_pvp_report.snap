@@ -1,0 +1,343 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: report_snapshot(filename)
+---
+arena_id: ArenaId(3975681141010689)
+version: "Version { major: 13, minor: 3, patch: 0, build: 8260685 }"
+map_name: spaces/08_NE_passage
+game_mode: domination_3point
+game_type: Known(Random)
+match_group: pvp
+self_player: 500463338
+battle_result: "{\"type\":\"Win\",\"team_id\":1}"
+finish_type: Known(ScoreZero)
+max_duration: 1200
+played_duration: 551.419
+extra_duration: 7.78
+players:
+  - account_id: -268390226
+    name: ":Villeneuve:"
+    entity_id: 952045
+    team_id: 1
+    meta_ship_id: 268390226
+    relation: Relation(1)
+    is_bot: true
+    vehicle_id: GameParamId(4184782800)
+  - account_id: -268390225
+    name: ":Martinengo:"
+    entity_id: 952044
+    team_id: 0
+    meta_ship_id: 268390225
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4069438928)
+  - account_id: 500463338
+    name: ThElOlEr464
+    entity_id: 952023
+    team_id: 1
+    meta_ship_id: 805435979
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(4185798448)
+  - account_id: 513793118
+    name: Nikvori
+    entity_id: 952031
+    team_id: 1
+    meta_ship_id: 805377645
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4185863920)
+  - account_id: 525741363
+    name: craperoni
+    entity_id: 952003
+    team_id: 1
+    meta_ship_id: 939742997
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4280170480)
+  - account_id: 530163465
+    name: kkcoby
+    entity_id: 952017
+    team_id: 1
+    meta_ship_id: 939839173
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4289640432)
+  - account_id: 530874309
+    name: Serenis_04
+    entity_id: 952001
+    team_id: 0
+    meta_ship_id: 805496448
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4185863632)
+  - account_id: 538122598
+    name: MCK1979
+    entity_id: 952037
+    team_id: 0
+    meta_ship_id: 805359509
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4185863984)
+  - account_id: 548034784
+    name: Sanso_Gyorai
+    entity_id: 952007
+    team_id: 1
+    meta_ship_id: 805503513
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3765352144)
+  - account_id: 550923473
+    name: hillster74
+    entity_id: 952029
+    team_id: 1
+    meta_ship_id: 939586781
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4081006544)
+  - account_id: 551523237
+    name: Roter_Otter
+    entity_id: 952013
+    team_id: 1
+    meta_ship_id: 805596991
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4081006384)
+  - account_id: 553682881
+    name: BuHuTTyx
+    entity_id: 952021
+    team_id: 0
+    meta_ship_id: 805645294
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4185798480)
+  - account_id: 559344695
+    name: Mechino
+    entity_id: 952039
+    team_id: 0
+    meta_ship_id: 939675769
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4069438928)
+  - account_id: 568716589
+    name: Aquaman_2020
+    entity_id: 952043
+    team_id: 0
+    meta_ship_id: 805424255
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4280170480)
+  - account_id: 578950809
+    name: Berserk_568
+    entity_id: 952011
+    team_id: 1
+    meta_ship_id: 939656370
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4267587280)
+  - account_id: 675927144
+    name: IceLemon1225
+    entity_id: 952015
+    team_id: 1
+    meta_ship_id: 939807555
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4274927600)
+  - account_id: 676686446
+    name: pipola_1
+    entity_id: 952033
+    team_id: 0
+    meta_ship_id: 805676654
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4184815440)
+  - account_id: 685942358
+    name: coyotte_59
+    entity_id: 952027
+    team_id: 1
+    meta_ship_id: 805686107
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4184815408)
+  - account_id: 685960031
+    name: blacklord_313
+    entity_id: 952019
+    team_id: 0
+    meta_ship_id: 939941960
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4289640144)
+  - account_id: 686523949
+    name: kingworktam
+    entity_id: 952041
+    team_id: 0
+    meta_ship_id: 939702015
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4081006384)
+  - account_id: 687754176
+    name: Ahmet_Ortaer
+    entity_id: 952005
+    team_id: 1
+    meta_ship_id: 805729174
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4279154032)
+  - account_id: 687895893
+    name: MajorDamage1
+    entity_id: 952009
+    team_id: 0
+    meta_ship_id: 805366688
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4184750032)
+  - account_id: 688081255
+    name: 0bscura_4
+    entity_id: 952035
+    team_id: 0
+    meta_ship_id: 805611506
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4289640432)
+  - account_id: 688201923
+    name: Meollo_
+    entity_id: 952025
+    team_id: 0
+    meta_ship_id: 805311824
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4291704528)
+frags:
+  - killer_account_id: 500463338
+    killer_name: ThElOlEr464
+    victims:
+      - 952023@Known(Torpedo)
+  - killer_account_id: 525741363
+    killer_name: craperoni
+    victims:
+      - 952003@Known(Fire)
+      - 952003@Known(Torpedo)
+      - 952003@Known(Torpedo)
+  - killer_account_id: 530874309
+    killer_name: Serenis_04
+    victims:
+      - 952001@Known(ApShell)
+  - killer_account_id: 559344695
+    killer_name: Mechino
+    victims:
+      - 952039@Known(HeShell)
+  - killer_account_id: 578950809
+    killer_name: Berserk_568
+    victims:
+      - 952011@Known(HeShell)
+      - 952011@Known(HeShell)
+      - 952011@Known(Torpedo)
+  - killer_account_id: 685942358
+    killer_name: coyotte_59
+    victims:
+      - 952027@Known(ApShell)
+      - 952027@Known(ApShell)
+      - 952027@Known(Secondaries)
+  - killer_account_id: 685960031
+    killer_name: blacklord_313
+    victims:
+      - 952019@Known(Torpedo)
+  - killer_account_id: 686523949
+    killer_name: kingworktam
+    victims:
+      - 952041@Known(ApShell)
+  - killer_account_id: 687895893
+    killer_name: MajorDamage1
+    victims:
+      - 952009@Known(Torpedo)
+chat: []
+capture_points:
+  - index: 0
+    position:
+      - 0
+      - 0
+      - 350
+    radius: 100
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - 0
+      - 0
+      - 0
+    radius: 100
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 2
+    position:
+      - 0
+      - 0
+      - -350
+    radius: 100
+    control_point_type: Some(Known(Control))
+    team_id: -1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 0
+  - team_index: 1
+    score: 626
+self_damage_stats:
+  - weapon: Known(AtbaHe)
+    category: Known(Agro)
+    count: 9
+    total: 12600
+  - weapon: Known(Burn)
+    category: Known(Spot)
+    count: 1
+    total: 1
+  - weapon: Known(MainAp)
+    category: Known(Agro)
+    count: 4
+    total: 38000
+  - weapon: Known(MainAp)
+    category: Known(Spot)
+    count: 5
+    total: 4050
+  - weapon: Known(MainHe)
+    category: Known(Agro)
+    count: 39
+    total: 93000
+  - weapon: Known(MainHe)
+    category: Known(Enemy)
+    count: 4
+    total: 1584
+  - weapon: Known(MainHe)
+    category: Known(Spot)
+    count: 9
+    total: 4854
+  - weapon: Known(Torpedo)
+    category: Known(Agro)
+    count: 19
+    total: 214932
+  - weapon: Known(Torpedo)
+    category: Known(Enemy)
+    count: 1
+    total: 3462
+active_consumable_avatars: 19
+active_consumable_total: 56

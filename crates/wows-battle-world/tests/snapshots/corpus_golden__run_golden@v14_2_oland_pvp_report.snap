@@ -1,0 +1,435 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: report_snapshot(filename)
+---
+arena_id: ArenaId(2121380579825640)
+version: "Version { major: 14, minor: 2, patch: 0, build: 9643943 }"
+map_name: spaces/15_NE_north
+game_mode: domination_2point
+game_type: Known(Random)
+match_group: pvp
+self_player: 1029102229
+battle_result: "{\"type\":\"Win\",\"team_id\":0}"
+finish_type: Known(ScoreZero)
+max_duration: 1200
+played_duration: 488.008
+extra_duration: 8.26
+players:
+  - account_id: 1002385128
+    name: rpaugh0
+    entity_id: 493971
+    team_id: 0
+    meta_ship_id: 402914170
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4288624336)
+  - account_id: 1004286961
+    name: jarnalf
+    entity_id: 493955
+    team_id: 1
+    meta_ship_id: 268485702
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4281284304)
+  - account_id: 1004663687
+    name: rosco99
+    entity_id: 493925
+    team_id: 0
+    meta_ship_id: 268725383
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4182685008)
+  - account_id: 1006228704
+    name: TRAK102
+    entity_id: 493941
+    team_id: 0
+    meta_ship_id: 268562311
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3553572144)
+  - account_id: 1010258818
+    name: TrueNorthS
+    entity_id: 493931
+    team_id: 0
+    meta_ship_id: 403041826
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4182652624)
+  - account_id: 1010300102
+    name: nuker2099
+    entity_id: 493963
+    team_id: 0
+    meta_ship_id: 268710483
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3542071248)
+  - account_id: 1014468458
+    name: Kellorian
+    entity_id: 493947
+    team_id: 1
+    meta_ship_id: 402854717
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4181604144)
+  - account_id: 1014780665
+    name: Scopalomine
+    entity_id: 493961
+    team_id: 1
+    meta_ship_id: 402852002
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4076779344)
+  - account_id: 1015653248
+    name: gir6865
+    entity_id: 493943
+    team_id: 1
+    meta_ship_id: 402732085
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3742316496)
+  - account_id: 1025208758
+    name: Italian_Bandit
+    entity_id: 493951
+    team_id: 1
+    meta_ship_id: 402921536
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4183701200)
+  - account_id: 1029102229
+    name: awesome101_21x
+    entity_id: 493965
+    team_id: 0
+    meta_ship_id: 268771463
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(4181603632)
+  - account_id: 1029329477
+    name: Poland_5
+    entity_id: 493935
+    team_id: 1
+    meta_ship_id: 268612261
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4282333168)
+  - account_id: 1034261126
+    name: BBAZ311
+    entity_id: 493967
+    team_id: 0
+    meta_ship_id: 402705766
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4181637104)
+  - account_id: 1037645144
+    name: RangeMasters
+    entity_id: 493969
+    team_id: 1
+    meta_ship_id: 268625644
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3752736208)
+  - account_id: 1039403360
+    name: Blue___Heart
+    entity_id: 493949
+    team_id: 0
+    meta_ship_id: 403042110
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3552491344)
+  - account_id: 1042962974
+    name: Pinnaclen
+    entity_id: 493937
+    team_id: 0
+    meta_ship_id: 403172135
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4078843344)
+  - account_id: 1043860249
+    name: CaptScruffy
+    entity_id: 493953
+    team_id: 0
+    meta_ship_id: 402931268
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4078352368)
+  - account_id: 1046909442
+    name: Gato2112
+    entity_id: 493957
+    team_id: 1
+    meta_ship_id: 268755146
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4182685104)
+  - account_id: 1054255687
+    name: Taylor97_2023
+    entity_id: 493927
+    team_id: 1
+    meta_ship_id: 403019116
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4078352368)
+  - account_id: 1055292445
+    name: _Lionsteel
+    entity_id: 493929
+    team_id: 1
+    meta_ship_id: 402876311
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4076779504)
+  - account_id: 1059884692
+    name: Xen_Master
+    entity_id: 493959
+    team_id: 1
+    meta_ship_id: 402897228
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4183766480)
+  - account_id: 1064567040
+    name: IndianBobber
+    entity_id: 493945
+    team_id: 1
+    meta_ship_id: 403094841
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4265588720)
+  - account_id: 1065187235
+    name: Kylesku
+    entity_id: 493933
+    team_id: 0
+    meta_ship_id: 403178659
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3762239472)
+  - account_id: 1066323966
+    name: mdsagct
+    entity_id: 493939
+    team_id: 0
+    meta_ship_id: 402998057
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4282333168)
+frags:
+  - killer_account_id: 1004286961
+    killer_name: jarnalf
+    victims:
+      - 493955@Known(ApShell)
+  - killer_account_id: 1004663687
+    killer_name: rosco99
+    victims:
+      - 493925@Known(ApShell)
+  - killer_account_id: 1010258818
+    killer_name: TrueNorthS
+    victims:
+      - 493931@Known(DepthCharge)
+      - 493931@Known(Torpedo)
+  - killer_account_id: 1010300102
+    killer_name: nuker2099
+    victims:
+      - 493963@Known(AerialTorpedo)
+      - 493963@Known(SkipBombs)
+  - killer_account_id: 1029102229
+    killer_name: awesome101_21x
+    victims:
+      - 493965@Known(HeShell)
+  - killer_account_id: 1039403360
+    killer_name: Blue___Heart
+    victims:
+      - 493949@Known(ApShell)
+      - 493949@Known(ApShell)
+      - 493949@Known(ApShell)
+  - killer_account_id: 1059884692
+    killer_name: Xen_Master
+    victims:
+      - 493959@Known(Secondaries)
+  - killer_account_id: 1065187235
+    killer_name: Kylesku
+    victims:
+      - 493933@Known(ApShell)
+      - 493933@Known(ApShell)
+chat:
+  - clock: 28.403
+    sender_name: Kylesku
+    channel: Team
+    message: GG folks
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1065187235:Kylesku"
+  - clock: 35.309
+    sender_name: _Lionsteel
+    channel: Global
+    message: howdy yall
+    entity_id: 493964
+    sender_relation: Some(Relation(2))
+    player: "1055292445:_Lionsteel"
+  - clock: 58.326
+    sender_name: BBAZ311
+    channel: Team
+    message: good luck
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1034261126:BBAZ311"
+  - clock: 76.706
+    sender_name: nuker2099
+    channel: Team
+    message: on blñack list in my team
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1010300102:nuker2099"
+  - clock: 81.293
+    sender_name: nuker2099
+    channel: Team
+    message: black*
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1010300102:nuker2099"
+  - clock: 82.707
+    sender_name: _Lionsteel
+    channel: Global
+    message: its like that then
+    entity_id: 493964
+    sender_relation: Some(Relation(2))
+    player: "1055292445:_Lionsteel"
+  - clock: 98.432
+    sender_name: _Lionsteel
+    channel: Global
+    message: sink fast and drown slow then mf
+    entity_id: 493964
+    sender_relation: Some(Relation(2))
+    player: "1055292445:_Lionsteel"
+  - clock: 128.708
+    sender_name: Pinnaclen
+    channel: Team
+    message: russian DDs suck so much when you only have 4km torp range
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1042962974:Pinnaclen"
+  - clock: 373.156
+    sender_name: RangeMasters
+    channel: Global
+    message: gg
+    entity_id: 493964
+    sender_relation: Some(Relation(2))
+    player: "1037645144:RangeMasters"
+  - clock: 380.87
+    sender_name: Kylesku
+    channel: Team
+    message: "that dude ain't moving"
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1065187235:Kylesku"
+  - clock: 402.161
+    sender_name: Kylesku
+    channel: Team
+    message: "and I'm still missing. LOL"
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1065187235:Kylesku"
+  - clock: 408.878
+    sender_name: rosco99
+    channel: Global
+    message: gg
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1004663687:rosco99"
+  - clock: 415.726
+    sender_name: _Lionsteel
+    channel: Global
+    message: gg
+    entity_id: 493964
+    sender_relation: Some(Relation(2))
+    player: "1055292445:_Lionsteel"
+  - clock: 415.726
+    sender_name: Poland_5
+    channel: Global
+    message: gg
+    entity_id: 493964
+    sender_relation: Some(Relation(2))
+    player: "1029329477:Poland_5"
+  - clock: 417.739
+    sender_name: BBAZ311
+    channel: Team
+    message: thank you true north that was a good smoke
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1034261126:BBAZ311"
+  - clock: 459.443
+    sender_name: RangeMasters
+    channel: Global
+    message: died
+    entity_id: 493964
+    sender_relation: Some(Relation(2))
+    player: "1037645144:RangeMasters"
+capture_points:
+  - index: 0
+    position:
+      - 80
+      - 0
+      - 310
+    radius: 167
+    control_point_type: Some(Known(BaseWithPoints))
+    team_id: 0
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - 80
+      - 0
+      - -310
+    radius: 167
+    control_point_type: Some(Known(BaseWithPoints))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 752
+  - team_index: 1
+    score: 0
+self_damage_stats:
+  - weapon: Known(Burn)
+    category: Known(Enemy)
+    count: 52
+    total: 6733.05
+  - weapon: Known(Burn)
+    category: Known(Spot)
+    count: 1
+    total: 1
+  - weapon: Known(MainAp)
+    category: Known(Agro)
+    count: 6
+    total: 78600
+  - weapon: Known(MainAp)
+    category: Known(Enemy)
+    count: 18
+    total: 8964.75
+  - weapon: Known(MainAp)
+    category: Known(Spot)
+    count: 14
+    total: 13515.327
+  - weapon: Known(MainHe)
+    category: Known(Agro)
+    count: 190
+    total: 422400
+  - weapon: Known(MainHe)
+    category: Known(Enemy)
+    count: 90
+    total: 36086.35
+  - weapon: Known(TBomber)
+    category: Known(Agro)
+    count: 2
+    total: 10134
+  - weapon: Known(Torpedo)
+    category: Known(Agro)
+    count: 6
+    total: 87867
+active_consumable_avatars: 17
+active_consumable_total: 52

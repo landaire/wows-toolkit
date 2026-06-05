@@ -1,0 +1,382 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: report_snapshot(filename)
+---
+arena_id: ArenaId(2086655708137526)
+version: "Version { major: 12, minor: 3, patch: 1, build: 6965290 }"
+map_name: spaces/42_Neighbors
+game_mode: Domination_3point
+game_type: Known(Random)
+match_group: pvp
+self_player: 1001486373
+battle_result: "{\"type\":\"Win\",\"team_id\":1}"
+finish_type: Known(Extermination)
+max_duration: 1200
+played_duration: 1118.75
+extra_duration: ~
+players:
+  - account_id: 1000636717
+    name: TheCaptain8504
+    entity_id: 533847
+    team_id: 1
+    meta_ship_id: 402721175
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3761190896)
+  - account_id: 1001486373
+    name: TF2_Electric_Boogaloo
+    entity_id: 533839
+    team_id: 1
+    meta_ship_id: 402711808
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(3761681872)
+  - account_id: 1004443192
+    name: KrazedMF
+    entity_id: 533875
+    team_id: 0
+    meta_ship_id: 268519129
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4076255216)
+  - account_id: 1006643621
+    name: Icarus42
+    entity_id: 533859
+    team_id: 1
+    meta_ship_id: 268506295
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4285445840)
+  - account_id: 1006791703
+    name: Mustang2209
+    entity_id: 533873
+    team_id: 0
+    meta_ship_id: 268619989
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4180588368)
+  - account_id: 1010511374
+    name: ThirstBuster44
+    entity_id: 533857
+    team_id: 0
+    meta_ship_id: 402716096
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4181669872)
+  - account_id: 1010590531
+    name: Kamikaze_Egg
+    entity_id: 533837
+    team_id: 0
+    meta_ship_id: 268496896
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3762206160)
+  - account_id: 1014326166
+    name: JonnyB_3317
+    entity_id: 533869
+    team_id: 1
+    meta_ship_id: 402699471
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4180555504)
+  - account_id: 1015699109
+    name: Arvess
+    entity_id: 533871
+    team_id: 0
+    meta_ship_id: 402704465
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4180588528)
+  - account_id: 1016293232
+    name: BIGD1945
+    entity_id: 533843
+    team_id: 0
+    meta_ship_id: 402740614
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4181669680)
+  - account_id: 1023376156
+    name: The_kriegsfox
+    entity_id: 533867
+    team_id: 1
+    meta_ship_id: 268494410
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3730782032)
+  - account_id: 1029354711
+    name: SealNvy114
+    entity_id: 533855
+    team_id: 0
+    meta_ship_id: 268444850
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4282333168)
+  - account_id: 1029464839
+    name: acbball96
+    entity_id: 533877
+    team_id: 0
+    meta_ship_id: 402812637
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4180621104)
+  - account_id: 1032832050
+    name: Annoyamus1
+    entity_id: 533845
+    team_id: 0
+    meta_ship_id: 402731151
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4065212112)
+  - account_id: 1033189556
+    name: asharra66
+    entity_id: 533853
+    team_id: 1
+    meta_ship_id: 402687662
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4181636432)
+  - account_id: 1039623997
+    name: Jim_Brandt
+    entity_id: 533883
+    team_id: 1
+    meta_ship_id: 402666237
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4076812080)
+  - account_id: 1040912605
+    name: GrumpyTater
+    entity_id: 533861
+    team_id: 0
+    meta_ship_id: 268504766
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3750704880)
+  - account_id: 1044221436
+    name: __1J_MORFEO_V9_
+    entity_id: 533865
+    team_id: 1
+    meta_ship_id: 268508993
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4180587728)
+  - account_id: 1044950733
+    name: bossQuattro
+    entity_id: 533841
+    team_id: 0
+    meta_ship_id: 402767234
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4181637072)
+  - account_id: 1045218018
+    name: Chej3
+    entity_id: 533881
+    team_id: 1
+    meta_ship_id: 268577788
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4181702448)
+  - account_id: 1045542170
+    name: SmokingBBQPorkChop
+    entity_id: 533863
+    team_id: 1
+    meta_ship_id: 268504768
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4075730384)
+  - account_id: 1045753761
+    name: DeadSouth
+    entity_id: 533851
+    team_id: 1
+    meta_ship_id: 268571014
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3762239472)
+  - account_id: 1052638781
+    name: AustinFrog_
+    entity_id: 533879
+    team_id: 0
+    meta_ship_id: 402796019
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4181702640)
+  - account_id: 1054250628
+    name: yometusk1
+    entity_id: 533849
+    team_id: 1
+    meta_ship_id: 402707100
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3761190608)
+frags:
+  - killer_account_id: 1001486373
+    killer_name: TF2_Electric_Boogaloo
+    victims:
+      - 533839@Known(Torpedo)
+      - 533839@Known(Torpedo)
+  - killer_account_id: 1010590531
+    killer_name: Kamikaze_Egg
+    victims:
+      - 533837@Known(Fire)
+      - 533837@Known(HeShell)
+  - killer_account_id: 1014326166
+    killer_name: JonnyB_3317
+    victims:
+      - 533869@Known(CsShell)
+  - killer_account_id: 1015699109
+    killer_name: Arvess
+    victims:
+      - 533871@Known(HeShell)
+      - 533871@Known(HeShell)
+  - killer_account_id: 1016293232
+    killer_name: BIGD1945
+    victims:
+      - 533843@Known(ApShell)
+  - killer_account_id: 1023376156
+    killer_name: The_kriegsfox
+    victims:
+      - 533867@Known(ApShell)
+  - killer_account_id: 1029464839
+    killer_name: acbball96
+    victims:
+      - 533877@Known(ApShell)
+  - killer_account_id: 1040912605
+    killer_name: GrumpyTater
+    victims:
+      - 533861@Known(ApShell)
+  - killer_account_id: 1044221436
+    killer_name: __1J_MORFEO_V9_
+    victims:
+      - 533865@Known(HeShell)
+  - killer_account_id: 1045218018
+    killer_name: Chej3
+    victims:
+      - 533881@Known(AerialTorpedo)
+  - killer_account_id: 1045753761
+    killer_name: DeadSouth
+    victims:
+      - 533851@Known(ApShell)
+      - 533851@Known(ApShell)
+      - 533851@Known(ApShell)
+      - 533851@Known(ApShell)
+  - killer_account_id: 1052638781
+    killer_name: AustinFrog_
+    victims:
+      - 533879@Known(DiveBomber)
+      - 533879@Known(Flooding)
+  - killer_account_id: 1054250628
+    killer_name: yometusk1
+    victims:
+      - 533849@Known(ApShell)
+      - 533849@Known(ApShell)
+chat:
+  - clock: 34.172
+    sender_name: Kamikaze_Egg
+    channel: Global
+    message: good Luck all
+    entity_id: 533838
+    sender_relation: Some(Relation(2))
+    player: "1010590531:Kamikaze_Egg"
+  - clock: 300.615
+    sender_name: TF2_Electric_Boogaloo
+    channel: Team
+    message: use your planes pls
+    entity_id: 533838
+    sender_relation: Some(Relation(0))
+    player: "1001486373:TF2_Electric_Boogaloo"
+  - clock: 593.872
+    sender_name: Jim_Brandt
+    channel: Team
+    message: g5
+    entity_id: 533838
+    sender_relation: Some(Relation(1))
+    player: "1039623997:Jim_Brandt"
+capture_points:
+  - index: 0
+    position:
+      - -270
+      - 0
+      - -270
+    radius: 120
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - 0
+      - 0
+      - 0
+    radius: 120
+    control_point_type: Some(Known(Control))
+    team_id: -1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 2
+    position:
+      - 270
+      - 0
+      - 270
+    radius: 120
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 301
+  - team_index: 1
+    score: 672
+self_damage_stats:
+  - weapon: Known(AtbaHe)
+    category: Known(Spot)
+    count: 2
+    total: 594
+  - weapon: Known(Burn)
+    category: Known(Spot)
+    count: 3
+    total: 3
+  - weapon: Known(DepthChargeAsup)
+    category: Known(Agro)
+    count: 7
+    total: 30513
+  - weapon: Known(DepthChargeAsup)
+    category: Known(Spot)
+    count: 3
+    total: 9240
+  - weapon: Known(Flood)
+    category: Known(Enemy)
+    count: 3
+    total: 1037.5
+  - weapon: Known(MainAp)
+    category: Known(Spot)
+    count: 37
+    total: 145376.64
+  - weapon: Known(MainHe)
+    category: Known(Spot)
+    count: 5
+    total: 3265.206
+  - weapon: Known(Torpedo)
+    category: Known(Agro)
+    count: 4
+    total: 31332
+  - weapon: Known(TorpedoAlter)
+    category: Known(Enemy)
+    count: 15
+    total: 132829.02
+active_consumable_avatars: 20
+active_consumable_total: 96

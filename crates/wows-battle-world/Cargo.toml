@@ -27,6 +27,7 @@ vfs = ["wows_replays/vfs"]
 
 [dev-dependencies]
 insta = { workspace = true }
+serde = { workspace = true }
 wowsunpack = { workspace = true, features = ["arc", "vfs"] }
 wows-data-mgr = { workspace = true }
 wows-replay-insights = { workspace = true, features = ["arc", "build"] }

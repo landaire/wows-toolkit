@@ -1,0 +1,436 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: report_snapshot(filename)
+---
+arena_id: ArenaId(1917429789318745)
+version: "Version { major: 15, minor: 0, patch: 0, build: 11791718 }"
+map_name: spaces/56_AngelWings
+game_mode: domination_3point_revised
+game_type: Known(Random)
+match_group: pvp
+self_player: 1015621968
+battle_result: ~
+finish_type: ~
+max_duration: 1200
+played_duration: ~
+extra_duration: ~
+players:
+  - account_id: 1001651685
+    name: FACTORCERO
+    entity_id: 446473
+    team_id: 0
+    meta_ship_id: 403071713
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3759585072)
+  - account_id: 1003924023
+    name: mark_in_missouri
+    entity_id: 446447
+    team_id: 1
+    meta_ship_id: 402992433
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4276041424)
+  - account_id: 1006155663
+    name: Andor_exSigfrid
+    entity_id: 446453
+    team_id: 0
+    meta_ship_id: 402982456
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179572176)
+  - account_id: 1008099068
+    name: JAFFA_KREE
+    entity_id: 446483
+    team_id: 1
+    meta_ship_id: 268668280
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3759585072)
+  - account_id: 1009860148
+    name: FirstSeaLord_F_Lebron
+    entity_id: 446461
+    team_id: 0
+    meta_ship_id: 403011649
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3760076496)
+  - account_id: 1012461954
+    name: TrinityKing
+    entity_id: 446465
+    team_id: 0
+    meta_ship_id: 403018446
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4276041424)
+  - account_id: 1012767503
+    name: HyperMapes
+    entity_id: 446475
+    team_id: 1
+    meta_ship_id: 402991330
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4276041424)
+  - account_id: 1015459832
+    name: HammerJE
+    entity_id: 446443
+    team_id: 0
+    meta_ship_id: 268649104
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4273911792)
+  - account_id: 1015621968
+    name: QUIDPROQUOWINKWINK
+    entity_id: 446451
+    team_id: 1
+    meta_ship_id: 403114035
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(3655219184)
+  - account_id: 1019364925
+    name: JckSparrow
+    entity_id: 446441
+    team_id: 1
+    meta_ship_id: 268529933
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4179539728)
+  - account_id: 1023251540
+    name: CarlosOrtiz_1994
+    entity_id: 446479
+    team_id: 0
+    meta_ship_id: 402682093
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179572688)
+  - account_id: 1023582759
+    name: BubbaJoe1973
+    entity_id: 446445
+    team_id: 0
+    meta_ship_id: 403103261
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4074714928)
+  - account_id: 1028409446
+    name: Lostwages2
+    entity_id: 446481
+    team_id: 0
+    meta_ship_id: 402773486
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179506928)
+  - account_id: 1028425637
+    name: Madlbad
+    entity_id: 446463
+    team_id: 0
+    meta_ship_id: 403006561
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3760109008)
+  - account_id: 1028644634
+    name: Pancit808
+    entity_id: 446457
+    team_id: 0
+    meta_ship_id: 268612286
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4276041424)
+  - account_id: 1032293806
+    name: devnull99
+    entity_id: 446459
+    team_id: 0
+    meta_ship_id: 268627008
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3539908400)
+  - account_id: 1033242394
+    name: Golagor
+    entity_id: 446439
+    team_id: 0
+    meta_ship_id: 403012235
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4273911792)
+  - account_id: 1035532182
+    name: Ecanmap
+    entity_id: 446469
+    team_id: 1
+    meta_ship_id: 268591439
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3539908592)
+  - account_id: 1037535347
+    name: VISH4P
+    entity_id: 446455
+    team_id: 1
+    meta_ship_id: 268668347
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4074649296)
+  - account_id: 1037836122
+    name: SuperSoldier1913
+    entity_id: 446449
+    team_id: 1
+    meta_ship_id: 268626993
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3539908400)
+  - account_id: 1037857905
+    name: Grand_admiral0723
+    entity_id: 446485
+    team_id: 1
+    meta_ship_id: 403055358
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3760141776)
+  - account_id: 1054460968
+    name: Matagrengos
+    entity_id: 446467
+    team_id: 1
+    meta_ship_id: 403066831
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4179572176)
+  - account_id: 1059372756
+    name: Nevergetgood325
+    entity_id: 446471
+    team_id: 1
+    meta_ship_id: 402978511
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3330193392)
+  - account_id: 1064917245
+    name: 700YellowRaptor
+    entity_id: 446477
+    team_id: 1
+    meta_ship_id: 402708073
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4074715120)
+frags:
+  - killer_account_id: 1006155663
+    killer_name: Andor_exSigfrid
+    victims:
+      - 446453@Known(ApShell)
+      - 446453@Known(ApShell)
+      - 446453@Known(ApShell)
+      - 446453@Known(ApShell)
+      - 446453@Known(ApShell)
+  - killer_account_id: 1008099068
+    killer_name: JAFFA_KREE
+    victims:
+      - 446483@Known(Flooding)
+  - killer_account_id: 1012461954
+    killer_name: TrinityKing
+    victims:
+      - 446465@Known(ApShell)
+  - killer_account_id: 1012767503
+    killer_name: HyperMapes
+    victims:
+      - 446475@Known(ApShell)
+  - killer_account_id: 1015621968
+    killer_name: QUIDPROQUOWINKWINK
+    victims:
+      - 446451@Known(CsShell)
+      - 446451@Known(CsShell)
+  - killer_account_id: 1019364925
+    killer_name: JckSparrow
+    victims:
+      - 446441@Known(DiveBomber)
+      - 446441@Known(DiveBomber)
+  - killer_account_id: 1023251540
+    killer_name: CarlosOrtiz_1994
+    victims:
+      - 446479@Known(ApShell)
+      - 446479@Known(Fire)
+  - killer_account_id: 1032293806
+    killer_name: devnull99
+    victims:
+      - 446459@Known(HeShell)
+  - killer_account_id: 1037535347
+    killer_name: VISH4P
+    victims:
+      - 446455@Known(Fire)
+      - 446455@Known(HeShell)
+  - killer_account_id: 1059372756
+    killer_name: Nevergetgood325
+    victims:
+      - 446471@Known(HeShell)
+chat:
+  - clock: 33.09
+    sender_name: Andor_exSigfrid
+    channel: Global
+    message: Cuanta shampaña y SAKE
+    entity_id: 446450
+    sender_relation: Some(Relation(2))
+    player: "1006155663:Andor_exSigfrid"
+  - clock: 85.395
+    sender_name: JAFFA_KREE
+    channel: Team
+    message: Ill get B
+    entity_id: 446450
+    sender_relation: Some(Relation(1))
+    player: "1008099068:JAFFA_KREE"
+  - clock: 242.006
+    sender_name: Nevergetgood325
+    channel: Team
+    message: GET READY golduen
+    entity_id: 446450
+    sender_relation: Some(Relation(1))
+    player: "1059372756:Nevergetgood325"
+  - clock: 287.537
+    sender_name: Grand_admiral0723
+    channel: Team
+    message: literally no theats near u
+    entity_id: 446450
+    sender_relation: Some(Relation(1))
+    player: "1037857905:Grand_admiral0723"
+  - clock: 396.119
+    sender_name: JckSparrow
+    channel: Team
+    message: slava AFK
+    entity_id: 446450
+    sender_relation: Some(Relation(1))
+    player: "1019364925:JckSparrow"
+  - clock: 415.983
+    sender_name: Grand_admiral0723
+    channel: Team
+    message: moron
+    entity_id: 446450
+    sender_relation: Some(Relation(1))
+    player: "1037857905:Grand_admiral0723"
+  - clock: 432.972
+    sender_name: Grand_admiral0723
+    channel: Team
+    message: sat in smoke shooting bb all game doing 0 spotiinfg
+    entity_id: 446450
+    sender_relation: Some(Relation(1))
+    player: "1037857905:Grand_admiral0723"
+  - clock: 444.104
+    sender_name: Grand_admiral0723
+    channel: Team
+    message: a bb that can heal all dmg u do to it
+    entity_id: 446450
+    sender_relation: Some(Relation(1))
+    player: "1037857905:Grand_admiral0723"
+  - clock: 446.549
+    sender_name: Grand_admiral0723
+    channel: Team
+    message: ur useles
+    entity_id: 446450
+    sender_relation: Some(Relation(1))
+    player: "1037857905:Grand_admiral0723"
+  - clock: 798.679
+    sender_name: VISH4P
+    channel: Global
+    message: FUCK U SLAVA PUSSIE PLAYER OF SHIT
+    entity_id: 446450
+    sender_relation: Some(Relation(1))
+    player: "1037535347:VISH4P"
+  - clock: 805.527
+    sender_name: Grand_admiral0723
+    channel: Global
+    message: stfu fag
+    entity_id: 446450
+    sender_relation: Some(Relation(1))
+    player: "1037857905:Grand_admiral0723"
+  - clock: 810.959
+    sender_name: JckSparrow
+    channel: Team
+    message: lol
+    entity_id: 446450
+    sender_relation: Some(Relation(1))
+    player: "1019364925:JckSparrow"
+  - clock: 902.243
+    sender_name: Andor_exSigfrid
+    channel: Global
+    message: that krem is afk...
+    entity_id: 446450
+    sender_relation: Some(Relation(2))
+    player: "1006155663:Andor_exSigfrid"
+capture_points:
+  - index: 0
+    position:
+      - -526.768
+      - 0
+      - 0
+    radius: 110
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: 0
+    progress:
+      - 0.333
+      - 0
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - 33.271
+      - 0
+      - 0
+    radius: 90
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 2
+    position:
+      - 446.739
+      - 0
+      - 0
+    radius: 95
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 648
+  - team_index: 1
+    score: 843
+self_damage_stats:
+  - weapon: Known(Burn)
+    category: Known(Enemy)
+    count: 108
+    total: 26274.469
+  - weapon: Known(MainAp)
+    category: Known(Agro)
+    count: 60
+    total: 877200
+  - weapon: Known(MainAp)
+    category: Known(Spot)
+    count: 13
+    total: 34567.05
+  - weapon: Known(MainCs)
+    category: Known(Enemy)
+    count: 244
+    total: 152951.45
+  - weapon: Known(MainHe)
+    category: Known(Agro)
+    count: 144
+    total: 403200
+  - weapon: Known(MainHe)
+    category: Known(Enemy)
+    count: 125
+    total: 47957.33
+  - weapon: Known(MainHe)
+    category: Known(Spot)
+    count: 9
+    total: 15404.8
+  - weapon: Known(Torpedo)
+    category: Known(Agro)
+    count: 5
+    total: 118835
+active_consumable_avatars: 23
+active_consumable_total: 98

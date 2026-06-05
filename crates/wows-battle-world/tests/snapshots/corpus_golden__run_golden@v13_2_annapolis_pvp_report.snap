@@ -1,0 +1,376 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: report_snapshot(filename)
+---
+arena_id: ArenaId(5369952077623515)
+version: "Version { major: 13, minor: 2, patch: 0, build: 8151735 }"
+map_name: spaces/22_tierra_del_fuego
+game_mode: domination_2point
+game_type: Known(Random)
+match_group: pvp
+self_player: 529204105
+battle_result: "{\"type\":\"Win\",\"team_id\":1}"
+finish_type: Known(Extermination)
+max_duration: 1200
+played_duration: 1057.958
+extra_duration: 7.822
+players:
+  - account_id: 500617795
+    name: Moretti24
+    entity_id: 1250318
+    team_id: 1
+    meta_ship_id: 940058949
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4276041424)
+  - account_id: 502666393
+    name: jacenty11
+    entity_id: 1250298
+    team_id: 1
+    meta_ship_id: 805641487
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4179572528)
+  - account_id: 505405863
+    name: wiko04
+    entity_id: 1250300
+    team_id: 0
+    meta_ship_id: 805428496
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179506480)
+  - account_id: 506289205
+    name: BH860
+    entity_id: 1250338
+    team_id: 0
+    meta_ship_id: 805373309
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3445536752)
+  - account_id: 514013675
+    name: Landmine0815
+    entity_id: 1250312
+    team_id: 0
+    meta_ship_id: 939980216
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4075763504)
+  - account_id: 515485107
+    name: Elveniasty
+    entity_id: 1250306
+    team_id: 0
+    meta_ship_id: 940041508
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4273911792)
+  - account_id: 519830231
+    name: davyJ90
+    entity_id: 1250310
+    team_id: 0
+    meta_ship_id: 805458991
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4074715120)
+  - account_id: 529204105
+    name: ChineseTechAbuser
+    entity_id: 1250326
+    team_id: 1
+    meta_ship_id: 939554386
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(4178491376)
+  - account_id: 530097350
+    name: woody_pysch
+    entity_id: 1250314
+    team_id: 1
+    meta_ship_id: 940021566
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+  - account_id: 531257267
+    name: Takinikt_
+    entity_id: 1250292
+    team_id: 0
+    meta_ship_id: 939670275
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4178523952)
+  - account_id: 561538082
+    name: WOLFSTAR67
+    entity_id: 1250330
+    team_id: 0
+    meta_ship_id: 940146531
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3760142288)
+  - account_id: 562350780
+    name: Bulletmaniax
+    entity_id: 1250322
+    team_id: 1
+    meta_ship_id: 805560138
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4178457808)
+  - account_id: 565298984
+    name: The_Silent_B4ng
+    entity_id: 1250332
+    team_id: 1
+    meta_ship_id: 939857393
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4178523984)
+  - account_id: 567142283
+    name: xeon84_1
+    entity_id: 1250296
+    team_id: 0
+    meta_ship_id: 805887116
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4180587952)
+  - account_id: 575737846
+    name: ToadMilk
+    entity_id: 1250308
+    team_id: 1
+    meta_ship_id: 805355948
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+  - account_id: 576060602
+    name: Turrondejijonaentrepan
+    entity_id: 1250302
+    team_id: 0
+    meta_ship_id: 939676827
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3760076208)
+  - account_id: 576851064
+    name: McKeen77
+    entity_id: 1250328
+    team_id: 1
+    meta_ship_id: 805557599
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4074714928)
+  - account_id: 583638712
+    name: Groetlinger
+    entity_id: 1250304
+    team_id: 1
+    meta_ship_id: 939693728
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3760109296)
+  - account_id: 594992289
+    name: BNHT47
+    entity_id: 1250334
+    team_id: 1
+    meta_ship_id: 940080505
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3761190640)
+  - account_id: 600149885
+    name: YAKUDZA75
+    entity_id: 1250294
+    team_id: 0
+    meta_ship_id: 939619461
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4178458320)
+  - account_id: 619294473
+    name: pipipis
+    entity_id: 1250320
+    team_id: 0
+    meta_ship_id: 805737415
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4276041424)
+  - account_id: 619581623
+    name: Sergant_VoVa
+    entity_id: 1250324
+    team_id: 0
+    meta_ship_id: 939900728
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4178491184)
+  - account_id: 674955020
+    name: CaptainDjango33
+    entity_id: 1250316
+    team_id: 1
+    meta_ship_id: 805361220
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3760109008)
+  - account_id: 684369596
+    name: hechi2
+    entity_id: 1250336
+    team_id: 1
+    meta_ship_id: 940136442
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3750672176)
+frags:
+  - killer_account_id: 502666393
+    killer_name: jacenty11
+    victims:
+      - 1250298@Known(ApShell)
+      - 1250298@Known(ApShell)
+      - 1250298@Known(ApShell)
+  - killer_account_id: 505405863
+    killer_name: wiko04
+    victims:
+      - 1250300@Known(Flooding)
+      - 1250300@Known(Flooding)
+  - killer_account_id: 519830231
+    killer_name: davyJ90
+    victims:
+      - 1250310@Known(ApShell)
+      - 1250310@Known(HeShell)
+  - killer_account_id: 529204105
+    killer_name: ChineseTechAbuser
+    victims:
+      - 1250326@Known(ApShell)
+      - 1250326@Known(HeShell)
+  - killer_account_id: 561538082
+    killer_name: WOLFSTAR67
+    victims:
+      - 1250330@Known(HeShell)
+  - killer_account_id: 562350780
+    killer_name: Bulletmaniax
+    victims:
+      - 1250322@Known(HeShell)
+      - 1250322@Known(Torpedo)
+      - 1250322@Known(Torpedo)
+  - killer_account_id: 565298984
+    killer_name: The_Silent_B4ng
+    victims:
+      - 1250332@Known(ApShell)
+  - killer_account_id: 575737846
+    killer_name: ToadMilk
+    victims:
+      - 1250308@Known(HeShell)
+  - killer_account_id: 576851064
+    killer_name: McKeen77
+    victims:
+      - 1250328@Known(Secondaries)
+  - killer_account_id: 583638712
+    killer_name: Groetlinger
+    victims:
+      - 1250304@Known(HeShell)
+  - killer_account_id: 600149885
+    killer_name: YAKUDZA75
+    victims:
+      - 1250294@Known(Torpedo)
+  - killer_account_id: 619581623
+    killer_name: Sergant_VoVa
+    victims:
+      - 1250324@Known(HeShell)
+chat:
+  - clock: 81.516
+    sender_name: woody_pysch
+    channel: Team
+    message: hope the halland desmoines combo is on other side of the map
+    entity_id: 1250325
+    sender_relation: Some(Relation(1))
+    player: "530097350:woody_pysch"
+  - clock: 169.956
+    sender_name: Groetlinger
+    channel: Team
+    message: "?"
+    entity_id: 1250325
+    sender_relation: Some(Relation(1))
+    player: "583638712:Groetlinger"
+  - clock: 778.801
+    sender_name: Groetlinger
+    channel: Team
+    message: come back pls
+    entity_id: 1250325
+    sender_relation: Some(Relation(1))
+    player: "583638712:Groetlinger"
+  - clock: 786.38
+    sender_name: Groetlinger
+    channel: Team
+    message: we cant do that alone
+    entity_id: 1250325
+    sender_relation: Some(Relation(1))
+    player: "583638712:Groetlinger"
+  - clock: 857.229
+    sender_name: Bulletmaniax
+    channel: Team
+    message: going for cap
+    entity_id: 1250325
+    sender_relation: Some(Relation(1))
+    player: "562350780:Bulletmaniax"
+capture_points:
+  - index: 0
+    position:
+      - 20
+      - 0
+      - 400
+    radius: 180
+    control_point_type: Some(Known(BaseWithPoints))
+    team_id: 0
+    invader_team: 1
+    progress:
+      - 0.429
+      - 0
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - 20
+      - 0
+      - -400
+    radius: 180
+    control_point_type: Some(Known(BaseWithPoints))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 199
+  - team_index: 1
+    score: 712
+self_damage_stats:
+  - weapon: Known(Burn)
+    category: Known(Enemy)
+    count: 68
+    total: 15351
+  - weapon: Known(MainAp)
+    category: Known(Agro)
+    count: 46
+    total: 551400
+  - weapon: Known(MainAp)
+    category: Known(Enemy)
+    count: 33
+    total: 47543.27
+  - weapon: Known(MainAp)
+    category: Known(Spot)
+    count: 7
+    total: 14726
+  - weapon: Known(MainCs)
+    category: Known(Spot)
+    count: 1
+    total: 3776.5
+  - weapon: Known(MainHe)
+    category: Known(Agro)
+    count: 70
+    total: 186000
+  - weapon: Known(MainHe)
+    category: Known(Enemy)
+    count: 126
+    total: 80155.64
+  - weapon: Known(MainHe)
+    category: Known(Spot)
+    count: 6
+    total: 4177.5
+  - weapon: Known(Torpedo)
+    category: Known(Agro)
+    count: 4
+    total: 66532
+active_consumable_avatars: 23
+active_consumable_total: 120

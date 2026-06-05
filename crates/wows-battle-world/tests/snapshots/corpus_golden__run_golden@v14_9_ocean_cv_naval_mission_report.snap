@@ -1,0 +1,310 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: report_snapshot(filename)
+---
+arena_id: ArenaId(2042782694602824)
+version: "Version { major: 14, minor: 9, patch: 0, build: 10695045 }"
+map_name: spaces/28_naval_mission
+game_mode: asymm_3point_coop
+game_type: Known(Event)
+match_group: event
+self_player: 1029438477
+battle_result: "{\"type\":\"Win\",\"team_id\":0}"
+finish_type: Known(ScoreExcess)
+max_duration: 1200
+played_duration: 733.89
+extra_duration: 8.923
+players:
+  - account_id: -268414800
+    name: ":Halsey:"
+    entity_id: 475645
+    team_id: 1
+    meta_ship_id: 268414800
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4181636944)
+  - account_id: -268414799
+    name: ":Pratt:"
+    entity_id: 475644
+    team_id: 1
+    meta_ship_id: 268414799
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4276008752)
+  - account_id: -268414798
+    name: ":Upham:"
+    entity_id: 475643
+    team_id: 1
+    meta_ship_id: 268414798
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4276008304)
+  - account_id: -268414797
+    name: ":Thomsen:"
+    entity_id: 475642
+    team_id: 1
+    meta_ship_id: 268414797
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4181636880)
+  - account_id: -268414796
+    name: ":Fisher:"
+    entity_id: 475641
+    team_id: 1
+    meta_ship_id: 268414796
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4181636944)
+  - account_id: -268414795
+    name: ":Sterneck:"
+    entity_id: 475640
+    team_id: 1
+    meta_ship_id: 268414795
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4182684880)
+  - account_id: -268414794
+    name: ":Hipper:"
+    entity_id: 475639
+    team_id: 1
+    meta_ship_id: 268414794
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4182684880)
+  - account_id: -268414793
+    name: ":Tianpei:"
+    entity_id: 475638
+    team_id: 1
+    meta_ship_id: 268414793
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4181669616)
+  - account_id: -268414792
+    name: ":Tourville:"
+    entity_id: 475637
+    team_id: 1
+    meta_ship_id: 268414792
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4181669328)
+  - account_id: -268414791
+    name: ":Feldt:"
+    entity_id: 475636
+    team_id: 1
+    meta_ship_id: 268414791
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4181669872)
+  - account_id: -268414790
+    name: ":Tsamados:"
+    entity_id: 475635
+    team_id: 1
+    meta_ship_id: 268414790
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4181669872)
+  - account_id: -268414789
+    name: ":Ingenohl:"
+    entity_id: 475634
+    team_id: 1
+    meta_ship_id: 268414789
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4281284304)
+  - account_id: 1024901815
+    name: speedee_bob
+    entity_id: 475627
+    team_id: 0
+    meta_ship_id: 402895817
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3760142160)
+  - account_id: 1028984790
+    name: godloum4a1
+    entity_id: 475625
+    team_id: 0
+    meta_ship_id: 268512437
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3760109296)
+  - account_id: 1029438477
+    name: seaznutz
+    entity_id: 475633
+    team_id: 0
+    meta_ship_id: 268490887
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(3550459856)
+  - account_id: 1035059467
+    name: PenMaukHetz
+    entity_id: 475629
+    team_id: 0
+    meta_ship_id: 268493359
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4180555600)
+  - account_id: 1054519218
+    name: Wendigussy
+    entity_id: 475631
+    team_id: 0
+    meta_ship_id: 402917425
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3760142064)
+frags:
+  - killer_account_id: -268414800
+    killer_name: ":Halsey:"
+    victims:
+      - 475645@Known(Torpedo)
+  - killer_account_id: -268414791
+    killer_name: ":Feldt:"
+    victims:
+      - 475636@Known(ApShell)
+  - killer_account_id: 1028984790
+    killer_name: godloum4a1
+    victims:
+      - 475625@Known(Secondaries)
+  - killer_account_id: 1029438477
+    killer_name: seaznutz
+    victims:
+      - 475633@Known(AerialTorpedo)
+      - 475633@Known(AerialTorpedo)
+      - 475633@Known(Fire)
+  - killer_account_id: 1035059467
+    killer_name: PenMaukHetz
+    victims:
+      - 475629@Known(Flooding)
+      - 475629@Known(HeShell)
+      - 475629@Known(Torpedo)
+      - 475629@Known(Torpedo)
+      - 475629@Known(Torpedo)
+  - killer_account_id: 1054519218
+    killer_name: Wendigussy
+    victims:
+      - 475631@Known(CsShell)
+      - 475631@Known(Secondaries)
+chat:
+  - clock: 432.168
+    sender_name: seaznutz
+    channel: Team
+    message: ill have smoke
+    entity_id: 475632
+    sender_relation: Some(Relation(0))
+    player: "1029438477:seaznutz"
+  - clock: 545.173
+    sender_name: seaznutz
+    channel: Team
+    message: more
+    entity_id: 475632
+    sender_relation: Some(Relation(0))
+    player: "1029438477:seaznutz"
+capture_points:
+  - index: 0
+    position:
+      - -348
+      - 0
+      - 348
+    radius: 150
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - 0
+      - 0
+      - 0
+    radius: 150
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: 0
+    progress:
+      - 0.158
+      - 0
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 2
+    position:
+      - 348
+      - 0
+      - -348
+    radius: 150
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: 0
+    progress:
+      - 0.233
+      - 0
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 1000
+  - team_index: 1
+    score: 742
+self_damage_stats:
+  - weapon: Known(AtbaCs)
+    category: Known(Spot)
+    count: 4
+    total: 1758.763
+  - weapon: Known(AtbaHe)
+    category: Known(Agro)
+    count: 2
+    total: 3400
+  - weapon: Known(BomberHeAlter)
+    category: Known(Enemy)
+    count: 9
+    total: 20368.123
+  - weapon: Known(BomberHeAsup)
+    category: Known(Agro)
+    count: 60
+    total: 348000
+  - weapon: Known(Burn)
+    category: Known(Enemy)
+    count: 9
+    total: 1653.358
+  - weapon: Known(Burn)
+    category: Known(Spot)
+    count: 1
+    total: 1
+  - weapon: Known(Flood)
+    category: Known(Enemy)
+    count: 164
+    total: 30383.25
+  - weapon: Known(MainAp)
+    category: Known(Spot)
+    count: 5
+    total: 11382
+  - weapon: Known(MainCs)
+    category: Known(Spot)
+    count: 1
+    total: 3782.513
+  - weapon: Known(MainHe)
+    category: Known(Agro)
+    count: 60
+    total: 243150
+  - weapon: Known(MainHe)
+    category: Known(Spot)
+    count: 22
+    total: 11222.687
+  - weapon: Known(RocketHeAlter)
+    category: Known(Enemy)
+    count: 16
+    total: 10000.618
+  - weapon: Known(TBomber)
+    category: Known(Enemy)
+    count: 34
+    total: 144579.03
+  - weapon: Known(Torpedo)
+    category: Known(Agro)
+    count: 1
+    total: 16850
+active_consumable_avatars: 17
+active_consumable_total: 82

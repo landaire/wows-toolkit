@@ -1,0 +1,319 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: report_snapshot(filename)
+---
+arena_id: ArenaId(8202431402102518)
+version: "Version { major: 0, minor: 11, patch: 0, build: 5045210 }"
+map_name: spaces/15_NE_north
+game_mode: Ranked_Domination
+game_type: Known(Ranked)
+match_group: ranked
+self_player: 564371113
+battle_result: "{\"type\":\"Win\",\"team_id\":1}"
+finish_type: Known(ScoreExcess)
+max_duration: 1200
+played_duration: 499.124
+extra_duration: ~
+players:
+  - account_id: 500993686
+    name: r3leased
+    entity_id: 1961009
+    team_id: 1
+    meta_ship_id: 940220796
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4179572176)
+  - account_id: 501523287
+    name: Korolko
+    entity_id: 1961005
+    team_id: 1
+    meta_ship_id: 805828888
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3760076496)
+  - account_id: 505781024
+    name: milgra
+    entity_id: 1961011
+    team_id: 1
+    meta_ship_id: 940242621
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4179539920)
+  - account_id: 514551619
+    name: rafall777
+    entity_id: 1960997
+    team_id: 0
+    meta_ship_id: 940256674
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179572176)
+  - account_id: 529432798
+    name: limivorous
+    entity_id: 1960989
+    team_id: 0
+    meta_ship_id: 940054019
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4074649296)
+  - account_id: 534300997
+    name: Gurgel100
+    entity_id: 1960991
+    team_id: 0
+    meta_ship_id: 939648869
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4277090288)
+  - account_id: 538780490
+    name: silvio16
+    entity_id: 1961003
+    team_id: 0
+    meta_ship_id: 805536662
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4074714928)
+  - account_id: 550031975
+    name: wetCgoe
+    entity_id: 1960999
+    team_id: 1
+    meta_ship_id: 939677426
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4273911792)
+  - account_id: 559670817
+    name: yusufbaskent2009
+    entity_id: 1961001
+    team_id: 1
+    meta_ship_id: 940304373
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+  - account_id: 564371113
+    name: Mastervdemon
+    entity_id: 1960995
+    team_id: 1
+    meta_ship_id: 939667790
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(4179572528)
+  - account_id: 565596600
+    name: Amiral_PUJOL
+    entity_id: 1960987
+    team_id: 0
+    meta_ship_id: 806210626
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4074682352)
+  - account_id: 571715981
+    name: Tasos_Mauromixalis
+    entity_id: 1961013
+    team_id: 0
+    meta_ship_id: 806305317
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179539760)
+  - account_id: 571898565
+    name: Mikey2111
+    entity_id: 1961007
+    team_id: 1
+    meta_ship_id: 806277743
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3760142320)
+  - account_id: 575910458
+    name: Tigris31_2020
+    entity_id: 1960993
+    team_id: 0
+    meta_ship_id: 940398914
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+frags:
+  - killer_account_id: 559670817
+    killer_name: yusufbaskent2009
+    victims:
+      - 1961001@Known(Torpedo)
+  - killer_account_id: 564371113
+    killer_name: Mastervdemon
+    victims:
+      - 1960995@Known(ApShell)
+      - 1960995@Known(ApShell)
+      - 1960995@Known(ApShell)
+      - 1960995@Known(ApShell)
+  - killer_account_id: 571898565
+    killer_name: Mikey2111
+    victims:
+      - 1961007@Known(Fire)
+chat:
+  - clock: 107.55
+    sender_name: Amiral_PUJOL
+    channel: Global
+    message: "I have 25 years XP of navals battles ;) My YOUTUBE channel is \"SEA WOLF\" #beststrat #pathwarrior #random https://youtu.be/R85ShzuITag"
+    entity_id: 1960994
+    sender_relation: Some(Relation(2))
+    player: "565596600:Amiral_PUJOL"
+  - clock: 155.555
+    sender_name: Gurgel100
+    channel: Global
+    message: "this is world of warships where you don't need any XP"
+    entity_id: 1960994
+    sender_relation: Some(Relation(2))
+    player: "534300997:Gurgel100"
+  - clock: 203.972
+    sender_name: yusufbaskent2009
+    channel: Team
+    message: gg
+    entity_id: 1960994
+    sender_relation: Some(Relation(1))
+    player: "559670817:yusufbaskent2009"
+  - clock: 213.979
+    sender_name: limivorous
+    channel: Global
+    message: turns like a supertanker
+    entity_id: 1960994
+    sender_relation: Some(Relation(2))
+    player: "529432798:limivorous"
+  - clock: 282.409
+    sender_name: Mastervdemon
+    channel: Team
+    message: up up and away xD
+    entity_id: 1960994
+    sender_relation: Some(Relation(0))
+    player: "564371113:Mastervdemon"
+  - clock: 298.14
+    sender_name: Amiral_PUJOL
+    channel: Global
+    message: we have best DDs in uour team ...
+    entity_id: 1960994
+    sender_relation: Some(Relation(2))
+    player: "565596600:Amiral_PUJOL"
+  - clock: 410.872
+    sender_name: yusufbaskent2009
+    channel: Team
+    message: poh poh
+    entity_id: 1960994
+    sender_relation: Some(Relation(1))
+    player: "559670817:yusufbaskent2009"
+  - clock: 410.872
+    sender_name: Amiral_PUJOL
+    channel: Global
+    message: LOL
+    entity_id: 1960994
+    sender_relation: Some(Relation(2))
+    player: "565596600:Amiral_PUJOL"
+  - clock: 417.271
+    sender_name: Amiral_PUJOL
+    channel: Global
+    message: WG MM
+    entity_id: 1960994
+    sender_relation: Some(Relation(2))
+    player: "565596600:Amiral_PUJOL"
+  - clock: 436.119
+    sender_name: Mastervdemon
+    channel: Global
+    message: did not expect to hit
+    entity_id: 1960994
+    sender_relation: Some(Relation(0))
+    player: "564371113:Mastervdemon"
+  - clock: 439.681
+    sender_name: Mastervdemon
+    channel: Global
+    message: lol wtf
+    entity_id: 1960994
+    sender_relation: Some(Relation(0))
+    player: "564371113:Mastervdemon"
+  - clock: 446.972
+    sender_name: wetCgoe
+    channel: Global
+    message: that looked bad
+    entity_id: 1960994
+    sender_relation: Some(Relation(1))
+    player: "550031975:wetCgoe"
+  - clock: 529.961
+    sender_name: Gurgel100
+    channel: Global
+    message: gg
+    entity_id: 1960994
+    sender_relation: Some(Relation(2))
+    player: "534300997:Gurgel100"
+capture_points:
+  - index: 0
+    position:
+      - -118
+      - 0
+      - 225
+    radius: 95
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: 1
+    progress:
+      - 0.126
+      - 0
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - -118
+      - 0
+      - -225
+    radius: 95
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 2
+    position:
+      - 360
+      - 0
+      - 0
+    radius: 90
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 194
+  - team_index: 1
+    score: 998
+self_damage_stats:
+  - weapon: Known(AtbaHe)
+    category: Known(Agro)
+    count: 77
+    total: 98400
+  - weapon: Known(AtbaHe)
+    category: Known(Enemy)
+    count: 23
+    total: 7128
+  - weapon: Known(Burn)
+    category: Known(Spot)
+    count: 1
+    total: 1
+  - weapon: Known(MainAp)
+    category: Known(Agro)
+    count: 49
+    total: 667100.06
+  - weapon: Known(MainAp)
+    category: Known(Enemy)
+    count: 29
+    total: 107230.72
+  - weapon: Known(MainHe)
+    category: Known(Agro)
+    count: 69
+    total: 208500
+  - weapon: Known(MainHe)
+    category: Known(Spot)
+    count: 8
+    total: 6006
+active_consumable_avatars: 13
+active_consumable_total: 50

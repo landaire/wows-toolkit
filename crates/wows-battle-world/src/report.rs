@@ -1,9 +1,9 @@
 //! End-of-battle report extraction.
 //!
 //! `BattleReport` is an owned snapshot of the battle state at `finish()` time.
-//! It outlives the ECS world: consumers hold it after the world is dropped. The
-//! assembly mirrors `wows_replays::analyzer::battle_controller::build_report`
-//! field for field, reusing the original value types so reports compare equal.
+//! It outlives the ECS world: consumers hold it after the world is dropped. It
+//! reuses the value types from `wows_replays::analyzer::battle_controller` so
+//! consumers read the same shapes regardless of which crate assembled them.
 
 use std::collections::HashMap;
 use std::str::FromStr;

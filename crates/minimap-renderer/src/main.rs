@@ -14,8 +14,8 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::vfs::VfsPath;
 
+use wows_battle_world::merged::MergedReplays;
 use wows_replays::ReplayFile;
-use wows_replays::analyzer::battle_controller::merged::MergedReplays;
 use wows_replays::game_constants::GameConstants;
 
 use wows_minimap_renderer::EncoderKind;
@@ -411,7 +411,7 @@ fn main() -> Result<(), Report> {
         &specs,
         &primary_with_alts,
     );
-    let damage_events = wows_replays::analyzer::battle_controller::merged::gather_damage_events(
+    let damage_events = wows_battle_world::merged::gather_damage_events(
         &controller_game_params,
         &game_constants,
         replay_version,
@@ -518,7 +518,7 @@ fn main() -> Result<(), Report> {
     )
     .map_err(|e| report!("{e}"))?;
     wows_replay_insights::build::seed_consumable_inventories_from_facts(
-        session.controller_mut(),
+        session.world_mut(),
         &vehicle_facts,
         &controller_game_params,
         replay_version,
@@ -559,24 +559,29 @@ fn main() -> Result<(), Report> {
             arena_logged = true;
         }
         if safe_clock.0 > prev_render_clock.0 {
-            renderer.populate_players(session.controller());
-            renderer.update_squadron_info(session.controller());
-            renderer.update_ship_abilities(session.controller());
-            encoder.advance_clock(prev_render_clock, session.controller(), &mut renderer, &mut target);
+            let view = session.world_mut().view();
+            renderer.populate_players(&view);
+            renderer.update_squadron_info(&view);
+            renderer.update_ship_abilities(&view);
+            encoder.advance_clock(prev_render_clock, &view, &mut renderer, &mut target);
             prev_render_clock = safe_clock;
         }
     }
 
     let final_clock = session.total_duration();
     if final_clock.0 > prev_render_clock.0 {
-        renderer.populate_players(session.controller());
-        renderer.update_squadron_info(session.controller());
-        renderer.update_ship_abilities(session.controller());
-        encoder.advance_clock(final_clock, session.controller(), &mut renderer, &mut target);
+        let view = session.world_mut().view();
+        renderer.populate_players(&view);
+        renderer.update_squadron_info(&view);
+        renderer.update_ship_abilities(&view);
+        encoder.advance_clock(final_clock, &view, &mut renderer, &mut target);
     }
 
     session.finish();
-    encoder.finish(session.controller(), &mut renderer, &mut target)?;
+    {
+        let view = session.world_mut().view();
+        encoder.finish(&view, &mut renderer, &mut target)?;
+    }
 
     if let Some(pb) = progress_bar {
         pb.finish_and_clear();

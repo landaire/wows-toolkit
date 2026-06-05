@@ -1,0 +1,376 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: report_snapshot(filename)
+---
+arena_id: ArenaId(4086023203010197)
+version: "Version { major: 15, minor: 1, patch: 0, build: 11965230 }"
+map_name: spaces/22_tierra_del_fuego
+game_mode: domination_3point
+game_type: Known(Random)
+match_group: pvp
+self_player: 586000161
+battle_result: "{\"type\":\"Win\",\"team_id\":1}"
+finish_type: Known(ScoreExcess)
+max_duration: 1200
+played_duration: 727.307
+extra_duration: 8.653
+players:
+  - account_id: 502714305
+    name: Olrac69
+    entity_id: 968065
+    team_id: 0
+    meta_ship_id: 805328452
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3759585072)
+  - account_id: 504191427
+    name: Schmetterer
+    entity_id: 968085
+    team_id: 1
+    meta_ship_id: 805373930
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3666818896)
+  - account_id: 510625475
+    name: Killer211070
+    entity_id: 968041
+    team_id: 0
+    meta_ship_id: 939778948
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3655251408)
+  - account_id: 511233664
+    name: sonacles
+    entity_id: 968057
+    team_id: 1
+    meta_ship_id: 939625783
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4074682064)
+  - account_id: 519779991
+    name: xNeckro
+    entity_id: 968069
+    team_id: 0
+    meta_ship_id: 805527500
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3540924112)
+  - account_id: 534176657
+    name: andi9039
+    entity_id: 968045
+    team_id: 0
+    meta_ship_id: 939932564
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4178491344)
+  - account_id: 540493840
+    name: Waffelbrueder
+    entity_id: 968067
+    team_id: 0
+    meta_ship_id: 805503559
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3750672176)
+  - account_id: 541894400
+    name: _Bignuts_
+    entity_id: 968063
+    team_id: 0
+    meta_ship_id: 805412802
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4074649392)
+  - account_id: 548063795
+    name: WarlordG36
+    entity_id: 968051
+    team_id: 0
+    meta_ship_id: 939555624
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4277090288)
+  - account_id: 556220771
+    name: LVSS_87
+    entity_id: 968079
+    team_id: 1
+    meta_ship_id: 805405371
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3760142320)
+  - account_id: 557682673
+    name: Rezzo_31
+    entity_id: 968053
+    team_id: 0
+    meta_ship_id: 939920425
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3655284688)
+  - account_id: 571469806
+    name: Amok_Squirrel
+    entity_id: 968047
+    team_id: 1
+    meta_ship_id: 805501090
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3750638896)
+  - account_id: 573002055
+    name: GrayGhos_CV6Enterprise
+    entity_id: 968075
+    team_id: 1
+    meta_ship_id: 805353176
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3549869904)
+  - account_id: 575990609
+    name: destings
+    entity_id: 968087
+    team_id: 1
+    meta_ship_id: 805448105
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+  - account_id: 579022016
+    name: Kasp3r__1
+    entity_id: 968043
+    team_id: 0
+    meta_ship_id: 805618693
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3761190608)
+  - account_id: 581663139
+    name: Lutjens_G
+    entity_id: 968073
+    team_id: 0
+    meta_ship_id: 805472336
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4276041424)
+  - account_id: 586000161
+    name: P_yk
+    entity_id: 968071
+    team_id: 1
+    meta_ship_id: 939699791
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(4179572720)
+  - account_id: 597475423
+    name: ARMO7
+    entity_id: 968055
+    team_id: 0
+    meta_ship_id: 939685419
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3655218960)
+  - account_id: 598048869
+    name: Ximesss
+    entity_id: 968077
+    team_id: 1
+    meta_ship_id: 805650268
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4178491184)
+  - account_id: 598140744
+    name: Ell1eEu_l2E
+    entity_id: 968059
+    team_id: 1
+    meta_ship_id: 805681083
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4074714832)
+  - account_id: 602163403
+    name: dinamis66
+    entity_id: 968083
+    team_id: 0
+    meta_ship_id: 805583335
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179572528)
+  - account_id: 663457529
+    name: 12_mementomori_12
+    entity_id: 968049
+    team_id: 1
+    meta_ship_id: 805637927
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4276041424)
+  - account_id: 683959628
+    name: veenestra
+    entity_id: 968081
+    team_id: 1
+    meta_ship_id: 805618790
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4074649296)
+  - account_id: 702040473
+    name: HAIY_KFC
+    entity_id: 968061
+    team_id: 1
+    meta_ship_id: 939565121
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3530471216)
+frags:
+  - killer_account_id: 504191427
+    killer_name: Schmetterer
+    victims:
+      - 968085@Known(Fire)
+  - killer_account_id: 519779991
+    killer_name: xNeckro
+    victims:
+      - 968069@Known(Torpedo)
+  - killer_account_id: 556220771
+    killer_name: LVSS_87
+    victims:
+      - 968079@Known(AerialDepthCharge)
+      - 968079@Known(ApShell)
+  - killer_account_id: 557682673
+    killer_name: Rezzo_31
+    victims:
+      - 968053@Known(ApShell)
+  - killer_account_id: 597475423
+    killer_name: ARMO7
+    victims:
+      - 968055@Known(HeShell)
+  - killer_account_id: 598048869
+    killer_name: Ximesss
+    victims:
+      - 968077@Known(HeShell)
+      - 968077@Known(HeShell)
+  - killer_account_id: 663457529
+    killer_name: 12_mementomori_12
+    victims:
+      - 968049@Known(ApShell)
+  - killer_account_id: 683959628
+    killer_name: veenestra
+    victims:
+      - 968081@Known(HeShell)
+      - 968081@Known(Torpedo)
+chat:
+  - clock: 122.943
+    sender_name: P_yk
+    channel: Team
+    message: why abandon the flank
+    entity_id: 968070
+    sender_relation: Some(Relation(0))
+    player: "586000161:P_yk"
+  - clock: 173.498
+    sender_name: P_yk
+    channel: Team
+    message: "RPF: None"
+    entity_id: 968070
+    sender_relation: Some(Relation(0))
+    player: "586000161:P_yk"
+  - clock: 360.374
+    sender_name: LVSS_87
+    channel: Team
+    message: dont overpush
+    entity_id: 968070
+    sender_relation: Some(Relation(1))
+    player: "556220771:LVSS_87"
+  - clock: 369.494
+    sender_name: Amok_Squirrel
+    channel: Team
+    message: "now you why, because of two DDs at that flank"
+    entity_id: 968070
+    sender_relation: Some(Relation(1))
+    player: "571469806:Amok_Squirrel"
+  - clock: 403.08
+    sender_name: LVSS_87
+    channel: Team
+    message: we got caps
+    entity_id: 968070
+    sender_relation: Some(Relation(1))
+    player: "556220771:LVSS_87"
+  - clock: 423.139
+    sender_name: P_yk
+    channel: Team
+    message: can you be any less useless
+    entity_id: 968070
+    sender_relation: Some(Relation(0))
+    player: "586000161:P_yk"
+  - clock: 665.666
+    sender_name: LVSS_87
+    channel: Team
+    message: enemy team chose to not play
+    entity_id: 968070
+    sender_relation: Some(Relation(1))
+    player: "556220771:LVSS_87"
+  - clock: 688.68
+    sender_name: P_yk
+    channel: Team
+    message: tromp
+    entity_id: 968070
+    sender_relation: Some(Relation(0))
+    player: "586000161:P_yk"
+capture_points:
+  - index: 0
+    position:
+      - -530
+      - 0
+      - 0
+    radius: 120
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - -43
+      - 0
+      - 0
+    radius: 110
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 2
+    position:
+      - 355
+      - 0
+      - 0
+    radius: 110
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 260
+  - team_index: 1
+    score: 1000
+self_damage_stats:
+  - weapon: Known(BomberHeAsup)
+    category: Known(Agro)
+    count: 359
+    total: 1328300
+  - weapon: Known(MainAp)
+    category: Known(Agro)
+    count: 236
+    total: 3363300
+  - weapon: Known(MainAp)
+    category: Known(Enemy)
+    count: 28
+    total: 103091.61
+  - weapon: Known(MainAp)
+    category: Known(Spot)
+    count: 1
+    total: 1480
+  - weapon: Known(Torpedo)
+    category: Known(Agro)
+    count: 11
+    total: 165000
+active_consumable_avatars: 20
+active_consumable_total: 71

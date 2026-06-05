@@ -2896,7 +2896,7 @@ pub struct Replay {
 
     /// Optional additional replays from other players in the same match. When
     /// non-empty, the parser feeds all of them into a single merged
-    /// [`wows_replays::analyzer::battle_controller::merged::MergedReplays`]
+    /// [`wows_battle_world::merged::MergedReplays`]
     /// so that enemy positions / HP / consumables / etc. that the primary's
     /// client never saw become visible in the resulting BattleReport.
     pub alt_replays: Vec<ReplayFile>,

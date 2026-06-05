@@ -1,0 +1,847 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: digest_snapshot(filename)
+---
+positions:
+  - id: 493925
+    x: -315.83
+    y: 0
+    z: -87.166
+    yaw: 2.528
+    pitch: 0
+    roll: 0
+  - id: 493931
+    x: -345.03
+    y: 0
+    z: -257.701
+    yaw: 2.025
+    pitch: 0
+    roll: 0
+  - id: 493933
+    x: -385.147
+    y: 0
+    z: 175.515
+    yaw: 0.893
+    pitch: 0
+    roll: 0
+  - id: 493935
+    x: 322.491
+    y: 0
+    z: 205.828
+    yaw: -0.083
+    pitch: 0
+    roll: 0
+  - id: 493939
+    x: -30.046
+    y: 0
+    z: -39.128
+    yaw: 0.819
+    pitch: 0
+    roll: 0
+  - id: 493941
+    x: 287.92
+    y: 0
+    z: 349.269
+    yaw: -2.335
+    pitch: 0
+    roll: 0
+  - id: 493945
+    x: 232.153
+    y: 0
+    z: -344.926
+    yaw: -0.497
+    pitch: 0
+    roll: 0
+  - id: 493949
+    x: 255.394
+    y: 0
+    z: -269.65
+    yaw: -1.657
+    pitch: 0
+    roll: -0.006
+  - id: 493953
+    x: -304.5
+    y: -2
+    z: -66.497
+    yaw: 1.626
+    pitch: 0
+    roll: 0.025
+  - id: 493955
+    x: 66.25
+    y: 0
+    z: -108.125
+    yaw: -2.482
+    pitch: 0
+    roll: 0
+  - id: 493963
+    x: -248.223
+    y: 0
+    z: 275.596
+    yaw: -2.688
+    pitch: 0
+    roll: 0
+  - id: 493965
+    x: 342.737
+    y: -0
+    z: -192.841
+    yaw: -1.976
+    pitch: 0
+    roll: 0
+  - id: 493967
+    x: -485.472
+    y: 0
+    z: -50.122
+    yaw: 2.212
+    pitch: 0
+    roll: 0
+  - id: 493971
+    x: -398.256
+    y: 0
+    z: -107.637
+    yaw: 2.553
+    pitch: 0
+    roll: 0
+minimap:
+  - id: 493925
+    x: 0.246
+    y: 0.43
+    heading: 143.438
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 493927
+    x: 0.072
+    y: 0.502
+    heading: -144.844
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 493929
+    x: 0.898
+    y: 0.248
+    heading: 127.969
+    visible: true
+    visibility_flags: 1
+    is_invisible: false
+  - id: 493931
+    x: 0.223
+    y: 0.293
+    heading: 115.313
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 493933
+    x: 0.191
+    y: 0.639
+    heading: 50.625
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 493935
+    x: 0.758
+    y: 0.664
+    heading: -5.625
+    visible: true
+    visibility_flags: 1
+    is_invisible: false
+  - id: 493937
+    x: 0.297
+    y: 0.471
+    heading: 130.781
+    visible: true
+    visibility_flags: 1
+    is_invisible: false
+  - id: 493939
+    x: 0.475
+    y: 0.467
+    heading: 46.406
+    visible: true
+    visibility_flags: 1
+    is_invisible: false
+  - id: 493941
+    x: 0.73
+    y: 0.779
+    heading: -133.594
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 493943
+    x: 0.037
+    y: 0.295
+    heading: 1.406
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 493945
+    x: 0.686
+    y: 0.223
+    heading: -29.531
+    visible: true
+    visibility_flags: 3
+    is_invisible: false
+  - id: 493947
+    x: 0.953
+    y: 0.318
+    heading: 125.156
+    visible: true
+    visibility_flags: 1
+    is_invisible: false
+  - id: 493949
+    x: 0.703
+    y: 0.283
+    heading: -94.219
+    visible: true
+    visibility_flags: 258
+    is_invisible: false
+  - id: 493951
+    x: 0.205
+    y: 0.365
+    heading: 165.938
+    visible: true
+    visibility_flags: 259
+    is_invisible: false
+  - id: 493953
+    x: 0.256
+    y: 0.445
+    heading: 94.219
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 493955
+    x: 0.553
+    y: 0.412
+    heading: -142.031
+    visible: true
+    visibility_flags: 257
+    is_invisible: false
+  - id: 493957
+    x: 0.848
+    y: 0.281
+    heading: -12.656
+    visible: true
+    visibility_flags: 1
+    is_invisible: false
+  - id: 493959
+    x: 0.211
+    y: 0.385
+    heading: -108.281
+    visible: true
+    visibility_flags: 257
+    is_invisible: false
+  - id: 493961
+    x: 0.061
+    y: 0.416
+    heading: -153.281
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 493963
+    x: 0.301
+    y: 0.719
+    heading: -154.688
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 493965
+    x: 0.773
+    y: 0.346
+    heading: -113.906
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 493967
+    x: 0.111
+    y: 0.457
+    heading: 125.156
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 493969
+    x: 0.133
+    y: 0.322
+    heading: -146.25
+    visible: false
+    visibility_flags: 1
+    is_invisible: false
+  - id: 493971
+    x: 0.18
+    y: 0.414
+    heading: 144.844
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+vehicles:
+  - id: 493925
+    health: 17072.8
+    max_health: 27100
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 493924
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4182685008)
+  - id: 493927
+    health: 0
+    max_health: 14000
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 1
+    owner: 493926
+    selected_weapon: Known(Pinger)
+    ship_params_id: GameParamId(4078352368)
+  - id: 493929
+    health: 0
+    max_health: 38750
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 1
+    owner: 493928
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4076779504)
+  - id: 493931
+    health: 4718
+    max_health: 13100
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 493930
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4182652624)
+  - id: 493933
+    health: 60726
+    max_health: 63300
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 493932
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(3762239472)
+  - id: 493935
+    health: 0
+    max_health: 53700
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 493934
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4282333168)
+  - id: 493937
+    health: 0
+    max_health: 14100
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 0
+    owner: 493936
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4078843344)
+  - id: 493939
+    health: 0
+    max_health: 53700
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 493938
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4282333168)
+  - id: 493941
+    health: 13154.154
+    max_health: 56100
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 493940
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(3553572144)
+  - id: 493943
+    health: 0
+    max_health: 63550
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 1
+    owner: 493942
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(3742316496)
+  - id: 493945
+    health: 0
+    max_health: 50650
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 493944
+    selected_weapon: Known(Planes)
+    ship_params_id: GameParamId(4265588720)
+  - id: 493947
+    health: 0
+    max_health: 17550
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 1
+    owner: 493946
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4181604144)
+  - id: 493949
+    health: 15365.014
+    max_health: 48450
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 258
+    team_id: 0
+    owner: 493948
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(3552491344)
+  - id: 493951
+    health: 0
+    max_health: 11500
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 1
+    owner: 493950
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4183701200)
+  - id: 493953
+    health: 14700
+    max_health: 14700
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 493952
+    selected_weapon: Known(Pinger)
+    ship_params_id: GameParamId(4078352368)
+  - id: 493955
+    health: 0
+    max_health: 59300
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 493954
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4281284304)
+  - id: 493957
+    health: 0
+    max_health: 39600
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 1
+    owner: 493956
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4182685104)
+  - id: 493959
+    health: 0
+    max_health: 55900
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 1
+    owner: 493958
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4183766480)
+  - id: 493961
+    health: 0
+    max_health: 49500
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 1
+    owner: 493960
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4076779344)
+  - id: 493963
+    health: 47600
+    max_health: 47600
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 493962
+    selected_weapon: Known(Planes)
+    ship_params_id: GameParamId(3542071248)
+  - id: 493965
+    health: 9537.25
+    max_health: 17750
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 258
+    team_id: 0
+    owner: 493964
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4181603632)
+  - id: 493967
+    health: 38300
+    max_health: 42400
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 493966
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4181637104)
+  - id: 493969
+    health: 17956
+    max_health: 22300
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 1
+    team_id: 1
+    owner: 493968
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(3752736208)
+  - id: 493971
+    health: 57100
+    max_health: 57100
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 493970
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4288624336)
+entity_kinds:
+  - id: 266791
+    kind: SmokeScreen
+  - id: 493925
+    kind: Vehicle
+  - id: 493927
+    kind: Vehicle
+  - id: 493929
+    kind: Vehicle
+  - id: 493931
+    kind: Vehicle
+  - id: 493933
+    kind: Vehicle
+  - id: 493935
+    kind: Vehicle
+  - id: 493937
+    kind: Vehicle
+  - id: 493939
+    kind: Vehicle
+  - id: 493941
+    kind: Vehicle
+  - id: 493943
+    kind: Vehicle
+  - id: 493945
+    kind: Vehicle
+  - id: 493947
+    kind: Vehicle
+  - id: 493949
+    kind: Vehicle
+  - id: 493951
+    kind: Vehicle
+  - id: 493953
+    kind: Vehicle
+  - id: 493955
+    kind: Vehicle
+  - id: 493957
+    kind: Vehicle
+  - id: 493959
+    kind: Vehicle
+  - id: 493961
+    kind: Vehicle
+  - id: 493963
+    kind: Vehicle
+  - id: 493965
+    kind: Vehicle
+  - id: 493967
+    kind: Vehicle
+  - id: 493969
+    kind: Vehicle
+  - id: 493971
+    kind: Vehicle
+kills:
+  - clock: 254.475
+    killer: 493933
+    victim: 493961
+    cause: Known(ApShell)
+  - clock: 271.018
+    killer: 493959
+    victim: 493937
+    cause: Known(Secondaries)
+  - clock: 285.908
+    killer: 493925
+    victim: 493951
+    cause: Known(ApShell)
+  - clock: 296.178
+    killer: 493933
+    victim: 493959
+    cause: Known(ApShell)
+  - clock: 331.159
+    killer: 493965
+    victim: 493947
+    cause: Known(HeShell)
+  - clock: 332.033
+    killer: 493949
+    victim: 493957
+    cause: Known(ApShell)
+  - clock: 362.603
+    killer: 493931
+    victim: 493927
+    cause: Known(DepthCharge)
+  - clock: 404.162
+    killer: 493931
+    victim: 493943
+    cause: Known(Torpedo)
+  - clock: 411.598
+    killer: 493949
+    victim: 493929
+    cause: Known(ApShell)
+  - clock: 462.019
+    killer: 493963
+    victim: 493935
+    cause: Known(AerialTorpedo)
+  - clock: 499.726
+    killer: 493955
+    victim: 493939
+    cause: Known(ApShell)
+  - clock: 501.016
+    killer: 493949
+    victim: 493945
+    cause: Known(ApShell)
+  - clock: 516.999
+    killer: 493963
+    victim: 493955
+    cause: Known(SkipBombs)
+chat:
+  - clock: 28.403
+    sender_name: Kylesku
+    channel: Team
+    message: GG folks
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1065187235:Kylesku"
+  - clock: 35.309
+    sender_name: _Lionsteel
+    channel: Global
+    message: howdy yall
+    entity_id: 493964
+    sender_relation: Some(Relation(2))
+    player: "1055292445:_Lionsteel"
+  - clock: 58.326
+    sender_name: BBAZ311
+    channel: Team
+    message: good luck
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1034261126:BBAZ311"
+  - clock: 76.706
+    sender_name: nuker2099
+    channel: Team
+    message: on blñack list in my team
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1010300102:nuker2099"
+  - clock: 81.293
+    sender_name: nuker2099
+    channel: Team
+    message: black*
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1010300102:nuker2099"
+  - clock: 82.707
+    sender_name: _Lionsteel
+    channel: Global
+    message: its like that then
+    entity_id: 493964
+    sender_relation: Some(Relation(2))
+    player: "1055292445:_Lionsteel"
+  - clock: 98.432
+    sender_name: _Lionsteel
+    channel: Global
+    message: sink fast and drown slow then mf
+    entity_id: 493964
+    sender_relation: Some(Relation(2))
+    player: "1055292445:_Lionsteel"
+  - clock: 128.708
+    sender_name: Pinnaclen
+    channel: Team
+    message: russian DDs suck so much when you only have 4km torp range
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1042962974:Pinnaclen"
+  - clock: 373.156
+    sender_name: RangeMasters
+    channel: Global
+    message: gg
+    entity_id: 493964
+    sender_relation: Some(Relation(2))
+    player: "1037645144:RangeMasters"
+  - clock: 380.87
+    sender_name: Kylesku
+    channel: Team
+    message: "that dude ain't moving"
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1065187235:Kylesku"
+  - clock: 402.161
+    sender_name: Kylesku
+    channel: Team
+    message: "and I'm still missing. LOL"
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1065187235:Kylesku"
+  - clock: 408.878
+    sender_name: rosco99
+    channel: Global
+    message: gg
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1004663687:rosco99"
+  - clock: 415.726
+    sender_name: _Lionsteel
+    channel: Global
+    message: gg
+    entity_id: 493964
+    sender_relation: Some(Relation(2))
+    player: "1055292445:_Lionsteel"
+  - clock: 415.726
+    sender_name: Poland_5
+    channel: Global
+    message: gg
+    entity_id: 493964
+    sender_relation: Some(Relation(2))
+    player: "1029329477:Poland_5"
+  - clock: 417.739
+    sender_name: BBAZ311
+    channel: Team
+    message: thank you true north that was a good smoke
+    entity_id: 493964
+    sender_relation: Some(Relation(1))
+    player: "1034261126:BBAZ311"
+  - clock: 459.443
+    sender_name: RangeMasters
+    channel: Global
+    message: died
+    entity_id: 493964
+    sender_relation: Some(Relation(2))
+    player: "1037645144:RangeMasters"
+capture_points:
+  - index: 0
+    position:
+      - 80
+      - 0
+      - 310
+    radius: 167
+    control_point_type: Some(Known(BaseWithPoints))
+    team_id: 0
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - 80
+      - 0
+      - -310
+    radius: 167
+    control_point_type: Some(Known(BaseWithPoints))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 752
+  - team_index: 1
+    score: 0
+consumables:
+  - id: 493929
+    active: 1
+    inventory_slots: 0
+  - id: 493933
+    active: 3
+    inventory_slots: 0
+  - id: 493935
+    active: 2
+    inventory_slots: 0
+  - id: 493937
+    active: 2
+    inventory_slots: 0
+  - id: 493939
+    active: 5
+    inventory_slots: 0
+  - id: 493941
+    active: 2
+    inventory_slots: 0
+  - id: 493945
+    active: 2
+    inventory_slots: 0
+  - id: 493947
+    active: 2
+    inventory_slots: 0
+  - id: 493949
+    active: 13
+    inventory_slots: 0
+  - id: 493951
+    active: 1
+    inventory_slots: 0
+  - id: 493953
+    active: 2
+    inventory_slots: 0
+  - id: 493955
+    active: 3
+    inventory_slots: 0
+  - id: 493957
+    active: 2
+    inventory_slots: 0
+  - id: 493959
+    active: 3
+    inventory_slots: 0
+  - id: 493965
+    active: 5
+    inventory_slots: 0
+  - id: 493967
+    active: 1
+    inventory_slots: 0
+  - id: 493969
+    active: 3
+    inventory_slots: 0
+planes:
+  - plane_id: PlaneId(141734414739)
+    owner_id: 493964
+    team_id: 0
+    params_id: GameParamId(4293328592)
+  - plane_id: PlaneId(588411013497)
+    owner_id: 493964
+    team_id: 1
+    params_id: GameParamId(4171071472)
+  - plane_id: PlaneId(622770751865)
+    owner_id: 493964
+    team_id: 1
+    params_id: GameParamId(3856498672)
+wards:
+  - plane_id: PlaneId(622770751865)
+    owner_id: 493945
+    position:
+      - 58.341
+      - 0
+      - -270.249
+    radius: BigWorldDistance(116.667)
+active_shots: 76
+active_torpedoes: 0
+battle_stage: Some(Finishing)
+time_left: 704
+winning_team: 0
+finish_type: Known(ScoreZero)
+battle_start_clock: 29.422
+battle_end_clock: 525.69

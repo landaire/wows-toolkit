@@ -1,0 +1,1137 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: digest_snapshot(filename)
+---
+positions:
+  - id: 667244
+    x: -414.012
+    y: 0
+    z: -64.544
+    yaw: -0.546
+    pitch: 0
+    roll: -0.006
+  - id: 667248
+    x: 186.03
+    y: 0
+    z: 46.089
+    yaw: -1.46
+    pitch: 0
+    roll: -0.006
+  - id: 667249
+    x: 92.191
+    y: 0
+    z: 166.417
+    yaw: 0
+    pitch: 0
+    roll: 0
+  - id: 667250
+    x: -20.009
+    y: -0
+    z: 277.7
+    yaw: -0.803
+    pitch: 0
+    roll: -0.005
+  - id: 667262
+    x: -287.845
+    y: 0
+    z: 350.093
+    yaw: -2.04
+    pitch: 0
+    roll: -0.012
+  - id: 667270
+    x: -87.882
+    y: 0
+    z: 589.976
+    yaw: 0.816
+    pitch: 0
+    roll: 0.018
+  - id: 667276
+    x: -435.132
+    y: 0
+    z: 71.924
+    yaw: -0.801
+    pitch: 0
+    roll: 0.025
+  - id: 667280
+    x: 441.448
+    y: 0
+    z: 280.021
+    yaw: 0.764
+    pitch: 0
+    roll: -0.043
+  - id: 667282
+    x: 140.213
+    y: 0
+    z: 155.858
+    yaw: -0.874
+    pitch: 0
+    roll: -0.006
+  - id: 667284
+    x: 46.587
+    y: 0
+    z: 508.855
+    yaw: -0.187
+    pitch: 0
+    roll: -0.043
+minimap: []
+vehicles:
+  - id: 667244
+    health: 6516.531
+    max_health: 6516.531
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 667243
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667246
+    health: 66600
+    max_health: 66600
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 667245
+    selected_weapon: Known(Planes)
+    ship_params_id: GameParamId(0)
+  - id: 667248
+    health: 52296.97
+    max_health: 52296.97
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 667247
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667250
+    health: 16846
+    max_health: 21400
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 667249
+    selected_weapon: Known(Torpedoes)
+    ship_params_id: GameParamId(0)
+  - id: 667252
+    health: 0
+    max_health: 0
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 0
+    owner: 667251
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667254
+    health: 0
+    max_health: 43300
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 0
+    owner: 667253
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667256
+    health: 71100
+    max_health: 71100
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 667255
+    selected_weapon: Known(Planes)
+    ship_params_id: GameParamId(0)
+  - id: 667258
+    health: 0
+    max_health: 108300
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 0
+    owner: 667257
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667260
+    health: 0
+    max_health: 0
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 0
+    owner: 667259
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667262
+    health: 5063.745
+    max_health: 28901
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 667261
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667264
+    health: 0
+    max_health: 0
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 1
+    owner: 667263
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667266
+    health: 0
+    max_health: 63942.04
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 1
+    owner: 667265
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667268
+    health: 7746
+    max_health: 7746
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 667267
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667270
+    health: 30464.85
+    max_health: 51800
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 667269
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667272
+    health: 0
+    max_health: 7854.259
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 1
+    owner: 667271
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667274
+    health: 0
+    max_health: 0
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 1
+    owner: 667273
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667276
+    health: 0
+    max_health: 4449
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 667275
+    selected_weapon: Known(Torpedoes)
+    ship_params_id: GameParamId(0)
+  - id: 667278
+    health: 0
+    max_health: 0
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 1
+    owner: 667277
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667280
+    health: 24837.293
+    max_health: 31302.152
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 667279
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667282
+    health: 0
+    max_health: 19137.783
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 667281
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667284
+    health: 28449.988
+    max_health: 108300
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 667283
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667286
+    health: 0
+    max_health: 0
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 0
+    owner: 667285
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667288
+    health: 0
+    max_health: 60591.887
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 1
+    owner: 667287
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+  - id: 667290
+    health: 0
+    max_health: 0
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 0
+    owner: 667289
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(0)
+entity_kinds:
+  - id: 276435
+    kind: SmokeScreen
+  - id: 667244
+    kind: Vehicle
+  - id: 667246
+    kind: Vehicle
+  - id: 667248
+    kind: Vehicle
+  - id: 667250
+    kind: Vehicle
+  - id: 667252
+    kind: Vehicle
+  - id: 667254
+    kind: Vehicle
+  - id: 667256
+    kind: Vehicle
+  - id: 667258
+    kind: Vehicle
+  - id: 667260
+    kind: Vehicle
+  - id: 667262
+    kind: Vehicle
+  - id: 667264
+    kind: Vehicle
+  - id: 667266
+    kind: Vehicle
+  - id: 667268
+    kind: Vehicle
+  - id: 667270
+    kind: Vehicle
+  - id: 667272
+    kind: Vehicle
+  - id: 667274
+    kind: Vehicle
+  - id: 667276
+    kind: Vehicle
+  - id: 667278
+    kind: Vehicle
+  - id: 667280
+    kind: Vehicle
+  - id: 667282
+    kind: Vehicle
+  - id: 667284
+    kind: Vehicle
+  - id: 667286
+    kind: Vehicle
+  - id: 667288
+    kind: Vehicle
+  - id: 667290
+    kind: Vehicle
+kills:
+  - clock: 555.075
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1146411418\")"
+  - clock: 555.38
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 555.662
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 555.933
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 556.225
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 556.509
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 556.78
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 557.071
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 557.204
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 557.513
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 557.781
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 558.077
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 558.204
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 558.499
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 558.643
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 558.932
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 559.222
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 559.369
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 559.515
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1103731098\")"
+  - clock: 559.648
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 559.796
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1108816691\")"
+  - clock: 559.931
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1103731098\")"
+  - clock: 560.067
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 560.202
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1108816691\")"
+  - clock: 560.373
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1103731098\")"
+  - clock: 560.499
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 560.646
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1108816691\")"
+  - clock: 560.926
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1108816691\")"
+  - clock: 561.058
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1108816691\")"
+  - clock: 561.381
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1108816691\")"
+  - clock: 561.502
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1108816691\")"
+  - clock: 561.773
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1108816691\")"
+  - clock: 561.924
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1108816691\")"
+  - clock: 563.929
+    killer: 35
+    victim: 667246
+    cause: "Unknown(\"1108816691\")"
+  - clock: 564.194
+    killer: 35
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 564.637
+    killer: 35
+    victim: 667246
+    cause: "Unknown(\"1108816691\")"
+  - clock: 565.054
+    killer: 35
+    victim: 667246
+    cause: "Unknown(\"1103731098\")"
+  - clock: 565.199
+    killer: 35
+    victim: 667246
+    cause: "Unknown(\"1103731098\")"
+  - clock: 565.372
+    killer: 35
+    victim: 667246
+    cause: "Unknown(\"1103731098\")"
+  - clock: 565.509
+    killer: 35
+    victim: 667246
+    cause: "Unknown(\"1103731098\")"
+  - clock: 565.644
+    killer: 35
+    victim: 667246
+    cause: "Unknown(\"1103731098\")"
+  - clock: 565.783
+    killer: 35
+    victim: 667246
+    cause: "Unknown(\"1103731098\")"
+  - clock: 565.931
+    killer: 35
+    victim: 667246
+    cause: "Unknown(\"1103731098\")"
+  - clock: 566.079
+    killer: 35
+    victim: 667246
+    cause: "Unknown(\"1103731098\")"
+  - clock: 566.922
+    killer: 35
+    victim: 667246
+    cause: "Unknown(\"1103731098\")"
+  - clock: 567.633
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 568.005
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 568.218
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 578.496
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 578.79
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 579.062
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1093664768\")"
+  - clock: 579.368
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 579.648
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 579.94
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 580.232
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 580.5
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 580.797
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 581.063
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 581.387
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 581.646
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 581.926
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 582.223
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 582.489
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 582.771
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 583.049
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 583.372
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 583.627
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 583.92
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 584.213
+    killer: 1
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 591.395
+    killer: 36
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 591.668
+    killer: 36
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 591.935
+    killer: 36
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 592.224
+    killer: 36
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 592.51
+    killer: 36
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 592.777
+    killer: 36
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 593.073
+    killer: 36
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 593.382
+    killer: 36
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1105.372
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1105.645
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1105.94
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1106.235
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1106.54
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1106.795
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1107.062
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1107.372
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1107.638
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1107.94
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1108.221
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1108.512
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1108.788
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1109.082
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1109.387
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1109.664
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1109.956
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+  - clock: 1110.222
+    killer: 3
+    victim: 667246
+    cause: "Unknown(\"1095342490\")"
+chat:
+  - clock: 0
+    sender_name: Unknown
+    channel: "Unknown(\"\")"
+    message: ""
+    entity_id: 667249
+    sender_relation: None
+    player: ~
+capture_points:
+  - index: 0
+    position:
+      - -399.999
+      - 0
+      - -0
+    radius: 120
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: 1
+    progress:
+      - 0.367
+      - 38
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - 0
+      - 0
+      - -0.001
+    radius: 120
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: 1
+    progress:
+      - 0.65
+      - 21
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 2
+    position:
+      - 399.999
+      - 0
+      - -0.001
+    radius: 120
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 60
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 1000
+  - team_index: 1
+    score: 765
+consumables:
+  - id: 667244
+    active: 4
+    inventory_slots: 0
+  - id: 667248
+    active: 3
+    inventory_slots: 0
+  - id: 667250
+    active: 5
+    inventory_slots: 0
+  - id: 667252
+    active: 4
+    inventory_slots: 0
+  - id: 667254
+    active: 3
+    inventory_slots: 0
+  - id: 667256
+    active: 1
+    inventory_slots: 0
+  - id: 667258
+    active: 6
+    inventory_slots: 0
+  - id: 667260
+    active: 3
+    inventory_slots: 0
+  - id: 667262
+    active: 14
+    inventory_slots: 0
+  - id: 667264
+    active: 1
+    inventory_slots: 0
+  - id: 667266
+    active: 5
+    inventory_slots: 0
+  - id: 667268
+    active: 1
+    inventory_slots: 0
+  - id: 667270
+    active: 7
+    inventory_slots: 0
+  - id: 667272
+    active: 1
+    inventory_slots: 0
+  - id: 667276
+    active: 1
+    inventory_slots: 0
+  - id: 667278
+    active: 1
+    inventory_slots: 0
+  - id: 667280
+    active: 5
+    inventory_slots: 0
+  - id: 667282
+    active: 6
+    inventory_slots: 0
+  - id: 667284
+    active: 6
+    inventory_slots: 0
+  - id: 667286
+    active: 3
+    inventory_slots: 0
+  - id: 667288
+    active: 1
+    inventory_slots: 0
+  - id: 667290
+    active: 6
+    inventory_slots: 0
+planes: []
+wards:
+  - plane_id: PlaneId(733644743956594384)
+    owner_id: 2364593729
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(19295048000.0)
+  - plane_id: PlaneId(733644743956725456)
+    owner_id: 3504418625
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(54986304.0)
+  - plane_id: PlaneId(733644748251561680)
+    owner_id: 884863041
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.4499069e-30)
+  - plane_id: PlaneId(733644748251692752)
+    owner_id: 2710631745
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-7.384006e36)
+  - plane_id: PlaneId(733644752546528976)
+    owner_id: 1848484417
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(3.1143274e-14)
+  - plane_id: PlaneId(733644752546594512)
+    owner_id: 127059778
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.19086424e27)
+  - plane_id: PlaneId(733644756841496272)
+    owner_id: 2787251777
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(8.0102475e-18)
+  - plane_id: PlaneId(733644756841561808)
+    owner_id: 2523780673
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-0.0026971537)
+  - plane_id: PlaneId(733644765431496400)
+    owner_id: 1612634177
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(7.025233e-35)
+  - plane_id: PlaneId(733644769516682960)
+    owner_id: 649204033
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(NaN)
+  - plane_id: PlaneId(733644778316332752)
+    owner_id: 142082369
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(2.595517e-39)
+  - plane_id: PlaneId(733644791201300176)
+    owner_id: 431352129
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(4.156677e-39)
+  - plane_id: PlaneId(733644791201365712)
+    owner_id: 424080961
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.493385e-39)
+  - plane_id: PlaneId(733646943192284880)
+    owner_id: 2343147329
+    position:
+      - 0
+      - -0
+      - 0
+    radius: BigWorldDistance(2.418e-41)
+  - plane_id: PlaneId(733651341238796016)
+    owner_id: 3395982657
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(7.0173e-41)
+  - plane_id: PlaneId(733655738968014832)
+    owner_id: 3060230722
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-0.00041058275)
+  - plane_id: PlaneId(733655739072937968)
+    owner_id: 3124913729
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-65218820000000.0)
+  - plane_id: PlaneId(733655747557949424)
+    owner_id: 2431273537
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.9750562e-34)
+  - plane_id: PlaneId(733655747662872560)
+    owner_id: 680926785
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-2.8845604e-29)
+  - plane_id: PlaneId(733655747662938096)
+    owner_id: 750042946
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(2.4933717e20)
+  - plane_id: PlaneId(733655751748059120)
+    owner_id: 1083272257
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(2.4339e-41)
+  - plane_id: PlaneId(733655756147884016)
+    owner_id: 3571543362
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.1210042e-33)
+  - plane_id: PlaneId(733655760442851312)
+    owner_id: 3755373122
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-7.2370487e-37)
+  - plane_id: PlaneId(733655760547774448)
+    owner_id: 313134402
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.6252614e-36)
+  - plane_id: PlaneId(733655760547839984)
+    owner_id: 525827650
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-1.7611896e-24)
+  - plane_id: PlaneId(733655764632961008)
+    owner_id: 4264247106
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-6.27203e-33)
+  - plane_id: PlaneId(733655769137709040)
+    owner_id: 2411667266
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(1.3448389e-14)
+  - plane_id: PlaneId(733655773327753200)
+    owner_id: 968276289
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(9.384036e-31)
+  - plane_id: PlaneId(733655773432741872)
+    owner_id: 711737921
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-1.117214e32)
+  - plane_id: PlaneId(733655786317578224)
+    owner_id: 3807052609
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(NaN)
+  - plane_id: PlaneId(733660150222388944)
+    owner_id: 3628285759
+    position:
+      - 0
+      - -0
+      - 0
+    radius: BigWorldDistance(NaN)
+  - plane_id: PlaneId(733664535384620848)
+    owner_id: 4021750849
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(2.425e-41)
+  - plane_id: PlaneId(733671132448095984)
+    owner_id: 2554633535
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(-0.00020243235)
+  - plane_id: PlaneId(733682127564373744)
+    owner_id: 317642049
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(2.4348e-41)
+  - plane_id: PlaneId(733684325643910960)
+    owner_id: 3406908993
+    position:
+      - 0
+      - 0
+      - 0
+    radius: BigWorldDistance(2.4158e-41)
+  - plane_id: PlaneId(733688724634140368)
+    owner_id: 2701182527
+    position:
+      - 0
+      - -6586514500000000000
+      - 0
+    radius: BigWorldDistance(-1.1679815e-6)
+active_shots: 0
+active_torpedoes: 0
+battle_stage: Some(Waiting)
+time_left: 116
+winning_team: 0
+finish_type: Known(ScoreExcess)
+battle_start_clock: 27.476
+battle_end_clock: 1110.564

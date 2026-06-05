@@ -1,0 +1,366 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: report_snapshot(filename)
+---
+arena_id: ArenaId(3016614854264728)
+version: "Version { major: 0, minor: 10, patch: 5, build: 4046169 }"
+map_name: spaces/18_NE_ice_islands
+game_mode: CvC_Domination
+game_type: Known(Clan)
+match_group: clan
+self_player: 1030144936
+battle_result: "{\"type\":\"Win\",\"team_id\":0}"
+finish_type: Known(Extermination)
+max_duration: 1200
+played_duration: 483.167
+extra_duration: ~
+players:
+  - account_id: 1000401733
+    name: Gobstoper
+    entity_id: 795222
+    team_id: 1
+    meta_ship_id: 269131667
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+  - account_id: 1002114231
+    name: DamienLarkspur
+    entity_id: 795218
+    team_id: 1
+    meta_ship_id: 403409538
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+  - account_id: 1005391474
+    name: Dadecoy11
+    entity_id: 795220
+    team_id: 1
+    meta_ship_id: 403322223
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4074649392)
+  - account_id: 1011962247
+    name: TheJohnny_Tank
+    entity_id: 795204
+    team_id: 1
+    meta_ship_id: 269036288
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3338548944)
+  - account_id: 1012033981
+    name: BigDaddy061
+    entity_id: 795210
+    team_id: 0
+    meta_ship_id: 403455491
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+  - account_id: 1013032818
+    name: infmaze
+    entity_id: 795216
+    team_id: 0
+    meta_ship_id: 269112811
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3338548944)
+  - account_id: 1015481238
+    name: Crummy_One
+    entity_id: 795224
+    team_id: 0
+    meta_ship_id: 403328278
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+  - account_id: 1019244409
+    name: Nimzaj
+    entity_id: 795212
+    team_id: 1
+    meta_ship_id: 403389799
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+  - account_id: 1030144936
+    name: CPT_Benson
+    entity_id: 795230
+    team_id: 0
+    meta_ship_id: 403392991
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(3338548944)
+  - account_id: 1032071847
+    name: Papercannon
+    entity_id: 795208
+    team_id: 0
+    meta_ship_id: 403376738
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+  - account_id: 1034854963
+    name: Knightow
+    entity_id: 795206
+    team_id: 0
+    meta_ship_id: 403416865
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3338548944)
+  - account_id: 1036245237
+    name: k35_
+    entity_id: 795226
+    team_id: 1
+    meta_ship_id: 269070487
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+  - account_id: 1038206403
+    name: _Miscreant_
+    entity_id: 795228
+    team_id: 1
+    meta_ship_id: 403512988
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+  - account_id: 1039874276
+    name: hupking
+    entity_id: 795214
+    team_id: 0
+    meta_ship_id: 269062440
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3338548944)
+frags:
+  - killer_account_id: 1002114231
+    killer_name: DamienLarkspur
+    victims:
+      - 795218@Known(Torpedo)
+  - killer_account_id: 1005391474
+    killer_name: Dadecoy11
+    victims:
+      - 795220@Known(Torpedo)
+  - killer_account_id: 1011962247
+    killer_name: TheJohnny_Tank
+    victims:
+      - 795204@Known(HeShell)
+  - killer_account_id: 1012033981
+    killer_name: BigDaddy061
+    victims:
+      - 795210@Known(HeShell)
+      - 795210@Known(Torpedo)
+      - 795210@Known(Torpedo)
+  - killer_account_id: 1030144936
+    killer_name: CPT_Benson
+    victims:
+      - 795230@Known(HeShell)
+      - 795230@Known(HeShell)
+  - killer_account_id: 1032071847
+    killer_name: Papercannon
+    victims:
+      - 795208@Known(HeShell)
+  - killer_account_id: 1034854963
+    killer_name: Knightow
+    victims:
+      - 795206@Known(HeShell)
+  - killer_account_id: 1038206403
+    killer_name: _Miscreant_
+    victims:
+      - 795228@Known(HeShell)
+chat:
+  - clock: 10.53
+    sender_name: k35_
+    channel: Global
+    message: ayyyy
+    entity_id: 795229
+    sender_relation: Some(Relation(2))
+    player: "1036245237:k35_"
+  - clock: 12.818
+    sender_name: DamienLarkspur
+    channel: Global
+    message: People of taste I see
+    entity_id: 795229
+    sender_relation: Some(Relation(2))
+    player: "1002114231:DamienLarkspur"
+  - clock: 14.502
+    sender_name: Nimzaj
+    channel: Global
+    message: lmao
+    entity_id: 795229
+    sender_relation: Some(Relation(2))
+    player: "1019244409:Nimzaj"
+  - clock: 24.8
+    sender_name: Gobstoper
+    channel: Global
+    message: lol now thats funny
+    entity_id: 795229
+    sender_relation: Some(Relation(2))
+    player: "1000401733:Gobstoper"
+  - clock: 34.242
+    sender_name: CPT_Benson
+    channel: Global
+    message: we need to knife fight
+    entity_id: 795229
+    sender_relation: Some(Relation(0))
+    player: "1030144936:CPT_Benson"
+  - clock: 49.401
+    sender_name: Papercannon
+    channel: Global
+    message: Cheers
+    entity_id: 795229
+    sender_relation: Some(Relation(1))
+    player: "1032071847:Papercannon"
+  - clock: 74.237
+    sender_name: Knightow
+    channel: Global
+    message: i see you are men and or women of culture as well
+    entity_id: 795229
+    sender_relation: Some(Relation(1))
+    player: "1034854963:Knightow"
+  - clock: 75.529
+    sender_name: CPT_Benson
+    channel: Team
+    message: "2 down the middle side of A, 2 wide of A, and 3 in the middle?"
+    entity_id: 795229
+    sender_relation: Some(Relation(0))
+    player: "1030144936:CPT_Benson"
+  - clock: 97.252
+    sender_name: CPT_Benson
+    channel: Team
+    message: we need to focus fire
+    entity_id: 795229
+    sender_relation: Some(Relation(0))
+    player: "1030144936:CPT_Benson"
+  - clock: 102.397
+    sender_name: CPT_Benson
+    channel: Team
+    message: 1 person call out a target
+    entity_id: 795229
+    sender_relation: Some(Relation(0))
+    player: "1030144936:CPT_Benson"
+  - clock: 104.844
+    sender_name: Nimzaj
+    channel: Global
+    message: i am non binary
+    entity_id: 795229
+    sender_relation: Some(Relation(2))
+    player: "1019244409:Nimzaj"
+  - clock: 132.948
+    sender_name: CPT_Benson
+    channel: Team
+    message: does elbing have the best guns out of all of them?
+    entity_id: 795229
+    sender_relation: Some(Relation(0))
+    player: "1030144936:CPT_Benson"
+  - clock: 136.671
+    sender_name: CPT_Benson
+    channel: Team
+    message: i think it does
+    entity_id: 795229
+    sender_relation: Some(Relation(0))
+    player: "1030144936:CPT_Benson"
+  - clock: 271.411
+    sender_name: CPT_Benson
+    channel: Team
+    message: go back to C?
+    entity_id: 795229
+    sender_relation: Some(Relation(0))
+    player: "1030144936:CPT_Benson"
+  - clock: 279.871
+    sender_name: CPT_Benson
+    channel: Team
+    message: we need to stick together
+    entity_id: 795229
+    sender_relation: Some(Relation(0))
+    player: "1030144936:CPT_Benson"
+  - clock: 326.265
+    sender_name: Dadecoy11
+    channel: Global
+    message: lol
+    entity_id: 795229
+    sender_relation: Some(Relation(2))
+    player: "1005391474:Dadecoy11"
+  - clock: 522.289
+    sender_name: Papercannon
+    channel: Global
+    message: MY CAP!!!   ;)
+    entity_id: 795229
+    sender_relation: Some(Relation(1))
+    player: "1032071847:Papercannon"
+  - clock: 525.829
+    sender_name: CPT_Benson
+    channel: Global
+    message: gg
+    entity_id: 795229
+    sender_relation: Some(Relation(0))
+    player: "1030144936:CPT_Benson"
+capture_points:
+  - index: 0
+    position:
+      - -300.664
+      - 0
+      - 0.685
+    radius: 100
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - 284.887
+      - 0
+      - -280.625
+    radius: 100
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 2
+    position:
+      - 286.139
+      - 0
+      - 279.374
+    radius: 100
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 553
+  - team_index: 1
+    score: 517
+self_damage_stats:
+  - weapon: Known(Burn)
+    category: Known(Enemy)
+    count: 27
+    total: 1465.242
+  - weapon: Known(MainHe)
+    category: Known(Agro)
+    count: 18
+    total: 38700
+  - weapon: Known(MainHe)
+    category: Known(Enemy)
+    count: 43
+    total: 25878.162
+  - weapon: Known(MainHe)
+    category: Known(Spot)
+    count: 6
+    total: 3638
+  - weapon: Known(Torpedo)
+    category: Known(Agro)
+    count: 3
+    total: 71301
+active_consumable_avatars: 14
+active_consumable_total: 36

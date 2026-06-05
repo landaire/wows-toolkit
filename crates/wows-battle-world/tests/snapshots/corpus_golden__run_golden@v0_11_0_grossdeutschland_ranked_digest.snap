@@ -1,0 +1,573 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: digest_snapshot(filename)
+---
+positions:
+  - id: 1960991
+    x: -7.407
+    y: 0
+    z: 257.404
+    yaw: 0.764
+    pitch: 0
+    roll: 0.043
+  - id: 1960994
+    x: 550.308
+    y: 0
+    z: 258.164
+    yaw: 0
+    pitch: 0
+    roll: 0
+  - id: 1960995
+    x: 527.732
+    y: -0
+    z: 274.7
+    yaw: -0.706
+    pitch: 0
+    roll: 0
+  - id: 1960997
+    x: 312.925
+    y: 0
+    z: -104.083
+    yaw: -2.829
+    pitch: 0
+    roll: -0.018
+  - id: 1960999
+    x: 154.285
+    y: 0
+    z: -42.067
+    yaw: -0.224
+    pitch: 0
+    roll: 0.018
+  - id: 1961001
+    x: -55.994
+    y: 0
+    z: -35.963
+    yaw: 2.117
+    pitch: 0
+    roll: -0.018
+  - id: 1961005
+    x: 183.828
+    y: 0
+    z: 248.961
+    yaw: 0.657
+    pitch: 0
+    roll: 0.025
+  - id: 1961007
+    x: 472.603
+    y: 0
+    z: -168.967
+    yaw: -0.862
+    pitch: 0
+    roll: -0.037
+  - id: 1961009
+    x: -195.773
+    y: 0
+    z: 180.053
+    yaw: 1.154
+    pitch: 0
+    roll: 0
+  - id: 1961011
+    x: -312.235
+    y: 0
+    z: 207.963
+    yaw: 0.795
+    pitch: 0
+    roll: 0
+  - id: 1961013
+    x: 47.04
+    y: 0
+    z: 364.421
+    yaw: -1.135
+    pitch: 0
+    roll: -0.018
+minimap:
+  - id: 1960987
+    x: 0.432
+    y: 0.701
+    heading: 35.156
+    visible: true
+    visibility_flags: 1
+    is_invisible: false
+  - id: 1960989
+    x: 0.297
+    y: 0.533
+    heading: -142.031
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 1960991
+    x: 0.492
+    y: 0.703
+    heading: 42.188
+    visible: true
+    visibility_flags: 1
+    is_invisible: false
+  - id: 1960993
+    x: 0.961
+    y: 0.594
+    heading: 101.25
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 1960995
+    x: 0.922
+    y: 0.717
+    heading: -40.781
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 1960997
+    x: 0.75
+    y: 0.416
+    heading: -161.719
+    visible: true
+    visibility_flags: 257
+    is_invisible: false
+  - id: 1960999
+    x: 0.623
+    y: 0.465
+    heading: -14.063
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 1961001
+    x: 0.453
+    y: 0.471
+    heading: 123.75
+    visible: true
+    visibility_flags: 1
+    is_invisible: false
+  - id: 1961003
+    x: 0.877
+    y: 0.777
+    heading: 52.031
+    visible: true
+    visibility_flags: 257
+    is_invisible: false
+  - id: 1961005
+    x: 0.645
+    y: 0.697
+    heading: 36.563
+    visible: true
+    visibility_flags: 1
+    is_invisible: false
+  - id: 1961007
+    x: 0.877
+    y: 0.363
+    heading: -49.219
+    visible: true
+    visibility_flags: 0
+    is_invisible: false
+  - id: 1961009
+    x: 0.342
+    y: 0.643
+    heading: 64.688
+    visible: true
+    visibility_flags: 1
+    is_invisible: false
+  - id: 1961011
+    x: 0.248
+    y: 0.664
+    heading: 45
+    visible: true
+    visibility_flags: 1
+    is_invisible: false
+  - id: 1961013
+    x: 0.537
+    y: 0.791
+    heading: -66.094
+    visible: true
+    visibility_flags: 1
+    is_invisible: false
+vehicles:
+  - id: 1960987
+    health: 0
+    max_health: 45400
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 0
+    owner: 1960986
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4074682352)
+  - id: 1960989
+    health: 0
+    max_health: 29100
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 0
+    owner: 1960988
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4074649296)
+  - id: 1960991
+    health: 11638.79
+    max_health: 96300
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 1
+    team_id: 0
+    owner: 1960990
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4277090288)
+  - id: 1960993
+    health: 0
+    max_health: 21400
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 0
+    owner: 1960992
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4282267344)
+  - id: 1960995
+    health: 41252.85
+    max_health: 105800
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1960994
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4179572528)
+  - id: 1960997
+    health: 0
+    max_health: 108300
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 0
+    owner: 1960996
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4179572176)
+  - id: 1960999
+    health: 45719.586
+    max_health: 55100
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1960998
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4273911792)
+  - id: 1961001
+    health: 8331.03
+    max_health: 21400
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 1
+    team_id: 1
+    owner: 1961000
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4282267344)
+  - id: 1961003
+    health: 0
+    max_health: 76100
+    is_alive: false
+    is_invisible: true
+    visibility_flags: 0
+    team_id: 0
+    owner: 1961002
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4074714928)
+  - id: 1961005
+    health: 17962
+    max_health: 20800
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 1
+    team_id: 1
+    owner: 1961004
+    selected_weapon: Known(Torpedoes)
+    ship_params_id: GameParamId(3760076496)
+  - id: 1961007
+    health: 51368.727
+    max_health: 96300
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 1
+    owner: 1961006
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(3760142320)
+  - id: 1961009
+    health: 10764.503
+    max_health: 108300
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 1
+    team_id: 1
+    owner: 1961008
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4179572176)
+  - id: 1961011
+    health: 47800
+    max_health: 47800
+    is_alive: true
+    is_invisible: false
+    visibility_flags: 1
+    team_id: 1
+    owner: 1961010
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4179539920)
+  - id: 1961013
+    health: 0
+    max_health: 51900
+    is_alive: false
+    is_invisible: false
+    visibility_flags: 0
+    team_id: 0
+    owner: 1961012
+    selected_weapon: Known(Artillery)
+    ship_params_id: GameParamId(4179539760)
+entity_kinds:
+  - id: 1960987
+    kind: Vehicle
+  - id: 1960989
+    kind: Vehicle
+  - id: 1960991
+    kind: Vehicle
+  - id: 1960993
+    kind: Vehicle
+  - id: 1960995
+    kind: Vehicle
+  - id: 1960997
+    kind: Vehicle
+  - id: 1960999
+    kind: Vehicle
+  - id: 1961001
+    kind: Vehicle
+  - id: 1961003
+    kind: Vehicle
+  - id: 1961005
+    kind: Vehicle
+  - id: 1961007
+    kind: Vehicle
+  - id: 1961009
+    kind: Vehicle
+  - id: 1961011
+    kind: Vehicle
+  - id: 1961013
+    kind: Vehicle
+kills:
+  - clock: 200.705
+    killer: 1961001
+    victim: 1960989
+    cause: Known(Torpedo)
+  - clock: 274.716
+    killer: 1960995
+    victim: 1960993
+    cause: Known(ApShell)
+  - clock: 403.132
+    killer: 1960995
+    victim: 1960987
+    cause: Known(ApShell)
+  - clock: 416.69
+    killer: 1961007
+    victim: 1960997
+    cause: Known(Fire)
+  - clock: 433.274
+    killer: 1960995
+    victim: 1961003
+    cause: Known(ApShell)
+  - clock: 502.557
+    killer: 1960995
+    victim: 1961013
+    cause: Known(ApShell)
+chat:
+  - clock: 107.55
+    sender_name: Amiral_PUJOL
+    channel: Global
+    message: "I have 25 years XP of navals battles ;) My YOUTUBE channel is \"SEA WOLF\" #beststrat #pathwarrior #random https://youtu.be/R85ShzuITag"
+    entity_id: 1960994
+    sender_relation: Some(Relation(2))
+    player: "565596600:Amiral_PUJOL"
+  - clock: 155.555
+    sender_name: Gurgel100
+    channel: Global
+    message: "this is world of warships where you don't need any XP"
+    entity_id: 1960994
+    sender_relation: Some(Relation(2))
+    player: "534300997:Gurgel100"
+  - clock: 203.972
+    sender_name: yusufbaskent2009
+    channel: Team
+    message: gg
+    entity_id: 1960994
+    sender_relation: Some(Relation(1))
+    player: "559670817:yusufbaskent2009"
+  - clock: 213.979
+    sender_name: limivorous
+    channel: Global
+    message: turns like a supertanker
+    entity_id: 1960994
+    sender_relation: Some(Relation(2))
+    player: "529432798:limivorous"
+  - clock: 282.409
+    sender_name: Mastervdemon
+    channel: Team
+    message: up up and away xD
+    entity_id: 1960994
+    sender_relation: Some(Relation(0))
+    player: "564371113:Mastervdemon"
+  - clock: 298.14
+    sender_name: Amiral_PUJOL
+    channel: Global
+    message: we have best DDs in uour team ...
+    entity_id: 1960994
+    sender_relation: Some(Relation(2))
+    player: "565596600:Amiral_PUJOL"
+  - clock: 410.872
+    sender_name: yusufbaskent2009
+    channel: Team
+    message: poh poh
+    entity_id: 1960994
+    sender_relation: Some(Relation(1))
+    player: "559670817:yusufbaskent2009"
+  - clock: 410.872
+    sender_name: Amiral_PUJOL
+    channel: Global
+    message: LOL
+    entity_id: 1960994
+    sender_relation: Some(Relation(2))
+    player: "565596600:Amiral_PUJOL"
+  - clock: 417.271
+    sender_name: Amiral_PUJOL
+    channel: Global
+    message: WG MM
+    entity_id: 1960994
+    sender_relation: Some(Relation(2))
+    player: "565596600:Amiral_PUJOL"
+  - clock: 436.119
+    sender_name: Mastervdemon
+    channel: Global
+    message: did not expect to hit
+    entity_id: 1960994
+    sender_relation: Some(Relation(0))
+    player: "564371113:Mastervdemon"
+  - clock: 439.681
+    sender_name: Mastervdemon
+    channel: Global
+    message: lol wtf
+    entity_id: 1960994
+    sender_relation: Some(Relation(0))
+    player: "564371113:Mastervdemon"
+  - clock: 446.972
+    sender_name: wetCgoe
+    channel: Global
+    message: that looked bad
+    entity_id: 1960994
+    sender_relation: Some(Relation(1))
+    player: "550031975:wetCgoe"
+  - clock: 529.961
+    sender_name: Gurgel100
+    channel: Global
+    message: gg
+    entity_id: 1960994
+    sender_relation: Some(Relation(2))
+    player: "534300997:Gurgel100"
+capture_points:
+  - index: 0
+    position:
+      - -118
+      - 0
+      - 225
+    radius: 95
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: 1
+    progress:
+      - 0.126
+      - 0
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - -118
+      - 0
+      - -225
+    radius: 95
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 2
+    position:
+      - 360
+      - 0
+      - 0
+    radius: 90
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 194
+  - team_index: 1
+    score: 998
+consumables:
+  - id: 1960987
+    active: 4
+    inventory_slots: 0
+  - id: 1960991
+    active: 3
+    inventory_slots: 0
+  - id: 1960993
+    active: 3
+    inventory_slots: 0
+  - id: 1960995
+    active: 8
+    inventory_slots: 0
+  - id: 1960997
+    active: 5
+    inventory_slots: 0
+  - id: 1960999
+    active: 1
+    inventory_slots: 0
+  - id: 1961001
+    active: 6
+    inventory_slots: 0
+  - id: 1961003
+    active: 3
+    inventory_slots: 0
+  - id: 1961005
+    active: 4
+    inventory_slots: 0
+  - id: 1961007
+    active: 6
+    inventory_slots: 0
+  - id: 1961009
+    active: 3
+    inventory_slots: 0
+  - id: 1961011
+    active: 2
+    inventory_slots: 0
+  - id: 1961013
+    active: 2
+    inventory_slots: 0
+planes:
+  - plane_id: PlaneId(141735881775)
+    owner_id: 1960994
+    team_id: 1
+    params_id: GameParamId(4283891696)
+wards: []
+active_shots: 102
+active_torpedoes: 24
+battle_stage: Some(Waiting)
+time_left: 701
+winning_team: 1
+finish_type: Known(ScoreExcess)
+battle_start_clock: 30.837
+battle_end_clock: 529.961

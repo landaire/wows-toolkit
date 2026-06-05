@@ -548,7 +548,7 @@ pub(super) fn render_video_blocking(
         game_metadata.entity_specs(),
         &primary_with_alts,
     );
-    let damage_events = wows_replays::analyzer::battle_controller::merged::gather_damage_events(
+    let damage_events = wows_battle_world::merged::gather_damage_events(
         &*game_metadata,
         &game_constants,
         version,

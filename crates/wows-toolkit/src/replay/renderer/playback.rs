@@ -330,7 +330,7 @@ pub(super) fn playback_thread(
             game_metadata.entity_specs(),
             &all,
         );
-        let damage = wows_replays::analyzer::battle_controller::merged::gather_damage_events(
+        let damage = wows_battle_world::merged::gather_damage_events(
             &*game_metadata,
             &game_constants,
             version,

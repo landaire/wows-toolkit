@@ -287,7 +287,7 @@ impl<'a> MinimapRenderer<'a> {
     }
 
     /// Install a pre-merged per-entity damage event list. Driven by
-    /// `wows_replays::analyzer::battle_controller::merged::gather_damage_events`.
+    /// `wows_battle_world::merged::gather_damage_events`.
     /// Used by the roster to surface damage that the primary perspective
     /// alone couldn't observe (teammates vs unspotted enemies).
     pub fn set_damage_events(

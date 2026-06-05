@@ -1,0 +1,467 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: report_snapshot(filename)
+---
+arena_id: ArenaId(5180982086409349)
+version: "Version { major: 12, minor: 6, patch: 0, build: 7266701 }"
+map_name: spaces/s06_Atoll
+game_mode: PCVO009_OP_02_02_s06_Atoll
+game_type: Known(Pve)
+match_group: pve
+self_player: 512563593
+battle_result: "{\"type\":\"Win\",\"team_id\":0}"
+finish_type: Known(PveMainTaskSucceeded)
+max_duration: 1200
+played_duration: 1129.736
+extra_duration: 8.141
+players:
+  - account_id: -4276382869
+    name: IDS_OP_02_02_EN43
+    entity_id: 1219456
+    team_id: 1
+    meta_ship_id: 26
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4076779504)
+  - account_id: -4270029679
+    name: IDS_OP_02_02_EN45
+    entity_id: 1219458
+    team_id: 1
+    meta_ship_id: 28
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(3762206704)
+  - account_id: -3979484341
+    name: IDS_OP_02_02_DDG_02
+    entity_id: 1219336
+    team_id: 1
+    meta_ship_id: 18
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4264441840)
+  - account_id: -3915805405
+    name: IDS_OP_02_02_INTRMDT_2
+    entity_id: 1219319
+    team_id: 1
+    meta_ship_id: 12
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4248745968)
+  - account_id: -3625101193
+    name: IDS_OP_02_02_EN_RBA_2
+    entity_id: 1219412
+    team_id: 1
+    meta_ship_id: 24
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4289607664)
+  - account_id: -3226123448
+    name: IDS_OP_02_02_EN35
+    entity_id: 1219409
+    team_id: 1
+    meta_ship_id: 22
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4076779504)
+  - account_id: -3113448432
+    name: IDS_OP_02_02_BOT_01_1
+    entity_id: 1206314
+    team_id: 1
+    meta_ship_id: 1
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4280170480)
+  - account_id: -2840921354
+    name: IDS_OP_02_02_EN44
+    entity_id: 1219457
+    team_id: 1
+    meta_ship_id: 27
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(3761190896)
+  - account_id: -2835062099
+    name: IDS_OP_02_02_BOT_ALLY
+    entity_id: 1206321
+    team_id: 0
+    meta_ship_id: 8
+    relation: Relation(1)
+    is_bot: true
+    vehicle_id: GameParamId(4287542992)
+  - account_id: -2539814340
+    name: IDS_OP_02_02_BOT_03_3
+    entity_id: 1219252
+    team_id: 1
+    meta_ship_id: 11
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4288591856)
+  - account_id: -2308959489
+    name: IDS_OP_02_02_BOT_CRR_1
+    entity_id: 1206320
+    team_id: 1
+    meta_ship_id: 7
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(3448747280)
+  - account_id: -2254972601
+    name: IDS_OP_02_02_DDG_01
+    entity_id: 1219335
+    team_id: 1
+    meta_ship_id: 17
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4289607664)
+  - account_id: -2238397599
+    name: IDS_OP_02_02_EN34
+    entity_id: 1219408
+    team_id: 1
+    meta_ship_id: 21
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4282333168)
+  - account_id: -2167446974
+    name: IDS_OP_02_02_BOT_03_4
+    entity_id: 1219219
+    team_id: 1
+    meta_ship_id: 10
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4078876656)
+  - account_id: -2114866493
+    name: IDS_OP_02_02_EN41
+    entity_id: 1219459
+    team_id: 1
+    meta_ship_id: 29
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4289607664)
+  - account_id: -1593419487
+    name: IDS_OP_02_02_EN25
+    entity_id: 1219332
+    team_id: 1
+    meta_ship_id: 16
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4289640432)
+  - account_id: -1368453493
+    name: IDS_OP_02_02_BOT_01_9
+    entity_id: 1206319
+    team_id: 1
+    meta_ship_id: 6
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4290721776)
+  - account_id: -1251500459
+    name: IDS_OP_02_02_BOT_01_5
+    entity_id: 1206316
+    team_id: 1
+    meta_ship_id: 3
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(3763255280)
+  - account_id: -1190017392
+    name: IDS_OP_02_02_EN33
+    entity_id: 1219407
+    team_id: 1
+    meta_ship_id: 20
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4289640432)
+  - account_id: -1043186179
+    name: IDS_OP_02_02_EN24
+    entity_id: 1219331
+    team_id: 1
+    meta_ship_id: 15
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4183734256)
+  - account_id: -932777551
+    name: IDS_OP_02_02_BOT_01_14
+    entity_id: 1219337
+    team_id: 1
+    meta_ship_id: 19
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4078876656)
+  - account_id: -705892326
+    name: IDS_OP_02_02_BOT_03_1
+    entity_id: 1219218
+    team_id: 1
+    meta_ship_id: 9
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4289640432)
+  - account_id: -635308303
+    name: IDS_OP_02_02_EN23
+    entity_id: 1219330
+    team_id: 1
+    meta_ship_id: 14
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4289640432)
+  - account_id: -509544973
+    name: IDS_OP_02_02_BOT_01_8
+    entity_id: 1206318
+    team_id: 1
+    meta_ship_id: 5
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4288624624)
+  - account_id: -470428147
+    name: IDS_OP_02_02_EN42
+    entity_id: 1219460
+    team_id: 1
+    meta_ship_id: 30
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4286461936)
+  - account_id: -252488766
+    name: IDS_OP_02_02_EN_RBA_1
+    entity_id: 1219411
+    team_id: 1
+    meta_ship_id: 23
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4288559088)
+  - account_id: -252247031
+    name: IDS_OP_02_02_BOT_01_7
+    entity_id: 1206317
+    team_id: 1
+    meta_ship_id: 4
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4259264496)
+  - account_id: -246634527
+    name: IDS_OP_02_02_INTRMDT_3
+    entity_id: 1219320
+    team_id: 1
+    meta_ship_id: 13
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4269717488)
+  - account_id: -204049776
+    name: IDS_OP_02_02_BOT_01_2
+    entity_id: 1206315
+    team_id: 1
+    meta_ship_id: 2
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4288559088)
+  - account_id: -87792667
+    name: IDS_OP_02_02_EN_RBA_3
+    entity_id: 1219413
+    team_id: 1
+    meta_ship_id: 25
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4280170480)
+  - account_id: 500521120
+    name: kut750
+    entity_id: 1206311
+    team_id: 0
+    meta_ship_id: 807196010
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4077860816)
+  - account_id: 500559591
+    name: stevandac
+    entity_id: 1206307
+    team_id: 0
+    meta_ship_id: 807025526
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4078876368)
+  - account_id: 502238597
+    name: coeur69lion
+    entity_id: 1206309
+    team_id: 0
+    meta_ship_id: 941040956
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4284430032)
+  - account_id: 512563593
+    name: HarryPotterSniper
+    entity_id: 1206313
+    team_id: 0
+    meta_ship_id: 806765854
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(3543054032)
+  - account_id: 547445435
+    name: adarkandstormyknight
+    entity_id: 1206305
+    team_id: 0
+    meta_ship_id: 806813292
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4181636912)
+  - account_id: 603410272
+    name: paulakis90
+    entity_id: 1206301
+    team_id: 0
+    meta_ship_id: 807261064
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4076779472)
+  - account_id: 676455223
+    name: "8468484"
+    entity_id: 1206303
+    team_id: 0
+    meta_ship_id: 941070634
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4076812080)
+frags:
+  - killer_account_id: -4270029679
+    killer_name: IDS_OP_02_02_EN45
+    victims:
+      - 1219458@Known(HeShell)
+  - killer_account_id: -2840921354
+    killer_name: IDS_OP_02_02_EN44
+    victims:
+      - 1219457@Known(ApShell)
+  - killer_account_id: -2835062099
+    killer_name: IDS_OP_02_02_BOT_ALLY
+    victims:
+      - 1206321@Known(ApShell)
+  - killer_account_id: -2238397599
+    killer_name: IDS_OP_02_02_EN34
+    victims:
+      - 1219408@Known(ApShell)
+  - killer_account_id: -252488766
+    killer_name: IDS_OP_02_02_EN_RBA_1
+    victims:
+      - 1219411@Known(Torpedo)
+  - killer_account_id: -252247031
+    killer_name: IDS_OP_02_02_BOT_01_7
+    victims:
+      - 1206317@Known(ApShell)
+  - killer_account_id: -246634527
+    killer_name: IDS_OP_02_02_INTRMDT_3
+    victims:
+      - 1219320@Known(ApShell)
+  - killer_account_id: 500521120
+    killer_name: kut750
+    victims:
+      - 1206311@Known(ApShell)
+      - 1206311@Known(ApShell)
+      - 1206311@Known(ApShell)
+  - killer_account_id: 500559591
+    killer_name: stevandac
+    victims:
+      - 1206307@Known(ApShell)
+      - 1206307@Known(Fire)
+      - 1206307@Known(HeShell)
+      - 1206307@Known(HeShell)
+      - 1206307@Known(HeShell)
+      - 1206307@Known(HeShell)
+  - killer_account_id: 512563593
+    killer_name: HarryPotterSniper
+    victims:
+      - 1206313@Known(ApShell)
+      - 1206313@Known(HeShell)
+      - 1206313@Known(Torpedo)
+  - killer_account_id: 547445435
+    killer_name: adarkandstormyknight
+    victims:
+      - 1206305@Known(HeShell)
+      - 1206305@Known(HeShell)
+      - 1206305@Known(Secondaries)
+  - killer_account_id: 603410272
+    killer_name: paulakis90
+    victims:
+      - 1206301@Known(ApShell)
+      - 1206301@Known(Fire)
+chat:
+  - clock: 557.081
+    sender_name: Unknown
+    channel: Division
+    message: IDS_OP_02_02_CHAT_007_BOMBERS_SUCCESS
+    entity_id: 1206312
+    sender_relation: None
+    player: ~
+  - clock: 622.622
+    sender_name: Unknown
+    channel: Division
+    message: IDS_OP_02_02_CHAT_010_SECOND_TASK_03_OPEN
+    entity_id: 1206312
+    sender_relation: None
+    player: ~
+  - clock: 983.648
+    sender_name: Unknown
+    channel: Division
+    message: IDS_OP_02_02_CHAT_002_YANKEES_DEAD
+    entity_id: 1206312
+    sender_relation: None
+    player: ~
+  - clock: 1041.655
+    sender_name: stevandac
+    channel: Team
+    message: retardi
+    entity_id: 1206312
+    sender_relation: Some(Relation(1))
+    player: "500559591:stevandac"
+  - clock: 1093.628
+    sender_name: Unknown
+    channel: Division
+    message: IDS_OP_02_02_CHAT_008_FLAGMANS_SUCCESS
+    entity_id: 1206312
+    sender_relation: None
+    player: ~
+capture_points: []
+team_scores:
+  - team_index: 0
+    score: 300
+  - team_index: 1
+    score: 300
+self_damage_stats:
+  - weapon: Known(AtbaHe)
+    category: Known(Agro)
+    count: 57
+    total: 102600
+  - weapon: Known(AtbaHe)
+    category: Known(Enemy)
+    count: 2
+    total: 1386
+  - weapon: Known(Burn)
+    category: Known(Enemy)
+    count: 77
+    total: 15491.55
+  - weapon: Known(Burn)
+    category: Known(Spot)
+    count: 6
+    total: 6
+  - weapon: Known(MainAp)
+    category: Known(Agro)
+    count: 63
+    total: 682099.94
+  - weapon: Known(MainAp)
+    category: Known(Enemy)
+    count: 53
+    total: 52461.5
+  - weapon: Known(MainAp)
+    category: Known(Spot)
+    count: 1
+    total: 1485
+  - weapon: Known(MainHe)
+    category: Known(Agro)
+    count: 272
+    total: 566800
+  - weapon: Known(MainHe)
+    category: Known(Enemy)
+    count: 35
+    total: 30674.566
+  - weapon: Known(MainHe)
+    category: Known(Spot)
+    count: 33
+    total: 25145.08
+  - weapon: Known(Torpedo)
+    category: Known(Agro)
+    count: 9
+    total: 135480
+  - weapon: Known(Torpedo)
+    category: Known(Enemy)
+    count: 3
+    total: 27587.25
+active_consumable_avatars: 36
+active_consumable_total: 92

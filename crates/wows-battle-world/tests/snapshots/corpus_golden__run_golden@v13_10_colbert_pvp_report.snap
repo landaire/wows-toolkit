@@ -1,0 +1,421 @@
+---
+source: crates/wows-battle-world/tests/corpus_golden.rs
+expression: report_snapshot(filename)
+---
+arena_id: ArenaId(2067830915978652)
+version: "Version { major: 13, minor: 10, patch: 0, build: 9129736 }"
+map_name: spaces/44_Path_warrior
+game_mode: domination_3point
+game_type: Known(Random)
+match_group: pvp
+self_player: 1020639850
+battle_result: "{\"type\":\"Loss\",\"team_id\":1}"
+finish_type: Known(Extermination)
+max_duration: 1200
+played_duration: 871.253
+extra_duration: 8.865
+players:
+  - account_id: 1000264088
+    name: WH_Knight
+    entity_id: 481503
+    team_id: 0
+    meta_ship_id: 402697980
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179507024)
+  - account_id: 1001176005
+    name: Dr_Jordan_B_Peterson
+    entity_id: 481487
+    team_id: 1
+    meta_ship_id: 402979802
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3655317296)
+  - account_id: 1001467709
+    name: Cap_Daniel92
+    entity_id: 481467
+    team_id: 1
+    meta_ship_id: 402774814
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3969824208)
+  - account_id: 1004308714
+    name: snapper97
+    entity_id: 481465
+    team_id: 0
+    meta_ship_id: 268684315
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4284429648)
+  - account_id: 1005702852
+    name: lazey3y3
+    entity_id: 481489
+    team_id: 1
+    meta_ship_id: 402948065
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3655219184)
+  - account_id: 1007625052
+    name: Gilidarius
+    entity_id: 481485
+    team_id: 1
+    meta_ship_id: 402979668
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3759585072)
+  - account_id: 1008338698
+    name: nawaf_gunner
+    entity_id: 481457
+    team_id: 0
+    meta_ship_id: 268521152
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3760141776)
+  - account_id: 1009446889
+    name: RealBigTuna
+    entity_id: 481477
+    team_id: 0
+    meta_ship_id: 268618556
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+  - account_id: 1015316170
+    name: RighteousFury42
+    entity_id: 481491
+    team_id: 0
+    meta_ship_id: 402734562
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3445536112)
+  - account_id: 1016824158
+    name: Cypher_
+    entity_id: 481495
+    team_id: 1
+    meta_ship_id: 402681324
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4074649424)
+  - account_id: 1020639850
+    name: John_The_Ruthless
+    entity_id: 481459
+    team_id: 1
+    meta_ship_id: 268476173
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(3760109392)
+  - account_id: 1021582286
+    name: Rhino5236
+    entity_id: 481473
+    team_id: 0
+    meta_ship_id: 402827955
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179539152)
+  - account_id: 1027241780
+    name: Alan_James
+    entity_id: 481497
+    team_id: 1
+    meta_ship_id: 402911981
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4074157872)
+  - account_id: 1027776177
+    name: leunam02
+    entity_id: 481483
+    team_id: 0
+    meta_ship_id: 402806473
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179572528)
+  - account_id: 1028547500
+    name: TheWingding
+    entity_id: 481481
+    team_id: 1
+    meta_ship_id: 402806472
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4284429648)
+  - account_id: 1028670177
+    name: Terra_94
+    entity_id: 481469
+    team_id: 0
+    meta_ship_id: 402788653
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3759585264)
+  - account_id: 1029815480
+    name: Red_Steller
+    entity_id: 481479
+    team_id: 1
+    meta_ship_id: 402702272
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3760142288)
+  - account_id: 1038287524
+    name: 6_3L3M3NT
+    entity_id: 481471
+    team_id: 0
+    meta_ship_id: 268645681
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3655317296)
+  - account_id: 1039004189
+    name: Edgar_Architecture
+    entity_id: 481499
+    team_id: 0
+    meta_ship_id: 268535023
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4259231440)
+  - account_id: 1039466877
+    name: IKnightArtorias
+    entity_id: 481461
+    team_id: 0
+    meta_ship_id: 402762605
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4074157872)
+  - account_id: 1042538688
+    name: ManaBomb
+    entity_id: 481501
+    team_id: 1
+    meta_ship_id: 402872565
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4074682064)
+  - account_id: 1053591281
+    name: Kanne00
+    entity_id: 481493
+    team_id: 1
+    meta_ship_id: 268591075
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4074682064)
+  - account_id: 1057437581
+    name: EODiezell
+    entity_id: 481475
+    team_id: 0
+    meta_ship_id: 402843705
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3739137488)
+  - account_id: 1061910011
+    name: mick_543
+    entity_id: 481463
+    team_id: 1
+    meta_ship_id: 268636565
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4277090288)
+frags:
+  - killer_account_id: 1000264088
+    killer_name: WH_Knight
+    victims:
+      - 481503@Known(DepthCharge)
+      - 481503@Known(Flooding)
+      - 481503@Known(HeShell)
+  - killer_account_id: 1004308714
+    killer_name: snapper97
+    victims:
+      - 481465@Known(ApShell)
+  - killer_account_id: 1008338698
+    killer_name: nawaf_gunner
+    victims:
+      - 481457@Known(ApShell)
+      - 481457@Known(ApShell)
+      - 481457@Known(ApShell)
+  - killer_account_id: 1009446889
+    killer_name: RealBigTuna
+    victims:
+      - 481477@Known(Torpedo)
+  - killer_account_id: 1015316170
+    killer_name: RighteousFury42
+    victims:
+      - 481491@Known(Fire)
+  - killer_account_id: 1020639850
+    killer_name: John_The_Ruthless
+    victims:
+      - 481459@Known(HeShell)
+      - 481459@Known(HeShell)
+      - 481459@Known(HeShell)
+  - killer_account_id: 1028547500
+    killer_name: TheWingding
+    victims:
+      - 481481@Known(AerialDepthCharge)
+  - killer_account_id: 1028670177
+    killer_name: Terra_94
+    victims:
+      - 481469@Known(Torpedo)
+  - killer_account_id: 1038287524
+    killer_name: 6_3L3M3NT
+    victims:
+      - 481471@Known(Fire)
+  - killer_account_id: 1039004189
+    killer_name: Edgar_Architecture
+    victims:
+      - 481499@Known(HeShell)
+  - killer_account_id: 1053591281
+    killer_name: Kanne00
+    victims:
+      - 481493@Known(ApShell)
+      - 481493@Known(Secondaries)
+      - 481493@Known(Torpedo)
+chat:
+  - clock: 36.931
+    sender_name: Dr_Jordan_B_Peterson
+    channel: Global
+    message: how do you like your max immelman?
+    entity_id: 481458
+    sender_relation: Some(Relation(1))
+    player: "1001176005:Dr_Jordan_B_Peterson"
+  - clock: 45.488
+    sender_name: Dr_Jordan_B_Peterson
+    channel: Global
+    message: "I think it kind of sucks but it's fun to play,"
+    entity_id: 481458
+    sender_relation: Some(Relation(1))
+    player: "1001176005:Dr_Jordan_B_Peterson"
+  - clock: 52.67
+    sender_name: Dr_Jordan_B_Peterson
+    channel: Global
+    message: I killed an enemy with secondaries last match
+    entity_id: 481458
+    sender_relation: Some(Relation(1))
+    player: "1001176005:Dr_Jordan_B_Peterson"
+  - clock: 60.524
+    sender_name: Cap_Daniel92
+    channel: Global
+    message: "It's not a bad CV"
+    entity_id: 481458
+    sender_relation: Some(Relation(1))
+    player: "1001467709:Cap_Daniel92"
+  - clock: 344.766
+    sender_name: Gilidarius
+    channel: Team
+    message: NO FUCKING ASW
+    entity_id: 481458
+    sender_relation: Some(Relation(1))
+    player: "1007625052:Gilidarius"
+  - clock: 369.077
+    sender_name: Gilidarius
+    channel: Team
+    message: "Hey thunderer, Douchebags run to the corbers"
+    entity_id: 481458
+    sender_relation: Some(Relation(1))
+    player: "1007625052:Gilidarius"
+  - clock: 373.785
+    sender_name: Gilidarius
+    channel: Team
+    message: Nice job
+    entity_id: 481458
+    sender_relation: Some(Relation(1))
+    player: "1007625052:Gilidarius"
+  - clock: 582.33
+    sender_name: Dr_Jordan_B_Peterson
+    channel: Global
+    message: "0.0"
+    entity_id: 481458
+    sender_relation: Some(Relation(1))
+    player: "1001176005:Dr_Jordan_B_Peterson"
+capture_points:
+  - index: 0
+    position:
+      - -376
+      - 0
+      - -0
+    radius: 120
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - 100
+      - 0
+      - -0
+    radius: 120
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: 0
+    progress:
+      - 0.934
+      - 0
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 2
+    position:
+      - 503
+      - 0
+      - 0
+    radius: 120
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 0
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 647
+  - team_index: 1
+    score: 466
+self_damage_stats:
+  - weapon: Known(AtbaHe)
+    category: Known(Agro)
+    count: 139
+    total: 322500
+  - weapon: Known(Burn)
+    category: Known(Enemy)
+    count: 136
+    total: 47201.063
+  - weapon: Known(DepthChargeAsup)
+    category: Known(Enemy)
+    count: 3
+    total: 9800
+  - weapon: Known(Flood)
+    category: Known(Enemy)
+    count: 1
+    total: 62.37
+  - weapon: Known(MainAp)
+    category: Known(Agro)
+    count: 86
+    total: 600600
+  - weapon: Known(MainAp)
+    category: Known(Enemy)
+    count: 19
+    total: 9813.588
+  - weapon: Known(MainAp)
+    category: Known(Spot)
+    count: 2
+    total: 1881
+  - weapon: Known(MainHe)
+    category: Known(Agro)
+    count: 182
+    total: 447000
+  - weapon: Known(MainHe)
+    category: Known(Enemy)
+    count: 424
+    total: 201502.17
+  - weapon: Known(SkipHe)
+    category: Known(Agro)
+    count: 4
+    total: 44000
+  - weapon: Known(TBomber)
+    category: Known(Agro)
+    count: 2
+    total: 9534
+  - weapon: Known(Torpedo)
+    category: Known(Agro)
+    count: 2
+    total: 38564
+active_consumable_avatars: 23
+active_consumable_total: 94
