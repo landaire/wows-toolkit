@@ -10,3 +10,5 @@ pub mod units;
 pub mod world;
 
 mod ingest;
+
+pub use world::BattleWorld;

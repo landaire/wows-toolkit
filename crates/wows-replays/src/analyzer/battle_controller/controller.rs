@@ -366,6 +366,10 @@ pub struct MetadataPlayer {
 }
 
 impl MetadataPlayer {
+    pub fn new(id: AccountId, name: String, relation: Relation, vehicle: Rc<Param>) -> Self {
+        Self { id, name, relation, vehicle }
+    }
+
     pub fn name(&self) -> &str {
         self.name.as_ref()
     }
