@@ -85,6 +85,22 @@ pub struct DamageLedger(pub HashMap<EntityId, Vec<DamageEvent>>);
 #[derive(Resource, Debug, Clone, Default)]
 pub struct ShotHitLog(pub Vec<ResolvedShotHit>);
 
+/// Ordered list of in-flight artillery salvo entities.
+///
+/// Each `Entity` carries a `Projectile` + `ProjectileState::Artillery`. The order
+/// mirrors BattleController.active_shots so salvo matching and the resulting
+/// shot_hits ordering stay byte-identical to the original. ECS archetype iteration
+/// order is not relied upon; this Vec is the authoritative sequence.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct ActiveShotOrder(pub Vec<Entity>);
+
+/// Ordered list of in-flight torpedo entities.
+///
+/// Mirrors BattleController.active_torpedoes, including swap_remove on hit so that
+/// later index-based lookups resolve to the same element the original would find.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct ActiveTorpedoOrder(pub Vec<Entity>);
+
 /// Self-player ribbon counts and cumulative damage stats.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct SelfStats {

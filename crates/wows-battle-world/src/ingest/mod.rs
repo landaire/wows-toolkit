@@ -6,6 +6,7 @@ pub mod combat;
 pub mod consumables;
 pub mod entities;
 pub mod positions;
+pub mod projectiles;
 pub mod vehicles;
 
 use bevy_ecs::world::World;
@@ -131,10 +132,26 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::Camera(_) => {}
         DecodedPacketPayload::CameraMode(_) => {}
         DecodedPacketPayload::CameraFreeLook(_) => {}
-        DecodedPacketPayload::ArtilleryShots { .. } => {}
-        DecodedPacketPayload::TorpedoesReceived { .. } => {}
-        DecodedPacketPayload::TorpedoDirection { .. } => {}
-        DecodedPacketPayload::ShotKills { .. } => {}
+        DecodedPacketPayload::ArtilleryShots { avatar_id, salvos } => {
+            projectiles::handle_artillery_shots(
+                avatar_id,
+                salvos,
+                clock,
+                world,
+                options.shot_tracking,
+            );
+        }
+        DecodedPacketPayload::TorpedoesReceived { avatar_id, torpedoes } => {
+            projectiles::handle_torpedoes_received(avatar_id, torpedoes, clock, world);
+        }
+        DecodedPacketPayload::TorpedoDirection { owner_id, shot_id, position, target_yaw, speed_coef } => {
+            projectiles::handle_torpedo_direction(
+                owner_id, shot_id, position, target_yaw, speed_coef, clock, world,
+            );
+        }
+        DecodedPacketPayload::ShotKills { avatar_id, hits } => {
+            projectiles::handle_shot_kills(avatar_id, hits, clock, world, options.shot_tracking);
+        }
         DecodedPacketPayload::GunSync { entity_id, weapon_type, gun_id, yaw, .. } => {
             vehicles::handle_gun_sync(entity_id, weapon_type, gun_id, yaw, world);
         }

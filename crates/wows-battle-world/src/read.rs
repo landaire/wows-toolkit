@@ -9,10 +9,13 @@ use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::VehicleProps;
 use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
 use wows_replays::analyzer::battle_controller::state::ActivePlane;
+use wows_replays::analyzer::battle_controller::state::ActiveShot;
+use wows_replays::analyzer::battle_controller::state::ActiveTorpedo;
 use wows_replays::analyzer::battle_controller::state::ActiveWard;
 use wows_replays::analyzer::battle_controller::state::ConsumableInventory;
 use wows_replays::analyzer::battle_controller::state::DeadShip;
 use wows_replays::analyzer::battle_controller::state::KillRecord;
+use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::analyzer::decoder::DamageStatEntry;
 use wows_replays::analyzer::decoder::Recognized;
 use wows_replays::types::EntityId;
@@ -23,8 +26,8 @@ use wowsunpack::game_types::Ribbon;
 
 use wowsunpack::game_types::PlaneId;
 
-use crate::components::{Aim, Building, Consumables, EntityKind, GameId, MinimapPlacement, Plane, PlaneState, SmokeScreen, Transform3d, Vehicle, VehicleState, Ward, WardState};
-use crate::resources::{ChatLog, DamageLedger, DeadShips, KillLog, PlayerIndex, SelfStats};
+use crate::components::{Aim, Building, Consumables, EntityKind, GameId, MinimapPlacement, Plane, PlaneState, ProjectileState, SmokeScreen, Transform3d, Vehicle, VehicleState, Ward, WardState};
+use crate::resources::{ActiveShotOrder, ActiveTorpedoOrder, ChatLog, DamageLedger, DeadShips, KillLog, PlayerIndex, SelfStats, ShotHitLog};
 use crate::world::BattleWorld;
 
 impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
@@ -164,6 +167,54 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
                 (state.plane_id, aw)
             })
             .collect()
+    }
+
+    /// In-flight artillery salvos, in BattleController.active_shots order.
+    pub fn active_shots(&mut self) -> Vec<ActiveShot> {
+        let order = self.world().resource::<ActiveShotOrder>().0.clone();
+        let world = self.world();
+        order
+            .into_iter()
+            .filter_map(|entity| {
+                let state = world.get_entity(entity).ok()?.get::<ProjectileState>()?;
+                match state {
+                    ProjectileState::Artillery { salvo, fired_at, avatar_id } => Some(ActiveShot {
+                        avatar_id: *avatar_id,
+                        salvo: salvo.clone(),
+                        fired_at: *fired_at,
+                    }),
+                    ProjectileState::Torpedo { .. } => None,
+                }
+            })
+            .collect()
+    }
+
+    /// In-flight torpedoes, in BattleController.active_torpedoes order.
+    pub fn active_torpedoes(&mut self) -> Vec<ActiveTorpedo> {
+        let order = self.world().resource::<ActiveTorpedoOrder>().0.clone();
+        let world = self.world();
+        order
+            .into_iter()
+            .filter_map(|entity| {
+                let state = world.get_entity(entity).ok()?.get::<ProjectileState>()?;
+                match state {
+                    ProjectileState::Torpedo { torpedo, launched_at, updated_at, avatar_id } => {
+                        Some(ActiveTorpedo {
+                            avatar_id: *avatar_id,
+                            torpedo: torpedo.clone(),
+                            launched_at: *launched_at,
+                            updated_at: *updated_at,
+                        })
+                    }
+                    ProjectileState::Artillery { .. } => None,
+                }
+            })
+            .collect()
+    }
+
+    /// Resolved shot hits recorded for the current frame (Tracked clears each packet).
+    pub fn shot_hits(&self) -> Vec<ResolvedShotHit> {
+        self.world().resource::<ShotHitLog>().0.clone()
     }
 
     /// Entity kinds (Vehicle/Building/SmokeScreen) for every tracked game entity.

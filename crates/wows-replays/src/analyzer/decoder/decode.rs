@@ -773,7 +773,7 @@ impl MinimapUpdate {
 }
 
 /// A single shell in an artillery salvo (from SHOT in alias.xml)
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ArtilleryShotData {
     pub origin: WorldPos,
     /// Gun barrel pitch angle at fire time (radians).
@@ -792,7 +792,7 @@ pub struct ArtilleryShotData {
 }
 
 /// A salvo of artillery shells from one ship
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ArtillerySalvo {
     pub owner_id: EntityId,
     pub params_id: GameParamId,
@@ -801,7 +801,7 @@ pub struct ArtillerySalvo {
 }
 
 /// Homing torpedo maneuver state (from TORPEDO_MANEUVER_DUMP in alias.xml).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TorpedoManeuverDump {
     pub target_yaw: f32,
     pub change_time: f32,
@@ -813,7 +813,7 @@ pub struct TorpedoManeuverDump {
 }
 
 /// Acoustic torpedo guidance state (from TORPEDO_ACOUSTIC_DUMP in alias.xml).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TorpedoAcousticDump {
     pub is_chasing_target: bool,
     pub prediction_lost: bool,
@@ -828,7 +828,7 @@ pub struct TorpedoAcousticDump {
 }
 
 /// A single torpedo launch (from TORPEDO in alias.xml)
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TorpedoData {
     pub owner_id: EntityId,
     pub params_id: GameParamId,
@@ -890,7 +890,7 @@ impl PhysicsBodyState {
 
 /// Packed hit type from SHOTKILL, encoding both collision type and shell hit type.
 /// Packed as `collision_type << 5 | shell_hit_type` by `IntPackerUnpacker`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct HitType {
     pub collision: Recognized<CollisionType>,
     pub shell_hit: Recognized<ShellHitType>,
@@ -913,7 +913,7 @@ impl HitType {
 /// Terminal ballistics state at the moment of shell impact (from TERMINAL_BALLISTICS_INFO).
 /// Contains the shell's position, velocity vector, detonator state, and the angle
 /// against the impacted armor material. Available in game version 14.8+.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TerminalBallisticsInfo {
     /// Shell position at impact in world coordinates.
     pub position: WorldPos,
@@ -928,7 +928,7 @@ pub struct TerminalBallisticsInfo {
 }
 
 /// A single projectile hit (from receiveShotKills)
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ShotHit {
     pub owner_id: EntityId,
     pub hit_type: HitType,

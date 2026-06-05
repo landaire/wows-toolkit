@@ -192,7 +192,7 @@ pub struct SmokeScreenEntity {
 }
 
 /// An active artillery salvo in flight.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ActiveShot {
     pub avatar_id: AvatarId,
     pub salvo: ArtillerySalvo,
@@ -200,7 +200,7 @@ pub struct ActiveShot {
 }
 
 /// An active torpedo in the water.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ActiveTorpedo {
     pub avatar_id: AvatarId,
     pub torpedo: TorpedoData,
@@ -282,7 +282,7 @@ pub struct LocalWeatherZone {
 /// Contains both the server-authoritative impact data and the salvo metadata
 /// needed for armor visualization. The matched ActiveShot is removed from
 /// active_shots when this is created.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ResolvedShotHit {
     /// Game clock when the hit was recorded.
     pub clock: GameClock,

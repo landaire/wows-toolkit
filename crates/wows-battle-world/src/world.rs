@@ -35,6 +35,8 @@ use crate::resources::PlayerIndex;
 use crate::resources::ReplayVehicles;
 use crate::resources::ScoringRules;
 use crate::resources::SelfStats;
+use crate::resources::ActiveShotOrder;
+use crate::resources::ActiveTorpedoOrder;
 use crate::resources::ShotHitLog;
 use crate::resources::TeamScores;
 use crate::resources::WardIndex;
@@ -189,6 +191,8 @@ fn insert_empty_resources(world: &mut World) {
     world.insert_resource(KillLog::default());
     world.insert_resource(DamageLedger::default());
     world.insert_resource(ShotHitLog::default());
+    world.insert_resource(ActiveShotOrder::default());
+    world.insert_resource(ActiveTorpedoOrder::default());
     world.insert_resource(SelfStats::default());
     world.insert_resource(CapturePointOrder::default());
     world.insert_resource(InteractiveZoneIndex::default());
