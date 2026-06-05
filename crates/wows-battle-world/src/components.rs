@@ -70,6 +70,16 @@ pub struct WeatherZone;
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct Projectile;
 
+/// Coarse entity kind, derived from the marker component present on the entity.
+///
+/// Used for read-side comparison and reporting; not stored as a component itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum EntityKind {
+    Vehicle,
+    Building,
+    SmokeScreen,
+}
+
 // -- Identity --
 
 /// Game-assigned entity id, present on every spawned ECS entity.
@@ -145,6 +155,17 @@ pub struct Consumables {
 /// Send+Sync (required by bevy Component) holds only if the `arc` feature makes `wows_replays::Rc = Arc`.
 #[derive(Component, Debug, Clone)]
 pub struct PlayerLink(pub Rc<Player>);
+
+/// Current visibility state from Vehicle entity properties.
+///
+/// Kept separate from VehicleState so minimap rendering does not require full
+/// vehicle-property parsing to be wired up.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct VehicleVisibility {
+    pub visibility_flags: crate::units::VisibilityFlags,
+    pub is_invisible: bool,
+    pub team_id: i8,
+}
 
 // -- Non-vehicle entity state --
 

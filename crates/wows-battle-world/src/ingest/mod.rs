@@ -1,11 +1,15 @@
 //! Packet ingestion: translates decoded packet payloads into ECS state changes.
 
+pub mod entities;
+pub mod positions;
+
 use bevy_ecs::world::World;
 use wows_replays::analyzer::decoder::DecodedPacketPayload;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
+use wowsunpack::game_types::WorldPos;
 
 use crate::ids::IngestOptions;
 
@@ -15,34 +19,71 @@ use crate::ids::IngestOptions;
 /// error rather than silently dropped.
 pub fn dispatch<G: ResourceLoader>(
     payload: DecodedPacketPayload<'_, '_, '_>,
-    _world: &mut World,
-    _resources: &G,
-    _constants: &GameConstants,
-    _version: Version,
-    _options: &IngestOptions,
-    _clock: GameClock,
+    world: &mut World,
+    resources: &G,
+    constants: &GameConstants,
+    version: Version,
+    options: &IngestOptions,
+    clock: GameClock,
 ) {
     match payload {
         DecodedPacketPayload::Chat { .. } => {}
         DecodedPacketPayload::VoiceLine { .. } => {}
         DecodedPacketPayload::Ribbon(_) => {}
-        DecodedPacketPayload::Position(_) => {}
-        DecodedPacketPayload::PlayerOrientation(_) => {}
+        DecodedPacketPayload::Position(pos) => {
+            positions::handle_position(&pos, world, clock);
+        }
+        DecodedPacketPayload::PlayerOrientation(orient) => {
+            positions::handle_player_orientation(&orient, world, clock);
+        }
         DecodedPacketPayload::DamageStat(_) => {}
         DecodedPacketPayload::ShipDestroyed { .. } => {}
         DecodedPacketPayload::EntityMethod(_) => {}
-        DecodedPacketPayload::EntityProperty(_) => {}
+        DecodedPacketPayload::EntityProperty(prop) => {
+            entities::handle_vehicle_visibility_property(prop.entity_id, prop.property, &prop.value, world);
+        }
         DecodedPacketPayload::BasePlayerCreate(_) => {}
         DecodedPacketPayload::CellPlayerCreate(_) => {}
         DecodedPacketPayload::EntityEnter(_) => {}
-        DecodedPacketPayload::EntityLeave(_) => {}
-        DecodedPacketPayload::EntityCreate(_) => {}
-        DecodedPacketPayload::OnArenaStateReceived { .. } => {}
+        DecodedPacketPayload::EntityLeave(leave) => {
+            entities::handle_entity_leave(leave.entity_id, world);
+        }
+        DecodedPacketPayload::EntityCreate(entity_create) => {
+            entities::handle_entity_create(clock, entity_create, world, resources, constants, version);
+        }
+        DecodedPacketPayload::OnArenaStateReceived {
+            arena_id: _,
+            team_build_type_id: _,
+            pre_battles_info: _,
+            player_states: players,
+            bot_states: bots,
+        } => {
+            entities::seed_vehicles_from_arena_state(
+                players.iter().chain(bots.iter()),
+                world,
+                resources,
+                constants,
+                version,
+            );
+        }
         DecodedPacketPayload::OnGameRoomStateChanged { .. } => {}
-        DecodedPacketPayload::NewPlayerSpawnedInBattle { .. } => {}
+        DecodedPacketPayload::NewPlayerSpawnedInBattle {
+            player_states: players,
+            bot_states: bots,
+        } => {
+            entities::seed_vehicles_from_arena_state(
+                players.iter().chain(bots.iter()),
+                world,
+                resources,
+                constants,
+                version,
+            );
+        }
         DecodedPacketPayload::CheckPing(_) => {}
         DecodedPacketPayload::DamageReceived { .. } => {}
-        DecodedPacketPayload::MinimapUpdate { .. } => {}
+        DecodedPacketPayload::MinimapUpdate { updates, .. } => {
+            positions::handle_minimap_updates(&updates, world, clock, options.source_team);
+        }
         DecodedPacketPayload::PropertyUpdate(_) => {}
         DecodedPacketPayload::BattleEnd { .. } => {}
         DecodedPacketPayload::Consumable { .. } => {}
@@ -64,7 +105,10 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::PlanePosition { .. } => {}
         DecodedPacketPayload::SetAmmoForWeapon { .. } => {}
         DecodedPacketPayload::EntityControl(_) => {}
-        DecodedPacketPayload::NonVolatilePosition(_) => {}
+        DecodedPacketPayload::NonVolatilePosition(sd) => {
+            let pos = WorldPos { x: sd.position.x, y: sd.position.y, z: sd.position.z };
+            positions::handle_non_volatile_position(sd.entity_id, pos, world);
+        }
         DecodedPacketPayload::PlayerNetStats(_) => {}
         DecodedPacketPayload::ServerTimestamp(_) => {}
         DecodedPacketPayload::OwnShip(_) => {}

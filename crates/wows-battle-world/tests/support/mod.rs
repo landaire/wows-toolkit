@@ -15,6 +15,8 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 
 use wows_replays::ReplayFile;
+use wows_replays::analyzer::Analyzer;
+use wows_replays::analyzer::battle_controller::BattleController;
 use wows_replays::game_constants::GameConstants;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
@@ -90,4 +92,42 @@ pub fn load(filename: &str) -> Handle {
     let specs: &'static [EntitySpec] = res.provider.entity_specs();
 
     Handle { replay, game_params: res.provider, game_constants: res.constants, specs, version }
+}
+
+/// Drive both BattleController and BattleWorld over the same packet stream.
+///
+/// The replay meta is leaked to 'static so both analyzers can borrow it with the
+/// same lifetime. Game resources are resolved from the per-build cache (same as
+/// `load`), so a test binary that calls `both` and `load` for the same fixture
+/// only parses GameParams once.
+pub fn both(
+    filename: &str,
+) -> (
+    BattleController<'static, 'static, GameMetadataProvider>,
+    wows_battle_world::BattleWorld<'static, 'static, GameMetadataProvider>,
+) {
+    let path = fixtures_dir().join(filename);
+    let replay = ReplayFile::from_file(&path).unwrap_or_else(|e| panic!("failed to parse {filename}: {e:?}"));
+    let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
+
+    let res = resources_for_build(&version);
+    let specs: &'static [EntitySpec] = res.provider.entity_specs();
+
+    let meta: &'static wows_replays::ReplayMeta = Box::leak(Box::new(replay.meta));
+
+    let mut old = BattleController::new(meta, res.provider, Some(res.constants));
+    let mut new_world =
+        wows_battle_world::BattleWorld::new(meta, res.provider, Some(res.constants));
+
+    let mut parser = wows_replays::packet2::Parser::with_version(specs, version);
+    let mut remaining = &replay.packet_data[..];
+    while !remaining.is_empty() {
+        let packet = parser.parse_packet(&mut remaining).expect("packet parse");
+        old.process(&packet);
+        new_world.process(&packet);
+    }
+    old.finish();
+    new_world.finish();
+
+    (old, new_world)
 }

@@ -140,6 +140,10 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         }
     }
 
+    pub(crate) fn world_mut(&mut self) -> &mut World {
+        &mut self.world
+    }
+
     /// Remove a game entity from EntityIndex and despawn its ECS entity.
     ///
     /// Entity lifetime policy: vehicles and buildings persist for the whole match
@@ -148,11 +152,10 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
     /// the single site that removes from EntityIndex; callers are responsible for
     /// applying the correct policy.
     pub fn despawn(&mut self, id: EntityId) {
-        if let Some(entity) = self.world.resource_mut::<EntityIndex>().remove(id) {
-            if self.world.get_entity(entity).is_ok() {
+        if let Some(entity) = self.world.resource_mut::<EntityIndex>().remove(id)
+            && self.world.get_entity(entity).is_ok() {
                 self.world.despawn(entity);
             }
-        }
     }
 
     /// Get the ECS entity for a game entity id, creating it if absent.
