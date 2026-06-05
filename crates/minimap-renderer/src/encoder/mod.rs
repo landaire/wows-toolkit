@@ -11,12 +11,6 @@
 use std::collections::BTreeMap;
 
 use rootcause::prelude::*;
-#[cfg(any(
-    feature = "cpu",
-    feature = "cpu-av1",
-    all(feature = "vulkan", not(target_os = "macos")),
-    all(feature = "videotoolbox", target_os = "macos"),
-))]
 use tracing::info;
 
 use crate::codec::EncoderKind;

@@ -50,6 +50,7 @@ use wowsunpack::game_types::Ribbon;
 
 use crate::components::Aim;
 use crate::components::Building;
+use crate::components::BuildingState;
 use crate::components::BuffZoneData;
 use crate::components::Consumables;
 use crate::components::EntityKind;
@@ -59,6 +60,7 @@ use crate::components::Plane;
 use crate::components::PlaneState;
 use crate::components::ProjectileState;
 use crate::components::SmokeScreen;
+use crate::components::SmokeScreenState;
 use crate::components::Transform3d;
 use crate::components::Vehicle;
 use crate::components::VehicleState;
@@ -100,6 +102,8 @@ pub struct QueryCache {
     vehicle_kind: QueryState<&'static GameId, bevy_ecs::query::With<Vehicle>>,
     building_kind: QueryState<&'static GameId, bevy_ecs::query::With<Building>>,
     smoke_kind: QueryState<&'static GameId, bevy_ecs::query::With<SmokeScreen>>,
+    building_state: QueryState<(&'static GameId, &'static BuildingState)>,
+    smoke_state: QueryState<(&'static GameId, &'static SmokeScreenState)>,
     vehicle_by_entity: QueryState<&'static VehicleState>,
     aim_by_entity: QueryState<&'static Aim>,
 }
@@ -118,6 +122,8 @@ impl QueryCache {
             vehicle_kind: world.query_filtered(),
             building_kind: world.query_filtered(),
             smoke_kind: world.query_filtered(),
+            building_state: world.query(),
+            smoke_state: world.query(),
             vehicle_by_entity: world.query(),
             aim_by_entity: world.query(),
         }
@@ -139,6 +145,8 @@ impl QueryCache {
         self.vehicle_kind.update_archetypes(world);
         self.building_kind.update_archetypes(world);
         self.smoke_kind.update_archetypes(world);
+        self.building_state.update_archetypes(world);
+        self.smoke_state.update_archetypes(world);
         self.vehicle_by_entity.update_archetypes(world);
         self.aim_by_entity.update_archetypes(world);
     }
@@ -246,6 +254,24 @@ impl<'w> BattleView<'w> {
             out.insert(gid.0, EntityKind::SmokeScreen);
         }
         out
+    }
+
+    /// Building states per entity id.
+    pub fn buildings(&self) -> HashMap<EntityId, &'w BuildingState> {
+        self.cache
+            .building_state
+            .iter_manual(self.world)
+            .map(|(gid, state)| (gid.0, state))
+            .collect()
+    }
+
+    /// Smoke screen states per entity id.
+    pub fn smoke_screens(&self) -> HashMap<EntityId, &'w SmokeScreenState> {
+        self.cache
+            .smoke_state
+            .iter_manual(self.world)
+            .map(|(gid, state)| (gid.0, state))
+            .collect()
     }
 
     /// Main-battery turret yaws (radians) per entity, group 0 only.

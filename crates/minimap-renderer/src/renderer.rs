@@ -19,10 +19,10 @@ use wowsunpack::game_types::BattleResult;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
 
+use wows_battle_world::view::BattleView;
 use wows_replay_insights::build::ResolvedBuild;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
-use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 use wows_replays::analyzer::battle_controller::state::ControlPointType;
 use wows_replays::analyzer::decoder::Consumable;
 use wows_replays::types::EntityId;
@@ -332,7 +332,7 @@ impl<'a> MinimapRenderer<'a> {
     /// Populate player info from controller state (once).
     ///
     /// Uses `player_entities` (populated from onArenaStateReceived packet parsing).
-    pub fn populate_players(&mut self, controller: &dyn BattleControllerState) {
+    pub fn populate_players(&mut self, controller: &BattleView<'_>) {
         if self.players_populated {
             return;
         }
@@ -410,10 +410,8 @@ impl<'a> MinimapRenderer<'a> {
             for (entity_id, player) in players {
                 if player.relation().is_self() {
                     self.self_entity_id = Some(*entity_id);
-                    if let Some(entity) = controller.entities_by_id().get(entity_id)
-                        && let Some(vehicle) = entity.vehicle_ref()
-                    {
-                        self.self_team_id = Some(vehicle.borrow().props().team_id() as i64);
+                    if let Some(props) = controller.vehicle_props(*entity_id) {
+                        self.self_team_id = Some(props.team_id() as i64);
                     }
                     break;
                 }
@@ -440,20 +438,16 @@ impl<'a> MinimapRenderer<'a> {
     /// For each vehicle entity, reads `ship_config().abilities()` (equipped GameParam IDs),
     /// looks up each ability in GameParams to get its `consumable_type` and `name`,
     /// and maps `(EntityId, Consumable)` → PCY name for icon lookup.
-    pub fn update_ship_abilities(&mut self, controller: &dyn BattleControllerState) {
-        for (entity_id, entity) in controller.entities_by_id() {
-            if self.resolved_entities.contains(entity_id) {
+    pub fn update_ship_abilities(&mut self, controller: &BattleView<'_>) {
+        for (entity_id, props) in controller.vehicle_props_all() {
+            if self.resolved_entities.contains(&entity_id) {
                 continue;
             }
-            let Some(vehicle) = entity.vehicle_ref() else {
-                continue;
-            };
-            let vehicle = vehicle.borrow();
-            let abilities = vehicle.props().ship_config().abilities();
+            let abilities = props.ship_config().abilities();
             if abilities.is_empty() {
                 continue;
             }
-            self.resolved_entities.insert(*entity_id);
+            self.resolved_entities.insert(entity_id);
             for &ability_id in abilities {
                 let Some(param) = GameParamProvider::game_param_by_id(self.game_params, ability_id) else {
                     continue;
@@ -471,9 +465,9 @@ impl<'a> MinimapRenderer<'a> {
                 // activation circles render even when the default-ability-slot
                 // variant lookup is unavailable.
                 if let Some(radius) = ability.categories().values().find_map(|c| c.detection_radius()) {
-                    self.ship_ability_radii.insert((*entity_id, consumable.clone()), radius);
+                    self.ship_ability_radii.insert((entity_id, consumable.clone()), radius);
                 }
-                self.ship_ability_icons.insert((*entity_id, consumable), param.name().to_string());
+                self.ship_ability_icons.insert((entity_id, consumable), param.name().to_string());
             }
         }
     }
@@ -515,7 +509,7 @@ impl<'a> MinimapRenderer<'a> {
     /// fallback for when the per-ship ability caches carry no radius.
     fn consumable_radius_from_ranges(
         &self,
-        controller: &dyn BattleControllerState,
+        controller: &BattleView<'_>,
         entity_id: EntityId,
         consumable: Recognized<Consumable>,
     ) -> Option<Meters> {
@@ -526,9 +520,8 @@ impl<'a> MinimapRenderer<'a> {
         let &ship_param_id = self.ship_param_ids.get(&entity_id)?;
         let ship_param = GameParamProvider::game_param_by_id(self.game_params, ship_param_id)?;
         let vehicle = ship_param.vehicle()?;
-        let hull_name = controller.entities_by_id().get(&entity_id).and_then(|e| e.vehicle_ref()).and_then(|v| {
-            let v = v.borrow();
-            let hull_id = v.props().ship_config().hull()?;
+        let hull_name = controller.vehicle_props(entity_id).and_then(|props| {
+            let hull_id = props.ship_config().hull()?;
             GameParamProvider::game_param_by_id(self.game_params, hull_id).map(|p| p.name().to_string())
         });
         let ranges = vehicle.resolve_ranges(Some(self.game_params), hull_name.as_deref(), self.version);
@@ -540,13 +533,13 @@ impl<'a> MinimapRenderer<'a> {
     }
 
     /// Update squadron info for any new planes in the controller.
-    pub fn update_squadron_info(&mut self, controller: &dyn BattleControllerState) {
+    pub fn update_squadron_info(&mut self, controller: &BattleView<'_>) {
         // Clean up stale entries for removed planes so reused IDs get fresh data
         let active = controller.active_planes();
         self.squadron_info.retain(|id, _| active.contains_key(id));
 
         for (plane_id, plane) in active {
-            if self.squadron_info.contains_key(plane_id) {
+            if self.squadron_info.contains_key(&plane_id) {
                 continue;
             }
             let param = GameParamProvider::game_param_by_id(self.game_params, plane.params_id);
@@ -565,13 +558,13 @@ impl<'a> MinimapRenderer<'a> {
                 PlaneCategory::Controllable => "controllable",
             };
             let is_consumable = is_consumable && !matches!(category, PlaneCategory::Airsupport);
-            self.squadron_info.insert(*plane_id, SquadronInfo { icon_base, icon_dir, is_consumable });
+            self.squadron_info.insert(plane_id, SquadronInfo { icon_base, icon_dir, is_consumable });
         }
     }
 
     /// Get the armament/ammo label for a ship based on its selected weapon and ammo.
     /// Get the armament color for a ship based on its selected weapon/ammo.
-    fn get_armament_color(&self, entity_id: &EntityId, controller: &dyn BattleControllerState) -> Option<[u8; 3]> {
+    fn get_armament_color(&self, entity_id: &EntityId, controller: &BattleView<'_>) -> Option<[u8; 3]> {
         const COLOR_AP: [u8; 3] = [140, 200, 255]; // light blue
         const COLOR_HE: [u8; 3] = [255, 180, 80]; // orange
         const COLOR_SAP: [u8; 3] = [255, 100, 100]; // pinkish red
@@ -579,12 +572,12 @@ impl<'a> MinimapRenderer<'a> {
         const COLOR_PLANES: [u8; 3] = [200, 160, 255]; // lavender
         const COLOR_SONAR: [u8; 3] = [100, 220, 255]; // cyan
 
-        let vehicle = controller.entities_by_id().get(entity_id)?.vehicle_ref()?;
-        let vehicle = vehicle.borrow();
-        let weapon = vehicle.props().selected_weapon().known()?;
+        let props = controller.vehicle_props(*entity_id)?;
+        let weapon = props.selected_weapon().known()?;
+        let selected_ammo = controller.selected_ammo();
         match weapon {
             WeaponType::Artillery => {
-                let ammo_param_id = controller.selected_ammo().get(entity_id)?;
+                let ammo_param_id = selected_ammo.get(entity_id)?;
                 let param = GameParamProvider::game_param_by_id(self.game_params, *ammo_param_id)?;
                 let projectile = param.projectile()?;
                 let color = match projectile.ammo_type() {
@@ -603,10 +596,9 @@ impl<'a> MinimapRenderer<'a> {
     }
 
     /// Get the depth suffix for a submarine (e.g. " (Scope)", " (30m)").
-    fn get_depth_suffix(&self, entity_id: &EntityId, controller: &dyn BattleControllerState) -> Option<&'static str> {
-        let vehicle = controller.entities_by_id().get(entity_id)?.vehicle_ref()?;
-        let vehicle = vehicle.borrow();
-        match vehicle.props().buoyancy_current_state().known()? {
+    fn get_depth_suffix(&self, entity_id: &EntityId, controller: &BattleView<'_>) -> Option<&'static str> {
+        let props = controller.vehicle_props(*entity_id)?;
+        match props.buoyancy_current_state().known()? {
             BuoyancyState::Periscope => Some(" (Scope)"),
             BuoyancyState::SemiDeepWater => Some(" (30m)"),
             BuoyancyState::DeepWater => Some(" (60m)"),
@@ -639,39 +631,30 @@ impl<'a> MinimapRenderer<'a> {
     /// it returns `true` will have their positions recorded.
     pub fn record_positions(
         &mut self,
-        controller: &dyn BattleControllerState,
+        controller: &BattleView<'_>,
         clock: GameClock,
         filter: impl Fn(&EntityId) -> bool,
     ) {
         let Some(map_info) = self.map_info.clone() else {
             return;
         };
-        let entities = controller.entities_by_id();
-        let ship_positions = controller.ship_positions();
+        let ship_positions = controller.positions();
         let minimap_positions = controller.minimap_positions();
-        for (entity_id, ship_pos) in ship_positions {
+        for (entity_id, transform) in &ship_positions {
             if !filter(entity_id) {
                 continue;
             }
-            let px = map_info.world_to_minimap(ship_pos.position, MINIMAP_SIZE);
-            let speed_raw = entities
-                .get(entity_id)
-                .and_then(|e| e.vehicle_ref())
-                .map(|v| v.borrow().props().server_speed_raw())
-                .unwrap_or(0);
+            let px = map_info.world_to_minimap(transform.pos, MINIMAP_SIZE);
+            let speed_raw = controller.vehicle_props(*entity_id).map(|p| p.server_speed_raw()).unwrap_or(0);
             self.record_position(*entity_id, px, clock, speed_raw);
         }
-        for (entity_id, mm) in minimap_positions {
+        for (entity_id, mm) in &minimap_positions {
             if !filter(entity_id) {
                 continue;
             }
             if !ship_positions.contains_key(entity_id) {
-                let px = map_info.normalized_to_minimap(&mm.position, MINIMAP_SIZE);
-                let speed_raw = entities
-                    .get(entity_id)
-                    .and_then(|e| e.vehicle_ref())
-                    .map(|v| v.borrow().props().server_speed_raw())
-                    .unwrap_or(0);
+                let px = map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE);
+                let speed_raw = controller.vehicle_props(*entity_id).map(|p| p.server_speed_raw()).unwrap_or(0);
                 self.record_position(*entity_id, px, clock, speed_raw);
             }
         }
@@ -682,15 +665,13 @@ impl<'a> MinimapRenderer<'a> {
     /// The result is normalized so that team0 = friendly (replay owner's team)
     /// and team1 = enemy. When the replay owner is on internal team 1, all
     /// per-team values are swapped. See TEAM_ADVANTAGE_SCORING.md for details.
-    fn calculate_team_advantage(&self, controller: &dyn BattleControllerState) -> crate::advantage::AdvantageResult {
+    fn calculate_team_advantage(&self, controller: &BattleView<'_>) -> crate::advantage::AdvantageResult {
         use crate::advantage::ScoringParams;
         use crate::advantage::TeamState;
         use crate::advantage::calculate_advantage;
         use crate::advantage::swap_breakdown;
-        use std::cell::RefCell;
 
         let players = controller.player_entities();
-        let entities = controller.entities_by_id();
         let swap = self.self_team_id == Some(1);
 
         let mut teams = [TeamState::new(), TeamState::new()];
@@ -736,11 +717,7 @@ impl<'a> MinimapRenderer<'a> {
                 cc.total += 1;
             }
 
-            if let Some(entity) = entities.get(entity_id)
-                && let Some(vehicle) = entity.vehicle_ref()
-            {
-                let v = RefCell::borrow(vehicle);
-                let props = v.props();
+            if let Some(props) = controller.vehicle_props(*entity_id) {
                 teams[team].ships_known += 1;
                 teams[team].max_hp += props.max_health();
                 if props.is_alive() {
@@ -786,7 +763,7 @@ impl<'a> MinimapRenderer<'a> {
     }
 
     /// Produce draw commands for the current frame from controller state.
-    pub fn draw_frame(&mut self, controller: &dyn BattleControllerState) -> Vec<DrawCommand> {
+    pub fn draw_frame(&mut self, controller: &BattleView<'_>) -> Vec<DrawCommand> {
         let Some(map_info) = self.map_info.clone() else {
             return Vec::new();
         };
@@ -1081,19 +1058,16 @@ impl<'a> MinimapRenderer<'a> {
 
         // 4. Smoke screens
         if self.options.show_smoke {
-            for entity in controller.entities_by_id().values() {
-                if let Some(smoke_ref) = entity.smoke_screen_ref() {
-                    let smoke = smoke_ref.borrow();
-                    let px_radius = (smoke.radius.value() / map_info.space_size as f32 * MINIMAP_SIZE as f32) as i32;
-                    for point in &smoke.points {
-                        let px = map_info.world_to_minimap(*point, MINIMAP_SIZE);
-                        commands.push(DrawCommand::Smoke {
-                            pos: px,
-                            radius: px_radius.max(3),
-                            color: SMOKE_COLOR,
-                            alpha: SMOKE_ALPHA,
-                        });
-                    }
+            for smoke in controller.smoke_screens().values() {
+                let px_radius = (smoke.radius.value() / map_info.space_size as f32 * MINIMAP_SIZE as f32) as i32;
+                for point in &smoke.points {
+                    let px = map_info.world_to_minimap(*point, MINIMAP_SIZE);
+                    commands.push(DrawCommand::Smoke {
+                        pos: px,
+                        radius: px_radius.max(3),
+                        color: SMOKE_COLOR,
+                        alpha: SMOKE_ALPHA,
+                    });
                 }
             }
         }
@@ -1109,62 +1083,59 @@ impl<'a> MinimapRenderer<'a> {
 
         // 6. Buildings
         if self.options.show_buildings {
-            for entity in controller.entities_by_id().values() {
-                if let Some(building_ref) = entity.building_ref() {
-                    let building = building_ref.borrow();
-                    if building.is_hidden {
-                        continue;
-                    }
-                    let px = map_info.world_to_minimap(building.position, MINIMAP_SIZE);
-
-                    // Determine relation (ally/enemy/neutral) relative to recording player
-                    let team = building.team_id as i64;
-                    let is_ally = self.self_team_id.is_some_and(|t| t == team);
-                    let is_neutral = team < 0;
-
-                    let relation = if !building.is_alive {
-                        BuildingRelation::Dead
-                    } else if building.is_suppressed {
-                        if is_neutral {
-                            BuildingRelation::SuppressedNeutral
-                        } else if is_ally {
-                            BuildingRelation::SuppressedAlly
-                        } else {
-                            BuildingRelation::SuppressedEnemy
-                        }
-                    } else if is_neutral {
-                        BuildingRelation::Neutral
-                    } else if is_ally {
-                        BuildingRelation::Ally
-                    } else {
-                        BuildingRelation::Enemy
-                    };
-
-                    let color = if building.is_alive {
-                        cap_point_color(building.team_id as i64, self.self_team_id)
-                    } else {
-                        [40, 40, 40]
-                    };
-
-                    // Look up building species from GameParams
-                    let icon_type = GameParamProvider::game_param_by_id(self.game_params, building.params_id)
-                        .and_then(|p| p.species().cloned())
-                        .and_then(|s| s.known().cloned())
-                        .and_then(|s| species_to_building_icon_type(&s));
-
-                    commands.push(DrawCommand::Building {
-                        pos: px,
-                        color,
-                        is_alive: building.is_alive,
-                        icon_type,
-                        relation,
-                    });
+            for building in controller.buildings().values() {
+                if building.is_hidden {
+                    continue;
                 }
+                let px = map_info.world_to_minimap(building.position, MINIMAP_SIZE);
+
+                // Determine relation (ally/enemy/neutral) relative to recording player
+                let team = building.team_id.raw();
+                let is_ally = self.self_team_id.is_some_and(|t| t == team);
+                let is_neutral = team < 0;
+
+                let relation = if !building.is_alive {
+                    BuildingRelation::Dead
+                } else if building.is_suppressed {
+                    if is_neutral {
+                        BuildingRelation::SuppressedNeutral
+                    } else if is_ally {
+                        BuildingRelation::SuppressedAlly
+                    } else {
+                        BuildingRelation::SuppressedEnemy
+                    }
+                } else if is_neutral {
+                    BuildingRelation::Neutral
+                } else if is_ally {
+                    BuildingRelation::Ally
+                } else {
+                    BuildingRelation::Enemy
+                };
+
+                let color = if building.is_alive {
+                    cap_point_color(building.team_id.raw(), self.self_team_id)
+                } else {
+                    [40, 40, 40]
+                };
+
+                // Look up building species from GameParams
+                let icon_type = GameParamProvider::game_param_by_id(self.game_params, building.params_id)
+                    .and_then(|p| p.species().cloned())
+                    .and_then(|s| s.known().cloned())
+                    .and_then(|s| species_to_building_icon_type(&s));
+
+                commands.push(DrawCommand::Building {
+                    pos: px,
+                    color,
+                    is_alive: building.is_alive,
+                    icon_type,
+                    relation,
+                });
             }
         }
 
         // 6. Ships
-        let ship_positions = controller.ship_positions();
+        let ship_positions = controller.positions();
         let minimap_positions = controller.minimap_positions();
 
         // Collect all entity IDs that have either world or minimap positions
@@ -1176,12 +1147,11 @@ impl<'a> MinimapRenderer<'a> {
 
         // Lazily resolve species for non-player vehicle entities (e.g. NPC enemies
         // in Operations) by looking up ship_params_id from shipConfig in GameParams.
-        let entities = controller.entities_by_id();
         for entity_id in &all_ship_ids {
             if !self.player_species.contains_key(entity_id)
-                && let Some(vehicle_ref) = entities.get(entity_id).and_then(|e| e.vehicle_ref())
+                && let Some(props) = controller.vehicle_props(*entity_id)
             {
-                let ship_id = vehicle_ref.borrow().props().ship_config().ship_params_id();
+                let ship_id = props.ship_config().ship_params_id();
                 if ship_id.raw() != 0
                     && let Some(param) = GameParamProvider::game_param_by_id(self.game_params, ship_id)
                     && let Some(species) = param.species().and_then(|s| s.known())
@@ -1197,7 +1167,7 @@ impl<'a> MinimapRenderer<'a> {
             // (e.g. reinforcement wave bots in Operations that never entered the AOI).
             let is_known_ship = self.player_relations.contains_key(entity_id)
                 || self.player_species.contains_key(entity_id)
-                || entities.get(entity_id).and_then(|e| e.vehicle_ref()).is_some()
+                || controller.vehicle_props(*entity_id).is_some()
                 || minimap_positions.contains_key(entity_id);
             if !is_known_ship {
                 continue;
@@ -1236,24 +1206,18 @@ impl<'a> MinimapRenderer<'a> {
             // visibility_flags from the Vehicle entity: bitmask of detection
             // reasons (radar, hydro, direct vision, etc.). Non-zero means the
             // ship is confirmed detected through game mechanics.
-            let vis_flags = controller
-                .entities_by_id()
-                .get(entity_id)
-                .and_then(|e| e.vehicle_ref())
-                .map(|v| v.borrow().props().visibility_flags())
-                .unwrap_or(0);
+            let vis_flags =
+                controller.vehicle_props(*entity_id).map(|p| p.visibility_flags()).unwrap_or(0);
 
             // Get health fraction from entity
-            let health_fraction =
-                controller.entities_by_id().get(entity_id).and_then(|e| e.vehicle_ref()).and_then(|v| {
-                    let v = v.borrow();
-                    let max = v.props().max_health();
-                    if max > 0.0 { Some((v.props().health() / max).clamp(0.0, 1.0)) } else { None }
-                });
+            let health_fraction = controller.vehicle_props(*entity_id).and_then(|p| {
+                let max = p.max_health();
+                if max > 0.0 { Some((p.health() / max).clamp(0.0, 1.0)) } else { None }
+            });
 
             // Compute yaw: prefer minimap heading (more accurate for icon rotation)
-            let minimap_yaw = minimap.map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.to_radians());
-            let world_yaw = world.map(|sp| sp.yaw);
+            let minimap_yaw = minimap.map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.0.to_radians());
+            let world_yaw = world.map(|t| t.yaw.0);
 
             // A ship is "spotted" when its visibility_flags are non-zero
             // (detected by radar, hydro, direct vision, etc.). On friendlies
@@ -1278,15 +1242,11 @@ impl<'a> MinimapRenderer<'a> {
                     // the minimap position when there's no world position (e.g. ships
                     // outside AOI that are only visible via minimap vision packets).
                     let px = match world {
-                        Some(w) => map_info.world_to_minimap(w.position, MINIMAP_SIZE),
-                        None => map_info.normalized_to_minimap(&mm.position, MINIMAP_SIZE),
+                        Some(w) => map_info.world_to_minimap(w.pos, MINIMAP_SIZE),
+                        None => map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE),
                     };
-                    let speed_raw = controller
-                        .entities_by_id()
-                        .get(entity_id)
-                        .and_then(|e| e.vehicle_ref())
-                        .map(|v| v.borrow().props().server_speed_raw())
-                        .unwrap_or(0);
+                    let speed_raw =
+                        controller.vehicle_props(*entity_id).map(|p| p.server_speed_raw()).unwrap_or(0);
                     self.record_position(*entity_id, px, clock, speed_raw);
                     commands.push(DrawCommand::Ship {
                         entity_id: *entity_id,
@@ -1321,7 +1281,7 @@ impl<'a> MinimapRenderer<'a> {
                 // Undetected — use minimap position (last known)
                 let yaw = minimap_yaw.or(world_yaw).unwrap_or(0.0);
                 let px = if let Some(mm) = minimap {
-                    map_info.normalized_to_minimap(&mm.position, MINIMAP_SIZE)
+                    map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE)
                 } else {
                     continue;
                 };
@@ -1346,7 +1306,7 @@ impl<'a> MinimapRenderer<'a> {
         // 6. Turret direction indicators (from targetLocalPos EntityProperty)
         if self.options.show_turret_direction {
             let target_yaws = controller.target_yaws();
-            for (entity_id, &world_yaw) in target_yaws {
+            for (entity_id, &world_yaw) in &target_yaws {
                 // Skip dead ships
                 if let Some(dead) = dead_ships.get(entity_id)
                     && clock >= dead.clock
@@ -1360,7 +1320,7 @@ impl<'a> MinimapRenderer<'a> {
                 }
                 // Need a position for this ship
                 let px = if let Some(mm) = minimap_positions.get(entity_id) {
-                    map_info.normalized_to_minimap(&mm.position, MINIMAP_SIZE)
+                    map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE)
                 } else {
                     continue;
                 };
@@ -1393,8 +1353,8 @@ impl<'a> MinimapRenderer<'a> {
                 // Use last known heading from minimap positions
                 let yaw = minimap_positions
                     .get(entity_id)
-                    .map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.to_radians())
-                    .or_else(|| ship_positions.get(entity_id).map(|sp| sp.yaw))
+                    .map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.0.to_radians())
+                    .or_else(|| ship_positions.get(entity_id).map(|t| t.yaw.0))
                     .unwrap_or(0.0);
                 let relation = self.player_relations.get(entity_id).copied().unwrap_or(Relation::new(2));
                 let player_name =
@@ -1416,10 +1376,11 @@ impl<'a> MinimapRenderer<'a> {
 
         // 7. Planes
         if self.options.show_planes {
+            let active_wards = controller.active_wards();
             for (plane_id, plane) in controller.active_planes() {
                 let px = map_info.world_to_minimap(plane.position.to_world_pos(), MINIMAP_SIZE);
 
-                let info = self.squadron_info.get(plane_id);
+                let info = self.squadron_info.get(&plane_id);
                 // Use player_relations to determine if the plane is enemy.
                 // PlaneId::owner_id() extracts the ship entity_id from the packed plane ID.
                 let owner_entity = plane.plane_id.owner_id();
@@ -1434,13 +1395,13 @@ impl<'a> MinimapRenderer<'a> {
                 let icon_key = format!("{}/{}_{}", icon_dir, icon_base, suffix);
 
                 // Draw patrol circle from ward data (if this plane has an active ward)
-                if let Some(ward) = controller.active_wards().get(plane_id) {
+                if let Some(ward) = active_wards.get(&plane_id) {
                     let ward_px = map_info.world_to_minimap(ward.position, MINIMAP_SIZE);
                     let space_size = map_info.space_size as f32;
                     let px_radius = (ward.radius.value() / space_size * MINIMAP_SIZE as f32) as i32;
                     let color = if is_enemy { TEAM1_COLOR } else { TEAM0_COLOR };
                     commands.push(DrawCommand::PatrolRadius {
-                        plane_id: *plane_id,
+                        plane_id,
                         pos: ward_px,
                         radius_px: px_radius,
                         color,
@@ -1462,7 +1423,7 @@ impl<'a> MinimapRenderer<'a> {
                 };
 
                 commands.push(DrawCommand::Plane {
-                    plane_id: *plane_id,
+                    plane_id,
                     owner_entity_id: owner_entity,
                     pos: px,
                     icon_key,
@@ -1475,7 +1436,7 @@ impl<'a> MinimapRenderer<'a> {
         // 8. Active consumables
         if self.options.show_consumables {
             let all_consumables = controller.active_consumables();
-            for (entity_id, consumables) in all_consumables {
+            for (entity_id, consumables) in &all_consumables {
                 // Skip dead ships
                 if let Some(dead) = dead_ships.get(entity_id)
                     && clock >= dead.clock
@@ -1488,12 +1449,12 @@ impl<'a> MinimapRenderer<'a> {
                     continue;
                 }
                 // Get ship position (prefer world position, fall back to minimap)
-                let pos = if let Some(sp) = ship_positions.get(entity_id) {
-                    Some(map_info.world_to_minimap(sp.position, MINIMAP_SIZE))
+                let pos = if let Some(t) = ship_positions.get(entity_id) {
+                    Some(map_info.world_to_minimap(t.pos, MINIMAP_SIZE))
                 } else {
                     minimap_positions
                         .get(entity_id)
-                        .map(|mm| map_info.normalized_to_minimap(&mm.position, MINIMAP_SIZE))
+                        .map(|mm| map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE))
                 };
                 let Some(pos) = pos else { continue };
 
@@ -1502,15 +1463,7 @@ impl<'a> MinimapRenderer<'a> {
 
                 // Check if this entity has an HP bar rendered
                 let has_hp_bar = self.options.show_hp_bars
-                    && controller
-                        .entities_by_id()
-                        .get(entity_id)
-                        .and_then(|e| e.vehicle_ref())
-                        .map(|v| {
-                            let v = v.borrow();
-                            v.props().max_health() > 0.0
-                        })
-                        .unwrap_or(false);
+                    && controller.vehicle_props(*entity_id).map(|p| p.max_health() > 0.0).unwrap_or(false);
 
                 let mut icon_keys = Vec::new();
                 for active in consumables {
@@ -1570,10 +1523,10 @@ impl<'a> MinimapRenderer<'a> {
                 }
 
                 // Get ship position
-                let pos = if let Some(ship_pos) = ship_positions.get(entity_id) {
-                    map_info.world_to_minimap(ship_pos.position, MINIMAP_SIZE)
+                let pos = if let Some(t) = ship_positions.get(entity_id) {
+                    map_info.world_to_minimap(t.pos, MINIMAP_SIZE)
                 } else if let Some(mm) = minimap_positions.get(entity_id) {
-                    map_info.normalized_to_minimap(&mm.position, MINIMAP_SIZE)
+                    map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE)
                 } else {
                     continue;
                 };
@@ -1595,23 +1548,21 @@ impl<'a> MinimapRenderer<'a> {
                 };
                 let species = ship_param.species().and_then(|s| s.known()).cloned();
 
-                // Get vehicle entity for ship config (modernizations, skills)
-                let vehicle_entity = controller.entities_by_id().get(entity_id).and_then(|e| e.vehicle_ref());
+                // Get vehicle props for ship config (modernizations, skills)
+                let vehicle_props = controller.vehicle_props(*entity_id);
 
                 // Look up the equipped hull upgrade name from replay data
-                let hull_name = vehicle_entity.as_ref().and_then(|v| {
-                    let v = v.borrow();
-                    let hull_id = v.props().ship_config().hull()?;
+                let hull_name = vehicle_props.as_ref().and_then(|props| {
+                    let hull_id = props.ship_config().hull()?;
                     GameParamProvider::game_param_by_id(self.game_params, hull_id).map(|p| p.name().to_string())
                 });
 
                 // Use Vehicle::resolve_ranges to get all range data
                 let mut ranges = vehicle.resolve_ranges(Some(self.game_params), hull_name.as_deref(), self.version);
 
-                if let (Some(species), Some(v_ref)) = (species, &vehicle_entity) {
-                    let v = v_ref.borrow();
-                    let cfg = v.props().ship_config();
-                    let crew = v.props().crew_modifiers_compact_params();
+                if let (Some(species), Some(props)) = (species, &vehicle_props) {
+                    let cfg = props.ship_config();
+                    let crew = props.crew_modifiers_compact_params();
                     let build = ResolvedBuild::from_ids(
                         ship_param_id,
                         cfg.units(),
@@ -1924,11 +1875,9 @@ impl<'a> MinimapRenderer<'a> {
             let (hp_fraction, hp_current, hp_max, ship_param_id) = self
                 .self_entity_id
                 .and_then(|eid| {
-                    let entity = controller.entities_by_id().get(&eid)?;
-                    let v = entity.vehicle_ref()?;
-                    let v = v.borrow();
-                    let max = v.props().max_health();
-                    let cur = v.props().health();
+                    let props = controller.vehicle_props(eid)?;
+                    let max = props.max_health();
+                    let cur = props.health();
                     let param_id = self.ship_param_ids.get(&eid).copied();
                     if max > 0.0 { Some(((cur / max).clamp(0.0, 1.0), cur, max, param_id)) } else { None }
                 })
@@ -2146,7 +2095,7 @@ impl<'a> MinimapRenderer<'a> {
         commands
     }
 
-    fn emit_team_rosters(&self, controller: &dyn BattleControllerState, commands: &mut Vec<DrawCommand>) {
+    fn emit_team_rosters(&self, controller: &BattleView<'_>, commands: &mut Vec<DrawCommand>) {
         use crate::draw_command::ChargeCount as CmdChargeCount;
         use crate::draw_command::RosterConsumable;
         use crate::draw_command::RosterRow;
@@ -2155,7 +2104,6 @@ impl<'a> MinimapRenderer<'a> {
         let dead = controller.dead_ships();
         let active = controller.active_consumables();
         let inventories = controller.consumable_inventories();
-        let entities = controller.entities_by_id();
         let clock = controller.clock();
 
         let mut friendly: Vec<RosterRow> = Vec::new();
@@ -2173,18 +2121,17 @@ impl<'a> MinimapRenderer<'a> {
             let relation = player.relation();
             let is_self = relation.is_self();
 
-            let vehicle_entity = entities.get(&entity_id).and_then(|e| e.vehicle_ref());
+            let vehicle_props = controller.vehicle_props(entity_id);
             let cached = self.vehicle_facts.get(&entity_id);
             // Prefer live entity HP. Fall back to the scanned EntityCreate
             // value when the live entity isn't tracked yet (merged sessions
             // before primary spotting) or hasn't received its first maxHealth
             // broadcast (some ships only get it on first damage).
-            let (hp_current, hp_max, hp_healable) = if let Some(v_ref) = vehicle_entity.as_ref() {
-                let v = v_ref.borrow();
-                let live_max = v.props().max_health();
-                let live_cur = v.props().health();
-                let regen_limit = v.props().regen_crew_hp_limit();
-                let regenerated = v.props().regenerated_health();
+            let (hp_current, hp_max, hp_healable) = if let Some(props) = vehicle_props.as_ref() {
+                let live_max = props.max_health();
+                let live_cur = props.health();
+                let regen_limit = props.regen_crew_hp_limit();
+                let regenerated = props.regenerated_health();
                 let healable = (regen_limit - regenerated).max(0.0).min((live_max - live_cur).max(0.0));
                 if live_max > 0.0 {
                     (live_cur, live_max, healable)
@@ -2203,7 +2150,7 @@ impl<'a> MinimapRenderer<'a> {
             // the live VehicleEntity. Non-zero means the game has confirmed
             // the ship is detected (radar, hydro, direct vision, etc.).
             let is_spotted =
-                vehicle_entity.as_ref().map(|v_ref| v_ref.borrow().props().visibility_flags() != 0).unwrap_or(false);
+                vehicle_props.as_ref().map(|props| props.visibility_flags() != 0).unwrap_or(false);
             let is_disconnected = !is_dead && is_player_disconnected_at(controller, entity_id, clock);
 
             // Kills at the current clock: filter the global kill list by
@@ -2374,7 +2321,7 @@ impl<'a> MinimapRenderer<'a> {
 /// True if the most recent connection-change event for this player at or
 /// before `clock` is `Disconnected`. Returns false when there are no events
 /// recorded (player has been connected since arena start).
-fn is_player_disconnected_at(controller: &dyn BattleControllerState, entity_id: EntityId, clock: GameClock) -> bool {
+fn is_player_disconnected_at(controller: &BattleView<'_>, entity_id: EntityId, clock: GameClock) -> bool {
     let Some(player) = controller.player_entities().get(&entity_id) else {
         return false;
     };

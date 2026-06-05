@@ -1,0 +1,153 @@
+---
+source: crates/minimap-renderer/tests/drawcommand_parity.rs
+expression: "capture_frames(\"20240422_161541_PGSD104-V-170_08_NE_passage.wowsreplay\")"
+---
+=== mid (100208 pkts, mid=50104) ===
+CapturePoint pos=(384.00,375.04) r=5 color=[76, 232, 170] alpha=0.15 label="A" prog=0.000 ic=None
+CapturePoint pos=(384.00,384.00) r=5 color=[255, 255, 255] alpha=0.15 label="B" prog=0.300 ic=Some([254, 77, 42])
+CapturePoint pos=(384.00,392.96) r=5 color=[255, 255, 255] alpha=0.15 label="C" prog=0.000 ic=Some([76, 232, 170])
+ConsumableIcons eid=EntityId(952001) pos=(382.27,370.79) keys=["PCY010_RegenCrewPremium"] friendly=false hp=true
+DeadShip eid=EntityId(952009) pos=(381.72,375.46) yaw=2.770 sp=Some("Destroyer") color=None self=false pn=Some("MajorDamage1") sn=None
+DeadShip eid=EntityId(952023) pos=(385.26,392.17) yaw=0.220 sp=Some("Destroyer") color=None self=true pn=Some("ThElOlEr464") sn=None
+DeadShip eid=EntityId(952025) pos=(385.43,392.68) yaw=-0.810 sp=Some("Destroyer") color=None self=false pn=Some("Meollo_") sn=None
+DeadShip eid=EntityId(952039) pos=(384.52,395.03) yaw=-0.960 sp=Some("Cruiser") color=None self=false pn=Some("Mechino") sn=None
+DeadShip eid=EntityId(952043) pos=(383.72,395.04) yaw=-0.830 sp=Some("Destroyer") color=None self=false pn=Some("Aquaman_2020") sn=None
+DeadShip eid=EntityId(952044) pos=(384.73,393.80) yaw=0.490 sp=Some("Cruiser") color=None self=false pn=Some(":Martinengo:") sn=None
+DeadShip eid=EntityId(952045) pos=(382.84,374.21) yaw=3.630 sp=Some("Cruiser") color=None self=false pn=Some(":Villeneuve:") sn=None
+HealthBar eid=EntityId(952001) pos=(382.27,370.79) frac=0.900 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952003) pos=(389.80,389.18) frac=0.630 fc=[255, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952005) pos=(389.28,383.94) frac=1.000 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952007) pos=(391.76,377.02) frac=0.730 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952011) pos=(383.04,376.00) frac=0.780 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952013) pos=(388.51,370.00) frac=0.970 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952015) pos=(386.18,373.98) frac=0.440 fc=[255, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952017) pos=(390.12,390.20) frac=1.000 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952019) pos=(380.83,371.29) frac=0.910 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952027) pos=(383.61,392.09) frac=0.600 fc=[255, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952029) pos=(390.22,370.08) frac=0.680 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952031) pos=(389.65,387.63) frac=1.000 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952033) pos=(382.32,393.28) frac=0.640 fc=[255, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952035) pos=(376.79,376.52) frac=0.990 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952037) pos=(377.26,373.03) frac=0.960 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952041) pos=(379.48,386.87) frac=0.880 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+ScoreBar t0=401 t1=130 c0=[76, 232, 170] c1=[254, 77, 42] max=1000 t0t=Some("-:--") t1t=Some("24:10") adv=Some((Strong, 0))
+Ship eid=EntityId(952001) pos=(382.27,370.79) yaw=-0.270 sp=Some("Battleship") color=Some([254, 77, 42]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("Serenis_04") sn=None
+Ship eid=EntityId(952003) pos=(389.80,389.18) yaw=4.200 sp=Some("Destroyer") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("craperoni") sn=None
+Ship eid=EntityId(952005) pos=(389.28,383.94) yaw=3.190 sp=Some("Cruiser") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=true dc=false nc=None pn=Some("Ahmet_Ortaer") sn=None
+Ship eid=EntityId(952007) pos=(391.76,377.02) yaw=1.870 sp=Some("Cruiser") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("Sanso_Gyorai") sn=None
+Ship eid=EntityId(952011) pos=(383.04,376.00) yaw=2.650 sp=Some("Destroyer") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("Berserk_568") sn=None
+Ship eid=EntityId(952013) pos=(388.51,370.00) yaw=3.120 sp=Some("Battleship") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=true dc=false nc=None pn=Some("Roter_Otter") sn=None
+Ship eid=EntityId(952015) pos=(386.18,373.98) yaw=0.170 sp=Some("Destroyer") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("IceLemon1225") sn=None
+Ship eid=EntityId(952017) pos=(390.12,390.20) yaw=3.880 sp=Some("Cruiser") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=true dc=false nc=None pn=Some("kkcoby") sn=None
+Ship eid=EntityId(952019) pos=(380.83,371.29) yaw=-0.590 sp=Some("Cruiser") color=Some([254, 77, 42]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("blacklord_313") sn=None
+Ship eid=EntityId(952021) pos=(381.03,382.59) yaw=-0.490 sp=Some("Destroyer") color=None vis=Undetected op=0.40 self=false dn=false dc=false nc=None pn=None sn=None
+Ship eid=EntityId(952027) pos=(383.61,392.09) yaw=2.920 sp=Some("Battleship") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=true dc=false nc=None pn=Some("coyotte_59") sn=None
+Ship eid=EntityId(952029) pos=(390.22,370.08) yaw=-0.960 sp=Some("Battleship") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=true dc=false nc=None pn=Some("hillster74") sn=None
+Ship eid=EntityId(952031) pos=(389.65,387.63) yaw=2.700 sp=Some("Battleship") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=true dc=false nc=None pn=Some("Nikvori") sn=None
+Ship eid=EntityId(952033) pos=(382.32,393.28) yaw=1.230 sp=Some("Battleship") color=Some([254, 77, 42]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("pipola_1") sn=None
+Ship eid=EntityId(952035) pos=(376.79,376.52) yaw=-0.020 sp=Some("Cruiser") color=Some([254, 77, 42]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("0bscura_4") sn=None
+Ship eid=EntityId(952037) pos=(377.26,373.03) yaw=1.060 sp=Some("Battleship") color=Some([254, 77, 42]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("MCK1979") sn=None
+Ship eid=EntityId(952041) pos=(379.48,386.87) yaw=0.910 sp=Some("Battleship") color=Some([254, 77, 42]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("kingworktam") sn=None
+TeamAdvantage level=Some(Strong) color=[76, 232, 170]
+TeamRoster side=Enemy x=1048 y=32 w=280 h=768 eids=[EntityId(952041), EntityId(952033), EntityId(952001), EntityId(952037), EntityId(952019), EntityId(952035), EntityId(952021), EntityId(952044), EntityId(952039), EntityId(952009), EntityId(952043), EntityId(952025)]
+TeamRoster side=Friendly x=0 y=32 w=280 h=768 eids=[EntityId(952013), EntityId(952029), EntityId(952027), EntityId(952031), EntityId(952007), EntityId(952005), EntityId(952017), EntityId(952011), EntityId(952015), EntityId(952003), EntityId(952045), EntityId(952023)]
+Timer tr=Some(940) el=ElapsedClock(259.7389)
+Torpedo pos=(383.31,375.26) color=[76, 232, 170]
+Torpedo pos=(383.35,375.25) color=[76, 232, 170]
+Torpedo pos=(384.31,373.31) color=[76, 232, 170]
+Torpedo pos=(384.31,373.34) color=[76, 232, 170]
+Torpedo pos=(384.32,373.39) color=[76, 232, 170]
+Torpedo pos=(384.53,373.46) color=[76, 232, 170]
+Torpedo pos=(384.53,373.51) color=[76, 232, 170]
+Torpedo pos=(384.54,373.43) color=[76, 232, 170]
+Torpedo pos=(387.02,384.11) color=[76, 232, 170]
+Torpedo pos=(387.08,383.78) color=[76, 232, 170]
+Torpedo pos=(387.08,383.89) color=[76, 232, 170]
+Torpedo pos=(387.20,383.52) color=[76, 232, 170]
+Torpedo pos=(389.92,370.26) color=[76, 232, 170]
+TurretDirection eid=EntityId(952001) pos=(382.28,370.77) yaw=0.420 color=[254, 77, 42] len=18
+TurretDirection eid=EntityId(952003) pos=(389.78,389.16) yaw=3.610 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952005) pos=(389.28,383.97) yaw=3.510 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952007) pos=(391.79,376.97) yaw=2.580 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952011) pos=(383.03,375.96) yaw=1.550 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952013) pos=(388.53,370.02) yaw=3.290 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952015) pos=(386.22,373.96) yaw=2.330 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952017) pos=(390.10,390.22) yaw=2.820 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952019) pos=(380.84,371.34) yaw=0.200 color=[254, 77, 42] len=18
+TurretDirection eid=EntityId(952027) pos=(383.66,392.10) yaw=3.880 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952029) pos=(390.22,370.09) yaw=3.390 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952031) pos=(389.66,387.66) yaw=3.780 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952033) pos=(382.34,393.29) yaw=0.790 color=[254, 77, 42] len=18
+TurretDirection eid=EntityId(952035) pos=(376.78,376.53) yaw=0.270 color=[254, 77, 42] len=18
+TurretDirection eid=EntityId(952037) pos=(377.28,373.03) yaw=0.270 color=[254, 77, 42] len=18
+TurretDirection eid=EntityId(952041) pos=(379.47,386.91) yaw=-0.320 color=[254, 77, 42] len=18
+
+=== final ===
+BattleResultOverlay result=Victory ft=Some(Known(ScoreZero)) color=[76, 232, 170] sa=false
+CapturePoint pos=(384.00,375.04) r=5 color=[76, 232, 170] alpha=0.15 label="A" prog=0.000 ic=None
+CapturePoint pos=(384.00,384.00) r=5 color=[76, 232, 170] alpha=0.15 label="B" prog=0.000 ic=None
+CapturePoint pos=(384.00,392.96) r=5 color=[255, 255, 255] alpha=0.15 label="C" prog=0.000 ic=None
+ConsumableIcons eid=EntityId(952001) pos=(378.12,379.17) keys=["PCY009_CrashCrewPremium"] friendly=false hp=true
+ConsumableIcons eid=EntityId(952027) pos=(372.58,388.70) keys=["PCY013_SpotterPremium"] friendly=true hp=true
+ConsumableIcons eid=EntityId(952035) pos=(375.74,374.94) keys=["PCY016_SonarSearchPremium"] friendly=false hp=true
+ConsumableRadius eid=EntityId(952035) pos=(375.74,374.94) r=3 color=[200, 90, 30] alpha=0.15
+DeadShip eid=EntityId(952005) pos=(380.40,387.60) yaw=2.800 sp=Some("Cruiser") color=None self=false pn=Some("Ahmet_Ortaer") sn=None
+DeadShip eid=EntityId(952009) pos=(381.72,375.46) yaw=2.770 sp=Some("Destroyer") color=None self=false pn=Some("MajorDamage1") sn=None
+DeadShip eid=EntityId(952013) pos=(384.53,374.79) yaw=3.530 sp=Some("Battleship") color=None self=false pn=Some("Roter_Otter") sn=None
+DeadShip eid=EntityId(952019) pos=(383.20,375.34) yaw=4.520 sp=Some("Cruiser") color=None self=false pn=Some("blacklord_313") sn=None
+DeadShip eid=EntityId(952021) pos=(372.28,385.72) yaw=1.620 sp=Some("Destroyer") color=None self=false pn=Some("BuHuTTyx") sn=None
+DeadShip eid=EntityId(952023) pos=(385.26,392.17) yaw=0.220 sp=Some("Destroyer") color=None self=true pn=Some("ThElOlEr464") sn=None
+DeadShip eid=EntityId(952025) pos=(385.43,392.68) yaw=-0.810 sp=Some("Destroyer") color=None self=false pn=Some("Meollo_") sn=None
+DeadShip eid=EntityId(952029) pos=(391.21,373.02) yaw=-1.500 sp=Some("Battleship") color=None self=false pn=Some("hillster74") sn=None
+DeadShip eid=EntityId(952033) pos=(381.83,392.52) yaw=3.360 sp=Some("Battleship") color=None self=false pn=Some("pipola_1") sn=None
+DeadShip eid=EntityId(952037) pos=(378.41,373.06) yaw=2.850 sp=Some("Battleship") color=None self=false pn=Some("MCK1979") sn=None
+DeadShip eid=EntityId(952039) pos=(384.52,395.03) yaw=-0.960 sp=Some("Cruiser") color=None self=false pn=Some("Mechino") sn=None
+DeadShip eid=EntityId(952041) pos=(380.94,386.27) yaw=-0.710 sp=Some("Battleship") color=None self=false pn=Some("kingworktam") sn=None
+DeadShip eid=EntityId(952043) pos=(383.72,395.04) yaw=-0.830 sp=Some("Destroyer") color=None self=false pn=Some("Aquaman_2020") sn=None
+DeadShip eid=EntityId(952044) pos=(384.73,393.80) yaw=0.490 sp=Some("Cruiser") color=None self=false pn=Some(":Martinengo:") sn=None
+DeadShip eid=EntityId(952045) pos=(382.84,374.21) yaw=3.630 sp=Some("Cruiser") color=None self=false pn=Some(":Villeneuve:") sn=None
+HealthBar eid=EntityId(952001) pos=(378.12,379.17) frac=0.030 fc=[255, 0, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952003) pos=(375.21,384.15) frac=0.570 fc=[255, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952007) pos=(384.92,380.88) frac=0.620 fc=[255, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952011) pos=(383.58,374.39) frac=0.710 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952015) pos=(383.97,374.82) frac=0.280 fc=[255, 0, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952017) pos=(385.28,380.70) frac=0.660 fc=[255, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952027) pos=(372.58,388.70) frac=0.250 fc=[255, 0, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952031) pos=(384.20,378.87) frac=0.950 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+HealthBar eid=EntityId(952035) pos=(375.74,374.94) frac=0.950 fc=[0, 255, 0] bg=[50, 50, 50] bga=0.70
+Plane pid=PlaneId(141734872795) eid=EntityId(952027) pos=(375.16,388.94) icon="consumables/scout_ally" pn=None sn=None
+ScoreBar t0=626 t1=0 c0=[76, 232, 170] c1=[254, 77, 42] max=1000 t0t=Some("-:--") t1t=Some("13:54") adv=Some((Absolute, 0))
+Ship eid=EntityId(952001) pos=(378.12,379.17) yaw=-0.470 sp=Some("Battleship") color=Some([254, 77, 42]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("Serenis_04") sn=None
+Ship eid=EntityId(952003) pos=(375.21,384.15) yaw=1.620 sp=Some("Destroyer") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=true dc=false nc=None pn=Some("craperoni") sn=None
+Ship eid=EntityId(952007) pos=(384.92,380.88) yaw=2.800 sp=Some("Cruiser") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=true dc=false nc=None pn=Some("Sanso_Gyorai") sn=None
+Ship eid=EntityId(952011) pos=(383.58,374.39) yaw=1.790 sp=Some("Destroyer") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("Berserk_568") sn=None
+Ship eid=EntityId(952015) pos=(383.97,374.82) yaw=2.060 sp=Some("Destroyer") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("IceLemon1225") sn=None
+Ship eid=EntityId(952017) pos=(385.28,380.70) yaw=-0.490 sp=Some("Cruiser") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=true dc=false nc=None pn=Some("kkcoby") sn=None
+Ship eid=EntityId(952027) pos=(372.58,388.70) yaw=1.690 sp=Some("Battleship") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("coyotte_59") sn=None
+Ship eid=EntityId(952031) pos=(384.20,378.87) yaw=1.990 sp=Some("Battleship") color=Some([76, 232, 170]) vis=Visible op=1.00 self=false dn=true dc=false nc=None pn=Some("Nikvori") sn=None
+Ship eid=EntityId(952035) pos=(375.74,374.94) yaw=3.580 sp=Some("Cruiser") color=Some([254, 77, 42]) vis=Visible op=1.00 self=false dn=false dc=false nc=None pn=Some("0bscura_4") sn=None
+Smoke pos=(383.59,374.43) r=3 color=[200, 200, 200] alpha=0.50
+Smoke pos=(383.60,374.46) r=3 color=[200, 200, 200] alpha=0.50
+Smoke pos=(383.69,374.89) r=3 color=[200, 200, 200] alpha=0.50
+Smoke pos=(383.80,375.13) r=3 color=[200, 200, 200] alpha=0.50
+Smoke pos=(383.95,374.76) r=3 color=[200, 200, 200] alpha=0.50
+Smoke pos=(383.97,374.82) r=3 color=[200, 200, 200] alpha=0.50
+Smoke pos=(383.99,375.73) r=3 color=[200, 200, 200] alpha=0.50
+Smoke pos=(384.02,375.44) r=3 color=[200, 200, 200] alpha=0.50
+Smoke pos=(384.09,375.14) r=3 color=[200, 200, 200] alpha=0.50
+Smoke pos=(384.20,375.91) r=3 color=[200, 200, 200] alpha=0.50
+TeamAdvantage level=Some(Absolute) color=[76, 232, 170]
+TeamRoster side=Enemy x=1048 y=32 w=280 h=768 eids=[EntityId(952001), EntityId(952035), EntityId(952041), EntityId(952033), EntityId(952037), EntityId(952044), EntityId(952039), EntityId(952019), EntityId(952009), EntityId(952021), EntityId(952043), EntityId(952025)]
+TeamRoster side=Friendly x=0 y=32 w=280 h=768 eids=[EntityId(952027), EntityId(952031), EntityId(952007), EntityId(952017), EntityId(952011), EntityId(952015), EntityId(952003), EntityId(952013), EntityId(952029), EntityId(952045), EntityId(952005), EntityId(952023)]
+Timer tr=Some(641) el=ElapsedClock(559.1994)
+Torpedo pos=(378.27,372.55) color=[76, 232, 170]
+Torpedo pos=(378.30,372.42) color=[76, 232, 170]
+TurretDirection eid=EntityId(952001) pos=(378.09,379.15) yaw=0.170 color=[254, 77, 42] len=18
+TurretDirection eid=EntityId(952003) pos=(375.21,384.16) yaw=1.030 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952007) pos=(384.97,380.90) yaw=2.360 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952011) pos=(383.59,374.40) yaw=3.710 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952015) pos=(383.97,374.84) yaw=3.020 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952017) pos=(385.28,380.65) yaw=2.950 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952027) pos=(372.59,388.72) yaw=1.150 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952031) pos=(384.22,378.90) yaw=2.750 color=[76, 232, 170] len=18
+TurretDirection eid=EntityId(952035) pos=(375.78,374.90) yaw=-0.390 color=[254, 77, 42] len=18

@@ -10,7 +10,7 @@ use rootcause::prelude::*;
 use tracing::error;
 use tracing::info;
 
-use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
+use wows_battle_world::view::BattleView;
 use wows_replays::types::GameClock;
 
 use crate::codec::VideoCodec;
@@ -252,7 +252,7 @@ impl VideoEncoder {
     pub fn advance_clock(
         &mut self,
         new_clock: GameClock,
-        controller: &dyn BattleControllerState,
+        controller: &BattleView<'_>,
         renderer: &mut MinimapRenderer,
         target: &mut ImageTarget,
     ) {
@@ -378,7 +378,7 @@ impl VideoEncoder {
 
     pub fn finish(
         &mut self,
-        controller: &dyn BattleControllerState,
+        controller: &BattleView<'_>,
         renderer: &mut MinimapRenderer,
         target: &mut ImageTarget,
     ) -> rootcause::Result<(), VideoError> {

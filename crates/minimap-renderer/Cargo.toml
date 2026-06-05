@@ -30,6 +30,7 @@ rendering = [
     "dep:tiny-skia",
     "dep:rootcause",
     "dep:wows-replay-insights",
+    "dep:wows-battle-world",
     "wows_replays/parsing",
     "wows_replays/vfs",
     "wowsunpack/json",
@@ -45,11 +46,13 @@ cpu-av1 = ["dep:rav1e", "dep:yuvutils-rs", "rendering"]
 # Opt in to rav1e's hand-tuned x86 SIMD (~3x faster). Requires NASM at build time.
 cpu-av1-asm = ["cpu-av1", "rav1e/asm"]
 arc = ["wows_replays/arc", "wows-replay-insights?/arc"]
+vfs = ["wows-battle-world?/vfs", "wows_replays/vfs", "wowsunpack/vfs-mmap"]
 
 [dependencies]
 wows_replays = { workspace = true, default-features = false }
 wowsunpack = { workspace = true, default-features = false }
 wows-replay-insights = { workspace = true, optional = true, features = ["build"] }
+wows-battle-world = { workspace = true, optional = true }
 wt-translations = { workspace = true }
 image = { workspace = true, features = ["png", "jpeg"], optional = true }
 ab_glyph = { version = "0.2", optional = true }
@@ -87,3 +90,13 @@ objc2-core-foundation = { version = "0.3", optional = true }
 objc2-core-media = { version = "0.3", optional = true }
 objc2-core-video = { version = "0.3", optional = true }
 objc2-video-toolbox = { version = "0.3", optional = true }
+
+[dev-dependencies]
+wows-data-mgr = { workspace = true }
+wows-battle-world = { workspace = true, features = ["vfs"] }
+wows-replay-insights = { workspace = true, features = ["build"] }
+insta = { workspace = true }
+
+[build-dependencies]
+serde = { workspace = true }
+toml = { workspace = true }
