@@ -449,6 +449,10 @@ pub struct TabState {
     pub game_data_updates: Vec<wows_data_mgr::download_repo::BuildUpdateStatus>,
     /// Whether a game data update check is currently running.
     pub checking_game_data_updates: bool,
+    /// Cached builds the last validation found missing, corrupt, or stale.
+    pub game_data_repair: Vec<wows_data_mgr::download_repo::BuildUpdateStatus>,
+    /// Whether a game data cache validation is currently running.
+    pub validating_game_data_cache: bool,
     /// Cached result of WoWs directory validation. Updated by `revalidate_wows_dir()`
     /// on startup and whenever `settings.wows_dir` changes — NOT every frame.
     pub wows_dir_invalid: bool,
@@ -552,6 +556,8 @@ impl Default for TabState {
             settings_needs_attention: false,
             game_data_updates: Vec::new(),
             checking_game_data_updates: false,
+            game_data_repair: Vec::new(),
+            validating_game_data_cache: false,
             wows_dir_invalid: false,
             wgpu_render_state: None,
             armor_viewer: Default::default(),
@@ -674,6 +680,39 @@ impl TabState {
                     output_base.clone(),
                     update.build,
                     Some(update.version),
+                    true,
+                ))
+            );
+        }
+    }
+
+    /// Validate the cache against the remote repo. No-op if a validation is
+    /// already running or no cache directory is configured.
+    pub fn validate_game_data_cache(&mut self) {
+        if self.validating_game_data_cache {
+            return;
+        }
+        let cache_dir = self.persisted.read().settings.game.game_data_cache_dir.clone();
+        let Some(output_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir) else {
+            return;
+        };
+        self.validating_game_data_cache = true;
+        update_background_task!(self.background_tasks, Some(crate::task::start_game_data_validation_task(output_base)));
+    }
+
+    /// Re-download every cached build the last validation flagged for repair.
+    pub fn repair_game_data_cache(&mut self) {
+        let cache_dir = self.persisted.read().settings.game.game_data_cache_dir.clone();
+        let Some(output_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir) else {
+            return;
+        };
+        for build in std::mem::take(&mut self.game_data_repair) {
+            update_background_task!(
+                self.background_tasks,
+                Some(crate::task::start_game_data_download_task(
+                    output_base.clone(),
+                    build.build,
+                    Some(build.version),
                     true,
                 ))
             );

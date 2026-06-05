@@ -778,6 +778,7 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::BatchVideoExport { .. } => {}
                             BackgroundTaskKind::DownloadingGameData { .. } => {}
                             BackgroundTaskKind::CheckingGameDataUpdates => {}
+                            BackgroundTaskKind::ValidatingGameData { .. } => {}
                         }
 
                         self.handle_task_completion(ui.ctx(), result);
@@ -1094,6 +1095,34 @@ impl WowsToolkitApp {
                         let count = updates.len();
                         self.tab_state.game_data_updates = updates;
                         self.tab_state.toasts.lock().info(t!("ui.messages.game_data_updates_available", count = count));
+                    }
+                }
+                BackgroundTaskCompletion::GameDataValidated { tip, builds } => {
+                    use wows_data_mgr::download_repo::ValidationOutcome;
+
+                    self.tab_state.validating_game_data_cache = false;
+                    let repair: Vec<wows_data_mgr::download_repo::BuildUpdateStatus> = builds
+                        .iter()
+                        .filter(|b| matches!(b.outcome, ValidationOutcome::NeedsRepair(_)))
+                        .map(|b| wows_data_mgr::download_repo::BuildUpdateStatus {
+                            build: b.build,
+                            version: b.version.clone(),
+                        })
+                        .collect();
+
+                    if repair.is_empty() {
+                        // Every cached build matches the remote repo; record the
+                        // tip so a later update check can short-circuit.
+                        self.tab_state.persisted.write().settings.game.game_data_repo_commit = Some(tip);
+                        self.tab_state.game_data_repair.clear();
+                        self.tab_state.toasts.lock().success(t!("ui.messages.game_data_cache_valid"));
+                    } else {
+                        let count = repair.len();
+                        self.tab_state.game_data_repair = repair;
+                        self.tab_state
+                            .toasts
+                            .lock()
+                            .warning(t!("ui.messages.game_data_cache_invalid", count = count));
                     }
                 }
                 BackgroundTaskCompletion::ReplayLoaded { replay, source } => {

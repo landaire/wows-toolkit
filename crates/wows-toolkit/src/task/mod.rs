@@ -43,6 +43,7 @@ pub enum ReplaySource {
 // Re-export everything so `use crate::task::*` still works
 pub use game_data_download::start_game_data_download_task;
 pub use game_data_download::start_game_data_update_check_task;
+pub use game_data_download::start_game_data_validation_task;
 pub use networking::NetworkJob;
 pub use networking::NetworkResult;
 pub use networking::load_personal_rating_data;
@@ -121,6 +122,10 @@ pub enum BackgroundTaskKind {
         last_progress: Option<DownloadProgress>,
     },
     CheckingGameDataUpdates,
+    ValidatingGameData {
+        rx: mpsc::Receiver<DownloadProgress>,
+        last_progress: Option<DownloadProgress>,
+    },
     #[cfg(feature = "mod_manager")]
     ModTask(Box<crate::mod_manager::ModTaskInfo>),
     UpdateTimedMessage(ToastMessage),
@@ -233,6 +238,25 @@ impl BackgroundTask {
                         ui.spinner();
                         ui.label(t!("ui.messages.checking_game_data_updates"));
                     }
+                    BackgroundTaskKind::ValidatingGameData { rx, last_progress } => {
+                        match rx.try_recv() {
+                            Ok(progress) => *last_progress = Some(progress),
+                            Err(TryRecvError::Empty) => {}
+                            Err(TryRecvError::Disconnected) => {}
+                        }
+                        match last_progress {
+                            Some(progress) if progress.total > 0 => {
+                                ui.add(
+                                    egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32)
+                                        .text(t!("ui.messages.validating_game_data")),
+                                );
+                            }
+                            _ => {
+                                ui.spinner();
+                                ui.label(t!("ui.messages.validating_game_data"));
+                            }
+                        }
+                    }
                     #[cfg(feature = "mod_manager")]
                     BackgroundTaskKind::ModTask(mod_task) => match mod_task.as_mut() {
                         crate::mod_manager::ModTaskInfo::LoadingModDatabase => {
@@ -328,6 +352,10 @@ pub enum BackgroundTaskCompletion {
         tip: String,
         updates: Vec<wows_data_mgr::download_repo::BuildUpdateStatus>,
     },
+    GameDataValidated {
+        tip: String,
+        builds: Vec<wows_data_mgr::download_repo::BuildValidation>,
+    },
     ReplayLoaded {
         replay: Arc<RwLock<Replay>>,
         source: ReplaySource,
@@ -366,6 +394,9 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .finish(),
             Self::GameDataUpdatesChecked { tip, updates } => {
                 f.debug_struct("GameDataUpdatesChecked").field("tip", tip).field("updates", updates).finish()
+            }
+            Self::GameDataValidated { tip, builds } => {
+                f.debug_struct("GameDataValidated").field("tip", tip).field("builds", builds).finish()
             }
             Self::ReplayLoaded { replay: _, source } => {
                 f.debug_struct("ReplayLoaded").field("replay", &"<...>").field("source", source).finish()

@@ -46,6 +46,20 @@ pub fn start_game_data_update_check_task(output_base: PathBuf, known_tip: Option
     BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::CheckingGameDataUpdates }
 }
 
+/// Validate every cached build in `output_base` against the remote repository,
+/// the source of truth. Reports missing, corrupt, or stale builds so the user
+/// can re-download them.
+pub fn start_game_data_validation_task(output_base: PathBuf) -> BackgroundTask {
+    let (tx, rx) = mpsc::channel();
+    let (progress_tx, progress_rx) = mpsc::channel();
+
+    crate::util::thread::spawn_logged("validate-game-data", move || {
+        let _ = tx.send(validate(output_base, &progress_tx));
+    });
+
+    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::ValidatingGameData { rx: progress_rx, last_progress: None } }
+}
+
 fn build_client() -> Result<reqwest::Client, Report> {
     Ok(reqwest::Client::builder()
         .user_agent(concat!("wows-toolkit/", env!("CARGO_PKG_VERSION")))
@@ -96,4 +110,23 @@ fn check_for_updates(output_base: PathBuf, known_tip: Option<String>) -> Result<
     ))?;
 
     Ok(BackgroundTaskCompletion::GameDataUpdatesChecked { tip: result.tip, updates: result.updates })
+}
+
+fn validate(output_base: PathBuf, progress_tx: &mpsc::Sender<DownloadProgress>) -> Result<BackgroundTaskCompletion, Report> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .attach_with(|| "failed to create download runtime")?;
+    let client = build_client()?;
+
+    let result = runtime.block_on(wows_data_mgr::download_repo::validate_cache(
+        &client,
+        wows_data_mgr::download_repo::DEFAULT_REPO_BASE_URL,
+        &output_base,
+        |downloaded, total| {
+            let _ = progress_tx.send(DownloadProgress { downloaded, total });
+        },
+    ))?;
+
+    Ok(BackgroundTaskCompletion::GameDataValidated { tip: result.tip, builds: result.builds })
 }

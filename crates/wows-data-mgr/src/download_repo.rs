@@ -4,6 +4,7 @@
 //! already exist locally are skipped, so downloading a build only transfers the
 //! assets it does not already share with builds already in the cache.
 
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
@@ -40,6 +41,61 @@ pub struct UpdateCheck {
     pub tip: String,
     /// Builds present locally whose remote data has changed.
     pub updates: Vec<BuildUpdateStatus>,
+}
+
+/// Counts of the ways a locally-cached build can diverge from the remote repo.
+#[derive(Debug, Clone, Default)]
+pub struct BuildIssues {
+    /// Content objects the remote metadata references but the local CAS lacks.
+    pub missing_objects: usize,
+    /// Local content objects whose bytes no longer hash to their name.
+    pub corrupt_objects: usize,
+    /// Extracted files the metadata lists but that are absent from the build tree.
+    pub missing_files: usize,
+    /// The local metadata references different content than the remote copy.
+    pub stale_metadata: bool,
+}
+
+impl BuildIssues {
+    /// Whether the build matches the remote repo with all content intact.
+    pub fn is_clean(&self) -> bool {
+        self.missing_objects == 0 && self.corrupt_objects == 0 && self.missing_files == 0 && !self.stale_metadata
+    }
+}
+
+/// Outcome of validating one locally-cached build against the remote repo.
+#[derive(Debug, Clone)]
+pub enum ValidationOutcome {
+    /// Local content matches the remote repo exactly.
+    Clean,
+    /// The build is cached locally but no longer published upstream, so there
+    /// is no source of truth to validate it against.
+    MissingFromRemote,
+    /// Local content diverges from the remote repo and should be re-downloaded.
+    NeedsRepair(BuildIssues),
+}
+
+/// Validation result for a single locally-cached build.
+#[derive(Debug, Clone)]
+pub struct BuildValidation {
+    pub build: u32,
+    pub version: String,
+    pub outcome: ValidationOutcome,
+}
+
+/// Result of validating every locally-cached build against the remote repo.
+#[derive(Debug, Clone)]
+pub struct CacheValidation {
+    /// The repository tip at validation time, to persist when the cache is clean.
+    pub tip: String,
+    pub builds: Vec<BuildValidation>,
+}
+
+impl CacheValidation {
+    /// Builds that diverge from the remote repo and need re-downloading.
+    pub fn needs_repair(&self) -> impl Iterator<Item = &BuildValidation> {
+        self.builds.iter().filter(|b| matches!(b.outcome, ValidationOutcome::NeedsRepair(_)))
+    }
 }
 
 /// Fetch the current tip commit SHA of the repository's main branch.
@@ -112,6 +168,144 @@ pub async fn check_for_updates(
     }
 
     Ok(UpdateCheck { tip, updates })
+}
+
+/// Validate every locally-cached build against the remote repository, which is
+/// the source of truth.
+///
+/// For each cached build the remote `metadata.toml` is fetched and every content
+/// object it references is checked for presence and integrity in the local CAS,
+/// the extracted build tree is checked for the same files, and the local
+/// metadata is compared against the remote copy to catch stale data. Shared
+/// content objects are read and hashed at most once across all builds.
+/// `on_progress(completed, total)` is invoked as each build is validated.
+pub async fn validate_cache(
+    client: &reqwest::Client,
+    base_url: &str,
+    output_base: &Path,
+    on_progress: impl Fn(u64, u64),
+) -> Result<CacheValidation, Report> {
+    let tip = fetch_repo_tip(client).await?;
+    let local = BuildsIndex::load(&output_base.join("builds.toml"));
+    let remote = fetch_builds_index(client, base_url).await?;
+    let cas_root = cas::cas_root(output_base);
+
+    let present: Vec<&BuildEntry> =
+        local.builds.iter().filter(|e| output_base.join(&e.dir).join("metadata.toml").exists()).collect();
+    let total = present.len() as u64;
+    on_progress(0, total);
+
+    // Verdicts for content objects, so a hash shared by many builds is read and
+    // hashed once rather than once per referencing build.
+    let mut verified: BTreeSet<String> = BTreeSet::new();
+    let mut corrupt: BTreeSet<String> = BTreeSet::new();
+
+    let mut builds = Vec::with_capacity(present.len());
+    for (i, entry) in present.iter().enumerate() {
+        let outcome = match remote.find_by_build(entry.build) {
+            None => ValidationOutcome::MissingFromRemote,
+            Some(remote_entry) => {
+                let url = format!("{base_url}/{}/metadata.toml", remote_entry.dir);
+                match get_text(client, &url).await? {
+                    None => ValidationOutcome::MissingFromRemote,
+                    Some(text) => {
+                        let remote_md: BuildMetadata =
+                            toml::from_str(&text).attach_with(|| "failed to parse remote metadata.toml")?;
+                        let issues = validate_build(
+                            &cas_root,
+                            &output_base.join(&entry.dir),
+                            &remote_md,
+                            &mut verified,
+                            &mut corrupt,
+                        );
+                        if issues.is_clean() { ValidationOutcome::Clean } else { ValidationOutcome::NeedsRepair(issues) }
+                    }
+                }
+            }
+        };
+        builds.push(BuildValidation { build: entry.build, version: entry.version.clone(), outcome });
+        on_progress(i as u64 + 1, total);
+    }
+
+    Ok(CacheValidation { tip, builds })
+}
+
+/// Verdict for one content object during validation.
+enum ObjectState {
+    Ok,
+    Missing,
+    Corrupt,
+}
+
+/// Check one build's local content against its remote metadata.
+fn validate_build(
+    cas_root: &Path,
+    output_dir: &Path,
+    remote_md: &BuildMetadata,
+    verified: &mut BTreeSet<String>,
+    corrupt: &mut BTreeSet<String>,
+) -> BuildIssues {
+    let mut issues = BuildIssues::default();
+
+    issues.stale_metadata = match BuildMetadata::load(&output_dir.join("metadata.toml")) {
+        Some(local) => local.files != remote_md.files || local.derived != remote_md.derived,
+        None => true,
+    };
+
+    check_entries(cas_root, &output_dir.join("vfs"), &remote_md.files, &mut issues, verified, corrupt);
+    check_entries(cas_root, output_dir, &remote_md.derived, &mut issues, verified, corrupt);
+
+    issues
+}
+
+/// Check every `(relative path, hash)` pair in `entries`, accumulating any
+/// missing or corrupt objects and any absent files under `tree_root`.
+fn check_entries(
+    cas_root: &Path,
+    tree_root: &Path,
+    entries: &BTreeMap<String, String>,
+    issues: &mut BuildIssues,
+    verified: &mut BTreeSet<String>,
+    corrupt: &mut BTreeSet<String>,
+) {
+    for (rel, hash) in entries {
+        match object_state(cas_root, hash, verified, corrupt) {
+            ObjectState::Ok => {}
+            ObjectState::Missing => issues.missing_objects += 1,
+            ObjectState::Corrupt => issues.corrupt_objects += 1,
+        }
+        if !tree_root.join(rel).exists() {
+            issues.missing_files += 1;
+        }
+    }
+}
+
+/// Resolve a content object's state, reusing prior verdicts. Present objects are
+/// read and re-hashed once; the result is cached so later builds reuse it.
+fn object_state(
+    cas_root: &Path,
+    hash: &str,
+    verified: &mut BTreeSet<String>,
+    corrupt: &mut BTreeSet<String>,
+) -> ObjectState {
+    if verified.contains(hash) {
+        return ObjectState::Ok;
+    }
+    if corrupt.contains(hash) {
+        return ObjectState::Corrupt;
+    }
+    match std::fs::read(cas::cas_path(cas_root, hash)) {
+        Err(_) => ObjectState::Missing,
+        Ok(bytes) => {
+            if cas::hash_bytes(&bytes) == hash {
+                verified.insert(hash.to_string());
+                ObjectState::Ok
+            } else {
+                corrupt.insert(hash.to_string());
+                ObjectState::Corrupt
+            }
+        }
+    }
 }
 
 /// Fetch and parse the remote `builds.toml` index.

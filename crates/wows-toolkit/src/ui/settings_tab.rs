@@ -223,6 +223,18 @@ impl ToolkitTabViewer<'_> {
                             if checking {
                                 ui.spinner();
                             }
+
+                            let validating = self.tab_state.validating_game_data_cache;
+                            if ui
+                                .add_enabled(!validating, egui::Button::new(t!("ui.settings.wows.cache.validate")))
+                                .on_hover_text(t!("ui.settings.wows.cache.validate_tooltip"))
+                                .clicked()
+                            {
+                                self.tab_state.validate_game_data_cache();
+                            }
+                            if validating {
+                                ui.spinner();
+                            }
                         });
 
                         let update_count = self.tab_state.game_data_updates.len();
@@ -231,6 +243,19 @@ impl ToolkitTabViewer<'_> {
                                 ui.label(t!("ui.settings.wows.cache.updates_available", count = update_count));
                                 if ui.button(t!("ui.settings.wows.cache.update_all")).clicked() {
                                     self.tab_state.update_all_game_data();
+                                }
+                            });
+                        }
+
+                        let repair_count = self.tab_state.game_data_repair.len();
+                        if repair_count > 0 {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(t!("ui.settings.wows.cache.repair_needed", count = repair_count))
+                                        .color(Color32::LIGHT_RED),
+                                );
+                                if ui.button(t!("ui.settings.wows.cache.repair")).clicked() {
+                                    self.tab_state.repair_game_data_cache();
                                 }
                             });
                         }
