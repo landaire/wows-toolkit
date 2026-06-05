@@ -351,6 +351,10 @@ impl Player {
         self.vehicle_entity.as_ref()
     }
 
+    pub fn set_vehicle_entity(&mut self, vehicle_entity: Option<VehicleEntity>) {
+        self.vehicle_entity = vehicle_entity;
+    }
+
     pub fn vehicle(&self) -> &Param {
         &self.vehicle
     }
@@ -2714,6 +2718,19 @@ impl From<&Death> for DeathInfo {
     }
 }
 
+impl From<&KillRecord> for DeathInfo {
+    fn from(kill: &KillRecord) -> Self {
+        let timestamp = kill.clock.to_duration();
+        let time_lived = if timestamp > TIME_UNTIL_GAME_START {
+            timestamp - TIME_UNTIL_GAME_START
+        } else {
+            Duration::from_secs(0)
+        };
+
+        DeathInfo { time_lived, killer: kill.killer, cause: kill.cause.clone() }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct VehicleEntity {
     id: EntityId,
@@ -2727,6 +2744,22 @@ pub struct VehicleEntity {
 }
 
 impl VehicleEntity {
+    /// Assemble a fully-populated vehicle record from externally accumulated state.
+    /// `visibility_changed_at` is always 0.0 in the controller; callers pass 0.0.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        id: EntityId,
+        visibility_changed_at: f32,
+        props: VehicleProps,
+        captain: Option<Rc<Param>>,
+        damage: f64,
+        death_info: Option<DeathInfo>,
+        results_info: Option<serde_json::Value>,
+        frags: Vec<DeathInfo>,
+    ) -> Self {
+        Self { id, visibility_changed_at, props, captain, damage, death_info, results_info, frags }
+    }
+
     pub fn id(&self) -> EntityId {
         self.id
     }

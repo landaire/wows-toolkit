@@ -156,6 +156,18 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         &mut self.world
     }
 
+    pub(crate) fn meta(&self) -> &ReplayMeta {
+        self.meta
+    }
+
+    pub(crate) fn resources(&self) -> &'res G {
+        self.resources
+    }
+
+    pub(crate) fn version(&self) -> Version {
+        self.version
+    }
+
     /// Remove a game entity from EntityIndex and despawn its ECS entity.
     ///
     /// Entity lifetime policy: vehicles and buildings persist for the whole match

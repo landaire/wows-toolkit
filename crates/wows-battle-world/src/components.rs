@@ -2,7 +2,6 @@
 
 use bevy_ecs::prelude::*;
 use wows_replays::Rc;
-use wows_replays::analyzer::battle_controller::DeathInfo;
 use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::VehicleProps;
 use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
@@ -24,7 +23,6 @@ use wows_replays::types::NormalizedPos;
 use wows_replays::types::TeamId;
 use wows_replays::types::WorldPos;
 use wowsunpack::game_params::types::BigWorldDistance;
-use wowsunpack::game_params::types::Param;
 use wowsunpack::game_types::PlaneId;
 use wowsunpack::game_types::WeaponType;
 use wowsunpack::game_types::WorldPos2D;
@@ -119,20 +117,6 @@ pub struct MinimapPlacement {
 /// Full server-authoritative vehicle property state.
 #[derive(Component, Debug, Clone)]
 pub struct VehicleState(pub VehicleProps);
-
-/// Aggregated record for one vehicle: captain ref, damage, death, results, frags.
-///
-/// Send+Sync (required by bevy Component) holds only if the `arc` feature makes `wows_replays::Rc = Arc`.
-#[derive(Component, Debug, Clone)]
-pub struct VehicleRecord {
-    /// Captain `Param`, if resolved.
-    pub captain: Option<Rc<Param>>,
-    pub damage: f64,
-    pub death: Option<DeathInfo>,
-    /// End-of-battle results blob, mirroring `VehicleEntity.results_info`.
-    pub results: Option<serde_json::Value>,
-    pub frags: Vec<DeathInfo>,
-}
 
 /// Main battery turret orientation and ammo selection.
 #[derive(Component, Debug, Clone)]

@@ -137,6 +137,19 @@ pub fn both(
     (old, new_world)
 }
 
+/// Drive both controllers over a replay, then build both end-of-battle reports
+/// (consuming each controller). Returns the original `wows_replays::BattleReport`
+/// and the new `wows_battle_world::report::BattleReport` from the same run.
+pub fn both_reports(
+    filename: &str,
+) -> (
+    wows_replays::analyzer::battle_controller::BattleReport,
+    wows_battle_world::report::BattleReport,
+) {
+    let (old, new_world) = both(filename);
+    (old.build_report(), new_world.into_report())
+}
+
 /// Drive both controllers packet-by-packet, accumulating shot_hits after each
 /// packet. Because Tracked clears the hit log every packet, end-of-replay state
 /// only holds the final frame; accumulation validates every resolved hit across
