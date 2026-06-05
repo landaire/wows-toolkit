@@ -1,14 +1,27 @@
 //! Shared fixture-loading helpers for integration tests.
+//!
+//! Loads game resources from a dumped build archive (the layout produced by
+//! wows-data-mgr: a build dir with `vfs/`, `game_params.rkyv`, `constants.json`),
+//! resolved via `wows_data_mgr::game_dir_for_build`. This mirrors replayshark's
+//! extracted-dir loader, not the raw-install `load_game_resources` path.
+//!
+//! Parsed game resources are cached per build so a corpus of fixtures sharing a
+//! build parses GameParams only once per test binary.
 #![cfg(feature = "vfs")]
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::sync::OnceLock;
 
 use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
+use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
-use wowsunpack::game_data;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::rpc::entitydefs::EntitySpec;
+use wowsunpack::vfs::VfsPath;
+use wowsunpack::vfs::impls::physical::PhysicalFS;
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -21,34 +34,60 @@ fn fixtures_dir() -> PathBuf {
         .join("replays")
 }
 
+#[derive(Clone, Copy)]
+struct BuildResources {
+    provider: &'static GameMetadataProvider,
+    constants: &'static GameConstants,
+}
+
 pub struct Handle {
     pub replay: ReplayFile,
     pub game_params: &'static GameMetadataProvider,
     pub game_constants: &'static GameConstants,
-    pub specs: Vec<EntitySpec>,
+    pub specs: &'static [EntitySpec],
     pub version: Version,
+}
+
+fn build_cache() -> &'static Mutex<HashMap<u32, BuildResources>> {
+    static CACHE: OnceLock<Mutex<HashMap<u32, BuildResources>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn resources_for_build(version: &Version) -> BuildResources {
+    if let Some(res) = build_cache().lock().unwrap().get(&version.build) {
+        return *res;
+    }
+
+    let dir = wows_data_mgr::game_dir_for_build(version.build)
+        .unwrap_or_else(|| panic!("game data for build {} not available", version.build));
+    let vfs_root = dir.join("vfs");
+    assert!(vfs_root.exists(), "vfs dir not found at {}", vfs_root.display());
+    let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
+
+    let rkyv_path = dir.join("game_params.rkyv");
+    let provider = match wowsunpack::game_params::cache::load(&rkyv_path) {
+        Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs)
+            .unwrap_or_else(|e| panic!("failed to build game metadata for build {}: {e:?}", version.build)),
+        None => GameMetadataProvider::from_vfs(&vfs)
+            .unwrap_or_else(|e| panic!("failed to load GameParams for build {}: {e:?}", version.build)),
+    };
+    let constants = GameConstants::from_vfs(&vfs);
+
+    let res = BuildResources {
+        provider: Box::leak(Box::new(provider)),
+        constants: Box::leak(Box::new(constants)),
+    };
+    build_cache().lock().unwrap().insert(version.build, res);
+    res
 }
 
 pub fn load(filename: &str) -> Handle {
     let path = fixtures_dir().join(filename);
-    let replay =
-        ReplayFile::from_file(&path).unwrap_or_else(|e| panic!("failed to parse {filename}: {e:?}"));
+    let replay = ReplayFile::from_file(&path).unwrap_or_else(|e| panic!("failed to parse {filename}: {e:?}"));
     let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
 
-    let game_dir = wows_data_mgr::game_dir_for_build(version.build)
-        .unwrap_or_else(|| panic!("game data for build {} not available", version.build));
-    let resources =
-        game_data::load_game_resources(&game_dir, &version).expect("should load game resources");
+    let res = resources_for_build(&version);
+    let specs: &'static [EntitySpec] = res.provider.entity_specs();
 
-    let game_params = GameMetadataProvider::from_vfs(&resources.vfs)
-        .map_err(|e| panic!("failed to load GameParams: {e:?}"))
-        .unwrap();
-    let game_constants = GameConstants::from_vfs(&resources.vfs);
-
-    let game_params: &'static GameMetadataProvider = Box::leak(Box::new(game_params));
-    let game_constants: &'static GameConstants = Box::leak(Box::new(game_constants));
-
-    let specs = resources.specs;
-
-    Handle { replay, game_params, game_constants, specs, version }
+    Handle { replay, game_params: res.provider, game_constants: res.constants, specs, version }
 }
