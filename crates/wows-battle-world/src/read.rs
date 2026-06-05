@@ -12,10 +12,16 @@ use wows_replays::analyzer::battle_controller::state::ActivePlane;
 use wows_replays::analyzer::battle_controller::state::ActiveShot;
 use wows_replays::analyzer::battle_controller::state::ActiveTorpedo;
 use wows_replays::analyzer::battle_controller::state::ActiveWard;
+use wows_replays::analyzer::battle_controller::state::BuffZoneState;
+use wows_replays::analyzer::battle_controller::state::CapturePointState;
+use wows_replays::analyzer::battle_controller::state::CapturedBuff;
 use wows_replays::analyzer::battle_controller::state::ConsumableInventory;
 use wows_replays::analyzer::battle_controller::state::DeadShip;
 use wows_replays::analyzer::battle_controller::state::KillRecord;
+use wows_replays::analyzer::battle_controller::state::LocalWeatherZone;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
+use wows_replays::analyzer::battle_controller::state::ScoringRules;
+use wows_replays::analyzer::battle_controller::state::TeamScore;
 use wows_replays::analyzer::decoder::DamageStatEntry;
 use wows_replays::analyzer::decoder::Recognized;
 use wows_replays::types::EntityId;
@@ -26,8 +32,8 @@ use wowsunpack::game_types::Ribbon;
 
 use wowsunpack::game_types::PlaneId;
 
-use crate::components::{Aim, Building, Consumables, EntityKind, GameId, MinimapPlacement, Plane, PlaneState, ProjectileState, SmokeScreen, Transform3d, Vehicle, VehicleState, Ward, WardState};
-use crate::resources::{ActiveShotOrder, ActiveTorpedoOrder, ChatLog, DamageLedger, DeadShips, KillLog, PlayerIndex, SelfStats, ShotHitLog};
+use crate::components::{Aim, Building, BuffZoneData, CapturePointData, Consumables, EntityKind, GameId, MinimapPlacement, Plane, PlaneState, ProjectileState, SmokeScreen, Transform3d, Vehicle, VehicleState, Ward, WardState, WeatherZoneData};
+use crate::resources::{ActiveShotOrder, ActiveTorpedoOrder, CapturePointOrder, CapturedBuffs, ChatLog, DamageLedger, DeadShips, KillLog, PlayerIndex, ScoringRules as ScoringRulesResource, SelfStats, ShotHitLog, TeamScores};
 use crate::world::BattleWorld;
 
 impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
@@ -242,5 +248,52 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             }
         }
         out
+    }
+
+    /// Capture point states in control-point index order.
+    pub fn capture_points(&self) -> Vec<CapturePointState> {
+        let order = &self.world().resource::<CapturePointOrder>().0;
+        order
+            .iter()
+            .filter_map(|&ecs_entity| {
+                self.world()
+                    .get_entity(ecs_entity)
+                    .ok()?
+                    .get::<CapturePointData>()
+                    .map(|d| d.0.clone())
+            })
+            .collect()
+    }
+
+    /// Current scores for all teams, in team_index order.
+    pub fn team_scores(&self) -> Vec<TeamScore> {
+        self.world().resource::<TeamScores>().0.clone()
+    }
+
+    /// Buff zone states (arms race powerup drop zones) keyed by game entity id.
+    pub fn buff_zones(&mut self) -> HashMap<EntityId, BuffZoneState> {
+        let world = self.world_mut();
+        let mut q = world.query::<(&GameId, &BuffZoneData)>();
+        q.iter(world).map(|(gid, data)| (gid.0, data.0.clone())).collect()
+    }
+
+    /// All buffs captured so far (arms race), in arrival order.
+    pub fn captured_buffs(&self) -> Vec<CapturedBuff> {
+        self.world().resource::<CapturedBuffs>().0.clone()
+    }
+
+    /// Active local weather zones (squalls/storms) in the order they were created.
+    pub fn local_weather_zones(&mut self) -> Vec<LocalWeatherZone> {
+        let world = self.world_mut();
+        let mut q = world.query::<(bevy_ecs::entity::Entity, &WeatherZoneData)>();
+        let mut pairs: Vec<(bevy_ecs::entity::Entity, LocalWeatherZone)> =
+            q.iter(world).map(|(e, data)| (e, data.0.clone())).collect();
+        pairs.sort_by_key(|(e, _)| *e);
+        pairs.into_iter().map(|(_, z)| z).collect()
+    }
+
+    /// Scoring rules from BattleLogic (win threshold, hold reward/period, cap indices).
+    pub fn scoring_rules(&self) -> Option<ScoringRules> {
+        self.world().resource::<ScoringRulesResource>().0.clone()
     }
 }

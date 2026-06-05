@@ -50,7 +50,7 @@ pub struct MinimapPosition {
 }
 
 /// Current state of a capture point.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct CapturePointState {
     pub index: usize,
     /// World position of the zone center (from InteractiveZone entity)
@@ -74,7 +74,7 @@ pub struct CapturePointState {
 /// InteractiveZone entities with `controlPoint: null` in `componentsState`.
 /// These appear in waves during arms race, can be captured by either team,
 /// and disappear (EntityLeave) once consumed.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BuffZoneState {
     pub entity_id: EntityId,
     /// World position of the zone center
@@ -89,7 +89,7 @@ pub struct BuffZoneState {
 }
 
 /// A buff that has been captured by a team.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CapturedBuff {
     /// GameParam ID of the Drop
     pub params_id: GameParamId,
@@ -100,14 +100,14 @@ pub struct CapturedBuff {
 }
 
 /// Current score for a team.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct TeamScore {
     pub team_index: usize,
     pub score: i64,
 }
 
 /// Scoring rules extracted from BattleLogic state.missions.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ScoringRules {
     /// Score required to win (typically 1000)
     pub team_win_score: i64,
@@ -261,7 +261,7 @@ pub struct DeadShip {
 /// Weather zones are InteractiveZone entities with `type == 5`. Their initial
 /// data comes from BattleLogic `state.weather.localWeather` PropertyUpdates,
 /// but position changes arrive via 0x2a packets on the InteractiveZone entity.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct LocalWeatherZone {
     /// Human-readable weather type name (e.g. "Filth")
     pub name: String,

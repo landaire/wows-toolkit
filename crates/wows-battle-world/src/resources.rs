@@ -124,6 +124,13 @@ pub enum InteractiveZoneRef {
 #[derive(Resource, Debug, Clone, Default)]
 pub struct InteractiveZoneIndex(pub HashMap<EntityId, InteractiveZoneRef>);
 
+/// Pre-arrival mapping: InteractiveZone entity id -> drop GameParamId from state.drop.data.
+///
+/// Populated when a state.drop.data PropertyUpdate arrives before the buff zone entity exists.
+/// Drained into BuffZoneData.drop_params_id on InteractiveZone create.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct PendingDropParams(pub HashMap<EntityId, wows_replays::types::GameParamId>);
+
 /// Maps game EntityId -> ECS Entity. The reverse lookup is available via the `GameId` component.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct EntityIndex(HashMap<EntityId, Entity>);

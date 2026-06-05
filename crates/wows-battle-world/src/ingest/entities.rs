@@ -28,7 +28,7 @@ use crate::components::{
     PlayerLink, SmokeScreen, SmokeScreenState, Transform3d, Vehicle, VehicleState, WeatherZone,
     WeatherZoneData,
 };
-use crate::resources::{CapturePointOrder, EntityIndex, InteractiveZoneIndex, InteractiveZoneRef, MetadataPlayers, PlayerIndex};
+use crate::resources::{CapturePointOrder, EntityIndex, InteractiveZoneIndex, InteractiveZoneRef, MetadataPlayers, PendingDropParams, PlayerIndex};
 
 /// Handle an EntityCreate packet.
 pub fn handle_entity_create<G: ResourceLoader>(
@@ -147,6 +147,9 @@ fn handle_battle_logic_create(
 ) {
     debug!("BattleLogic create (entity_id={})", packet.entity_id);
 
+    // Seed TeamScores, ScoringRules, and LocalWeatherZones from BattleLogic state.
+    super::zones::seed_battle_logic_state(&packet.props, world);
+
     // Legacy control points (pre-InteractiveZone clients, e.g. 0.9.10):
     // seed capture_points from state.controlPoints if no InteractiveZone has
     // populated them yet.
@@ -197,17 +200,44 @@ fn handle_interactive_zone_create(
 
     if is_weather {
         let name = decode_name(packet.props.get("name"));
-        let wz = wows_replays::analyzer::battle_controller::state::LocalWeatherZone {
-            name,
-            position,
-            radius,
-            params_id: GameParamId::default(),
-            entity_id: Some(packet.entity_id),
+
+        // Try to match against a WeatherZoneData already seeded from BattleLogic state.
+        // If found (by name, no entity_id yet), update it in-place instead of creating a duplicate.
+        let matched: Option<bevy_ecs::entity::Entity> = {
+            let mut q = world.query::<(bevy_ecs::entity::Entity, &WeatherZoneData)>();
+            let mut found = None;
+            for (ecs_entity, data) in q.iter(world) {
+                if data.0.name == name && data.0.entity_id.is_none() {
+                    found = Some(ecs_entity);
+                    break;
+                }
+            }
+            found
         };
-        let entity = spawn_or_get(world, packet.entity_id);
-        if let Ok(mut e) = world.get_entity_mut(entity) {
-            e.insert(WeatherZone);
-            e.insert(WeatherZoneData(wz));
+
+        if let Some(ecs_entity) = matched {
+            // Link the ECS entity to the game entity id and update position/radius.
+            world.resource_mut::<EntityIndex>().insert(packet.entity_id, ecs_entity);
+            if let Ok(mut e) = world.get_entity_mut(ecs_entity) {
+                if let Some(mut data) = e.get_mut::<WeatherZoneData>() {
+                    data.0.entity_id = Some(packet.entity_id);
+                    data.0.position = position;
+                    data.0.radius = radius;
+                }
+            }
+        } else {
+            let wz = wows_replays::analyzer::battle_controller::state::LocalWeatherZone {
+                name,
+                position,
+                radius,
+                params_id: GameParamId::default(),
+                entity_id: Some(packet.entity_id),
+            };
+            let entity = spawn_or_get(world, packet.entity_id);
+            if let Ok(mut e) = world.get_entity_mut(entity) {
+                e.insert(WeatherZone);
+                e.insert(WeatherZoneData(wz));
+            }
         }
         return;
     }
@@ -281,13 +311,15 @@ fn handle_interactive_zone_create(
         world.resource_mut::<InteractiveZoneIndex>().0.insert(packet.entity_id, InteractiveZoneRef::CapturePoint(idx));
     } else {
         // Buff zone (arms race powerup drop).
+        // Apply any drop params that arrived before this entity was created.
+        let drop_params_id = world.resource::<PendingDropParams>().0.get(&packet.entity_id).copied();
         let bz_state = BuffZoneState {
             entity_id: packet.entity_id,
             position,
             radius,
             team_id,
             is_active: is_enabled,
-            drop_params_id: None,
+            drop_params_id,
         };
         let entity = spawn_or_get(world, packet.entity_id);
         if let Ok(mut e) = world.get_entity_mut(entity) {

@@ -8,6 +8,7 @@ pub mod entities;
 pub mod positions;
 pub mod projectiles;
 pub mod vehicles;
+pub mod zones;
 
 use bevy_ecs::world::World;
 use wows_replays::analyzer::decoder::DecodedPacketPayload;
@@ -72,6 +73,7 @@ pub fn dispatch<G: ResourceLoader>(
                 version,
                 constants,
             );
+            zones::handle_entity_property_zone(prop.entity_id, prop.property, &prop.value, world);
         }
         DecodedPacketPayload::BasePlayerCreate(base) => {
             vehicles::apply_player_create_props(base.entity_id, &base.props, world, version, constants);
@@ -121,7 +123,9 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::MinimapUpdate { updates, .. } => {
             positions::handle_minimap_updates(&updates, world, clock, options.source_team);
         }
-        DecodedPacketPayload::PropertyUpdate(_) => {}
+        DecodedPacketPayload::PropertyUpdate(update) => {
+            zones::handle_property_update(update, clock, world);
+        }
         DecodedPacketPayload::BattleEnd { .. } => {}
         DecodedPacketPayload::Consumable { entity, consumable, duration, usage_params } => {
             consumables::handle_consumable(entity, consumable.clone(), duration, usage_params, clock, world);

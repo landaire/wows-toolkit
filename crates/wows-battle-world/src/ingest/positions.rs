@@ -10,6 +10,7 @@ use wowsunpack::game_types::WorldPos;
 
 use crate::components::{
     GameId, MinimapPlacement, SmokeScreen, SmokeScreenState, Transform3d, VehicleState,
+    WeatherZone, WeatherZoneData,
 };
 use crate::ids::SourceTeam;
 use crate::resources::EntityIndex;
@@ -121,14 +122,19 @@ pub fn handle_minimap_updates(
     }
 }
 
-/// Handle NonVolatilePosition: update SmokeScreen entity position.
+/// Handle NonVolatilePosition: update SmokeScreen or WeatherZone entity position.
 pub fn handle_non_volatile_position(entity_id: EntityId, position: WorldPos, world: &mut World) {
-    if let Some(ecs_entity) = world.resource::<EntityIndex>().get(entity_id)
-        && let Ok(mut er) = world.get_entity_mut(ecs_entity)
-            && er.contains::<SmokeScreen>()
-                && let Some(mut state) = er.get_mut::<SmokeScreenState>() {
-                    state.position = position;
-                }
+    let Some(ecs_entity) = world.resource::<EntityIndex>().get(entity_id) else { return };
+    let Ok(mut er) = world.get_entity_mut(ecs_entity) else { return };
+    if er.contains::<SmokeScreen>() {
+        if let Some(mut state) = er.get_mut::<SmokeScreenState>() {
+            state.position = position;
+        }
+    } else if er.contains::<WeatherZone>() {
+        if let Some(mut data) = er.get_mut::<WeatherZoneData>() {
+            data.0.position = position;
+        }
+    }
 }
 
 fn spawn_or_get(world: &mut World, id: EntityId) -> bevy_ecs::entity::Entity {
