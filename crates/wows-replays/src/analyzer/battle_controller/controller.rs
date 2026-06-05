@@ -651,6 +651,7 @@ pub struct VehicleProps {
     air_defense_target_ids: Vec<()>,
     buoyancy: f32,
     max_health: f32,
+    max_health_explicit: bool,
     rudders_angle: f32,
     draught: f32,
     target_local_pos: u16,
@@ -714,6 +715,7 @@ impl Default for VehicleProps {
             air_defense_target_ids: Vec::new(),
             buoyancy: 0.0,
             max_health: 0.0,
+            max_health_explicit: false,
             rudders_angle: 0.0,
             draught: 0.0,
             target_local_pos: 0,
@@ -1123,6 +1125,9 @@ impl UpdateFromReplayArgs for VehicleProps {
         set_arg_value!(self.buoyancy, args, BUOYANCY_KEY, f32);
 
         set_arg_value!(self.max_health, args, MAX_HEALTH_KEY, f32);
+        if args.contains_key(MAX_HEALTH_KEY) {
+            self.max_health_explicit = true;
+        }
 
         set_arg_value!(self.draught, args, DRAUGHT_KEY, f32);
 
@@ -1176,13 +1181,11 @@ impl UpdateFromReplayArgs for VehicleProps {
         // TODO: debugText
 
         set_arg_value!(self.health, args, HEALTH_KEY, f32);
-        // Older clients (e.g. 0.9.10) never broadcast maxHealth -- the Vehicle
-        // EntityCreate carries only `health` (full HP at spawn) and there are no
-        // maxHealth updates -- so `max_health` would stay 0 and the HP-bar
-        // fraction (health / max_health) breaks. Treat the highest health ever
-        // observed as the max. Newer clients set maxHealth explicitly and health
-        // never exceeds it, so this is a no-op there.
-        if self.health > self.max_health {
+        // Old clients never broadcast maxHealth; treat the highest observed health
+        // as the max so the HP-bar fraction stays valid. Gated on never having
+        // seen an explicit maxHealth so a legitimate mid-match decrease is not
+        // overridden.
+        if !self.max_health_explicit && self.health > self.max_health {
             self.max_health = self.health;
         }
         set_arg_value!(self.engine_dir, args, ENGINE_DIR_KEY, i8);
