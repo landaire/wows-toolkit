@@ -420,65 +420,240 @@ impl From<u32> for ShotId {
 // Position Types
 // =============================================================================
 
-/// World-space position in BigWorld coordinates.
-/// X = east/west, Y = up/down (altitude), Z = north/south. Origin at map center.
+/// Base 3-component vector. Carries the arithmetic shared by every 3D quantity
+/// (positions, velocities, directions). Domain newtypes wrap this and gate which
+/// values can be mixed with which.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
-pub struct WorldPos {
+pub struct Vec3 {
     pub x: f32,
     pub y: f32,
     pub z: f32,
 }
 
-impl WorldPos {
-    pub fn lerp(self, other: WorldPos, t: f32) -> WorldPos {
+impl Vec3 {
+    pub const fn new(x: f32, y: f32, z: f32) -> Vec3 {
+        Vec3 { x, y, z }
+    }
+
+    pub fn lerp(self, other: Vec3, t: f32) -> Vec3 {
         self + (other - self) * t
+    }
+}
+
+impl std::ops::Add for Vec3 {
+    type Output = Vec3;
+    fn add(self, rhs: Vec3) -> Vec3 {
+        Vec3 { x: self.x + rhs.x, y: self.y + rhs.y, z: self.z + rhs.z }
+    }
+}
+
+impl std::ops::Sub for Vec3 {
+    type Output = Vec3;
+    fn sub(self, rhs: Vec3) -> Vec3 {
+        Vec3 { x: self.x - rhs.x, y: self.y - rhs.y, z: self.z - rhs.z }
+    }
+}
+
+impl std::ops::Mul<f32> for Vec3 {
+    type Output = Vec3;
+    fn mul(self, rhs: f32) -> Vec3 {
+        Vec3 { x: self.x * rhs, y: self.y * rhs, z: self.z * rhs }
+    }
+}
+
+impl std::ops::Div<f32> for Vec3 {
+    type Output = Vec3;
+    fn div(self, rhs: f32) -> Vec3 {
+        Vec3 { x: self.x / rhs, y: self.y / rhs, z: self.z / rhs }
+    }
+}
+
+impl std::iter::Sum for Vec3 {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Vec3::default(), |a, b| Vec3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z })
+    }
+}
+
+#[cfg(feature = "parsing")]
+impl Vec3 {
+    /// Horizontal (XZ-plane) distance to another vector, returned in meters.
+    /// Both inputs are in BigWorld coordinates (1 BW = 30m).
+    pub fn distance_xz(&self, other: &Vec3) -> Meters {
+        let dx = (self.x - other.x) * 30.0;
+        let dz = (self.z - other.z) * 30.0;
+        Meters::from((dx * dx + dz * dz).sqrt())
+    }
+}
+
+/// Base 2-component vector. Shared arithmetic for 2D quantities.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct Vec2 {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl Vec2 {
+    pub const fn new(x: f32, y: f32) -> Vec2 {
+        Vec2 { x, y }
+    }
+
+    pub fn lerp(self, other: Vec2, t: f32) -> Vec2 {
+        self + (other - self) * t
+    }
+}
+
+impl std::ops::Add for Vec2 {
+    type Output = Vec2;
+    fn add(self, rhs: Vec2) -> Vec2 {
+        Vec2 { x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+
+impl std::ops::Sub for Vec2 {
+    type Output = Vec2;
+    fn sub(self, rhs: Vec2) -> Vec2 {
+        Vec2 { x: self.x - rhs.x, y: self.y - rhs.y }
+    }
+}
+
+impl std::ops::Mul<f32> for Vec2 {
+    type Output = Vec2;
+    fn mul(self, rhs: f32) -> Vec2 {
+        Vec2 { x: self.x * rhs, y: self.y * rhs }
+    }
+}
+
+impl std::ops::Div<f32> for Vec2 {
+    type Output = Vec2;
+    fn div(self, rhs: f32) -> Vec2 {
+        Vec2 { x: self.x / rhs, y: self.y / rhs }
+    }
+}
+
+impl std::iter::Sum for Vec2 {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Vec2::default(), |a, b| Vec2 { x: a.x + b.x, y: a.y + b.y })
+    }
+}
+
+/// World-space position in BigWorld coordinates.
+/// X = east/west, Y = up/down (altitude), Z = north/south. Origin at map center.
+/// Serializes transparently as the inner `Vec3` (emits `x`/`y`/`z`).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct WorldPos(pub Vec3);
+
+impl WorldPos {
+    pub const fn new(x: f32, y: f32, z: f32) -> WorldPos {
+        WorldPos(Vec3::new(x, y, z))
+    }
+
+    pub fn lerp(self, other: WorldPos, t: f32) -> WorldPos {
+        WorldPos(self.0.lerp(other.0, t))
+    }
+}
+
+impl std::ops::Deref for WorldPos {
+    type Target = Vec3;
+    fn deref(&self) -> &Vec3 {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for WorldPos {
+    fn deref_mut(&mut self) -> &mut Vec3 {
+        &mut self.0
     }
 }
 
 impl std::ops::Add for WorldPos {
     type Output = WorldPos;
     fn add(self, rhs: WorldPos) -> WorldPos {
-        WorldPos { x: self.x + rhs.x, y: self.y + rhs.y, z: self.z + rhs.z }
+        WorldPos(self.0 + rhs.0)
     }
 }
 
 impl std::ops::Sub for WorldPos {
     type Output = WorldPos;
     fn sub(self, rhs: WorldPos) -> WorldPos {
-        WorldPos { x: self.x - rhs.x, y: self.y - rhs.y, z: self.z - rhs.z }
+        WorldPos(self.0 - rhs.0)
     }
 }
 
 impl std::ops::Mul<f32> for WorldPos {
     type Output = WorldPos;
     fn mul(self, rhs: f32) -> WorldPos {
-        WorldPos { x: self.x * rhs, y: self.y * rhs, z: self.z * rhs }
+        WorldPos(self.0 * rhs)
     }
 }
 
 impl std::ops::Div<f32> for WorldPos {
     type Output = WorldPos;
     fn div(self, rhs: f32) -> WorldPos {
-        WorldPos { x: self.x / rhs, y: self.y / rhs, z: self.z / rhs }
+        WorldPos(self.0 / rhs)
     }
 }
 
 impl std::iter::Sum for WorldPos {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(WorldPos::default(), |a, b| WorldPos { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z })
+        WorldPos(iter.map(|p| p.0).sum())
     }
 }
 
 #[cfg(feature = "parsing")]
 impl WorldPos {
     /// Horizontal (XZ-plane) distance to another position, returned in meters.
-    /// Both positions are in BigWorld coordinates (1 BW = 30m).
     pub fn distance_xz(&self, other: &WorldPos) -> Meters {
-        let dx = (self.x - other.x) * 30.0;
-        let dz = (self.z - other.z) * 30.0;
-        Meters::from((dx * dx + dz * dz).sqrt())
+        self.0.distance_xz(&other.0)
+    }
+}
+
+/// Linear velocity in m/s. Distinct from position so the two cannot be mixed.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct Velocity(pub Vec3);
+
+impl std::ops::Deref for Velocity {
+    type Target = Vec3;
+    fn deref(&self) -> &Vec3 {
+        &self.0
+    }
+}
+
+/// Angular velocity in rad/s.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct AngularVelocity(pub Vec3);
+
+impl std::ops::Deref for AngularVelocity {
+    type Target = Vec3;
+    fn deref(&self) -> &Vec3 {
+        &self.0
+    }
+}
+
+/// A heading/direction vector. Magnitude is domain-specific (e.g. torpedo
+/// direction magnitude is the speed in m/s).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct Direction(pub Vec3);
+
+impl std::ops::Deref for Direction {
+    type Target = Vec3;
+    fn deref(&self) -> &Vec3 {
+        &self.0
     }
 }
 
@@ -495,18 +670,30 @@ pub struct WorldPos2D {
 impl WorldPos2D {
     /// Promote to 3D with `y = 0.0`.
     pub fn to_world_pos(self) -> WorldPos {
-        WorldPos { x: self.x, y: 0.0, z: self.z }
+        WorldPos::new(self.x, 0.0, self.z)
     }
 }
 
 /// Normalized minimap position from MinimapUpdate packets.
 /// Values roughly in [-0.5, 1.5] range (centered around [0,1]).
+/// Serializes transparently as the inner `Vec2`.
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
-pub struct NormalizedPos {
-    pub x: f32,
-    pub y: f32,
+pub struct NormalizedPos(pub Vec2);
+
+impl NormalizedPos {
+    pub const fn new(x: f32, y: f32) -> NormalizedPos {
+        NormalizedPos(Vec2::new(x, y))
+    }
+}
+
+impl std::ops::Deref for NormalizedPos {
+    type Target = Vec2;
+    fn deref(&self) -> &Vec2 {
+        &self.0
+    }
 }
 
 // =============================================================================

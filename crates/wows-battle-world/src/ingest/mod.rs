@@ -194,7 +194,7 @@ pub fn dispatch<G: ResourceLoader>(
         }
         DecodedPacketPayload::EntityControl(_) => {}
         DecodedPacketPayload::NonVolatilePosition(sd) => {
-            let pos = WorldPos { x: sd.position.x, y: sd.position.y, z: sd.position.z };
+            let pos = WorldPos::new(sd.position.x, sd.position.y, sd.position.z);
             positions::handle_non_volatile_position(sd.entity_id, pos, world);
         }
         DecodedPacketPayload::PlayerNetStats(_) => {}

@@ -2472,7 +2472,7 @@ fn species_key(species: &Recognized<Species>) -> Option<String> {
 fn torpedo_position(torp: &TorpedoData, elapsed: f32) -> WorldPos {
     let maneuver = match torp.maneuver_dump {
         Some(ref m) => m,
-        None => return torp.origin + torp.direction * elapsed,
+        None => return WorldPos(*torp.origin + *torp.direction * elapsed),
     };
 
     let speed = (torp.direction.x * torp.direction.x + torp.direction.z * torp.direction.z).sqrt();
@@ -2484,7 +2484,7 @@ fn torpedo_position(torp: &TorpedoData, elapsed: f32) -> WorldPos {
     let yaw_delta = maneuver.target_yaw - initial_yaw;
     if yaw_delta.abs() < 1e-6 || maneuver.yaw_speed.abs() < 1e-6 {
         // No actual turn needed
-        return torp.origin + torp.direction * elapsed;
+        return WorldPos(*torp.origin + *torp.direction * elapsed);
     }
 
     let sign: f32 = if yaw_delta > 0.0 { 1.0 } else { -1.0 };
@@ -2497,25 +2497,25 @@ fn torpedo_position(torp: &TorpedoData, elapsed: f32) -> WorldPos {
         // z(t) = oz + (speed/w) * ( sin(initial_yaw + w*t) - sin(initial_yaw))
         let ratio = speed / w;
         let yaw_t = initial_yaw + w * elapsed;
-        WorldPos {
-            x: torp.origin.x + ratio * (-yaw_t.cos() + initial_yaw.cos()),
-            y: torp.origin.y,
-            z: torp.origin.z + ratio * (yaw_t.sin() - initial_yaw.sin()),
-        }
+        WorldPos::new(
+            torp.origin.x + ratio * (-yaw_t.cos() + initial_yaw.cos()),
+            torp.origin.y,
+            torp.origin.z + ratio * (yaw_t.sin() - initial_yaw.sin()),
+        )
     } else {
         // After the turn: compute turn endpoint, then extrapolate straight
         let ratio = speed / w;
-        let turn_end = WorldPos {
-            x: torp.origin.x + ratio * (-maneuver.target_yaw.cos() + initial_yaw.cos()),
-            y: torp.origin.y,
-            z: torp.origin.z + ratio * (maneuver.target_yaw.sin() - initial_yaw.sin()),
-        };
+        let turn_end = WorldPos::new(
+            torp.origin.x + ratio * (-maneuver.target_yaw.cos() + initial_yaw.cos()),
+            torp.origin.y,
+            torp.origin.z + ratio * (maneuver.target_yaw.sin() - initial_yaw.sin()),
+        );
         let straight_t = elapsed - turn_dur;
-        WorldPos {
-            x: turn_end.x + speed * maneuver.target_yaw.sin() * straight_t,
-            y: turn_end.y,
-            z: turn_end.z + speed * maneuver.target_yaw.cos() * straight_t,
-        }
+        WorldPos::new(
+            turn_end.x + speed * maneuver.target_yaw.sin() * straight_t,
+            turn_end.y,
+            turn_end.z + speed * maneuver.target_yaw.cos() * straight_t,
+        )
     }
 }
 

@@ -31,11 +31,11 @@ fn as_dict<'a, 'b>(
 
 fn extract_weather_position(value: &ArgValue<'_>) -> Option<WorldPos> {
     match value {
-        ArgValue::Vector2((x, z)) => Some(WorldPos { x: *x, y: 0.0, z: *z }),
+        ArgValue::Vector2((x, z)) => Some(WorldPos::new(*x, 0.0, *z)),
         ArgValue::Array(arr) if arr.len() >= 2 => {
             let x = arr[0].float_32_ref().copied().unwrap_or(0.0);
             let z = arr[1].float_32_ref().copied().unwrap_or(0.0);
-            Some(WorldPos { x, y: 0.0, z })
+            Some(WorldPos::new(x, 0.0, z))
         }
         _ => None,
     }
@@ -517,11 +517,11 @@ fn apply_smoke_points_update(
             }
             for (i, v) in values.iter().enumerate() {
                 let pos = match v {
-                    ArgValue::Vector3((x, y, z)) => Some(WorldPos { x: *x, y: *y, z: *z }),
-                    ArgValue::Vector2((x, z)) => Some(WorldPos { x: *x, y: 0.0, z: *z }),
+                    ArgValue::Vector3((x, y, z)) => Some(WorldPos::new(*x, *y, *z)),
+                    ArgValue::Vector2((x, z)) => Some(WorldPos::new(*x, 0.0, *z)),
                     ArgValue::Array(arr) if arr.len() >= 2 => {
                         match (arr[0].float_32_ref(), arr[1].float_32_ref()) {
-                            (Some(x), Some(z)) => Some(WorldPos { x: *x, y: 0.0, z: *z }),
+                            (Some(x), Some(z)) => Some(WorldPos::new(*x, 0.0, *z)),
                             _ => None,
                         }
                     }

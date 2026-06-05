@@ -6,7 +6,11 @@ use crate::types::AccountId;
 use crate::types::AvatarId;
 use crate::types::EntityId;
 use crate::types::GameParamId;
+use crate::types::AngularVelocity;
+use crate::types::Direction;
 use crate::types::NormalizedPos;
+use crate::types::Vec3;
+use crate::types::Velocity;
 use crate::types::PlaneId;
 use crate::types::ShotId;
 use crate::types::WorldPos;
@@ -838,7 +842,7 @@ pub struct TorpedoData {
     pub shot_id: ShotId,
     pub origin: WorldPos,
     /// Direction vector whose magnitude is the torpedo speed in m/s.
-    pub direction: WorldPos,
+    pub direction: Direction,
     /// Whether the torpedo warhead is armed (can detonate on contact).
     pub armed: bool,
     /// Homing torpedo maneuver state. None for straight-running torpedoes.
@@ -859,9 +863,9 @@ pub struct PhysicsBodyState {
     /// Orientation as a quaternion (x, y, z, w)
     pub orientation: [f32; 4],
     /// Linear velocity in m/s (x, y, z)
-    pub linear_velocity: WorldPos,
+    pub linear_velocity: Velocity,
     /// Angular velocity in rad/s (x, y, z)
-    pub angular_velocity: WorldPos,
+    pub angular_velocity: AngularVelocity,
     /// Unknown physics parameters (likely buoyancy/damping state)
     pub unknown1: [f32; 2],
     /// Unknown physics parameter (likely water damping coefficient)
@@ -878,10 +882,10 @@ impl PhysicsBodyState {
         let f = |offset: usize| -> f32 { f32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) };
         Some(PhysicsBodyState {
             elasticity: f(0x00),
-            position: WorldPos { x: f(0x04), y: f(0x08), z: f(0x0C) },
+            position: WorldPos::new(f(0x04), f(0x08), f(0x0C)),
             orientation: [f(0x10), f(0x14), f(0x18), f(0x1C)],
-            linear_velocity: WorldPos { x: f(0x20), y: f(0x24), z: f(0x28) },
-            angular_velocity: WorldPos { x: f(0x2C), y: f(0x30), z: f(0x34) },
+            linear_velocity: Velocity(Vec3::new(f(0x20), f(0x24), f(0x28))),
+            angular_velocity: AngularVelocity(Vec3::new(f(0x2C), f(0x30), f(0x34))),
             unknown1: [f(0x38), f(0x3C)],
             unknown2: f(0x40),
         })
@@ -920,7 +924,7 @@ pub struct TerminalBallisticsInfo {
     /// Shell velocity vector after server-side impact processing (post-impact, not incoming).
     /// Used by the game client to spawn a visual FakeShot showing the shell exiting/bouncing.
     /// For ricochets this is the bounce direction; for overpens the exit direction.
-    pub velocity: WorldPos,
+    pub velocity: Velocity,
     /// Whether the AP detonator has been activated (fuse armed).
     pub detonator_activated: bool,
     /// Angle between the shell trajectory and the armor plate normal (radians).
@@ -1537,17 +1541,22 @@ where
         }
     }
 
-    fn extract_vec3(val: Option<&ArgValue>) -> WorldPos {
+    fn extract_vec3(val: Option<&ArgValue>) -> Vec3 {
         match val {
-            Some(ArgValue::Vector3((x, y, z))) => WorldPos { x: *x, y: *y, z: *z },
+            Some(ArgValue::Vector3((x, y, z))) => Vec3::new(*x, *y, *z),
             Some(ArgValue::Array(a)) if a.len() >= 3 => {
                 let x: f32 = (&a[0]).try_into().unwrap_or(0.0);
                 let y: f32 = (&a[1]).try_into().unwrap_or(0.0);
                 let z: f32 = (&a[2]).try_into().unwrap_or(0.0);
-                WorldPos { x, y, z }
+                Vec3::new(x, y, z)
             }
-            _ => WorldPos::default(),
+            _ => Vec3::default(),
         }
+    }
+
+    /// Extract a world-space position from a packet argument.
+    fn extract_world_pos(val: Option<&ArgValue>) -> WorldPos {
+        WorldPos(Self::extract_vec3(val))
     }
 
     fn from_entity_method(
@@ -2015,7 +2024,7 @@ where
                         ArgValue::Uint32(u) => EntityId::from(*u),
                         _ => panic!(),
                     },
-                    position: NormalizedPos { x, y },
+                    position: NormalizedPos::new(x, y),
                     heading,
                     is_sentinel,
                     disappearing: update.is_disappearing(),
@@ -2145,10 +2154,10 @@ where
                         ArgValue::FixedDict(m) => m,
                         _ => continue,
                     };
-                    let pos = Self::extract_vec3(shot_dict.get("pos"));
+                    let pos = Self::extract_world_pos(shot_dict.get("pos"));
                     let pitch: f32 = shot_dict.get("pitch").and_then(ArgValue::as_f32).unwrap_or(0.0);
                     let speed: f32 = shot_dict.get("speed").and_then(ArgValue::as_f32).unwrap_or(0.0);
-                    let tar_pos = Self::extract_vec3(shot_dict.get("tarPos"));
+                    let tar_pos = Self::extract_world_pos(shot_dict.get("tarPos"));
                     let shot_id: u32 = shot_dict.get("shotID").and_then(ArgValue::as_u32).unwrap_or(0);
                     let gun_barrel_id: u16 = match shot_dict.get("gunBarrelID") {
                         Some(ArgValue::Uint16(v)) => *v,
@@ -2204,8 +2213,8 @@ where
                         ArgValue::FixedDict(m) => m,
                         _ => continue,
                     };
-                    let pos = Self::extract_vec3(torp_dict.get("pos"));
-                    let dir = Self::extract_vec3(torp_dict.get("dir"));
+                    let pos = Self::extract_world_pos(torp_dict.get("pos"));
+                    let dir = Direction(Self::extract_vec3(torp_dict.get("dir")));
                     let shot_id: u32 = torp_dict.get("shotID").and_then(ArgValue::as_u32).unwrap_or(0);
                     let armed = match torp_dict.get("armed") {
                         Some(ArgValue::Uint8(v)) => *v != 0,
@@ -2224,8 +2233,8 @@ where
                             stop_time: d.get("stopTime").and_then(ArgValue::as_f32).unwrap_or(0.0),
                             current_time: d.get("currentTime").and_then(ArgValue::as_f32).unwrap_or(0.0),
                             yaw_speed: d.get("yawSpeed").and_then(ArgValue::as_f32).unwrap_or(0.0),
-                            arm_pos: Self::extract_vec3(d.get("armPos")),
-                            final_pos: Self::extract_vec3(d.get("finalPos")),
+                            arm_pos: Self::extract_world_pos(d.get("armPos")),
+                            final_pos: Self::extract_world_pos(d.get("finalPos")),
                         })
                     });
                     let acoustic_dump = torp_dict.get("acousticDump").and_then(|v| {
@@ -2303,15 +2312,15 @@ where
                         _ => continue,
                     };
                     let shot_id: u32 = kill_dict.get("shotID").and_then(ArgValue::as_u32).unwrap_or(0);
-                    let pos = Self::extract_vec3(kill_dict.get("pos"));
+                    let pos = Self::extract_world_pos(kill_dict.get("pos"));
                     let terminal_ballistics = kill_dict.get("terminalBallisticsInfo").and_then(|v| {
                         let d = match v {
                             ArgValue::FixedDict(d) => d,
                             ArgValue::NullableFixedDict(Some(d)) => d,
                             _ => return None,
                         };
-                        let position = Self::extract_vec3(d.get("position"));
-                        let velocity = Self::extract_vec3(d.get("velocity"));
+                        let position = Self::extract_world_pos(d.get("position"));
+                        let velocity = Velocity(Self::extract_vec3(d.get("velocity")));
                         let detonator_activated = match d.get("detonatorActivated") {
                             Some(ArgValue::Uint8(v)) => *v != 0,
                             Some(ArgValue::Int8(v)) => *v != 0,
@@ -2341,7 +2350,7 @@ where
             let Some(shot_id) = args.get(1).and_then(|a| a.as_u32()).map(ShotId::from) else {
                 return DecodedPacketPayload::EntityMethod(packet);
             };
-            let position = Self::extract_vec3(args.get(2));
+            let position = Self::extract_world_pos(args.get(2));
             let target_yaw = match args.get(3) {
                 Some(ArgValue::Float32(v)) => *v,
                 _ => return DecodedPacketPayload::EntityMethod(packet),
@@ -2433,12 +2442,12 @@ where
                 _ => return DecodedPacketPayload::EntityMethod(packet),
             };
             let position = match &args[1] {
-                ArgValue::Vector3((x, y, z)) => WorldPos { x: *x, y: *y, z: *z },
+                ArgValue::Vector3((x, y, z)) => WorldPos::new(*x, *y, *z),
                 ArgValue::Array(a) if a.len() >= 3 => {
                     let x: f32 = (&a[0]).try_into().unwrap_or(0.0);
                     let y: f32 = (&a[1]).try_into().unwrap_or(0.0);
                     let z: f32 = (&a[2]).try_into().unwrap_or(0.0);
-                    WorldPos { x, y, z }
+                    WorldPos::new(x, y, z)
                 }
                 _ => return DecodedPacketPayload::EntityMethod(packet),
             };

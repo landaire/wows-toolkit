@@ -120,7 +120,7 @@ fn handle_building_create(_clock: GameClock, packet: &EntityCreatePacket<'_>, wo
         params_id = v.uint_32_ref().copied().unwrap_or(0);
     }
 
-    let position = WorldPos { x: packet.position.x, y: packet.position.y, z: packet.position.z };
+    let position = WorldPos::new(packet.position.x, packet.position.y, packet.position.z);
     let state = BuildingState {
         position,
         is_alive,
@@ -141,7 +141,7 @@ fn handle_smoke_create(packet: &EntityCreatePacket<'_>, world: &mut World) {
     let radius = BigWorldDistance::from(
         packet.props.get("radius").and_then(|v| v.float_32_ref().copied()).unwrap_or(0.0),
     );
-    let position = WorldPos { x: packet.position.x, y: packet.position.y, z: packet.position.z };
+    let position = WorldPos::new(packet.position.x, packet.position.y, packet.position.z);
     let state = SmokeScreenState { radius, position, points: vec![position] };
 
     let entity = spawn_or_get(world, packet.entity_id);
@@ -199,7 +199,7 @@ fn handle_interactive_zone_create(
     };
     use wows_replays::analyzer::decoder::Recognized;
 
-    let position = WorldPos { x: packet.position.x, y: packet.position.y, z: packet.position.z };
+    let position = WorldPos::new(packet.position.x, packet.position.y, packet.position.z);
     let radius = packet.props.get("radius").and_then(|v| v.float_32_ref().copied()).unwrap_or(0.0);
     let team_id = packet.props.get("teamId").and_then(|v| v.as_i64()).unwrap_or(-1);
 
@@ -605,9 +605,9 @@ fn parse_legacy_control_point(
 
     let dict = as_dict(entry)?;
     let position = match dict.get("position") {
-        Some(ArgValue::Vector2((x, z))) => Some(WorldPos { x: *x, y: 0.0, z: *z }),
+        Some(ArgValue::Vector2((x, z))) => Some(WorldPos::new(*x, 0.0, *z)),
         Some(ArgValue::Array(p)) if p.len() >= 2 => {
-            Some(WorldPos { x: p[0].as_f32().unwrap_or(0.0), y: 0.0, z: p[1].as_f32().unwrap_or(0.0) })
+            Some(WorldPos::new(p[0].as_f32().unwrap_or(0.0), 0.0, p[1].as_f32().unwrap_or(0.0)))
         }
         _ => None,
     };

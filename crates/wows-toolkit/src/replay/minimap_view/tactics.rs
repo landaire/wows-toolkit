@@ -2508,7 +2508,7 @@ fn draw_cap_point(
     render_cap_point(painter, transform, map_info, &cap.view());
 
     if selected {
-        let world_pos = WorldPos { x: cap.world_x, y: 0.0, z: cap.world_z };
+        let world_pos = WorldPos::new(cap.world_x, 0.0, cap.world_z);
         let minimap_pos = map_info.world_to_minimap(world_pos, MINIMAP_SIZE);
         let center = transform.minimap_to_screen(&minimap_pos);
         let radius_minimap = map_info.world_distance_to_minimap(cap.radius, MINIMAP_SIZE);
@@ -2577,7 +2577,7 @@ fn hit_test_cap_drag(
 
 /// Get the screen-space center of a cap point.
 fn cap_screen_center(cap: &TacticsCapPoint, transform: &MapTransform, map_info: &MapInfo) -> Pos2 {
-    let world_pos = WorldPos { x: cap.world_x, y: 0.0, z: cap.world_z };
+    let world_pos = WorldPos::new(cap.world_x, 0.0, cap.world_z);
     let minimap_pos = map_info.world_to_minimap(world_pos, MINIMAP_SIZE);
     transform.minimap_to_screen(&minimap_pos)
 }

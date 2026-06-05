@@ -272,7 +272,7 @@ pub fn cap_point_colors(team_id: i64) -> (Color32, Color32) {
 /// Does NOT draw selection handles — callers that need selection visuals should
 /// draw them separately after calling this function.
 pub fn render_cap_point(painter: &egui::Painter, transform: &MapTransform, map_info: &MapInfo, cap: &CapPointView) {
-    let world_pos = WorldPos { x: cap.world_x, y: 0.0, z: cap.world_z };
+    let world_pos = WorldPos::new(cap.world_x, 0.0, cap.world_z);
     let minimap_pos = map_info.world_to_minimap(world_pos, MINIMAP_SIZE);
     let center = transform.minimap_to_screen(&minimap_pos);
     let radius_minimap = map_info.world_distance_to_minimap(cap.radius, MINIMAP_SIZE);

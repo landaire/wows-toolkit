@@ -16,7 +16,9 @@ use wows_replays::analyzer::decoder::TorpedoData;
 use wows_replays::types::AvatarId;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
+use wowsunpack::game_types::Direction;
 use wowsunpack::game_types::ShotId;
+use wowsunpack::game_types::Vec3;
 use wowsunpack::game_types::WorldPos;
 
 use crate::components::GameId;
@@ -107,11 +109,10 @@ pub fn handle_torpedo_direction(
     let speed = base_speed * speed_coef;
     torpedo.origin = position;
     if (target_yaw - std::f32::consts::TAU).abs() > 0.01 {
-        torpedo.direction =
-            WorldPos { x: speed * target_yaw.sin(), y: 0.0, z: speed * target_yaw.cos() };
+        torpedo.direction = Direction(Vec3::new(speed * target_yaw.sin(), 0.0, speed * target_yaw.cos()));
     } else if (speed_coef - 1.0).abs() > 1e-6 {
-        let dir_norm = torpedo.direction * (1.0 / base_speed);
-        torpedo.direction = dir_norm * speed;
+        let dir_norm = torpedo.direction.0 * (1.0 / base_speed);
+        torpedo.direction = Direction(dir_norm * speed);
     }
     torpedo.maneuver_dump = None;
     *updated_at = clock;

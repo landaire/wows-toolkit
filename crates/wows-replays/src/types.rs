@@ -1,6 +1,8 @@
 pub use wowsunpack::game_types::AccountId;
+pub use wowsunpack::game_types::AngularVelocity;
 pub use wowsunpack::game_types::ArenaId;
 pub use wowsunpack::game_types::AvatarId;
+pub use wowsunpack::game_types::Direction;
 pub use wowsunpack::game_types::ElapsedClock;
 pub use wowsunpack::game_types::EntityId;
 pub use wowsunpack::game_types::GameClock;
@@ -10,6 +12,9 @@ pub use wowsunpack::game_types::PlaneId;
 pub use wowsunpack::game_types::Relation;
 pub use wowsunpack::game_types::ShotId;
 pub use wowsunpack::game_types::TeamId;
+pub use wowsunpack::game_types::Vec2;
+pub use wowsunpack::game_types::Vec3;
+pub use wowsunpack::game_types::Velocity;
 pub use wowsunpack::game_types::WeaponLockType;
 pub use wowsunpack::game_types::WeaponType;
 pub use wowsunpack::game_types::WorldPos;

@@ -20,7 +20,7 @@ use crate::units::{Degrees, Radians, VisibilityFlags};
 pub fn handle_position(pos: &PositionPacket, world: &mut World, clock: GameClock) {
     let entity = spawn_or_get(world, pos.pid);
     let t = Transform3d {
-        pos: WorldPos { x: pos.position.x, y: pos.position.y, z: pos.position.z },
+        pos: WorldPos::new(pos.position.x, pos.position.y, pos.position.z),
         yaw: Radians(pos.rotation.yaw),
         pitch: Radians(pos.rotation.pitch),
         roll: Radians(pos.rotation.roll),
@@ -45,7 +45,7 @@ pub fn handle_player_orientation(
     }
     let entity = spawn_or_get(world, orient.pid);
     let t = Transform3d {
-        pos: WorldPos { x: orient.position.x, y: orient.position.y, z: orient.position.z },
+        pos: WorldPos::new(orient.position.x, orient.position.y, orient.position.z),
         yaw: Radians(orient.rotation.yaw),
         pitch: Radians(orient.rotation.pitch),
         roll: Radians(orient.rotation.roll),
