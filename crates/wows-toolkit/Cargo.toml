@@ -43,6 +43,7 @@ wowsunpack = { workspace = true, features = [
 ] }
 bytemuck = { workspace = true }
 wows_minimap_renderer = { workspace = true, features = ["vulkan", "videotoolbox", "cpu", "arc", "rkyv"] }
+wows-battle-world = { workspace = true }
 wt-translations = { workspace = true }
 rfd = "0.17"
 humansize = "2.1.3"

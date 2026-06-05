@@ -82,9 +82,10 @@ use tracing::debug;
 use tracing::error;
 use wows_replays::ReplayFile;
 use wows_replays::VehicleInfoMeta;
+use wows_battle_world::BattleWorld;
+use wows_battle_world::merged::MergedReplays;
+use wows_battle_world::report::BattleReport;
 use wows_replays::analyzer::Analyzer;
-use wows_replays::analyzer::battle_controller::BattleController;
-use wows_replays::analyzer::battle_controller::BattleReport;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::GameMessage;
@@ -3031,7 +3032,7 @@ impl Replay {
         );
         if self.alt_replays.is_empty() {
             // Single-replay fast path — no merger involved.
-            let mut controller = BattleController::new(
+            let mut world = BattleWorld::new(
                 &self.replay_file.meta,
                 self.resource_loader.as_ref(),
                 self.game_constants.as_deref(),
@@ -3041,24 +3042,24 @@ impl Replay {
             let mut remaining = self.replay_file.packet_data.as_slice();
             while !remaining.is_empty() {
                 match p.parse_packet(&mut remaining) {
-                    Ok(packet) => controller.process(&packet),
+                    Ok(packet) => world.process(&packet),
                     Err(e) => {
                         debug!("Packet parse error: {:?}", e);
                         break;
                     }
                 }
             }
-            controller.finish();
-            return Ok(controller.build_report());
+            world.finish();
+            return Ok(world.into_report());
         }
 
-        // Merge path — fold alt perspectives into a single controller via
+        // Merge path — fold alt perspectives into a single world via
         // MergedReplays so the report sees through fog of war.
         let game_constants = self
             .game_constants
             .as_deref()
             .ok_or_else(|| rootcause::report!("game constants required to merge alt-perspective replays"))?;
-        let mut session = wows_replays::analyzer::battle_controller::merged::MergedReplays::new(
+        let mut session = MergedReplays::new(
             self.resource_loader.entity_specs(),
             self.resource_loader.as_ref(),
             game_constants,
@@ -3069,9 +3070,7 @@ impl Replay {
         .map_err(|e| rootcause::report!("{e}"))?;
         while session.step().map_err(|e| rootcause::report!("{e}"))?.is_some() {}
         session.finish();
-        let mut controller = session.into_controller();
-        controller.finish();
-        Ok(controller.build_report())
+        Ok(session.into_world().into_report())
     }
 
     pub fn build_ui_report(&mut self, deps: &crate::data::wows_data::ReplayDependencies) {

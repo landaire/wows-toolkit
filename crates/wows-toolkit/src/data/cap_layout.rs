@@ -8,11 +8,10 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use tracing::warn;
+use wows_battle_world::BattleWorld;
 use wows_replays::ReplayFile;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::Analyzer;
-use wows_replays::analyzer::battle_controller::BattleController;
-use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 use wows_replays::analyzer::battle_controller::state::CapturePointState;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::packet2::Parser;
@@ -158,8 +157,8 @@ pub fn extract_cap_layout_from_replay<G: ResourceLoader>(
         }
     };
 
-    let mut controller = BattleController::new(&replay_file.meta, resource_loader, game_constants);
-    controller.set_track_shots(false);
+    let mut world = BattleWorld::new(&replay_file.meta, resource_loader, game_constants);
+    world.set_shot_tracking(wows_battle_world::ids::ShotTracking::Untracked);
 
     let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
     let mut parser = Parser::with_version(resource_loader.entity_specs(), replay_version);
@@ -172,13 +171,13 @@ pub fn extract_cap_layout_from_replay<G: ResourceLoader>(
                 if packet.clock.0 > 0.0 {
                     break;
                 }
-                controller.process(&packet);
+                world.process(&packet);
             }
             Err(_) => break,
         }
     }
 
-    extract_cap_layout_from_controller(&replay_file.meta, controller.capture_points())
+    extract_cap_layout_from_controller(&replay_file.meta, &world.capture_points())
 }
 
 // CapLayoutDb methods

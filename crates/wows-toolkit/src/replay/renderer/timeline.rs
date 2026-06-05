@@ -2,10 +2,9 @@ use std::collections::HashMap;
 
 use egui::Color32;
 
+use wows_battle_world::BattleWorld;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
-use wows_replays::analyzer::battle_controller::BattleController;
-use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 use wows_replays::analyzer::decoder::Consumable;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::types::ElapsedClock;
@@ -158,7 +157,7 @@ pub(super) fn extract_timeline_events(
     game_constants: Option<&GameConstants>,
 ) -> TimelineExtractionResult {
     let mut events = Vec::new();
-    let mut controller = BattleController::new(&replay_file.meta, game_metadata, game_constants);
+    let mut controller = BattleWorld::new(&replay_file.meta, game_metadata, game_constants);
     let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
     let mut parser = wows_replays::packet2::Parser::with_version(game_metadata.entity_specs(), replay_version);
 
@@ -230,43 +229,39 @@ pub(super) fn extract_timeline_events(
                     let clock = prev_clock;
 
                     // --- Health loss detection ---
-                    for (entity_id, entity) in controller.entities_by_id() {
-                        if let Some(vehicle_rc) = entity.vehicle_ref() {
-                            let vehicle = vehicle_rc.borrow();
-                            let props = vehicle.props();
-                            let current_health = props.health();
-                            let max_health = props.max_health();
+                    for (entity_id, props) in controller.vehicle_props_all() {
+                        let current_health = props.health();
+                        let max_health = props.max_health();
 
-                            if max_health <= 0.0 {
-                                continue;
-                            }
+                        if max_health <= 0.0 {
+                            continue;
+                        }
 
-                            if let Some((window_start, health_at_start)) = health_windows.get_mut(entity_id) {
-                                if clock - *window_start >= 3.0 {
-                                    let loss = (*health_at_start - current_health) / max_health;
-                                    if loss > 0.25 {
-                                        let sname = ship_names.get(entity_id).cloned().unwrap_or_default();
-                                        let pname = player_names.get(entity_id).cloned().unwrap_or_default();
-                                        let friendly = is_friendly.get(entity_id).copied().unwrap_or(false);
-                                        events.push(TimelineEvent {
-                                            clock: ElapsedClock(clock.seconds()),
-                                            kind: TimelineEventKind::HealthLost {
-                                                ship_name: sname,
-                                                player_name: pname,
-                                                is_friendly: friendly,
-                                                percent_lost: loss,
-                                                old_hp: *health_at_start,
-                                                new_hp: current_health,
-                                                max_hp: max_health,
-                                            },
-                                        });
-                                    }
-                                    *window_start = clock;
-                                    *health_at_start = current_health;
+                        if let Some((window_start, health_at_start)) = health_windows.get_mut(&entity_id) {
+                            if clock - *window_start >= 3.0 {
+                                let loss = (*health_at_start - current_health) / max_health;
+                                if loss > 0.25 {
+                                    let sname = ship_names.get(&entity_id).cloned().unwrap_or_default();
+                                    let pname = player_names.get(&entity_id).cloned().unwrap_or_default();
+                                    let friendly = is_friendly.get(&entity_id).copied().unwrap_or(false);
+                                    events.push(TimelineEvent {
+                                        clock: ElapsedClock(clock.seconds()),
+                                        kind: TimelineEventKind::HealthLost {
+                                            ship_name: sname,
+                                            player_name: pname,
+                                            is_friendly: friendly,
+                                            percent_lost: loss,
+                                            old_hp: *health_at_start,
+                                            new_hp: current_health,
+                                            max_hp: max_health,
+                                        },
+                                    });
                                 }
-                            } else if props.is_alive() {
-                                health_windows.insert(*entity_id, (clock, current_health));
+                                *window_start = clock;
+                                *health_at_start = current_health;
                             }
+                        } else if props.is_alive() {
+                            health_windows.insert(entity_id, (clock, current_health));
                         }
                     }
 
@@ -361,11 +356,11 @@ pub(super) fn extract_timeline_events(
                     for (entity_id, consumables) in controller.active_consumables() {
                         let radar_count =
                             consumables.iter().filter(|c| c.consumable == Recognized::Known(Consumable::Radar)).count();
-                        let prev_count = radar_counts.get(entity_id).copied().unwrap_or(0);
+                        let prev_count = radar_counts.get(&entity_id).copied().unwrap_or(0);
                         if radar_count > prev_count {
-                            let sname = ship_names.get(entity_id).cloned().unwrap_or_default();
-                            let pname = player_names.get(entity_id).cloned().unwrap_or_default();
-                            let friendly = is_friendly.get(entity_id).copied().unwrap_or(false);
+                            let sname = ship_names.get(&entity_id).cloned().unwrap_or_default();
+                            let pname = player_names.get(&entity_id).cloned().unwrap_or_default();
+                            let friendly = is_friendly.get(&entity_id).copied().unwrap_or(false);
                             events.push(TimelineEvent {
                                 clock: ElapsedClock(clock.seconds()),
                                 kind: TimelineEventKind::RadarUsed {
@@ -375,7 +370,7 @@ pub(super) fn extract_timeline_events(
                                 },
                             });
                         }
-                        radar_counts.insert(*entity_id, radar_count);
+                        radar_counts.insert(entity_id, radar_count);
                     }
 
                     // --- Advantage change detection (check every ~3 seconds) ---
@@ -384,8 +379,13 @@ pub(super) fn extract_timeline_events(
 
                         let viewer_team = viewer_team_id.unwrap_or(0);
                         let swap = viewer_team == 1;
-                        let players = controller.player_entities();
-                        let entities = controller.entities_by_id();
+                        // Snapshot players before vehicle_props_all (&mut borrow).
+                        let players: Vec<(wows_replays::types::EntityId, wows_replays::Rc<wows_replays::analyzer::battle_controller::Player>)> = controller
+                            .player_entities()
+                            .iter()
+                            .map(|(id, p)| (*id, wows_replays::Rc::clone(p)))
+                            .collect();
+                        let all_vehicle_props = controller.vehicle_props_all();
 
                         let mut teams = [
                             TeamState {
@@ -435,17 +435,13 @@ pub(super) fn extract_timeline_events(
                             }
                         }
 
-                        for (entity_id, player) in players {
+                        for (entity_id, player) in &players {
                             let team = player.initial_state().team_id() as usize;
                             if team > 1 {
                                 continue;
                             }
                             teams[team].ships_total += 1;
-                            if let Some(entity) = entities.get(entity_id)
-                                && let Some(vehicle) = entity.vehicle_ref()
-                            {
-                                let v = vehicle.borrow();
-                                let props = v.props();
+                            if let Some(props) = all_vehicle_props.get(entity_id) {
                                 teams[team].ships_known += 1;
                                 teams[team].max_hp += props.max_health();
                                 if props.is_alive() {
@@ -558,23 +554,19 @@ pub(super) fn extract_timeline_events(
                 }
 
                 // --- Health history snapshots (on every change) ---
-                for (entity_id, entity) in controller.entities_by_id() {
-                    if let Some(vehicle_rc) = entity.vehicle_ref() {
-                        let vehicle = vehicle_rc.borrow();
-                        let props = vehicle.props();
-                        let current_hp = props.health();
-                        let max_hp = props.max_health();
-                        if max_hp <= 0.0 {
-                            continue;
-                        }
-                        let prev_hp = last_health.get(entity_id).copied();
-                        if prev_hp.is_none() || (current_hp - prev_hp.unwrap()).abs() > 0.1 {
-                            last_health.insert(*entity_id, current_hp);
-                            health_histories
-                                .entry(*entity_id)
-                                .or_default()
-                                .insert(packet.clock, HealthSnapshot { health: current_hp, max_health: max_hp });
-                        }
+                for (entity_id, props) in controller.vehicle_props_all() {
+                    let current_hp = props.health();
+                    let max_hp = props.max_health();
+                    if max_hp <= 0.0 {
+                        continue;
+                    }
+                    let prev_hp = last_health.get(&entity_id).copied();
+                    if prev_hp.is_none() || (current_hp - prev_hp.unwrap()).abs() > 0.1 {
+                        last_health.insert(entity_id, current_hp);
+                        health_histories
+                            .entry(entity_id)
+                            .or_default()
+                            .insert(packet.clock, HealthSnapshot { health: current_hp, max_health: max_hp });
                     }
                 }
             }
@@ -630,8 +622,6 @@ pub(super) fn extract_all_shots(
     shot_count_hints: &HashMap<EntityId, ShotCountHints>,
     health_histories: HashMap<EntityId, std::collections::BTreeMap<GameClock, HealthSnapshot>>,
 ) -> HashMap<EntityId, ShipShotTimeline> {
-    use wows_replays::analyzer::battle_controller::BattleController;
-
     let replay_file = match ReplayFile::from_decrypted_parts(raw_meta.to_vec(), packet_data.to_vec()) {
         Ok(rf) => rf,
         Err(e) => {
@@ -639,8 +629,8 @@ pub(super) fn extract_all_shots(
             return HashMap::new();
         }
     };
-    let mut controller = BattleController::new(&replay_file.meta, game_metadata, game_constants);
-    // shot tracking ON (default)
+    let mut controller = BattleWorld::new(&replay_file.meta, game_metadata, game_constants);
+    // shot tracking is ON by default (ShotTracking::Tracked)
     let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
     let mut parser = wows_replays::packet2::Parser::with_version(game_metadata.entity_specs(), replay_version);
 

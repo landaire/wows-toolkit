@@ -11404,6 +11404,7 @@ dependencies = [
  "web-time",
  "wgpu",
  "winresource",
+ "wows-battle-world",
  "wows-data-mgr",
  "wows-replay-insights",
  "wows_minimap_renderer",

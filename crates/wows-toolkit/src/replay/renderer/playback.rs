@@ -6,14 +6,14 @@ use std::sync::mpsc;
 
 use parking_lot::Mutex;
 
+use wows_battle_world::BattleWorld;
+use wows_battle_world::ids::ShotTracking;
+use wows_battle_world::merged::MergedReplays;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::renderer::RenderOptions;
 
 use wows_replays::ReplayFile;
-use wows_replays::analyzer::battle_controller::BattleController;
-use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
-use wows_replays::analyzer::battle_controller::merged::MergedReplays;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
@@ -236,7 +236,7 @@ pub(super) fn playback_thread(
             return;
         }
     };
-    session.controller_mut().set_track_shots(false); // No shot data needed for frame building
+    session.world_mut().set_shot_tracking(ShotTracking::Untracked); // No shot data needed for frame building
 
     // Parse all packets, tracking frame boundaries
     let frame_duration = 1.0 / SNAPSHOTS_PER_SECOND;
@@ -260,14 +260,18 @@ pub(super) fn playback_thread(
             }
         };
         if step.0 > prev_clock.0 {
-            renderer.populate_players(session.controller());
-            renderer.update_squadron_info(session.controller());
-            renderer.update_ship_abilities(session.controller());
+            {
+                let view = session.world_mut().view();
+                renderer.populate_players(&view);
+                renderer.update_squadron_info(&view);
+                renderer.update_ship_abilities(&view);
+            }
 
             let target_frame = (prev_clock.seconds() / frame_duration) as i64;
             while last_rendered_frame < target_frame {
                 last_rendered_frame += 1;
-                let commands = renderer.draw_frame(session.controller());
+                let view = session.world_mut().view();
+                let commands = renderer.draw_frame(&view);
                 frame_snapshots.push(FrameSnapshot { clock: prev_clock });
 
                 // Store the first frame immediately (and broadcast if session is active).
@@ -303,9 +307,10 @@ pub(super) fn playback_thread(
 
     // Final tick
     if prev_clock.seconds() > 0.0 {
-        renderer.populate_players(session.controller());
-        renderer.update_squadron_info(session.controller());
-        renderer.update_ship_abilities(session.controller());
+        let view = session.world_mut().view();
+        renderer.populate_players(&view);
+        renderer.update_squadron_info(&view);
+        renderer.update_ship_abilities(&view);
         let target_frame = (prev_clock.seconds() / frame_duration) as i64;
         while last_rendered_frame < target_frame {
             last_rendered_frame += 1;
@@ -344,7 +349,7 @@ pub(super) fn playback_thread(
     // invariant during a battle, so this snapshot stays valid for the
     // session's entire lifetime — later live refreshes only fill in the
     // (rare) gaps the lookahead missed.
-    let initial_builds = snapshot_player_builds(session.controller(), &game_metadata, version, |_| true);
+    let initial_builds = snapshot_player_builds(session.world_mut(), &game_metadata, version, |_| true);
     if !initial_builds.is_empty() {
         let mut s = shared_state.lock();
         for (eid, display) in initial_builds {
@@ -496,10 +501,10 @@ pub(super) fn playback_thread(
             &cancel_step,
         );
         live_clock = outcome.final_clock;
-        populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
+        populate_bridge_players(live_session.world_mut(), &game_metadata, &armor_bridges);
         finalize_bridge_staging(&armor_bridges, staging, true);
         wows_replay_insights::build::seed_consumable_inventories_from_facts(
-            live_session.controller_mut(),
+            live_session.world_mut(),
             &vehicle_facts,
             &*game_metadata,
             version,
@@ -554,10 +559,10 @@ pub(super) fn playback_thread(
         }
     }
 
-    /// Extract new shot hits from the controller and push them into staging vecs.
-    /// `hit_cursor` tracks how many hits have already been processed.
+    /// Extract new shot hits from the world and push them into staging vecs.
+    /// `hit_cursor` tracks how many hits have already been processed per packet.
     fn push_shot_hits_to_staging(
-        controller: &BattleController<'_, '_, GameMetadataProvider>,
+        world: &BattleWorld<'_, '_, GameMetadataProvider>,
         staging: &mut [BridgeStaging],
         hit_cursor: &mut usize,
     ) {
@@ -565,11 +570,11 @@ pub(super) fn playback_thread(
             return;
         }
 
-        let all_hits = controller.shot_hits();
+        let all_hits = world.shot_hits();
         let new_count = all_hits.len();
 
-        // The controller clears shot_hits each clock tick, so reset the cursor
-        // whenever the list shrinks.
+        // shot_hits is cleared each packet, so reset the cursor whenever
+        // the list shrinks (new packet started).
         if new_count < *hit_cursor {
             *hit_cursor = 0;
         }
@@ -600,24 +605,30 @@ pub(super) fn playback_thread(
 
     /// Populate player info on all armor bridges from the controller.
     fn populate_bridge_players(
-        controller: &BattleController<'_, '_, GameMetadataProvider>,
+        world: &mut BattleWorld<'_, '_, GameMetadataProvider>,
         game_metadata: &GameMetadataProvider,
         bridges: &[Arc<Mutex<RealtimeArmorBridge>>],
     ) {
         if bridges.is_empty() {
             return;
         }
-        let players = controller.player_entities();
-        if players.is_empty() {
+        // Snapshot player list to release the &self borrow before calling vehicle_props (&mut self).
+        let player_snapshot: Vec<(EntityId, wows_replays::Rc<wows_replays::analyzer::battle_controller::Player>)> = world
+            .player_entities()
+            .iter()
+            .map(|(eid, p)| (*eid, wows_replays::Rc::clone(p)))
+            .collect();
+        if player_snapshot.is_empty() {
             return;
         }
+        let all_props = world.vehicle_props_all();
 
-        let player_infos: Vec<ReplayPlayerInfo> = players
+        let player_infos: Vec<ReplayPlayerInfo> = player_snapshot
             .iter()
             .map(|(eid, player)| {
                 let display_name = game_metadata.localized_name_from_param(player.vehicle()).unwrap_or_default();
                 let team_id = player.initial_state().team_id();
-                let hull_param_id = player.vehicle_entity().and_then(|ve| ve.props().ship_config().hull());
+                let hull_param_id = all_props.get(eid).and_then(|props| props.ship_config().hull());
                 ReplayPlayerInfo {
                     entity_id: *eid,
                     username: player.initial_state().username().to_string(),
@@ -695,13 +706,13 @@ pub(super) fn playback_thread(
                 break;
             }
             if step.0 > prev_clock.0 && prev_clock.seconds() > 0.0 {
-                let controller = session.controller();
-                renderer.populate_players(controller);
-                renderer.update_squadron_info(controller);
-                renderer.update_ship_abilities(controller);
-                let dead_ships = controller.dead_ships();
-                let minimap_positions = controller.minimap_positions();
-                renderer.record_positions(controller, prev_clock, |eid| {
+                let view = session.world_mut().view();
+                renderer.populate_players(&view);
+                renderer.update_squadron_info(&view);
+                renderer.update_ship_abilities(&view);
+                let dead_ships = view.dead_ships();
+                let minimap_positions = view.minimap_positions();
+                renderer.record_positions(&view, prev_clock, |eid| {
                     if let Some(dead) = dead_ships.get(eid)
                         && prev_clock >= dead.clock
                     {
@@ -711,7 +722,7 @@ pub(super) fn playback_thread(
                 });
             }
             prev_clock = step;
-            push_shot_hits_to_staging(session.controller(), staging, hit_cursor);
+            push_shot_hits_to_staging(session.world(), staging, hit_cursor);
         }
 
         // Always leave the flag cleared on exit so a stale "true" set
@@ -719,10 +730,10 @@ pub(super) fn playback_thread(
         cancel.store(false, Ordering::Relaxed);
 
         if !cancelled {
-            let controller = session.controller();
-            renderer.populate_players(controller);
-            renderer.update_squadron_info(controller);
-            renderer.update_ship_abilities(controller);
+            let view = session.world_mut().view();
+            renderer.populate_players(&view);
+            renderer.update_squadron_info(&view);
+            renderer.update_ship_abilities(&view);
         }
 
         StepOutcome { final_clock: prev_clock, cancelled }
@@ -749,8 +760,8 @@ pub(super) fn playback_thread(
     // battle end), so we look up the live VehicleEntity through
     // `entities_by_id` and call `ResolvedBuild::from_ids` directly.
     let refresh_player_builds =
-        |state: &Arc<Mutex<SharedRendererState>>, controller: &BattleController<'_, '_, GameMetadataProvider>| {
-            let new_entries = snapshot_player_builds(controller, &game_metadata, version, |eid| {
+        |state: &Arc<Mutex<SharedRendererState>>, world: &mut BattleWorld<'_, '_, GameMetadataProvider>| {
+            let new_entries = snapshot_player_builds(world, &game_metadata, version, |eid| {
                 !state.lock().player_builds.contains_key(&eid)
             });
             if new_entries.is_empty() {
@@ -842,13 +853,13 @@ pub(super) fn playback_thread(
             // surfaced as transient "no inventory" rows on rapid seek scrubs
             // when the cancelled-rebuild controller stayed in play.
             wows_replay_insights::build::seed_consumable_inventories_from_facts(
-                live_session.controller_mut(),
+                live_session.world_mut(),
                 &vehicle_facts,
                 &*game_metadata,
                 version,
             );
             if !outcome.cancelled {
-                populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
+                populate_bridge_players(live_session.world_mut(), &game_metadata, &armor_bridges);
                 finalize_bridge_staging(&armor_bridges, staging, true);
             }
             !outcome.cancelled
@@ -862,11 +873,14 @@ pub(super) fn playback_thread(
     if !frame_snapshots.is_empty() {
         live_renderer.options = shared_state.lock().options.clone();
         let first_clock = frame_snapshots[0].clock;
-        let commands = live_renderer.draw_frame(live_session.controller());
-        let inventory_count = live_session.controller().consumable_inventories().len();
-        let player_count = live_session.controller().player_entities().len();
+        let inventory_count = live_session.world_mut().consumable_inventories().len();
+        let player_count = live_session.world().player_entities().len();
+        let commands = {
+            let view = live_session.world_mut().view();
+            live_renderer.draw_frame(&view)
+        };
         tracing::info!(clock = first_clock.0, inventory_count, player_count, "initial first-frame redraw");
-        refresh_player_builds(&shared_state, live_session.controller());
+        refresh_player_builds(&shared_state, live_session.world_mut());
         set_frame(&shared_state, commands, first_clock, 0, actual_total_frames, actual_game_duration);
         request_repaint(&shared_state);
     }
@@ -893,8 +907,11 @@ pub(super) fn playback_thread(
                 let completed = rebuild_live_state!(target_clock);
                 if completed {
                     live_renderer.options = shared_state.lock().options.clone();
-                    let commands = live_renderer.draw_frame(live_session.controller());
-                    refresh_player_builds(&shared_state, live_session.controller());
+                    let commands = {
+                        let view = live_session.world_mut().view();
+                        live_renderer.draw_frame(&view)
+                    };
+                    refresh_player_builds(&shared_state, live_session.world_mut());
                     set_frame(
                         &shared_state,
                         commands,
@@ -959,7 +976,7 @@ pub(super) fn playback_thread(
                         );
                         live_clock = outcome.final_clock;
                         if !outcome.cancelled {
-                            populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
+                            populate_bridge_players(live_session.world_mut(), &game_metadata, &armor_bridges);
                             finalize_bridge_staging(&armor_bridges, staging, false);
                         }
                         !outcome.cancelled
@@ -970,8 +987,11 @@ pub(super) fn playback_thread(
                     // already moved past, and a fresher Seek is on its way.
                     if completed {
                         live_renderer.options = shared_state.lock().options.clone();
-                        let commands = live_renderer.draw_frame(live_session.controller());
-                        refresh_player_builds(&shared_state, live_session.controller());
+                        let commands = {
+                            let view = live_session.world_mut().view();
+                            live_renderer.draw_frame(&view)
+                        };
+                        refresh_player_builds(&shared_state, live_session.world_mut());
                         set_frame(
                             &shared_state,
                             commands,
@@ -1028,12 +1048,15 @@ pub(super) fn playback_thread(
                 );
                 live_clock = outcome.final_clock;
                 if !outcome.cancelled {
-                    populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
+                    populate_bridge_players(live_session.world_mut(), &game_metadata, &armor_bridges);
                     finalize_bridge_staging(&armor_bridges, staging, false);
 
                     live_renderer.options = shared_state.lock().options.clone();
-                    let commands = live_renderer.draw_frame(live_session.controller());
-                    refresh_player_builds(&shared_state, live_session.controller());
+                    let commands = {
+                        let view = live_session.world_mut().view();
+                        live_renderer.draw_frame(&view)
+                    };
+                    refresh_player_builds(&shared_state, live_session.world_mut());
                     set_frame(
                         &shared_state,
                         commands,
@@ -1053,10 +1076,13 @@ pub(super) fn playback_thread(
             let new_opts = shared_state.lock().options.clone();
             if live_renderer.options != new_opts {
                 live_renderer.options = new_opts;
-                let commands = live_renderer.draw_frame(live_session.controller());
+                let commands = {
+                    let view = live_session.world_mut().view();
+                    live_renderer.draw_frame(&view)
+                };
                 let clock =
                     frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(GameClock(actual_game_duration));
-                refresh_player_builds(&shared_state, live_session.controller());
+                refresh_player_builds(&shared_state, live_session.world_mut());
                 set_frame(&shared_state, commands, clock, current_frame, actual_total_frames, actual_game_duration);
                 request_repaint(&shared_state);
             }
@@ -1160,34 +1186,41 @@ fn skill_tier_for_species(
     tier_usize as u8
 }
 
-/// Snapshot every player whose entity is currently tracked by `controller`,
+/// Snapshot every player whose entity is currently tracked by `world`,
 /// returning a list of (entity_id, display) pairs for which the caller's
 /// `accept` predicate returned true. Used both for the one-shot lookahead
-/// snapshot (where the merged controller has seen every spotted player)
-/// and for the per-frame additive refresh on the live controller.
+/// snapshot (where the merged world has seen every spotted player)
+/// and for the per-frame additive refresh on the live world.
 fn snapshot_player_builds<F: FnMut(EntityId) -> bool>(
-    controller: &BattleController<'_, '_, GameMetadataProvider>,
+    world: &mut BattleWorld<'_, '_, GameMetadataProvider>,
     metadata: &GameMetadataProvider,
     version: Version,
     mut accept: F,
 ) -> Vec<(EntityId, Arc<super::PlayerBuildDisplay>)> {
+    // Snapshot players first to release the &self borrow before calling vehicle_props_all (&mut self).
+    let players: Vec<(EntityId, wows_replays::Rc<wows_replays::analyzer::battle_controller::Player>)> = world
+        .player_entities()
+        .iter()
+        .map(|(id, p)| (*id, wows_replays::Rc::clone(p)))
+        .collect();
+    let all_props = world.vehicle_props_all();
+
     let mut out = Vec::new();
-    let entities = controller.entities_by_id();
-    for player in controller.player_entities().values() {
-        let entity_id = player.initial_state().entity_id();
+    for (entity_id, player) in &players {
+        let entity_id = *entity_id;
         if !accept(entity_id) {
             continue;
         }
-        let Some(vehicle_rc) = entities.get(&entity_id).and_then(|e| e.vehicle_ref()) else {
+        let Some(props) = all_props.get(&entity_id) else {
             continue;
         };
-        let vehicle = vehicle_rc.borrow();
         let Some(species) = player.vehicle().species().and_then(|s| s.known()).copied() else {
             continue;
         };
-        let config = vehicle.props().ship_config();
-        let captain_id = vehicle.captain().map(|c| c.id());
-        let skills = vehicle.commander_skills_raw(species);
+        let config = props.ship_config();
+        let crew = props.crew_modifiers_compact_params();
+        let captain_id = if crew.params_id().raw() != 0 { Some(crew.params_id()) } else { None };
+        let skills = crew.learned_skills().for_species(&species);
         let Some(build) = wows_replay_insights::build::ResolvedBuild::from_ids(
             config.ship_params_id(),
             config.units(),

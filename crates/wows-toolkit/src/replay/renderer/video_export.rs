@@ -9,8 +9,8 @@ use wows_minimap_renderer::RenderProgress;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::renderer::RenderOptions;
 
+use wows_battle_world::merged::MergedReplays;
 use wows_replays::ReplayFile;
-use wows_replays::analyzer::Analyzer;
 use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
@@ -595,7 +595,7 @@ pub(super) fn render_video_blocking(
     // standalone case (zero alt replays, single primary) and the merged case
     // (alt perspectives feed packets into the same controller through the
     // routing filter).
-    let mut session = wows_replays::analyzer::battle_controller::merged::MergedReplays::new(
+    let mut session = MergedReplays::new(
         game_metadata.entity_specs(),
         &*game_metadata,
         &game_constants,
@@ -605,7 +605,7 @@ pub(super) fn render_video_blocking(
     )
     .map_err(|e| report!("{e}"))?;
     wows_replay_insights::build::seed_consumable_inventories_from_facts(
-        session.controller_mut(),
+        session.world_mut(),
         &vehicle_facts,
         &*game_metadata,
         version,
@@ -627,29 +627,33 @@ pub(super) fn render_video_blocking(
     let mut prev_render_clock = GameClock(0.0);
     while let Some(safe_clock) = session.step().map_err(|e| report!("{e}"))? {
         if safe_clock.0 > prev_render_clock.0 {
-            renderer.populate_players(session.controller());
-            renderer.update_squadron_info(session.controller());
-            renderer.update_ship_abilities(session.controller());
-            encoder.advance_clock(prev_render_clock, session.controller(), &mut renderer, &mut target);
+            let view = session.world_mut().view();
+            renderer.populate_players(&view);
+            renderer.update_squadron_info(&view);
+            renderer.update_ship_abilities(&view);
+            encoder.advance_clock(prev_render_clock, &view, &mut renderer, &mut target);
             prev_render_clock = safe_clock;
         }
     }
 
     let total = session.total_duration();
     if total.0 > prev_render_clock.0 {
-        renderer.populate_players(session.controller());
-        renderer.update_squadron_info(session.controller());
-        renderer.update_ship_abilities(session.controller());
-        encoder.advance_clock(total, session.controller(), &mut renderer, &mut target);
+        let view = session.world_mut().view();
+        renderer.populate_players(&view);
+        renderer.update_squadron_info(&view);
+        renderer.update_ship_abilities(&view);
+        encoder.advance_clock(total, &view, &mut renderer, &mut target);
     }
 
     session.finish();
-    let mut controller = session.into_controller();
-    controller.finish();
-    renderer.populate_players(&controller);
-    renderer.update_squadron_info(&controller);
-    renderer.update_ship_abilities(&controller);
-    encoder.finish(&controller, &mut renderer, &mut target).map_err(|e| report!("{e}"))?;
+    let mut world = session.into_world();
+    {
+        let view = world.view();
+        renderer.populate_players(&view);
+        renderer.update_squadron_info(&view);
+        renderer.update_ship_abilities(&view);
+        encoder.finish(&view, &mut renderer, &mut target).map_err(|e| report!("{e}"))?;
+    }
 
     Ok(())
 }
