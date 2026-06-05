@@ -21,9 +21,10 @@ use wowsunpack::vfs::impls::physical::PhysicalFS;
 use wows_replays::ParseError;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
-use wows_replays::analyzer::battle_controller::BattleController;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::types::EntityId;
+use wows_battle_world::BattleWorld;
+use wows_battle_world::ids::ShotTracking;
 
 /// Parses & processes World of Warships replay files
 #[derive(Parser)]
@@ -773,19 +774,20 @@ fn run_players_query(
     let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
     let (provider, constants) = load_metadata_provider_and_constants(game_dir, extracted_dir, &version)?;
 
-    let mut controller = BattleController::new(&replay_file.meta, &provider, Some(&constants));
-    controller.set_track_shots(false);
+    let mut world = BattleWorld::new(&replay_file.meta, &provider, Some(&constants));
+    world.set_shot_tracking(ShotTracking::Untracked);
 
     let mut parser = wows_replays::packet2::Parser::with_version(provider.entity_specs(), version);
     let mut remaining = replay_file.packet_data.as_slice();
     while !remaining.is_empty() {
         match parser.parse_packet(&mut remaining) {
-            Ok(packet) => controller.process(&packet),
+            Ok(packet) => world.process(&packet),
             Err(_) => break,
         }
     }
+    world.finish();
 
-    let report = controller.build_report();
+    let report = world.into_report();
 
     let name_lc = name_filter.map(str::to_lowercase);
     let ship_lc = ship_filter.map(str::to_lowercase);

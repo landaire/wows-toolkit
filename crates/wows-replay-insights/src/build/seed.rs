@@ -4,12 +4,11 @@ use wowsunpack::data::Version;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 
-use wows_replays::analyzer::battle_controller::BattleController;
 use wows_replays::analyzer::battle_controller::Player;
-use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 use wows_replays::analyzer::battle_controller::merged::VehicleFacts;
 use wows_replays::analyzer::battle_controller::state::ConsumableInventory;
 use wows_replays::types::EntityId;
+use wows_battle_world::BattleWorld;
 
 use super::ResolvedBuild;
 
@@ -40,25 +39,24 @@ pub fn build_inventory_for_player<P: GameParamProvider>(
         .collect()
 }
 
-/// Walk every player-controlled vehicle in `controller`, build their
-/// inventory, and seed it. Entities without a parsed `vehicle_entity` yet
+/// Walk every player-controlled vehicle in `world`, build their
+/// inventory, and seed it. Entities without a parsed vehicle entity yet
 /// are skipped silently; callers can re-invoke after more packets have
 /// been processed.
-pub fn seed_consumable_inventories<P, G>(controller: &mut BattleController<'_, '_, G>, gp: &P, version: Version)
+pub fn seed_consumable_inventories<P, G>(world: &mut BattleWorld<'_, '_, G>, gp: &P, version: Version)
 where
     P: GameParamProvider,
     G: wowsunpack::data::ResourceLoader,
 {
     // Snapshot the (entity_id, Rc<Player>) pairs first so we can mutate the
-    // controller while iterating without holding an active borrow. The `Rc`
-    // alias resolves to `Arc` when wows_replays is built with `arc`.
+    // world while iterating without holding an active borrow.
     let pairs: Vec<(EntityId, wows_replays::Rc<Player>)> =
-        controller.player_entities().iter().map(|(id, p)| (*id, wows_replays::Rc::clone(p))).collect();
+        world.player_entities().iter().map(|(id, p)| (*id, wows_replays::Rc::clone(p))).collect();
 
     for (entity_id, player) in pairs {
         let inv = build_inventory_for_player(&player, gp, version);
         if !inv.is_empty() {
-            controller.set_consumable_inventory(entity_id, inv);
+            world.set_consumable_inventory(entity_id, inv);
         }
     }
 }
@@ -66,9 +64,9 @@ where
 /// Seed inventories from a pre-scanned `VehicleFacts` cache. Use this when
 /// the cache was built via `wows_replays::analyzer::battle_controller::merged::gather_replay_facts`,
 /// so per-entity ship config is known from any perspective regardless of
-/// whether the merged controller has surfaced that entity yet.
+/// whether the world has surfaced that entity yet.
 pub fn seed_consumable_inventories_from_facts<P, G>(
-    controller: &mut BattleController<'_, '_, G>,
+    world: &mut BattleWorld<'_, '_, G>,
     facts: &HashMap<EntityId, VehicleFacts>,
     gp: &P,
     version: Version,
@@ -90,7 +88,7 @@ pub fn seed_consumable_inventories_from_facts<P, G>(
             );
         } else {
             seeded += 1;
-            controller.set_consumable_inventory(*entity_id, inv);
+            world.set_consumable_inventory(*entity_id, inv);
         }
     }
     tracing::info!(seeded, empty, total = facts.len(), "seed_consumable_inventories_from_facts");

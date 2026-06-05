@@ -11,6 +11,7 @@ license.workspace = true
 [dependencies]
 wowsunpack = { workspace = true, default-features = false, features = ["parsing"] }
 wows_replays = { workspace = true, default-features = false, features = ["parsing"] }
+wows-battle-world = { workspace = true, default-features = false }
 tracing = { workspace = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
