@@ -1232,8 +1232,9 @@ pub fn draw_command_to_shapes(
         }
 
         DrawCommand::ChatOverlay { entries } => {
-            let canvas_w = transform.screen_hud_width();
-            let canvas_h = (transform.hud_width + transform.hud_height) * transform.window_scale;
+            // Minimap region in logical pixels (excludes the roster gutters) so
+            // chat sits inside the map instead of under a side panel.
+            let minimap_w = transform.hud_width - 2.0 * transform.map_x_offset;
             let header_font = game_font(11.0 * ws);
             let msg_font = game_font(11.0 * ws);
             let line_h = 14.0 * ws;
@@ -1241,8 +1242,8 @@ pub fn draw_command_to_shapes(
             let padding = 6.0 * ws;
             let entry_gap = 6.0 * ws;
 
-            let box_w = canvas_w * 0.25;
-            let box_x = transform.origin.x + 4.0 * ws;
+            let box_w = minimap_w * 0.25 * ws;
+            let box_x = transform.origin.x + (transform.map_x_offset + 4.0) * ws;
             let inner_w = box_w - padding * 2.0;
 
             struct ChatLayout {
@@ -1315,7 +1316,8 @@ pub fn draw_command_to_shapes(
 
             if !layouts.is_empty() {
                 total_h += padding;
-                let box_y = transform.origin.y + canvas_h / 2.0 - total_h / 2.0;
+                let map_mid_y = transform.origin.y + (transform.hud_height + minimap_w / 2.0) * ws;
+                let box_y = map_mid_y - total_h / 2.0;
 
                 let bg_rect = Rect::from_min_size(Pos2::new(box_x, box_y), Vec2::new(box_w, total_h));
                 shapes.push(Shape::rect_filled(bg_rect, CornerRadius::same(3), Color32::from_black_alpha(90)));
