@@ -2,10 +2,18 @@
 
 use std::collections::HashMap;
 
+use wows_replays::ReplayFile;
+use wows_replays::analyzer::decoder::DecodedPacketPayload;
+use wows_replays::analyzer::decoder::PacketDecoder;
+use wows_replays::game_constants::GameConstants;
+use wows_replays::packet2::Packet;
+use wows_replays::packet2::Parser;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::NormalizedPos;
 use wows_replays::types::WorldPos;
+use wowsunpack::data::Version;
+use wowsunpack::rpc::entitydefs::EntitySpec;
 
 /// A position sample tagged with the coordinate space it came from. Kept
 /// distinct so the draw site converts each with the matching projection and so
@@ -45,9 +53,59 @@ pub fn merge_position_timelines(parts: Vec<PositionTimeline>) -> PositionTimelin
     out
 }
 
+/// Observes each packet of a single replay during one [`scan_replay`] pass.
+pub trait ScanCollector {
+    /// Called once per successfully-parsed packet, with its decoded payload.
+    fn observe(&mut self, packet: &Packet<'_, '_>, decoded: &DecodedPacketPayload<'_, '_, '_>);
+}
+
+/// Walk `replay`'s packet stream once, decoding each packet and feeding every
+/// collector. Stops at the first parse error (the tail of some replays is
+/// truncated); collectors keep whatever they gathered up to that point.
+pub fn scan_replay(
+    specs: &[EntitySpec],
+    game_constants: &GameConstants,
+    version: Version,
+    replay: &ReplayFile,
+    collectors: &mut [&mut dyn ScanCollector],
+) {
+    let mut parser = Parser::with_version(specs, version);
+    let decoder = PacketDecoder::builder()
+        .version(version)
+        .battle_constants(game_constants.battle())
+        .common_constants(game_constants.common())
+        .ships_constants(game_constants.ships())
+        .build();
+    let mut remaining = &replay.packet_data[..];
+    while !remaining.is_empty() {
+        let Ok(packet) = parser.parse_packet(&mut remaining) else {
+            break;
+        };
+        let decoded = decoder.decode(&packet);
+        for c in collectors.iter_mut() {
+            c.observe(&packet, &decoded.payload);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct Counter(usize);
+    impl ScanCollector for Counter {
+        fn observe(&mut self, _p: &Packet<'_, '_>, _d: &DecodedPacketPayload<'_, '_, '_>) {
+            self.0 += 1;
+        }
+    }
+
+    #[test]
+    fn scan_replay_signature_compiles() {
+        fn _use(specs: &[EntitySpec], gc: &GameConstants, v: Version, r: &ReplayFile) {
+            let mut counter = Counter(0);
+            scan_replay(specs, gc, v, r, &mut [&mut counter]);
+        }
+    }
 
     #[test]
     fn merge_sorts_and_dedups_by_clock() {
