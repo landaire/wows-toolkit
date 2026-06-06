@@ -338,8 +338,7 @@ fn handle_interactive_zone_create(
                 let gap_entity = world.spawn(()).id();
                 if let Ok(mut e) = world.get_entity_mut(gap_entity) {
                     e.insert(CapturePoint);
-                    let mut default_state = CapturePointState::default();
-                    default_state.index = gap;
+                    let default_state = CapturePointState { index: gap, ..Default::default() };
                     e.insert(CapturePointData(default_state));
                 }
                 world.resource_mut::<CapturePointOrder>().0.push(gap_entity);

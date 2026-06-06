@@ -37,7 +37,11 @@ pub fn dispatch<G: ResourceLoader>(
     match payload {
         DecodedPacketPayload::Chat { entity_id, sender_id, audience, message, extra_data } => {
             chat::handle_chat_message(
-                entity_id, sender_id, audience, message, extra_data, clock, world, resources, version,
+                chat::ChatMessage { entity_id, sender_id, audience, message, extra_data },
+                clock,
+                world,
+                resources,
+                version,
             );
         }
         DecodedPacketPayload::VoiceLine { .. } => {}

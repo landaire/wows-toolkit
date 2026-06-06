@@ -17,18 +17,25 @@ use crate::resources::ChatLog;
 use crate::resources::PlayerIndex;
 use crate::resources::ReplayVehicles;
 
+/// The decoded fields of an onChatMessage RPC.
+pub struct ChatMessage<'a> {
+    pub entity_id: EntityId,
+    pub sender_id: AccountId,
+    pub audience: &'a str,
+    pub message: &'a str,
+    pub extra_data: Option<ChatMessageExtra>,
+}
+
 /// Handle one onChatMessage RPC, mirroring BattleController::handle_chat_message.
 pub fn handle_chat_message<G: ResourceLoader>(
-    entity_id: EntityId,
-    sender_id: AccountId,
-    audience: &str,
-    message: &str,
-    _extra_data: Option<ChatMessageExtra>,
+    msg: ChatMessage<'_>,
     clock: GameClock,
     world: &mut World,
     resources: &G,
     version: Version,
 ) {
+    let ChatMessage { entity_id, sender_id, audience, message, extra_data: _extra_data } = msg;
+
     // System messages have sender_id 0.
     if sender_id.raw() == 0 {
         return;

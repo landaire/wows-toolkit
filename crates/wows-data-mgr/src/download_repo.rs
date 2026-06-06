@@ -249,11 +249,12 @@ fn validate_build(
     verified: &mut BTreeSet<String>,
     corrupt: &mut BTreeSet<String>,
 ) -> BuildIssues {
-    let mut issues = BuildIssues::default();
-
-    issues.stale_metadata = match BuildMetadata::load(&output_dir.join("metadata.toml")) {
-        Some(local) => local.files != remote_md.files || local.derived != remote_md.derived,
-        None => true,
+    let mut issues = BuildIssues {
+        stale_metadata: match BuildMetadata::load(&output_dir.join("metadata.toml")) {
+            Some(local) => local.files != remote_md.files || local.derived != remote_md.derived,
+            None => true,
+        },
+        ..Default::default()
     };
 
     check_entries(cas_root, &output_dir.join("vfs"), &remote_md.files, &mut issues, verified, corrupt);

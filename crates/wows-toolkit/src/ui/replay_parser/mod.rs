@@ -4983,9 +4983,11 @@ impl ToolkitTabViewer<'_> {
                 options,
                 self.tab_state.renderer_asset_cache.clone(),
                 self.tab_state.toasts.clone(),
-                prefer_cpu,
-                renderer_settings.video_codec,
-                renderer_settings.include_pre_battle,
+                crate::replay::renderer::BatchEncodeOptions {
+                    prefer_cpu,
+                    codec: renderer_settings.video_codec,
+                    include_pre_battle: renderer_settings.include_pre_battle,
+                },
             );
             self.tab_state.background_tasks.push(task);
             return;
@@ -5017,9 +5019,11 @@ impl ToolkitTabViewer<'_> {
                 options,
                 self.tab_state.renderer_asset_cache.clone(),
                 self.tab_state.toasts.clone(),
-                prefer_cpu,
-                renderer_settings.video_codec,
-                renderer_settings.include_pre_battle,
+                crate::replay::renderer::BatchEncodeOptions {
+                    prefer_cpu,
+                    codec: renderer_settings.video_codec,
+                    include_pre_battle: renderer_settings.include_pre_battle,
+                },
             );
             self.tab_state.background_tasks.push(task);
         }

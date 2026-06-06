@@ -53,7 +53,6 @@ pub fn handle_vehicle_property(
             if let Some(ref mut a) = aim {
                 a.target_yaw = Some(Radians(yaw));
             } else {
-                drop(aim);
                 er.insert(Aim {
                     turret_yaws: Vec::new(),
                     target_yaw: Some(Radians(yaw)),
@@ -81,7 +80,6 @@ pub fn handle_gun_sync(entity_id: EntityId, weapon_type: u32, gun_id: u32, yaw: 
             }
             a.turret_yaws[idx] = Radians(yaw);
         } else {
-            drop(aim);
             let mut turret_yaws = Vec::new();
             turret_yaws.resize(idx + 1, Radians(0.0));
             turret_yaws[idx] = Radians(yaw);
@@ -108,7 +106,6 @@ pub fn handle_set_ammo_for_weapon(
         if let Some(ref mut a) = aim {
             a.selected_ammo.insert(key, ammo_param_id);
         } else {
-            drop(aim);
             let mut selected_ammo = std::collections::HashMap::new();
             selected_ammo.insert(key, ammo_param_id);
             er.insert(Aim { turret_yaws: Vec::new(), target_yaw: None, selected_ammo });

@@ -34,12 +34,8 @@ pub fn pickle_to_cbor(pickled: pickled::Value) -> CborValue {
         pickled::Value::F64(v) => CborValue::Float(v),
         pickled::Value::Bytes(v) => CborValue::Bytes(v.into_raw_or_cloned()),
         pickled::Value::String(v) => CborValue::Text(v.into_raw_or_cloned()),
-        pickled::Value::List(v) => {
-            CborValue::Array(v.into_raw_or_cloned().into_iter().map(pickle_to_cbor).collect())
-        }
-        pickled::Value::Tuple(v) => {
-            CborValue::Array(v.into_raw_or_cloned().into_iter().map(pickle_to_cbor).collect())
-        }
+        pickled::Value::List(v) => CborValue::Array(v.into_raw_or_cloned().into_iter().map(pickle_to_cbor).collect()),
+        pickled::Value::Tuple(v) => CborValue::Array(v.into_raw_or_cloned().into_iter().map(pickle_to_cbor).collect()),
         pickled::Value::Set(v) => {
             CborValue::Array(v.into_raw_or_cloned().into_iter().map(hashable_pickle_to_cbor).collect())
         }

@@ -223,6 +223,14 @@ pub struct BatchReplayInfo {
     pub wows_data: SharedWoWsData,
 }
 
+/// Encoding/output preferences shared by the batch render entry points.
+#[derive(Clone, Copy)]
+pub struct BatchEncodeOptions {
+    pub prefer_cpu: bool,
+    pub codec: Option<wows_minimap_renderer::VideoCodec>,
+    pub include_pre_battle: bool,
+}
+
 /// Shared helper: render a list of replays sequentially, updating progress.
 /// Returns (succeeded_count, failed_count, output_paths).
 fn render_batch(
@@ -231,9 +239,7 @@ fn render_batch(
     options: &RenderOptions,
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
     progress: &Arc<Mutex<crate::task::BatchVideoExportProgress>>,
-    prefer_cpu: bool,
-    codec: Option<wows_minimap_renderer::VideoCodec>,
-    include_pre_battle: bool,
+    encode: &BatchEncodeOptions,
 ) -> (usize, usize, Vec<std::path::PathBuf>) {
     let mut succeeded_paths = Vec::new();
     let mut failed = 0usize;
@@ -279,11 +285,11 @@ fn render_batch(
             &replay.wows_data,
             asset_cache,
             &per_replay_progress,
-            prefer_cpu,
-            codec,
+            encode.prefer_cpu,
+            encode.codec,
             None,
             wows_minimap_renderer::EncoderConfig::default(),
-            include_pre_battle,
+            encode.include_pre_battle,
         );
 
         let estimated_frames = (replay.game_duration * 7.0) as u64;
@@ -312,9 +318,7 @@ pub fn batch_render_to_folder(
     options: RenderOptions,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     toasts: crate::tab_state::SharedToasts,
-    prefer_cpu: bool,
-    codec: Option<wows_minimap_renderer::VideoCodec>,
-    include_pre_battle: bool,
+    encode: BatchEncodeOptions,
 ) -> crate::task::BackgroundTask {
     let total_frames: u64 = replays.iter().map(|r| (r.game_duration * 7.0) as u64).sum();
     let total_replays = replays.len();
@@ -330,16 +334,8 @@ pub fn batch_render_to_folder(
 
     let progress_clone = Arc::clone(&progress);
     crate::util::thread::spawn_logged("batch-video-export", move || {
-        let (succeeded, failed, _) = render_batch(
-            &replays,
-            &output_dir,
-            &options,
-            &asset_cache,
-            &progress_clone,
-            prefer_cpu,
-            codec,
-            include_pre_battle,
-        );
+        let (succeeded, failed, _) =
+            render_batch(&replays, &output_dir, &options, &asset_cache, &progress_clone, &encode);
 
         if failed == 0 {
             toasts.lock().success(format!("Batch render complete: {} videos saved", succeeded));
@@ -363,9 +359,7 @@ pub fn batch_render_to_clipboard(
     options: RenderOptions,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     toasts: crate::tab_state::SharedToasts,
-    prefer_cpu: bool,
-    codec: Option<wows_minimap_renderer::VideoCodec>,
-    include_pre_battle: bool,
+    encode: BatchEncodeOptions,
 ) -> crate::task::BackgroundTask {
     let total_frames: u64 = replays.iter().map(|r| (r.game_duration * 7.0) as u64).sum();
     let total_replays = replays.len();
@@ -390,16 +384,8 @@ pub fn batch_render_to_clipboard(
             }
         };
 
-        let (succeeded, failed, paths) = render_batch(
-            &replays,
-            temp_dir.path(),
-            &options,
-            &asset_cache,
-            &progress_clone,
-            prefer_cpu,
-            codec,
-            include_pre_battle,
-        );
+        let (succeeded, failed, paths) =
+            render_batch(&replays, temp_dir.path(), &options, &asset_cache, &progress_clone, &encode);
 
         if !paths.is_empty()
             && let Ok(mut clipboard) = arboard::Clipboard::new()
