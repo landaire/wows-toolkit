@@ -5,6 +5,7 @@
 //! in the heavy unpacking/parsing stack that lives in `wowsunpack`.
 
 pub mod recognized;
+pub mod units;
 pub mod version;
 
 pub use version::Version;
