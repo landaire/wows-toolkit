@@ -83,6 +83,7 @@ parsing = [
     "dep:bon",
     "dep:convert_case",
     "dep:itertools",
+    "wows-core/parsing",
 ]
 # VFS abstraction over IDX/PKG archives. Pure Rust, wasm-compatible. Bring your
 # own `Prime` source: BytesPkgSource (in-memory) always, MmapPkgSource via vfs-mmap.

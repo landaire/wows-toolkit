@@ -14,9 +14,12 @@ path = "src/lib.rs"
 [dependencies]
 serde = { workspace = true, optional = true }
 rkyv = { workspace = true, optional = true }
+roxmltree = { workspace = true, optional = true }
 
 [features]
 # Unify Rc/Arc across the workspace: with `arc`, shared pointers are `Arc`.
 arc = []
 serde = ["dep:serde"]
 rkyv = ["dep:rkyv"]
+# XML-derived constructors (e.g. Version::from_account_def). Pulls roxmltree.
+parsing = ["dep:roxmltree"]

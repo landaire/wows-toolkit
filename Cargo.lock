@@ -11230,6 +11230,7 @@ name = "wows-core"
 version = "0.1.0"
 dependencies = [
  "rkyv",
+ "roxmltree 0.21.1",
  "serde",
 ]
 

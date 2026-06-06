@@ -5,6 +5,9 @@
 //! in the heavy unpacking/parsing stack that lives in `wowsunpack`.
 
 pub mod recognized;
+pub mod version;
+
+pub use version::Version;
 
 /// Reference-counted pointer, unified across the workspace by the `arc` feature.
 /// With `arc` it is `Arc` (thread-safe); without it, `Rc`.
