@@ -275,6 +275,11 @@ impl VideoEncoder {
         while self.last_rendered_frame < target_frame {
             self.last_rendered_frame += 1;
 
+            // Continuous per-frame time so positions interpolate and tracers /
+            // torpedoes (paced by the render clock) animate between packets.
+            let frame_seconds = self.start_clock.seconds() + self.last_rendered_frame as f32 * frame_duration;
+            renderer.set_render_clock(GameClock(frame_seconds));
+
             renderer.populate_players(controller);
             renderer.update_squadron_info(controller);
 
