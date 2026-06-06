@@ -7,10 +7,12 @@ pub mod merged;
 pub mod read;
 pub mod report;
 pub mod resources;
+pub mod scan;
 pub mod units;
 pub mod view;
 pub mod world;
 
 mod ingest;
 
+pub use scan::{PositionSample, PositionTimeline, SampledPos};
 pub use world::BattleWorld;
