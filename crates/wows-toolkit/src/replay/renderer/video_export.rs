@@ -596,6 +596,7 @@ pub(super) fn render_video_blocking(
         &*game_metadata,
         version,
     );
+    renderer.set_position_timeline(session.position_timeline());
 
     // By default the export starts at battle start, skipping the pre-battle
     // spawn and countdown. The battle-start clock comes from the scanned
