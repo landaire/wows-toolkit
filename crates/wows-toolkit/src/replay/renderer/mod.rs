@@ -325,12 +325,13 @@ impl RendererAssetCache {
         &mut self,
         vfs: &VfsPath,
         version: Option<&Version>,
-        dump_dir: Option<&std::path::Path>,
+        _dump_dir: Option<&std::path::Path>,
     ) -> Arc<IconMap> {
-        let src = self.icon_source(vfs, version, dump_dir);
-        self.crew_skill_icons.get_or_load(src.version.as_ref(), || {
-            convert_icons(assets::load_crew_skill_icons(&src.vfs, 36, src.version.as_ref()))
-        })
+        // Crew skill icons are skill-set specific and ship in every build's own
+        // VFS (pre-rework clients keep them under big/small subdirs). Never
+        // borrow another build's set the way ship icons do -- a newer build's
+        // skills and icon names would not match this replay's skills.
+        self.crew_skill_icons.get_or_load(version, || convert_icons(assets::load_crew_skill_icons(vfs, 36, version)))
     }
 
     pub fn get_or_load_modernization_icons(
