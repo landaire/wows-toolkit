@@ -55,6 +55,19 @@ use crate::STATS_PANEL_WIDTH;
 const TRACER_LEN: f32 = 0.12; // fraction of total shot path length
 const KILL_FEED_DURATION: f32 = 10.0;
 
+/// Seconds a shell is in flight, used to pace its tracer along origin->target.
+/// Prefer the server's authoritative time-to-impact; the muzzle-speed estimate
+/// ignores drag deceleration and lands the tracer early at long range.
+fn tracer_flight_duration(distance: f32, speed: f32, server_time_left: f32) -> f32 {
+    if server_time_left > 0.0 {
+        server_time_left
+    } else if speed > 0.0 {
+        distance / speed
+    } else {
+        3.0
+    }
+}
+
 // Visual constants
 const SMOKE_COLOR: [u8; 3] = [200, 200, 200];
 const SMOKE_ALPHA: f32 = 0.5;
@@ -1019,7 +1032,8 @@ impl<'a> MinimapRenderer<'a> {
                     let dx = target.x - origin.x;
                     let dz = target.z - origin.z;
                     let distance = (dx * dx + dz * dz).sqrt();
-                    let flight_duration = if shot_data.speed > 0.0 { distance / shot_data.speed } else { 3.0 };
+                    let flight_duration =
+                        tracer_flight_duration(distance, shot_data.speed, shot_data.server_time_left);
 
                     let elapsed = clock - shot.fired_at;
                     if elapsed < 0.0 || elapsed > flight_duration {
@@ -2598,4 +2612,19 @@ fn consumable_to_base_icon_key(c: Consumable) -> Option<String> {
         _ => return None,
     };
     Some(key.to_string())
+}
+
+#[cfg(test)]
+mod test {
+    use super::tracer_flight_duration;
+
+    #[test]
+    fn flight_duration_prefers_server_time() {
+        // Server time-to-impact wins over the muzzle-speed estimate.
+        assert_eq!(tracer_flight_duration(3000.0, 1000.0, 5.0), 5.0);
+        // No server time: fall back to distance / speed.
+        assert_eq!(tracer_flight_duration(3000.0, 1000.0, 0.0), 3.0);
+        // Neither available: fixed fallback so the tracer is still drawn.
+        assert_eq!(tracer_flight_duration(3000.0, 0.0, 0.0), 3.0);
+    }
 }
