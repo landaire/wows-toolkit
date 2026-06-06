@@ -1014,59 +1014,59 @@ pub(super) fn playback_thread(
 
         if playing && actual_total_frames > 0 {
             let now = std::time::Instant::now();
-            let dt = now.duration_since(last_advance).as_secs_f32();
-            let base_fps = actual_total_frames as f32 / actual_game_duration.max(1.0);
-            let frames_to_advance = dt * base_fps * speed;
+            // Real elapsed time drives the clock so playback renders at the
+            // display rate, not the coarse seek-snapshot rate (which made 1x a
+            // slideshow). Cap dt so a stall doesn't fast-forward the match.
+            let dt = now.duration_since(last_advance).as_secs_f32().min(0.25);
+            last_advance = now;
 
-            if frames_to_advance >= 1.0 {
-                current_frame = (current_frame + frames_to_advance as usize).min(actual_total_frames - 1);
-                last_advance = now;
+            let target = (live_clock.0 + dt * speed).min(actual_game_duration);
+            let target_clock = GameClock(target);
+            if target >= actual_game_duration {
+                playing = false;
+                shared_state.lock().playing = false;
+            }
 
-                if current_frame >= actual_total_frames - 1 {
-                    playing = false;
-                    shared_state.lock().playing = false;
-                }
+            // Step the world precisely to the render clock (tiny slack) so ship
+            // state advances at the packet rate instead of jumping at the
+            // snapshot rate.
+            let armor_bridges = shared_state.lock().armor_bridges.clone();
+            let mut staging = init_bridge_staging(&armor_bridges);
+            let outcome = step_session_to_clock(
+                &mut live_session,
+                &mut live_renderer,
+                live_clock,
+                target_clock,
+                1.0 / 60.0,
+                &mut staging,
+                &mut hit_cursor,
+                &cancel_step,
+            );
+            live_clock = target_clock;
 
-                let target_clock = if current_frame < frame_snapshots.len() {
-                    frame_snapshots[current_frame].clock
-                } else {
-                    GameClock(actual_game_duration)
+            // Keep the scrubber index in sync with the continuous clock.
+            let frac = target / actual_game_duration.max(1.0);
+            current_frame = ((frac * (actual_total_frames - 1) as f32) as usize).min(actual_total_frames - 1);
+
+            if !outcome.cancelled {
+                populate_bridge_players(live_session.world_mut(), &game_metadata, &armor_bridges);
+                finalize_bridge_staging(&armor_bridges, staging, false);
+
+                live_renderer.options = shared_state.lock().options.clone();
+                let commands = {
+                    let view = live_session.world_mut().view();
+                    live_renderer.draw_frame(&view)
                 };
-
-                // Forward playback — always incremental, never rebuild
-                let armor_bridges = shared_state.lock().armor_bridges.clone();
-                let mut staging = init_bridge_staging(&armor_bridges);
-                let outcome = step_session_to_clock(
-                    &mut live_session,
-                    &mut live_renderer,
-                    live_clock,
+                refresh_player_builds(&shared_state, live_session.world_mut());
+                set_frame(
+                    &shared_state,
+                    commands,
                     target_clock,
-                    frame_duration,
-                    &mut staging,
-                    &mut hit_cursor,
-                    &cancel_step,
+                    current_frame,
+                    actual_total_frames,
+                    actual_game_duration,
                 );
-                live_clock = outcome.final_clock;
-                if !outcome.cancelled {
-                    populate_bridge_players(live_session.world_mut(), &game_metadata, &armor_bridges);
-                    finalize_bridge_staging(&armor_bridges, staging, false);
-
-                    live_renderer.options = shared_state.lock().options.clone();
-                    let commands = {
-                        let view = live_session.world_mut().view();
-                        live_renderer.draw_frame(&view)
-                    };
-                    refresh_player_builds(&shared_state, live_session.world_mut());
-                    set_frame(
-                        &shared_state,
-                        commands,
-                        target_clock,
-                        current_frame,
-                        actual_total_frames,
-                        actual_game_duration,
-                    );
-                    request_repaint(&shared_state);
-                }
+                request_repaint(&shared_state);
             }
         }
 
@@ -1088,8 +1088,9 @@ pub(super) fn playback_thread(
             }
         }
 
-        // Sleep to avoid busy-waiting
-        std::thread::sleep(std::time::Duration::from_millis(if playing { 8 } else { 16 }));
+        // Pace the playback loop at ~30 fps (one render per iteration); idle
+        // slower when paused.
+        std::thread::sleep(std::time::Duration::from_millis(if playing { 33 } else { 16 }));
     }
 }
 
