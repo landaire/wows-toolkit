@@ -873,6 +873,7 @@ pub(super) fn playback_thread(
     if !frame_snapshots.is_empty() {
         live_renderer.options = shared_state.lock().options.clone();
         let first_clock = frame_snapshots[0].clock;
+        live_renderer.set_render_clock(first_clock);
         let inventory_count = live_session.world_mut().consumable_inventories().len();
         let player_count = live_session.world().player_entities().len();
         let commands = {
@@ -907,6 +908,7 @@ pub(super) fn playback_thread(
                 let completed = rebuild_live_state!(target_clock);
                 if completed {
                     live_renderer.options = shared_state.lock().options.clone();
+                    live_renderer.set_render_clock(target_clock);
                     let commands = {
                         let view = live_session.world_mut().view();
                         live_renderer.draw_frame(&view)
@@ -987,6 +989,7 @@ pub(super) fn playback_thread(
                     // already moved past, and a fresher Seek is on its way.
                     if completed {
                         live_renderer.options = shared_state.lock().options.clone();
+                        live_renderer.set_render_clock(target_clock);
                         let commands = {
                             let view = live_session.world_mut().view();
                             live_renderer.draw_frame(&view)
@@ -1053,6 +1056,7 @@ pub(super) fn playback_thread(
                 finalize_bridge_staging(&armor_bridges, staging, false);
 
                 live_renderer.options = shared_state.lock().options.clone();
+                live_renderer.set_render_clock(target_clock);
                 let commands = {
                     let view = live_session.world_mut().view();
                     live_renderer.draw_frame(&view)
@@ -1076,12 +1080,13 @@ pub(super) fn playback_thread(
             let new_opts = shared_state.lock().options.clone();
             if live_renderer.options != new_opts {
                 live_renderer.options = new_opts;
+                let clock =
+                    frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(GameClock(actual_game_duration));
+                live_renderer.set_render_clock(clock);
                 let commands = {
                     let view = live_session.world_mut().view();
                     live_renderer.draw_frame(&view)
                 };
-                let clock =
-                    frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(GameClock(actual_game_duration));
                 refresh_player_builds(&shared_state, live_session.world_mut());
                 set_frame(&shared_state, commands, clock, current_frame, actual_total_frames, actual_game_duration);
                 request_repaint(&shared_state);

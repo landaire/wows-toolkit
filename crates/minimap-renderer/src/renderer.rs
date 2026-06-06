@@ -235,6 +235,22 @@ pub struct MinimapRenderer<'a> {
     /// icon's mere presence already implies detection, so the outline is
     /// suppressed to avoid visual noise.
     has_merged_perspectives: bool,
+
+    /// Continuous render clock for live playback, set per frame. When present it
+    /// drives smooth timing (dead-reckoning) instead of the packet clock; None
+    /// for timelapse/video where each frame is a discrete sample.
+    render_clock: Option<GameClock>,
+
+    /// Last two world-position samples per entity, for dead-reckoning visible
+    /// ships between position packets during live playback.
+    dead_reckon: HashMap<EntityId, DeadReckon>,
+}
+
+#[derive(Clone, Copy)]
+struct DeadReckon {
+    cur_clock: GameClock,
+    cur_pos: WorldPos,
+    prev: Option<(GameClock, WorldPos)>,
 }
 
 impl<'a> MinimapRenderer<'a> {
@@ -272,7 +288,63 @@ impl<'a> MinimapRenderer<'a> {
             vehicle_facts: HashMap::new(),
             damage_events: HashMap::new(),
             has_merged_perspectives: false,
+            render_clock: None,
+            dead_reckon: HashMap::new(),
         }
+    }
+
+    /// Set the continuous render clock for the next frame. Live playback calls
+    /// this each frame so motion is smoothed toward real time; timelapse/video
+    /// leaves it unset and renders at the packet clock.
+    pub fn set_render_clock(&mut self, clock: GameClock) {
+        self.render_clock = Some(clock);
+    }
+
+    /// Extrapolate a visible ship's world position to `render_clock` from its
+    /// last two position samples (finite-difference velocity). Snaps to the
+    /// latest sample when there is no recent prior sample of the same
+    /// visibility (the gap guard rejects samples from before a spotting break)
+    /// or the clock rewound. Only meaningful during live playback.
+    fn dead_reckon_pos(
+        &mut self,
+        entity_id: EntityId,
+        cur_pos: WorldPos,
+        last_updated: GameClock,
+        render_clock: GameClock,
+    ) -> WorldPos {
+        let entry = self.dead_reckon.entry(entity_id).or_insert(DeadReckon {
+            cur_clock: last_updated,
+            cur_pos,
+            prev: None,
+        });
+        if last_updated.0 > entry.cur_clock.0 {
+            entry.prev = Some((entry.cur_clock, entry.cur_pos));
+            entry.cur_clock = last_updated;
+            entry.cur_pos = cur_pos;
+        } else if last_updated.0 < entry.cur_clock.0 {
+            // Clock rewound (seek without a fresh renderer): drop the stale prior.
+            entry.prev = None;
+            entry.cur_clock = last_updated;
+            entry.cur_pos = cur_pos;
+        }
+
+        // Gaps larger than this imply the ship was unspotted between samples, so
+        // we must not interpolate across the break.
+        const MAX_SAMPLE_GAP: f32 = 2.0;
+        if let Some((prev_clock, prev_pos)) = entry.prev {
+            let dt_sample = entry.cur_clock.0 - prev_clock.0;
+            if dt_sample > 1e-3 && dt_sample <= MAX_SAMPLE_GAP {
+                let dt_extrap = (render_clock.0 - entry.cur_clock.0).clamp(0.0, dt_sample);
+                let vx = (entry.cur_pos.x - prev_pos.x) / dt_sample;
+                let vz = (entry.cur_pos.z - prev_pos.z) / dt_sample;
+                return WorldPos::new(
+                    entry.cur_pos.x + vx * dt_extrap,
+                    entry.cur_pos.y,
+                    entry.cur_pos.z + vz * dt_extrap,
+                );
+            }
+        }
+        entry.cur_pos
     }
 
     /// Mark whether this renderer is driving a merged session (primary plus
@@ -781,7 +853,9 @@ impl<'a> MinimapRenderer<'a> {
             return Vec::new();
         };
 
-        let clock = controller.clock();
+        // During live playback the continuous render clock paces motion between
+        // packets; timelapse/video leaves it unset and uses the packet clock.
+        let clock = self.render_clock.unwrap_or_else(|| controller.clock());
         let mut commands = Vec::new();
 
         // 1. Score bar
@@ -1256,6 +1330,13 @@ impl<'a> MinimapRenderer<'a> {
                     // the minimap position when there's no world position (e.g. ships
                     // outside AOI that are only visible via minimap vision packets).
                     let px = match world {
+                        // The ship is visible here, so dead-reckon its world
+                        // position toward the render clock for smooth motion
+                        // between packets (live playback only).
+                        Some(w) if self.render_clock.is_some() => {
+                            let pos = self.dead_reckon_pos(*entity_id, w.pos, w.last_updated, clock);
+                            map_info.world_to_minimap(pos, MINIMAP_SIZE)
+                        }
                         Some(w) => map_info.world_to_minimap(w.pos, MINIMAP_SIZE),
                         None => map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE),
                     };
