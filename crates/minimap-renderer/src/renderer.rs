@@ -2747,7 +2747,10 @@ mod test {
                 (GameClock(1.0), NormalizedPos::new(0.5, 0.5)),
             ],
         };
-        assert!(matches!(interpolate_track(&t, GameClock(0.5)), Some(SampledPos::World(_))));
+        match interpolate_track(&t, GameClock(0.5)) {
+            Some(SampledPos::World(p)) => assert!((p.x - 5.0).abs() < 1e-4),
+            other => panic!("expected world lerp, got {other:?}"),
+        }
     }
 
     #[test]
