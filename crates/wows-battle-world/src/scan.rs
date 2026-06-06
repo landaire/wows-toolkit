@@ -11,8 +11,10 @@ use wows_replays::packet2::Parser;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::NormalizedPos;
+use wows_replays::types::TeamId;
 use wows_replays::types::WorldPos;
 use wowsunpack::data::Version;
+use wowsunpack::game_types::BattleStage;
 use wowsunpack::rpc::entitydefs::EntitySpec;
 
 /// A position sample tagged with the coordinate space it came from. Kept
@@ -84,6 +86,61 @@ pub fn scan_replay(
         let decoded = decoder.decode(&packet);
         for c in collectors.iter_mut() {
             c.observe(&packet, &decoded.payload);
+        }
+    }
+}
+
+/// Recording-player team, replay duration, and battle-start clock, gathered in
+/// one pass. `self_team` matches the recording player's name to the arena
+/// roster; `battle_start_clock` is the first `battleStage == Waiting`.
+pub struct MetadataCollector<'a> {
+    player_name: &'a str,
+    game_constants: &'a GameConstants,
+    pub self_team: Option<TeamId>,
+    pub last_clock: GameClock,
+    pub battle_start_clock: Option<GameClock>,
+}
+
+impl<'a> MetadataCollector<'a> {
+    pub fn new(player_name: &'a str, game_constants: &'a GameConstants) -> Self {
+        Self {
+            player_name,
+            game_constants,
+            self_team: None,
+            last_clock: GameClock(0.0),
+            battle_start_clock: None,
+        }
+    }
+}
+
+impl ScanCollector for MetadataCollector<'_> {
+    fn observe(&mut self, packet: &Packet<'_, '_>, decoded: &DecodedPacketPayload<'_, '_, '_>) {
+        if packet.clock.0 > self.last_clock.0 {
+            self.last_clock = packet.clock;
+        }
+        match decoded {
+            DecodedPacketPayload::OnArenaStateReceived { player_states, bot_states, .. }
+                if self.self_team.is_none() =>
+            {
+                self.self_team = player_states
+                    .iter()
+                    .chain(bot_states.iter())
+                    .find(|p| p.username() == self.player_name)
+                    .map(|p| TeamId::from(p.team_id()));
+            }
+            DecodedPacketPayload::EntityProperty(prop)
+                if self.battle_start_clock.is_none() && prop.property == "battleStage" =>
+            {
+                if let Some(raw) = prop.value.as_i64()
+                    && matches!(
+                        self.game_constants.common().battle_stage(raw as i32).copied(),
+                        Some(BattleStage::Waiting)
+                    )
+                {
+                    self.battle_start_clock = Some(packet.clock);
+                }
+            }
+            _ => {}
         }
     }
 }
