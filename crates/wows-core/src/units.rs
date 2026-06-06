@@ -50,8 +50,6 @@ pub struct Km(f32);
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct Millimeters(f32);
 
-// --- Construction ---
-
 impl From<f32> for Meters {
     fn from(v: f32) -> Self {
         Self(v)
@@ -95,8 +93,6 @@ impl From<i32> for Millimeters {
         Self(v as f32)
     }
 }
-
-// --- Read access and unit conversions ---
 
 impl Meters {
     /// Const constructor for use in static/const contexts.
@@ -182,8 +178,6 @@ impl Millimeters {
     }
 }
 
-// --- Scalar multiplication (dimensionless coefficients) ---
-
 impl Mul<f32> for Meters {
     type Output = Meters;
     fn mul(self, rhs: f32) -> Meters {
@@ -211,8 +205,6 @@ impl Mul<f32> for Millimeters {
         Millimeters(self.0 * rhs)
     }
 }
-
-// --- Same-type arithmetic ---
 
 impl Add for Meters {
     type Output = Meters;
@@ -266,8 +258,6 @@ impl Sub for Millimeters {
     }
 }
 
-// --- Cross-type arithmetic (converts RHS to LHS unit, returns LHS type) ---
-
 impl Add<BigWorldDistance> for Meters {
     type Output = Meters;
     fn add(self, rhs: BigWorldDistance) -> Meters {
@@ -320,8 +310,6 @@ impl Sub<Meters> for Km {
     }
 }
 
-// --- Scalar division (for averaging, etc.) ---
-
 impl std::ops::Div<f32> for Meters {
     type Output = Meters;
     fn div(self, rhs: f32) -> Meters {
@@ -350,8 +338,6 @@ impl std::ops::Div<f32> for Millimeters {
     }
 }
 
-// --- Sum (for iterator aggregation) ---
-
 impl std::iter::Sum for Meters {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
         Meters(iter.map(|m| m.0).sum())
@@ -375,8 +361,6 @@ impl std::iter::Sum for Millimeters {
         Millimeters(iter.map(|m| m.0).sum())
     }
 }
-
-// --- Cross-type comparison (converts to common unit for PartialEq/PartialOrd) ---
 
 impl PartialEq<BigWorldDistance> for Meters {
     fn eq(&self, other: &BigWorldDistance) -> bool {
