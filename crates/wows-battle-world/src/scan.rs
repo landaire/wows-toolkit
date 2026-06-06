@@ -101,10 +101,10 @@ mod tests {
 
     #[test]
     fn scan_replay_signature_compiles() {
-        fn _use(specs: &[EntitySpec], gc: &GameConstants, v: Version, r: &ReplayFile) {
-            let mut counter = Counter(0);
-            scan_replay(specs, gc, v, r, &mut [&mut counter]);
-        }
+        let _f: fn(&[EntitySpec], &GameConstants, Version, &ReplayFile, &mut [&mut dyn ScanCollector]) = scan_replay;
+        let mut counter = Counter(0);
+        counter.0 += 1;
+        assert_eq!(counter.0, 1);
     }
 
     #[test]
