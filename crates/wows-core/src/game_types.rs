@@ -679,6 +679,10 @@ impl NormalizedPos {
     pub const fn new(x: f32, y: f32) -> NormalizedPos {
         NormalizedPos(Vec2::new(x, y))
     }
+
+    pub fn lerp(self, other: NormalizedPos, t: f32) -> NormalizedPos {
+        NormalizedPos(self.0.lerp(other.0, t))
+    }
 }
 
 impl std::ops::Deref for NormalizedPos {
@@ -2520,5 +2524,20 @@ impl DamageStatCategory {
 impl fmt::Display for DamageStatCategory {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalized_pos_lerp_midpoint() {
+        let a = NormalizedPos::new(0.0, 0.0);
+        let b = NormalizedPos::new(1.0, 2.0);
+        let m = a.lerp(b, 0.5);
+        let NormalizedPos(v) = m;
+        assert!((v.x - 0.5).abs() < 1e-6);
+        assert!((v.y - 1.0).abs() < 1e-6);
     }
 }
