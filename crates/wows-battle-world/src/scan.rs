@@ -7,6 +7,7 @@ use wows_replays::analyzer::decoder::DecodedPacketPayload;
 use wows_replays::analyzer::decoder::PacketDecoder;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::packet2::Packet;
+use wows_replays::packet2::PacketType;
 use wows_replays::packet2::Parser;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
@@ -86,6 +87,46 @@ pub fn scan_replay(
         let decoded = decoder.decode(&packet);
         for c in collectors.iter_mut() {
             c.observe(&packet, &decoded.payload);
+        }
+    }
+}
+
+/// Builds a per-entity position timeline from world packets (Position,
+/// PlayerOrientation for the self ship) and visible minimap-vision entries.
+#[derive(Default)]
+pub struct PositionTimelineCollector {
+    pub timeline: PositionTimeline,
+}
+
+impl ScanCollector for PositionTimelineCollector {
+    fn observe(&mut self, packet: &Packet<'_, '_>, decoded: &DecodedPacketPayload<'_, '_, '_>) {
+        match &packet.payload {
+            PacketType::Position(p) => {
+                self.timeline.entry(p.pid).or_default().push(PositionSample {
+                    clock: packet.clock,
+                    pos: SampledPos::World(WorldPos::new(p.position.x, p.position.y, p.position.z)),
+                });
+            }
+            PacketType::PlayerOrientation(o) if o.parent_id == EntityId::from(0u32) => {
+                self.timeline.entry(o.pid).or_default().push(PositionSample {
+                    clock: packet.clock,
+                    pos: SampledPos::World(WorldPos::new(o.position.x, o.position.y, o.position.z)),
+                });
+            }
+            _ => {}
+        }
+        if let DecodedPacketPayload::MinimapUpdate { updates, .. } = decoded {
+            for u in updates {
+                // Sentinels (not visible) and one-shot pings are not sustained
+                // tracking samples.
+                if u.is_sentinel || u.is_minimap_ping() {
+                    continue;
+                }
+                self.timeline.entry(u.entity_id).or_default().push(PositionSample {
+                    clock: packet.clock,
+                    pos: SampledPos::Minimap(u.position),
+                });
+            }
         }
     }
 }
