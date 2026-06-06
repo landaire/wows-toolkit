@@ -12,6 +12,7 @@
 //! reached) so renderers know when it's safe to draw a frame.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
@@ -31,9 +32,10 @@ use wows_replays::types::TeamId;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::data::ship_config::ShipConfig;
-use wowsunpack::game_types::BattleStage;
 use wowsunpack::game_types::GameParamId;
 use wowsunpack::rpc::entitydefs::EntitySpec;
+
+use crate::scan::{MetadataCollector, PositionTimeline, PositionTimelineCollector, merge_position_timelines, scan_replay};
 
 use crate::BattleWorld;
 use crate::components::Vehicle;
@@ -67,6 +69,7 @@ pub struct MergedReplays<'specs, 'res, 'data, G: ResourceLoader> {
     arena_validated: bool,
     total_duration: GameClock,
     battle_start_clock: Option<GameClock>,
+    position_timeline: Arc<PositionTimeline>,
 }
 
 impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, G> {
@@ -106,15 +109,21 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
 
         let mut self_teams = Vec::with_capacity(replay_count);
         let mut total_duration = GameClock(0.0);
-        for r in &replays {
-            self_teams.push(scan_self_team(specs, game_constants, version, r));
-            total_duration = GameClock(total_duration.0.max(scan_last_clock(specs, version, r).0));
+        let mut timeline_parts: Vec<PositionTimeline> = Vec::with_capacity(replay_count);
+        let mut battle_start_clock: Option<GameClock> = None;
+        for (i, r) in replays.iter().enumerate() {
+            let mut meta = MetadataCollector::new(r.meta.playerName.as_str(), game_constants);
+            let mut positions = PositionTimelineCollector::default();
+            scan_replay(specs, game_constants, version, r, &mut [&mut meta, &mut positions]);
+            self_teams.push(meta.self_team);
+            total_duration = GameClock(total_duration.0.max(meta.last_clock.0));
+            // battleStage is a primary-owned broadcast; trust only the primary.
+            if i == 0 {
+                battle_start_clock = meta.battle_start_clock;
+            }
+            timeline_parts.push(positions.timeline);
         }
-
-        // The battleStage transition is a match-wide broadcast carried by the
-        // primary perspective, so the primary's stream is the authoritative
-        // source for when the pre-battle phase ends.
-        let battle_start_clock = scan_battle_start_clock(specs, game_constants, version, primary);
+        let position_timeline = Arc::new(merge_position_timelines(timeline_parts));
 
         let world = BattleWorld::new(&primary.meta, game_params, Some(game_constants));
 
@@ -130,6 +139,7 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
             arena_validated: replay_count <= 1,
             total_duration,
             battle_start_clock,
+            position_timeline,
         })
     }
 
@@ -156,6 +166,12 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
     /// transition (e.g. very old replays).
     pub fn battle_start_clock(&self) -> Option<GameClock> {
         self.battle_start_clock
+    }
+
+    /// Per-entity position timeline for motion smoothing, built once at session
+    /// construction and shared cheaply (`Arc`) with renderers.
+    pub fn position_timeline(&self) -> Arc<PositionTimeline> {
+        Arc::clone(&self.position_timeline)
     }
 
     /// `true` once every replay's stream has been exhausted.
@@ -273,38 +289,6 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
 }
 
 /// Walk a replay's stream to find the first `onArenaStateReceived` and
-/// return the team id whose username matches the replay meta's
-/// `playerName`. Returns `None` if no match is found.
-fn scan_self_team(
-    specs: &[EntitySpec],
-    game_constants: &GameConstants,
-    version: Version,
-    replay: &ReplayFile,
-) -> Option<TeamId> {
-    let mut parser = Parser::with_version(specs, version);
-    let decoder = PacketDecoder::builder()
-        .version(version)
-        .battle_constants(game_constants.battle())
-        .common_constants(game_constants.common())
-        .ships_constants(game_constants.ships())
-        .build();
-    let mut remaining = &replay.packet_data[..];
-    let player_name = replay.meta.playerName.as_str();
-    while !remaining.is_empty() {
-        let packet = parser.parse_packet(&mut remaining).ok()?;
-        let decoded = decoder.decode(&packet);
-        if let DecodedPacketPayload::OnArenaStateReceived { player_states, bot_states, .. } = decoded.payload {
-            return player_states
-                .iter()
-                .chain(bot_states.iter())
-                .find(|p| p.username() == player_name)
-                .map(|p| TeamId::from(p.team_id()));
-        }
-    }
-    None
-}
-
-/// Walk a replay's stream to find the first `onArenaStateReceived` and
 /// extract its arena id. Lets callers reject merge candidates that
 /// don't belong to the same match before a full re-parse is kicked off.
 pub fn scan_arena_id(specs: &[EntitySpec], version: Version, replay: &ReplayFile) -> Option<ArenaId> {
@@ -320,52 +304,6 @@ pub fn scan_arena_id(specs: &[EntitySpec], version: Version, replay: &ReplayFile
         }
     }
     None
-}
-
-/// Walk a replay's stream to find the first `battleStage` EntityProperty that
-/// resolves to the active battle stage, returning the clock of that packet.
-/// This is the moment the pre-battle countdown ends. Returns `None` if no such
-/// transition is recorded.
-fn scan_battle_start_clock(
-    specs: &[EntitySpec],
-    game_constants: &GameConstants,
-    version: Version,
-    replay: &ReplayFile,
-) -> Option<GameClock> {
-    let mut parser = Parser::with_version(specs, version);
-    let decoder = PacketDecoder::builder()
-        .version(version)
-        .battle_constants(game_constants.battle())
-        .common_constants(game_constants.common())
-        .ships_constants(game_constants.ships())
-        .build();
-    let mut remaining = &replay.packet_data[..];
-    while !remaining.is_empty() {
-        let packet = parser.parse_packet(&mut remaining).ok()?;
-        let clock = packet.clock;
-        if let DecodedPacketPayload::EntityProperty(prop) = decoder.decode(&packet).payload
-            && prop.property == "battleStage"
-            && let Some(raw) = prop.value.as_i64()
-            && matches!(game_constants.common().battle_stage(raw as i32).copied(), Some(BattleStage::Waiting))
-        {
-            return Some(clock);
-        }
-    }
-    None
-}
-
-/// Walk a replay's stream and return the largest packet clock observed.
-fn scan_last_clock(specs: &[EntitySpec], version: Version, replay: &ReplayFile) -> GameClock {
-    let mut parser = Parser::with_version(specs, version);
-    let mut remaining = &replay.packet_data[..];
-    let mut last = GameClock(0.0);
-    while !remaining.is_empty() {
-        match parser.parse_packet(&mut remaining) {
-            Ok(p) => last = GameClock(p.clock.0.max(last.0)),
-            Err(_) => break,
-        }
-    }
-    last
 }
 
 /// Decide whether a packet from a non-primary replay should be fed to the
