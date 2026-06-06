@@ -137,6 +137,11 @@ pub enum ArgType {
     /// (allow_none, properties)
     FixedDict((bool, Vec<FixedDictProperty>)),
     Tuple((Box<ArgType>, usize)),
+
+    /// A type referenced through a def alias or named composite. Transparent:
+    /// layout and parsed value come from `inner`; `name` is the game's own
+    /// semantic type name (e.g. "ENTITY_ID", "WEATHER_LOGIC_PARAMS").
+    Named { name: String, inner: Box<ArgType> },
 }
 
 #[derive(Clone, Debug, PartialEq, variantly::Variantly)]
@@ -337,6 +342,23 @@ impl<'argtype> serde::Serialize for ArgValue<'argtype> {
 const INFINITY: usize = 0xffff;
 
 impl ArgType {
+    /// The outermost def type name, if this type was referenced via an alias
+    /// or named composite.
+    pub fn semantic_name(&self) -> Option<&str> {
+        match self {
+            Self::Named { name, .. } => Some(name),
+            _ => None,
+        }
+    }
+
+    /// Strip any `Named` wrappers down to the structural type.
+    pub fn peeled(&self) -> &ArgType {
+        match self {
+            Self::Named { inner, .. } => inner.peeled(),
+            other => other,
+        }
+    }
+
     pub fn sort_size(&self) -> usize {
         match self {
             Self::Primitive(PrimitiveType::Uint8) => 1,
@@ -372,6 +394,7 @@ impl ArgType {
                 let sort_size = t.sort_size();
                 if sort_size == INFINITY { INFINITY } else { sort_size * count }
             }
+            Self::Named { inner, .. } => inner.sort_size(),
         }
     }
 
@@ -408,6 +431,7 @@ impl ArgType {
             Self::Tuple((_t, _count)) => {
                 panic!("Tuple parsing is unsupported");
             }
+            Self::Named { inner, .. } => inner.parse_value(input),
         }
     }
 }
@@ -482,8 +506,8 @@ pub fn parse_type(arg: &roxmltree::Node, aliases: &HashMap<String, ArgType>) -> 
         let subtype = parse_type(&child_by_name(arg, "of").unwrap(), aliases);
         let count = child_by_name(arg, "size").unwrap().text().unwrap().trim().parse::<usize>().unwrap();
         ArgType::Tuple((Box::new(subtype), count))
-    } else if aliases.contains_key(t) {
-        aliases.get(t).unwrap().clone()
+    } else if let Some(resolved) = aliases.get(t) {
+        ArgType::Named { name: t.to_string(), inner: Box::new(resolved.clone()) }
     } else {
         panic!("Unrecognized type {t}");
     }
@@ -584,6 +608,26 @@ mod test {
         let doc = roxmltree::Document::parse(doc).unwrap();
         let root = doc.root();
         assert_eq!(parse_type(&root, &HashMap::new()), ArgType::Primitive(PrimitiveType::Int16));
+    }
+
+    #[test]
+    fn alias_preserves_semantic_name() {
+        let mut aliases = HashMap::new();
+        aliases.insert("ENTITY_ID".to_string(), ArgType::Primitive(PrimitiveType::Int32));
+
+        let doc = roxmltree::Document::parse("<Arg>ENTITY_ID</Arg>").unwrap();
+        let root = doc.root();
+        let t = parse_type(&root, &aliases);
+
+        // The semantic name survives, but the type is otherwise transparent.
+        assert_eq!(t.semantic_name(), Some("ENTITY_ID"));
+        assert_eq!(t.peeled(), &ArgType::Primitive(PrimitiveType::Int32));
+        assert_eq!(t.sort_size(), 4);
+
+        let data = [5, 0, 0, 0];
+        let mut input = &data[..];
+        assert_eq!(t.parse_value(&mut input).unwrap(), ArgValue::Int32(5));
+        assert!(input.is_empty());
     }
 
     #[test]
