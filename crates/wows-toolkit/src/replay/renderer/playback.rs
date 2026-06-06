@@ -1119,42 +1119,72 @@ fn build_display_from_resolved(
 
     let captain_name = build.captain.as_deref().and_then(|c| metadata.localized_name_from_param(c));
 
-    // Show the captain's learned skills grouped by tier (= point cost).
-    // GameParams doesn't expose the in-game per-species skill grid (the
-    // 5-wide layout the WoWs client paints is a hidden UI manifest; the
-    // `tier` map carries values for every species on every skill), so
-    // listing the full catalog would dump all ~80 skills instead of the
-    // 16-20 a player actually sees in port. The learned set is exact.
-    let mut all_skills: Vec<super::SkillDisplay> = build
-        .captain
-        .as_deref()
-        .and_then(|c| c.data().crew_ref())
-        .map(|crew| {
-            build
-                .skills
-                .iter()
-                .filter_map(|skill_type| crew.skill_by_type(*skill_type as u32))
-                .map(|skill| {
-                    let internal = skill.internal_name();
-                    super::SkillDisplay {
-                        icon_key: internal.to_case(Case::Snake),
-                        name: skill.translated_name(metadata, version).unwrap_or_else(|| internal.to_string()),
-                        description: skill.translated_description(metadata, version).unwrap_or_default(),
-                        tier: skill_tier_for_species(skill, build.species),
-                        skill_type: skill.skill_type() as u32,
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    all_skills.sort_by_key(|s| (s.tier, s.skill_type));
-    let mut skill_rows: Vec<super::SkillRow> = Vec::new();
-    for skill in all_skills {
-        match skill_rows.last_mut() {
-            Some(row) if row.tier == skill.tier => row.skills.push(skill),
-            _ => skill_rows.push(super::SkillRow { tier: skill.tier, skills: vec![skill] }),
+    // Lay out the captain's full per-species skill grid (rows = point cost,
+    // columns per the in-game layout), flagging the skills the player took.
+    // Modern builds (>=0.10) use the reverse-engineered SKILLS_BY_SHIP_TYPE
+    // layout table; older builds have no table here yet, so we fall back to
+    // listing only the learned skills.
+    let crew = build.captain.as_deref().and_then(|c| c.data().crew_ref());
+    let learned: std::collections::HashSet<u32> = build.skills.iter().map(|s| *s as u32).collect();
+    // Empty for pre-0.10 builds and species without a captain grid.
+    let grid = wowsunpack::game_params::skill_grid_data::modern_grid(version.build, build.species);
+
+    let skill_rows: Vec<super::SkillRow> = if let (Some(crew), false) = (crew, grid.is_empty()) {
+        let by_name: std::collections::HashMap<&str, &wowsunpack::game_params::types::CrewSkill> =
+            crew.skills().into_iter().flatten().map(|s| (s.internal_name(), s)).collect();
+        let mut rows: Vec<super::SkillRow> = Vec::new();
+        for slot in grid {
+            // Skip a layout entry whose skill this build's params don't define
+            // (version skew) rather than inventing a placeholder.
+            let Some(skill) = by_name.get(slot.skill).copied() else {
+                continue;
+            };
+            let display = super::SkillDisplay {
+                icon_key: slot.skill.to_case(Case::Snake),
+                // Fall back to the internal name only when a translation is genuinely absent.
+                name: skill.translated_name(metadata, version).unwrap_or_else(|| slot.skill.to_string()),
+                description: skill.translated_description(metadata, version).unwrap_or_default(),
+                tier: slot.tier + 1, // table tier is 0-based; display as point cost
+                skill_type: skill.skill_type() as u32,
+                learned: learned.contains(&(skill.skill_type() as u32)),
+            };
+            match rows.last_mut() {
+                Some(row) if row.tier == display.tier => row.skills.push(display),
+                _ => rows.push(super::SkillRow { tier: display.tier, skills: vec![display] }),
+            }
         }
-    }
+        rows
+    } else {
+        let mut all_skills: Vec<super::SkillDisplay> = crew
+            .map(|crew| {
+                build
+                    .skills
+                    .iter()
+                    .filter_map(|skill_type| crew.skill_by_type(*skill_type as u32))
+                    .map(|skill| {
+                        let internal = skill.internal_name();
+                        super::SkillDisplay {
+                            icon_key: internal.to_case(Case::Snake),
+                            name: skill.translated_name(metadata, version).unwrap_or_else(|| internal.to_string()),
+                            description: skill.translated_description(metadata, version).unwrap_or_default(),
+                            tier: skill_tier_for_species(skill, build.species),
+                            skill_type: skill.skill_type() as u32,
+                            learned: true,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        all_skills.sort_by_key(|s| (s.tier, s.skill_type));
+        let mut rows: Vec<super::SkillRow> = Vec::new();
+        for skill in all_skills {
+            match rows.last_mut() {
+                Some(row) if row.tier == skill.tier => row.skills.push(skill),
+                _ => rows.push(super::SkillRow { tier: skill.tier, skills: vec![skill] }),
+            }
+        }
+        rows
+    };
 
     let upgrades = build.upgrades.iter().map(|p| equipment_display_for_param(p, metadata)).collect();
     // `config.exteriors()` returns every exterior the player has mounted:

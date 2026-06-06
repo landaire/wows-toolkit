@@ -625,6 +625,8 @@ pub struct SkillDisplay {
     pub tier: u8,
     /// In-game ordering key within a tier row.
     pub skill_type: u32,
+    /// True when the player actually took this skill (vs shown for context).
+    pub learned: bool,
 }
 
 pub struct EquipmentDisplay {
@@ -3452,12 +3454,19 @@ fn draw_skill_grid(ui: &mut egui::Ui, rows: &[SkillRow], icons: &HashMap<String,
                     tracing::warn!(icon_key = %skill.icon_key, "missing skill icon");
                     continue;
                 };
+                let status = if skill.learned { "" } else { " - not taken" };
                 let tooltip = if skill.description.is_empty() {
-                    format!("{} ({} pt)", skill.name, skill.tier)
+                    format!("{} ({} pt){}", skill.name, skill.tier, status)
                 } else {
-                    format!("{} ({} pt)\n\n{}", skill.name, skill.tier, skill.description)
+                    format!("{} ({} pt){}\n\n{}", skill.name, skill.tier, status, skill.description)
                 };
-                ui.image((tex.id(), Vec2::splat(ICON_SIZE))).on_hover_text(tooltip);
+                // Dim skills the player didn't take so the taken ones stand out.
+                let tint = if skill.learned {
+                    Color32::WHITE
+                } else {
+                    Color32::from_rgba_unmultiplied(255, 255, 255, 55)
+                };
+                ui.add(egui::Image::new((tex.id(), Vec2::splat(ICON_SIZE))).tint(tint)).on_hover_text(tooltip);
             }
         });
     }

@@ -37,6 +37,8 @@ HEADER = """\
 //! instead and are not covered here. Regenerate after adding game versions.
 #![allow(dead_code)]
 
+use super::types::Species;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SkillGroup {
     Attack,
@@ -56,16 +58,6 @@ pub struct GridSlot {
     pub group: SkillGroup,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SkillSpecies {
-    AirCarrier,
-    Battleship,
-    Cruiser,
-    Destroyer,
-    Submarine,
-    Auxiliary,
-}
-
 struct Layout {
     min_build: u32,
     air_carrier: &'static [GridSlot],
@@ -77,21 +69,23 @@ struct Layout {
 }
 
 impl Layout {
-    fn species(&self, s: SkillSpecies) -> &'static [GridSlot] {
+    fn species(&self, s: Species) -> &'static [GridSlot] {
         match s {
-            SkillSpecies::AirCarrier => self.air_carrier,
-            SkillSpecies::Battleship => self.battleship,
-            SkillSpecies::Cruiser => self.cruiser,
-            SkillSpecies::Destroyer => self.destroyer,
-            SkillSpecies::Submarine => self.submarine,
-            SkillSpecies::Auxiliary => self.auxiliary,
+            Species::AirCarrier => self.air_carrier,
+            Species::Battleship => self.battleship,
+            Species::Cruiser => self.cruiser,
+            Species::Destroyer => self.destroyer,
+            Species::Submarine => self.submarine,
+            Species::Auxiliary => self.auxiliary,
+            _ => &[],
         }
     }
 }
 
 /// Modern skill grid for `build` and `species`. Empty when `build` predates the
-/// modern skill system. Picks the layout with the largest `min_build <= build`.
-pub fn modern_grid(build: u32, species: SkillSpecies) -> &'static [GridSlot] {
+/// modern skill system or `species` has no captain grid. Picks the layout with
+/// the largest `min_build <= build`.
+pub fn modern_grid(build: u32, species: Species) -> &'static [GridSlot] {
     let mut chosen: Option<&Layout> = None;
     for layout in LAYOUTS {
         if layout.min_build <= build {
