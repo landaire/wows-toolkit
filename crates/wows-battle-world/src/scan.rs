@@ -29,29 +29,37 @@ pub enum SampledPos {
     Minimap(NormalizedPos),
 }
 
-/// One timestamped position sample for an entity.
-#[derive(Debug, Clone, Copy)]
-pub struct PositionSample {
-    pub clock: GameClock,
-    pub pos: SampledPos,
+/// Per-entity samples split by source. World samples (Position /
+/// PlayerOrientation) are dense; minimap samples (updateMinimapVisionInfo) are
+/// sparse and quantized. They interleave while a ship is both in AOI and
+/// spotted, so they are kept in separate tracks and interpolated independently.
+/// Each vec is sorted ascending by clock.
+#[derive(Debug, Default, Clone)]
+pub struct EntityTrack {
+    pub world: Vec<(GameClock, WorldPos)>,
+    pub minimap: Vec<(GameClock, NormalizedPos)>,
 }
 
-/// Per-entity samples, sorted ascending by clock.
-pub type PositionTimeline = HashMap<EntityId, Vec<PositionSample>>;
+/// Per-entity position tracks.
+pub type PositionTimeline = HashMap<EntityId, EntityTrack>;
 
-/// Merge per-replay timelines into one. Samples for the same entity from
-/// multiple perspectives are concatenated, sorted by clock, and exact-duplicate
-/// clocks dropped (keeping the first seen).
+/// Merge per-replay timelines into one, concatenating each entity's world and
+/// minimap tracks across perspectives, then sorting each track by clock and
+/// dropping exact-duplicate clocks.
 pub fn merge_position_timelines(parts: Vec<PositionTimeline>) -> PositionTimeline {
     let mut out: PositionTimeline = HashMap::new();
     for part in parts {
-        for (eid, samples) in part {
-            out.entry(eid).or_default().extend(samples);
+        for (eid, track) in part {
+            let e = out.entry(eid).or_default();
+            e.world.extend(track.world);
+            e.minimap.extend(track.minimap);
         }
     }
-    for samples in out.values_mut() {
-        samples.sort_by(|a, b| a.clock.0.total_cmp(&b.clock.0));
-        samples.dedup_by(|a, b| a.clock.0 == b.clock.0);
+    for track in out.values_mut() {
+        track.world.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
+        track.world.dedup_by(|a, b| a.0.0 == b.0.0);
+        track.minimap.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
+        track.minimap.dedup_by(|a, b| a.0.0 == b.0.0);
     }
     out
 }
@@ -102,30 +110,28 @@ impl ScanCollector for PositionTimelineCollector {
     fn observe(&mut self, packet: &Packet<'_, '_>, decoded: &DecodedPacketPayload<'_, '_, '_>) {
         match &packet.payload {
             PacketType::Position(p) => {
-                self.timeline.entry(p.pid).or_default().push(PositionSample {
-                    clock: packet.clock,
-                    pos: SampledPos::World(WorldPos::new(p.position.x, p.position.y, p.position.z)),
-                });
+                self.timeline
+                    .entry(p.pid)
+                    .or_default()
+                    .world
+                    .push((packet.clock, WorldPos::new(p.position.x, p.position.y, p.position.z)));
             }
             PacketType::PlayerOrientation(o) if o.parent_id == EntityId::from(0u32) => {
-                self.timeline.entry(o.pid).or_default().push(PositionSample {
-                    clock: packet.clock,
-                    pos: SampledPos::World(WorldPos::new(o.position.x, o.position.y, o.position.z)),
-                });
+                self.timeline
+                    .entry(o.pid)
+                    .or_default()
+                    .world
+                    .push((packet.clock, WorldPos::new(o.position.x, o.position.y, o.position.z)));
             }
             _ => {}
         }
         if let DecodedPacketPayload::MinimapUpdate { updates, .. } = decoded {
             for u in updates {
-                // Sentinels (not visible) and one-shot pings are not sustained
-                // tracking samples.
+                // Sentinels (not visible) and one-shot pings are not sustained tracking.
                 if u.is_sentinel || u.is_minimap_ping() {
                     continue;
                 }
-                self.timeline
-                    .entry(u.entity_id)
-                    .or_default()
-                    .push(PositionSample { clock: packet.clock, pos: SampledPos::Minimap(u.position) });
+                self.timeline.entry(u.entity_id).or_default().minimap.push((packet.clock, u.position));
             }
         }
     }
@@ -202,22 +208,16 @@ mod tests {
     #[test]
     fn merge_sorts_and_dedups_by_clock() {
         let mut a: PositionTimeline = HashMap::new();
-        a.insert(
-            EntityId::from(1u32),
-            vec![
-                PositionSample { clock: GameClock(2.0), pos: SampledPos::World(WorldPos::new(2.0, 0.0, 0.0)) },
-                PositionSample { clock: GameClock(0.0), pos: SampledPos::World(WorldPos::new(0.0, 0.0, 0.0)) },
-            ],
-        );
+        a.entry(EntityId::from(1u32)).or_default().world.extend([
+            (GameClock(2.0), WorldPos::new(2.0, 0.0, 0.0)),
+            (GameClock(0.0), WorldPos::new(0.0, 0.0, 0.0)),
+        ]);
         let mut b: PositionTimeline = HashMap::new();
-        b.insert(
-            EntityId::from(1u32),
-            vec![PositionSample { clock: GameClock(2.0), pos: SampledPos::World(WorldPos::new(9.0, 0.0, 0.0)) }],
-        );
+        b.entry(EntityId::from(1u32)).or_default().world.push((GameClock(2.0), WorldPos::new(9.0, 0.0, 0.0)));
         let merged = merge_position_timelines(vec![a, b]);
-        let s = &merged[&EntityId::from(1u32)];
-        assert_eq!(s.len(), 2);
-        assert_eq!(s[0].clock.0, 0.0);
-        assert_eq!(s[1].clock.0, 2.0);
+        let w = &merged[&EntityId::from(1u32)].world;
+        assert_eq!(w.len(), 2);
+        assert_eq!(w[0].0.0, 0.0);
+        assert_eq!(w[1].0.0, 2.0);
     }
 }

@@ -20,7 +20,7 @@ use wowsunpack::game_types::BattleResult;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
 
-use wows_battle_world::PositionSample;
+use wows_battle_world::EntityTrack;
 use wows_battle_world::PositionTimeline;
 use wows_battle_world::SampledPos;
 use wows_battle_world::view::BattleView;
@@ -63,39 +63,48 @@ const KILL_FEED_DURATION: f32 = 10.0;
 /// AOI exit, so we snap (hold nearest) instead of interpolating across them.
 const MAX_SAMPLE_GAP: f32 = 2.0;
 
-/// Interpolate a position from sorted samples at `clock`. Returns `None` when
-/// `clock` is outside the sample range. Lerps only between same-variant
-/// neighbours within `MAX_SAMPLE_GAP`; otherwise snaps to the nearer sample so
-/// world/minimap coordinate spaces are never blended.
-pub(crate) fn interpolate_samples(samples: &[PositionSample], clock: GameClock) -> Option<SampledPos> {
-    if samples.len() < 2 {
-        return samples.first().and_then(|s| if s.clock.0 == clock.0 { Some(s.pos) } else { None });
-    }
-    if clock.0 < samples[0].clock.0 || clock.0 > samples[samples.len() - 1].clock.0 {
+/// Interpolate one sorted (clock, value) track at `clock`. Lerps the bracketing
+/// pair when within `MAX_SAMPLE_GAP`; returns `None` outside the track's range,
+/// or when the bracket gap exceeds the threshold (a spotting break) so the
+/// caller can fall back to another source.
+fn interp_track<T: Copy>(samples: &[(GameClock, T)], clock: GameClock, lerp: impl Fn(T, T, f32) -> T) -> Option<T> {
+    if samples.is_empty() {
         return None;
     }
-    let hi = samples.partition_point(|s| s.clock.0 <= clock.0);
+    if clock.0 < samples[0].0.0 || clock.0 > samples[samples.len() - 1].0.0 {
+        return None;
+    }
+    let hi = samples.partition_point(|s| s.0.0 <= clock.0);
     if hi == 0 {
-        return Some(samples[0].pos);
+        return Some(samples[0].1);
+    }
+    let (ca, va) = samples[hi - 1];
+    if clock.0 == ca.0 {
+        return Some(va);
     }
     if hi >= samples.len() {
-        return Some(samples[samples.len() - 1].pos);
+        return Some(va);
     }
-    let a = &samples[hi - 1];
-    let b = &samples[hi];
-    let dt = b.clock.0 - a.clock.0;
-    let snap = |a: &PositionSample, b: &PositionSample| -> SampledPos {
-        if (clock.0 - a.clock.0) <= (b.clock.0 - clock.0) { a.pos } else { b.pos }
-    };
+    let (cb, vb) = samples[hi];
+    let dt = cb.0 - ca.0;
     if dt <= 0.0 || dt > MAX_SAMPLE_GAP {
-        return Some(snap(a, b));
+        return None;
     }
-    let t = (clock.0 - a.clock.0) / dt;
-    match (a.pos, b.pos) {
-        (SampledPos::World(pa), SampledPos::World(pb)) => Some(SampledPos::World(pa.lerp(pb, t))),
-        (SampledPos::Minimap(pa), SampledPos::Minimap(pb)) => Some(SampledPos::Minimap(pa.lerp(pb, t))),
-        _ => Some(snap(a, b)),
+    let t = (clock.0 - ca.0) / dt;
+    Some(lerp(va, vb, t))
+}
+
+/// Interpolate an entity's position, preferring the dense world track and
+/// falling back to the sparse minimap track only where world coverage is absent
+/// (e.g. a ship spotted by radar while outside the recording player's AOI).
+pub(crate) fn interpolate_track(track: &EntityTrack, clock: GameClock) -> Option<SampledPos> {
+    if let Some(w) = interp_track(&track.world, clock, |a, b, t| a.lerp(b, t)) {
+        return Some(SampledPos::World(w));
     }
+    if let Some(m) = interp_track(&track.minimap, clock, |a, b, t| a.lerp(b, t)) {
+        return Some(SampledPos::Minimap(m));
+    }
+    None
 }
 
 /// Seconds a shell is in flight, used to pace its tracer along origin->target.
@@ -342,8 +351,8 @@ impl<'a> MinimapRenderer<'a> {
     }
 
     fn interpolated_pos(&self, entity_id: EntityId, render_clock: GameClock) -> Option<SampledPos> {
-        let samples = self.position_timeline.as_ref()?.get(&entity_id)?;
-        interpolate_samples(samples, render_clock)
+        let track = self.position_timeline.as_ref()?.get(&entity_id)?;
+        interpolate_track(track, render_clock)
     }
 
     /// Mark whether this renderer is driving a merged session (primary plus
@@ -2687,9 +2696,9 @@ fn consumable_to_base_icon_key(c: Consumable) -> Option<String> {
 #[cfg(test)]
 mod test {
     use super::SampledPos;
-    use super::interpolate_samples;
+    use super::interpolate_track;
     use super::tracer_flight_duration;
-    use wows_battle_world::PositionSample;
+    use wows_battle_world::EntityTrack;
     use wows_replays::types::GameClock;
     use wows_replays::types::NormalizedPos;
     use wows_replays::types::WorldPos;
@@ -2704,44 +2713,60 @@ mod test {
         assert_eq!(tracer_flight_duration(3000.0, 0.0, 0.0), 3.0);
     }
 
-    fn ws(c: f32, x: f32) -> PositionSample {
-        PositionSample { clock: GameClock(c), pos: SampledPos::World(WorldPos::new(x, 0.0, 0.0)) }
+    fn world_only(samples: &[(f32, f32)]) -> EntityTrack {
+        EntityTrack {
+            world: samples.iter().map(|&(c, x)| (GameClock(c), WorldPos::new(x, 0.0, 0.0))).collect(),
+            minimap: Vec::new(),
+        }
     }
 
     #[test]
     fn interp_world_midpoint() {
-        let s = vec![ws(0.0, 0.0), ws(1.0, 10.0)];
-        match interpolate_samples(&s, GameClock(0.5)) {
+        let t = world_only(&[(0.0, 0.0), (1.0, 10.0)]);
+        match interpolate_track(&t, GameClock(0.5)) {
             Some(SampledPos::World(p)) => assert!((p.x - 5.0).abs() < 1e-4),
             other => panic!("expected world lerp, got {other:?}"),
         }
     }
 
     #[test]
-    fn interp_before_first_and_after_last_is_none() {
-        let s = vec![ws(1.0, 0.0), ws(2.0, 10.0)];
-        assert!(interpolate_samples(&s, GameClock(0.5)).is_none());
-        assert!(interpolate_samples(&s, GameClock(3.0)).is_none());
+    fn interp_out_of_range_is_none() {
+        let t = world_only(&[(1.0, 0.0), (2.0, 10.0)]);
+        assert!(interpolate_track(&t, GameClock(0.5)).is_none());
+        assert!(interpolate_track(&t, GameClock(3.0)).is_none());
     }
 
     #[test]
-    fn interp_snaps_across_large_gap() {
-        let s = vec![ws(0.0, 0.0), ws(10.0, 100.0)];
-        match interpolate_samples(&s, GameClock(1.0)) {
-            Some(SampledPos::World(p)) => assert!((p.x - 0.0).abs() < 1e-4),
-            other => panic!("expected snap to first, got {other:?}"),
+    fn interp_prefers_world_when_both_cover_clock() {
+        // Interleaved in-AOI case: world and minimap both cover the clock; the
+        // dense world track must win so motion stays smooth (not snapped).
+        let t = EntityTrack {
+            world: vec![(GameClock(0.0), WorldPos::new(0.0, 0.0, 0.0)), (GameClock(1.0), WorldPos::new(10.0, 0.0, 0.0))],
+            minimap: vec![
+                (GameClock(0.0), NormalizedPos::new(0.0, 0.0)),
+                (GameClock(1.0), NormalizedPos::new(0.5, 0.5)),
+            ],
+        };
+        assert!(matches!(interpolate_track(&t, GameClock(0.5)), Some(SampledPos::World(_))));
+    }
+
+    #[test]
+    fn interp_falls_back_to_minimap_across_world_gap() {
+        // World samples straddle a spotting break (>MAX_SAMPLE_GAP apart); the
+        // minimap track covers the gap (radar) and must be used.
+        let t = EntityTrack {
+            world: vec![
+                (GameClock(0.0), WorldPos::new(0.0, 0.0, 0.0)),
+                (GameClock(10.0), WorldPos::new(100.0, 0.0, 0.0)),
+            ],
+            minimap: vec![
+                (GameClock(4.0), NormalizedPos::new(0.4, 0.4)),
+                (GameClock(6.0), NormalizedPos::new(0.6, 0.6)),
+            ],
+        };
+        match interpolate_track(&t, GameClock(5.0)) {
+            Some(SampledPos::Minimap(n)) => assert!((n.x - 0.5).abs() < 1e-4),
+            other => panic!("expected minimap fallback, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn interp_snaps_across_source_change() {
-        let s = vec![
-            ws(0.0, 0.0),
-            PositionSample { clock: GameClock(0.5), pos: SampledPos::Minimap(NormalizedPos::new(0.4, 0.4)) },
-        ];
-        // 0.1 is closer to a (0.0) than b (0.5), so snap returns World.
-        assert!(matches!(interpolate_samples(&s, GameClock(0.1)), Some(SampledPos::World(_))));
-        // 0.4 is closer to b (0.5) than a (0.0), so snap returns Minimap.
-        assert!(matches!(interpolate_samples(&s, GameClock(0.4)), Some(SampledPos::Minimap(_))));
     }
 }

@@ -5,7 +5,6 @@
 #[path = "support/mod.rs"]
 mod support;
 
-use wows_battle_world::SampledPos;
 use wows_battle_world::merged::MergedReplays;
 use wows_replays::ReplayFile;
 
@@ -19,17 +18,19 @@ fn position_timeline_is_built_and_sorted() {
             .expect("build session");
     let timeline = session.position_timeline();
 
-    assert!(!timeline.is_empty(), "expected position samples");
-
-    for samples in timeline.values() {
+    assert!(!timeline.is_empty(), "expected position tracks");
+    for track in timeline.values() {
         assert!(
-            samples.windows(2).all(|w| w[0].clock.0 <= w[1].clock.0),
-            "each entity timeline must be sorted ascending by clock"
+            track.world.windows(2).all(|w| w[0].0.0 <= w[1].0.0),
+            "world track must be sorted ascending by clock"
+        );
+        assert!(
+            track.minimap.windows(2).all(|w| w[0].0.0 <= w[1].0.0),
+            "minimap track must be sorted ascending by clock"
         );
     }
-
-    let world_samples = timeline.values().flatten().filter(|s| matches!(s.pos, SampledPos::World(_))).count();
-    let minimap_samples = timeline.values().flatten().filter(|s| matches!(s.pos, SampledPos::Minimap(_))).count();
+    let world_samples: usize = timeline.values().map(|t| t.world.len()).sum();
+    let minimap_samples: usize = timeline.values().map(|t| t.minimap.len()).sum();
     assert!(world_samples > 0, "expected world-space samples (Position / PlayerOrientation)");
     assert!(minimap_samples > 0, "expected minimap samples (radar/hydro spotted ships)");
 }
