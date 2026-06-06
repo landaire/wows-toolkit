@@ -306,10 +306,10 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> 
                 let logic_trigger_data = logic_trigger_data.inner();
                 CrewSkillLogicTrigger::builder()
                     .maybe_burn_count(game_param_to_type!(logic_trigger_data, "burnCount", Option<usize>))
-                    .change_priority_target_penalty(game_param_to_type!(
+                    .maybe_change_priority_target_penalty(game_param_to_type!(
                         logic_trigger_data,
                         "changePriorityTargetPenalty",
-                        f32
+                        Option<f32>
                     ))
                     .consumable_type(game_param_to_type!(logic_trigger_data, "consumableType", String))
                     .cooling_delay(game_param_to_type!(logic_trigger_data, "coolingDelay", f32))

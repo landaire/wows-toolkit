@@ -1659,7 +1659,8 @@ impl CrewSkillModifier {
 pub struct CrewSkillLogicTrigger {
     /// Sometimes this field isn't present?
     burn_count: Option<usize>,
-    change_priority_target_penalty: f32,
+    /// Not present in every skill's LogicTrigger (absent in some builds).
+    change_priority_target_penalty: Option<f32>,
     consumable_type: String,
     cooling_delay: f32,
     /// TODO: figure out type
