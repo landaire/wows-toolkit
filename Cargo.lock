@@ -11527,7 +11527,7 @@ dependencies = [
 name = "wt-translations"
 version = "0.4.0"
 dependencies = [
- "wowsunpack",
+ "wows-core",
 ]
 
 [[package]]

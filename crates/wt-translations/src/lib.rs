@@ -164,9 +164,9 @@ mod tests {
 
     #[test]
     fn test_key_mappings() {
-        use wowsunpack::game_types::AdvantageLevel;
-        use wowsunpack::game_types::BattleResult;
-        use wowsunpack::game_types::FinishType;
+        use wows_core::game_types::AdvantageLevel;
+        use wows_core::game_types::BattleResult;
+        use wows_core::game_types::FinishType;
 
         assert_eq!(keys::battle_result_key(BattleResult::Victory), "battle.victory");
         assert_eq!(keys::battle_result_key(BattleResult::Defeat), "battle.defeat");
@@ -181,8 +181,8 @@ mod tests {
 
     #[test]
     fn test_translatable_text_key() {
-        use wowsunpack::game_types::BattleResult;
-        use wowsunpack::recognized::Recognized;
+        use wows_core::game_types::BattleResult;
+        use wows_core::recognized::Recognized;
 
         let t = TranslatableText::BattleResult(BattleResult::Victory);
         assert_eq!(t.key(), "battle.victory");
@@ -196,9 +196,9 @@ mod tests {
 
     #[test]
     fn test_default_text_resolver() {
-        use wowsunpack::game_types::BattleResult;
-        use wowsunpack::game_types::FinishType;
-        use wowsunpack::recognized::Recognized;
+        use wows_core::game_types::BattleResult;
+        use wows_core::game_types::FinishType;
+        use wows_core::recognized::Recognized;
 
         let resolver = DefaultTextResolver;
 

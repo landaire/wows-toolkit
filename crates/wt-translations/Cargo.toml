@@ -8,4 +8,4 @@ repository = "https://github.com/landaire/wows-toolkit"
 description = "Translation key mappings, TextResolver trait, and language metadata for WoWs Toolkit"
 
 [dependencies]
-wowsunpack = { workspace = true, default-features = false }
+wows-core = { workspace = true }
