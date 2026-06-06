@@ -1184,8 +1184,6 @@ use shapes::*;
 
 mod textures;
 use textures::upload_textures;
-
-mod skill_grid_data;
 impl ReplayRendererViewer {
     /// Access the shared renderer state (for polling pending requests, etc.).
     pub fn shared_state(&self) -> &Arc<Mutex<SharedRendererState>> {

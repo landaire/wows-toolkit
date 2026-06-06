@@ -16,7 +16,7 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 JSON_IN = os.path.join(HERE, "skill_grids.json")
-RS_OUT = os.path.join(ROOT, "crates", "wows-toolkit", "src", "replay", "renderer", "skill_grid_data.rs")
+RS_OUT = os.path.join(ROOT, "crates", "wowsunpack", "src", "game_params", "skill_grid_data.rs")
 
 # JSON ship-type key -> Rust Layout field name.
 SHIP_FIELDS = [
