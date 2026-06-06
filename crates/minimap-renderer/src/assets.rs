@@ -328,18 +328,61 @@ pub fn load_consumable_icons(vfs: &VfsPath, version: Option<&Version>) -> HashMa
 /// (e.g. `"consumables_duration"`), so callers feed the converted internal
 /// name when looking up the icon for a learned skill.
 pub fn load_crew_skill_icons(vfs: &VfsPath, size: u32, version: Option<&Version>) -> HashMap<String, RgbaImage> {
-    let mut icons = HashMap::new();
+    use convert_case::Case;
+    use convert_case::Casing;
 
-    if let Some(dir) = GuiAssetDir::CrewSkills.resolve(vfs, version)
-        && let Ok(entries) = dir.read_dir()
-    {
+    let mut icons = HashMap::new();
+    let resize =
+        |img: &image::DynamicImage| image::imageops::resize(img, size, size, image::imageops::FilterType::Lanczos3);
+
+    let Some(dir) = GuiAssetDir::CrewSkills.resolve(vfs, version) else {
+        debug!("crew skills dir not found");
+        return icons;
+    };
+
+    // Modern clients: flat icon files named by the snake-case skill slug, which
+    // matches the grid's lookup key directly.
+    if let Ok(entries) = dir.read_dir() {
         for entry in entries {
             let filename = entry.filename();
             if let Some(key) = filename.strip_suffix(".png")
                 && let Some(img) = load_image_entry(&entry)
             {
-                let resized = image::imageops::resize(&img, size, size, image::imageops::FilterType::Lanczos3);
-                icons.insert(key.to_string(), resized);
+                icons.insert(key.to_string(), resize(&img));
+            }
+        }
+    }
+
+    // Pre-rework clients keep skill icons in `big/` (preferred) or `small/`
+    // subdirs as `icon_perk_<InternalName>.png` rather than flat slugs. Key them
+    // by the snake-case internal name so they match the grid's lookup
+    // (skill.internal_name().to_case(Snake)). Only consulted when the flat
+    // layout yielded nothing.
+    if icons.is_empty() {
+        for sub in ["big", "small"] {
+            let Ok(subdir) = dir.join(sub) else { continue };
+            if !subdir.exists().unwrap_or(false) {
+                continue;
+            }
+            if let Ok(entries) = subdir.read_dir() {
+                for entry in entries {
+                    let filename = entry.filename();
+                    let Some(stem) = filename.strip_suffix(".png") else { continue };
+                    // Base state icon only; the grid doesn't use the disabled/penalty art.
+                    if stem.ends_with("_inactive") || stem.ends_with("_penalty") {
+                        continue;
+                    }
+                    let internal = stem
+                        .strip_prefix("icon_perk_small_")
+                        .or_else(|| stem.strip_prefix("icon_perk_"))
+                        .unwrap_or(stem);
+                    if let Some(img) = load_image_entry(&entry) {
+                        icons.insert(internal.to_case(Case::Snake), resize(&img));
+                    }
+                }
+            }
+            if !icons.is_empty() {
+                break;
             }
         }
     }
