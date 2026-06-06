@@ -20,6 +20,9 @@ use wowsunpack::game_types::BattleResult;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
 
+use wows_battle_world::PositionSample;
+use wows_battle_world::PositionTimeline;
+use wows_battle_world::SampledPos;
 use wows_battle_world::view::BattleView;
 use wows_replay_insights::build::ResolvedBuild;
 use wows_replays::analyzer::battle_controller::ChatChannel;
@@ -32,7 +35,6 @@ use wows_replays::types::GameParamId;
 use wows_replays::types::PlaneId;
 use wows_replays::types::Relation;
 use wows_replays::types::WorldPos;
-use wows_battle_world::{PositionSample, PositionTimeline, SampledPos};
 
 use crate::assets::GameFonts;
 use crate::draw_command::ActivityFeedEntry;
@@ -2684,10 +2686,13 @@ fn consumable_to_base_icon_key(c: Consumable) -> Option<String> {
 
 #[cfg(test)]
 mod test {
+    use super::SampledPos;
+    use super::interpolate_samples;
     use super::tracer_flight_duration;
-    use super::{interpolate_samples, SampledPos};
     use wows_battle_world::PositionSample;
-    use wows_replays::types::{GameClock, NormalizedPos, WorldPos};
+    use wows_replays::types::GameClock;
+    use wows_replays::types::NormalizedPos;
+    use wows_replays::types::WorldPos;
 
     #[test]
     fn flight_duration_prefers_server_time() {

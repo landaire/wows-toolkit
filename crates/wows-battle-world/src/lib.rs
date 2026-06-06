@@ -14,5 +14,7 @@ pub mod world;
 
 mod ingest;
 
-pub use scan::{PositionSample, PositionTimeline, SampledPos};
+pub use scan::PositionSample;
+pub use scan::PositionTimeline;
+pub use scan::SampledPos;
 pub use world::BattleWorld;

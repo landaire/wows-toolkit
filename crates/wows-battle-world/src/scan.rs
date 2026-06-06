@@ -122,10 +122,10 @@ impl ScanCollector for PositionTimelineCollector {
                 if u.is_sentinel || u.is_minimap_ping() {
                     continue;
                 }
-                self.timeline.entry(u.entity_id).or_default().push(PositionSample {
-                    clock: packet.clock,
-                    pos: SampledPos::Minimap(u.position),
-                });
+                self.timeline
+                    .entry(u.entity_id)
+                    .or_default()
+                    .push(PositionSample { clock: packet.clock, pos: SampledPos::Minimap(u.position) });
             }
         }
     }
@@ -144,13 +144,7 @@ pub struct MetadataCollector<'a> {
 
 impl<'a> MetadataCollector<'a> {
     pub fn new(player_name: &'a str, game_constants: &'a GameConstants) -> Self {
-        Self {
-            player_name,
-            game_constants,
-            self_team: None,
-            last_clock: GameClock(0.0),
-            battle_start_clock: None,
-        }
+        Self { player_name, game_constants, self_team: None, last_clock: GameClock(0.0), battle_start_clock: None }
     }
 }
 

@@ -35,7 +35,11 @@ use wowsunpack::data::ship_config::ShipConfig;
 use wowsunpack::game_types::GameParamId;
 use wowsunpack::rpc::entitydefs::EntitySpec;
 
-use crate::scan::{MetadataCollector, PositionTimeline, PositionTimelineCollector, merge_position_timelines, scan_replay};
+use crate::scan::MetadataCollector;
+use crate::scan::PositionTimeline;
+use crate::scan::PositionTimelineCollector;
+use crate::scan::merge_position_timelines;
+use crate::scan::scan_replay;
 
 use crate::BattleWorld;
 use crate::components::Vehicle;

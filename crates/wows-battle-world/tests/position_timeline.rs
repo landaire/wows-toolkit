@@ -14,15 +14,9 @@ use wows_replays::ReplayFile;
 #[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
 fn position_timeline_is_built_and_sorted() {
     let h = support::load("20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay");
-    let session = MergedReplays::new(
-        h.specs,
-        h.game_params,
-        h.game_constants,
-        h.version,
-        &h.replay,
-        &[] as &[ReplayFile],
-    )
-    .expect("build session");
+    let session =
+        MergedReplays::new(h.specs, h.game_params, h.game_constants, h.version, &h.replay, &[] as &[ReplayFile])
+            .expect("build session");
     let timeline = session.position_timeline();
 
     assert!(!timeline.is_empty(), "expected position samples");
