@@ -2741,7 +2741,10 @@ mod test {
         // Interleaved in-AOI case: world and minimap both cover the clock; the
         // dense world track must win so motion stays smooth (not snapped).
         let t = EntityTrack {
-            world: vec![(GameClock(0.0), WorldPos::new(0.0, 0.0, 0.0)), (GameClock(1.0), WorldPos::new(10.0, 0.0, 0.0))],
+            world: vec![
+                (GameClock(0.0), WorldPos::new(0.0, 0.0, 0.0)),
+                (GameClock(1.0), WorldPos::new(10.0, 0.0, 0.0)),
+            ],
             minimap: vec![
                 (GameClock(0.0), NormalizedPos::new(0.0, 0.0)),
                 (GameClock(1.0), NormalizedPos::new(0.5, 0.5)),

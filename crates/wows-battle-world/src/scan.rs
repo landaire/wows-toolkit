@@ -208,10 +208,10 @@ mod tests {
     #[test]
     fn merge_sorts_and_dedups_by_clock() {
         let mut a: PositionTimeline = HashMap::new();
-        a.entry(EntityId::from(1u32)).or_default().world.extend([
-            (GameClock(2.0), WorldPos::new(2.0, 0.0, 0.0)),
-            (GameClock(0.0), WorldPos::new(0.0, 0.0, 0.0)),
-        ]);
+        a.entry(EntityId::from(1u32))
+            .or_default()
+            .world
+            .extend([(GameClock(2.0), WorldPos::new(2.0, 0.0, 0.0)), (GameClock(0.0), WorldPos::new(0.0, 0.0, 0.0))]);
         let mut b: PositionTimeline = HashMap::new();
         b.entry(EntityId::from(1u32)).or_default().world.push((GameClock(2.0), WorldPos::new(9.0, 0.0, 0.0)));
         let merged = merge_position_timelines(vec![a, b]);

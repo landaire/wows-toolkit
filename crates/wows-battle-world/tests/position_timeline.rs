@@ -20,10 +20,7 @@ fn position_timeline_is_built_and_sorted() {
 
     assert!(!timeline.is_empty(), "expected position tracks");
     for track in timeline.values() {
-        assert!(
-            track.world.windows(2).all(|w| w[0].0.0 <= w[1].0.0),
-            "world track must be sorted ascending by clock"
-        );
+        assert!(track.world.windows(2).all(|w| w[0].0.0 <= w[1].0.0), "world track must be sorted ascending by clock");
         assert!(
             track.minimap.windows(2).all(|w| w[0].0.0 <= w[1].0.0),
             "minimap track must be sorted ascending by clock"
