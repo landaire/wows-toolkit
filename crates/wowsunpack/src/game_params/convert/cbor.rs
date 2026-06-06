@@ -2,58 +2,64 @@ use std::io::Read;
 use std::io::Write;
 
 use crate::error::GameDataError;
+#[cfg(feature = "cbor")]
+use ciborium::value::Value as CborValue;
 
 #[cfg(feature = "cbor")]
-fn hashable_pickle_to_cbor(pickled: pickled::HashableValue) -> serde_cbor::Value {
+fn hashable_pickle_to_cbor(pickled: pickled::HashableValue) -> CborValue {
     match pickled {
-        pickled::HashableValue::None => serde_cbor::Value::Null,
-        pickled::HashableValue::Bool(v) => serde_cbor::Value::Bool(v),
-        pickled::HashableValue::I64(v) => serde_cbor::Value::Integer(v.into()),
+        pickled::HashableValue::None => CborValue::Null,
+        pickled::HashableValue::Bool(v) => CborValue::Bool(v),
+        pickled::HashableValue::I64(v) => CborValue::Integer(v.into()),
         pickled::HashableValue::Int(_v) => todo!("Hashable int -> JSON"),
-        pickled::HashableValue::F64(v) => serde_cbor::Value::Float(v),
-        pickled::HashableValue::Bytes(v) => serde_cbor::Value::Bytes(v.into_raw_or_cloned()),
-        pickled::HashableValue::String(v) => serde_cbor::Value::Text(v.into_raw_or_cloned()),
+        pickled::HashableValue::F64(v) => CborValue::Float(v),
+        pickled::HashableValue::Bytes(v) => CborValue::Bytes(v.into_raw_or_cloned()),
+        pickled::HashableValue::String(v) => CborValue::Text(v.into_raw_or_cloned()),
         pickled::HashableValue::Tuple(v) => {
-            serde_cbor::Value::Array(v.into_raw_or_cloned().into_iter().map(hashable_pickle_to_cbor).collect())
+            CborValue::Array(v.into_raw_or_cloned().into_iter().map(hashable_pickle_to_cbor).collect())
         }
         pickled::HashableValue::FrozenSet(v) => {
-            serde_cbor::Value::Array(v.into_raw_or_cloned().into_iter().map(hashable_pickle_to_cbor).collect())
+            CborValue::Array(v.into_raw_or_cloned().into_iter().map(hashable_pickle_to_cbor).collect())
         }
     }
 }
 
 #[cfg(feature = "cbor")]
-pub fn pickle_to_cbor(pickled: pickled::Value) -> serde_cbor::Value {
-    use std::collections::BTreeMap;
-
+pub fn pickle_to_cbor(pickled: pickled::Value) -> CborValue {
     match pickled {
-        pickled::Value::None => serde_cbor::Value::Null,
-        pickled::Value::Bool(v) => serde_cbor::Value::Bool(v),
-        pickled::Value::I64(v) => serde_cbor::Value::Integer(v.into()),
+        pickled::Value::None => CborValue::Null,
+        pickled::Value::Bool(v) => CborValue::Bool(v),
+        pickled::Value::I64(v) => CborValue::Integer(v.into()),
         pickled::Value::Int(_v) => todo!("Int -> JSON"),
-        pickled::Value::F64(v) => serde_cbor::Value::Float(v),
-        pickled::Value::Bytes(v) => serde_cbor::Value::Bytes(v.into_raw_or_cloned()),
-        pickled::Value::String(v) => serde_cbor::Value::Text(v.into_raw_or_cloned()),
+        pickled::Value::F64(v) => CborValue::Float(v),
+        pickled::Value::Bytes(v) => CborValue::Bytes(v.into_raw_or_cloned()),
+        pickled::Value::String(v) => CborValue::Text(v.into_raw_or_cloned()),
         pickled::Value::List(v) => {
-            serde_cbor::Value::Array(v.into_raw_or_cloned().into_iter().map(pickle_to_cbor).collect())
+            CborValue::Array(v.into_raw_or_cloned().into_iter().map(pickle_to_cbor).collect())
         }
         pickled::Value::Tuple(v) => {
-            serde_cbor::Value::Array(v.into_raw_or_cloned().into_iter().map(pickle_to_cbor).collect())
+            CborValue::Array(v.into_raw_or_cloned().into_iter().map(pickle_to_cbor).collect())
         }
         pickled::Value::Set(v) => {
-            serde_cbor::Value::Array(v.into_raw_or_cloned().into_iter().map(hashable_pickle_to_cbor).collect())
+            CborValue::Array(v.into_raw_or_cloned().into_iter().map(hashable_pickle_to_cbor).collect())
         }
         pickled::Value::FrozenSet(v) => {
-            serde_cbor::Value::Array(v.into_raw_or_cloned().into_iter().map(hashable_pickle_to_cbor).collect())
+            CborValue::Array(v.into_raw_or_cloned().into_iter().map(hashable_pickle_to_cbor).collect())
         }
         pickled::Value::Dict(v) => {
-            let mut map = BTreeMap::new();
+            use std::collections::BTreeMap;
+
+            // Dedup colliding string keys (last write wins) and keep a stable,
+            // lexically-sorted key order, matching the previous BTreeMap-based
+            // encoding. ciborium's `Value::Map` is a plain Vec and does neither
+            // on its own, so we collect into a BTreeMap first.
             let v = v.into_raw_or_cloned();
+            let mut map: BTreeMap<String, CborValue> = BTreeMap::new();
             for (key, value) in &v {
                 let converted_key = hashable_pickle_to_cbor(key.clone());
                 let string_key = match converted_key {
-                    serde_cbor::Value::Integer(num) => num.to_string(),
-                    serde_cbor::Value::Text(s) => s,
+                    CborValue::Integer(num) => i128::from(num).to_string(),
+                    CborValue::Text(s) => s,
                     _other => {
                         continue;
                         // panic!(
@@ -63,12 +69,10 @@ pub fn pickle_to_cbor(pickled: pickled::Value) -> serde_cbor::Value {
                     }
                 };
 
-                let converted_value = pickle_to_cbor(value.clone());
-
-                map.insert(serde_cbor::Value::Text(string_key), converted_value);
+                map.insert(string_key, pickle_to_cbor(value.clone()));
             }
 
-            serde_cbor::Value::Map(map)
+            CborValue::Map(map.into_iter().map(|(k, value)| (CborValue::Text(k), value)).collect())
         }
         pickled::Value::Object(ref o) => pickle_to_cbor(o.inner().__reduce__().state_or_none()),
     }
@@ -92,5 +96,5 @@ pub fn read_game_params_as_cbor<W: Write>(
         return Err(GameDataError::InvalidGameParamsData);
     };
 
-    Ok(serde_cbor::to_writer(writer, &converted)?)
+    Ok(ciborium::into_writer(&converted, writer)?)
 }

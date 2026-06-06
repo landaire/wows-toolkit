@@ -141,10 +141,13 @@ pub enum ArgType {
     /// A type referenced through a def alias or named composite. Transparent:
     /// layout and parsed value come from `inner`; `name` is the game's own
     /// semantic type name (e.g. "ENTITY_ID", "WEATHER_LOGIC_PARAMS").
-    Named { name: String, inner: Box<ArgType> },
+    Named {
+        name: String,
+        inner: Box<ArgType>,
+    },
 }
 
-#[derive(Clone, Debug, PartialEq, variantly::Variantly)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ArgValue<'argtype> {
     Uint8(u8),
     Uint16(u16),
@@ -166,6 +169,28 @@ pub enum ArgValue<'argtype> {
     NullableFixedDict(Option<HashMap<&'argtype str, ArgValue<'argtype>>>),
     Tuple(Vec<ArgValue<'argtype>>),
 }
+
+variant_accessors!(ArgValue<'argtype> {
+    tuple Uint8(u8) => uint_8;
+    tuple Uint16(u16) => uint_16;
+    tuple Uint32(u32) => uint_32;
+    tuple Uint64(u64) => uint_64;
+    tuple Int8(i8) => int_8;
+    tuple Int16(i16) => int_16;
+    tuple Int32(i32) => int_32;
+    tuple Int64(i64) => int_64;
+    tuple Float32(f32) => float_32;
+    tuple Float64(f64) => float_64;
+    tuple Vector2((f32, f32)) => vector_2;
+    tuple Vector3((f32, f32, f32)) => vector_3;
+    tuple String(Vec<u8>) => string;
+    tuple UnicodeString(Vec<u8>) => unicode_string;
+    tuple Blob(Vec<u8>) => blob;
+    tuple Array(Vec<ArgValue<'argtype>>) => array;
+    tuple FixedDict(HashMap<&'argtype str, ArgValue<'argtype>>) => fixed_dict;
+    tuple NullableFixedDict(Option<HashMap<&'argtype str, ArgValue<'argtype>>>) => nullable_fixed_dict;
+    tuple Tuple(Vec<ArgValue<'argtype>>) => tuple;
+});
 
 impl<'argtype> ArgValue<'argtype> {
     /// Convert any integer variant to i32 (widening or narrowing as needed).
@@ -790,7 +815,10 @@ mod test {
             name: "WEAPON_LOCKS".to_string(),
             inner: Box::new(ArgType::Array((
                 None,
-                Box::new(ArgType::Named { name: "ENTITY_ID".to_string(), inner: Box::new(ArgType::Primitive(PrimitiveType::Int32)) }),
+                Box::new(ArgType::Named {
+                    name: "ENTITY_ID".to_string(),
+                    inner: Box::new(ArgType::Primitive(PrimitiveType::Int32)),
+                }),
             ))),
         };
 

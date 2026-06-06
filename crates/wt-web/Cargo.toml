@@ -21,7 +21,6 @@ egui_dock = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu"] }
 wgpu = { workspace = true, features = ["webgl"] }
 iroh = { workspace = true, default-features = false }
-rkyv = { workspace = true }
 tracing = { workspace = true }
 web-time = { workspace = true }
 png = "0.18"

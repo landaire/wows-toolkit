@@ -1,5 +1,9 @@
 #![allow(dead_code)]
 
+#[cfg(feature = "parsing")]
+#[macro_use]
+mod variant_accessors;
+
 /// Utilities for resolving raw battle results arrays into named JSON objects.
 #[cfg(feature = "json")]
 pub mod battle_results;

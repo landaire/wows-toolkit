@@ -56,20 +56,19 @@ itertools = { workspace = true }
 convert_case = { workspace = true }
 gettext = { workspace = true }
 language-tags = "0.3"
-pickled = { workspace = true, features = ["variantly"] }
+pickled = { workspace = true }
 flate2 = { workspace = true }
 thousands = "0.2.0"
 notify = "8.2.0"
 serde_json = { workspace = true, features = ["preserve_order"] }
-data-encoding = { workspace = true }
 image = { workspace = true, features = ["jpeg", "png"] }
 image_dds = { workspace = true, features = ["ddsfile", "image"] }
 octocrab = "0.49"
 semver = "1.0"
 tokio = { version = "1.51", features = ["rt", "rt-multi-thread", "macros"] }
 zip = { version = "8.5.0", default-features = false, features = ["deflate"] }
-reqwest = { version = "0.12", features = ["blocking", "json"] }
-serde_cbor = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+ciborium = { workspace = true }
 parking_lot = { version = "0.12.5", features = ["serde"] }
 twitch_api = { version = "0.7.2", features = [
     "helix",
@@ -87,14 +86,13 @@ csv = "1.4.0"
 jiff = { workspace = true, features = ["serde"] }
 rootcause = { workspace = true }
 arboard = "3.6.1"
-iroh = { workspace = true, features = ["default"] }
+iroh = { workspace = true, default-features = false, features = ["fast-apple-datapath", "portmapper"] }
 wt-collab-protocol = { workspace = true, features = ["egui"] }
 wt-collab-egui = { workspace = true }
 web-time = { workspace = true }
 rand = "0.10"
 rkyv = { workspace = true }
 sqlx = { workspace = true }
-const_format = "0.2.35"
 tempfile = "3.27.0"
 unidecode = "0.3.0"
 roxmltree = { workspace = true }

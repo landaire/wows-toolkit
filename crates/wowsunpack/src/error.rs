@@ -22,5 +22,5 @@ pub enum GameDataError {
     SerdeJson(#[from] serde_json::Error),
     #[cfg(feature = "cbor")]
     #[error(transparent)]
-    SerdeCbor(#[from] serde_cbor::Error),
+    Cbor(#[from] ciborium::ser::Error<std::io::Error>),
 }

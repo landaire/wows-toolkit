@@ -27,7 +27,6 @@ use egui_dock::tab_viewer::OnCloseResponse;
 use parking_lot::Mutex;
 use pickled::HashableValue;
 use serde::Serialize;
-use serde_cbor::ser::IoWrite;
 use wowsunpack::data::assets_bin_vfs::AssetsBinVfs;
 use wowsunpack::data::assets_bin_vfs::PrototypeType;
 use wowsunpack::game_params::convert::game_params_to_pickle;
@@ -1635,9 +1634,7 @@ impl ToolkitTabViewer<'_> {
                             params_dict.serialize(&mut serializer).expect("failed to write GameParams data");
                         }
                         GameParamsFormat::Cbor => {
-                            let file = IoWrite::new(file);
-                            let mut serializer = serde_cbor::Serializer::new(file);
-                            params_dict.serialize(&mut serializer).expect("failed to write GameParams data");
+                            ciborium::into_writer(&params_dict, file).expect("failed to write GameParams data");
                         }
                         GameParamsFormat::MinimalJson => {
                             if let Some(metadata_provider) = metadata_provider {
@@ -1647,7 +1644,7 @@ impl ToolkitTabViewer<'_> {
                         }
                         GameParamsFormat::MinimalCbor => {
                             if let Some(metadata_provider) = metadata_provider {
-                                serde_cbor::to_writer(file, &metadata_provider.params())
+                                ciborium::into_writer(&metadata_provider.params(), file)
                                     .expect("failed to write CBOR data");
                             }
                         }

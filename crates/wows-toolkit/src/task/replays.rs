@@ -766,7 +766,7 @@ fn parse_replay_data_in_background(
                                     .and_then(|file| match data.data_export_settings.export_format {
                                         ReplayExportFormat::Json => serde_json::to_writer(file, &transformed_data)
                                             .context("failed to write export file"),
-                                        ReplayExportFormat::Cbor => serde_cbor::to_writer(file, &transformed_data)
+                                        ReplayExportFormat::Cbor => ciborium::into_writer(&transformed_data, file)
                                             .context("failed to write export file"),
                                         ReplayExportFormat::Csv => {
                                             let mut writer =

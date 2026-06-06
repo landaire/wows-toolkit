@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use bon::Builder;
-use variantly::Variantly;
 
 use crate::Rc;
 use crate::data::ResourceLoader;
@@ -22,7 +21,19 @@ use super::provider::GameMetadataProvider;
 
 /// Distance newtypes. Defined in `wows-core`; re-exported so existing
 /// `wowsunpack::game_params::types::{Meters, ...}` paths keep working.
-pub use wows_core::units::{BigWorldDistance, Km, Meters, Millimeters, ShipModelDistance};
+pub use wows_core::units::BigWorldDistance;
+/// Distance newtypes. Defined in `wows-core`; re-exported so existing
+/// `wowsunpack::game_params::types::{Meters, ...}` paths keep working.
+pub use wows_core::units::Km;
+/// Distance newtypes. Defined in `wows-core`; re-exported so existing
+/// `wowsunpack::game_params::types::{Meters, ...}` paths keep working.
+pub use wows_core::units::Meters;
+/// Distance newtypes. Defined in `wows-core`; re-exported so existing
+/// `wowsunpack::game_params::types::{Meters, ...}` paths keep working.
+pub use wows_core::units::Millimeters;
+/// Distance newtypes. Defined in `wows-core`; re-exported so existing
+/// `wowsunpack::game_params::types::{Meters, ...}` paths keep working.
+pub use wows_core::units::ShipModelDistance;
 
 /// Per-material armor thickness map.
 ///
@@ -34,7 +45,7 @@ pub use wows_core::units::{BigWorldDistance, Km, Meters, Millimeters, ShipModelD
 /// `model_index` values; each registration represents a separate armor layer.
 pub type ArmorMap = HashMap<u32, BTreeMap<u32, f32>>;
 
-#[derive(Clone, Copy, Debug, Variantly, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub enum Species {
@@ -426,7 +437,7 @@ impl Param {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Debug, Clone, Copy, Variantly)]
+#[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub enum ParamType {
@@ -1839,7 +1850,7 @@ impl Building {
     }
 }
 
-#[derive(Clone, Debug, Variantly)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub enum ParamData {
@@ -1855,6 +1866,20 @@ pub enum ParamData {
     Drop(BuffDrop),
     Building(Building),
 }
+
+variant_accessors!(ParamData {
+    tuple Vehicle(Vehicle) => vehicle;
+    tuple Crew(Crew) => crew;
+    tuple Ability(Ability) => ability;
+    tuple Achievement(Achievement) => achievement;
+    tuple Modernization(Modernization) => modernization;
+    tuple Exterior(Exterior) => exterior;
+    tuple Aircraft(Aircraft) => aircraft;
+    tuple Projectile(Projectile) => projectile;
+    tuple Drop(BuffDrop) => drop;
+    tuple Building(Building) => building;
+    unit Unit => unit;
+});
 
 pub trait GameParamProvider {
     fn game_param_by_id(&self, id: GameParamId) -> Option<Rc<Param>>;
