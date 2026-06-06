@@ -181,7 +181,7 @@ pub fn build_game_constants(
     // table rather than the latest layout. Applied last so it wins over any bridged
     // (newer-build) constants merged above.
     if let Some(version) = version {
-        game_constants.common_mut().apply_version_consumables(version);
+        wowsunpack::game_constants::apply_version_consumables(game_constants.common_mut(), version);
     }
     game_constants
 }

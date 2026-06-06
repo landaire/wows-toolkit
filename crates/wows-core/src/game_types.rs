@@ -5,19 +5,13 @@
 
 use std::fmt;
 
-#[cfg(feature = "parsing")]
-use crate::data::Version;
-#[cfg(feature = "parsing")]
+use crate::Version;
 use crate::game_constants::BattleConstants;
-#[cfg(feature = "parsing")]
 use crate::game_constants::CommonConstants;
-#[cfg(feature = "parsing")]
 use crate::game_constants::ShipsConstants;
-#[cfg(feature = "parsing")]
 use crate::recognized::Recognized;
 
-#[cfg(feature = "parsing")]
-use crate::game_params::types::Meters;
+use crate::units::Meters;
 
 // =============================================================================
 // Identity Types
@@ -476,7 +470,6 @@ impl std::iter::Sum for Vec3 {
     }
 }
 
-#[cfg(feature = "parsing")]
 impl Vec3 {
     /// Horizontal (XZ-plane) distance to another vector, returned in meters.
     /// Both inputs are in BigWorld coordinates (1 BW = 30m).
@@ -606,7 +599,6 @@ impl std::iter::Sum for WorldPos {
     }
 }
 
-#[cfg(feature = "parsing")]
 impl WorldPos {
     /// Horizontal (XZ-plane) distance to another position, returned in meters.
     pub fn distance_xz(&self, other: &WorldPos) -> Meters {
@@ -1015,7 +1007,6 @@ pub enum DeathCause {
     Missile,
 }
 
-#[cfg(feature = "parsing")]
 impl DeathCause {
     pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
         constants.death_reason(id).map(|name| Self::from_name(name, version))
@@ -1269,7 +1260,6 @@ pub enum Consumable {
     Special,
 }
 
-#[cfg(feature = "parsing")]
 impl Consumable {
     pub fn from_id(id: i32, constants: &CommonConstants, version: Version) -> Option<Recognized<Self>> {
         constants.consumable_type(id).map(|name| Self::from_consumable_type(name, version))
@@ -1428,7 +1418,6 @@ pub enum CameraMode {
     IdleGame,
 }
 
-#[cfg(feature = "parsing")]
 impl CameraMode {
     pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
         constants.camera_mode(id).map(|name| Self::from_name(name, version))
@@ -1516,7 +1505,6 @@ impl BattleStage {
     }
 }
 
-#[cfg(feature = "parsing")]
 impl BattleStage {
     pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
         match name {
@@ -1595,7 +1583,6 @@ impl FinishType {
     }
 }
 
-#[cfg(feature = "parsing")]
 impl FinishType {
     pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
         constants.finish_type(id).map(|name| Self::from_name(name, version))
@@ -1697,7 +1684,6 @@ impl BuoyancyState {
     }
 }
 
-#[cfg(feature = "parsing")]
 impl BuoyancyState {
     pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
         constants.depth_state(id).map(|name| Self::from_name(name, version))
@@ -1780,7 +1766,6 @@ impl WeaponType {
     }
 }
 
-#[cfg(feature = "parsing")]
 impl WeaponType {
     pub fn from_id(id: i32, constants: &ShipsConstants, version: Version) -> Option<Recognized<Self>> {
         constants.weapon_type(id).map(|name| Self::from_name(name, version))
@@ -1849,7 +1834,6 @@ impl BatteryState {
     }
 }
 
-#[cfg(feature = "parsing")]
 impl BatteryState {
     pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
         constants.battery_state(id).map(|name| Self::from_name(name, version))
@@ -1924,7 +1908,6 @@ impl BattleType {
     }
 }
 
-#[cfg(feature = "parsing")]
 impl BattleType {
     /// Parse from the string value in replay metadata (e.g. `"RandomBattle"`).
     pub fn from_value(s: &str, _version: Version) -> Recognized<Self> {
@@ -1981,7 +1964,6 @@ impl CollisionType {
     }
 }
 
-#[cfg(feature = "parsing")]
 impl CollisionType {
     pub fn from_id(id: i32, constants: &ShipsConstants, version: Version) -> Option<Recognized<Self>> {
         constants.collision_type(id).map(|name| Self::from_name(name, version))
@@ -2045,7 +2027,6 @@ impl ShellHitType {
     }
 }
 
-#[cfg(feature = "parsing")]
 impl ShellHitType {
     pub fn from_id(id: i32, constants: &ShipsConstants, version: Version) -> Option<Recognized<Self>> {
         constants.shell_hit_type(id).map(|name| Self::from_name(name, version))
@@ -2113,7 +2094,6 @@ impl InteractiveZoneType {
     }
 }
 
-#[cfg(feature = "parsing")]
 impl InteractiveZoneType {
     pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
         constants.interactive_zone_type(id).map(|name| Self::from_name(name, version))
@@ -2173,7 +2153,6 @@ impl ControlPointType {
     }
 }
 
-#[cfg(feature = "parsing")]
 impl ControlPointType {
     pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
         constants.control_point_type(id).map(|name| Self::from_name(name, version))
@@ -2390,7 +2369,6 @@ impl DamageStatWeapon {
     }
 }
 
-#[cfg(feature = "parsing")]
 impl DamageStatWeapon {
     pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
         constants.damage_stat_weapon(id).map(|name| Self::from_name(name, version))
@@ -2523,7 +2501,6 @@ impl DamageStatCategory {
     }
 }
 
-#[cfg(feature = "parsing")]
 impl DamageStatCategory {
     pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
         constants.damage_stat_category(id).map(|name| Self::from_name(name, version))

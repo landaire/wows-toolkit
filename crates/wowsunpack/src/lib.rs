@@ -29,7 +29,9 @@ pub mod game_data;
 #[cfg(feature = "parsing")]
 pub mod game_params;
 /// Game concept types (entities, positions, enums) useful across WoWS tools.
-pub mod game_types;
+/// Live in `wows-core`; re-exported so existing `wowsunpack::game_types` paths
+/// keep working.
+pub use wows_core::game_types;
 /// 3D model formats (geometry, visual, etc.)
 #[cfg(feature = "parsing")]
 pub mod models;
