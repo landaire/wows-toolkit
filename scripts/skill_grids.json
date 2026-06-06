@@ -1,0 +1,4340 @@
+[
+ {
+  "grid": {
+   "AIRCARRIER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesForsageRenewal", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesForsageDuration", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "PlanesConsumablesSpeedboosterReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesFighterAdditional", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersRange", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoArmingrange", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "PlanesSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesConsumablesRegeneratehealthUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubblesCv", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersAdditional", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesAimingBoost", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesApDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbabilityCv", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesDefenseDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "PlanesHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersUpgrade", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesDivebomberSpeed", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoUwReduced", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "AtbaUpgrade", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesDefenseDamageBubbles", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityCrashcrew", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersPreparationtime", 
+     "tier": 3
+    }
+   ], 
+   "AUXILIARY": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesSpotterUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeSapDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageCa", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadCa", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 3
+    }
+   ], 
+   "BATTLESHIP": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesCrashcrewRegencrewReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseCritProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DetectionTorpedoRange", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "ApDamageBb", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "AtbaRange", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DefenceCritFireFlooding", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DefenceUw", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "AtbaAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadBb", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesCrashcrewRegencrewUpgrade", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenceFireProbability", 
+     "tier": 3
+    }
+   ], 
+   "CRUISER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesSpotterUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeSapDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageCa", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadCa", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 3
+    }
+   ], 
+   "DESTROYER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoFloodingProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseCritProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageDd", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmReloadAaDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmRangeAaDamageBubbles", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeed", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmReload", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "TriggerSpreading", 
+     "tier": 3
+    }
+   ], 
+   "SUBMARINE": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesSpotterUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeSapDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageCa", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadCa", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 3
+    }
+   ]
+  }, 
+  "min_build": 3343484, 
+  "version": "10.0.0"
+ }, 
+ {
+  "grid": {
+   "AIRCARRIER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesForsageRenewal", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesForsageDuration", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "PlanesConsumablesSpeedboosterReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesFighterAdditional", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersRange", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoArmingrange", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "PlanesSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesConsumablesRegeneratehealthUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubblesCv", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersAdditional", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesAimingBoost", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesApDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbabilityCv", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesDefenseDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "PlanesHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersUpgrade", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesDivebomberSpeed", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoUwReduced", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "AtbaUpgrade", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesDefenseDamageBubbles", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityCrashcrew", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersPreparationtime", 
+     "tier": 3
+    }
+   ], 
+   "AUXILIARY": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesSpotterUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeSapDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageCa", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadCa", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 3
+    }
+   ], 
+   "BATTLESHIP": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesCrashcrewRegencrewReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseCritProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DetectionTorpedoRange", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "ApDamageBb", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "AtbaRange", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DefenceCritFireFlooding", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DefenceUw", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedBb", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "AtbaAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadBb", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesCrashcrewRegencrewUpgrade", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenceFireProbability", 
+     "tier": 3
+    }
+   ], 
+   "CRUISER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesSpotterUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeSapDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageCa", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadCa", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 3
+    }
+   ], 
+   "DESTROYER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoFloodingProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseCritProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageDd", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmReloadAaDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmRangeAaDamageBubbles", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeed", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmReload", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "TriggerSpreading", 
+     "tier": 3
+    }
+   ], 
+   "SUBMARINE": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesSpotterUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeSapDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageCa", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadCa", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 3
+    }
+   ]
+  }, 
+  "min_build": 3912232, 
+  "version": "10.4.0"
+ }, 
+ {
+  "grid": {
+   "AIRCARRIER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesForsageRenewal", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesForsageDuration", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "PlanesConsumablesSpeedboosterReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesFighterAdditional", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersRange", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoArmingrange", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "PlanesSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesConsumablesRegeneratehealthUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubblesCv", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersAdditional", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesAimingBoost", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesApDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbabilityCv", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesDefenseDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "PlanesHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersUpgrade", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesDivebomberSpeed", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoUwReduced", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "AtbaUpgrade", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesDefenseDamageBubbles", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityCrashcrew", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersPreparationtime", 
+     "tier": 3
+    }
+   ], 
+   "AUXILIARY": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesSpotterUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeSapDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageCa", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadCa", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 3
+    }
+   ], 
+   "BATTLESHIP": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesCrashcrewRegencrewReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseCritProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedBb", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DetectionTorpedoRange", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "ApDamageBb", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "AtbaRange", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DefenceCritFireFlooding", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DefenceUw", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerBurnGmReload", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "AtbaAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadBb", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesCrashcrewRegencrewUpgrade", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenceFireProbability", 
+     "tier": 3
+    }
+   ], 
+   "CRUISER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesSpotterUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeSapDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageCa", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadCa", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 3
+    }
+   ], 
+   "DESTROYER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoFloodingProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseCritProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageDd", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmReloadAaDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmRangeAaDamageBubbles", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeed", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmReload", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "TriggerSpreading", 
+     "tier": 3
+    }
+   ], 
+   "SUBMARINE": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerPingerReloadBuff", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoFloodingProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "SubmarineConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "SubmarineBatteryCapacity", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSeenTorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "TriggerConsRudderTimeCoeff", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DefenseCritProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerPingerSpeedBuff", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "SubmarineHoldSectors", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "SubmarineConsumablesDuration", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "SubmarineDangerAlert", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadSubmarine", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "SubmarineTorpedoPingDamage", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "TriggerConsSonarTimeCoeff", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "SubmarineBatteryBurnDown", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "SubmarineSpeed", 
+     "tier": 3
+    }
+   ]
+  }, 
+  "min_build": 4365481, 
+  "version": "10.7.2"
+ }, 
+ {
+  "grid": {
+   "AIRCARRIER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesForsageRenewal", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesForsageDuration", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "PlanesConsumablesSpeedboosterReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesFighterAdditional", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersRange", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoArmingrange", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "PlanesSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesConsumablesRegeneratehealthUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubblesCv", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersAdditional", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesAimingBoost", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesApDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbabilityCv", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesDefenseDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "PlanesHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersUpgrade", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesDivebomberSpeed", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoUwReduced", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "AtbaUpgrade", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesDefenseDamageBubbles", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityCrashcrew", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersPreparationtime", 
+     "tier": 3
+    }
+   ], 
+   "AUXILIARY": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesSpotterUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeSapDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageCa", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadCa", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 3
+    }
+   ], 
+   "BATTLESHIP": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesCrashcrewRegencrewReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseCritProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedBb", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DetectionTorpedoRange", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "ApDamageBb", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "AtbaRange", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DefenceCritFireFlooding", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DefenceUw", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerBurnGmReload", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "AtbaAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadBb", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesCrashcrewRegencrewUpgrade", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenceFireProbability", 
+     "tier": 3
+    }
+   ], 
+   "CRUISER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesSpotterUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeSapDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageCa", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadCa", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 3
+    }
+   ], 
+   "DESTROYER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoFloodingProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseCritProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageDd", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmReloadAaDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmRangeAaDamageBubbles", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeed", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmReload", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "TriggerSpreading", 
+     "tier": 3
+    }
+   ], 
+   "SUBMARINE": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerPingerReloadBuff", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoFloodingProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "TriggerConsRudderTimeCoeff", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "SubmarineBatteryCapacity", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSeenTorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "SubmarineConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DefenseCritProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerPingerSpeedBuff", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "SubmarineHoldSectors", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "SubmarineConsumablesReload", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "SubmarineDangerAlert", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadSubmarine", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "SubmarineTorpedoPingDamage", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "TriggerConsSonarTimeCoeff", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "SubmarineBatteryBurnDown", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "SubmarineSpeed", 
+     "tier": 3
+    }
+   ]
+  }, 
+  "min_build": 6359964, 
+  "version": "0.11.9"
+ }, 
+ {
+  "grid": {
+   "AIRCARRIER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesForsageRenewal", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesForsageDuration", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "PlanesConsumablesSpeedboosterReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesFighterAdditional", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersRange", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoArmingrange", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "PlanesSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesConsumablesActiveManeuveringUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubblesCv", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersAdditional", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesAimingBoost", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesApDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbabilityCv", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesDefenseDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "PlanesHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersUpgrade", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "PlanesDivebomberSpeed", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "PlanesTorpedoUwReduced", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "AtbaUpgrade", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "PlanesDefenseDamageBubbles", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityCrashcrew", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "SUPPORT", 
+     "skill": "PlanesConsumablesCallfightersPreparationtime", 
+     "tier": 3
+    }
+   ], 
+   "AUXILIARY": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesSpotterUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeSapDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageCa", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadCa", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 3
+    }
+   ], 
+   "BATTLESHIP": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesCrashcrewRegencrewReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseCritProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedBb", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DetectionTorpedoRange", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "ApDamageBb", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "AtbaRange", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DefenceCritFireFlooding", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DefenceUw", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerBurnGmReload", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "AtbaAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadBb", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesCrashcrewRegencrewUpgrade", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenceFireProbability", 
+     "tier": 3
+    }
+   ], 
+   "CRUISER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesSpotterUpgrade", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaPrioritysectorDamageConstant", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeSapDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageCa", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmAtbaReloadCa", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeedAccuracy", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "AaDamageConstantBubbles", 
+     "tier": 3
+    }
+   ], 
+   "DESTROYER": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmTurn", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoFloodingProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "GmShellReload", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseCritProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "HeFireProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoSpeed", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "ApDamageDd", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 1
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmReloadAaDamageConstant", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoReload", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadAaDamage", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "HePenetration", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "DefenseHp", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "GmRangeAaDamageBubbles", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSpeed", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "DetectionDirection", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "ATTACK", 
+     "skill": "TriggerGmReload", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionVisibilityRange", 
+     "tier": 3
+    }, 
+    {
+     "column": 6, 
+     "group": "DEFENCE", 
+     "skill": "TriggerSpreading", 
+     "tier": 3
+    }
+   ], 
+   "SUBMARINE": [
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerPingerReloadBuff", 
+     "tier": 0
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TorpedoFloodingProbability", 
+     "tier": 0
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "TriggerConsRudderTimeCoeff", 
+     "tier": 0
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAiming", 
+     "tier": 0
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "DetectionAlert", 
+     "tier": 0
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "SubmarineBatteryCapacity", 
+     "tier": 1
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "TriggerSeenTorpedoReload", 
+     "tier": 1
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "SubmarineConsumablesDuration", 
+     "tier": 1
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "DefenseCritProbability", 
+     "tier": 1
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "Maneuverability", 
+     "tier": 1
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "TriggerPingerSpeedBuff", 
+     "tier": 2
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "SubmarineHoldSectors", 
+     "tier": 2
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "SubmarineConsumablesReload", 
+     "tier": 2
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "SubmarineDangerAlert", 
+     "tier": 2
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "ConsumablesAdditional", 
+     "tier": 2
+    }, 
+    {
+     "column": 1, 
+     "group": "ATTACK", 
+     "skill": "ArmamentReloadSubmarine", 
+     "tier": 3
+    }, 
+    {
+     "column": 2, 
+     "group": "ATTACK", 
+     "skill": "SubmarineTorpedoPingDamage", 
+     "tier": 3
+    }, 
+    {
+     "column": 3, 
+     "group": "ATTACK", 
+     "skill": "TriggerConsSonarTimeCoeff", 
+     "tier": 3
+    }, 
+    {
+     "column": 4, 
+     "group": "DEFENCE", 
+     "skill": "SubmarineBatteryBurnDown", 
+     "tier": 3
+    }, 
+    {
+     "column": 5, 
+     "group": "DEFENCE", 
+     "skill": "SubmarineSpeed", 
+     "tier": 3
+    }
+   ]
+  }, 
+  "min_build": 12116141, 
+  "version": "15.2.0"
+ }
+]
