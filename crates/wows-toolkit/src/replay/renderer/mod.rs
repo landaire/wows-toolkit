@@ -216,6 +216,27 @@ fn newest_dump_source(dump_dir: Option<&std::path::Path>) -> Option<(VfsPath, Op
     Some((vfs, version))
 }
 
+/// All dump build VFS roots on disk, newest build first. Lets an old replay that
+/// ships no TTF borrow a font from the newest build that has one, trying older
+/// builds in turn rather than giving up after the single newest.
+fn dump_sources_newest_first(dump_dir: Option<&std::path::Path>) -> Vec<VfsPath> {
+    let Some(base) = dump_dir.and_then(|d| d.parent()) else {
+        return Vec::new();
+    };
+    let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
+    let mut entries: Vec<_> = index.builds.iter().collect();
+    entries.sort_by(|a, b| b.build.cmp(&a.build));
+    entries
+        .into_iter()
+        .filter_map(|e| {
+            let vfs_root = base.join(&e.dir).join("vfs");
+            vfs_root
+                .exists()
+                .then(|| VfsPath::new(wowsunpack::vfs::impls::physical::PhysicalFS::new(&vfs_root)))
+        })
+        .collect()
+}
+
 impl RendererAssetCache {
     /// Resolve (and memoize) where GUI icons load from for this game data.
     /// Old builds that ship no icons transparently borrow them from the newest
@@ -345,10 +366,10 @@ impl RendererAssetCache {
         if let Some(cached) = self.game_fonts.get(&version.copied()) {
             return cached.clone();
         }
-        // Old clients ship bitmap-only fonts; borrow the TTF from the newest
-        // dump before falling back to a system font.
-        let fallback = newest_dump_source(dump_dir).map(|(vfs, _)| vfs);
-        let fonts = assets::load_game_fonts_with_fallback(vfs, fallback.as_ref());
+        // Old clients ship bitmap-only fonts; borrow a TTF from dump builds
+        // (newest first) before falling back to a system font.
+        let fallbacks = dump_sources_newest_first(dump_dir);
+        let fonts = assets::load_game_fonts_with_fallbacks(vfs, &fallbacks);
         self.game_fonts.insert(version.copied(), fonts.clone());
         fonts
     }

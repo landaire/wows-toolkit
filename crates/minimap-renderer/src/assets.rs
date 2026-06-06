@@ -785,8 +785,33 @@ pub fn load_game_fonts(vfs: &VfsPath) -> GameFonts {
     game_fonts_from_vfs(vfs).unwrap_or_else(system_game_fonts)
 }
 
-/// Load game fonts, trying `vfs` first, then `fallback` (e.g. the newest dump on
-/// disk for old replays that ship no TTF), then a system font.
-pub fn load_game_fonts_with_fallback(vfs: &VfsPath, fallback: Option<&VfsPath>) -> GameFonts {
-    game_fonts_from_vfs(vfs).or_else(|| fallback.and_then(game_fonts_from_vfs)).unwrap_or_else(system_game_fonts)
+/// First `Some` from `primary` then `fallbacks` in order, else `default`.
+fn first_available<T>(
+    primary: Option<T>,
+    fallbacks: impl IntoIterator<Item = Option<T>>,
+    default: impl FnOnce() -> T,
+) -> T {
+    primary.or_else(|| fallbacks.into_iter().flatten().next()).unwrap_or_else(default)
+}
+
+/// Load game fonts, trying `vfs` first, then each `fallbacks` VFS in order (dump
+/// builds newest-first for old replays that ship no TTF), and a system font only
+/// when none carry a usable face.
+pub fn load_game_fonts_with_fallbacks(vfs: &VfsPath, fallbacks: &[VfsPath]) -> GameFonts {
+    first_available(game_fonts_from_vfs(vfs), fallbacks.iter().map(game_fonts_from_vfs), system_game_fonts)
+}
+
+#[cfg(test)]
+mod font_fallback_test {
+    use super::first_available;
+
+    #[test]
+    fn picks_first_available_in_order() {
+        // Primary present: use it.
+        assert_eq!(first_available(Some(1), [Some(2), Some(3)], || 9), 1);
+        // Primary absent: first available fallback (newest-first ordering).
+        assert_eq!(first_available(None, [None, Some(2), Some(3)], || 9), 2);
+        // Nothing available: default (system font).
+        assert_eq!(first_available::<i32>(None, [None, None], || 9), 9);
+    }
 }
