@@ -114,9 +114,12 @@ fn handle_building_create(_clock: GameClock, packet: &EntityCreatePacket<'_>, wo
         is_suppressed = v.uint_8_ref().map(|v| *v != 0).unwrap_or(false);
     }
     if let Some(v) = packet.props.get("teamId") {
+        // teamId is always present in building EntityCreate packets; the 0 fallback is
+        // effectively unreachable and matches the old controller's Default state.
         team_id = v.int_8_ref().copied().unwrap_or(0);
     }
     if let Some(v) = packet.props.get("paramsId") {
+        // 0 maps to GameParamId::default() (no param); correct when key absent (mirrors old controller).
         params_id = v.uint_32_ref().copied().unwrap_or(0);
     }
 
@@ -201,6 +204,7 @@ fn handle_interactive_zone_create(
 
     let position = WorldPos::new(packet.position.x, packet.position.y, packet.position.z);
     let radius = packet.props.get("radius").and_then(|v| v.float_32_ref().copied()).unwrap_or(0.0);
+    // -1 is the game's own "no owning team" encoding for zones (mirrors old controller and game protocol).
     let team_id = packet.props.get("teamId").and_then(|v| v.as_i64()).unwrap_or(-1);
 
     let zone_type: Option<Recognized<InteractiveZoneType>> =
@@ -283,6 +287,7 @@ fn handle_interactive_zone_create(
             && let Some(cl_dict) = as_dict(cl)
         {
             has_invaders = cl_dict.get("hasInvaders").and_then(|v| v.as_i64()).unwrap_or(0) != 0;
+            // -1 is the game's own "no invader" encoding (documented in decode.rs and mirrors old controller).
             invader_team = cl_dict.get("invaderTeam").and_then(|v| v.as_i64()).unwrap_or(-1);
             progress =
                 cl_dict.get("progress").and_then(|v| v.float_32_ref()).map(|f| *f as f64).unwrap_or(0.0);
