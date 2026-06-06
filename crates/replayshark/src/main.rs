@@ -520,6 +520,13 @@ where
         let packet = parser.parse_packet(&mut remaining).map_err(|e| rootcause::report!(ParseError::from(e)))?;
         analyzer.process(&packet);
     }
+    let diagnostics = parser.drain_diagnostics();
+    if !diagnostics.is_empty() {
+        eprintln!("payload validation: {} property payload(s) under-consumed", diagnostics.len());
+        for d in &diagnostics {
+            eprintln!("  {} (def {:?}): consumed {} of {} bytes", d.context, d.semantic_name, d.consumed, d.payload_len);
+        }
+    }
     analyzer.finish();
     Ok(())
 }
@@ -818,6 +825,13 @@ fn run_players_query(
         match parser.parse_packet(&mut remaining) {
             Ok(packet) => world.process(&packet),
             Err(_) => break,
+        }
+    }
+    let diagnostics = parser.drain_diagnostics();
+    if !diagnostics.is_empty() {
+        eprintln!("payload validation: {} property payload(s) under-consumed", diagnostics.len());
+        for d in &diagnostics {
+            eprintln!("  {} (def {:?}): consumed {} of {} bytes", d.context, d.semantic_name, d.consumed, d.payload_len);
         }
     }
     world.finish();

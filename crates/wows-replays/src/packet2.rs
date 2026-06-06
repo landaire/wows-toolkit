@@ -728,6 +728,8 @@ pub struct Parser<'argtype> {
     /// The replay's game version, used to select the packet-ID layout. `None`
     /// assumes the modern layout (when the version isn't known).
     version: Option<Version>,
+    /// Interior mutability: parse methods borrow `self.specs` via shared refs,
+    /// so `&mut self` accumulation would conflict with those borrows.
     diagnostics: RefCell<Vec<PayloadDiagnostic>>,
 }
 
@@ -836,17 +838,6 @@ impl<'argtype> Parser<'argtype> {
                 }
             };
             args.push(pval);
-        }
-
-        let consumed = payload.len() - sub.len();
-        let semantic_name = spec.args.first().and_then(|a| a.semantic_name()).map(str::to_string);
-        if let Some(d) = PayloadDiagnostic::for_leftover(
-            format!("EntityMethod::{}::{}", spec_entity.name, spec.name),
-            semantic_name,
-            payload.len(),
-            consumed,
-        ) {
-            self.diagnostics.borrow_mut().push(d);
         }
 
         Ok(PacketType::EntityMethod(EntityMethodPacket { entity_id: entity_id.into(), method: &spec.name, args }))
