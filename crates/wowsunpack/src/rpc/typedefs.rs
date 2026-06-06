@@ -434,6 +434,24 @@ impl ArgType {
             Self::Named { inner, .. } => inner.parse_value(input),
         }
     }
+
+    /// Collect every def semantic name appearing anywhere in this type tree.
+    pub fn collect_semantic_names(&self, out: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::Named { name, inner } => {
+                out.insert(name.clone());
+                inner.collect_semantic_names(out);
+            }
+            Self::Array((_, inner)) => inner.collect_semantic_names(out),
+            Self::Tuple((inner, _)) => inner.collect_semantic_names(out),
+            Self::FixedDict((_, props)) => {
+                for p in props {
+                    p.prop_type.collect_semantic_names(out);
+                }
+            }
+            Self::Primitive(_) => {}
+        }
+    }
 }
 
 pub fn parse_type(arg: &roxmltree::Node, aliases: &HashMap<String, ArgType>) -> ArgType {
@@ -762,5 +780,25 @@ mod test {
         assert_eq!(args.0, 5);
         assert_eq!(args.1, -54);
         assert_eq!(args.2, vec![1, 3]);
+    }
+
+    #[test]
+    fn collect_semantic_names_recurses() {
+        use std::collections::BTreeSet;
+
+        let t = ArgType::Named {
+            name: "WEAPON_LOCKS".to_string(),
+            inner: Box::new(ArgType::Array((
+                None,
+                Box::new(ArgType::Named { name: "ENTITY_ID".to_string(), inner: Box::new(ArgType::Primitive(PrimitiveType::Int32)) }),
+            ))),
+        };
+
+        let mut names = BTreeSet::new();
+        t.collect_semantic_names(&mut names);
+
+        assert!(names.contains("WEAPON_LOCKS"));
+        assert!(names.contains("ENTITY_ID"));
+        assert_eq!(names.len(), 2);
     }
 }
