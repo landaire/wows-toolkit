@@ -87,6 +87,11 @@ enum Commands {
         /// Version to dump. Must be comma-delimited: major,minor,patch,build
         version: String,
     },
+    /// Audit which game def semantic type names have domain newtypes.
+    AuditTypes {
+        /// Version to load. Comma-delimited: major,minor,patch,build
+        version: String,
+    },
     /// Decrypt a replay file and dump the meta and packet data to disk
     Decrypt {
         /// Output path for the JSON metadata
@@ -461,6 +466,36 @@ fn load_game_data(
     };
 
     Ok(specs)
+}
+
+fn audit_types(specs: &[EntitySpec]) {
+    use std::collections::BTreeSet;
+    use wowsunpack::rpc::newtype_registry::newtype_for;
+
+    let mut names: BTreeSet<String> = BTreeSet::new();
+    for spec in specs {
+        for p in spec.properties.iter().chain(&spec.internal_properties).chain(&spec.base_properties) {
+            p.prop_type.collect_semantic_names(&mut names);
+        }
+        for m in spec.client_methods.iter().chain(&spec.base_methods).chain(&spec.cell_methods) {
+            for arg in &m.args {
+                arg.collect_semantic_names(&mut names);
+            }
+        }
+    }
+
+    let mut covered = 0usize;
+    println!("{:<40} {:<10} {}", "DEF NAME", "NEWTYPE?", "RUST TYPE");
+    for name in &names {
+        match newtype_for(name) {
+            Some(nt) => {
+                covered += 1;
+                println!("{:<40} {:<10} {}", name, "yes", nt.rust_type_name());
+            }
+            None => println!("{:<40} {:<10} {}", name, "no", "-"),
+        }
+    }
+    println!("\n{} of {} semantic names have a domain newtype", covered, names.len());
 }
 
 fn parse_replay<F>(
@@ -908,6 +943,11 @@ fn main() {
             let target_version = Version::from_client_exe(&version);
             let specs = load_game_data(game_dir, extracted, &target_version).expect("failed to load game data");
             printspecs(&specs);
+        }
+        Commands::AuditTypes { version } => {
+            let target_version = Version::from_client_exe(&version);
+            let specs = load_game_data(game_dir, extracted, &target_version).expect("failed to load game data");
+            audit_types(&specs);
         }
         Commands::Decrypt { meta_output, packets_output, replay } => {
             let replay_file = ReplayFile::from_file(&replay).unwrap();
