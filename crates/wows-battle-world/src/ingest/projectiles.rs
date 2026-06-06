@@ -47,9 +47,7 @@ pub fn handle_artillery_shots(
         return;
     }
     for salvo in salvos {
-        let entity = world
-            .spawn((Projectile, ProjectileState::Artillery { salvo, fired_at: clock, avatar_id }))
-            .id();
+        let entity = world.spawn((Projectile, ProjectileState::Artillery { salvo, fired_at: clock, avatar_id })).id();
         world.resource_mut::<ActiveShotOrder>().0.push(entity);
     }
 }
@@ -65,15 +63,7 @@ pub fn handle_torpedoes_received(
 ) {
     for torpedo in torpedoes {
         let entity = world
-            .spawn((
-                Projectile,
-                ProjectileState::Torpedo {
-                    torpedo,
-                    launched_at: clock,
-                    updated_at: clock,
-                    avatar_id,
-                },
-            ))
+            .spawn((Projectile, ProjectileState::Torpedo { torpedo, launched_at: clock, updated_at: clock, avatar_id }))
             .id();
         world.resource_mut::<ActiveTorpedoOrder>().0.push(entity);
     }
@@ -137,12 +127,8 @@ pub fn handle_shot_kills(
 ) {
     let record = tracking == ShotTracking::Tracked;
 
-    let self_ship_id = world
-        .resource::<PlayerIndex>()
-        .0
-        .iter()
-        .find(|(_, p)| p.relation().is_self())
-        .map(|(eid, _)| *eid);
+    let self_ship_id =
+        world.resource::<PlayerIndex>().0.iter().find(|(_, p)| p.relation().is_self()).map(|(eid, _)| *eid);
 
     let Some(self_ship_id) = self_ship_id else {
         tracing::warn!("ShotKills received but self-player not yet known (avatar={avatar_id:?})");
@@ -158,11 +144,9 @@ pub fn handle_shot_kills(
 
         let (salvo, fired_at) = match_active_salvo(world, hit.owner_id, hit.shot_id);
 
-        let victim_entity_id =
-            resolve_victim(world, salvo.as_ref()).unwrap_or(self_ship_id);
+        let victim_entity_id = resolve_victim(world, salvo.as_ref()).unwrap_or(self_ship_id);
 
-        let (victim_position, victim_yaw, victim_pitch, victim_roll) =
-            victim_pose(world, victim_entity_id);
+        let (victim_position, victim_yaw, victim_pitch, victim_roll) = victim_pose(world, victim_entity_id);
 
         world.resource_mut::<ShotHitLog>().0.push(ResolvedShotHit {
             clock,
@@ -182,9 +166,7 @@ pub fn handle_shot_kills(
 
 fn torpedo_matches(state: &ProjectileState, owner_id: EntityId, shot_id: ShotId) -> bool {
     match state {
-        ProjectileState::Torpedo { torpedo, .. } => {
-            torpedo.owner_id == owner_id && torpedo.shot_id == shot_id
-        }
+        ProjectileState::Torpedo { torpedo, .. } => torpedo.owner_id == owner_id && torpedo.shot_id == shot_id,
         ProjectileState::Artillery { .. } => false,
     }
 }
@@ -276,10 +258,8 @@ fn expire_stale_salvos(world: &mut World, clock: GameClock) {
     let order = world.resource::<ActiveShotOrder>().0.clone();
     let mut kept: Vec<Entity> = Vec::with_capacity(order.len());
     for entity in order {
-        let fired_at = world
-            .get_entity(entity)
-            .ok()
-            .and_then(|er| er.get::<ProjectileState>().and_then(salvo_fired_at));
+        let fired_at =
+            world.get_entity(entity).ok().and_then(|er| er.get::<ProjectileState>().and_then(salvo_fired_at));
         match fired_at {
             Some(fired_at) if fired_at.seconds() > cutoff => kept.push(entity),
             _ => {

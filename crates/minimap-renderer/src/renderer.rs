@@ -312,11 +312,8 @@ impl<'a> MinimapRenderer<'a> {
         last_updated: GameClock,
         render_clock: GameClock,
     ) -> WorldPos {
-        let entry = self.dead_reckon.entry(entity_id).or_insert(DeadReckon {
-            cur_clock: last_updated,
-            cur_pos,
-            prev: None,
-        });
+        let entry =
+            self.dead_reckon.entry(entity_id).or_insert(DeadReckon { cur_clock: last_updated, cur_pos, prev: None });
         if last_updated.0 > entry.cur_clock.0 {
             entry.prev = Some((entry.cur_clock, entry.cur_pos));
             entry.cur_clock = last_updated;
@@ -1106,8 +1103,7 @@ impl<'a> MinimapRenderer<'a> {
                     let dx = target.x - origin.x;
                     let dz = target.z - origin.z;
                     let distance = (dx * dx + dz * dz).sqrt();
-                    let flight_duration =
-                        tracer_flight_duration(distance, shot_data.speed, shot_data.server_time_left);
+                    let flight_duration = tracer_flight_duration(distance, shot_data.speed, shot_data.server_time_left);
 
                     let elapsed = clock - shot.fired_at;
                     if elapsed < 0.0 || elapsed > flight_duration {
@@ -1294,8 +1290,7 @@ impl<'a> MinimapRenderer<'a> {
             // visibility_flags from the Vehicle entity: bitmask of detection
             // reasons (radar, hydro, direct vision, etc.). Non-zero means the
             // ship is confirmed detected through game mechanics.
-            let vis_flags =
-                controller.vehicle_props(*entity_id).map(|p| p.visibility_flags()).unwrap_or(0);
+            let vis_flags = controller.vehicle_props(*entity_id).map(|p| p.visibility_flags()).unwrap_or(0);
 
             // Get health fraction from entity
             let health_fraction = controller.vehicle_props(*entity_id).and_then(|p| {
@@ -1340,8 +1335,7 @@ impl<'a> MinimapRenderer<'a> {
                         Some(w) => map_info.world_to_minimap(w.pos, MINIMAP_SIZE),
                         None => map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE),
                     };
-                    let speed_raw =
-                        controller.vehicle_props(*entity_id).map(|p| p.server_speed_raw()).unwrap_or(0);
+                    let speed_raw = controller.vehicle_props(*entity_id).map(|p| p.server_speed_raw()).unwrap_or(0);
                     self.record_position(*entity_id, px, clock, speed_raw);
                     commands.push(DrawCommand::Ship {
                         entity_id: *entity_id,
@@ -1547,9 +1541,7 @@ impl<'a> MinimapRenderer<'a> {
                 let pos = if let Some(t) = ship_positions.get(entity_id) {
                     Some(map_info.world_to_minimap(t.pos, MINIMAP_SIZE))
                 } else {
-                    minimap_positions
-                        .get(entity_id)
-                        .map(|mm| map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE))
+                    minimap_positions.get(entity_id).map(|mm| map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE))
                 };
                 let Some(pos) = pos else { continue };
 
@@ -1577,9 +1569,10 @@ impl<'a> MinimapRenderer<'a> {
                             Some(Consumable::CallFighters | Consumable::CatapultFighter)
                         ) {
                             // no detection radius for fighters
-                        } else if let Some(radius) = self
-                            .get_consumable_radius(*entity_id, active.consumable.clone())
-                            .or_else(|| self.consumable_radius_from_ranges(controller, *entity_id, active.consumable.clone()))
+                        } else if let Some(radius) =
+                            self.get_consumable_radius(*entity_id, active.consumable.clone()).or_else(|| {
+                                self.consumable_radius_from_ranges(controller, *entity_id, active.consumable.clone())
+                            })
                         {
                             let space_size = map_info.space_size as f32;
                             let px_radius = (radius.value() / 30.0 / space_size * MINIMAP_SIZE as f32) as i32;
@@ -2244,8 +2237,7 @@ impl<'a> MinimapRenderer<'a> {
             // Same source as the yellow ship-icon outline: visibilityFlags on
             // the live VehicleEntity. Non-zero means the game has confirmed
             // the ship is detected (radar, hydro, direct vision, etc.).
-            let is_spotted =
-                vehicle_props.as_ref().map(|props| props.visibility_flags() != 0).unwrap_or(false);
+            let is_spotted = vehicle_props.as_ref().map(|props| props.visibility_flags() != 0).unwrap_or(false);
             let is_disconnected = !is_dead && is_player_disconnected_at(controller, entity_id, clock);
 
             // Kills at the current clock: filter the global kill list by

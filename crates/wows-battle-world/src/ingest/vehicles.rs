@@ -9,7 +9,9 @@ use wowsunpack::game_types::WeaponType;
 use wowsunpack::recognized::Recognized;
 use wowsunpack::rpc::typedefs::ArgValue;
 
-use crate::components::{Aim, Vehicle, VehicleState};
+use crate::components::Aim;
+use crate::components::Vehicle;
+use crate::components::VehicleState;
 use crate::resources::EntityIndex;
 use crate::units::Radians;
 
@@ -29,10 +31,7 @@ pub fn handle_vehicle_property(
     };
 
     // Guard: only vehicles carry VehicleState.
-    let is_vehicle = world
-        .get_entity(ecs_entity)
-        .map(|er| er.contains::<Vehicle>())
-        .unwrap_or(false);
+    let is_vehicle = world.get_entity(ecs_entity).map(|er| er.contains::<Vehicle>()).unwrap_or(false);
     if !is_vehicle {
         return;
     }
@@ -66,13 +65,7 @@ pub fn handle_vehicle_property(
 }
 
 /// Handle a GunSync packet: update main battery turret yaws on the vehicle's `Aim`.
-pub fn handle_gun_sync(
-    entity_id: EntityId,
-    weapon_type: u32,
-    gun_id: u32,
-    yaw: f32,
-    world: &mut World,
-) {
+pub fn handle_gun_sync(entity_id: EntityId, weapon_type: u32, gun_id: u32, yaw: f32, world: &mut World) {
     if WeaponType::from_raw(weapon_type) != Recognized::Known(WeaponType::Artillery) {
         return;
     }
@@ -137,10 +130,7 @@ pub fn apply_player_create_props(
     let Some(ecs_entity) = world.resource::<EntityIndex>().get(entity_id) else {
         return;
     };
-    let is_vehicle = world
-        .get_entity(ecs_entity)
-        .map(|er| er.contains::<Vehicle>())
-        .unwrap_or(false);
+    let is_vehicle = world.get_entity(ecs_entity).map(|er| er.contains::<Vehicle>()).unwrap_or(false);
     if !is_vehicle {
         return;
     }
@@ -150,4 +140,3 @@ pub fn apply_player_create_props(
         vs.0.update_from_args(props, version, constants);
     }
 }
-

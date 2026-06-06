@@ -230,9 +230,7 @@ fn dump_sources_newest_first(dump_dir: Option<&std::path::Path>) -> Vec<VfsPath>
         .into_iter()
         .filter_map(|e| {
             let vfs_root = base.join(&e.dir).join("vfs");
-            vfs_root
-                .exists()
-                .then(|| VfsPath::new(wowsunpack::vfs::impls::physical::PhysicalFS::new(&vfs_root)))
+            vfs_root.exists().then(|| VfsPath::new(wowsunpack::vfs::impls::physical::PhysicalFS::new(&vfs_root)))
         })
         .collect()
 }
@@ -242,7 +240,12 @@ impl RendererAssetCache {
     /// Old builds that ship no icons transparently borrow them from the newest
     /// dump on disk; callers pass their own VFS/version/dump dir and never need
     /// to compute the fallback themselves.
-    fn icon_source(&mut self, vfs: &VfsPath, version: Option<&Version>, dump_dir: Option<&std::path::Path>) -> IconSource {
+    fn icon_source(
+        &mut self,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        dump_dir: Option<&std::path::Path>,
+    ) -> IconSource {
         if let Some(src) = self.icon_sources.get(&version.copied()) {
             return src.clone();
         }
@@ -258,8 +261,9 @@ impl RendererAssetCache {
         dump_dir: Option<&std::path::Path>,
     ) -> Arc<IconMap> {
         let src = self.icon_source(vfs, version, dump_dir);
-        self.ship_icons
-            .get_or_load(src.version.as_ref(), || convert_icons(assets::load_ship_icons(&src.vfs, src.version.as_ref())))
+        self.ship_icons.get_or_load(src.version.as_ref(), || {
+            convert_icons(assets::load_ship_icons(&src.vfs, src.version.as_ref()))
+        })
     }
 
     pub fn get_or_load_plane_icons(
@@ -269,8 +273,9 @@ impl RendererAssetCache {
         dump_dir: Option<&std::path::Path>,
     ) -> Arc<IconMap> {
         let src = self.icon_source(vfs, version, dump_dir);
-        self.plane_icons
-            .get_or_load(src.version.as_ref(), || convert_icons(assets::load_plane_icons(&src.vfs, src.version.as_ref())))
+        self.plane_icons.get_or_load(src.version.as_ref(), || {
+            convert_icons(assets::load_plane_icons(&src.vfs, src.version.as_ref()))
+        })
     }
 
     pub fn get_or_load_building_icons(
@@ -3461,11 +3466,8 @@ fn draw_skill_grid(ui: &mut egui::Ui, rows: &[SkillRow], icons: &HashMap<String,
                     format!("{} ({} pt){}\n\n{}", skill.name, skill.tier, status, skill.description)
                 };
                 // Dim skills the player didn't take so the taken ones stand out.
-                let tint = if skill.learned {
-                    Color32::WHITE
-                } else {
-                    Color32::from_rgba_unmultiplied(255, 255, 255, 55)
-                };
+                let tint =
+                    if skill.learned { Color32::WHITE } else { Color32::from_rgba_unmultiplied(255, 255, 255, 55) };
                 ui.add(egui::Image::new((tex.id(), Vec2::splat(ICON_SIZE))).tint(tint)).on_hover_text(tooltip);
             }
         });

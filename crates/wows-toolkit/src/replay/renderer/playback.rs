@@ -613,11 +613,8 @@ pub(super) fn playback_thread(
             return;
         }
         // Snapshot player list to release the &self borrow before calling vehicle_props (&mut self).
-        let player_snapshot: Vec<(EntityId, wows_replays::Rc<wows_replays::analyzer::battle_controller::Player>)> = world
-            .player_entities()
-            .iter()
-            .map(|(eid, p)| (*eid, wows_replays::Rc::clone(p)))
-            .collect();
+        let player_snapshot: Vec<(EntityId, wows_replays::Rc<wows_replays::analyzer::battle_controller::Player>)> =
+            world.player_entities().iter().map(|(eid, p)| (*eid, wows_replays::Rc::clone(p))).collect();
         if player_snapshot.is_empty() {
             return;
         }
@@ -1235,11 +1232,8 @@ fn snapshot_player_builds<F: FnMut(EntityId) -> bool>(
     mut accept: F,
 ) -> Vec<(EntityId, Arc<super::PlayerBuildDisplay>)> {
     // Snapshot players first to release the &self borrow before calling vehicle_props_all (&mut self).
-    let players: Vec<(EntityId, wows_replays::Rc<wows_replays::analyzer::battle_controller::Player>)> = world
-        .player_entities()
-        .iter()
-        .map(|(id, p)| (*id, wows_replays::Rc::clone(p)))
-        .collect();
+    let players: Vec<(EntityId, wows_replays::Rc<wows_replays::analyzer::battle_controller::Player>)> =
+        world.player_entities().iter().map(|(id, p)| (*id, wows_replays::Rc::clone(p))).collect();
     let all_props = world.vehicle_props_all();
 
     let mut out = Vec::new();

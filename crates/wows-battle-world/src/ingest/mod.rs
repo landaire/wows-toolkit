@@ -37,15 +37,7 @@ pub fn dispatch<G: ResourceLoader>(
     match payload {
         DecodedPacketPayload::Chat { entity_id, sender_id, audience, message, extra_data } => {
             chat::handle_chat_message(
-                entity_id,
-                sender_id,
-                audience,
-                message,
-                extra_data,
-                clock,
-                world,
-                resources,
-                version,
+                entity_id, sender_id, audience, message, extra_data, clock, world, resources, version,
             );
         }
         DecodedPacketPayload::VoiceLine { .. } => {}
@@ -66,23 +58,9 @@ pub fn dispatch<G: ResourceLoader>(
         }
         DecodedPacketPayload::EntityMethod(_) => {}
         DecodedPacketPayload::EntityProperty(prop) => {
-            vehicles::handle_vehicle_property(
-                prop.entity_id,
-                prop.property,
-                &prop.value,
-                world,
-                version,
-                constants,
-            );
+            vehicles::handle_vehicle_property(prop.entity_id, prop.property, &prop.value, world, version, constants);
             zones::handle_entity_property_zone(prop.entity_id, prop.property, &prop.value, world);
-            match_state::handle_entity_property_match(
-                prop.property,
-                &prop.value,
-                clock,
-                world,
-                constants,
-                version,
-            );
+            match_state::handle_entity_property_match(prop.property, &prop.value, clock, world, constants, version);
         }
         DecodedPacketPayload::BasePlayerCreate(base) => {
             vehicles::apply_player_create_props(base.entity_id, &base.props, world, version, constants);
@@ -117,17 +95,8 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::OnGameRoomStateChanged { player_states } => {
             match_state::handle_game_room_state_changed(&player_states, clock, world);
         }
-        DecodedPacketPayload::NewPlayerSpawnedInBattle {
-            player_states: players,
-            bot_states: bots,
-        } => {
-            entities::seed_spawned_players(
-                players.iter().chain(bots.iter()),
-                world,
-                resources,
-                constants,
-                version,
-            );
+        DecodedPacketPayload::NewPlayerSpawnedInBattle { player_states: players, bot_states: bots } => {
+            entities::seed_spawned_players(players.iter().chain(bots.iter()), world, resources, constants, version);
         }
         DecodedPacketPayload::CheckPing(_) => {}
         DecodedPacketPayload::DamageReceived { victim, ref aggressors } => {
@@ -152,21 +121,13 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::CameraMode(_) => {}
         DecodedPacketPayload::CameraFreeLook(_) => {}
         DecodedPacketPayload::ArtilleryShots { avatar_id, salvos } => {
-            projectiles::handle_artillery_shots(
-                avatar_id,
-                salvos,
-                clock,
-                world,
-                options.shot_tracking,
-            );
+            projectiles::handle_artillery_shots(avatar_id, salvos, clock, world, options.shot_tracking);
         }
         DecodedPacketPayload::TorpedoesReceived { avatar_id, torpedoes } => {
             projectiles::handle_torpedoes_received(avatar_id, torpedoes, clock, world);
         }
         DecodedPacketPayload::TorpedoDirection { owner_id, shot_id, position, target_yaw, speed_coef } => {
-            projectiles::handle_torpedo_direction(
-                owner_id, shot_id, position, target_yaw, speed_coef, clock, world,
-            );
+            projectiles::handle_torpedo_direction(owner_id, shot_id, position, target_yaw, speed_coef, clock, world);
         }
         DecodedPacketPayload::ShotKills { avatar_id, hits } => {
             projectiles::handle_shot_kills(avatar_id, hits, clock, world, options.shot_tracking);

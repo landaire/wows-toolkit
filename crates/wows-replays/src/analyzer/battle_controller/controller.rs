@@ -993,7 +993,12 @@ impl VehicleProps {
     }
 
     /// Apply a batch of named property updates (mirrors `UpdateFromReplayArgs::update_from_args`).
-    pub fn update_from_args(&mut self, args: &HashMap<&str, ArgValue<'_>>, version: Version, constants: &GameConstants) {
+    pub fn update_from_args(
+        &mut self,
+        args: &HashMap<&str, ArgValue<'_>>,
+        version: Version,
+        constants: &GameConstants,
+    ) {
         <Self as UpdateFromReplayArgs>::update_from_args(self, args, version, constants);
     }
 
@@ -1236,11 +1241,8 @@ impl DeathInfo {
 impl From<&KillRecord> for DeathInfo {
     fn from(kill: &KillRecord) -> Self {
         let timestamp = kill.clock.to_duration();
-        let time_lived = if timestamp > TIME_UNTIL_GAME_START {
-            timestamp - TIME_UNTIL_GAME_START
-        } else {
-            Duration::from_secs(0)
-        };
+        let time_lived =
+            if timestamp > TIME_UNTIL_GAME_START { timestamp - TIME_UNTIL_GAME_START } else { Duration::from_secs(0) };
 
         DeathInfo { time_lived, killer: kill.killer, cause: kill.cause.clone() }
     }
@@ -1395,4 +1397,3 @@ impl Entity {
         }
     }
 }
-

@@ -4,11 +4,11 @@ use wowsunpack::data::Version;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 
+use wows_battle_world::BattleWorld;
 use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::merged::VehicleFacts;
 use wows_replays::analyzer::battle_controller::state::ConsumableInventory;
 use wows_replays::types::EntityId;
-use wows_battle_world::BattleWorld;
 
 use super::ResolvedBuild;
 

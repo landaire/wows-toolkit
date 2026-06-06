@@ -66,11 +66,7 @@ pub fn handle_chat_message<G: ResourceLoader>(
     };
 
     if player.is_none() && meta_vehicle.is_none() {
-        debug!(
-            sender = sender_id.raw(),
-            by_account,
-            "chat sender did not match any player"
-        );
+        debug!(sender = sender_id.raw(), by_account, "chat sender did not match any player");
     }
 
     let resolved_name = player
@@ -79,15 +75,9 @@ pub fn handle_chat_message<G: ResourceLoader>(
             let name = p.initial_state().username();
             if name.is_empty() { None } else { Some(name.to_owned()) }
         })
-        .or_else(|| {
-            meta_vehicle.as_ref().and_then(|v| {
-                if v.name.is_empty() { None } else { Some(v.name.clone()) }
-            })
-        });
-    let sender_relation: Option<Relation> = player
-        .as_ref()
-        .map(|p| p.relation())
-        .or_else(|| meta_vehicle.as_ref().map(|v| Relation::new(v.relation)));
+        .or_else(|| meta_vehicle.as_ref().and_then(|v| if v.name.is_empty() { None } else { Some(v.name.clone()) }));
+    let sender_relation: Option<Relation> =
+        player.as_ref().map(|p| p.relation()).or_else(|| meta_vehicle.as_ref().map(|v| Relation::new(v.relation)));
 
     let is_bot = player.as_ref().map(|p| p.is_bot()).unwrap_or(true);
 

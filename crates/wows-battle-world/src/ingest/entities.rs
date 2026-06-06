@@ -14,7 +14,6 @@ use wows_replays::analyzer::battle_controller::VehicleProps;
 use wows_replays::analyzer::decoder::PlayerStateData;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::packet2::EntityCreatePacket;
-use wowsunpack::rpc::typedefs::ArgValue;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::GameParamId;
@@ -24,13 +23,33 @@ use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::types::BigWorldDistance;
 use wowsunpack::game_types::WorldPos;
+use wowsunpack::rpc::typedefs::ArgValue;
 
-use crate::components::{
-    Building, BuildingState, BuffZone, BuffZoneData, Captain, CapturePoint, CapturePointData,
-    GameId, PlayerLink, SmokeScreen, SmokeScreenState, Transform3d, Vehicle, VehicleState,
-    WeatherZone, WeatherZoneData,
-};
-use crate::resources::{CapturePointOrder, EntityIndex, InteractiveZoneIndex, InteractiveZoneRef, KillLog, MetadataPlayers, PendingDropParams, PlayerIndex, WeatherZoneOrder};
+use crate::components::BuffZone;
+use crate::components::BuffZoneData;
+use crate::components::Building;
+use crate::components::BuildingState;
+use crate::components::Captain;
+use crate::components::CapturePoint;
+use crate::components::CapturePointData;
+use crate::components::GameId;
+use crate::components::PlayerLink;
+use crate::components::SmokeScreen;
+use crate::components::SmokeScreenState;
+use crate::components::Transform3d;
+use crate::components::Vehicle;
+use crate::components::VehicleState;
+use crate::components::WeatherZone;
+use crate::components::WeatherZoneData;
+use crate::resources::CapturePointOrder;
+use crate::resources::EntityIndex;
+use crate::resources::InteractiveZoneIndex;
+use crate::resources::InteractiveZoneRef;
+use crate::resources::KillLog;
+use crate::resources::MetadataPlayers;
+use crate::resources::PendingDropParams;
+use crate::resources::PlayerIndex;
+use crate::resources::WeatherZoneOrder;
 
 /// Handle an EntityCreate packet.
 pub fn handle_entity_create<G: ResourceLoader>(
@@ -89,10 +108,10 @@ fn handle_vehicle_create<G: ResourceLoader>(
         e.insert(Captain(captain));
         // Attach player link when the player was registered via NewPlayerSpawnedInBattle
         // before this EntityCreate arrived.
-        if let Some(rc) = player_rc {
-            if !e.contains::<PlayerLink>() {
-                e.insert(PlayerLink(rc));
-            }
+        if let Some(rc) = player_rc
+            && !e.contains::<PlayerLink>()
+        {
+            e.insert(PlayerLink(rc));
         }
     }
 }
@@ -141,9 +160,8 @@ fn handle_building_create(_clock: GameClock, packet: &EntityCreatePacket<'_>, wo
 }
 
 fn handle_smoke_create(packet: &EntityCreatePacket<'_>, world: &mut World) {
-    let radius = BigWorldDistance::from(
-        packet.props.get("radius").and_then(|v| v.float_32_ref().copied()).unwrap_or(0.0),
-    );
+    let radius =
+        BigWorldDistance::from(packet.props.get("radius").and_then(|v| v.float_32_ref().copied()).unwrap_or(0.0));
     let position = WorldPos::new(packet.position.x, packet.position.y, packet.position.z);
     let state = SmokeScreenState { radius, position, points: vec![position] };
 
@@ -170,25 +188,23 @@ fn handle_battle_logic_create(
     // populated them yet.
     if world.resource::<CapturePointOrder>().0.is_empty()
         && let Some(state) = packet.props.get("state")
-            && let Some(state_dict) = as_dict(state)
-            && let Some(ArgValue::Array(control_points)) = state_dict.get("controlPoints")
-        {
-            let cps: Vec<_> = control_points
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, entry)| {
-                    parse_legacy_control_point(idx, entry, constants, version)
-                })
-                .collect();
-            for cp in cps {
-                let cp_entity = world.spawn(()).id();
-                if let Ok(mut e) = world.get_entity_mut(cp_entity) {
-                    e.insert(CapturePoint);
-                    e.insert(CapturePointData(cp));
-                }
-                world.resource_mut::<CapturePointOrder>().0.push(cp_entity);
+        && let Some(state_dict) = as_dict(state)
+        && let Some(ArgValue::Array(control_points)) = state_dict.get("controlPoints")
+    {
+        let cps: Vec<_> = control_points
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, entry)| parse_legacy_control_point(idx, entry, constants, version))
+            .collect();
+        for cp in cps {
+            let cp_entity = world.spawn(()).id();
+            if let Ok(mut e) = world.get_entity_mut(cp_entity) {
+                e.insert(CapturePoint);
+                e.insert(CapturePointData(cp));
             }
+            world.resource_mut::<CapturePointOrder>().0.push(cp_entity);
         }
+    }
 }
 
 fn handle_interactive_zone_create(
@@ -197,9 +213,10 @@ fn handle_interactive_zone_create(
     constants: &GameConstants,
     version: Version,
 ) {
-    use wows_replays::analyzer::battle_controller::state::{
-        BuffZoneState, CapturePointState, ControlPointType, InteractiveZoneType,
-    };
+    use wows_replays::analyzer::battle_controller::state::BuffZoneState;
+    use wows_replays::analyzer::battle_controller::state::CapturePointState;
+    use wows_replays::analyzer::battle_controller::state::ControlPointType;
+    use wows_replays::analyzer::battle_controller::state::InteractiveZoneType;
     use wows_replays::analyzer::decoder::Recognized;
 
     let position = WorldPos::new(packet.position.x, packet.position.y, packet.position.z);
@@ -207,12 +224,12 @@ fn handle_interactive_zone_create(
     // -1 is the game's own "no owning team" encoding for zones (mirrors old controller and game protocol).
     let team_id = packet.props.get("teamId").and_then(|v| v.as_i64()).unwrap_or(-1);
 
-    let zone_type: Option<Recognized<InteractiveZoneType>> =
-        packet.props.get("type").and_then(|v| v.as_i64()).and_then(|id| {
-            InteractiveZoneType::from_id(id as i32, constants.battle(), version)
-        });
-    let is_weather = zone_type.as_ref().and_then(|r| r.known().copied())
-        == Some(InteractiveZoneType::WeatherZone);
+    let zone_type: Option<Recognized<InteractiveZoneType>> = packet
+        .props
+        .get("type")
+        .and_then(|v| v.as_i64())
+        .and_then(|id| InteractiveZoneType::from_id(id as i32, constants.battle(), version));
+    let is_weather = zone_type.as_ref().and_then(|r| r.known().copied()) == Some(InteractiveZoneType::WeatherZone);
 
     if is_weather {
         let name = decode_name(packet.props.get("name"));
@@ -234,12 +251,12 @@ fn handle_interactive_zone_create(
         if let Some(ecs_entity) = matched {
             // Link the ECS entity to the game entity id and update position/radius.
             world.resource_mut::<EntityIndex>().insert(packet.entity_id, ecs_entity);
-            if let Ok(mut e) = world.get_entity_mut(ecs_entity) {
-                if let Some(mut data) = e.get_mut::<WeatherZoneData>() {
-                    data.0.entity_id = Some(packet.entity_id);
-                    data.0.position = position;
-                    data.0.radius = radius;
-                }
+            if let Ok(mut e) = world.get_entity_mut(ecs_entity)
+                && let Some(mut data) = e.get_mut::<WeatherZoneData>()
+            {
+                data.0.entity_id = Some(packet.entity_id);
+                data.0.position = position;
+                data.0.radius = radius;
             }
         } else {
             let wz = wows_replays::analyzer::battle_controller::state::LocalWeatherZone {
@@ -278,9 +295,7 @@ fn handle_interactive_zone_create(
                 cp_index = idx.as_i64().map(|v| v as usize);
             }
             if let Some(t) = cp_dict.get("type") {
-                cp_type = t.as_i64().and_then(|id| {
-                    ControlPointType::from_id(id as i32, constants.battle(), version)
-                });
+                cp_type = t.as_i64().and_then(|id| ControlPointType::from_id(id as i32, constants.battle(), version));
             }
         }
         if let Some(cl) = cs_dict.get("captureLogic")
@@ -289,8 +304,7 @@ fn handle_interactive_zone_create(
             has_invaders = cl_dict.get("hasInvaders").and_then(|v| v.as_i64()).unwrap_or(0) != 0;
             // -1 is the game's own "no invader" encoding (documented in decode.rs and mirrors old controller).
             invader_team = cl_dict.get("invaderTeam").and_then(|v| v.as_i64()).unwrap_or(-1);
-            progress =
-                cl_dict.get("progress").and_then(|v| v.float_32_ref()).map(|f| *f as f64).unwrap_or(0.0);
+            progress = cl_dict.get("progress").and_then(|v| v.float_32_ref()).map(|f| *f as f64).unwrap_or(0.0);
             both_inside = cl_dict.get("bothInside").and_then(|v| v.as_i64()).unwrap_or(0) != 0;
             is_enabled = cl_dict.get("isEnabled").and_then(|v| v.as_i64()).unwrap_or(1) != 0;
         }
@@ -381,55 +395,32 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
 
         // Build Player if not already in the index.
         if !world.resource::<PlayerIndex>().0.contains_key(&entity_id) {
-            let meta = metadata
-                .iter()
-                .find(|m| m.id() == player.meta_ship_id())
-                .or_else(|| {
-                    let name = player.username();
-                    if name.is_empty() {
-                        None
-                    } else {
-                        metadata.iter().find(|m| m.name() == name)
-                    }
-                });
+            let meta = metadata.iter().find(|m| m.id() == player.meta_ship_id()).or_else(|| {
+                let name = player.username();
+                if name.is_empty() { None } else { metadata.iter().find(|m| m.name() == name) }
+            });
 
             match meta {
                 None => {
-                    warn!(
-                        "could not map arena player to metadata player (meta_ship_id={})",
-                        player.meta_ship_id()
-                    );
+                    warn!("could not map arena player to metadata player (meta_ship_id={})", player.meta_ship_id());
                 }
                 Some(meta) => {
-                    if let Some(battle_player) =
-                        Player::from_arena_player(player, meta.as_ref(), resources)
-                    {
+                    if let Some(battle_player) = Player::from_arena_player(player, meta.as_ref(), resources) {
                         // Mirror controller.rs ~3252-3270: check if the vehicle
                         // was already in entities_by_id and had a frag against it.
                         let player_has_died = world
                             .resource::<EntityIndex>()
                             .get(entity_id)
-                            .is_some_and(|_| {
-                                world
-                                    .resource::<KillLog>()
-                                    .0
-                                    .iter()
-                                    .any(|kill| kill.victim == entity_id)
-                            });
+                            .is_some_and(|_| world.resource::<KillLog>().0.iter().any(|kill| kill.victim == entity_id));
                         if player.is_connected() {
-                            battle_player.connection_change_info_mut().push(
-                                ConnectionChangeInfo::new(
-                                    clock.to_duration(),
-                                    ConnectionChangeKind::Connected,
-                                    player_has_died,
-                                ),
-                            );
+                            battle_player.connection_change_info_mut().push(ConnectionChangeInfo::new(
+                                clock.to_duration(),
+                                ConnectionChangeKind::Connected,
+                                player_has_died,
+                            ));
                         }
                         let battle_player = Rc::new(battle_player);
-                        world
-                            .resource_mut::<PlayerIndex>()
-                            .0
-                            .insert(entity_id, battle_player);
+                        world.resource_mut::<PlayerIndex>().0.insert(entity_id, battle_player);
                     }
                 }
             }
@@ -440,10 +431,10 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
             // Attach PlayerLink if we just built a Player for an already-existing entity.
             if let Some(player_rc) = world.resource::<PlayerIndex>().0.get(&entity_id).cloned() {
                 let ecs_entity = world.resource::<EntityIndex>().get(entity_id).unwrap();
-                if let Ok(mut e) = world.get_entity_mut(ecs_entity) {
-                    if !e.contains::<PlayerLink>() {
-                        e.insert(PlayerLink(player_rc));
-                    }
+                if let Ok(mut e) = world.get_entity_mut(ecs_entity)
+                    && !e.contains::<PlayerLink>()
+                {
+                    e.insert(PlayerLink(player_rc));
                 }
             }
             continue;
@@ -508,8 +499,7 @@ pub fn seed_spawned_players<'a, G: ResourceLoader>(
         }
 
         if let Some(self_team) = self_team_id {
-            let relation =
-                if player.team_id() == self_team { Relation::new(1) } else { Relation::new(2) };
+            let relation = if player.team_id() == self_team { Relation::new(1) } else { Relation::new(2) };
             if let Some(battle_player) = Player::from_spawned_player(player, resources, relation) {
                 let battle_player = Rc::new(battle_player);
                 world.resource_mut::<PlayerIndex>().0.insert(entity_id, battle_player);
@@ -530,28 +520,26 @@ pub fn seed_spawned_players<'a, G: ResourceLoader>(
 pub fn handle_entity_leave(entity_id: EntityId, world: &mut World) {
     let ecs_entity = world.resource::<EntityIndex>().get(entity_id);
 
-    let is_smoke = ecs_entity
-        .and_then(|e| world.get_entity(e).ok())
-        .map(|er| er.contains::<SmokeScreen>())
-        .unwrap_or(false);
-    let is_buff = ecs_entity
-        .and_then(|e| world.get_entity(e).ok())
-        .map(|er| er.contains::<BuffZone>())
-        .unwrap_or(false);
+    let is_smoke =
+        ecs_entity.and_then(|e| world.get_entity(e).ok()).map(|er| er.contains::<SmokeScreen>()).unwrap_or(false);
+    let is_buff =
+        ecs_entity.and_then(|e| world.get_entity(e).ok()).map(|er| er.contains::<BuffZone>()).unwrap_or(false);
 
     if is_smoke || is_buff {
         if let Some(entity) = world.resource_mut::<EntityIndex>().remove(entity_id)
-            && world.get_entity(entity).is_ok() {
-                world.despawn(entity);
-            }
+            && world.get_entity(entity).is_ok()
+        {
+            world.despawn(entity);
+        }
         return;
     }
 
     // Vehicles and buildings: remove only Transform3d, keeping MinimapPlacement.
     if let Some(ecs_entity) = world.resource::<EntityIndex>().get(entity_id)
-        && let Ok(mut er) = world.get_entity_mut(ecs_entity) {
-            er.remove::<Transform3d>();
-        }
+        && let Ok(mut er) = world.get_entity_mut(ecs_entity)
+    {
+        er.remove::<Transform3d>();
+    }
 }
 
 fn spawn_or_get(world: &mut World, id: EntityId) -> bevy_ecs::entity::Entity {
@@ -563,9 +551,7 @@ fn spawn_or_get(world: &mut World, id: EntityId) -> bevy_ecs::entity::Entity {
     entity
 }
 
-fn as_dict<'a, 'b>(
-    v: &'a ArgValue<'b>,
-) -> Option<&'a std::collections::HashMap<&'b str, ArgValue<'b>>> {
+fn as_dict<'a, 'b>(v: &'a ArgValue<'b>) -> Option<&'a std::collections::HashMap<&'b str, ArgValue<'b>>> {
     match v {
         ArgValue::FixedDict(d) => Some(d),
         ArgValue::NullableFixedDict(Some(d)) => Some(d),
@@ -584,9 +570,7 @@ fn decode_name(v: Option<&ArgValue<'_>>) -> String {
     }
 }
 
-fn arena_state_to_args(
-    player: &PlayerStateData,
-) -> std::collections::HashMap<&'static str, ArgValue<'static>> {
+fn arena_state_to_args(player: &PlayerStateData) -> std::collections::HashMap<&'static str, ArgValue<'static>> {
     let mut args = std::collections::HashMap::new();
     if player.max_health() > 0 {
         args.insert("maxHealth", ArgValue::Float32(player.max_health() as f32));
@@ -606,7 +590,8 @@ fn parse_legacy_control_point(
     constants: &GameConstants,
     version: Version,
 ) -> Option<wows_replays::analyzer::battle_controller::state::CapturePointState> {
-    use wows_replays::analyzer::battle_controller::state::{CapturePointState, ControlPointType};
+    use wows_replays::analyzer::battle_controller::state::CapturePointState;
+    use wows_replays::analyzer::battle_controller::state::ControlPointType;
 
     let dict = as_dict(entry)?;
     let position = match dict.get("position") {

@@ -4,8 +4,8 @@ use wows_replays::analyzer::battle_controller::state::ConsumableInventory;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::game_types::ChargeCount;
-use wowsunpack::game_types::ConsumableUsageParams;
 use wowsunpack::game_types::Consumable;
+use wowsunpack::game_types::ConsumableUsageParams;
 use wowsunpack::recognized::Recognized;
 
 use crate::components::Consumables;

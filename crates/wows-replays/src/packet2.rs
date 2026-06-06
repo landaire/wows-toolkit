@@ -45,11 +45,7 @@ impl PayloadDiagnostic {
         payload_len: usize,
         consumed: usize,
     ) -> Option<Self> {
-        if consumed < payload_len {
-            Some(Self { context, semantic_name, payload_len, consumed })
-        } else {
-            None
-        }
+        if consumed < payload_len { Some(Self { context, semantic_name, payload_len, consumed }) } else { None }
     }
 }
 
@@ -743,7 +739,12 @@ impl<'argtype> Parser<'argtype> {
 
     /// Build a parser that dispatches packet IDs for the given game version.
     pub fn with_version(entities: &'argtype [EntitySpec], version: Version) -> Parser<'argtype> {
-        Parser { specs: entities, entities: HashMap::new(), version: Some(version), diagnostics: RefCell::new(Vec::new()) }
+        Parser {
+            specs: entities,
+            entities: HashMap::new(),
+            version: Some(version),
+            diagnostics: RefCell::new(Vec::new()),
+        }
     }
 
     /// Take and clear accumulated non-fatal diagnostics.
@@ -771,7 +772,7 @@ impl<'argtype> Parser<'argtype> {
             .get(prop_id as usize)
             .ok_or_else(|| failure(ParseError::PropertyIdOutOfBounds { prop_id, entity_type }))?;
 
-        let mut pslice = &*payload;
+        let mut pslice = payload;
         let pval = spec.prop_type.parse_value(&mut pslice).map_err(|e| {
             failure(ParseError::RpcValueParseFailed {
                 method: format!("EntityProperty::{}", spec.name),
@@ -1476,7 +1477,12 @@ mod diag_test {
     #[test]
     fn leftover_produces_diagnostic() {
         // Consumed fewer bytes than the payload held => a diagnostic.
-        let d = PayloadDiagnostic::for_leftover("EntityMethod::Avatar::onFoo".to_string(), Some("ENTITY_ID".to_string()), 8, 4);
+        let d = PayloadDiagnostic::for_leftover(
+            "EntityMethod::Avatar::onFoo".to_string(),
+            Some("ENTITY_ID".to_string()),
+            8,
+            4,
+        );
         let d = d.expect("expected a diagnostic");
         assert_eq!(d.payload_len, 8);
         assert_eq!(d.consumed, 4);

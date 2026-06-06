@@ -1,27 +1,36 @@
 //! Property-update and entity-property ingestion for zones, scores, and smoke.
 
 use bevy_ecs::world::World;
-use wows_replays::analyzer::battle_controller::state::{
-    CapturedBuff, LocalWeatherZone, ScoringRules as ScoringRulesState, TeamScore,
-};
-use wows_replays::nested_property_path::{PropertyNestLevel, UpdateAction};
+use wows_replays::analyzer::battle_controller::state::CapturedBuff;
+use wows_replays::analyzer::battle_controller::state::LocalWeatherZone;
+use wows_replays::analyzer::battle_controller::state::ScoringRules as ScoringRulesState;
+use wows_replays::analyzer::battle_controller::state::TeamScore;
+use wows_replays::nested_property_path::PropertyNestLevel;
+use wows_replays::nested_property_path::UpdateAction;
 use wows_replays::packet2::PropertyUpdatePacket;
-use wows_replays::types::{EntityId, GameClock, GameParamId};
-use wowsunpack::rpc::typedefs::ArgValue;
+use wows_replays::types::EntityId;
+use wows_replays::types::GameClock;
+use wows_replays::types::GameParamId;
 use wowsunpack::game_types::WorldPos;
+use wowsunpack::rpc::typedefs::ArgValue;
 
-use crate::components::{
-    BuffZoneData, CapturePointData, SmokeScreenState, WeatherZoneData,
-};
-use crate::resources::{
-    CapturePointOrder, CapturedBuffs, EntityIndex, InteractiveZoneIndex, InteractiveZoneRef,
-    PendingDropParams, PlayerIndex, ScoringRules, TeamScores, WeatherZoneOrder,
-};
+use crate::components::BuffZoneData;
+use crate::components::CapturePointData;
+use crate::components::SmokeScreenState;
+use crate::components::WeatherZoneData;
+use crate::resources::CapturePointOrder;
+use crate::resources::CapturedBuffs;
+use crate::resources::EntityIndex;
+use crate::resources::InteractiveZoneIndex;
+use crate::resources::InteractiveZoneRef;
+use crate::resources::PendingDropParams;
+use crate::resources::PlayerIndex;
+use crate::resources::ScoringRules;
+use crate::resources::TeamScores;
+use crate::resources::WeatherZoneOrder;
 
 /// Extract a dict from FixedDict or NullableFixedDict(Some).
-fn as_dict<'a, 'b>(
-    v: &'a ArgValue<'b>,
-) -> Option<&'a std::collections::HashMap<&'b str, ArgValue<'b>>> {
+fn as_dict<'a, 'b>(v: &'a ArgValue<'b>) -> Option<&'a std::collections::HashMap<&'b str, ArgValue<'b>>> {
     match v {
         ArgValue::FixedDict(d) => Some(d),
         ArgValue::NullableFixedDict(Some(d)) => Some(d),
@@ -179,10 +188,8 @@ pub fn handle_property_update(update: &PropertyUpdatePacket<'_>, clock: GameCloc
     {
         for value in values {
             if let ArgValue::FixedDict(dict) = value {
-                let zone_id =
-                    dict.get("zoneId").and_then(|v| v.as_i64()).map(|v| EntityId::from(v as i32));
-                let params_id =
-                    dict.get("paramsId").and_then(|v| v.as_i64()).map(GameParamId::from);
+                let zone_id = dict.get("zoneId").and_then(|v| v.as_i64()).map(|v| EntityId::from(v as i32));
+                let params_id = dict.get("paramsId").and_then(|v| v.as_i64()).map(GameParamId::from);
 
                 if let (Some(zone_id), Some(params_id)) = (zone_id, params_id) {
                     // Store for pre-arrival case (entity may not exist yet).
@@ -208,15 +215,10 @@ pub fn handle_property_update(update: &PropertyUpdatePacket<'_>, clock: GameCloc
     {
         for value in values {
             if let ArgValue::FixedDict(dict) = value {
-                let params_id =
-                    dict.get("paramsId").and_then(|v| v.as_i64()).map(GameParamId::from);
+                let params_id = dict.get("paramsId").and_then(|v| v.as_i64()).map(GameParamId::from);
                 let owners: Option<Vec<EntityId>> = dict.get("owners").and_then(|v| {
                     if let ArgValue::Array(arr) = v {
-                        Some(
-                            arr.iter()
-                                .filter_map(|o| o.as_i64().map(|id| EntityId::from(id as i32)))
-                                .collect(),
-                        )
+                        Some(arr.iter().filter_map(|o| o.as_i64().map(|id| EntityId::from(id as i32))).collect())
                     } else {
                         None
                     }
@@ -229,14 +231,10 @@ pub fn handle_property_update(update: &PropertyUpdatePacket<'_>, clock: GameCloc
                             .0
                             .values()
                             .find(|p| p.initial_state().entity_id() == *owner_id)
-                            .map(|p| p.initial_state().team_id() as i64)
+                            .map(|p| p.initial_state().team_id())
                     });
                     if let Some(team_id) = team_id {
-                        world.resource_mut::<CapturedBuffs>().0.push(CapturedBuff {
-                            params_id,
-                            team_id,
-                            clock,
-                        });
+                        world.resource_mut::<CapturedBuffs>().0.push(CapturedBuff { params_id, team_id, clock });
                     }
                 }
             }
@@ -265,8 +263,7 @@ pub fn handle_property_update(update: &PropertyUpdatePacket<'_>, clock: GameCloc
 
     // state -> controlPoints -> [N] -> SetKey{...} (legacy, pre-InteractiveZone)
     if update.property == "state"
-        && let [PropertyNestLevel::DictKey("controlPoints"), PropertyNestLevel::ArrayIndex(cp_idx)] =
-            levels.as_slice()
+        && let [PropertyNestLevel::DictKey("controlPoints"), PropertyNestLevel::ArrayIndex(cp_idx)] = levels.as_slice()
         && let UpdateAction::SetKey { key, value } = action
     {
         let cp_idx = *cp_idx;
@@ -274,12 +271,11 @@ pub fn handle_property_update(update: &PropertyUpdatePacket<'_>, clock: GameCloc
     }
 
     // Smoke screen points (entity-specific PropertyUpdate, property == "points")
-    if update.property == "points" {
-        if let Some(ecs_entity) = world.resource::<EntityIndex>().get(update.entity_id)
-            && world.get_entity(ecs_entity).ok().map(|e| e.contains::<crate::components::SmokeScreen>()).unwrap_or(false)
-        {
-            apply_smoke_points_update(ecs_entity, action, world);
-        }
+    if update.property == "points"
+        && let Some(ecs_entity) = world.resource::<EntityIndex>().get(update.entity_id)
+        && world.get_entity(ecs_entity).ok().map(|e| e.contains::<crate::components::SmokeScreen>()).unwrap_or(false)
+    {
+        apply_smoke_points_update(ecs_entity, action, world);
     }
 
     // InteractiveZone componentsState.captureLogic updates
@@ -316,15 +312,15 @@ fn apply_weather_zone_array_update(action: &UpdateAction<'_>, world: &mut World)
             for (i, value) in values.iter().enumerate() {
                 if let Some(mut zone) = parse_weather_zone(value) {
                     let ecs_entity = world.resource::<WeatherZoneOrder>().0[start + i];
-                    if let Ok(er) = world.get_entity(ecs_entity) {
-                        if let Some(existing) = er.get::<WeatherZoneData>() {
-                            zone.entity_id = existing.0.entity_id;
-                        }
+                    if let Ok(er) = world.get_entity(ecs_entity)
+                        && let Some(existing) = er.get::<WeatherZoneData>()
+                    {
+                        zone.entity_id = existing.0.entity_id;
                     }
-                    if let Ok(mut er) = world.get_entity_mut(ecs_entity) {
-                        if let Some(mut data) = er.get_mut::<WeatherZoneData>() {
-                            data.0 = zone;
-                        }
+                    if let Ok(mut er) = world.get_entity_mut(ecs_entity)
+                        && let Some(mut data) = er.get_mut::<WeatherZoneData>()
+                    {
+                        data.0 = zone;
                     }
                 }
             }
@@ -348,15 +344,15 @@ fn apply_weather_zone_array_update(action: &UpdateAction<'_>, world: &mut World)
             }
             if let Some(mut zone) = parse_weather_zone(value) {
                 let ecs_entity = world.resource::<WeatherZoneOrder>().0[index];
-                if let Ok(er) = world.get_entity(ecs_entity) {
-                    if let Some(existing) = er.get::<WeatherZoneData>() {
-                        zone.entity_id = existing.0.entity_id;
-                    }
+                if let Ok(er) = world.get_entity(ecs_entity)
+                    && let Some(existing) = er.get::<WeatherZoneData>()
+                {
+                    zone.entity_id = existing.0.entity_id;
                 }
-                if let Ok(mut er) = world.get_entity_mut(ecs_entity) {
-                    if let Some(mut data) = er.get_mut::<WeatherZoneData>() {
-                        data.0 = zone;
-                    }
+                if let Ok(mut er) = world.get_entity_mut(ecs_entity)
+                    && let Some(mut data) = er.get_mut::<WeatherZoneData>()
+                {
+                    data.0 = zone;
                 }
             }
         }
@@ -365,8 +361,7 @@ fn apply_weather_zone_array_update(action: &UpdateAction<'_>, world: &mut World)
             let order_len = world.resource::<WeatherZoneOrder>().0.len();
             let end = (*stop).min(order_len);
             if start < end {
-                let to_despawn: Vec<_> =
-                    world.resource::<WeatherZoneOrder>().0[start..end].to_vec();
+                let to_despawn: Vec<_> = world.resource::<WeatherZoneOrder>().0[start..end].to_vec();
                 for ecs_entity in &to_despawn {
                     if world.get_entity(*ecs_entity).is_ok() {
                         world.despawn(*ecs_entity);
@@ -397,8 +392,7 @@ fn apply_weather_zone_field_update(idx: usize, key: &str, value: &ArgValue<'_>, 
         "name" => {
             data.0.name = match value {
                 ArgValue::Array(arr) => {
-                    let bytes: Vec<u8> =
-                        arr.iter().filter_map(|v| v.as_i64().map(|i| i as u8)).collect();
+                    let bytes: Vec<u8> = arr.iter().filter_map(|v| v.as_i64().map(|i| i as u8)).collect();
                     String::from_utf8(bytes).unwrap_or_default()
                 }
                 ArgValue::String(s) => String::from_utf8_lossy(s).into_owned(),
@@ -448,8 +442,7 @@ fn apply_legacy_cp_field_update(cp_idx: usize, key: &str, value: &ArgValue<'_>, 
         }
         "progress" => match value {
             ArgValue::Array(p) if p.len() >= 2 => {
-                cp.progress =
-                    (p[0].as_f32().unwrap_or(0.0) as f64, p[1].as_f32().unwrap_or(0.0) as f64);
+                cp.progress = (p[0].as_f32().unwrap_or(0.0) as f64, p[1].as_f32().unwrap_or(0.0) as f64);
             }
             _ => {
                 if let Some(f) = value.as_f32() {
@@ -502,11 +495,7 @@ fn apply_cp_components_state_update(cp_idx: usize, key: &str, value: &ArgValue<'
     }
 }
 
-fn apply_smoke_points_update(
-    ecs_entity: bevy_ecs::entity::Entity,
-    action: &UpdateAction<'_>,
-    world: &mut World,
-) {
+fn apply_smoke_points_update(ecs_entity: bevy_ecs::entity::Entity, action: &UpdateAction<'_>, world: &mut World) {
     let Ok(mut er) = world.get_entity_mut(ecs_entity) else { return };
     let Some(mut state) = er.get_mut::<SmokeScreenState>() else { return };
     match action {
@@ -519,12 +508,10 @@ fn apply_smoke_points_update(
                 let pos = match v {
                     ArgValue::Vector3((x, y, z)) => Some(WorldPos::new(*x, *y, *z)),
                     ArgValue::Vector2((x, z)) => Some(WorldPos::new(*x, 0.0, *z)),
-                    ArgValue::Array(arr) if arr.len() >= 2 => {
-                        match (arr[0].float_32_ref(), arr[1].float_32_ref()) {
-                            (Some(x), Some(z)) => Some(WorldPos::new(*x, 0.0, *z)),
-                            _ => None,
-                        }
-                    }
+                    ArgValue::Array(arr) if arr.len() >= 2 => match (arr[0].float_32_ref(), arr[1].float_32_ref()) {
+                        (Some(x), Some(z)) => Some(WorldPos::new(*x, 0.0, *z)),
+                        _ => None,
+                    },
                     _ => None,
                 };
                 if let Some(pos) = pos {

@@ -218,7 +218,11 @@ pub async fn validate_cache(
                             &mut verified,
                             &mut corrupt,
                         );
-                        if issues.is_clean() { ValidationOutcome::Clean } else { ValidationOutcome::NeedsRepair(issues) }
+                        if issues.is_clean() {
+                            ValidationOutcome::Clean
+                        } else {
+                            ValidationOutcome::NeedsRepair(issues)
+                        }
                     }
                 }
             }

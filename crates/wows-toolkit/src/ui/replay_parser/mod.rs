@@ -80,11 +80,11 @@ use parking_lot::RwLock;
 use tracing::debug;
 
 use tracing::error;
-use wows_replays::ReplayFile;
-use wows_replays::VehicleInfoMeta;
 use wows_battle_world::BattleWorld;
 use wows_battle_world::merged::MergedReplays;
 use wows_battle_world::report::BattleReport;
+use wows_replays::ReplayFile;
+use wows_replays::VehicleInfoMeta;
 use wows_replays::analyzer::Analyzer;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::analyzer::battle_controller::ChatChannel;
@@ -3032,11 +3032,8 @@ impl Replay {
         );
         if self.alt_replays.is_empty() {
             // Single-replay fast path — no merger involved.
-            let mut world = BattleWorld::new(
-                &self.replay_file.meta,
-                self.resource_loader.as_ref(),
-                self.game_constants.as_deref(),
-            );
+            let mut world =
+                BattleWorld::new(&self.replay_file.meta, self.resource_loader.as_ref(), self.game_constants.as_deref());
             let mut p =
                 wows_replays::packet2::Parser::with_version(self.resource_loader.entity_specs(), replay_version);
             let mut remaining = self.replay_file.packet_data.as_slice();
@@ -3350,7 +3347,7 @@ impl ToolkitTabViewer<'_> {
                         let result = match format {
                             ReplayExportFormat::Json => serde_json::to_writer(&mut file, &transformed_results)
                                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
-                            ReplayExportFormat::Cbor => serde_cbor::to_writer(&mut file, &transformed_results)
+                            ReplayExportFormat::Cbor => ciborium::into_writer(&transformed_results, &mut file)
                                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
                             ReplayExportFormat::Csv => {
                                 let mut writer = csv::WriterBuilder::new().has_headers(true).from_writer(file);

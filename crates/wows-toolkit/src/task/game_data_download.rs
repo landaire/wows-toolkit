@@ -57,7 +57,10 @@ pub fn start_game_data_validation_task(output_base: PathBuf) -> BackgroundTask {
         let _ = tx.send(validate(output_base, &progress_tx));
     });
 
-    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::ValidatingGameData { rx: progress_rx, last_progress: None } }
+    BackgroundTask {
+        receiver: Some(rx),
+        kind: BackgroundTaskKind::ValidatingGameData { rx: progress_rx, last_progress: None },
+    }
 }
 
 fn build_client() -> Result<reqwest::Client, Report> {
@@ -112,7 +115,10 @@ fn check_for_updates(output_base: PathBuf, known_tip: Option<String>) -> Result<
     Ok(BackgroundTaskCompletion::GameDataUpdatesChecked { tip: result.tip, updates: result.updates })
 }
 
-fn validate(output_base: PathBuf, progress_tx: &mpsc::Sender<DownloadProgress>) -> Result<BackgroundTaskCompletion, Report> {
+fn validate(
+    output_base: PathBuf,
+    progress_tx: &mpsc::Sender<DownloadProgress>,
+) -> Result<BackgroundTaskCompletion, Report> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

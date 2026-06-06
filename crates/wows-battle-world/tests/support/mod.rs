@@ -73,10 +73,7 @@ fn resources_for_build(version: &Version) -> BuildResources {
     };
     let constants = GameConstants::from_vfs(&vfs);
 
-    let res = BuildResources {
-        provider: Box::leak(Box::new(provider)),
-        constants: Box::leak(Box::new(constants)),
-    };
+    let res = BuildResources { provider: Box::leak(Box::new(provider)), constants: Box::leak(Box::new(constants)) };
     build_cache().lock().unwrap().insert(version.build, res);
     res
 }

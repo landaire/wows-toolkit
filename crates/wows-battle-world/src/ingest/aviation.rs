@@ -10,9 +10,13 @@ use wowsunpack::game_types::PlaneId;
 use wowsunpack::game_types::WorldPos;
 use wowsunpack::game_types::WorldPos2D;
 
-use crate::components::{Plane, PlaneState, Ward, WardState};
+use crate::components::Plane;
+use crate::components::PlaneState;
+use crate::components::Ward;
+use crate::components::WardState;
 use crate::ids::SourceTeam;
-use crate::resources::{PlaneIndex, WardIndex};
+use crate::resources::PlaneIndex;
+use crate::resources::WardIndex;
 
 pub fn handle_plane_added(
     entity_id: EntityId,
@@ -37,26 +41,17 @@ pub fn handle_plane_added(
     }
 }
 
-pub fn handle_plane_position(
-    plane_id: PlaneId,
-    position: WorldPos2D,
-    clock: GameClock,
-    world: &mut World,
-) {
+pub fn handle_plane_position(plane_id: PlaneId, position: WorldPos2D, clock: GameClock, world: &mut World) {
     let Some(entity) = world.resource::<PlaneIndex>().get(plane_id) else { return };
-    if let Ok(mut e) = world.get_entity_mut(entity) {
-        if let Some(mut state) = e.get_mut::<PlaneState>() {
-            state.position = position;
-            state.last_updated = clock;
-        }
+    if let Ok(mut e) = world.get_entity_mut(entity)
+        && let Some(mut state) = e.get_mut::<PlaneState>()
+    {
+        state.position = position;
+        state.last_updated = clock;
     }
 }
 
-pub fn handle_plane_removed(
-    plane_id: PlaneId,
-    source_team: SourceTeam,
-    world: &mut World,
-) {
+pub fn handle_plane_removed(plane_id: PlaneId, source_team: SourceTeam, world: &mut World) {
     let owner_team = world
         .resource::<PlaneIndex>()
         .get(plane_id)
@@ -64,16 +59,16 @@ pub fn handle_plane_removed(
         .and_then(|e| e.get::<PlaneState>())
         .map(|s| s.team_id);
 
-    if let (Some(src), Some(owner)) = (source_team.0, owner_team) {
-        if src != owner {
-            return;
-        }
+    if let (Some(src), Some(owner)) = (source_team.0, owner_team)
+        && src != owner
+    {
+        return;
     }
 
-    if let Some(entity) = world.resource_mut::<PlaneIndex>().remove(plane_id) {
-        if world.get_entity(entity).is_ok() {
-            world.despawn(entity);
-        }
+    if let Some(entity) = world.resource_mut::<PlaneIndex>().remove(plane_id)
+        && world.get_entity(entity).is_ok()
+    {
+        world.despawn(entity);
     }
 }
 
@@ -92,10 +87,10 @@ pub fn handle_ward_added(
 }
 
 pub fn handle_ward_removed(plane_id: PlaneId, world: &mut World) {
-    if let Some(entity) = world.resource_mut::<WardIndex>().remove(plane_id) {
-        if world.get_entity(entity).is_ok() {
-            world.despawn(entity);
-        }
+    if let Some(entity) = world.resource_mut::<WardIndex>().remove(plane_id)
+        && world.get_entity(entity).is_ok()
+    {
+        world.despawn(entity);
     }
 }
 

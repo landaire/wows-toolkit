@@ -3,6 +3,7 @@
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 use tracing::warn;
+use wows_replays::Rc;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::battle_controller::MetadataPlayer;
 use wows_replays::analyzer::battle_controller::SharedPlayer;
@@ -10,7 +11,6 @@ use wows_replays::game_constants::GameConstants;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::Relation;
-use wows_replays::Rc;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 
@@ -19,10 +19,10 @@ use crate::components::GameId;
 use crate::ids::IngestOptions;
 use crate::ids::ShotTracking;
 use crate::ids::SourceTeam;
+use crate::resources::ActiveShotOrder;
+use crate::resources::ActiveTorpedoOrder;
 use crate::resources::CapturePointOrder;
 use crate::resources::CapturedBuffs;
-use crate::resources::PendingDropParams;
-use crate::resources::WeatherZoneOrder;
 use crate::resources::ChatLog;
 use crate::resources::Clock;
 use crate::resources::DamageLedger;
@@ -32,16 +32,16 @@ use crate::resources::InteractiveZoneIndex;
 use crate::resources::KillLog;
 use crate::resources::MatchState;
 use crate::resources::MetadataPlayers;
+use crate::resources::PendingDropParams;
 use crate::resources::PlaneIndex;
 use crate::resources::PlayerIndex;
 use crate::resources::ReplayVehicles;
 use crate::resources::ScoringRules;
 use crate::resources::SelfStats;
-use crate::resources::ActiveShotOrder;
-use crate::resources::ActiveTorpedoOrder;
 use crate::resources::ShotHitLog;
 use crate::resources::TeamScores;
 use crate::resources::WardIndex;
+use crate::resources::WeatherZoneOrder;
 
 pub struct BattleWorld<'res, 'replay, G: ResourceLoader> {
     world: World,
@@ -55,25 +55,13 @@ pub struct BattleWorld<'res, 'replay, G: ResourceLoader> {
 }
 
 impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
-    pub fn new(
-        meta: &'replay ReplayMeta,
-        resources: &'res G,
-        constants: Option<&'res GameConstants>,
-    ) -> Self {
+    pub fn new(meta: &'replay ReplayMeta, resources: &'res G, constants: Option<&'res GameConstants>) -> Self {
         let version = Version::from_client_exe(&meta.clientVersionFromExe);
         let mut world = World::new();
         insert_empty_resources(&mut world);
         seed_metadata_players(&mut world, meta, resources);
         world.resource_mut::<ReplayVehicles>().0 = meta.vehicles.clone();
-        Self {
-            world,
-            meta,
-            resources,
-            constants,
-            version,
-            options: IngestOptions::default(),
-            query_cache: None,
-        }
+        Self { world, meta, resources, constants, version, options: IngestOptions::default(), query_cache: None }
     }
 
     /// Reset all mutable state for seeking (re-parse from start).
@@ -84,7 +72,10 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
     /// Call clear_consumable_inventories before reset to drop them entirely.
     pub fn reset(&mut self) {
         // Snapshot seeded slot definitions before wiping the world.
-        let inventory_snapshot: Vec<(EntityId, Vec<wows_replays::analyzer::battle_controller::state::ConsumableInventory>)> = self
+        let inventory_snapshot: Vec<(
+            EntityId,
+            Vec<wows_replays::analyzer::battle_controller::state::ConsumableInventory>,
+        )> = self
             .world
             .query::<(&GameId, &Consumables)>()
             .iter(&self.world)
@@ -147,12 +138,8 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
 
     /// Drop all consumable inventories (e.g. when loading a new replay).
     pub fn clear_consumable_inventories(&mut self) {
-        let entities_with_consumables: Vec<Entity> = self
-            .world
-            .query::<(Entity, &Consumables)>()
-            .iter(&self.world)
-            .map(|(e, _)| e)
-            .collect();
+        let entities_with_consumables: Vec<Entity> =
+            self.world.query::<(Entity, &Consumables)>().iter(&self.world).map(|(e, _)| e).collect();
         for entity in entities_with_consumables {
             self.world.entity_mut(entity).remove::<Consumables>();
         }
@@ -206,9 +193,10 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
     /// applying the correct policy.
     pub fn despawn(&mut self, id: EntityId) {
         if let Some(entity) = self.world.resource_mut::<EntityIndex>().remove(id)
-            && self.world.get_entity(entity).is_ok() {
-                self.world.despawn(entity);
-            }
+            && self.world.get_entity(entity).is_ok()
+        {
+            self.world.despawn(entity);
+        }
     }
 
     /// Get the ECS entity for a game entity id, creating it if absent.
@@ -259,10 +247,7 @@ fn seed_metadata_players<G: ResourceLoader>(world: &mut World, meta: &ReplayMeta
         .iter()
         .filter_map(|vehicle| {
             let vehicle_param = resources.game_param_by_id(vehicle.shipId).or_else(|| {
-                warn!(
-                    "skipping unknown vehicle shipId={} for player {:?}",
-                    vehicle.shipId, vehicle.name
-                );
+                warn!("skipping unknown vehicle shipId={} for player {:?}", vehicle.shipId, vehicle.name);
                 None
             })?;
             Some(Rc::new(MetadataPlayer::new(
@@ -276,9 +261,7 @@ fn seed_metadata_players<G: ResourceLoader>(world: &mut World, meta: &ReplayMeta
     world.resource_mut::<MetadataPlayers>().0 = players;
 }
 
-impl<'res, 'replay, G: ResourceLoader> wows_replays::analyzer::Analyzer
-    for BattleWorld<'res, 'replay, G>
-{
+impl<'res, 'replay, G: ResourceLoader> wows_replays::analyzer::Analyzer for BattleWorld<'res, 'replay, G> {
     fn process(&mut self, packet: &wows_replays::packet2::Packet<'_, '_>) {
         // Advance the clock unless the packet has no time and the clock has not
         // yet started (initial pre-battle packets carry clock=0).

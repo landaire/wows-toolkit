@@ -26,9 +26,11 @@ impl GameConstants {
     /// Load all constants from game files via VFS.
     #[cfg(feature = "vfs")]
     pub fn from_vfs(vfs: &VfsPath) -> Self {
-        use wowsunpack::game_constants::{
-            load_battle_constants, load_channel_constants, load_common_constants, load_ships_constants, load_weapons_constants,
-        };
+        use wowsunpack::game_constants::load_battle_constants;
+        use wowsunpack::game_constants::load_channel_constants;
+        use wowsunpack::game_constants::load_common_constants;
+        use wowsunpack::game_constants::load_ships_constants;
+        use wowsunpack::game_constants::load_weapons_constants;
         Self {
             battle: load_battle_constants(vfs),
             ships: load_ships_constants(vfs),

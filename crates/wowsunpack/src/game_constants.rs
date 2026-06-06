@@ -19,35 +19,55 @@ fn read_vfs_file(vfs: &vfs::VfsPath, path: &str) -> Result<Vec<u8>, vfs::VfsErro
 /// can't be read.
 #[cfg(feature = "vfs")]
 pub fn load_battle_constants(vfs: &vfs::VfsPath) -> BattleConstants {
-    if let Ok(buf) = read_vfs_file(vfs, BATTLE_CONSTANTS_PATH) { BattleConstants::from_xml(&buf) } else { BattleConstants::defaults() }
+    if let Ok(buf) = read_vfs_file(vfs, BATTLE_CONSTANTS_PATH) {
+        BattleConstants::from_xml(&buf)
+    } else {
+        BattleConstants::defaults()
+    }
 }
 
 /// Load ship constants from game files, falling back to defaults if the file
 /// can't be read.
 #[cfg(feature = "vfs")]
 pub fn load_ships_constants(vfs: &vfs::VfsPath) -> ShipsConstants {
-    if let Ok(buf) = read_vfs_file(vfs, SHIPS_CONSTANTS_PATH) { ShipsConstants::from_xml(&buf) } else { ShipsConstants::defaults() }
+    if let Ok(buf) = read_vfs_file(vfs, SHIPS_CONSTANTS_PATH) {
+        ShipsConstants::from_xml(&buf)
+    } else {
+        ShipsConstants::defaults()
+    }
 }
 
 /// Load weapons constants from game files, falling back to defaults if the file
 /// can't be read.
 #[cfg(feature = "vfs")]
 pub fn load_weapons_constants(vfs: &vfs::VfsPath) -> WeaponsConstants {
-    if let Ok(buf) = read_vfs_file(vfs, WEAPONS_CONSTANTS_PATH) { WeaponsConstants::from_xml(&buf) } else { WeaponsConstants::defaults() }
+    if let Ok(buf) = read_vfs_file(vfs, WEAPONS_CONSTANTS_PATH) {
+        WeaponsConstants::from_xml(&buf)
+    } else {
+        WeaponsConstants::defaults()
+    }
 }
 
 /// Load common constants from game files, falling back to defaults if the file
 /// can't be read.
 #[cfg(feature = "vfs")]
 pub fn load_common_constants(vfs: &vfs::VfsPath) -> CommonConstants {
-    if let Ok(buf) = read_vfs_file(vfs, COMMON_CONSTANTS_PATH) { CommonConstants::from_xml(&buf) } else { CommonConstants::defaults() }
+    if let Ok(buf) = read_vfs_file(vfs, COMMON_CONSTANTS_PATH) {
+        CommonConstants::from_xml(&buf)
+    } else {
+        CommonConstants::defaults()
+    }
 }
 
 /// Load channel constants from game files, falling back to defaults if the file
 /// can't be read.
 #[cfg(feature = "vfs")]
 pub fn load_channel_constants(vfs: &vfs::VfsPath) -> ChannelConstants {
-    if let Ok(buf) = read_vfs_file(vfs, CHANNEL_CONSTANTS_PATH) { ChannelConstants::from_xml(&buf) } else { ChannelConstants::defaults() }
+    if let Ok(buf) = read_vfs_file(vfs, CHANNEL_CONSTANTS_PATH) {
+        ChannelConstants::from_xml(&buf)
+    } else {
+        ChannelConstants::defaults()
+    }
 }
 
 /// Replace `common`'s consumable id -> name map with the layout recovered for
@@ -59,7 +79,8 @@ pub fn load_channel_constants(vfs: &vfs::VfsPath) -> ChannelConstants {
 /// `wows-core`) because the version table is build-script generated in this crate.
 pub fn apply_version_consumables(common: &mut CommonConstants, version: crate::data::Version) {
     if let Some(table) = crate::consumable_versions::consumable_ids_for_version(version) {
-        *common.consumable_types_mut() = table.iter().map(|(id, name)| (*id, std::borrow::Cow::Borrowed(*name))).collect();
+        *common.consumable_types_mut() =
+            table.iter().map(|(id, name)| (*id, std::borrow::Cow::Borrowed(*name))).collect();
     }
 }
 

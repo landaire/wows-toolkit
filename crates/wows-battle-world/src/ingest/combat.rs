@@ -14,8 +14,13 @@ use wows_replays::types::NormalizedPos;
 use wows_replays::types::WorldPos;
 use wowsunpack::game_types::Ribbon;
 
-use crate::components::{MinimapPlacement, Transform3d};
-use crate::resources::{DamageLedger, DeadShips, EntityIndex, KillLog, SelfStats};
+use crate::components::MinimapPlacement;
+use crate::components::Transform3d;
+use crate::resources::DamageLedger;
+use crate::resources::DeadShips;
+use crate::resources::EntityIndex;
+use crate::resources::KillLog;
+use crate::resources::SelfStats;
 
 /// Increment the ribbon count for the self player.
 pub fn handle_ribbon(ribbon: Ribbon, world: &mut World) {
@@ -24,15 +29,10 @@ pub fn handle_ribbon(ribbon: Ribbon, world: &mut World) {
 }
 
 /// Replace (or insert) a damage-stat entry for the self player.
-pub fn handle_damage_stat(
-    entries: &[DamageStatEntry],
-    world: &mut World,
-) {
+pub fn handle_damage_stat(entries: &[DamageStatEntry], world: &mut World) {
     let mut self_stats = world.resource_mut::<SelfStats>();
     for entry in entries {
-        self_stats
-            .damage_stats
-            .insert((entry.weapon.clone(), entry.category.clone()), entry.clone());
+        self_stats.damage_stats.insert((entry.weapon.clone(), entry.category.clone()), entry.clone());
     }
 }
 
@@ -56,19 +56,10 @@ pub fn handle_ship_destroyed(
 }
 
 /// Append damage events from a DamageReceived packet, keyed by aggressor.
-pub fn handle_damage_received(
-    victim: EntityId,
-    aggressors: &[AggressorDamage],
-    clock: GameClock,
-    world: &mut World,
-) {
+pub fn handle_damage_received(victim: EntityId, aggressors: &[AggressorDamage], clock: GameClock, world: &mut World) {
     let mut ledger = world.resource_mut::<DamageLedger>();
     for dmg in aggressors {
-        ledger
-            .0
-            .entry(dmg.aggressor)
-            .or_default()
-            .push(DamageEvent { amount: dmg.damage, victim, clock });
+        ledger.0.entry(dmg.aggressor).or_default().push(DamageEvent { amount: dmg.damage, victim, clock });
     }
 }
 

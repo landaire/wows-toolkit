@@ -4,11 +4,7 @@ mod support;
 
 fn run_ingest(filename: &str) {
     let h = support::load(filename);
-    let mut world = wows_battle_world::BattleWorld::new(
-        &h.replay.meta,
-        h.game_params,
-        Some(h.game_constants),
-    );
+    let mut world = wows_battle_world::BattleWorld::new(&h.replay.meta, h.game_params, Some(h.game_constants));
     let mut parser = wows_replays::packet2::Parser::with_version(h.specs, h.version);
     let mut remaining = &h.replay.packet_data[..];
     use wows_replays::analyzer::Analyzer;
@@ -30,9 +26,7 @@ fn v0_8_2_pvp_montana() {
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_1631917)), ignore)]
 fn v0_8_5_ranked_new_orleans() {
-    run_ingest(
-        "20190721_165022_PASC107-New-Orlean-1944_r01_military_navigation.wowsreplay",
-    );
+    run_ingest("20190721_165022_PASC107-New-Orlean-1944_r01_military_navigation.wowsreplay");
 }
 
 // v0.8.5, pve, Attack_On_Base_Normal (operation)

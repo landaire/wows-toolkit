@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use bevy_ecs::prelude::*;
 use wows_replays::Rc;
+use wows_replays::VehicleInfoMeta;
 use wows_replays::analyzer::battle_controller::DamageEvent;
 use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::Player;
@@ -17,7 +18,6 @@ use wows_replays::analyzer::battle_controller::state::TeamScore;
 use wows_replays::analyzer::decoder::DamageStatEntry;
 use wows_replays::analyzer::decoder::FinishType;
 use wows_replays::analyzer::decoder::Recognized;
-use wows_replays::VehicleInfoMeta;
 use wows_replays::types::ArenaId;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
@@ -105,8 +105,7 @@ pub struct ActiveTorpedoOrder(pub Vec<Entity>);
 #[derive(Resource, Debug, Clone, Default)]
 pub struct SelfStats {
     pub ribbons: HashMap<Ribbon, usize>,
-    pub damage_stats:
-        HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry>,
+    pub damage_stats: HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry>,
 }
 
 /// Ordered list of ECS entities for each capture point, by control-point index.

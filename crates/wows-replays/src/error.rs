@@ -23,13 +23,7 @@ pub enum ParseError {
     UnsupportedReplayVersion { version: String },
 
     #[error("failed to parse RPC value for {method} arg #{argnum} (type {argtype}, def {semantic_name:?}): {error}")]
-    RpcValueParseFailed {
-        method: String,
-        argnum: usize,
-        argtype: String,
-        semantic_name: Option<String>,
-        error: String,
-    },
+    RpcValueParseFailed { method: String, argnum: usize, argtype: String, semantic_name: Option<String>, error: String },
 
     #[error("internal property set on unsupported entity {entity_type} (id={entity_id})")]
     UnsupportedInternalPropSet { entity_id: u32, entity_type: String },

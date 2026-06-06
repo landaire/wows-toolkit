@@ -380,7 +380,10 @@ pub(super) fn extract_timeline_events(
                         let viewer_team = viewer_team_id.unwrap_or(0);
                         let swap = viewer_team == 1;
                         // Snapshot players before vehicle_props_all (&mut borrow).
-                        let players: Vec<(wows_replays::types::EntityId, wows_replays::Rc<wows_replays::analyzer::battle_controller::Player>)> = controller
+                        let players: Vec<(
+                            wows_replays::types::EntityId,
+                            wows_replays::Rc<wows_replays::analyzer::battle_controller::Player>,
+                        )> = controller
                             .player_entities()
                             .iter()
                             .map(|(id, p)| (*id, wows_replays::Rc::clone(p)))

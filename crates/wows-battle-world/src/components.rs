@@ -5,7 +5,6 @@ use wows_replays::Rc;
 use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::VehicleProps;
 use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
-use wowsunpack::game_params::types::Param;
 use wows_replays::analyzer::battle_controller::state::ActivePlane;
 use wows_replays::analyzer::battle_controller::state::ActiveWard;
 use wows_replays::analyzer::battle_controller::state::BuffZoneState;
@@ -24,6 +23,7 @@ use wows_replays::types::NormalizedPos;
 use wows_replays::types::TeamId;
 use wows_replays::types::WorldPos;
 use wowsunpack::game_params::types::BigWorldDistance;
+use wowsunpack::game_params::types::Param;
 use wowsunpack::game_types::PlaneId;
 use wowsunpack::game_types::WeaponType;
 use wowsunpack::game_types::WorldPos2D;
@@ -250,15 +250,6 @@ pub struct WeatherZoneData(pub LocalWeatherZone);
 /// A single `Projectile`-tagged entity holds one of these variants.
 #[derive(Component, Debug, Clone)]
 pub enum ProjectileState {
-    Artillery {
-        salvo: ArtillerySalvo,
-        fired_at: GameClock,
-        avatar_id: AvatarId,
-    },
-    Torpedo {
-        torpedo: TorpedoData,
-        launched_at: GameClock,
-        updated_at: GameClock,
-        avatar_id: AvatarId,
-    },
+    Artillery { salvo: ArtillerySalvo, fired_at: GameClock, avatar_id: AvatarId },
+    Torpedo { torpedo: TorpedoData, launched_at: GameClock, updated_at: GameClock, avatar_id: AvatarId },
 }

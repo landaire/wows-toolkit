@@ -614,11 +614,8 @@ pub(super) fn render_video_blocking(
     // By default the export starts at battle start, skipping the pre-battle
     // spawn and countdown. The battle-start clock comes from the scanned
     // session; falling back to clock 0 renders the full replay.
-    let render_start = if include_pre_battle {
-        GameClock(0.0)
-    } else {
-        session.battle_start_clock().unwrap_or(GameClock(0.0))
-    };
+    let render_start =
+        if include_pre_battle { GameClock(0.0) } else { session.battle_start_clock().unwrap_or(GameClock(0.0)) };
     encoder.set_render_start(render_start);
     if let Some(duration) = actual_game_duration {
         encoder.set_battle_duration(GameClock(duration));

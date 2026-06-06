@@ -255,8 +255,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             .as_ref()
             .and_then(|results| serde_json::Value::from_str(results.as_str()).ok());
 
-        let player_entities: Vec<Rc<Player>> =
-            self.world().resource::<PlayerIndex>().0.values().cloned().collect();
+        let player_entities: Vec<Rc<Player>> = self.world().resource::<PlayerIndex>().0.values().cloned().collect();
 
         // Build final Player objects with an owned VehicleEntity. Players without a
         // matching vehicle entity (disconnected, bots without EntityCreate) keep
@@ -285,8 +284,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
 
         let frags: HashMap<Rc<Player>, Vec<DeathInfo>> =
             HashMap::from_iter(frags_by_killer.into_iter().filter_map(|(entity_id, kills)| {
-                let player =
-                    players.iter().find(|p| p.initial_state().entity_id() == entity_id)?;
+                let player = players.iter().find(|p| p.initial_state().entity_id() == entity_id)?;
                 Some((Rc::clone(player), kills))
             }));
 
@@ -313,9 +311,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         };
 
         let extra_duration = match (match_end, battle_end_clock) {
-            (Some(result), Some(end)) if end.seconds() > result.seconds() => {
-                Some(end.seconds() - result.seconds())
-            }
+            (Some(result), Some(end)) if end.seconds() > result.seconds() => Some(end.seconds() - result.seconds()),
             _ => None,
         };
 
@@ -404,33 +400,22 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         let captain = entity_ref.get::<Captain>().and_then(|c| c.0.clone());
 
         let damage = if is_self {
-            authoritative_self_damage
-                .unwrap_or_else(|| damage_by_entity.get(&entity_id).copied().unwrap_or(0.0))
+            authoritative_self_damage.unwrap_or_else(|| damage_by_entity.get(&entity_id).copied().unwrap_or(0.0))
         } else {
             damage_by_entity.get(&entity_id).copied().unwrap_or(0.0)
         };
 
         let death_info = death_by_victim.get(&entity_id).cloned();
 
-        let results_info =
-            parsed_battle_results.and_then(|results| results.as_object()).and_then(|results| {
-                results.get("playersPublicInfo").and_then(|infos| {
-                    infos.as_object().and_then(|infos| infos.get(db_id.to_string().as_str()).cloned())
-                })
-            });
+        let results_info = parsed_battle_results.and_then(|results| results.as_object()).and_then(|results| {
+            results
+                .get("playersPublicInfo")
+                .and_then(|infos| infos.as_object().and_then(|infos| infos.get(db_id.to_string().as_str()).cloned()))
+        });
 
         let frags = frags_by_killer.get(&entity_id).cloned().unwrap_or_default();
 
-        Some(VehicleEntity::new(
-            entity_id,
-            0.0,
-            props,
-            captain,
-            damage,
-            death_info,
-            results_info,
-            frags,
-        ))
+        Some(VehicleEntity::new(entity_id, 0.0, props, captain, damage, death_info, results_info, frags))
     }
 
     fn report_version(&self) -> Version {

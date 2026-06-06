@@ -101,8 +101,7 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
         replays.push(primary);
         replays.extend(merges.iter());
 
-        let parsers: Vec<Parser<'specs>> =
-            (0..replay_count).map(|_| Parser::with_version(specs, version)).collect();
+        let parsers: Vec<Parser<'specs>> = (0..replay_count).map(|_| Parser::with_version(specs, version)).collect();
         let remainings: Vec<&[u8]> = replays.iter().map(|r| r.packet_data.as_slice()).collect();
 
         let mut self_teams = Vec::with_capacity(replay_count);
@@ -250,11 +249,7 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
                     continue;
                 };
                 if *merge_arena != primary_arena {
-                    return Err(MergeError::ArenaIdMismatch {
-                        primary: primary_arena,
-                        merge: *merge_arena,
-                        index: i,
-                    });
+                    return Err(MergeError::ArenaIdMismatch { primary: primary_arena, merge: *merge_arena, index: i });
                 }
             }
             if all_set {
@@ -298,9 +293,7 @@ fn scan_self_team(
     while !remaining.is_empty() {
         let packet = parser.parse_packet(&mut remaining).ok()?;
         let decoded = decoder.decode(&packet);
-        if let DecodedPacketPayload::OnArenaStateReceived { player_states, bot_states, .. } =
-            decoded.payload
-        {
+        if let DecodedPacketPayload::OnArenaStateReceived { player_states, bot_states, .. } = decoded.payload {
             return player_states
                 .iter()
                 .chain(bot_states.iter())
@@ -353,10 +346,7 @@ fn scan_battle_start_clock(
         if let DecodedPacketPayload::EntityProperty(prop) = decoder.decode(&packet).payload
             && prop.property == "battleStage"
             && let Some(raw) = prop.value.as_i64()
-            && matches!(
-                game_constants.common().battle_stage(raw as i32).copied(),
-                Some(BattleStage::Waiting)
-            )
+            && matches!(game_constants.common().battle_stage(raw as i32).copied(), Some(BattleStage::Waiting))
         {
             return Some(clock);
         }
@@ -383,10 +373,7 @@ fn scan_last_clock(specs: &[EntitySpec], version: Version, replay: &ReplayFile) 
 /// that the world already tracks, plus a short allow-list of Avatar-method
 /// calls that carry cross-perspective info about other ships (artillery in
 /// flight, plane spawns, minimap vision, etc.).
-fn forward_secondary_packet<G: ResourceLoader>(
-    world: &BattleWorld<'_, '_, G>,
-    packet: &Packet<'_, '_>,
-) -> bool {
+fn forward_secondary_packet<G: ResourceLoader>(world: &BattleWorld<'_, '_, G>, packet: &Packet<'_, '_>) -> bool {
     match &packet.payload {
         PacketType::Position(p) => is_known_vehicle(world, p.pid),
         PacketType::EntityProperty(ep) => is_known_vehicle(world, ep.entity_id),
@@ -457,8 +444,7 @@ pub fn gather_damage_events<G: ResourceLoader>(
     use wows_replays::analyzer::battle_controller::DamageEvent;
 
     let mut combined: HashMap<EntityId, Vec<DamageEvent>> = HashMap::new();
-    let mut seen: std::collections::HashSet<(EntityId, EntityId, u64)> =
-        std::collections::HashSet::new();
+    let mut seen: std::collections::HashSet<(EntityId, EntityId, u64)> = std::collections::HashSet::new();
 
     for replay in replays {
         let mut world = BattleWorld::new(&replay.meta, game_resources, Some(constants));
@@ -491,9 +477,7 @@ pub fn gather_damage_events<G: ResourceLoader>(
 /// Snapshot per-vehicle facts from a world that has finished processing
 /// every packet in its packet stream. Each vehicle entity becomes one
 /// `VehicleFacts` entry.
-pub fn capture_vehicle_facts<G: ResourceLoader>(
-    world: &mut BattleWorld<'_, '_, G>,
-) -> HashMap<EntityId, VehicleFacts> {
+pub fn capture_vehicle_facts<G: ResourceLoader>(world: &mut BattleWorld<'_, '_, G>) -> HashMap<EntityId, VehicleFacts> {
     let mut out = HashMap::new();
     for (entity_id, props) in world.vehicle_props_all() {
         out.insert(
@@ -559,30 +543,21 @@ pub fn gather_replay_facts(
                     fold_props_into(&mut combined, ec.entity_id, &ec.props, version, constants);
                 }
                 PacketType::CellPlayerCreate(cell) => {
-                    if !matches!(
-                        cell.entity_type.parse::<EntityType>(),
-                        Ok(EntityType::Vehicle)
-                    ) {
+                    if !matches!(cell.entity_type.parse::<EntityType>(), Ok(EntityType::Vehicle)) {
                         continue;
                     }
                     fold_props_into(&mut combined, cell.entity_id, &cell.props, version, constants);
                 }
                 PacketType::BasePlayerCreate(base) => {
-                    if !matches!(
-                        base.entity_type.parse::<EntityType>(),
-                        Ok(EntityType::Vehicle)
-                    ) {
+                    if !matches!(base.entity_type.parse::<EntityType>(), Ok(EntityType::Vehicle)) {
                         continue;
                     }
                     fold_props_into(&mut combined, base.entity_id, &base.props, version, constants);
                 }
                 PacketType::EntityMethod(em) if em.method == "onArenaStateReceived" => {
                     let decoded = decoder.decode(&packet);
-                    if let DecodedPacketPayload::OnArenaStateReceived {
-                        player_states,
-                        bot_states,
-                        ..
-                    } = decoded.payload
+                    if let DecodedPacketPayload::OnArenaStateReceived { player_states, bot_states, .. } =
+                        decoded.payload
                     {
                         for player in player_states.iter().chain(bot_states.iter()) {
                             let entity_id = player.entity_id();
@@ -622,13 +597,9 @@ pub fn gather_replay_facts(
                     if entry.max_health == 0.0 && parsed.max_health() > 0.0 {
                         entry.max_health = parsed.max_health();
                     }
-                    if entry.ship_config.abilities().is_empty()
-                        && !parsed.ship_config().abilities().is_empty()
-                    {
+                    if entry.ship_config.abilities().is_empty() && !parsed.ship_config().abilities().is_empty() {
                         entry.ship_config = parsed.ship_config().clone();
-                        if entry.vehicle_id.raw() == 0
-                            && parsed.ship_config().ship_params_id().raw() != 0
-                        {
+                        if entry.vehicle_id.raw() == 0 && parsed.ship_config().ship_params_id().raw() != 0 {
                             entry.vehicle_id = parsed.ship_config().ship_params_id();
                         }
                     }
@@ -641,8 +612,7 @@ pub fn gather_replay_facts(
                 _ => {}
             }
         }
-        let with_ship_config =
-            combined.values().filter(|f| !f.ship_config.abilities().is_empty()).count();
+        let with_ship_config = combined.values().filter(|f| !f.ship_config.abilities().is_empty()).count();
         let with_max_health = combined.values().filter(|f| f.max_health > 0.0).count();
         tracing::info!(
             replay_idx,

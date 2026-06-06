@@ -3,16 +3,16 @@ use crate::packet2::EntityMethodPacket;
 use crate::packet2::Packet;
 use crate::packet2::PacketType;
 use crate::types::AccountId;
+use crate::types::AngularVelocity;
 use crate::types::AvatarId;
+use crate::types::Direction;
 use crate::types::EntityId;
 use crate::types::GameParamId;
-use crate::types::AngularVelocity;
-use crate::types::Direction;
 use crate::types::NormalizedPos;
-use crate::types::Vec3;
-use crate::types::Velocity;
 use crate::types::PlaneId;
 use crate::types::ShotId;
+use crate::types::Vec3;
+use crate::types::Velocity;
 use crate::types::WorldPos;
 use crate::types::WorldPos2D;
 use kinded::Kinded;
@@ -1981,10 +1981,9 @@ where
                 let ArgValue::FixedDict(map) = elem else {
                     continue;
                 };
-                let (Some(aggressor_raw), Some(damage)) = (
-                    map.get("vehicleID").and_then(|a| a.as_i32()),
-                    map.get("damage").and_then(|a| a.as_f32()),
-                ) else {
+                let (Some(aggressor_raw), Some(damage)) =
+                    (map.get("vehicleID").and_then(|a| a.as_i32()), map.get("damage").and_then(|a| a.as_f32()))
+                else {
                     continue;
                 };
                 v.push(DamageReceived { aggressor: EntityId::from(aggressor_raw), damage });

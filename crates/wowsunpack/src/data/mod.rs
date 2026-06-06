@@ -63,4 +63,3 @@ where
         (self.callback)(path)
     }
 }
-

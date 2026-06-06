@@ -59,23 +59,19 @@ pub fn handle_entity_property_match(
                 let reason = dict.get("finishReason").and_then(|v: &ArgValue<'_>| v.as_i64());
                 {
                     let mut ms = world.resource_mut::<MatchState>();
-                    if let Some(winner) = winner {
-                        if winner >= -1 {
-                            let mw = if winner >= 0 {
-                                MatchWinner::Team(TeamId::from(winner))
-                            } else {
-                                MatchWinner::Draw
-                            };
-                            ms.winning_team = Some(mw);
-                            if ms.battle_result_clock.is_none() {
-                                ms.battle_result_clock = Some(clock);
-                            }
+                    if let Some(winner) = winner
+                        && winner >= -1
+                    {
+                        let mw = if winner >= 0 { MatchWinner::Team(TeamId::from(winner)) } else { MatchWinner::Draw };
+                        ms.winning_team = Some(mw);
+                        if ms.battle_result_clock.is_none() {
+                            ms.battle_result_clock = Some(clock);
                         }
                     }
-                    if let Some(reason) = reason {
-                        if reason > 0 {
-                            ms.finish_type = FinishType::from_id(reason as i32, constants.battle(), version);
-                        }
+                    if let Some(reason) = reason
+                        && reason > 0
+                    {
+                        ms.finish_type = FinishType::from_id(reason as i32, constants.battle(), version);
                     }
                 }
             }
@@ -94,13 +90,8 @@ pub fn handle_battle_end(
     ms.match_finished = true;
     ms.battle_end_clock = Some(clock);
     if winning_team.is_some() {
-        ms.winning_team = winning_team.map(|t| {
-            if t >= 0 {
-                MatchWinner::Team(TeamId::from(t as i64))
-            } else {
-                MatchWinner::Draw
-            }
-        });
+        ms.winning_team =
+            winning_team.map(|t| if t >= 0 { MatchWinner::Team(TeamId::from(t as i64)) } else { MatchWinner::Draw });
     }
     if finish_type.is_some() {
         ms.finish_type = finish_type;
@@ -127,10 +118,7 @@ pub fn handle_game_room_state_changed(
             index
                 .0
                 .values()
-                .find(|p| {
-                    p.initial_state().meta_ship_id()
-                        == wows_replays::types::AccountId::from(meta_ship_id)
-                })
+                .find(|p| p.initial_state().meta_ship_id() == wows_replays::types::AccountId::from(meta_ship_id))
                 .cloned()
         };
         let Some(player) = player else {
@@ -145,13 +133,7 @@ pub fn handle_game_room_state_changed(
         let player_has_died = world
             .resource::<EntityIndex>()
             .get(player_entity_id)
-            .is_some_and(|_| {
-                world
-                    .resource::<KillLog>()
-                    .0
-                    .iter()
-                    .any(|kill| kill.victim == player_entity_id)
-            });
+            .is_some_and(|_| world.resource::<KillLog>().0.iter().any(|kill| kill.victim == player_entity_id));
 
         let connection_event_kind = if player.end_state().is_connected() {
             ConnectionChangeKind::Connected

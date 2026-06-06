@@ -14,19 +14,19 @@ use std::sync::OnceLock;
 
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
+use wows_replays::game_constants::GameConstants;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::rpc::entitydefs::EntitySpec;
 use wowsunpack::vfs::VfsPath;
 use wowsunpack::vfs::impls::physical::PhysicalFS;
-use wows_replays::game_constants::GameConstants;
 
+use wows_minimap_renderer::DrawCommand;
 use wows_minimap_renderer::MapInfo;
 use wows_minimap_renderer::RenderOptions;
-use wows_minimap_renderer::DrawCommand;
-use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::map_data::MinimapPos;
+use wows_minimap_renderer::renderer::MinimapRenderer;
 
 // ---------------------------------------------------------------------------
 // Fixture loading
@@ -74,10 +74,7 @@ fn resources_for_build(version: &Version) -> BuildResources {
     };
     let constants = GameConstants::from_vfs(&vfs);
 
-    let res = BuildResources {
-        provider: Box::leak(Box::new(provider)),
-        constants: Box::leak(Box::new(constants)),
-    };
+    let res = BuildResources { provider: Box::leak(Box::new(provider)), constants: Box::leak(Box::new(constants)) };
     build_cache().lock().unwrap().insert(version.build, res);
     res
 }
@@ -109,42 +106,62 @@ fn normalize(cmd: &DrawCommand) -> String {
             format!("Smoke pos={} r={radius} color={color:?} alpha={:.2}", fmt_pos(*pos), alpha)
         }
         DrawCommand::Ship {
-            entity_id, pos, yaw, species, color, visibility, opacity, is_self,
-            player_name, ship_name, is_detected_teammate, is_disconnected, name_color,
+            entity_id,
+            pos,
+            yaw,
+            species,
+            color,
+            visibility,
+            opacity,
+            is_self,
+            player_name,
+            ship_name,
+            is_detected_teammate,
+            is_disconnected,
+            name_color,
         } => {
             format!(
                 "Ship eid={entity_id:?} pos={} yaw={:.3} sp={species:?} color={color:?} vis={visibility:?} op={:.2} self={is_self} dn={is_detected_teammate} dc={is_disconnected} nc={name_color:?} pn={player_name:?} sn={ship_name:?}",
-                fmt_pos(*pos), round2(*yaw), round2(*opacity)
+                fmt_pos(*pos),
+                round2(*yaw),
+                round2(*opacity)
             )
         }
         DrawCommand::HealthBar { entity_id, pos, fraction, fill_color, background_color, background_alpha } => {
             format!(
                 "HealthBar eid={entity_id:?} pos={} frac={:.3} fc={fill_color:?} bg={background_color:?} bga={:.2}",
-                fmt_pos(*pos), round2(*fraction), round2(*background_alpha)
+                fmt_pos(*pos),
+                round2(*fraction),
+                round2(*background_alpha)
             )
         }
         DrawCommand::DeadShip { entity_id, pos, yaw, species, color, is_self, player_name, ship_name } => {
             format!(
                 "DeadShip eid={entity_id:?} pos={} yaw={:.3} sp={species:?} color={color:?} self={is_self} pn={player_name:?} sn={ship_name:?}",
-                fmt_pos(*pos), round2(*yaw)
+                fmt_pos(*pos),
+                round2(*yaw)
             )
         }
         DrawCommand::BuffZone { pos, radius, color, alpha, marker_name } => {
             format!(
                 "BuffZone pos={} r={radius} color={color:?} alpha={:.2} mn={marker_name:?}",
-                fmt_pos(*pos), round2(*alpha)
+                fmt_pos(*pos),
+                round2(*alpha)
             )
         }
         DrawCommand::CapturePoint { pos, radius, color, alpha, label, progress, invader_color, .. } => {
             format!(
                 "CapturePoint pos={} r={radius} color={color:?} alpha={:.2} label={label:?} prog={:.3} ic={invader_color:?}",
-                fmt_pos(*pos), round2(*alpha), round2(*progress)
+                fmt_pos(*pos),
+                round2(*alpha),
+                round2(*progress)
             )
         }
         DrawCommand::TurretDirection { entity_id, pos, yaw, color, length } => {
             format!(
                 "TurretDirection eid={entity_id:?} pos={} yaw={:.3} color={color:?} len={length}",
-                fmt_pos(*pos), round2(*yaw)
+                fmt_pos(*pos),
+                round2(*yaw)
             )
         }
         DrawCommand::Building { pos, color, is_alive, icon_type, relation } => {
@@ -165,13 +182,15 @@ fn normalize(cmd: &DrawCommand) -> String {
         DrawCommand::ConsumableRadius { entity_id, pos, radius_px, color, alpha } => {
             format!(
                 "ConsumableRadius eid={entity_id:?} pos={} r={radius_px} color={color:?} alpha={:.2}",
-                fmt_pos(*pos), round2(*alpha)
+                fmt_pos(*pos),
+                round2(*alpha)
             )
         }
         DrawCommand::PatrolRadius { plane_id, pos, radius_px, color, alpha } => {
             format!(
                 "PatrolRadius pid={plane_id:?} pos={} r={radius_px} color={color:?} alpha={:.2}",
-                fmt_pos(*pos), round2(*alpha)
+                fmt_pos(*pos),
+                round2(*alpha)
             )
         }
         DrawCommand::ConsumableIcons { entity_id, pos, icon_keys, is_friendly, has_hp_bar } => {
@@ -181,11 +200,22 @@ fn normalize(cmd: &DrawCommand) -> String {
             )
         }
         DrawCommand::ShipConfigCircle {
-            entity_id, pos, radius_px, color, alpha, dashed, label, kind, player_name, is_self,
+            entity_id,
+            pos,
+            radius_px,
+            color,
+            alpha,
+            dashed,
+            label,
+            kind,
+            player_name,
+            is_self,
         } => {
             format!(
                 "ShipConfigCircle eid={entity_id:?} pos={} r={:.2} color={color:?} alpha={:.2} dashed={dashed} label={label:?} kind={kind:?} pn={player_name:?} self={is_self}",
-                fmt_pos(*pos), round2(*radius_px), round2(*alpha)
+                fmt_pos(*pos),
+                round2(*radius_px),
+                round2(*alpha)
             )
         }
         DrawCommand::PositionTrail { entity_id, player_name, points } => {
@@ -196,7 +226,14 @@ fn normalize(cmd: &DrawCommand) -> String {
             format!("TeamBuffs friendly={friendly_buffs:?} enemy={enemy_buffs:?}")
         }
         DrawCommand::ScoreBar {
-            team0, team1, team0_color, team1_color, max_score, team0_timer, team1_timer, advantage,
+            team0,
+            team1,
+            team0_color,
+            team1_color,
+            max_score,
+            team0_timer,
+            team1_timer,
+            advantage,
         } => {
             format!(
                 "ScoreBar t0={team0} t1={team1} c0={team0_color:?} c1={team1_color:?} max={max_score} t0t={team0_timer:?} t1t={team1_timer:?} adv={advantage:?}"
@@ -220,25 +257,42 @@ fn normalize(cmd: &DrawCommand) -> String {
             format!("ChatOverlay {msgs:?}")
         }
         DrawCommand::BattleResultOverlay { result, finish_type, color, subtitle_above } => {
-            format!(
-                "BattleResultOverlay result={result:?} ft={finish_type:?} color={color:?} sa={subtitle_above}"
-            )
+            format!("BattleResultOverlay result={result:?} ft={finish_type:?} color={color:?} sa={subtitle_above}")
         }
         DrawCommand::StatsPanel { x, width } => {
             format!("StatsPanel x={x} w={width}")
         }
         DrawCommand::StatsSilhouette {
-            x, y, width, height, ship_param_id, hp_fraction, hp_current, hp_max,
-            player_name, clan_tag, clan_color, ship_name, ..
+            x,
+            y,
+            width,
+            height,
+            ship_param_id,
+            hp_fraction,
+            hp_current,
+            hp_max,
+            player_name,
+            clan_tag,
+            clan_color,
+            ship_name,
+            ..
         } => {
             format!(
                 "StatsSilhouette x={x} y={y} w={width} h={height} sid={ship_param_id:?} hpf={:.3} hpc={:.0} hpm={:.0} pn={player_name:?} ct={clan_tag:?} cc={clan_color:?} sn={ship_name:?}",
-                round2(*hp_fraction), hp_current, hp_max
+                round2(*hp_fraction),
+                hp_current,
+                hp_max
             )
         }
         DrawCommand::StatsDamage {
-            x, y, width, breakdowns, damage_spotting, spotting_breakdowns,
-            damage_potential, potential_breakdowns,
+            x,
+            y,
+            width,
+            breakdowns,
+            damage_spotting,
+            spotting_breakdowns,
+            damage_potential,
+            potential_breakdowns,
         } => {
             let bd: Vec<_> = breakdowns.iter().map(|b| (&b.label, b.damage as i64)).collect();
             let sbd: Vec<_> = spotting_breakdowns.iter().map(|b| (&b.label, b.damage as i64)).collect();
@@ -257,9 +311,7 @@ fn normalize(cmd: &DrawCommand) -> String {
         }
         DrawCommand::TeamRoster { side, x, y, width, height, rows } => {
             let row_ids: Vec<_> = rows.iter().map(|r| r.entity_id).collect();
-            format!(
-                "TeamRoster side={side:?} x={x} y={y} w={width} h={height} eids={row_ids:?}"
-            )
+            format!("TeamRoster side={side:?} x={x} y={y} w={width} h={height} eids={row_ids:?}")
         }
     }
 }
@@ -275,8 +327,7 @@ fn capture_frames(filename: &str) -> String {
     let path = fixtures_dir().join(filename);
 
     // Count total packets (first pass)
-    let replay_count = ReplayFile::from_file(&path)
-        .unwrap_or_else(|e| panic!("failed to parse {filename}: {e:?}"));
+    let replay_count = ReplayFile::from_file(&path).unwrap_or_else(|e| panic!("failed to parse {filename}: {e:?}"));
     let version = Version::from_client_exe(&replay_count.meta.clientVersionFromExe);
     let res = resources_for_build(&version);
     let specs: &'static [EntitySpec] = res.provider.entity_specs();
@@ -296,8 +347,7 @@ fn capture_frames(filename: &str) -> String {
     let mid = total_packets / 2;
 
     // Seed inventory facts (second pass through file)
-    let replay_facts = ReplayFile::from_file(&path)
-        .unwrap_or_else(|e| panic!("failed to parse {filename}: {e:?}"));
+    let replay_facts = ReplayFile::from_file(&path).unwrap_or_else(|e| panic!("failed to parse {filename}: {e:?}"));
     let facts = wows_replays::analyzer::battle_controller::merged::gather_replay_facts(
         res.constants,
         version,
@@ -306,8 +356,7 @@ fn capture_frames(filename: &str) -> String {
     );
 
     // Main pass: drive BattleWorld and collect frames
-    let replay_main = ReplayFile::from_file(&path)
-        .unwrap_or_else(|e| panic!("failed to parse {filename}: {e:?}"));
+    let replay_main = ReplayFile::from_file(&path).unwrap_or_else(|e| panic!("failed to parse {filename}: {e:?}"));
     let meta: &'static wows_replays::ReplayMeta = Box::leak(Box::new(replay_main.meta));
 
     let mut world = wows_battle_world::BattleWorld::new(meta, res.provider, Some(res.constants));

@@ -18,13 +18,13 @@ use wowsunpack::rpc::entitydefs::parse_scripts;
 use wowsunpack::vfs::VfsPath;
 use wowsunpack::vfs::impls::physical::PhysicalFS;
 
+use wows_battle_world::BattleWorld;
+use wows_battle_world::ids::ShotTracking;
 use wows_replays::ParseError;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::types::EntityId;
-use wows_battle_world::BattleWorld;
-use wows_battle_world::ids::ShotTracking;
 
 /// Parses & processes World of Warships replay files
 #[derive(Parser)]
@@ -485,14 +485,14 @@ fn audit_types(specs: &[EntitySpec]) {
     }
 
     let mut covered = 0usize;
-    println!("{:<40} {:<10} {}", "DEF NAME", "NEWTYPE?", "RUST TYPE");
+    println!("{:<40} {:<10} RUST TYPE", "DEF NAME", "NEWTYPE?");
     for name in &names {
         match newtype_for(name) {
             Some(nt) => {
                 covered += 1;
                 println!("{:<40} {:<10} {}", name, "yes", nt.rust_type_name());
             }
-            None => println!("{:<40} {:<10} {}", name, "no", "-"),
+            None => println!("{:<40} {:<10} -", name, "no"),
         }
     }
     println!("\n{} of {} semantic names have a domain newtype", covered, names.len());
@@ -524,7 +524,10 @@ where
     if !diagnostics.is_empty() {
         eprintln!("payload validation: {} property payload(s) under-consumed", diagnostics.len());
         for d in &diagnostics {
-            eprintln!("  {} (def {:?}): consumed {} of {} bytes", d.context, d.semantic_name, d.consumed, d.payload_len);
+            eprintln!(
+                "  {} (def {:?}): consumed {} of {} bytes",
+                d.context, d.semantic_name, d.consumed, d.payload_len
+            );
         }
     }
     analyzer.finish();
@@ -831,7 +834,10 @@ fn run_players_query(
     if !diagnostics.is_empty() {
         eprintln!("payload validation: {} property payload(s) under-consumed", diagnostics.len());
         for d in &diagnostics {
-            eprintln!("  {} (def {:?}): consumed {} of {} bytes", d.context, d.semantic_name, d.consumed, d.payload_len);
+            eprintln!(
+                "  {} (def {:?}): consumed {} of {} bytes",
+                d.context, d.semantic_name, d.consumed, d.payload_len
+            );
         }
     }
     world.finish();

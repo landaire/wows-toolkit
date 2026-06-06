@@ -49,9 +49,9 @@ use wowsunpack::game_types::PlaneId;
 use wowsunpack::game_types::Ribbon;
 
 use crate::components::Aim;
+use crate::components::BuffZoneData;
 use crate::components::Building;
 use crate::components::BuildingState;
-use crate::components::BuffZoneData;
 use crate::components::Consumables;
 use crate::components::EntityKind;
 use crate::components::GameId;
@@ -159,8 +159,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
     /// metadata. The returned `BattleView` reads through `&self` query methods, so
     /// no further `QueryState` allocation happens for the lifetime of the view.
     pub fn view(&mut self) -> BattleView<'_> {
-        let battle_type =
-            BattleType::from_value(self.game_type().unwrap_or(""), self.version());
+        let battle_type = BattleType::from_value(self.game_type().unwrap_or(""), self.version());
         let (world, cache) = self.view_parts();
         BattleView { world, cache, battle_type }
     }
@@ -185,20 +184,12 @@ impl<'w> BattleView<'w> {
 
     /// World-space transform per entity, keyed by game entity id.
     pub fn positions(&self) -> HashMap<EntityId, &'w Transform3d> {
-        self.cache
-            .positions
-            .iter_manual(self.world)
-            .map(|(gid, t)| (gid.0, t))
-            .collect()
+        self.cache.positions.iter_manual(self.world).map(|(gid, t)| (gid.0, t)).collect()
     }
 
     /// Minimap placement per entity, keyed by game entity id.
     pub fn minimap_positions(&self) -> HashMap<EntityId, &'w MinimapPlacement> {
-        self.cache
-            .minimap
-            .iter_manual(self.world)
-            .map(|(gid, m)| (gid.0, m))
-            .collect()
+        self.cache.minimap.iter_manual(self.world).map(|(gid, m)| (gid.0, m)).collect()
     }
 
     /// Players parsed from the arena roster, keyed by entity id.
@@ -214,11 +205,7 @@ impl<'w> BattleView<'w> {
 
     /// All vehicle props, keyed by entity id.
     pub fn vehicle_props_all(&self) -> HashMap<EntityId, &'w VehicleProps> {
-        self.cache
-            .vehicles
-            .iter_manual(self.world)
-            .map(|(gid, vs)| (gid.0, &vs.0))
-            .collect()
+        self.cache.vehicles.iter_manual(self.world).map(|(gid, vs)| (gid.0, &vs.0)).collect()
     }
 
     /// Aim state (turret/target yaws, selected ammo) for a single entity.
@@ -258,20 +245,12 @@ impl<'w> BattleView<'w> {
 
     /// Building states per entity id.
     pub fn buildings(&self) -> HashMap<EntityId, &'w BuildingState> {
-        self.cache
-            .building_state
-            .iter_manual(self.world)
-            .map(|(gid, state)| (gid.0, state))
-            .collect()
+        self.cache.building_state.iter_manual(self.world).map(|(gid, state)| (gid.0, state)).collect()
     }
 
     /// Smoke screen states per entity id.
     pub fn smoke_screens(&self) -> HashMap<EntityId, &'w SmokeScreenState> {
-        self.cache
-            .smoke_state
-            .iter_manual(self.world)
-            .map(|(gid, state)| (gid.0, state))
-            .collect()
+        self.cache.smoke_state.iter_manual(self.world).map(|(gid, state)| (gid.0, state)).collect()
     }
 
     /// Main-battery turret yaws (radians) per entity, group 0 only.
@@ -286,11 +265,7 @@ impl<'w> BattleView<'w> {
 
     /// World-space gun aim yaw (radians) per entity.
     pub fn target_yaws(&self) -> HashMap<EntityId, f32> {
-        self.cache
-            .aims
-            .iter_manual(self.world)
-            .filter_map(|(gid, aim)| aim.target_yaw.map(|r| (gid.0, r.0)))
-            .collect()
+        self.cache.aims.iter_manual(self.world).filter_map(|(gid, aim)| aim.target_yaw.map(|r| (gid.0, r.0))).collect()
     }
 
     /// Selected artillery ammo param per entity.
@@ -300,9 +275,7 @@ impl<'w> BattleView<'w> {
             .aims
             .iter_manual(self.world)
             .filter_map(|(gid, aim)| {
-                aim.selected_ammo
-                    .get(&Recognized::Known(WeaponType::Artillery))
-                    .map(|id| (gid.0, *id))
+                aim.selected_ammo.get(&Recognized::Known(WeaponType::Artillery)).map(|id| (gid.0, *id))
             })
             .collect()
     }
@@ -369,15 +342,11 @@ impl<'w> BattleView<'w> {
             .resource::<ActiveShotOrder>()
             .0
             .iter()
-            .filter_map(|&entity| {
-                match self.world.get_entity(entity).ok()?.get::<ProjectileState>()? {
-                    ProjectileState::Artillery { salvo, fired_at, avatar_id } => Some(ActiveShot {
-                        avatar_id: *avatar_id,
-                        salvo: salvo.clone(),
-                        fired_at: *fired_at,
-                    }),
-                    ProjectileState::Torpedo { .. } => None,
+            .filter_map(|&entity| match self.world.get_entity(entity).ok()?.get::<ProjectileState>()? {
+                ProjectileState::Artillery { salvo, fired_at, avatar_id } => {
+                    Some(ActiveShot { avatar_id: *avatar_id, salvo: salvo.clone(), fired_at: *fired_at })
                 }
+                ProjectileState::Torpedo { .. } => None,
             })
             .collect()
     }
@@ -388,29 +357,21 @@ impl<'w> BattleView<'w> {
             .resource::<ActiveTorpedoOrder>()
             .0
             .iter()
-            .filter_map(|&entity| {
-                match self.world.get_entity(entity).ok()?.get::<ProjectileState>()? {
-                    ProjectileState::Torpedo { torpedo, launched_at, updated_at, avatar_id } => {
-                        Some(ActiveTorpedo {
-                            avatar_id: *avatar_id,
-                            torpedo: torpedo.clone(),
-                            launched_at: *launched_at,
-                            updated_at: *updated_at,
-                        })
-                    }
-                    ProjectileState::Artillery { .. } => None,
-                }
+            .filter_map(|&entity| match self.world.get_entity(entity).ok()?.get::<ProjectileState>()? {
+                ProjectileState::Torpedo { torpedo, launched_at, updated_at, avatar_id } => Some(ActiveTorpedo {
+                    avatar_id: *avatar_id,
+                    torpedo: torpedo.clone(),
+                    launched_at: *launched_at,
+                    updated_at: *updated_at,
+                }),
+                ProjectileState::Artillery { .. } => None,
             })
             .collect()
     }
 
     /// Buff zone states (arms race powerup drops) keyed by entity id.
     pub fn buff_zones(&self) -> HashMap<EntityId, BuffZoneState> {
-        self.cache
-            .buff_zones
-            .iter_manual(self.world)
-            .map(|(gid, data)| (gid.0, data.0.clone()))
-            .collect()
+        self.cache.buff_zones.iter_manual(self.world).map(|(gid, data)| (gid.0, data.0.clone())).collect()
     }
 
     /// Capture point states in control-point index order.
@@ -439,11 +400,7 @@ impl<'w> BattleView<'w> {
             .0
             .iter()
             .filter_map(|&entity| {
-                self.world
-                    .get_entity(entity)
-                    .ok()?
-                    .get::<crate::components::WeatherZoneData>()
-                    .map(|d| d.0.clone())
+                self.world.get_entity(entity).ok()?.get::<crate::components::WeatherZoneData>().map(|d| d.0.clone())
             })
             .collect()
     }
@@ -486,8 +443,7 @@ impl<'w> BattleView<'w> {
     /// Cumulative damage stats for the self player.
     pub fn self_damage_stats(
         &self,
-    ) -> &'w HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry>
-    {
+    ) -> &'w HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry> {
         &self.world.resource::<SelfStats>().damage_stats
     }
 
@@ -498,7 +454,7 @@ impl<'w> BattleView<'w> {
 
     /// Resolved battle stage.
     pub fn battle_stage(&self) -> Option<BattleStage> {
-        self.world.resource::<MatchState>().battle_stage.clone()
+        self.world.resource::<MatchState>().battle_stage
     }
 
     /// Seconds remaining in the match.

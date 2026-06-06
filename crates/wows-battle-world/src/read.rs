@@ -36,8 +36,39 @@ use wowsunpack::game_types::Ribbon;
 
 use wowsunpack::game_types::PlaneId;
 
-use crate::components::{Aim, Building, BuffZoneData, CapturePointData, Consumables, EntityKind, GameId, MinimapPlacement, Plane, PlaneState, ProjectileState, SmokeScreen, Transform3d, Vehicle, VehicleState, Ward, WardState, WeatherZoneData};
-use crate::resources::{ActiveShotOrder, ActiveTorpedoOrder, CapturePointOrder, CapturedBuffs, ChatLog, DamageLedger, DeadShips, KillLog, MatchState, PlayerIndex, ScoringRules as ScoringRulesResource, SelfStats, ShotHitLog, TeamScores, WeatherZoneOrder};
+use crate::components::Aim;
+use crate::components::BuffZoneData;
+use crate::components::Building;
+use crate::components::CapturePointData;
+use crate::components::Consumables;
+use crate::components::EntityKind;
+use crate::components::GameId;
+use crate::components::MinimapPlacement;
+use crate::components::Plane;
+use crate::components::PlaneState;
+use crate::components::ProjectileState;
+use crate::components::SmokeScreen;
+use crate::components::Transform3d;
+use crate::components::Vehicle;
+use crate::components::VehicleState;
+use crate::components::Ward;
+use crate::components::WardState;
+use crate::components::WeatherZoneData;
+use crate::resources::ActiveShotOrder;
+use crate::resources::ActiveTorpedoOrder;
+use crate::resources::CapturePointOrder;
+use crate::resources::CapturedBuffs;
+use crate::resources::ChatLog;
+use crate::resources::DamageLedger;
+use crate::resources::DeadShips;
+use crate::resources::KillLog;
+use crate::resources::MatchState;
+use crate::resources::PlayerIndex;
+use crate::resources::ScoringRules as ScoringRulesResource;
+use crate::resources::SelfStats;
+use crate::resources::ShotHitLog;
+use crate::resources::TeamScores;
+use crate::resources::WeatherZoneOrder;
 use crate::units::MatchWinner;
 use crate::world::BattleWorld;
 
@@ -107,8 +138,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
     /// Cumulative damage stats for the self player.
     pub fn self_damage_stats(
         &self,
-    ) -> &HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry>
-    {
+    ) -> &HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry> {
         &self.world().resource::<SelfStats>().damage_stats
     }
 
@@ -128,20 +158,14 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
     pub fn active_consumables(&mut self) -> HashMap<EntityId, Vec<ActiveConsumable>> {
         let world = self.world_mut();
         let mut q = world.query::<(&GameId, &Consumables)>();
-        q.iter(world)
-            .filter(|(_, c)| !c.active.is_empty())
-            .map(|(gid, c)| (gid.0, c.active.clone()))
-            .collect()
+        q.iter(world).filter(|(_, c)| !c.active.is_empty()).map(|(gid, c)| (gid.0, c.active.clone())).collect()
     }
 
     /// Consumable inventory slots keyed by entity id.
     pub fn consumable_inventories(&mut self) -> HashMap<EntityId, Vec<ConsumableInventory>> {
         let world = self.world_mut();
         let mut q = world.query::<(&GameId, &Consumables)>();
-        q.iter(world)
-            .filter(|(_, c)| !c.slots.is_empty())
-            .map(|(gid, c)| (gid.0, c.slots.clone()))
-            .collect()
+        q.iter(world).filter(|(_, c)| !c.slots.is_empty()).map(|(gid, c)| (gid.0, c.slots.clone())).collect()
     }
 
     /// Active plane squadrons keyed by plane id.
@@ -189,11 +213,9 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             .filter_map(|entity| {
                 let state = world.get_entity(entity).ok()?.get::<ProjectileState>()?;
                 match state {
-                    ProjectileState::Artillery { salvo, fired_at, avatar_id } => Some(ActiveShot {
-                        avatar_id: *avatar_id,
-                        salvo: salvo.clone(),
-                        fired_at: *fired_at,
-                    }),
+                    ProjectileState::Artillery { salvo, fired_at, avatar_id } => {
+                        Some(ActiveShot { avatar_id: *avatar_id, salvo: salvo.clone(), fired_at: *fired_at })
+                    }
                     ProjectileState::Torpedo { .. } => None,
                 }
             })
@@ -209,14 +231,12 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             .filter_map(|entity| {
                 let state = world.get_entity(entity).ok()?.get::<ProjectileState>()?;
                 match state {
-                    ProjectileState::Torpedo { torpedo, launched_at, updated_at, avatar_id } => {
-                        Some(ActiveTorpedo {
-                            avatar_id: *avatar_id,
-                            torpedo: torpedo.clone(),
-                            launched_at: *launched_at,
-                            updated_at: *updated_at,
-                        })
-                    }
+                    ProjectileState::Torpedo { torpedo, launched_at, updated_at, avatar_id } => Some(ActiveTorpedo {
+                        avatar_id: *avatar_id,
+                        torpedo: torpedo.clone(),
+                        launched_at: *launched_at,
+                        updated_at: *updated_at,
+                    }),
                     ProjectileState::Artillery { .. } => None,
                 }
             })
@@ -299,11 +319,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         order
             .into_iter()
             .filter_map(|ecs_entity| {
-                self.world()
-                    .get_entity(ecs_entity)
-                    .ok()?
-                    .get::<WeatherZoneData>()
-                    .map(|d| d.0.clone())
+                self.world().get_entity(ecs_entity).ok()?.get::<WeatherZoneData>().map(|d| d.0.clone())
             })
             .collect()
     }
@@ -315,7 +331,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
 
     /// Resolved battle stage, updated from BattleLogic `battleStage` EntityProperty.
     pub fn battle_stage(&self) -> Option<BattleStage> {
-        self.world().resource::<MatchState>().battle_stage.clone()
+        self.world().resource::<MatchState>().battle_stage
     }
 
     /// Seconds remaining in the match from BattleLogic `timeLeft`.

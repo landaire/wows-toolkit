@@ -8,13 +8,19 @@ use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::game_types::WorldPos;
 
-use crate::components::{
-    GameId, MinimapPlacement, SmokeScreen, SmokeScreenState, Transform3d, VehicleState,
-    WeatherZone, WeatherZoneData,
-};
+use crate::components::GameId;
+use crate::components::MinimapPlacement;
+use crate::components::SmokeScreen;
+use crate::components::SmokeScreenState;
+use crate::components::Transform3d;
+use crate::components::VehicleState;
+use crate::components::WeatherZone;
+use crate::components::WeatherZoneData;
 use crate::ids::SourceTeam;
 use crate::resources::EntityIndex;
-use crate::units::{Degrees, Radians, VisibilityFlags};
+use crate::units::Degrees;
+use crate::units::Radians;
+use crate::units::VisibilityFlags;
 
 /// Handle a Position packet: update Transform3d for the entity.
 pub fn handle_position(pos: &PositionPacket, world: &mut World, clock: GameClock) {
@@ -35,11 +41,7 @@ pub fn handle_position(pos: &PositionPacket, world: &mut World, clock: GameClock
 ///
 /// Non-zero parent_id indicates the entity is attached (e.g. camera to ship);
 /// only the free-floating case maps to a ship world position.
-pub fn handle_player_orientation(
-    orient: &PlayerOrientationPacket,
-    world: &mut World,
-    clock: GameClock,
-) {
+pub fn handle_player_orientation(orient: &PlayerOrientationPacket, world: &mut World, clock: GameClock) {
     if orient.parent_id != EntityId::from(0u32) {
         return;
     }
@@ -61,24 +63,20 @@ pub fn handle_player_orientation(
 /// Source-team filtering: when `source_team` is Some, only updates for entities
 /// belonging to that team are applied. Entities not yet known fall through so
 /// their first sighting still registers.
-pub fn handle_minimap_updates(
-    updates: &[MinimapUpdate],
-    world: &mut World,
-    clock: GameClock,
-    source_team: SourceTeam,
-) {
+pub fn handle_minimap_updates(updates: &[MinimapUpdate], world: &mut World, clock: GameClock, source_team: SourceTeam) {
     for update in updates {
         // Source-team filter.
         if let Some(team) = source_team.0
             && let Some(ecs_entity) = world.resource::<EntityIndex>().get(update.entity_id)
-                && let Ok(er) = world.get_entity(ecs_entity)
-                    && let Some(vs) = er.get::<VehicleState>() {
-                        use wows_replays::types::TeamId;
-                        let entity_team = TeamId::from(vs.0.team_id() as i64);
-                        if entity_team != team {
-                            continue;
-                        }
-                    }
+            && let Ok(er) = world.get_entity(ecs_entity)
+            && let Some(vs) = er.get::<VehicleState>()
+        {
+            use wows_replays::types::TeamId;
+            let entity_team = TeamId::from(vs.0.team_id() as i64);
+            if entity_team != team {
+                continue;
+            }
+        }
 
         // Minimap pings are one-shot flashes; do not treat them as sustained detection.
         let visible = !update.is_sentinel && !update.is_minimap_ping();
@@ -101,19 +99,12 @@ pub fn handle_minimap_updates(
             .get(update.entity_id)
             .and_then(|e| world.get_entity(e).ok())
             .and_then(|er| {
-                er.get::<VehicleState>()
-                    .map(|vs| (VisibilityFlags(vs.0.visibility_flags()), vs.0.is_invisible()))
+                er.get::<VehicleState>().map(|vs| (VisibilityFlags(vs.0.visibility_flags()), vs.0.is_invisible()))
             })
             .unwrap_or((VisibilityFlags(0), false));
 
-        let placement = MinimapPlacement {
-            pos: position,
-            heading,
-            visible,
-            visibility_flags,
-            is_invisible,
-            last_updated: clock,
-        };
+        let placement =
+            MinimapPlacement { pos: position, heading, visible, visibility_flags, is_invisible, last_updated: clock };
 
         let entity = spawn_or_get(world, update.entity_id);
         if let Ok(mut e) = world.get_entity_mut(entity) {
@@ -130,10 +121,10 @@ pub fn handle_non_volatile_position(entity_id: EntityId, position: WorldPos, wor
         if let Some(mut state) = er.get_mut::<SmokeScreenState>() {
             state.position = position;
         }
-    } else if er.contains::<WeatherZone>() {
-        if let Some(mut data) = er.get_mut::<WeatherZoneData>() {
-            data.0.position = position;
-        }
+    } else if er.contains::<WeatherZone>()
+        && let Some(mut data) = er.get_mut::<WeatherZoneData>()
+    {
+        data.0.position = position;
     }
 }
 

@@ -1119,10 +1119,7 @@ impl WowsToolkitApp {
                     } else {
                         let count = repair.len();
                         self.tab_state.game_data_repair = repair;
-                        self.tab_state
-                            .toasts
-                            .lock()
-                            .warning(t!("ui.messages.game_data_cache_invalid", count = count));
+                        self.tab_state.toasts.lock().warning(t!("ui.messages.game_data_cache_invalid", count = count));
                     }
                 }
                 BackgroundTaskCompletion::ReplayLoaded { replay, source } => {

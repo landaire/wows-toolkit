@@ -207,7 +207,9 @@ struct ReportSnapshot {
     active_consumable_total: usize,
 }
 
-fn make_world(filename: &str) -> (ReplayFile, BattleWorld<'static, 'static, wowsunpack::game_params::provider::GameMetadataProvider>) {
+fn make_world(
+    filename: &str,
+) -> (ReplayFile, BattleWorld<'static, 'static, wowsunpack::game_params::provider::GameMetadataProvider>) {
     let h = support::load(filename);
     let replay = h.replay;
     let meta: &'static wows_replays::ReplayMeta = Box::leak(Box::new(replay.meta.clone()));
@@ -272,14 +274,12 @@ fn report_snapshot(filename: &str) -> Option<ReportSnapshot> {
             let mut victims: Vec<String> =
                 deaths.iter().map(|d| format!("{}@{:?}", d.killer().raw(), d.cause())).collect();
             victims.sort();
-            FragEntry {
-                killer_account_id: st.db_id().raw(),
-                killer_name: st.username().to_string(),
-                victims,
-            }
+            FragEntry { killer_account_id: st.db_id().raw(), killer_name: st.username().to_string(), victims }
         })
         .collect();
-    frags.sort_by(|a, b| (a.killer_account_id, a.killer_name.clone()).cmp(&(b.killer_account_id, b.killer_name.clone())));
+    frags.sort_by(|a, b| {
+        (a.killer_account_id, a.killer_name.clone()).cmp(&(b.killer_account_id, b.killer_name.clone()))
+    });
 
     let mut self_damage_stats: Vec<DamageStatEntry> = report
         .self_damage_stats()
@@ -291,10 +291,10 @@ fn report_snapshot(filename: &str) -> Option<ReportSnapshot> {
             total: r3(e.total as f32),
         })
         .collect();
-    self_damage_stats.sort_by(|a, b| (a.weapon.clone(), a.category.clone()).cmp(&(b.weapon.clone(), b.category.clone())));
+    self_damage_stats
+        .sort_by(|a, b| (a.weapon.clone(), a.category.clone()).cmp(&(b.weapon.clone(), b.category.clone())));
 
-    let active_consumable_total: usize =
-        report.active_consumables().values().map(|v| v.len()).sum();
+    let active_consumable_total: usize = report.active_consumables().values().map(|v| v.len()).sum();
 
     Some(ReportSnapshot {
         arena_id: format!("{:?}", report.arena_id()),
@@ -304,9 +304,7 @@ fn report_snapshot(filename: &str) -> Option<ReportSnapshot> {
         game_type: format!("{:?}", report.game_type()),
         match_group: report.match_group().to_string(),
         self_player: report.self_player().initial_state().db_id().raw(),
-        battle_result: report
-            .battle_result()
-            .map(|r| serde_json::to_string(r).unwrap_or_default()),
+        battle_result: report.battle_result().map(|r| serde_json::to_string(r).unwrap_or_default()),
         finish_type: report.finish_type().map(|f| format!("{f:?}")),
         max_duration: report.max_duration(),
         played_duration: r3o(report.played_duration()),
@@ -331,9 +329,10 @@ fn chat_entries(chat: &[wows_replays::analyzer::battle_controller::GameMessage])
             message: m.message.clone(),
             entity_id: m.entity_id.raw(),
             sender_relation: format!("{:?}", m.sender_relation),
-            player: m.player.as_ref().map(|p| {
-                format!("{}:{}", p.initial_state().db_id().raw(), p.initial_state().username())
-            }),
+            player: m
+                .player
+                .as_ref()
+                .map(|p| format!("{}:{}", p.initial_state().db_id().raw(), p.initial_state().username())),
         })
         .collect()
 }
@@ -358,9 +357,7 @@ fn capture_point_entries(
         .collect()
 }
 
-fn team_score_entries(
-    scores: &[wows_replays::analyzer::battle_controller::state::TeamScore],
-) -> Vec<TeamScoreEntry> {
+fn team_score_entries(scores: &[wows_replays::analyzer::battle_controller::state::TeamScore]) -> Vec<TeamScoreEntry> {
     scores.iter().map(|s| TeamScoreEntry { team_index: s.team_index, score: s.score }).collect()
 }
 
@@ -443,8 +440,7 @@ fn digest_snapshot(filename: &str) -> Digest {
 
     let active = world.active_consumables();
     let inventories = world.consumable_inventories();
-    let mut consumable_ids: Vec<u32> =
-        active.keys().chain(inventories.keys()).map(|id| id.raw()).collect();
+    let mut consumable_ids: Vec<u32> = active.keys().chain(inventories.keys()).map(|id| id.raw()).collect();
     consumable_ids.sort_unstable();
     consumable_ids.dedup();
     let consumables: Vec<ConsumableCount> = consumable_ids
@@ -584,10 +580,7 @@ fn golden_v0_11_0_conte_di_cavour_brawl() {
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_5045210)), ignore)]
 fn golden_v0_11_0_grossdeutschland_ranked() {
-    run_golden(
-        "v0_11_0_grossdeutschland_ranked",
-        "20220210_003215_PGSB110-Grossdeutschland_15_NE_north.wowsreplay",
-    );
+    run_golden("v0_11_0_grossdeutschland_ranked", "20220210_003215_PGSB110-Grossdeutschland_15_NE_north.wowsreplay");
 }
 
 // v0.11.9, pvp, ArmsRace
@@ -608,10 +601,7 @@ fn golden_v12_3_s189_submarine_pvp() {
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_7266701)), ignore)]
 fn golden_v12_6_yellow_dragon_pve_operation() {
-    run_golden(
-        "v12_6_yellow_dragon_pve_operation",
-        "20230813_200638_PJSC717-Yellow-Dragon_s06_Atoll.wowsreplay",
-    );
+    run_golden("v12_6_yellow_dragon_pve_operation", "20230813_200638_PJSC717-Yellow-Dragon_s06_Atoll.wowsreplay");
 }
 
 // v13.2, pvp, Domination (Annapolis)
@@ -660,10 +650,7 @@ fn golden_v14_9_ocean_cv_naval_mission() {
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_11791718)), ignore)]
 fn golden_v15_0_forrest_sherman_pvp() {
-    run_golden(
-        "v15_0_forrest_sherman_pvp",
-        "20260127_185500_PASD610-Forrest-Sherman_56_AngelWings.wowsreplay",
-    );
+    run_golden("v15_0_forrest_sherman_pvp", "20260127_185500_PASD610-Forrest-Sherman_56_AngelWings.wowsreplay");
 }
 
 // v15.1, pvp, Domination (Vermont)
