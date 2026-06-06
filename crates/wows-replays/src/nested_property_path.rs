@@ -86,6 +86,7 @@ fn nested_update_command<'argtype>(
     mut prop_value: &mut ArgValue<'argtype>,
     mut reader: BitReader,
 ) -> PropertyNesting<'argtype> {
+    let t = t.peeled();
     match (t, &mut prop_value) {
         (ArgType::FixedDict((_, entries)), _) => {
             let entry_idx = reader.read_u8(entries.len().next_power_of_two().trailing_zeros() as u8);
@@ -174,6 +175,7 @@ pub(crate) fn get_nested_prop_path_helper<'argtype>(
     prop_value: &mut ArgValue<'argtype>,
     mut reader: BitReader,
 ) -> PropertyNesting<'argtype> {
+    let t = t.peeled();
     let cont = reader.read_u8(1);
     if cont == 0 {
         return nested_update_command(is_slice, t, prop_value, reader);
@@ -267,5 +269,44 @@ mod test {
         let mut v: Vec<u32> = vec![1, 2, 3, 4, 5];
         slice_insert(5, 12, &mut v, vec![6, 7, 8]);
         assert_eq!(v, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn nested_update_peels_named_wrapper() {
+        use std::collections::HashMap;
+        use wowsunpack::rpc::typedefs::FixedDictProperty;
+        use wowsunpack::rpc::typedefs::PrimitiveType;
+
+        // A FIXED_DICT referenced through an alias arrives wrapped in Named.
+        let t = ArgType::Named {
+            name: "FOO".to_string(),
+            inner: Box::new(ArgType::FixedDict((
+                false,
+                vec![FixedDictProperty { name: "x".to_string(), prop_type: ArgType::Primitive(PrimitiveType::Uint8) }],
+            ))),
+        };
+
+        let key: &str = match &t {
+            ArgType::Named { inner, .. } => match inner.as_ref() {
+                ArgType::FixedDict((_, props)) => &props[0].name,
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        };
+        let mut map = HashMap::new();
+        map.insert(key, ArgValue::Uint8(0));
+        let mut value = ArgValue::FixedDict(map);
+
+        // 1-entry dict => 0 index bits; the single payload byte is the new u8.
+        let data = [5u8];
+        let nesting = nested_update_command(false, &t, &mut value, BitReader::new(&data));
+
+        match nesting.action {
+            UpdateAction::SetKey { key, value } => {
+                assert_eq!(key, "x");
+                assert_eq!(value, ArgValue::Uint8(5));
+            }
+            other => panic!("unexpected action: {other:?}"),
+        }
     }
 }
