@@ -16,6 +16,7 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 JSON_IN = os.path.join(HERE, "skill_grids.json")
+OLD_JSON_IN = os.path.join(HERE, "skill_grids_old.json")
 RS_OUT = os.path.join(ROOT, "crates", "wowsunpack", "src", "game_params", "skill_grid_data.rs")
 
 # JSON ship-type key -> Rust Layout field name.
@@ -82,10 +83,18 @@ impl Layout {
     }
 }
 
-/// Modern skill grid for `build` and `species`. Empty when `build` predates the
-/// modern skill system or `species` has no captain grid. Picks the layout with
-/// the largest `min_build <= build`.
-pub fn modern_grid(build: u32, species: Species) -> &'static [GridSlot] {
+/// The captain skill grid for a ship `species` at game build `build`, as rows of
+/// `GridSlot` ordered by tier then column. Returns the modern per-species layout
+/// for >=0.10 builds and the shared pre-rework layout for older ones. `None` when
+/// no grid is known: `species` has no captain grid, or `build` predates the
+/// oldest extracted layout.
+pub fn skill_grid(build: u32, species: Species) -> Option<&'static [GridSlot]> {
+    modern_grid(build, species).or_else(|| old_grid(build))
+}
+
+/// Modern (>=0.10) per-species layout. Picks the layout with the largest
+/// `min_build <= build`; `None` if no layout applies or the species is gridless.
+fn modern_grid(build: u32, species: Species) -> Option<&'static [GridSlot]> {
     let mut chosen: Option<&Layout> = None;
     for layout in LAYOUTS {
         if layout.min_build <= build {
@@ -94,18 +103,38 @@ pub fn modern_grid(build: u32, species: Species) -> &'static [GridSlot] {
             break;
         }
     }
-    chosen.map(|l| l.species(species)).unwrap_or(&[])
+    match chosen?.species(species) {
+        [] => None,
+        slots => Some(slots),
+    }
+}
+
+/// Pre-rework (<0.10) shared grid from GameParams (tier+column per skill).
+/// `group` is unset (Attack) -- pre-rework skills carry no group and the UI
+/// orders by tier+column only. `None` if `build` predates the oldest layout.
+fn old_grid(build: u32) -> Option<&'static [GridSlot]> {
+    let mut chosen: Option<&'static [GridSlot]> = None;
+    for (min_build, slots) in OLD_LAYOUTS {
+        if *min_build <= build {
+            chosen = Some(slots);
+        } else {
+            break;
+        }
+    }
+    chosen
 }
 
 """
 
 
 def slot_lit(s):
+    # Old (pre-rework) slots carry no group; default to Attack (unused by the UI).
+    group = GROUP_RS.get(s.get("group", "ATTACK"), "Attack")
     return '        GridSlot { skill: "%s", tier: %d, column: %d, group: SkillGroup::%s },' % (
         s["skill"],
         s["tier"],
         s["column"],
-        GROUP_RS[s["group"]],
+        group,
     )
 
 
@@ -131,6 +160,24 @@ def main():
                 out.write(slot_lit(s) + u"\n")
             out.write(u"        ],\n")
         out.write(u"    },\n")
+    out.write(u"];\n")
+
+    # Old (pre-rework) per-build grid (flat, shared across species), deduped.
+    out.write(u"\nstatic OLD_LAYOUTS: &[(u32, &[GridSlot])] = &[\n")
+    if os.path.exists(OLD_JSON_IN):
+        old = json.load(io.open(OLD_JSON_IN, encoding="utf-8"))
+        last = None
+        for v in sorted(old.values(), key=lambda e: e["build"]):
+            grid = sorted(v["grid"], key=lambda s: (s["tier"], s["column"]))
+            key = json.dumps(grid, sort_keys=True)
+            if key == last:
+                continue
+            last = key
+            out.write(u"    // %s\n" % v["version"])
+            out.write(u"    (%d, &[\n" % v["build"])
+            for s in grid:
+                out.write(slot_lit(s) + u"\n")
+            out.write(u"    ]),\n")
     out.write(u"];\n")
 
     with io.open(RS_OUT, "w", encoding="utf-8", newline="\n") as f:

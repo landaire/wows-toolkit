@@ -1126,10 +1126,11 @@ fn build_display_from_resolved(
     // listing only the learned skills.
     let crew = build.captain.as_deref().and_then(|c| c.data().crew_ref());
     let learned: std::collections::HashSet<u32> = build.skills.iter().map(|s| *s as u32).collect();
-    // Empty for pre-0.10 builds and species without a captain grid.
-    let grid = wowsunpack::game_params::skill_grid_data::modern_grid(version.build, build.species);
+    // Modern (>=0.10) layout is per species; pre-0.10 is a shared grid. `None`
+    // when neither applies (e.g. a species with no captain grid).
+    let grid = wowsunpack::game_params::skill_grid_data::skill_grid(version.build, build.species);
 
-    let skill_rows: Vec<super::SkillRow> = if let (Some(crew), false) = (crew, grid.is_empty()) {
+    let skill_rows: Vec<super::SkillRow> = if let (Some(crew), Some(grid)) = (crew, grid) {
         let by_name: std::collections::HashMap<&str, &wowsunpack::game_params::types::CrewSkill> =
             crew.skills().into_iter().flatten().map(|s| (s.internal_name(), s)).collect();
         let mut rows: Vec<super::SkillRow> = Vec::new();

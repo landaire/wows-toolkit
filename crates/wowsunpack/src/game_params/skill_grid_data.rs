@@ -50,10 +50,18 @@ impl Layout {
     }
 }
 
-/// Modern skill grid for `build` and `species`. Empty when `build` predates the
-/// modern skill system or `species` has no captain grid. Picks the layout with
-/// the largest `min_build <= build`.
-pub fn modern_grid(build: u32, species: Species) -> &'static [GridSlot] {
+/// The captain skill grid for a ship `species` at game build `build`, as rows of
+/// `GridSlot` ordered by tier then column. Returns the modern per-species layout
+/// for >=0.10 builds and the shared pre-rework layout for older ones. `None` when
+/// no grid is known: `species` has no captain grid, or `build` predates the
+/// oldest extracted layout.
+pub fn skill_grid(build: u32, species: Species) -> Option<&'static [GridSlot]> {
+    modern_grid(build, species).or_else(|| old_grid(build))
+}
+
+/// Modern (>=0.10) per-species layout. Picks the layout with the largest
+/// `min_build <= build`; `None` if no layout applies or the species is gridless.
+fn modern_grid(build: u32, species: Species) -> Option<&'static [GridSlot]> {
     let mut chosen: Option<&Layout> = None;
     for layout in LAYOUTS {
         if layout.min_build <= build {
@@ -62,7 +70,25 @@ pub fn modern_grid(build: u32, species: Species) -> &'static [GridSlot] {
             break;
         }
     }
-    chosen.map(|l| l.species(species)).unwrap_or(&[])
+    match chosen?.species(species) {
+        [] => None,
+        slots => Some(slots),
+    }
+}
+
+/// Pre-rework (<0.10) shared grid from GameParams (tier+column per skill).
+/// `group` is unset (Attack) -- pre-rework skills carry no group and the UI
+/// orders by tier+column only. `None` if `build` predates the oldest layout.
+fn old_grid(build: u32) -> Option<&'static [GridSlot]> {
+    let mut chosen: Option<&'static [GridSlot]> = None;
+    for (min_build, slots) in OLD_LAYOUTS {
+        if *min_build <= build {
+            chosen = Some(slots);
+        } else {
+            break;
+        }
+    }
+    chosen
 }
 
 static LAYOUTS: &[Layout] = &[
@@ -854,4 +880,77 @@ static LAYOUTS: &[Layout] = &[
         GridSlot { skill: "AaDamageConstantBubbles", tier: 3, column: 6, group: SkillGroup::Defence },
         ],
     },
+];
+
+static OLD_LAYOUTS: &[(u32, &[GridSlot])] = &[
+    // 0.6.13
+    (296659, &[
+        GridSlot { skill: "PriorityTargetModifier", tier: 0, column: 0, group: SkillGroup::Attack },
+        GridSlot { skill: "MeticulousPreventionModifier", tier: 0, column: 1, group: SkillGroup::Attack },
+        GridSlot { skill: "IntuitionModifier", tier: 0, column: 2, group: SkillGroup::Attack },
+        GridSlot { skill: "PlanePreparingModifier", tier: 0, column: 3, group: SkillGroup::Attack },
+        GridSlot { skill: "AimingFightersPointModifier", tier: 0, column: 4, group: SkillGroup::Attack },
+        GridSlot { skill: "FighterEfficiencyModifier", tier: 0, column: 5, group: SkillGroup::Attack },
+        GridSlot { skill: "ArtilleryAlertModifier", tier: 0, column: 6, group: SkillGroup::Attack },
+        GridSlot { skill: "OutOfAttackModifier", tier: 0, column: 7, group: SkillGroup::Attack },
+        GridSlot { skill: "EmergencyTeamCooldownModifier", tier: 1, column: 0, group: SkillGroup::Attack },
+        GridSlot { skill: "AllSkillsCooldownModifier", tier: 1, column: 1, group: SkillGroup::Attack },
+        GridSlot { skill: "MainGunsRotationModifier", tier: 1, column: 2, group: SkillGroup::Attack },
+        GridSlot { skill: "TorpedoAcceleratorModifier", tier: 1, column: 3, group: SkillGroup::Attack },
+        GridSlot { skill: "AdditionalSmokescreensModifier", tier: 1, column: 4, group: SkillGroup::Attack },
+        GridSlot { skill: "PreparingOnboardShootersModifier", tier: 1, column: 5, group: SkillGroup::Attack },
+        GridSlot { skill: "LastChanceModifier", tier: 1, column: 6, group: SkillGroup::Attack },
+        GridSlot { skill: "LastEffortModifier", tier: 1, column: 7, group: SkillGroup::Attack },
+        GridSlot { skill: "AutoRepairModifier", tier: 2, column: 0, group: SkillGroup::Attack },
+        GridSlot { skill: "SurvivalModifier", tier: 2, column: 1, group: SkillGroup::Attack },
+        GridSlot { skill: "TorpedoReloadModifier", tier: 2, column: 2, group: SkillGroup::Attack },
+        GridSlot { skill: "ParkingDeckModifier", tier: 2, column: 3, group: SkillGroup::Attack },
+        GridSlot { skill: "AIGunsEfficiencyModifier", tier: 2, column: 4, group: SkillGroup::Attack },
+        GridSlot { skill: "SuperintendentModifier", tier: 2, column: 5, group: SkillGroup::Attack },
+        GridSlot { skill: "FireProbabilityModifier", tier: 2, column: 6, group: SkillGroup::Attack },
+        GridSlot { skill: "TorpedoAlertnessModifier", tier: 2, column: 7, group: SkillGroup::Attack },
+        GridSlot { skill: "CentralATBAModifier", tier: 3, column: 0, group: SkillGroup::Attack },
+        GridSlot { skill: "FireResistanceModifier", tier: 3, column: 1, group: SkillGroup::Attack },
+        GridSlot { skill: "LandmineExploderModifier", tier: 3, column: 2, group: SkillGroup::Attack },
+        GridSlot { skill: "AdditionalPlanesInSquadModifier", tier: 3, column: 3, group: SkillGroup::Attack },
+        GridSlot { skill: "AIGunsRangeModifier", tier: 3, column: 4, group: SkillGroup::Attack },
+        GridSlot { skill: "CentralAirDefenceModifier", tier: 3, column: 5, group: SkillGroup::Attack },
+        GridSlot { skill: "NearEnemyIntuitionModifier", tier: 3, column: 6, group: SkillGroup::Attack },
+        GridSlot { skill: "VisibilityModifier", tier: 3, column: 7, group: SkillGroup::Attack },
+    ]),
+    // 8.0.2
+    (1325581, &[
+        GridSlot { skill: "PriorityTargetModifier", tier: 0, column: 0, group: SkillGroup::Attack },
+        GridSlot { skill: "MeticulousPreventionModifier", tier: 0, column: 1, group: SkillGroup::Attack },
+        GridSlot { skill: "IntuitionModifier", tier: 0, column: 2, group: SkillGroup::Attack },
+        GridSlot { skill: "AirSupremacyModifier", tier: 0, column: 3, group: SkillGroup::Attack },
+        GridSlot { skill: "AimingFightersPointModifier", tier: 0, column: 4, group: SkillGroup::Attack },
+        GridSlot { skill: "ForsageDurationModifier", tier: 0, column: 5, group: SkillGroup::Attack },
+        GridSlot { skill: "ArtilleryAlertModifier", tier: 0, column: 6, group: SkillGroup::Attack },
+        GridSlot { skill: "ForsageRestorationModifier", tier: 0, column: 7, group: SkillGroup::Attack },
+        GridSlot { skill: "EmergencyTeamCooldownModifier", tier: 1, column: 0, group: SkillGroup::Attack },
+        GridSlot { skill: "AllSkillsCooldownModifier", tier: 1, column: 1, group: SkillGroup::Attack },
+        GridSlot { skill: "MainGunsRotationModifier", tier: 1, column: 2, group: SkillGroup::Attack },
+        GridSlot { skill: "TorpedoAcceleratorModifier", tier: 1, column: 3, group: SkillGroup::Attack },
+        GridSlot { skill: "AdditionalSmokescreensModifier", tier: 1, column: 4, group: SkillGroup::Attack },
+        GridSlot { skill: "FlightSpeedModifier", tier: 1, column: 5, group: SkillGroup::Attack },
+        GridSlot { skill: "LastChanceModifier", tier: 1, column: 6, group: SkillGroup::Attack },
+        GridSlot { skill: "LastEffortModifier", tier: 1, column: 7, group: SkillGroup::Attack },
+        GridSlot { skill: "AutoRepairModifier", tier: 2, column: 0, group: SkillGroup::Attack },
+        GridSlot { skill: "SurvivalModifier", tier: 2, column: 1, group: SkillGroup::Attack },
+        GridSlot { skill: "TorpedoReloadModifier", tier: 2, column: 2, group: SkillGroup::Attack },
+        GridSlot { skill: "NearAuraDamageTakenModifier", tier: 2, column: 3, group: SkillGroup::Attack },
+        GridSlot { skill: "AIGunsEfficiencyModifier", tier: 2, column: 4, group: SkillGroup::Attack },
+        GridSlot { skill: "SuperintendentModifier", tier: 2, column: 5, group: SkillGroup::Attack },
+        GridSlot { skill: "FireProbabilityModifier", tier: 2, column: 6, group: SkillGroup::Attack },
+        GridSlot { skill: "TorpedoAlertnessModifier", tier: 2, column: 7, group: SkillGroup::Attack },
+        GridSlot { skill: "CentralATBAModifier", tier: 3, column: 0, group: SkillGroup::Attack },
+        GridSlot { skill: "FireResistanceModifier", tier: 3, column: 1, group: SkillGroup::Attack },
+        GridSlot { skill: "LandmineExploderModifier", tier: 3, column: 2, group: SkillGroup::Attack },
+        GridSlot { skill: "AccuracyIncreaseRateModifier", tier: 3, column: 3, group: SkillGroup::Attack },
+        GridSlot { skill: "AIGunsRangeModifier", tier: 3, column: 4, group: SkillGroup::Attack },
+        GridSlot { skill: "CentralAirDefenceModifier", tier: 3, column: 5, group: SkillGroup::Attack },
+        GridSlot { skill: "NearEnemyIntuitionModifier", tier: 3, column: 6, group: SkillGroup::Attack },
+        GridSlot { skill: "VisibilityModifier", tier: 3, column: 7, group: SkillGroup::Attack },
+    ]),
 ];
