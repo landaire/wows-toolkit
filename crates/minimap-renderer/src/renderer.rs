@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use image::RgbaImage;
 use wowsunpack::data::ResourceLoader;
@@ -31,6 +32,7 @@ use wows_replays::types::GameParamId;
 use wows_replays::types::PlaneId;
 use wows_replays::types::Relation;
 use wows_replays::types::WorldPos;
+use wows_battle_world::{PositionSample, PositionTimeline, SampledPos};
 
 use crate::assets::GameFonts;
 use crate::draw_command::ActivityFeedEntry;
@@ -54,6 +56,45 @@ use crate::STATS_PANEL_WIDTH;
 // How long various effects persist in game-seconds
 const TRACER_LEN: f32 = 0.12; // fraction of total shot path length
 const KILL_FEED_DURATION: f32 = 10.0;
+
+/// Gaps larger than this between consecutive samples imply a spotting break /
+/// AOI exit, so we snap (hold nearest) instead of interpolating across them.
+const MAX_SAMPLE_GAP: f32 = 2.0;
+
+/// Interpolate a position from sorted samples at `clock`. Returns `None` when
+/// `clock` is outside the sample range. Lerps only between same-variant
+/// neighbours within `MAX_SAMPLE_GAP`; otherwise snaps to the nearer sample so
+/// world/minimap coordinate spaces are never blended.
+pub(crate) fn interpolate_samples(samples: &[PositionSample], clock: GameClock) -> Option<SampledPos> {
+    if samples.len() < 2 {
+        return samples.first().and_then(|s| if s.clock.0 == clock.0 { Some(s.pos) } else { None });
+    }
+    if clock.0 < samples[0].clock.0 || clock.0 > samples[samples.len() - 1].clock.0 {
+        return None;
+    }
+    let hi = samples.partition_point(|s| s.clock.0 <= clock.0);
+    if hi == 0 {
+        return Some(samples[0].pos);
+    }
+    if hi >= samples.len() {
+        return Some(samples[samples.len() - 1].pos);
+    }
+    let a = &samples[hi - 1];
+    let b = &samples[hi];
+    let dt = b.clock.0 - a.clock.0;
+    let snap = |a: &PositionSample, b: &PositionSample| -> SampledPos {
+        if (clock.0 - a.clock.0) <= (b.clock.0 - clock.0) { a.pos } else { b.pos }
+    };
+    if dt <= 0.0 || dt > MAX_SAMPLE_GAP {
+        return Some(snap(a, b));
+    }
+    let t = (clock.0 - a.clock.0) / dt;
+    match (a.pos, b.pos) {
+        (SampledPos::World(pa), SampledPos::World(pb)) => Some(SampledPos::World(pa.lerp(pb, t))),
+        (SampledPos::Minimap(pa), SampledPos::Minimap(pb)) => Some(SampledPos::Minimap(pa.lerp(pb, t))),
+        _ => Some(snap(a, b)),
+    }
+}
 
 /// Seconds a shell is in flight, used to pace its tracer along origin->target.
 /// Prefer the server's authoritative time-to-impact; the muzzle-speed estimate
@@ -237,20 +278,13 @@ pub struct MinimapRenderer<'a> {
     has_merged_perspectives: bool,
 
     /// Continuous render clock for live playback, set per frame. When present it
-    /// drives smooth timing (dead-reckoning) instead of the packet clock; None
-    /// for timelapse/video where each frame is a discrete sample.
+    /// drives smooth timing instead of the packet clock; None for timelapse/video
+    /// where each frame is a discrete sample.
     render_clock: Option<GameClock>,
 
-    /// Last two world-position samples per entity, for dead-reckoning visible
-    /// ships between position packets during live playback.
-    dead_reckon: HashMap<EntityId, DeadReckon>,
-}
-
-#[derive(Clone, Copy)]
-struct DeadReckon {
-    cur_clock: GameClock,
-    cur_pos: WorldPos,
-    prev: Option<(GameClock, WorldPos)>,
+    /// Future-aware per-entity position samples for interpolation. None falls
+    /// back to discrete packet positions.
+    position_timeline: Option<Arc<PositionTimeline>>,
 }
 
 impl<'a> MinimapRenderer<'a> {
@@ -289,7 +323,7 @@ impl<'a> MinimapRenderer<'a> {
             damage_events: HashMap::new(),
             has_merged_perspectives: false,
             render_clock: None,
-            dead_reckon: HashMap::new(),
+            position_timeline: None,
         }
     }
 
@@ -300,48 +334,14 @@ impl<'a> MinimapRenderer<'a> {
         self.render_clock = Some(clock);
     }
 
-    /// Extrapolate a visible ship's world position to `render_clock` from its
-    /// last two position samples (finite-difference velocity). Snaps to the
-    /// latest sample when there is no recent prior sample of the same
-    /// visibility (the gap guard rejects samples from before a spotting break)
-    /// or the clock rewound. Only meaningful during live playback.
-    fn dead_reckon_pos(
-        &mut self,
-        entity_id: EntityId,
-        cur_pos: WorldPos,
-        last_updated: GameClock,
-        render_clock: GameClock,
-    ) -> WorldPos {
-        let entry =
-            self.dead_reckon.entry(entity_id).or_insert(DeadReckon { cur_clock: last_updated, cur_pos, prev: None });
-        if last_updated.0 > entry.cur_clock.0 {
-            entry.prev = Some((entry.cur_clock, entry.cur_pos));
-            entry.cur_clock = last_updated;
-            entry.cur_pos = cur_pos;
-        } else if last_updated.0 < entry.cur_clock.0 {
-            // Clock rewound (seek without a fresh renderer): drop the stale prior.
-            entry.prev = None;
-            entry.cur_clock = last_updated;
-            entry.cur_pos = cur_pos;
-        }
+    /// Install the shared position timeline used to smooth motion between packets.
+    pub fn set_position_timeline(&mut self, timeline: Arc<PositionTimeline>) {
+        self.position_timeline = Some(timeline);
+    }
 
-        // Gaps larger than this imply the ship was unspotted between samples, so
-        // we must not interpolate across the break.
-        const MAX_SAMPLE_GAP: f32 = 2.0;
-        if let Some((prev_clock, prev_pos)) = entry.prev {
-            let dt_sample = entry.cur_clock.0 - prev_clock.0;
-            if dt_sample > 1e-3 && dt_sample <= MAX_SAMPLE_GAP {
-                let dt_extrap = (render_clock.0 - entry.cur_clock.0).clamp(0.0, dt_sample);
-                let vx = (entry.cur_pos.x - prev_pos.x) / dt_sample;
-                let vz = (entry.cur_pos.z - prev_pos.z) / dt_sample;
-                return WorldPos::new(
-                    entry.cur_pos.x + vx * dt_extrap,
-                    entry.cur_pos.y,
-                    entry.cur_pos.z + vz * dt_extrap,
-                );
-            }
-        }
-        entry.cur_pos
+    fn interpolated_pos(&self, entity_id: EntityId, render_clock: GameClock) -> Option<SampledPos> {
+        let samples = self.position_timeline.as_ref()?.get(&entity_id)?;
+        interpolate_samples(samples, render_clock)
     }
 
     /// Mark whether this renderer is driving a merged session (primary plus
@@ -1318,22 +1318,17 @@ impl<'a> MinimapRenderer<'a> {
             if detected {
                 let yaw = minimap_yaw.or(world_yaw).unwrap_or(0.0);
                 if let Some(mm) = minimap {
-                    // Prefer the full-precision world position when we have it.
-                    // The minimap position is quantized to 11 bits (~1.5px steps on a
-                    // 3km map) and only updates when the value crosses a quantum, so
-                    // using it directly makes slow ships visibly jerky. Fall back to
-                    // the minimap position when there's no world position (e.g. ships
-                    // outside AOI that are only visible via minimap vision packets).
-                    let px = match world {
-                        // The ship is visible here, so dead-reckon its world
-                        // position toward the render clock for smooth motion
-                        // between packets (live playback only).
-                        Some(w) if self.render_clock.is_some() => {
-                            let pos = self.dead_reckon_pos(*entity_id, w.pos, w.last_updated, clock);
-                            map_info.world_to_minimap(pos, MINIMAP_SIZE)
-                        }
-                        Some(w) => map_info.world_to_minimap(w.pos, MINIMAP_SIZE),
-                        None => map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE),
+                    // Smooth motion between packets: interpolate from the shared
+                    // timeline when a render clock is set. Each sample carries its
+                    // coordinate space so we project with the matching transform;
+                    // fall back to the latest discrete position otherwise.
+                    let px = match self.render_clock.and_then(|rc| self.interpolated_pos(*entity_id, rc)) {
+                        Some(SampledPos::World(p)) => map_info.world_to_minimap(p, MINIMAP_SIZE),
+                        Some(SampledPos::Minimap(n)) => map_info.normalized_to_minimap(&n, MINIMAP_SIZE),
+                        None => match world {
+                            Some(w) => map_info.world_to_minimap(w.pos, MINIMAP_SIZE),
+                            None => map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE),
+                        },
                     };
                     let speed_raw = controller.vehicle_props(*entity_id).map(|p| p.server_speed_raw()).unwrap_or(0);
                     self.record_position(*entity_id, px, clock, speed_raw);
@@ -2690,6 +2685,9 @@ fn consumable_to_base_icon_key(c: Consumable) -> Option<String> {
 #[cfg(test)]
 mod test {
     use super::tracer_flight_duration;
+    use super::{interpolate_samples, SampledPos};
+    use wows_battle_world::PositionSample;
+    use wows_replays::types::{GameClock, NormalizedPos, WorldPos};
 
     #[test]
     fn flight_duration_prefers_server_time() {
@@ -2699,5 +2697,46 @@ mod test {
         assert_eq!(tracer_flight_duration(3000.0, 1000.0, 0.0), 3.0);
         // Neither available: fixed fallback so the tracer is still drawn.
         assert_eq!(tracer_flight_duration(3000.0, 0.0, 0.0), 3.0);
+    }
+
+    fn ws(c: f32, x: f32) -> PositionSample {
+        PositionSample { clock: GameClock(c), pos: SampledPos::World(WorldPos::new(x, 0.0, 0.0)) }
+    }
+
+    #[test]
+    fn interp_world_midpoint() {
+        let s = vec![ws(0.0, 0.0), ws(1.0, 10.0)];
+        match interpolate_samples(&s, GameClock(0.5)) {
+            Some(SampledPos::World(p)) => assert!((p.x - 5.0).abs() < 1e-4),
+            other => panic!("expected world lerp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn interp_before_first_and_after_last_is_none() {
+        let s = vec![ws(1.0, 0.0), ws(2.0, 10.0)];
+        assert!(interpolate_samples(&s, GameClock(0.5)).is_none());
+        assert!(interpolate_samples(&s, GameClock(3.0)).is_none());
+    }
+
+    #[test]
+    fn interp_snaps_across_large_gap() {
+        let s = vec![ws(0.0, 0.0), ws(10.0, 100.0)];
+        match interpolate_samples(&s, GameClock(1.0)) {
+            Some(SampledPos::World(p)) => assert!((p.x - 0.0).abs() < 1e-4),
+            other => panic!("expected snap to first, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn interp_snaps_across_source_change() {
+        let s = vec![
+            ws(0.0, 0.0),
+            PositionSample { clock: GameClock(0.5), pos: SampledPos::Minimap(NormalizedPos::new(0.4, 0.4)) },
+        ];
+        // 0.1 is closer to a (0.0) than b (0.5), so snap returns World.
+        assert!(matches!(interpolate_samples(&s, GameClock(0.1)), Some(SampledPos::World(_))));
+        // 0.4 is closer to b (0.5) than a (0.0), so snap returns Minimap.
+        assert!(matches!(interpolate_samples(&s, GameClock(0.4)), Some(SampledPos::Minimap(_))));
     }
 }
