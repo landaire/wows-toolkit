@@ -775,6 +775,7 @@ impl<'argtype> Parser<'argtype> {
                 method: format!("EntityProperty::{}", spec.name),
                 argnum: prop_id as usize,
                 argtype: format!("{:?}", spec.prop_type),
+                semantic_name: spec.prop_type.semantic_name().map(str::to_string),
                 error: format!("{e:?}"),
             })
         })?;
@@ -829,6 +830,7 @@ impl<'argtype> Parser<'argtype> {
                         method: spec.name.to_string(),
                         argnum: idx,
                         argtype: format!("{:?}", arg),
+                        semantic_name: arg.semantic_name().map(str::to_string),
                         error: format!("{:?}", e),
                     }));
                 }
@@ -1113,6 +1115,7 @@ impl<'argtype> Parser<'argtype> {
                         method: format!("BasePlayerCreate::{}", spec.name),
                         argnum: prop_id,
                         argtype: format!("{:?}", spec),
+                        semantic_name: spec.prop_type.semantic_name().map(str::to_string),
                         error: format!("{:?}", e),
                     }));
                 }
@@ -1192,6 +1195,7 @@ impl<'argtype> Parser<'argtype> {
                         method: format!("EntityCreate::{}", spec.name),
                         argnum: prop_id as usize,
                         argtype: format!("{:?}", spec),
+                        semantic_name: spec.prop_type.semantic_name().map(str::to_string),
                         error: format!("{:?}", e),
                     }));
                 }
@@ -1259,6 +1263,7 @@ impl<'argtype> Parser<'argtype> {
                         method: format!("CellPlayerCreate::{}", spec.name),
                         argnum: prop_id,
                         argtype: format!("{:?}", spec),
+                        semantic_name: spec.prop_type.semantic_name().map(str::to_string),
                         error: format!("{:?}", e),
                     }));
                 }
