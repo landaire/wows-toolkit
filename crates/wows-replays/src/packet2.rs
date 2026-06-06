@@ -10,6 +10,7 @@ use winnow::binary::le_u32;
 use winnow::token::take;
 
 use serde::Serialize;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryInto;
 
@@ -23,6 +24,34 @@ use wowsunpack::data::Version;
 use wowsunpack::recognized::Recognized;
 use wowsunpack::rpc::entitydefs::*;
 use wowsunpack::rpc::typedefs::ArgValue;
+
+/// A non-fatal parsing observation: a method/property payload was not fully
+/// consumed, which usually signals a def/layout mismatch for this build.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PayloadDiagnostic {
+    /// Human-readable origin, e.g. "EntityMethod::Avatar::onFoo".
+    pub context: String,
+    /// The def semantic name of the value being parsed, when known.
+    pub semantic_name: Option<String>,
+    pub payload_len: usize,
+    pub consumed: usize,
+}
+
+impl PayloadDiagnostic {
+    /// Some(_) only when the payload was under-consumed.
+    pub fn for_leftover(
+        context: String,
+        semantic_name: Option<String>,
+        payload_len: usize,
+        consumed: usize,
+    ) -> Option<Self> {
+        if consumed < payload_len {
+            Some(Self { context, semantic_name, payload_len, consumed })
+        } else {
+            None
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Clone)]
 pub struct Vec3 {
@@ -699,6 +728,7 @@ pub struct Parser<'argtype> {
     /// The replay's game version, used to select the packet-ID layout. `None`
     /// assumes the modern layout (when the version isn't known).
     version: Option<Version>,
+    diagnostics: RefCell<Vec<PayloadDiagnostic>>,
 }
 
 impl<'argtype> Parser<'argtype> {
@@ -706,12 +736,17 @@ impl<'argtype> Parser<'argtype> {
     /// [`Self::with_version`] when the replay's version is known so old replays
     /// dispatch correctly across the protocol shift at 12.6.0.
     pub fn new(entities: &'argtype [EntitySpec]) -> Parser<'argtype> {
-        Parser { specs: entities, entities: HashMap::new(), version: None }
+        Parser { specs: entities, entities: HashMap::new(), version: None, diagnostics: RefCell::new(Vec::new()) }
     }
 
     /// Build a parser that dispatches packet IDs for the given game version.
     pub fn with_version(entities: &'argtype [EntitySpec], version: Version) -> Parser<'argtype> {
-        Parser { specs: entities, entities: HashMap::new(), version: Some(version) }
+        Parser { specs: entities, entities: HashMap::new(), version: Some(version), diagnostics: RefCell::new(Vec::new()) }
+    }
+
+    /// Take and clear accumulated non-fatal diagnostics.
+    pub fn drain_diagnostics(&self) -> Vec<PayloadDiagnostic> {
+        self.diagnostics.borrow_mut().drain(..).collect()
     }
 
     fn parse_entity_property_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'argtype>> {
@@ -734,7 +769,8 @@ impl<'argtype> Parser<'argtype> {
             .get(prop_id as usize)
             .ok_or_else(|| failure(ParseError::PropertyIdOutOfBounds { prop_id, entity_type }))?;
 
-        let pval = spec.prop_type.parse_value(&mut &*payload).map_err(|e| {
+        let mut pslice = &*payload;
+        let pval = spec.prop_type.parse_value(&mut pslice).map_err(|e| {
             failure(ParseError::RpcValueParseFailed {
                 method: format!("EntityProperty::{}", spec.name),
                 argnum: prop_id as usize,
@@ -742,6 +778,16 @@ impl<'argtype> Parser<'argtype> {
                 error: format!("{e:?}"),
             })
         })?;
+
+        let consumed = payload.len() - pslice.len();
+        if let Some(d) = PayloadDiagnostic::for_leftover(
+            format!("EntityProperty::{}::{}", spec_entity.name, spec.name),
+            spec.prop_type.semantic_name().map(str::to_string),
+            payload.len(),
+            consumed,
+        ) {
+            self.diagnostics.borrow_mut().push(d);
+        }
 
         Ok(PacketType::EntityProperty(EntityPropertyPacket {
             entity_id: entity_id.into(),
@@ -788,6 +834,17 @@ impl<'argtype> Parser<'argtype> {
                 }
             };
             args.push(pval);
+        }
+
+        let consumed = payload.len() - sub.len();
+        let semantic_name = spec.args.first().and_then(|a| a.semantic_name()).map(str::to_string);
+        if let Some(d) = PayloadDiagnostic::for_leftover(
+            format!("EntityMethod::{}::{}", spec_entity.name, spec.name),
+            semantic_name,
+            payload.len(),
+            consumed,
+        ) {
+            self.diagnostics.borrow_mut().push(d);
         }
 
         Ok(PacketType::EntityMethod(EntityMethodPacket { entity_id: entity_id.into(), method: &spec.name, args }))
@@ -1413,5 +1470,23 @@ mod tests {
                 assert_eq!(id.raw(), raw, "0x{raw:02x} did not round-trip");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod diag_test {
+    use super::PayloadDiagnostic;
+
+    #[test]
+    fn leftover_produces_diagnostic() {
+        // Consumed fewer bytes than the payload held => a diagnostic.
+        let d = PayloadDiagnostic::for_leftover("EntityMethod::Avatar::onFoo".to_string(), Some("ENTITY_ID".to_string()), 8, 4);
+        let d = d.expect("expected a diagnostic");
+        assert_eq!(d.payload_len, 8);
+        assert_eq!(d.consumed, 4);
+        assert_eq!(d.semantic_name.as_deref(), Some("ENTITY_ID"));
+
+        // Fully consumed => no diagnostic.
+        assert!(PayloadDiagnostic::for_leftover("ctx".to_string(), None, 8, 8).is_none());
     }
 }
