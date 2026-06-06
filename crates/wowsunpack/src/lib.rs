@@ -34,7 +34,9 @@ pub mod game_types;
 #[cfg(feature = "parsing")]
 pub mod models;
 /// Generic wrapper for values that may or may not match a known variant.
-pub mod recognized;
+/// Lives in `wows-core`; re-exported here so existing `wowsunpack::recognized`
+/// paths keep working.
+pub use wows_core::recognized;
 /// Utilities involving the game's RPC functions -- useful for parsing entity defs and RPC definitions.
 #[cfg(feature = "parsing")]
 pub mod rpc;

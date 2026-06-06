@@ -1,0 +1,22 @@
+[package]
+name = "wows-core"
+description = "Lightweight domain core (shared types and small derived data) for the WoWS toolkit"
+version = "0.1.0"
+repository = "https://github.com/landaire/wows-toolkit"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "wows_core"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true, optional = true }
+rkyv = { workspace = true, optional = true }
+
+[features]
+# Unify Rc/Arc across the workspace: with `arc`, shared pointers are `Arc`.
+arc = []
+serde = ["dep:serde"]
+rkyv = ["dep:rkyv"]

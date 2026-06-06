@@ -11226,6 +11226,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "wows-core"
+version = "0.1.0"
+dependencies = [
+ "rkyv",
+ "serde",
+]
+
+[[package]]
 name = "wows-data-mgr"
 version = "0.9.0"
 dependencies = [
@@ -11459,6 +11467,7 @@ dependencies = [
  "variantly",
  "vfs",
  "winnow 1.0.1",
+ "wows-core",
 ]
 
 [[package]]

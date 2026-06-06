@@ -19,6 +19,7 @@ path = "src/main.rs"
 required-features = ["bin"]
 
 [dependencies]
+wows-core = { workspace = true }
 clap = { workspace = true, optional = true }
 flate2 = { workspace = true }
 rootcause = { workspace = true }
@@ -66,9 +67,9 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 
 [features]
-arc = []
-serde = ["dep:serde"]
-rkyv = ["dep:rkyv"]
+arc = ["wows-core/arc"]
+serde = ["dep:serde", "wows-core/serde"]
+rkyv = ["dep:rkyv", "wows-core/rkyv"]
 json = ["dep:serde_json", "serde"]
 # Core parsing/processing: sans-io. Gates pickled, winnow, roxmltree, etc. and
 # the modules that use them. Compiles for wasm32 (no memmap2, no filesystem VFS).

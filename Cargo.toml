@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/wows-toolkit",
+    "crates/wows-core",
     "crates/wowsunpack",
     "crates/wows-replays",
     "crates/minimap-renderer",
@@ -27,6 +28,7 @@ name = "wows-toolkit"
 
 [workspace.dependencies]
 # Internal crates (versions synced by scripts/bump-versions.sh)
+wows-core = { version = "0.1.0", path = "crates/wows-core", default-features = false }
 wowsunpack = { version = "0.33.0", path = "crates/wowsunpack", default-features = false }
 wows_replays = { version = "0.34.0", path = "crates/wows-replays", default-features = false }
 wows_minimap_renderer = { version = "0.27.0", path = "crates/minimap-renderer", default-features = false }
