@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 
 use wows_replays::ReplayFile;
+use wows_replays::ReplayMeta;
+use wows_replays::analyzer::Analyzer;
 use wows_replays::analyzer::decoder::DecodedPacketPayload;
 use wows_replays::analyzer::decoder::PacketDecoder;
 use wows_replays::game_constants::GameConstants;
@@ -14,9 +16,13 @@ use wows_replays::types::GameClock;
 use wows_replays::types::NormalizedPos;
 use wows_replays::types::TeamId;
 use wows_replays::types::WorldPos;
+use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_types::BattleStage;
 use wowsunpack::rpc::entitydefs::EntitySpec;
+
+use crate::view::BattleView;
+use crate::world::BattleWorld;
 
 /// A position sample tagged with the coordinate space it came from. Kept
 /// distinct so the draw site converts each with the matching projection and so
@@ -186,6 +192,45 @@ impl ScanCollector for MetadataCollector<'_> {
     }
 }
 
+/// Observes a `BattleWorld` stepped over one replay. `observe` runs once per
+/// packet after the world processes it, with the post-process view and the
+/// previous packet's clock (so collectors can detect clock boundaries).
+pub trait WorldScanCollector {
+    fn observe(&mut self, packet: &Packet<'_, '_>, prev_clock: GameClock, view: &BattleView<'_>);
+    fn finish(&mut self, _view: &BattleView<'_>) {}
+}
+
+/// Build one `BattleWorld`, step it over `replay`, and feed each collector the
+/// post-process view per packet. Stops at the first parse error.
+pub fn scan_replay_world<G: ResourceLoader>(
+    meta: &ReplayMeta,
+    game_params: &G,
+    game_constants: &GameConstants,
+    version: Version,
+    replay: &ReplayFile,
+    collectors: &mut [&mut dyn WorldScanCollector],
+) {
+    let mut world = BattleWorld::new(meta, game_params, Some(game_constants));
+    let mut parser = Parser::with_version(game_params.entity_specs(), version);
+    let mut remaining = &replay.packet_data[..];
+    let mut prev_clock = GameClock(0.0);
+    while let Ok(packet) = parser.parse_packet(&mut remaining) {
+        world.process(&packet);
+        {
+            let view = world.view();
+            for c in collectors.iter_mut() {
+                c.observe(&packet, prev_clock, &view);
+            }
+        }
+        prev_clock = packet.clock;
+    }
+    world.finish();
+    let view = world.view();
+    for c in collectors.iter_mut() {
+        c.finish(&view);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,6 +248,18 @@ mod tests {
         let mut counter = Counter(0);
         counter.0 += 1;
         assert_eq!(counter.0, 1);
+    }
+
+    struct NoopWorldCollector;
+    impl WorldScanCollector for NoopWorldCollector {
+        fn observe(&mut self, _packet: &Packet<'_, '_>, _prev_clock: GameClock, _view: &BattleView<'_>) {}
+    }
+
+    #[test]
+    fn scan_replay_world_trait_compiles() {
+        // Verify WorldScanCollector is object-safe and finish has a default impl.
+        let mut c = NoopWorldCollector;
+        let _: &mut dyn WorldScanCollector = &mut c;
     }
 
     #[test]
