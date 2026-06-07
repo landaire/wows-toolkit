@@ -194,10 +194,15 @@ impl ScanCollector for MetadataCollector<'_> {
     }
 }
 
-/// Observes a `BattleWorld` stepped over one replay. `observe` runs once per
-/// packet after the world processes it, with the post-process view and the
-/// previous packet's clock (so collectors can detect clock boundaries).
+/// Observes a `BattleWorld` stepped over one replay.
+///
+/// `observe_pre` runs before the world processes a packet (pre-process state).
+/// `observe` runs after the world processes a packet (post-process state).
+/// Both receive the previous packet's clock so collectors can detect boundaries.
 pub trait WorldScanCollector {
+    /// Called BEFORE the world processes `packet`, with the pre-process view.
+    fn observe_pre(&mut self, _packet: &Packet<'_, '_>, _prev_clock: GameClock, _view: &BattleView<'_>) {}
+    /// Called AFTER the world processes `packet`, with the post-process view.
     fn observe(&mut self, packet: &Packet<'_, '_>, prev_clock: GameClock, view: &BattleView<'_>);
     fn finish(&mut self, _view: &BattleView<'_>) {}
 }
@@ -242,6 +247,12 @@ pub fn scan_replay_world<G: ResourceLoader>(
     let mut remaining = &replay.packet_data[..];
     let mut prev_clock = GameClock(0.0);
     while let Ok(packet) = parser.parse_packet(&mut remaining) {
+        {
+            let view = world.view();
+            for c in collectors.iter_mut() {
+                c.observe_pre(&packet, prev_clock, &view);
+            }
+        }
         world.process(&packet);
         {
             let view = world.view();

@@ -2,15 +2,18 @@ use std::collections::HashMap;
 
 use egui::Color32;
 
-use wows_battle_world::BattleWorld;
+use wows_battle_world::scan::WorldScanCollector;
+use wows_battle_world::scan::scan_replay_world;
+use wows_battle_world::view::BattleView;
 use wows_replays::ReplayFile;
-use wows_replays::analyzer::Analyzer;
 use wows_replays::analyzer::decoder::Consumable;
 use wows_replays::game_constants::GameConstants;
+use wows_replays::packet2::Packet;
 use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::recognized::Recognized;
 
@@ -151,444 +154,408 @@ pub(super) struct TimelineExtractionResult {
     pub(super) health_histories: HashMap<EntityId, std::collections::BTreeMap<GameClock, HealthSnapshot>>,
 }
 
-pub(super) fn extract_timeline_events(
-    replay_file: &ReplayFile,
-    game_metadata: &GameMetadataProvider,
-    game_constants: Option<&GameConstants>,
-) -> TimelineExtractionResult {
-    let mut events = Vec::new();
-    let mut controller = BattleWorld::new(&replay_file.meta, game_metadata, game_constants);
-    let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-    let mut parser = wows_replays::packet2::Parser::with_version(game_metadata.entity_specs(), replay_version);
+struct TimelineEventsCollector<'a> {
+    game_metadata: &'a GameMetadataProvider,
+    events: Vec<TimelineEvent>,
+    ship_names: HashMap<EntityId, String>,
+    player_names: HashMap<EntityId, String>,
+    is_friendly: HashMap<EntityId, bool>,
+    viewer_team_id: Option<i64>,
+    players_populated: bool,
+    health_windows: HashMap<EntityId, (GameClock, f32)>,
+    shot_counts: HashMap<EntityId, ShotCountHints>,
+    health_histories: HashMap<EntityId, std::collections::BTreeMap<GameClock, HealthSnapshot>>,
+    last_health: HashMap<EntityId, f32>,
+    last_kill_count: usize,
+    cap_prev_contested: HashMap<usize, bool>,
+    cap_prev_team: HashMap<usize, i64>,
+    cap_prev_invader_team: HashMap<usize, i64>,
+    radar_counts: HashMap<EntityId, usize>,
+    prev_advantage: wows_minimap_renderer::advantage::TeamAdvantage,
+    advantage_check_clock: GameClock,
+    battle_start: GameClock,
+}
 
-    // Player info lookups (populated once players are available)
-    let mut ship_names: HashMap<EntityId, String> = HashMap::new();
-    let mut player_names: HashMap<EntityId, String> = HashMap::new();
-    let mut is_friendly: HashMap<EntityId, bool> = HashMap::new();
-    let mut viewer_team_id: Option<i64> = None;
-    let mut players_populated = false;
+impl<'a> TimelineEventsCollector<'a> {
+    fn new(game_metadata: &'a GameMetadataProvider) -> Self {
+        Self {
+            game_metadata,
+            events: Vec::new(),
+            ship_names: HashMap::new(),
+            player_names: HashMap::new(),
+            is_friendly: HashMap::new(),
+            viewer_team_id: None,
+            players_populated: false,
+            health_windows: HashMap::new(),
+            shot_counts: HashMap::new(),
+            health_histories: HashMap::new(),
+            last_health: HashMap::new(),
+            last_kill_count: 0,
+            cap_prev_contested: HashMap::new(),
+            cap_prev_team: HashMap::new(),
+            cap_prev_invader_team: HashMap::new(),
+            radar_counts: HashMap::new(),
+            prev_advantage: wows_minimap_renderer::advantage::TeamAdvantage::Even,
+            advantage_check_clock: GameClock(0.0),
+            battle_start: GameClock(0.0),
+        }
+    }
+}
 
-    // Health tracking: entity -> (window_start_clock, health_at_window_start)
-    let mut health_windows: HashMap<EntityId, (GameClock, f32)> = HashMap::new();
+impl WorldScanCollector for TimelineEventsCollector<'_> {
+    fn observe_pre(&mut self, packet: &Packet<'_, '_>, prev_clock: GameClock, view: &BattleView<'_>) {
+        if packet.clock != prev_clock && prev_clock.seconds() > 0.0 {
+            if !self.players_populated {
+                let players = view.player_entities();
+                if !players.is_empty() {
+                    for (entity_id, player) in players {
+                        let ship_name =
+                            self.game_metadata.localized_name_from_param(player.vehicle()).unwrap_or_default();
+                        self.ship_names.insert(*entity_id, ship_name);
+                        self.player_names.insert(*entity_id, player.initial_state().username().to_string());
 
-    // Shot counting for pre-allocation hints
-    let mut shot_counts: HashMap<EntityId, ShotCountHints> = HashMap::new();
+                        let relation = player.relation();
+                        let friendly = relation.is_self() || relation.is_ally();
+                        self.is_friendly.insert(*entity_id, friendly);
 
-    // Health history: per-entity health snapshots on every change
-    let mut health_histories: HashMap<EntityId, std::collections::BTreeMap<GameClock, HealthSnapshot>> = HashMap::new();
-    let mut last_health: HashMap<EntityId, f32> = HashMap::new();
-
-    // Kill tracking
-    let mut last_kill_count: usize = 0;
-
-    // Cap tracking: cap_index -> (previous has_invaders, previous team_id)
-    let mut cap_prev_contested: HashMap<usize, bool> = HashMap::new();
-    let mut cap_prev_team: HashMap<usize, i64> = HashMap::new();
-    let mut cap_prev_invader_team: HashMap<usize, i64> = HashMap::new();
-
-    // Radar tracking: entity -> number of radar activations seen so far
-    let mut radar_counts: HashMap<EntityId, usize> = HashMap::new();
-
-    // Advantage tracking
-    use wows_minimap_renderer::advantage;
-    use wows_minimap_renderer::advantage::ScoringParams;
-    use wows_minimap_renderer::advantage::TeamAdvantage;
-    use wows_minimap_renderer::advantage::TeamState;
-    let mut prev_advantage: TeamAdvantage = TeamAdvantage::Even;
-    let mut advantage_check_clock = GameClock(0.0);
-
-    let mut remaining = &replay_file.packet_data[..];
-    let mut prev_clock = GameClock(0.0);
-
-    while !remaining.is_empty() {
-        match parser.parse_packet(&mut remaining) {
-            Ok(packet) => {
-                if packet.clock != prev_clock && prev_clock.seconds() > 0.0 {
-                    // Populate player info on first tick where players are available
-                    if !players_populated {
-                        let players = controller.player_entities();
-                        if !players.is_empty() {
-                            for (entity_id, player) in players {
-                                let ship_name =
-                                    game_metadata.localized_name_from_param(player.vehicle()).unwrap_or_default();
-                                ship_names.insert(*entity_id, ship_name);
-                                player_names.insert(*entity_id, player.initial_state().username().to_string());
-
-                                let relation = player.relation();
-                                let friendly = relation.is_self() || relation.is_ally();
-                                is_friendly.insert(*entity_id, friendly);
-
-                                if relation.is_self() {
-                                    viewer_team_id = Some(player.initial_state().team_id());
-                                }
-                            }
-                            players_populated = true;
+                        if relation.is_self() {
+                            self.viewer_team_id = Some(player.initial_state().team_id());
                         }
                     }
+                    self.players_populated = true;
+                }
+            }
 
-                    let clock = prev_clock;
+            let clock = prev_clock;
 
-                    // --- Health loss detection ---
-                    for (entity_id, props) in controller.vehicle_props_all() {
-                        let current_health = props.health();
-                        let max_health = props.max_health();
+            for (entity_id, props) in view.vehicle_props_all() {
+                let current_health = props.health();
+                let max_health = props.max_health();
 
-                        if max_health <= 0.0 {
-                            continue;
-                        }
+                if max_health <= 0.0 {
+                    continue;
+                }
 
-                        if let Some((window_start, health_at_start)) = health_windows.get_mut(&entity_id) {
-                            if clock - *window_start >= 3.0 {
-                                let loss = (*health_at_start - current_health) / max_health;
-                                if loss > 0.25 {
-                                    let sname = ship_names.get(&entity_id).cloned().unwrap_or_default();
-                                    let pname = player_names.get(&entity_id).cloned().unwrap_or_default();
-                                    let friendly = is_friendly.get(&entity_id).copied().unwrap_or(false);
-                                    events.push(TimelineEvent {
-                                        clock: ElapsedClock(clock.seconds()),
-                                        kind: TimelineEventKind::HealthLost {
-                                            ship_name: sname,
-                                            player_name: pname,
-                                            is_friendly: friendly,
-                                            percent_lost: loss,
-                                            old_hp: *health_at_start,
-                                            new_hp: current_health,
-                                            max_hp: max_health,
-                                        },
-                                    });
-                                }
-                                *window_start = clock;
-                                *health_at_start = current_health;
-                            }
-                        } else if props.is_alive() {
-                            health_windows.insert(entity_id, (clock, current_health));
-                        }
-                    }
-
-                    // --- Death detection ---
-                    let kills = controller.kills();
-                    if kills.len() > last_kill_count {
-                        for kill in &kills[last_kill_count..] {
-                            let victim_ship = ship_names.get(&kill.victim).cloned().unwrap_or_default();
-                            let victim_player = player_names.get(&kill.victim).cloned().unwrap_or_default();
-                            let friendly = is_friendly.get(&kill.victim).copied().unwrap_or(false);
-                            let killer_ship = ship_names.get(&kill.killer).cloned().unwrap_or_default();
-                            let killer_player = player_names.get(&kill.killer).cloned().unwrap_or_default();
-                            events.push(TimelineEvent {
-                                clock: ElapsedClock(kill.clock.seconds()),
-                                kind: TimelineEventKind::Death {
-                                    ship_name: victim_ship,
-                                    player_name: victim_player,
-                                    is_friendly: friendly,
-                                    killer_ship,
-                                    killer_player,
-                                },
-                            });
-                        }
-                        last_kill_count = kills.len();
-                    }
-
-                    // --- Capture point events ---
-                    let viewer_team = viewer_team_id.unwrap_or(0);
-                    for cap in controller.capture_points() {
-                        let cap_idx = cap.index;
-
-                        let is_base = cap
-                            .control_point_type
-                            .as_ref()
-                            .and_then(|r| r.known().copied())
-                            .map(|t| {
-                                matches!(
-                                    t,
-                                    ControlPointType::Base
-                                        | ControlPointType::BaseWithPoints
-                                        | ControlPointType::MegaBase
-                                )
-                            })
-                            .unwrap_or(false);
-                        let cap_label =
-                            if is_base { "\u{2691}".to_string() } else { ((b'A' + cap_idx as u8) as char).to_string() };
-
-                        // Cap contested: both_inside transitions false -> true
-                        let prev_contested = cap_prev_contested.get(&cap_idx).copied().unwrap_or(false);
-                        if cap.both_inside && !prev_contested {
-                            events.push(TimelineEvent {
+                if let Some((window_start, health_at_start)) = self.health_windows.get_mut(&entity_id) {
+                    if clock - *window_start >= 3.0 {
+                        let loss = (*health_at_start - current_health) / max_health;
+                        if loss > 0.25 {
+                            let sname = self.ship_names.get(&entity_id).cloned().unwrap_or_default();
+                            let pname = self.player_names.get(&entity_id).cloned().unwrap_or_default();
+                            let friendly = self.is_friendly.get(&entity_id).copied().unwrap_or(false);
+                            self.events.push(TimelineEvent {
                                 clock: ElapsedClock(clock.seconds()),
-                                kind: TimelineEventKind::CapContested {
-                                    cap_label: cap_label.clone(),
-                                    owner_is_friendly: cap.team_id == viewer_team,
-                                },
-                            });
-                        }
-                        cap_prev_contested.insert(cap_idx, cap.both_inside);
-
-                        // Cap being captured (uncontested): invader_team transitions from
-                        // no-invader (<0) to a valid team (>=0), while not contested
-                        let prev_invader = cap_prev_invader_team.get(&cap_idx).copied().unwrap_or(-1);
-                        if cap.invader_team >= 0 && prev_invader < 0 && !cap.both_inside {
-                            events.push(TimelineEvent {
-                                clock: ElapsedClock(clock.seconds()),
-                                kind: TimelineEventKind::CapBeingCaptured {
-                                    cap_label: cap_label.clone(),
-                                    capturer_is_friendly: cap.invader_team == viewer_team,
-                                },
-                            });
-                        }
-                        cap_prev_invader_team.insert(cap_idx, cap.invader_team);
-
-                        // Cap flipped: team_id changes
-                        if let Some(&prev_team) = cap_prev_team.get(&cap_idx)
-                            && cap.team_id != prev_team
-                            && cap.team_id >= 0
-                        {
-                            events.push(TimelineEvent {
-                                clock: ElapsedClock(clock.seconds()),
-                                kind: TimelineEventKind::CapFlipped {
-                                    cap_label,
-                                    capturer_is_friendly: cap.team_id == viewer_team,
-                                },
-                            });
-                        }
-                        cap_prev_team.insert(cap_idx, cap.team_id);
-                    }
-
-                    // --- Radar activation detection ---
-                    for (entity_id, consumables) in controller.active_consumables() {
-                        let radar_count =
-                            consumables.iter().filter(|c| c.consumable == Recognized::Known(Consumable::Radar)).count();
-                        let prev_count = radar_counts.get(&entity_id).copied().unwrap_or(0);
-                        if radar_count > prev_count {
-                            let sname = ship_names.get(&entity_id).cloned().unwrap_or_default();
-                            let pname = player_names.get(&entity_id).cloned().unwrap_or_default();
-                            let friendly = is_friendly.get(&entity_id).copied().unwrap_or(false);
-                            events.push(TimelineEvent {
-                                clock: ElapsedClock(clock.seconds()),
-                                kind: TimelineEventKind::RadarUsed {
+                                kind: TimelineEventKind::HealthLost {
                                     ship_name: sname,
                                     player_name: pname,
                                     is_friendly: friendly,
+                                    percent_lost: loss,
+                                    old_hp: *health_at_start,
+                                    new_hp: current_health,
+                                    max_hp: max_health,
                                 },
                             });
                         }
-                        radar_counts.insert(entity_id, radar_count);
+                        *window_start = clock;
+                        *health_at_start = current_health;
                     }
-
-                    // --- Advantage change detection (check every ~3 seconds) ---
-                    if clock - advantage_check_clock >= 3.0 && players_populated {
-                        advantage_check_clock = clock;
-
-                        let viewer_team = viewer_team_id.unwrap_or(0);
-                        let swap = viewer_team == 1;
-                        // Snapshot players before vehicle_props_all (&mut borrow).
-                        let players: Vec<(
-                            wows_replays::types::EntityId,
-                            wows_replays::Rc<wows_replays::analyzer::battle_controller::Player>,
-                        )> = controller
-                            .player_entities()
-                            .iter()
-                            .map(|(id, p)| (*id, wows_replays::Rc::clone(p)))
-                            .collect();
-                        let all_vehicle_props = controller.vehicle_props_all();
-
-                        let mut teams = [
-                            TeamState {
-                                score: 0,
-                                uncontested_caps: 0,
-                                total_hp: 0.0,
-                                max_hp: 0.0,
-                                ships_alive: 0,
-                                ships_total: 0,
-                                ships_known: 0,
-                                destroyers: Default::default(),
-                                cruisers: Default::default(),
-                                battleships: Default::default(),
-                                submarines: Default::default(),
-                                carriers: Default::default(),
-                            },
-                            TeamState {
-                                score: 0,
-                                uncontested_caps: 0,
-                                total_hp: 0.0,
-                                max_hp: 0.0,
-                                ships_alive: 0,
-                                ships_total: 0,
-                                ships_known: 0,
-                                destroyers: Default::default(),
-                                cruisers: Default::default(),
-                                battleships: Default::default(),
-                                submarines: Default::default(),
-                                carriers: Default::default(),
-                            },
-                        ];
-
-                        let scores = controller.team_scores();
-                        if scores.len() >= 2 {
-                            teams[0].score = scores[0].score;
-                            teams[1].score = scores[1].score;
-                        }
-
-                        for cp in controller.capture_points() {
-                            if !cp.is_enabled || cp.has_invaders {
-                                continue;
-                            }
-                            if cp.team_id == 0 {
-                                teams[0].uncontested_caps += 1;
-                            } else if cp.team_id == 1 {
-                                teams[1].uncontested_caps += 1;
-                            }
-                        }
-
-                        for (entity_id, player) in &players {
-                            let team = player.initial_state().team_id() as usize;
-                            if team > 1 {
-                                continue;
-                            }
-                            teams[team].ships_total += 1;
-                            if let Some(props) = all_vehicle_props.get(entity_id) {
-                                teams[team].ships_known += 1;
-                                teams[team].max_hp += props.max_health();
-                                if props.is_alive() {
-                                    teams[team].ships_alive += 1;
-                                    teams[team].total_hp += props.health();
-                                }
-                            }
-                        }
-
-                        let scoring = controller
-                            .scoring_rules()
-                            .map(|r| ScoringParams {
-                                team_win_score: r.team_win_score,
-                                hold_reward: r.hold_reward,
-                                hold_period: r.hold_period,
-                            })
-                            .unwrap_or(ScoringParams { team_win_score: 1000, hold_reward: 3, hold_period: 5.0 });
-
-                        let result =
-                            advantage::calculate_advantage(&teams[0], &teams[1], &scoring, controller.time_left());
-
-                        // Swap so Team0 = friendly
-                        let current = if swap {
-                            match result.advantage {
-                                TeamAdvantage::Team0(level) => TeamAdvantage::Team1(level),
-                                TeamAdvantage::Team1(level) => TeamAdvantage::Team0(level),
-                                other => other,
-                            }
-                        } else {
-                            result.advantage
-                        };
-
-                        if current != prev_advantage {
-                            let level_label = |adv: &TeamAdvantage| -> Option<(&str, bool)> {
-                                match adv {
-                                    TeamAdvantage::Team0(level) => Some((level.label(), true)),
-                                    TeamAdvantage::Team1(level) => Some((level.label(), false)),
-                                    TeamAdvantage::Even => None,
-                                }
-                            };
-
-                            let label = match (level_label(&prev_advantage), level_label(&current)) {
-                                // Gained advantage from even
-                                (None, Some((new_label, _))) => {
-                                    format!("{} advantage gained", new_label)
-                                }
-                                // Lost advantage to even
-                                (Some((old_label, _)), None) => {
-                                    format!("{} advantage lost", old_label)
-                                }
-                                // Same team, level changed
-                                (Some((old_label, old_friendly)), Some((new_label, new_friendly)))
-                                    if old_friendly == new_friendly =>
-                                {
-                                    let old_val = match &prev_advantage {
-                                        TeamAdvantage::Team0(l) | TeamAdvantage::Team1(l) => Some(*l),
-                                        _ => None,
-                                    };
-                                    let new_val = match &current {
-                                        TeamAdvantage::Team0(l) | TeamAdvantage::Team1(l) => Some(*l),
-                                        _ => None,
-                                    };
-                                    // Compare by discriminant order (Absolute=0 > Strong=1 > Moderate=2 > Weak=3)
-                                    if let (Some(o), Some(n)) = (old_val, new_val) {
-                                        if (n as u8) < (o as u8) {
-                                            format!("{} advantage gained", new_label)
-                                        } else {
-                                            format!("Dropped to {} advantage", new_label)
-                                        }
-                                    } else {
-                                        format!("{} advantage", new_label)
-                                    }
-                                }
-                                // Advantage flipped teams
-                                (Some(_), Some((new_label, _))) => {
-                                    format!("{} advantage gained", new_label)
-                                }
-                                _ => String::new(),
-                            };
-
-                            if !label.is_empty() {
-                                let is_friendly = match &current {
-                                    TeamAdvantage::Team0(_) => true,
-                                    TeamAdvantage::Team1(_) => false,
-                                    TeamAdvantage::Even => match &prev_advantage {
-                                        TeamAdvantage::Team1(_) => true, // enemy lost advantage = good for us
-                                        _ => false,
-                                    },
-                                };
-                                events.push(TimelineEvent {
-                                    clock: ElapsedClock(clock.seconds()),
-                                    kind: TimelineEventKind::AdvantageChanged { label, is_friendly },
-                                });
-                            }
-                            prev_advantage = current;
-                        }
-                    }
-
-                    prev_clock = packet.clock;
-                } else if prev_clock.seconds() == 0.0 {
-                    prev_clock = packet.clock;
-                }
-
-                controller.process(&packet);
-
-                // --- Shot counting (for pre-allocation in pass 3) ---
-                for hit in controller.shot_hits() {
-                    let counts = shot_counts.entry(hit.victim_entity_id).or_default();
-                    counts.shell_count += 1;
-                }
-
-                // --- Health history snapshots (on every change) ---
-                for (entity_id, props) in controller.vehicle_props_all() {
-                    let current_hp = props.health();
-                    let max_hp = props.max_health();
-                    if max_hp <= 0.0 {
-                        continue;
-                    }
-                    let prev_hp = last_health.get(&entity_id).copied();
-                    if prev_hp.is_none() || (current_hp - prev_hp.unwrap()).abs() > 0.1 {
-                        last_health.insert(entity_id, current_hp);
-                        health_histories
-                            .entry(entity_id)
-                            .or_default()
-                            .insert(packet.clock, HealthSnapshot { health: current_hp, max_health: max_hp });
-                    }
+                } else if props.is_alive() {
+                    self.health_windows.insert(entity_id, (clock, current_health));
                 }
             }
-            Err(_) => break,
+
+            let kills = view.kills();
+            if kills.len() > self.last_kill_count {
+                for kill in &kills[self.last_kill_count..] {
+                    let victim_ship = self.ship_names.get(&kill.victim).cloned().unwrap_or_default();
+                    let victim_player = self.player_names.get(&kill.victim).cloned().unwrap_or_default();
+                    let friendly = self.is_friendly.get(&kill.victim).copied().unwrap_or(false);
+                    let killer_ship = self.ship_names.get(&kill.killer).cloned().unwrap_or_default();
+                    let killer_player = self.player_names.get(&kill.killer).cloned().unwrap_or_default();
+                    self.events.push(TimelineEvent {
+                        clock: ElapsedClock(kill.clock.seconds()),
+                        kind: TimelineEventKind::Death {
+                            ship_name: victim_ship,
+                            player_name: victim_player,
+                            is_friendly: friendly,
+                            killer_ship,
+                            killer_player,
+                        },
+                    });
+                }
+                self.last_kill_count = kills.len();
+            }
+
+            let viewer_team = self.viewer_team_id.unwrap_or(0);
+            for cap in view.capture_points() {
+                let cap_idx = cap.index;
+
+                let is_base = cap
+                    .control_point_type
+                    .as_ref()
+                    .and_then(|r| r.known().copied())
+                    .map(|t| {
+                        matches!(
+                            t,
+                            ControlPointType::Base
+                                | ControlPointType::BaseWithPoints
+                                | ControlPointType::MegaBase
+                        )
+                    })
+                    .unwrap_or(false);
+                let cap_label =
+                    if is_base { "\u{2691}".to_string() } else { ((b'A' + cap_idx as u8) as char).to_string() };
+
+                let prev_contested = self.cap_prev_contested.get(&cap_idx).copied().unwrap_or(false);
+                if cap.both_inside && !prev_contested {
+                    self.events.push(TimelineEvent {
+                        clock: ElapsedClock(clock.seconds()),
+                        kind: TimelineEventKind::CapContested {
+                            cap_label: cap_label.clone(),
+                            owner_is_friendly: cap.team_id == viewer_team,
+                        },
+                    });
+                }
+                self.cap_prev_contested.insert(cap_idx, cap.both_inside);
+
+                let prev_invader = self.cap_prev_invader_team.get(&cap_idx).copied().unwrap_or(-1);
+                if cap.invader_team >= 0 && prev_invader < 0 && !cap.both_inside {
+                    self.events.push(TimelineEvent {
+                        clock: ElapsedClock(clock.seconds()),
+                        kind: TimelineEventKind::CapBeingCaptured {
+                            cap_label: cap_label.clone(),
+                            capturer_is_friendly: cap.invader_team == viewer_team,
+                        },
+                    });
+                }
+                self.cap_prev_invader_team.insert(cap_idx, cap.invader_team);
+
+                if let Some(&prev_team) = self.cap_prev_team.get(&cap_idx)
+                    && cap.team_id != prev_team
+                    && cap.team_id >= 0
+                {
+                    self.events.push(TimelineEvent {
+                        clock: ElapsedClock(clock.seconds()),
+                        kind: TimelineEventKind::CapFlipped {
+                            cap_label,
+                            capturer_is_friendly: cap.team_id == viewer_team,
+                        },
+                    });
+                }
+                self.cap_prev_team.insert(cap_idx, cap.team_id);
+            }
+
+            for (entity_id, consumables) in view.active_consumables() {
+                let radar_count =
+                    consumables.iter().filter(|c| c.consumable == Recognized::Known(Consumable::Radar)).count();
+                let prev_count = self.radar_counts.get(&entity_id).copied().unwrap_or(0);
+                if radar_count > prev_count {
+                    let sname = self.ship_names.get(&entity_id).cloned().unwrap_or_default();
+                    let pname = self.player_names.get(&entity_id).cloned().unwrap_or_default();
+                    let friendly = self.is_friendly.get(&entity_id).copied().unwrap_or(false);
+                    self.events.push(TimelineEvent {
+                        clock: ElapsedClock(clock.seconds()),
+                        kind: TimelineEventKind::RadarUsed {
+                            ship_name: sname,
+                            player_name: pname,
+                            is_friendly: friendly,
+                        },
+                    });
+                }
+                self.radar_counts.insert(entity_id, radar_count);
+            }
+
+            if clock - self.advantage_check_clock >= 3.0 && self.players_populated {
+                use wows_minimap_renderer::advantage;
+                use wows_minimap_renderer::advantage::ScoringParams;
+                use wows_minimap_renderer::advantage::TeamAdvantage;
+                use wows_minimap_renderer::advantage::TeamState;
+
+                self.advantage_check_clock = clock;
+
+                let viewer_team = self.viewer_team_id.unwrap_or(0);
+                let swap = viewer_team == 1;
+
+                let players = view.player_entities();
+                let all_vehicle_props = view.vehicle_props_all();
+
+                let mut teams = [
+                    TeamState {
+                        score: 0,
+                        uncontested_caps: 0,
+                        total_hp: 0.0,
+                        max_hp: 0.0,
+                        ships_alive: 0,
+                        ships_total: 0,
+                        ships_known: 0,
+                        destroyers: Default::default(),
+                        cruisers: Default::default(),
+                        battleships: Default::default(),
+                        submarines: Default::default(),
+                        carriers: Default::default(),
+                    },
+                    TeamState {
+                        score: 0,
+                        uncontested_caps: 0,
+                        total_hp: 0.0,
+                        max_hp: 0.0,
+                        ships_alive: 0,
+                        ships_total: 0,
+                        ships_known: 0,
+                        destroyers: Default::default(),
+                        cruisers: Default::default(),
+                        battleships: Default::default(),
+                        submarines: Default::default(),
+                        carriers: Default::default(),
+                    },
+                ];
+
+                let scores = view.team_scores();
+                if scores.len() >= 2 {
+                    teams[0].score = scores[0].score;
+                    teams[1].score = scores[1].score;
+                }
+
+                for cp in view.capture_points() {
+                    if !cp.is_enabled || cp.has_invaders {
+                        continue;
+                    }
+                    if cp.team_id == 0 {
+                        teams[0].uncontested_caps += 1;
+                    } else if cp.team_id == 1 {
+                        teams[1].uncontested_caps += 1;
+                    }
+                }
+
+                for (entity_id, player) in players {
+                    let team = player.initial_state().team_id() as usize;
+                    if team > 1 {
+                        continue;
+                    }
+                    teams[team].ships_total += 1;
+                    if let Some(props) = all_vehicle_props.get(entity_id) {
+                        teams[team].ships_known += 1;
+                        teams[team].max_hp += props.max_health();
+                        if props.is_alive() {
+                            teams[team].ships_alive += 1;
+                            teams[team].total_hp += props.health();
+                        }
+                    }
+                }
+
+                let scoring = view
+                    .scoring_rules()
+                    .map(|r| ScoringParams {
+                        team_win_score: r.team_win_score,
+                        hold_reward: r.hold_reward,
+                        hold_period: r.hold_period,
+                    })
+                    .unwrap_or(ScoringParams { team_win_score: 1000, hold_reward: 3, hold_period: 5.0 });
+
+                let result = advantage::calculate_advantage(&teams[0], &teams[1], &scoring, view.time_left());
+
+                let current = if swap {
+                    match result.advantage {
+                        TeamAdvantage::Team0(level) => TeamAdvantage::Team1(level),
+                        TeamAdvantage::Team1(level) => TeamAdvantage::Team0(level),
+                        other => other,
+                    }
+                } else {
+                    result.advantage
+                };
+
+                if current != self.prev_advantage {
+                    let level_label = |adv: &TeamAdvantage| -> Option<(&str, bool)> {
+                        match adv {
+                            TeamAdvantage::Team0(level) => Some((level.label(), true)),
+                            TeamAdvantage::Team1(level) => Some((level.label(), false)),
+                            TeamAdvantage::Even => None,
+                        }
+                    };
+
+                    let label = match (level_label(&self.prev_advantage), level_label(&current)) {
+                        (None, Some((new_label, _))) => {
+                            format!("{} advantage gained", new_label)
+                        }
+                        (Some((old_label, _)), None) => {
+                            format!("{} advantage lost", old_label)
+                        }
+                        (Some((old_label, old_friendly)), Some((new_label, new_friendly)))
+                            if old_friendly == new_friendly =>
+                        {
+                            let old_val = match &self.prev_advantage {
+                                TeamAdvantage::Team0(l) | TeamAdvantage::Team1(l) => Some(*l),
+                                _ => None,
+                            };
+                            let new_val = match &current {
+                                TeamAdvantage::Team0(l) | TeamAdvantage::Team1(l) => Some(*l),
+                                _ => None,
+                            };
+                            if let (Some(o), Some(n)) = (old_val, new_val) {
+                                if (n as u8) < (o as u8) {
+                                    format!("{} advantage gained", new_label)
+                                } else {
+                                    format!("Dropped to {} advantage", new_label)
+                                }
+                            } else {
+                                format!("{} advantage", new_label)
+                            }
+                        }
+                        (Some(_), Some((new_label, _))) => {
+                            format!("{} advantage gained", new_label)
+                        }
+                        _ => String::new(),
+                    };
+
+                    if !label.is_empty() {
+                        let is_friendly = match &current {
+                            TeamAdvantage::Team0(_) => true,
+                            TeamAdvantage::Team1(_) => false,
+                            TeamAdvantage::Even => matches!(&self.prev_advantage, TeamAdvantage::Team1(_)),
+                        };
+                        self.events.push(TimelineEvent {
+                            clock: ElapsedClock(clock.seconds()),
+                            kind: TimelineEventKind::AdvantageChanged { label, is_friendly },
+                        });
+                    }
+                    self.prev_advantage = current;
+                }
+            }
         }
     }
 
-    controller.finish();
+    fn observe(&mut self, packet: &Packet<'_, '_>, _prev_clock: GameClock, view: &BattleView<'_>) {
+        for hit in view.shot_hits() {
+            let counts = self.shot_counts.entry(hit.victim_entity_id).or_default();
+            counts.shell_count += 1;
+        }
 
-    // --- Disconnect events (non-death) ---
-    {
+        for (entity_id, props) in view.vehicle_props_all() {
+            let current_hp = props.health();
+            let max_hp = props.max_health();
+            if max_hp <= 0.0 {
+                continue;
+            }
+            let prev_hp = self.last_health.get(&entity_id).copied();
+            if prev_hp.is_none() || (current_hp - prev_hp.unwrap()).abs() > 0.1 {
+                self.last_health.insert(entity_id, current_hp);
+                self.health_histories
+                    .entry(entity_id)
+                    .or_default()
+                    .insert(packet.clock, HealthSnapshot { health: current_hp, max_health: max_hp });
+            }
+        }
+    }
+
+    fn finish(&mut self, view: &BattleView<'_>) {
         use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
-        for (entity_id, player) in controller.player_entities() {
+        for (entity_id, player) in view.player_entities() {
             for info in player.connection_change_info().iter() {
                 if info.event_kind() == ConnectionChangeKind::Disconnected && !info.had_death_event() {
-                    let sname = ship_names.get(entity_id).cloned().unwrap_or_default();
-                    let pname = player_names.get(entity_id).cloned().unwrap_or_default();
-                    let friendly = is_friendly.get(entity_id).copied().unwrap_or(false);
-                    events.push(TimelineEvent {
+                    let sname = self.ship_names.get(entity_id).cloned().unwrap_or_default();
+                    let pname = self.player_names.get(entity_id).cloned().unwrap_or_default();
+                    let friendly = self.is_friendly.get(entity_id).copied().unwrap_or(false);
+                    self.events.push(TimelineEvent {
                         clock: ElapsedClock(info.at_game_duration().as_secs_f32()),
                         kind: TimelineEventKind::Disconnected {
                             ship_name: sname,
@@ -599,21 +566,104 @@ pub(super) fn extract_timeline_events(
                 }
             }
         }
+        self.battle_start = view.battle_start_clock().unwrap_or(GameClock(0.0));
+    }
+}
+
+struct ShotTimelineCollector {
+    timelines: HashMap<EntityId, ShipShotTimeline>,
+}
+
+impl ShotTimelineCollector {
+    fn new() -> Self {
+        Self { timelines: HashMap::new() }
+    }
+}
+
+impl WorldScanCollector for ShotTimelineCollector {
+    fn observe(&mut self, _packet: &Packet<'_, '_>, _prev_clock: GameClock, view: &BattleView<'_>) {
+        for hit in view.shot_hits() {
+            if let Some(timeline) = self.timelines.get_mut(&hit.victim_entity_id) {
+                timeline.hits.push(PreExtractedHit { clock: hit.clock, hit: hit.clone() });
+            } else {
+                let mut tl = ShipShotTimeline {
+                    hits: Vec::with_capacity(100),
+                    health_history: std::collections::BTreeMap::new(),
+                };
+                tl.hits.push(PreExtractedHit { clock: hit.clock, hit: hit.clone() });
+                self.timelines.insert(hit.victim_entity_id, tl);
+            }
+        }
+    }
+}
+
+fn extract_timeline_and_shots(
+    replay_file: &ReplayFile,
+    game_metadata: &GameMetadataProvider,
+    game_constants: Option<&GameConstants>,
+) -> (TimelineExtractionResult, HashMap<EntityId, ShipShotTimeline>) {
+    let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+    let mut timeline_col = TimelineEventsCollector::new(game_metadata);
+    let mut shot_col = ShotTimelineCollector::new();
+
+    {
+        let cols: &mut [&mut dyn WorldScanCollector] = &mut [&mut timeline_col, &mut shot_col];
+        scan_replay_world(
+            &replay_file.meta,
+            game_metadata,
+            game_constants.unwrap_or(&*wows_replays::game_constants::DEFAULT_GAME_CONSTANTS),
+            replay_version,
+            replay_file,
+            cols,
+        );
     }
 
-    // Translate event times from absolute game clock to elapsed time since battle start
-    let battle_start = controller.battle_start_clock().unwrap_or(GameClock(0.0));
-    for event in &mut events {
-        // Events were created with GameClock values stored as ElapsedClock(abs_seconds).
-        // Convert to real elapsed time.
+    let battle_start = timeline_col.battle_start;
+    for event in &mut timeline_col.events {
         let abs = GameClock(event.clock.seconds());
         event.clock = abs.to_elapsed(battle_start);
     }
+    timeline_col.events.sort_by(|a, b| a.clock.cmp(&b.clock));
 
-    // Sort events by clock time
-    events.sort_by(|a, b| a.clock.cmp(&b.clock));
-    TimelineExtractionResult { events, battle_start, shot_counts, health_histories }
+    let health_histories = timeline_col.health_histories.clone();
+
+    let timeline_result = TimelineExtractionResult {
+        events: timeline_col.events,
+        battle_start,
+        shot_counts: timeline_col.shot_counts,
+        health_histories: timeline_col.health_histories,
+    };
+
+    for (eid, hh) in &health_histories {
+        shot_col.timelines.entry(*eid).or_insert_with(|| ShipShotTimeline {
+            hits: Vec::new(),
+            health_history: hh.clone(),
+        });
+        if let Some(tl) = shot_col.timelines.get_mut(eid)
+            && tl.health_history.is_empty()
+        {
+            tl.health_history = hh.clone();
+        }
+    }
+
+    tracing::info!(
+        "extract_timeline_and_shots: {} ships, {} total hits",
+        shot_col.timelines.len(),
+        shot_col.timelines.values().map(|t| t.hits.len()).sum::<usize>(),
+    );
+
+    (timeline_result, shot_col.timelines)
 }
+
+pub(super) fn extract_timeline_events(
+    replay_file: &ReplayFile,
+    game_metadata: &GameMetadataProvider,
+    game_constants: Option<&GameConstants>,
+) -> TimelineExtractionResult {
+    let (result, _shots) = extract_timeline_and_shots(replay_file, game_metadata, game_constants);
+    result
+}
+
 /// Parse the entire replay and extract all `ResolvedShotHit`s per ship.
 /// Uses `shot_count_hints` from pass 2 to pre-allocate buffers.
 /// Health histories from pass 2 are merged into the returned timelines.
@@ -632,53 +682,20 @@ pub(super) fn extract_all_shots(
             return HashMap::new();
         }
     };
-    let mut controller = BattleWorld::new(&replay_file.meta, game_metadata, game_constants);
-    // shot tracking is ON by default (ShotTracking::Tracked)
-    let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-    let mut parser = wows_replays::packet2::Parser::with_version(game_metadata.entity_specs(), replay_version);
 
-    // Pre-allocate per-ship timelines from hints
-    let mut timelines: HashMap<EntityId, ShipShotTimeline> = shot_count_hints
-        .iter()
-        .map(|(&eid, hints)| {
-            (
-                eid,
-                ShipShotTimeline {
-                    hits: Vec::with_capacity(hints.shell_count),
-                    health_history: health_histories.get(&eid).cloned().unwrap_or_default(),
-                },
-            )
-        })
-        .collect();
+    let (_timeline, mut timelines) = extract_timeline_and_shots(&replay_file, game_metadata, game_constants);
 
-    // Also create timelines for ships that had health changes but no shot hits
-    for (eid, hh) in health_histories {
-        timelines.entry(eid).or_insert_with(|| ShipShotTimeline { hits: Vec::new(), health_history: hh });
+    // Apply pre-allocation hints to any ships already in the map (no-op if already allocated)
+    for (&eid, hints) in shot_count_hints {
+        timelines.entry(eid).or_insert_with(|| ShipShotTimeline {
+            hits: Vec::with_capacity(hints.shell_count),
+            health_history: health_histories.get(&eid).cloned().unwrap_or_default(),
+        });
     }
 
-    let mut remaining = &replay_file.packet_data[..];
-    while !remaining.is_empty() {
-        match parser.parse_packet(&mut remaining) {
-            Ok(packet) => {
-                controller.process(&packet);
-
-                // Accumulate all shot_hits (cleared each packet by the controller)
-                for hit in controller.shot_hits() {
-                    if let Some(timeline) = timelines.get_mut(&hit.victim_entity_id) {
-                        timeline.hits.push(PreExtractedHit { clock: hit.clock, hit: hit.clone() });
-                    } else {
-                        // Ship not in hints (e.g. friendly fire) — create on demand
-                        let mut tl = ShipShotTimeline {
-                            hits: Vec::with_capacity(100),
-                            health_history: std::collections::BTreeMap::new(),
-                        };
-                        tl.hits.push(PreExtractedHit { clock: hit.clock, hit: hit.clone() });
-                        timelines.insert(hit.victim_entity_id, tl);
-                    }
-                }
-            }
-            Err(_) => break,
-        }
+    // Ensure ships with health changes but no shot hits have timelines
+    for (eid, hh) in health_histories {
+        timelines.entry(eid).or_insert_with(|| ShipShotTimeline { hits: Vec::new(), health_history: hh });
     }
 
     tracing::info!(

@@ -32,6 +32,7 @@ use wows_replays::analyzer::battle_controller::state::ConsumableInventory;
 use wows_replays::analyzer::battle_controller::state::DeadShip;
 use wows_replays::analyzer::battle_controller::state::KillRecord;
 use wows_replays::analyzer::battle_controller::state::LocalWeatherZone;
+use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::analyzer::battle_controller::state::ScoringRules;
 use wows_replays::analyzer::battle_controller::state::TeamScore;
 use wows_replays::analyzer::decoder::DamageStatEntry;
@@ -413,6 +414,11 @@ impl<'w> BattleView<'w> {
     /// Buffs captured so far (arms race), in arrival order.
     pub fn captured_buffs(&self) -> &'w [CapturedBuff] {
         &self.world.resource::<CapturedBuffs>().0
+    }
+
+    /// Resolved shot hits recorded for the current frame (cleared each packet by the world).
+    pub fn shot_hits(&self) -> &'w [ResolvedShotHit] {
+        &self.world.resource::<crate::resources::ShotHitLog>().0
     }
 
     /// Scoring rules from BattleLogic.
