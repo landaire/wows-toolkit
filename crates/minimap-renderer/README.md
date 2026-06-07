@@ -118,7 +118,7 @@ minimap_renderer \
 | `--no-ship-names` | Hide ship names |
 | `--no-capture-points` | Hide capture zones |
 | `--no-buildings` | Hide building markers |
-| `--no-turret-direction` | Hide turret direction indicators |
+| `--no-camera-direction` | Hide camera/look direction indicators |
 | `--no-armament` | Hide selected armament/ammo type |
 | `--show-trails` | Show position trail heatmap |
 | `--no-dead-trails` | Hide trails for dead ships |
