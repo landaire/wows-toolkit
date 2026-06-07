@@ -1,0 +1,1354 @@
+---
+source: crates/wows-battle-world/tests/scan_facts.rs
+expression: "Snapshot { facts, damage }"
+---
+facts:
+  - entity_id: 321811
+    vehicle_id: 0
+    max_health: 0
+    ship_params_id: 0
+    ability_count: 0
+    crew_params_id: 0
+  - entity_id: 321812
+    vehicle_id: 0
+    max_health: 0
+    ship_params_id: 0
+    ability_count: 0
+    crew_params_id: 0
+  - entity_id: 321813
+    vehicle_id: 0
+    max_health: 0
+    ship_params_id: 0
+    ability_count: 0
+    crew_params_id: 0
+  - entity_id: 321814
+    vehicle_id: 0
+    max_health: 0
+    ship_params_id: 0
+    ability_count: 0
+    crew_params_id: 0
+  - entity_id: 321815
+    vehicle_id: 0
+    max_health: 0
+    ship_params_id: 0
+    ability_count: 0
+    crew_params_id: 0
+  - entity_id: 321816
+    vehicle_id: 0
+    max_health: 0
+    ship_params_id: 0
+    ability_count: 0
+    crew_params_id: 0
+  - entity_id: 321817
+    vehicle_id: 0
+    max_health: 0
+    ship_params_id: 0
+    ability_count: 0
+    crew_params_id: 0
+  - entity_id: 321818
+    vehicle_id: 0
+    max_health: 0
+    ship_params_id: 0
+    ability_count: 0
+    crew_params_id: 0
+  - entity_id: 321821
+    vehicle_id: 0
+    max_health: 0
+    ship_params_id: 0
+    ability_count: 0
+    crew_params_id: 0
+  - entity_id: 321822
+    vehicle_id: 0
+    max_health: 0
+    ship_params_id: 0
+    ability_count: 0
+    crew_params_id: 0
+  - entity_id: 321823
+    vehicle_id: 0
+    max_health: 0
+    ship_params_id: 0
+    ability_count: 0
+    crew_params_id: 0
+  - entity_id: 321824
+    vehicle_id: 0
+    max_health: 0
+    ship_params_id: 0
+    ability_count: 0
+    crew_params_id: 0
+  - entity_id: 968039
+    vehicle_id: 0
+    max_health: 0
+    ship_params_id: 0
+    ability_count: 0
+    crew_params_id: 0
+  - entity_id: 968041
+    vehicle_id: 3655251408
+    max_health: 38750
+    ship_params_id: 3655251408
+    ability_count: 6
+    crew_params_id: 4293043664
+  - entity_id: 968043
+    vehicle_id: 3761190608
+    max_health: 102200
+    ship_params_id: 3761190608
+    ability_count: 6
+    crew_params_id: 4275218128
+  - entity_id: 968045
+    vehicle_id: 4178491344
+    max_health: 52400
+    ship_params_id: 4178491344
+    ability_count: 6
+    crew_params_id: 4293044176
+  - entity_id: 968047
+    vehicle_id: 3750638896
+    max_health: 15900
+    ship_params_id: 3750638896
+    ability_count: 6
+    crew_params_id: 4290946352
+  - entity_id: 968049
+    vehicle_id: 4276041424
+    max_health: 97200
+    ship_params_id: 4276041424
+    ability_count: 6
+    crew_params_id: 4293043920
+  - entity_id: 968051
+    vehicle_id: 4277090288
+    max_health: 101150
+    ship_params_id: 4277090288
+    ability_count: 6
+    crew_params_id: 4293044208
+  - entity_id: 968053
+    vehicle_id: 3655284688
+    max_health: 70000
+    ship_params_id: 3655284688
+    ability_count: 6
+    crew_params_id: 4293044176
+  - entity_id: 968055
+    vehicle_id: 3655218960
+    max_health: 25750
+    ship_params_id: 3655218960
+    ability_count: 6
+    crew_params_id: 4182943664
+  - entity_id: 968057
+    vehicle_id: 4074682064
+    max_health: 55300
+    ship_params_id: 4074682064
+    ability_count: 6
+    crew_params_id: 4293043920
+  - entity_id: 968059
+    vehicle_id: 4074714832
+    max_health: 86950
+    ship_params_id: 4074714832
+    ability_count: 6
+    crew_params_id: 4293043920
+  - entity_id: 968061
+    vehicle_id: 3530471216
+    max_health: 45300
+    ship_params_id: 3530471216
+    ability_count: 6
+    crew_params_id: 4186089264
+  - entity_id: 968063
+    vehicle_id: 4074649392
+    max_health: 36150
+    ship_params_id: 4074649392
+    ability_count: 6
+    crew_params_id: 4293044016
+  - entity_id: 968065
+    vehicle_id: 3759585072
+    max_health: 14100
+    ship_params_id: 3759585072
+    ability_count: 6
+    crew_params_id: 4293044016
+  - entity_id: 968067
+    vehicle_id: 3750672176
+    max_health: 66900
+    ship_params_id: 3750672176
+    ability_count: 6
+    crew_params_id: 4189235120
+  - entity_id: 968069
+    vehicle_id: 3540924112
+    max_health: 15100
+    ship_params_id: 3540924112
+    ability_count: 6
+    crew_params_id: 4277315280
+  - entity_id: 968070
+    vehicle_id: 0
+    max_health: 0
+    ship_params_id: 0
+    ability_count: 0
+    crew_params_id: 0
+  - entity_id: 968071
+    vehicle_id: 4179572720
+    max_health: 107950
+    ship_params_id: 4179572720
+    ability_count: 6
+    crew_params_id: 4187138032
+  - entity_id: 968073
+    vehicle_id: 4276041424
+    max_health: 97200
+    ship_params_id: 4276041424
+    ability_count: 6
+    crew_params_id: 4293043920
+  - entity_id: 968075
+    vehicle_id: 3549869904
+    max_health: 33200
+    ship_params_id: 3549869904
+    ability_count: 6
+    crew_params_id: 4187137872
+  - entity_id: 968077
+    vehicle_id: 4178491184
+    max_health: 58000
+    ship_params_id: 4178491184
+    ability_count: 6
+    crew_params_id: 4293044016
+  - entity_id: 968079
+    vehicle_id: 3760142320
+    max_health: 101150
+    ship_params_id: 3760142320
+    ability_count: 6
+    crew_params_id: 4187138032
+  - entity_id: 968081
+    vehicle_id: 4074649296
+    max_health: 26900
+    ship_params_id: 4074649296
+    ability_count: 6
+    crew_params_id: 3973228240
+  - entity_id: 968083
+    vehicle_id: 4179572528
+    max_health: 111100
+    ship_params_id: 4179572528
+    ability_count: 6
+    crew_params_id: 4293044016
+  - entity_id: 968085
+    vehicle_id: 3666818896
+    max_health: 72450
+    ship_params_id: 3666818896
+    ability_count: 6
+    crew_params_id: 4188186448
+  - entity_id: 968087
+    vehicle_id: 4282267344
+    max_health: 22500
+    ship_params_id: 4282267344
+    ability_count: 6
+    crew_params_id: 4293043920
+damage:
+  - aggressor: 968041
+    victim: 968047
+    clock: 235.23
+    amount: 1354.5
+  - aggressor: 968041
+    victim: 968047
+    clock: 236.099
+    amount: 653.4
+  - aggressor: 968041
+    victim: 968047
+    clock: 237.661
+    amount: 1354.5
+  - aggressor: 968041
+    victim: 968047
+    clock: 240.22
+    amount: 1306.8
+  - aggressor: 968041
+    victim: 968047
+    clock: 248.084
+    amount: 1681.113
+  - aggressor: 968041
+    victim: 968047
+    clock: 257.252
+    amount: 358.683
+  - aggressor: 968041
+    victim: 968057
+    clock: 415.673
+    amount: 1306.8
+  - aggressor: 968041
+    victim: 968057
+    clock: 416.786
+    amount: 2613.6
+  - aggressor: 968041
+    victim: 968057
+    clock: 420.119
+    amount: 1960.2
+  - aggressor: 968041
+    victim: 968057
+    clock: 421.272
+    amount: 653.4
+  - aggressor: 968041
+    victim: 968057
+    clock: 425.674
+    amount: 653.4
+  - aggressor: 968041
+    victim: 968057
+    clock: 426.788
+    amount: 819.3
+  - aggressor: 968041
+    victim: 968057
+    clock: 430.278
+    amount: 453.224
+  - aggressor: 968041
+    victim: 968057
+    clock: 431.355
+    amount: 1408.318
+  - aggressor: 968041
+    victim: 968057
+    clock: 432.514
+    amount: 326.7
+  - aggressor: 968041
+    victim: 968057
+    clock: 437.074
+    amount: 487.535
+  - aggressor: 968041
+    victim: 968057
+    clock: 440.699
+    amount: 453.927
+  - aggressor: 968041
+    victim: 968061
+    clock: 378.68
+    amount: 2356.2
+  - aggressor: 968043
+    victim: 968049
+    clock: 653.672
+    amount: 2442
+  - aggressor: 968043
+    victim: 968049
+    clock: 654.38
+    amount: 2442
+  - aggressor: 968043
+    victim: 968057
+    clock: 156.093
+    amount: 4884
+  - aggressor: 968043
+    victim: 968057
+    clock: 184.201
+    amount: 14800
+  - aggressor: 968043
+    victim: 968071
+    clock: 255.547
+    amount: 1480
+  - aggressor: 968043
+    victim: 968071
+    clock: 397.259
+    amount: 3922
+  - aggressor: 968043
+    victim: 968071
+    clock: 398.413
+    amount: 4440
+  - aggressor: 968043
+    victim: 968071
+    clock: 424.154
+    amount: 1480
+  - aggressor: 968043
+    victim: 968071
+    clock: 450.966
+    amount: 4884
+  - aggressor: 968043
+    victim: 968071
+    clock: 481.853
+    amount: 3773.485
+  - aggressor: 968043
+    victim: 968071
+    clock: 491.539
+    amount: 9373.625
+  - aggressor: 968043
+    victim: 968071
+    clock: 508.11
+    amount: 1480
+  - aggressor: 968043
+    victim: 968071
+    clock: 518.404
+    amount: 2442
+  - aggressor: 968043
+    victim: 968071
+    clock: 715.53
+    amount: 12728
+  - aggressor: 968043
+    victim: 968071
+    clock: 761.26
+    amount: 1480
+  - aggressor: 968043
+    victim: 968079
+    clock: 336.493
+    amount: 1480
+  - aggressor: 968045
+    victim: 968059
+    clock: 217.919
+    amount: 1376
+  - aggressor: 968045
+    victim: 968059
+    clock: 219.924
+    amount: 1584
+  - aggressor: 968045
+    victim: 968059
+    clock: 221.93
+    amount: 1584
+  - aggressor: 968047
+    victim: 968055
+    clock: 314.964
+    amount: 726
+  - aggressor: 968047
+    victim: 968055
+    clock: 320.707
+    amount: 1390.25
+  - aggressor: 968047
+    victim: 968055
+    clock: 325.244
+    amount: 726
+  - aggressor: 968049
+    victim: 968041
+    clock: 437.84
+    amount: 14800
+  - aggressor: 968049
+    victim: 968041
+    clock: 438.98
+    amount: 1480
+  - aggressor: 968049
+    victim: 968051
+    clock: 421.351
+    amount: 6364
+  - aggressor: 968049
+    victim: 968051
+    clock: 556.797
+    amount: 5350
+  - aggressor: 968049
+    victim: 968051
+    clock: 588.14
+    amount: 6364
+  - aggressor: 968049
+    victim: 968073
+    clock: 329.811
+    amount: 14652
+  - aggressor: 968049
+    victim: 968073
+    clock: 359.073
+    amount: 6882
+  - aggressor: 968049
+    victim: 968073
+    clock: 625.362
+    amount: 1480
+  - aggressor: 968049
+    victim: 968073
+    clock: 686.942
+    amount: 9055.51
+  - aggressor: 968049
+    victim: 968073
+    clock: 712.689
+    amount: 4884
+  - aggressor: 968051
+    victim: 968049
+    clock: 477.959
+    amount: 1451.25
+  - aggressor: 968051
+    victim: 968049
+    clock: 543.371
+    amount: 2394.563
+  - aggressor: 968051
+    victim: 968049
+    clock: 620.381
+    amount: 2394.563
+  - aggressor: 968051
+    victim: 968049
+    clock: 641.936
+    amount: 4789.125
+  - aggressor: 968051
+    victim: 968059
+    clock: 553.662
+    amount: 4789.125
+  - aggressor: 968051
+    victim: 968059
+    clock: 555.085
+    amount: 4789.125
+  - aggressor: 968051
+    victim: 968059
+    clock: 740.788
+    amount: 1451.25
+  - aggressor: 968051
+    victim: 968079
+    clock: 199.07
+    amount: 4789.125
+  - aggressor: 968051
+    victim: 968079
+    clock: 371.36
+    amount: 1451.25
+  - aggressor: 968051
+    victim: 968081
+    clock: 674.798
+    amount: 2902.5
+  - aggressor: 968051
+    victim: 968081
+    clock: 676.24
+    amount: 1451.25
+  - aggressor: 968053
+    victim: 968049
+    clock: 654.38
+    amount: 12870
+  - aggressor: 968053
+    victim: 968059
+    clock: 606.387
+    amount: 25155
+  - aggressor: 968053
+    victim: 968059
+    clock: 631.09
+    amount: 20503.293
+  - aggressor: 968053
+    victim: 968061
+    clock: 524.259
+    amount: 6435
+  - aggressor: 968053
+    victim: 968071
+    clock: 197.83
+    amount: 12870
+  - aggressor: 968053
+    victim: 968071
+    clock: 222.964
+    amount: 8385
+  - aggressor: 968053
+    victim: 968071
+    clock: 223.528
+    amount: 3217.5
+  - aggressor: 968053
+    victim: 968071
+    clock: 249.831
+    amount: 1950
+  - aggressor: 968053
+    victim: 968071
+    clock: 253.821
+    amount: 1950
+  - aggressor: 968053
+    victim: 968071
+    clock: 278.399
+    amount: 5926.991
+  - aggressor: 968053
+    victim: 968071
+    clock: 413.277
+    amount: 15835
+  - aggressor: 968053
+    victim: 968071
+    clock: 456.106
+    amount: 9652.5
+  - aggressor: 968055
+    victim: 968047
+    clock: 231.939
+    amount: 1419
+  - aggressor: 968055
+    victim: 968047
+    clock: 239.367
+    amount: 1419
+  - aggressor: 968055
+    victim: 968047
+    clock: 240.22
+    amount: 1847.05
+  - aggressor: 968055
+    victim: 968047
+    clock: 252.689
+    amount: 1419
+  - aggressor: 968055
+    victim: 968047
+    clock: 319.355
+    amount: 2128.5
+  - aggressor: 968055
+    victim: 968047
+    clock: 320.202
+    amount: 47.7
+  - aggressor: 968055
+    victim: 968061
+    clock: 180.793
+    amount: 1221
+  - aggressor: 968055
+    victim: 968061
+    clock: 181.525
+    amount: 135.9
+  - aggressor: 968055
+    victim: 968061
+    clock: 181.833
+    amount: 135.9
+  - aggressor: 968055
+    victim: 968061
+    clock: 183.083
+    amount: 135.9
+  - aggressor: 968055
+    victim: 968061
+    clock: 184.126
+    amount: 135.9
+  - aggressor: 968055
+    victim: 968061
+    clock: 185.364
+    amount: 135.9
+  - aggressor: 968055
+    victim: 968061
+    clock: 185.829
+    amount: 135.9
+  - aggressor: 968055
+    victim: 968061
+    clock: 186.978
+    amount: 135.9
+  - aggressor: 968055
+    victim: 968061
+    clock: 188.213
+    amount: 135.9
+  - aggressor: 968055
+    victim: 968061
+    clock: 189.261
+    amount: 135.9
+  - aggressor: 968055
+    victim: 968061
+    clock: 189.826
+    amount: 135.9
+  - aggressor: 968055
+    victim: 968061
+    clock: 191.089
+    amount: 135.9
+  - aggressor: 968055
+    victim: 968061
+    clock: 192.221
+    amount: 135.9
+  - aggressor: 968055
+    victim: 968061
+    clock: 193.25
+    amount: 135.9
+  - aggressor: 968055
+    victim: 968061
+    clock: 193.821
+    amount: 135.9
+  - aggressor: 968055
+    victim: 968071
+    clock: 438.98
+    amount: 3024.93
+  - aggressor: 968055
+    victim: 968071
+    clock: 440.114
+    amount: 582.93
+  - aggressor: 968055
+    victim: 968071
+    clock: 516.704
+    amount: 4884
+  - aggressor: 968055
+    victim: 968071
+    clock: 517.291
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 517.834
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 518.95
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 520.111
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 521.284
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 521.83
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 522.961
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 524.12
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 525.292
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 525.82
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 526.977
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 528.146
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 529.281
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 529.847
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 530.962
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 532.131
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 533.293
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 533.839
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 534.967
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 536.103
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 537.304
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 537.831
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 538.947
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 540.111
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 541.261
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 541.807
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 542.953
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 544.1
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 545.272
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 545.813
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 546.95
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 548.105
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 549.26
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 549.807
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 550.294
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 553.278
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 553.807
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 554.942
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 556.106
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 557.265
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 557.807
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 558.946
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 560.109
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 561.262
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 561.81
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 562.933
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 564.118
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 565.252
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 565.806
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 566.94
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
+    clock: 568.098
+    amount: 0
+  - aggressor: 968055
+    victim: 968071
+    clock: 588.706
+    amount: 1900.867
+  - aggressor: 968055
+    victim: 968071
+    clock: 590.389
+    amount: 8519.628
+  - aggressor: 968055
+    victim: 968071
+    clock: 590.958
+    amount: 485.775
+  - aggressor: 968055
+    victim: 968071
+    clock: 757.257
+    amount: 1221
+  - aggressor: 968057
+    victim: 968055
+    clock: 238.39
+    amount: 2821.5
+  - aggressor: 968057
+    victim: 968055
+    clock: 239.081
+    amount: 1510.5
+  - aggressor: 968057
+    victim: 968055
+    clock: 264.705
+    amount: 285
+  - aggressor: 968057
+    victim: 968055
+    clock: 320.106
+    amount: 2451
+  - aggressor: 968057
+    victim: 968055
+    clock: 332.692
+    amount: 1140
+  - aggressor: 968057
+    victim: 968055
+    clock: 333.236
+    amount: 285
+  - aggressor: 968059
+    victim: 968051
+    clock: 564.232
+    amount: 2227.5
+  - aggressor: 968059
+    victim: 968051
+    clock: 590.389
+    amount: 8505
+  - aggressor: 968059
+    victim: 968051
+    clock: 590.958
+    amount: 2900.357
+  - aggressor: 968059
+    victim: 968053
+    clock: 616.675
+    amount: 5805
+  - aggressor: 968059
+    victim: 968067
+    clock: 713.922
+    amount: 9176.327
+  - aggressor: 968059
+    victim: 968069
+    clock: 530.289
+    amount: 1350
+  - aggressor: 968059
+    victim: 968073
+    clock: 693.256
+    amount: 2700
+  - aggressor: 968059
+    victim: 968073
+    clock: 693.805
+    amount: 6277.5
+  - aggressor: 968059
+    victim: 968073
+    clock: 742.96
+    amount: 4455
+  - aggressor: 968059
+    victim: 968073
+    clock: 743.527
+    amount: 9973.514
+  - aggressor: 968061
+    victim: 968041
+    clock: 400.12
+    amount: 1650
+  - aggressor: 968061
+    victim: 968053
+    clock: 526.977
+    amount: 1447.5
+  - aggressor: 968061
+    victim: 968055
+    clock: 226.667
+    amount: 1220
+  - aggressor: 968061
+    victim: 968055
+    clock: 227.075
+    amount: 1220
+  - aggressor: 968061
+    victim: 968055
+    clock: 237.844
+    amount: 825
+  - aggressor: 968061
+    victim: 968055
+    clock: 251.353
+    amount: 1650
+  - aggressor: 968061
+    victim: 968055
+    clock: 263.202
+    amount: 1650
+  - aggressor: 968061
+    victim: 968055
+    clock: 341.807
+    amount: 1650
+  - aggressor: 968061
+    victim: 968067
+    clock: 176.119
+    amount: 825
+  - aggressor: 968061
+    victim: 968067
+    clock: 188.714
+    amount: 2013
+  - aggressor: 968061
+    victim: 968067
+    clock: 192.791
+    amount: 4636
+  - aggressor: 968061
+    victim: 968067
+    clock: 200.369
+    amount: 3315.333
+  - aggressor: 968063
+    victim: 968059
+    clock: 209.825
+    amount: 2908.95
+  - aggressor: 968063
+    victim: 968059
+    clock: 217.919
+    amount: 881.5
+  - aggressor: 968063
+    victim: 968085
+    clock: 599.783
+    amount: 5817.9
+  - aggressor: 968063
+    victim: 968085
+    clock: 606.387
+    amount: 1561.591
+  - aggressor: 968063
+    victim: 968085
+    clock: 608.266
+    amount: 1167.988
+  - aggressor: 968063
+    victim: 968085
+    clock: 738.947
+    amount: 2049.488
+  - aggressor: 968063
+    victim: 968085
+    clock: 749.928
+    amount: 440.75
+  - aggressor: 968067
+    victim: 968047
+    clock: 238.513
+    amount: 495
+  - aggressor: 968067
+    victim: 968049
+    clock: 669.818
+    amount: 910
+  - aggressor: 968067
+    victim: 968057
+    clock: 154.782
+    amount: 22113
+  - aggressor: 968067
+    victim: 968057
+    clock: 155.529
+    amount: 910
+  - aggressor: 968067
+    victim: 968059
+    clock: 730.386
+    amount: 910
+  - aggressor: 968067
+    victim: 968061
+    clock: 177.356
+    amount: 3003
+  - aggressor: 968067
+    victim: 968061
+    clock: 177.819
+    amount: 910
+  - aggressor: 968067
+    victim: 968071
+    clock: 222.381
+    amount: 3003
+  - aggressor: 968067
+    victim: 968071
+    clock: 222.964
+    amount: 7238.5
+  - aggressor: 968067
+    victim: 968071
+    clock: 500.138
+    amount: 1501.5
+  - aggressor: 968067
+    victim: 968071
+    clock: 515.549
+    amount: 3003
+  - aggressor: 968067
+    victim: 968071
+    clock: 521.83
+    amount: 910
+  - aggressor: 968067
+    victim: 968071
+    clock: 542.953
+    amount: 4672.368
+  - aggressor: 968067
+    victim: 968071
+    clock: 564.118
+    amount: 3003
+  - aggressor: 968069
+    victim: 968061
+    clock: 429.829
+    amount: 18139.232
+  - aggressor: 968069
+    victim: 968061
+    clock: 430.421
+    amount: 11689.45
+  - aggressor: 968069
+    victim: 968061
+    clock: 431.355
+    amount: 113.25
+  - aggressor: 968069
+    victim: 968061
+    clock: 432.355
+    amount: 11629.043
+  - aggressor: 968071
+    victim: 968053
+    clock: 230.966
+    amount: 8779.906
+  - aggressor: 968071
+    victim: 968053
+    clock: 463.532
+    amount: 5587.313
+  - aggressor: 968071
+    victim: 968053
+    clock: 500.701
+    amount: 7093.125
+  - aggressor: 968071
+    victim: 968053
+    clock: 620.684
+    amount: 22518.563
+  - aggressor: 968071
+    victim: 968053
+    clock: 621.278
+    amount: 7729.104
+  - aggressor: 968071
+    victim: 968067
+    clock: 160.703
+    amount: 22274.623
+  - aggressor: 968071
+    victim: 968067
+    clock: 161.27
+    amount: 1693.125
+  - aggressor: 968071
+    victim: 968067
+    clock: 689.262
+    amount: 7183.003
+  - aggressor: 968073
+    victim: 968049
+    clock: 243.2
+    amount: 1480
+  - aggressor: 968073
+    victim: 968049
+    clock: 287.205
+    amount: 1480
+  - aggressor: 968073
+    victim: 968049
+    clock: 458.373
+    amount: 6364
+  - aggressor: 968073
+    victim: 968049
+    clock: 525.377
+    amount: 3200
+  - aggressor: 968073
+    victim: 968049
+    clock: 605.274
+    amount: 4771.535
+  - aggressor: 968073
+    victim: 968049
+    clock: 635.071
+    amount: 6364
+  - aggressor: 968073
+    victim: 968049
+    clock: 665.099
+    amount: 1480
+  - aggressor: 968073
+    victim: 968071
+    clock: 492.102
+    amount: 1480
+  - aggressor: 968073
+    victim: 968079
+    clock: 326.67
+    amount: 1480
+  - aggressor: 968075
+    victim: 968067
+    clock: 748.249
+    amount: 22697.877
+  - aggressor: 968075
+    victim: 968067
+    clock: 749.258
+    amount: 334.5
+  - aggressor: 968077
+    victim: 968083
+    clock: 240.786
+    amount: 973.5
+  - aggressor: 968077
+    victim: 968083
+    clock: 250.808
+    amount: 973.5
+  - aggressor: 968077
+    victim: 968083
+    clock: 252.934
+    amount: 3510.5
+  - aggressor: 968077
+    victim: 968083
+    clock: 254.957
+    amount: 333.3
+  - aggressor: 968077
+    victim: 968083
+    clock: 256.97
+    amount: 333.3
+  - aggressor: 968077
+    victim: 968083
+    clock: 258.971
+    amount: 333.3
+  - aggressor: 968077
+    victim: 968083
+    clock: 260.933
+    amount: 333.3
+  - aggressor: 968077
+    victim: 968083
+    clock: 262.964
+    amount: 2280.3
+  - aggressor: 968079
+    victim: 968041
+    clock: 394.659
+    amount: 4648.75
+  - aggressor: 968079
+    victim: 968053
+    clock: 620.684
+    amount: 5724.955
+  - aggressor: 968079
+    victim: 968053
+    clock: 648.692
+    amount: 1575
+  - aggressor: 968079
+    victim: 968067
+    clock: 754.371
+    amount: 4596.485
+  - aggressor: 968081
+    victim: 968041
+    clock: 459.083
+    amount: 792
+  - aggressor: 968081
+    victim: 968051
+    clock: 385.671
+    amount: 396
+  - aggressor: 968081
+    victim: 968051
+    clock: 387.367
+    amount: 273.105
+  - aggressor: 968081
+    victim: 968051
+    clock: 389.087
+    amount: 669.105
+  - aggressor: 968081
+    victim: 968051
+    clock: 390.667
+    amount: 273.105
+  - aggressor: 968081
+    victim: 968051
+    clock: 392.351
+    amount: 273.105
+  - aggressor: 968081
+    victim: 968051
+    clock: 394.098
+    amount: 273.105
+  - aggressor: 968081
+    victim: 968051
+    clock: 395.675
+    amount: 273.105
+  - aggressor: 968081
+    victim: 968051
+    clock: 397.36
+    amount: 1065.105
+  - aggressor: 968081
+    victim: 968051
+    clock: 398.968
+    amount: 546.21
+  - aggressor: 968081
+    victim: 968051
+    clock: 400.707
+    amount: 546.21
+  - aggressor: 968081
+    victim: 968051
+    clock: 402.229
+    amount: 546.21
+  - aggressor: 968081
+    victim: 968053
+    clock: 608.696
+    amount: 1584
+  - aggressor: 968081
+    victim: 968053
+    clock: 610.986
+    amount: 396
+  - aggressor: 968081
+    victim: 968053
+    clock: 611.528
+    amount: 120
+  - aggressor: 968081
+    victim: 968053
+    clock: 613.816
+    amount: 792
+  - aggressor: 968081
+    victim: 968053
+    clock: 614.384
+    amount: 792
+  - aggressor: 968081
+    victim: 968053
+    clock: 617.285
+    amount: 396
+  - aggressor: 968081
+    victim: 968069
+    clock: 525.945
+    amount: 792
+  - aggressor: 968081
+    victim: 968069
+    clock: 528.792
+    amount: 1535.25
+  - aggressor: 968081
+    victim: 968069
+    clock: 530.289
+    amount: 441.3
+  - aggressor: 968081
+    victim: 968069
+    clock: 531.691
+    amount: 1046.35
+  - aggressor: 968081
+    victim: 968069
+    clock: 533.085
+    amount: 1674.6
+  - aggressor: 968081
+    victim: 968069
+    clock: 534.519
+    amount: 684.6
+  - aggressor: 968081
+    victim: 968073
+    clock: 734.397
+    amount: 1188
+  - aggressor: 968081
+    victim: 968073
+    clock: 734.948
+    amount: 1584
+  - aggressor: 968081
+    victim: 968073
+    clock: 740.102
+    amount: 516
+  - aggressor: 968081
+    victim: 968073
+    clock: 742.391
+    amount: 434.295
+  - aggressor: 968081
+    victim: 968073
+    clock: 742.96
+    amount: 318
+  - aggressor: 968081
+    victim: 968073
+    clock: 744.098
+    amount: 291.6
+  - aggressor: 968081
+    victim: 968073
+    clock: 744.693
+    amount: 198
+  - aggressor: 968081
+    victim: 968073
+    clock: 745.254
+    amount: 489.6
+  - aggressor: 968081
+    victim: 968073
+    clock: 745.825
+    amount: 291.6
+  - aggressor: 968081
+    victim: 968073
+    clock: 746.957
+    amount: 291.6
+  - aggressor: 968081
+    victim: 968073
+    clock: 747.539
+    amount: 120
+  - aggressor: 968081
+    victim: 968073
+    clock: 748.103
+    amount: 885.6
+  - aggressor: 968081
+    victim: 968073
+    clock: 748.674
+    amount: 198
+  - aggressor: 968081
+    victim: 968073
+    clock: 749.258
+    amount: 291.6
+  - aggressor: 968081
+    victim: 968073
+    clock: 749.928
+    amount: 291.6
+  - aggressor: 968081
+    victim: 968087
+    clock: 530.962
+    amount: 0
+  - aggressor: 968085
+    victim: 968053
+    clock: 646.973
+    amount: 1782
+  - aggressor: 968087
+    victim: 968069
+    clock: 492.368
+    amount: 2128.5
+  - aggressor: 968087
+    victim: 968069
+    clock: 497.828
+    amount: 2838
+  - aggressor: 968087
+    victim: 968069
+    clock: 533.085
+    amount: 1419
