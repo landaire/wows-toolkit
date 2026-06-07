@@ -85,13 +85,6 @@ pub struct PreExtractedHit {
     pub hit: ResolvedShotHit,
 }
 
-/// Counts from the timeline pass used to pre-allocate buffers in pass 3.
-#[derive(Clone, Debug, Default)]
-pub struct ShotCountHints {
-    /// Number of individual shell impacts against this ship.
-    pub shell_count: usize,
-}
-
 /// Per-ship shot timeline, pre-computed from the full replay.
 #[derive(Clone, Debug)]
 pub struct ShipShotTimeline {
@@ -145,13 +138,10 @@ pub(crate) fn format_timeline_event(event: &TimelineEvent) -> String {
 
 /// Parse the entire replay and extract significant game events for the timeline.
 /// Returns `(events, battle_start)` where `battle_start` is the absolute game clock
-/// at which the battle started. Event clocks are adjusted to elapsed time.
-/// Result from the timeline extraction pass (pass 2).
+/// Result from the combined timeline + shot extraction pass.
 pub(super) struct TimelineExtractionResult {
     pub(super) events: Vec<TimelineEvent>,
     pub(super) battle_start: GameClock,
-    pub(super) shot_counts: HashMap<EntityId, ShotCountHints>,
-    pub(super) health_histories: HashMap<EntityId, std::collections::BTreeMap<GameClock, HealthSnapshot>>,
 }
 
 struct TimelineEventsCollector<'a> {
@@ -163,7 +153,6 @@ struct TimelineEventsCollector<'a> {
     viewer_team_id: Option<i64>,
     players_populated: bool,
     health_windows: HashMap<EntityId, (GameClock, f32)>,
-    shot_counts: HashMap<EntityId, ShotCountHints>,
     health_histories: HashMap<EntityId, std::collections::BTreeMap<GameClock, HealthSnapshot>>,
     last_health: HashMap<EntityId, f32>,
     last_kill_count: usize,
@@ -187,7 +176,6 @@ impl<'a> TimelineEventsCollector<'a> {
             viewer_team_id: None,
             players_populated: false,
             health_windows: HashMap::new(),
-            shot_counts: HashMap::new(),
             health_histories: HashMap::new(),
             last_health: HashMap::new(),
             last_kill_count: 0,
@@ -525,11 +513,6 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
     }
 
     fn observe(&mut self, packet: &Packet<'_, '_>, _prev_clock: GameClock, view: &BattleView<'_>) {
-        for hit in view.shot_hits() {
-            let counts = self.shot_counts.entry(hit.victim_entity_id).or_default();
-            counts.shell_count += 1;
-        }
-
         for (entity_id, props) in view.vehicle_props_all() {
             let current_hp = props.health();
             let max_hp = props.max_health();
@@ -597,7 +580,7 @@ impl WorldScanCollector for ShotTimelineCollector {
     }
 }
 
-fn extract_timeline_and_shots(
+pub(super) fn extract_timeline_and_shots(
     replay_file: &ReplayFile,
     game_metadata: &GameMetadataProvider,
     game_constants: Option<&GameConstants>,
@@ -625,16 +608,9 @@ fn extract_timeline_and_shots(
     }
     timeline_col.events.sort_by(|a, b| a.clock.cmp(&b.clock));
 
-    let health_histories = timeline_col.health_histories.clone();
+    let timeline_result = TimelineExtractionResult { events: timeline_col.events, battle_start };
 
-    let timeline_result = TimelineExtractionResult {
-        events: timeline_col.events,
-        battle_start,
-        shot_counts: timeline_col.shot_counts,
-        health_histories: timeline_col.health_histories,
-    };
-
-    for (eid, hh) in &health_histories {
+    for (eid, hh) in &timeline_col.health_histories {
         shot_col.timelines.entry(*eid).or_insert_with(|| ShipShotTimeline {
             hits: Vec::new(),
             health_history: hh.clone(),
@@ -655,57 +631,6 @@ fn extract_timeline_and_shots(
     (timeline_result, shot_col.timelines)
 }
 
-pub(super) fn extract_timeline_events(
-    replay_file: &ReplayFile,
-    game_metadata: &GameMetadataProvider,
-    game_constants: Option<&GameConstants>,
-) -> TimelineExtractionResult {
-    let (result, _shots) = extract_timeline_and_shots(replay_file, game_metadata, game_constants);
-    result
-}
-
-/// Parse the entire replay and extract all `ResolvedShotHit`s per ship.
-/// Uses `shot_count_hints` from pass 2 to pre-allocate buffers.
-/// Health histories from pass 2 are merged into the returned timelines.
-pub(super) fn extract_all_shots(
-    raw_meta: &[u8],
-    packet_data: &[u8],
-    game_metadata: &GameMetadataProvider,
-    game_constants: Option<&GameConstants>,
-    shot_count_hints: &HashMap<EntityId, ShotCountHints>,
-    health_histories: HashMap<EntityId, std::collections::BTreeMap<GameClock, HealthSnapshot>>,
-) -> HashMap<EntityId, ShipShotTimeline> {
-    let replay_file = match ReplayFile::from_decrypted_parts(raw_meta.to_vec(), packet_data.to_vec()) {
-        Ok(rf) => rf,
-        Err(e) => {
-            tracing::error!("extract_all_shots: failed to parse replay: {:?}", e);
-            return HashMap::new();
-        }
-    };
-
-    let (_timeline, mut timelines) = extract_timeline_and_shots(&replay_file, game_metadata, game_constants);
-
-    // Apply pre-allocation hints to any ships already in the map (no-op if already allocated)
-    for (&eid, hints) in shot_count_hints {
-        timelines.entry(eid).or_insert_with(|| ShipShotTimeline {
-            hits: Vec::with_capacity(hints.shell_count),
-            health_history: health_histories.get(&eid).cloned().unwrap_or_default(),
-        });
-    }
-
-    // Ensure ships with health changes but no shot hits have timelines
-    for (eid, hh) in health_histories {
-        timelines.entry(eid).or_insert_with(|| ShipShotTimeline { hits: Vec::new(), health_history: hh });
-    }
-
-    tracing::info!(
-        "extract_all_shots: {} ships, {} total hits",
-        timelines.len(),
-        timelines.values().map(|t| t.hits.len()).sum::<usize>(),
-    );
-
-    timelines
-}
 
 #[cfg(test)]
 mod extraction_snapshots {
@@ -823,19 +748,7 @@ mod extraction_snapshots {
         let replay = ReplayFile::from_file(&fixture)
             .unwrap_or_else(|e| panic!("failed to load Vermont fixture: {e:?}"));
 
-        let result = extract_timeline_events(&replay, &provider, Some(&constants));
-
-        let raw_meta = replay.raw_meta.as_bytes();
-        let packet_data = &replay.packet_data[..];
-
-        let shots = extract_all_shots(
-            raw_meta,
-            packet_data,
-            &provider,
-            Some(&constants),
-            &result.shot_counts,
-            result.health_histories.clone(),
-        );
+        let (result, shots) = extract_timeline_and_shots(&replay, &provider, Some(&constants));
 
         let mut events: Vec<EventSnapshot> = result
             .events
@@ -847,17 +760,18 @@ mod extraction_snapshots {
             .collect();
         events.sort_by(|a, b| a.clock_s.total_cmp(&b.clock_s).then(a.kind.cmp(&b.kind)));
 
-        let mut shot_counts: Vec<ShotCountRow> = result
-            .shot_counts
+        let mut shot_counts: Vec<ShotCountRow> = shots
             .iter()
-            .map(|(&eid, h)| ShotCountRow { entity_id: eid.raw(), shell_count: h.shell_count })
+            .filter(|(_, tl)| !tl.hits.is_empty())
+            .map(|(&eid, tl)| ShotCountRow { entity_id: eid.raw(), shell_count: tl.hits.len() })
             .collect();
         shot_counts.sort_by_key(|r| r.entity_id);
 
-        let mut health_histories: Vec<HealthHistoryRow> = result
-            .health_histories
+        let mut health_histories: Vec<HealthHistoryRow> = shots
             .iter()
-            .map(|(&eid, hh)| {
+            .filter(|(_, tl)| !tl.health_history.is_empty())
+            .map(|(&eid, tl)| {
+                let hh = &tl.health_history;
                 let first = hh.keys().next().map(|c| r3(c.seconds())).unwrap_or(0.0);
                 let last = hh.keys().next_back().map(|c| r3(c.seconds())).unwrap_or(0.0);
                 let health_sum = r3(hh.values().map(|s| s.health).sum::<f32>());

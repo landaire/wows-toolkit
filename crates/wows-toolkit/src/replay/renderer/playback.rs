@@ -35,8 +35,7 @@ use super::ReplayRendererAssets;
 use super::SNAPSHOTS_PER_SECOND;
 use super::SharedRendererState;
 use super::timeline::ShipShotTimeline;
-use super::timeline::extract_all_shots;
-use super::timeline::extract_timeline_events;
+use super::timeline::extract_timeline_and_shots;
 use crate::util::controls::parse_commands_scheme;
 
 #[allow(clippy::too_many_arguments)]
@@ -352,14 +351,16 @@ pub(super) fn playback_thread(
     let actual_total_frames = frame_snapshots.len();
     let actual_game_duration = frame_snapshots.last().map(|s| s.clock.seconds()).unwrap_or(game_duration);
 
-    // 4. Event extraction pass — second full parse for timeline events + shot counting + health
-    let timeline_result = ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone())
-        .ok()
-        .map(|event_replay| extract_timeline_events(&event_replay, &game_metadata, Some(&game_constants)));
-    let (timeline_events, battle_start, shot_counts, health_histories) = match timeline_result {
-        Some(r) => (r.events, r.battle_start, r.shot_counts, r.health_histories),
-        None => (Vec::new(), GameClock(0.0), HashMap::new(), HashMap::new()),
-    };
+    // 4. Combined timeline + shot extraction — single full parse produces both.
+    let (timeline_events, battle_start, shot_timelines) =
+        match ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone()) {
+            Ok(event_replay) => {
+                let (tr, shots) =
+                    extract_timeline_and_shots(&event_replay, &game_metadata, Some(&game_constants));
+                (tr.events, tr.battle_start, shots)
+            }
+            Err(_) => (Vec::new(), GameClock(0.0), HashMap::new()),
+        };
     {
         let mut state = shared_state.lock();
         state.timeline_events = Some(timeline_events);
@@ -367,16 +368,6 @@ pub(super) fn playback_thread(
         state.actual_game_duration = Some(actual_game_duration);
         state.self_player_name = Some(replay_file.meta.playerName.clone());
     }
-
-    // 4b. Shot extraction pass — third full parse, pre-allocated from counts
-    let shot_timelines = extract_all_shots(
-        &raw_meta,
-        &packet_data,
-        &game_metadata,
-        Some(&game_constants),
-        &shot_counts,
-        health_histories,
-    );
     {
         let mut state = shared_state.lock();
         let timeline_map: HashMap<EntityId, Arc<ShipShotTimeline>> =
