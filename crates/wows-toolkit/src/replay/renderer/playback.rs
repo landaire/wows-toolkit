@@ -317,27 +317,17 @@ pub(super) fn playback_thread(
             frame_snapshots.push(FrameSnapshot { clock: prev_clock });
         }
     }
-    // Cache per-vehicle facts (max HP, ship config, captain) by running a
-    // BattleController over each replay independently and unioning the
-    // results. The merged controller alone only sees what passed its merge
-    // filter, so ships only one alt perspective ever spotted would be missing.
-    let (vehicle_facts, damage_events) = {
+    let vehicle_facts = session.vehicle_facts().clone();
+    let damage_events = {
         let mut all = vec![&replay_file];
         all.extend(alt_replay_files.iter());
-        let facts = wows_replays::analyzer::battle_controller::merged::gather_replay_facts(
-            &game_constants,
-            version,
-            game_metadata.entity_specs(),
-            &all,
-        );
-        let damage = wows_battle_world::merged::gather_damage_events(
+        wows_battle_world::merged::gather_damage_events(
             &*game_metadata,
             &game_constants,
             version,
             game_metadata.entity_specs(),
             &all,
-        );
-        (facts, damage)
+        )
     };
 
     // One-shot build snapshot from the lookahead pass. The merged session

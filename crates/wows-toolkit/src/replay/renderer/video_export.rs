@@ -523,30 +523,9 @@ pub(super) fn render_video_blocking(
         Some(rgba)
     });
 
-    // Pre-scan facts + damage so roster HP, consumable inventories, and the
-    // damage column render correctly from frame zero (matches the live
-    // playback renderer in playback.rs).
-    let mut primary_with_alts: Vec<&ReplayFile> = vec![&replay_file];
-    primary_with_alts.extend(alt_replay_files.iter());
-    let vehicle_facts = wows_replays::analyzer::battle_controller::merged::gather_replay_facts(
-        &game_constants,
-        version,
-        game_metadata.entity_specs(),
-        &primary_with_alts,
-    );
-    let damage_events = wows_battle_world::merged::gather_damage_events(
-        &*game_metadata,
-        &game_constants,
-        version,
-        game_metadata.entity_specs(),
-        &primary_with_alts,
-    );
-
     let mut renderer = MinimapRenderer::new(map_info, &game_metadata, version, options.clone());
     renderer.set_fonts(game_fonts.clone());
     renderer.set_merged_perspectives(!alt_replay_files.is_empty());
-    renderer.set_vehicle_facts(vehicle_facts.clone());
-    renderer.set_damage_events(damage_events);
     if let Some(ref sil) = self_silhouette {
         renderer.set_self_silhouette(sil.clone());
     }
@@ -590,6 +569,20 @@ pub(super) fn render_video_blocking(
         &alt_replay_files,
     )
     .map_err(|e| report!("{e}"))?;
+    let vehicle_facts = session.vehicle_facts().clone();
+    {
+        let mut primary_with_alts: Vec<&ReplayFile> = vec![&replay_file];
+        primary_with_alts.extend(alt_replay_files.iter());
+        let damage_events = wows_battle_world::merged::gather_damage_events(
+            &*game_metadata,
+            &game_constants,
+            version,
+            game_metadata.entity_specs(),
+            &primary_with_alts,
+        );
+        renderer.set_damage_events(damage_events);
+    }
+    renderer.set_vehicle_facts(vehicle_facts.clone());
     wows_replay_insights::build::seed_consumable_inventories_from_facts(
         session.world_mut(),
         &vehicle_facts,

@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use wows_replays::ReplayFile;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::Analyzer;
+use wows_replays::analyzer::battle_controller::merged::VehicleFacts;
+use wows_replays::analyzer::battle_controller::merged::VehicleFactsAccumulator;
 use wows_replays::analyzer::decoder::DecodedPacketPayload;
 use wows_replays::analyzer::decoder::PacketDecoder;
 use wows_replays::game_constants::GameConstants;
@@ -198,6 +200,31 @@ impl ScanCollector for MetadataCollector<'_> {
 pub trait WorldScanCollector {
     fn observe(&mut self, packet: &Packet<'_, '_>, prev_clock: GameClock, view: &BattleView<'_>);
     fn finish(&mut self, _view: &BattleView<'_>) {}
+}
+
+/// Collects per-vehicle facts during a [`scan_replay`] pass.
+///
+/// Wraps [`VehicleFactsAccumulator`] so facts gathering participates in the
+/// same single packet walk as metadata and position collection. Call
+/// [`into_facts`](Self::into_facts) after the scan to obtain the result.
+pub struct FactsCollector<'c> {
+    inner: VehicleFactsAccumulator<'c>,
+}
+
+impl<'c> FactsCollector<'c> {
+    pub fn new(version: Version, constants: &'c GameConstants) -> Self {
+        Self { inner: VehicleFactsAccumulator::new(version, constants) }
+    }
+
+    pub fn into_facts(self) -> HashMap<EntityId, VehicleFacts> {
+        self.inner.into_facts()
+    }
+}
+
+impl ScanCollector for FactsCollector<'_> {
+    fn observe(&mut self, packet: &Packet<'_, '_>, decoded: &DecodedPacketPayload<'_, '_, '_>) {
+        self.inner.observe(packet, decoded);
+    }
 }
 
 /// Build one `BattleWorld`, step it over `replay`, and feed each collector the
