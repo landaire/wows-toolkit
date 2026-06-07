@@ -11134,6 +11134,7 @@ dependencies = [
  "humansize",
  "image",
  "image_dds",
+ "insta",
  "iroh",
  "itertools 0.14.0",
  "jiff",

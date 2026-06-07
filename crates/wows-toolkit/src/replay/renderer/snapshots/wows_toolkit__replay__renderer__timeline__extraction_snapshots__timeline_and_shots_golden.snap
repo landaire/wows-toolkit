@@ -1,0 +1,361 @@
+---
+source: crates/wows-toolkit/src/replay/renderer/timeline.rs
+expression: snapshot
+---
+battle_start_s: 27.938
+events:
+  - clock_s: 95.609
+    kind: CapBeingCaptured(A)
+  - clock_s: 126.744
+    kind: CapBeingCaptured(C)
+  - clock_s: 127.071
+    kind: HealthLost(/sonacles)
+  - clock_s: 133.083
+    kind: HealthLost(/Waffelbrueder)
+  - clock_s: 157.274
+    kind: HealthLost(/sonacles)
+  - clock_s: 164.853
+    kind: CapFlipped(A)
+  - clock_s: 166.241
+    kind: AdvantageChanged(Moderate advantage gained)
+  - clock_s: 185.728
+    kind: CapFlipped(C)
+  - clock_s: 187.481
+    kind: AdvantageChanged(Strong advantage gained)
+  - clock_s: 191.136
+    kind: CapContested(C)
+  - clock_s: 193.567
+    kind: AdvantageChanged(Dropped to Moderate advantage)
+  - clock_s: 196.563
+    kind: CapContested(A)
+  - clock_s: 196.632
+    kind: AdvantageChanged(Moderate advantage lost)
+  - clock_s: 205.703
+    kind: AdvantageChanged(Moderate advantage gained)
+  - clock_s: 205.733
+    kind: CapBeingCaptured(B)
+  - clock_s: 211.938
+    kind: HealthLost(/Amok_Squirrel)
+  - clock_s: 264.763
+    kind: CapFlipped(B)
+  - clock_s: 266.413
+    kind: AdvantageChanged(Strong advantage gained)
+  - clock_s: 284.181
+    kind: CapFlipped(C)
+  - clock_s: 284.693
+    kind: AdvantageChanged(Dropped to Moderate advantage)
+  - clock_s: 295.993
+    kind: Death(/Amok_Squirrel)
+  - clock_s: 402.785
+    kind: HealthLost(/HAIY_KFC)
+  - clock_s: 405.803
+    kind: HealthLost(/HAIY_KFC)
+  - clock_s: 411.867
+    kind: HealthLost(/Killer211070)
+  - clock_s: 428.858
+    kind: Death(/andi9039)
+  - clock_s: 429.569
+    kind: CapBeingCaptured(B)
+  - clock_s: 430.04
+    kind: HealthLost(/andi9039)
+  - clock_s: 432.859
+    kind: Death(/Killer211070)
+  - clock_s: 436.124
+    kind: AdvantageChanged(Strong advantage gained)
+  - clock_s: 436.124
+    kind: HealthLost(/Killer211070)
+  - clock_s: 475.869
+    kind: Death(/sonacles)
+  - clock_s: 476.991
+    kind: CapContested(B)
+  - clock_s: 478.466
+    kind: AdvantageChanged(Dropped to Weak advantage)
+  - clock_s: 478.466
+    kind: HealthLost(/sonacles)
+  - clock_s: 494.152
+    kind: Death(/Olrac69)
+  - clock_s: 496.703
+    kind: AdvantageChanged(Moderate advantage gained)
+  - clock_s: 496.703
+    kind: HealthLost(/Olrac69)
+  - clock_s: 502.737
+    kind: HealthLost(/xNeckro)
+  - clock_s: 505.77
+    kind: HealthLost(/xNeckro)
+  - clock_s: 506.322
+    kind: Death(/xNeckro)
+  - clock_s: 508.801
+    kind: AdvantageChanged(Strong advantage gained)
+  - clock_s: 522.136
+    kind: Death(/HAIY_KFC)
+  - clock_s: 524.595
+    kind: AdvantageChanged(Dropped to Moderate advantage)
+  - clock_s: 533.651
+    kind: AdvantageChanged(Strong advantage gained)
+  - clock_s: 536.662
+    kind: AdvantageChanged(Dropped to Moderate advantage)
+  - clock_s: 539.677
+    kind: AdvantageChanged(Strong advantage gained)
+  - clock_s: 542.689
+    kind: HealthLost(/GrayGhos_CV6Enterprise)
+  - clock_s: 579.017
+    kind: HealthLost(/Ell1eEu_l2E)
+  - clock_s: 594.227
+    kind: HealthLost(/Rezzo_31)
+  - clock_s: 621.344
+    kind: Death(/Rezzo_31)
+  - clock_s: 659.743
+    kind: Death(/dinamis66)
+  - clock_s: 660.93
+    kind: HealthLost(/dinamis66)
+  - clock_s: 721.483
+    kind: HealthLost(/Waffelbrueder)
+  - clock_s: 722.762
+    kind: Death(/Lutjens_G)
+  - clock_s: 724.536
+    kind: HealthLost(/Lutjens_G)
+  - clock_s: 726.15
+    kind: Death(/_Bignuts_)
+  - clock_s: 727.551
+    kind: HealthLost(/_Bignuts_)
+shot_counts:
+  - entity_id: 968041
+    shell_count: 24
+  - entity_id: 968043
+    shell_count: 9
+  - entity_id: 968047
+    shell_count: 42
+  - entity_id: 968049
+    shell_count: 57
+  - entity_id: 968051
+    shell_count: 47
+  - entity_id: 968053
+    shell_count: 62
+  - entity_id: 968055
+    shell_count: 37
+  - entity_id: 968057
+    shell_count: 59
+  - entity_id: 968059
+    shell_count: 24
+  - entity_id: 968061
+    shell_count: 20
+  - entity_id: 968067
+    shell_count: 42
+  - entity_id: 968069
+    shell_count: 51
+  - entity_id: 968070
+    shell_count: 11
+  - entity_id: 968071
+    shell_count: 367
+  - entity_id: 968073
+    shell_count: 113
+  - entity_id: 968075
+    shell_count: 2
+  - entity_id: 968079
+    shell_count: 10
+  - entity_id: 968081
+    shell_count: 81
+  - entity_id: 968083
+    shell_count: 44
+  - entity_id: 968085
+    shell_count: 19
+  - entity_id: 968087
+    shell_count: 45
+health_histories:
+  - entity_id: 968041
+    sample_count: 28
+    first_clock_s: 0
+    last_clock_s: 461.285
+  - entity_id: 968043
+    sample_count: 1
+    first_clock_s: 0
+    last_clock_s: 0
+  - entity_id: 968045
+    sample_count: 2
+    first_clock_s: 0
+    last_clock_s: 457.287
+  - entity_id: 968047
+    sample_count: 27
+    first_clock_s: 0
+    last_clock_s: 324.492
+  - entity_id: 968049
+    sample_count: 48
+    first_clock_s: 0
+    last_clock_s: 685.825
+  - entity_id: 968051
+    sample_count: 49
+    first_clock_s: 0
+    last_clock_s: 604.693
+  - entity_id: 968053
+    sample_count: 28
+    first_clock_s: 0
+    last_clock_s: 649.282
+  - entity_id: 968055
+    sample_count: 23
+    first_clock_s: 0
+    last_clock_s: 341.671
+  - entity_id: 968057
+    sample_count: 88
+    first_clock_s: 0
+    last_clock_s: 504.364
+  - entity_id: 968059
+    sample_count: 61
+    first_clock_s: 0
+    last_clock_s: 740.788
+  - entity_id: 968061
+    sample_count: 77
+    first_clock_s: 0
+    last_clock_s: 550.258
+  - entity_id: 968063
+    sample_count: 2
+    first_clock_s: 0
+    last_clock_s: 754.371
+  - entity_id: 968065
+    sample_count: 3
+    first_clock_s: 0
+    last_clock_s: 522.398
+  - entity_id: 968067
+    sample_count: 65
+    first_clock_s: 0
+    last_clock_s: 762.663
+  - entity_id: 968069
+    sample_count: 10
+    first_clock_s: 0
+    last_clock_s: 534.519
+  - entity_id: 968071
+    sample_count: 201
+    first_clock_s: 0
+    last_clock_s: 760.94
+  - entity_id: 968073
+    sample_count: 88
+    first_clock_s: 0
+    last_clock_s: 750.968
+  - entity_id: 968075
+    sample_count: 2
+    first_clock_s: 0
+    last_clock_s: 568.098
+  - entity_id: 968077
+    sample_count: 1
+    first_clock_s: 0
+    last_clock_s: 0
+  - entity_id: 968079
+    sample_count: 6
+    first_clock_s: 0
+    last_clock_s: 568.098
+  - entity_id: 968081
+    sample_count: 2
+    first_clock_s: 0
+    last_clock_s: 674.798
+  - entity_id: 968083
+    sample_count: 10
+    first_clock_s: 0
+    last_clock_s: 688.107
+  - entity_id: 968085
+    sample_count: 7
+    first_clock_s: 0
+    last_clock_s: 749.928
+  - entity_id: 968087
+    sample_count: 1
+    first_clock_s: 0
+    last_clock_s: 0
+shot_timelines:
+  - entity_id: 968041
+    hit_count: 24
+    first_hit_clock_s: 195.213
+    last_hit_clock_s: 463.532
+  - entity_id: 968043
+    hit_count: 9
+    first_hit_clock_s: 190.966
+    last_hit_clock_s: 719.806
+  - entity_id: 968045
+    hit_count: 0
+    first_hit_clock_s: ~
+    last_hit_clock_s: ~
+  - entity_id: 968047
+    hit_count: 42
+    first_hit_clock_s: 231.207
+    last_hit_clock_s: 324.237
+  - entity_id: 968049
+    hit_count: 57
+    first_hit_clock_s: 242.512
+    last_hit_clock_s: 697.508
+  - entity_id: 968051
+    hit_count: 47
+    first_hit_clock_s: 387.367
+    last_hit_clock_s: 750.7
+  - entity_id: 968053
+    hit_count: 62
+    first_hit_clock_s: 230.398
+    last_hit_clock_s: 656.264
+  - entity_id: 968055
+    hit_count: 37
+    first_hit_clock_s: 226.075
+    last_hit_clock_s: 341.506
+  - entity_id: 968057
+    hit_count: 59
+    first_hit_clock_s: 153.921
+    last_hit_clock_s: 440.699
+  - entity_id: 968059
+    hit_count: 24
+    first_hit_clock_s: 552.934
+    last_hit_clock_s: 740.102
+  - entity_id: 968061
+    hit_count: 20
+    first_hit_clock_s: 176.929
+    last_hit_clock_s: 549.934
+  - entity_id: 968063
+    hit_count: 0
+    first_hit_clock_s: ~
+    last_hit_clock_s: ~
+  - entity_id: 968065
+    hit_count: 0
+    first_hit_clock_s: ~
+    last_hit_clock_s: ~
+  - entity_id: 968067
+    hit_count: 42
+    first_hit_clock_s: 160.211
+    last_hit_clock_s: 761.67
+  - entity_id: 968069
+    hit_count: 51
+    first_hit_clock_s: 490.968
+    last_hit_clock_s: 535.823
+  - entity_id: 968070
+    hit_count: 11
+    first_hit_clock_s: 282.383
+    last_hit_clock_s: 760.94
+  - entity_id: 968071
+    hit_count: 367
+    first_hit_clock_s: 161.677
+    last_hit_clock_s: 761.928
+  - entity_id: 968073
+    hit_count: 113
+    first_hit_clock_s: 328.109
+    last_hit_clock_s: 753.382
+  - entity_id: 968075
+    hit_count: 2
+    first_hit_clock_s: 704.361
+    last_hit_clock_s: 704.361
+  - entity_id: 968077
+    hit_count: 0
+    first_hit_clock_s: ~
+    last_hit_clock_s: ~
+  - entity_id: 968079
+    hit_count: 10
+    first_hit_clock_s: 155.933
+    last_hit_clock_s: 370.202
+  - entity_id: 968081
+    hit_count: 81
+    first_hit_clock_s: 349.666
+    last_hit_clock_s: 674.25
+  - entity_id: 968083
+    hit_count: 44
+    first_hit_clock_s: 239.367
+    last_hit_clock_s: 754.513
+  - entity_id: 968085
+    hit_count: 19
+    first_hit_clock_s: 667.109
+    last_hit_clock_s: 754.677
+  - entity_id: 968087
+    hit_count: 45
+    first_hit_clock_s: 363.087
+    last_hit_clock_s: 461.369

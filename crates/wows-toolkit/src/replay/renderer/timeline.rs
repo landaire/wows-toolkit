@@ -689,3 +689,184 @@ pub(super) fn extract_all_shots(
 
     timelines
 }
+
+#[cfg(test)]
+mod extraction_snapshots {
+    use super::*;
+    use std::path::PathBuf;
+
+    use wows_replays::ReplayFile;
+    use wows_replays::game_constants::GameConstants;
+    use wowsunpack::game_params::provider::GameMetadataProvider;
+    use wowsunpack::vfs::VfsPath;
+    use wowsunpack::vfs::impls::physical::PhysicalFS;
+
+    fn fixtures_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("tests")
+            .join("fixtures")
+            .join("replays")
+    }
+
+    fn load_build_resources(build: u32) -> (GameMetadataProvider, GameConstants) {
+        let dir = wows_data_mgr::game_dir_for_build(build)
+            .unwrap_or_else(|| panic!("game data for build {} not available", build));
+        let vfs_root = dir.join("vfs");
+        let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
+        let rkyv_path = dir.join("game_params.rkyv");
+        let provider = match wowsunpack::game_params::cache::load(&rkyv_path) {
+            Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs)
+                .unwrap_or_else(|e| panic!("failed to build game metadata for build {build}: {e:?}")),
+            None => GameMetadataProvider::from_vfs(&vfs)
+                .unwrap_or_else(|e| panic!("failed to load GameParams for build {build}: {e:?}")),
+        };
+        let constants = GameConstants::from_vfs(&vfs);
+        (provider, constants)
+    }
+
+    #[derive(serde::Serialize)]
+    struct EventSnapshot {
+        clock_s: f32,
+        kind: String,
+    }
+
+    #[derive(serde::Serialize)]
+    struct ShotCountRow {
+        entity_id: u32,
+        shell_count: usize,
+    }
+
+    #[derive(serde::Serialize)]
+    struct HealthHistoryRow {
+        entity_id: u32,
+        sample_count: usize,
+        first_clock_s: f32,
+        last_clock_s: f32,
+    }
+
+    #[derive(serde::Serialize)]
+    struct ShotTimelineRow {
+        entity_id: u32,
+        hit_count: usize,
+        first_hit_clock_s: Option<f32>,
+        last_hit_clock_s: Option<f32>,
+    }
+
+    #[derive(serde::Serialize)]
+    struct Snapshot {
+        battle_start_s: f32,
+        events: Vec<EventSnapshot>,
+        shot_counts: Vec<ShotCountRow>,
+        health_histories: Vec<HealthHistoryRow>,
+        shot_timelines: Vec<ShotTimelineRow>,
+    }
+
+    fn r3(v: f32) -> f32 {
+        (v * 1000.0).round() / 1000.0
+    }
+
+    fn event_kind_label(kind: &TimelineEventKind) -> String {
+        match kind {
+            TimelineEventKind::HealthLost { ship_name, player_name, .. } => {
+                format!("HealthLost({ship_name}/{player_name})")
+            }
+            TimelineEventKind::Death { ship_name, player_name, .. } => {
+                format!("Death({ship_name}/{player_name})")
+            }
+            TimelineEventKind::CapContested { cap_label, .. } => format!("CapContested({cap_label})"),
+            TimelineEventKind::CapFlipped { cap_label, .. } => format!("CapFlipped({cap_label})"),
+            TimelineEventKind::CapBeingCaptured { cap_label, .. } => format!("CapBeingCaptured({cap_label})"),
+            TimelineEventKind::RadarUsed { ship_name, player_name, .. } => {
+                format!("RadarUsed({ship_name}/{player_name})")
+            }
+            TimelineEventKind::AdvantageChanged { label, .. } => format!("AdvantageChanged({label})"),
+            TimelineEventKind::Disconnected { ship_name, player_name, .. } => {
+                format!("Disconnected({ship_name}/{player_name})")
+            }
+        }
+    }
+
+    #[test]
+    #[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
+    fn timeline_and_shots_golden() {
+        let (provider, constants) = load_build_resources(11965230);
+
+        let fixture = fixtures_dir().join("20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay");
+        let replay = ReplayFile::from_file(&fixture)
+            .unwrap_or_else(|e| panic!("failed to load Vermont fixture: {e:?}"));
+
+        let result = extract_timeline_events(&replay, &provider, Some(&constants));
+
+        let raw_meta = replay.raw_meta.as_bytes();
+        let packet_data = &replay.packet_data[..];
+
+        let shots = extract_all_shots(
+            raw_meta,
+            packet_data,
+            &provider,
+            Some(&constants),
+            &result.shot_counts,
+            result.health_histories.clone(),
+        );
+
+        let mut events: Vec<EventSnapshot> = result
+            .events
+            .iter()
+            .map(|e| EventSnapshot {
+                clock_s: r3(e.clock.seconds()),
+                kind: event_kind_label(&e.kind),
+            })
+            .collect();
+        events.sort_by(|a, b| a.clock_s.total_cmp(&b.clock_s).then(a.kind.cmp(&b.kind)));
+
+        let mut shot_counts: Vec<ShotCountRow> = result
+            .shot_counts
+            .iter()
+            .map(|(&eid, h)| ShotCountRow { entity_id: eid.raw(), shell_count: h.shell_count })
+            .collect();
+        shot_counts.sort_by_key(|r| r.entity_id);
+
+        let mut health_histories: Vec<HealthHistoryRow> = result
+            .health_histories
+            .iter()
+            .map(|(&eid, hh)| {
+                let first = hh.keys().next().map(|c| r3(c.seconds())).unwrap_or(0.0);
+                let last = hh.keys().next_back().map(|c| r3(c.seconds())).unwrap_or(0.0);
+                HealthHistoryRow {
+                    entity_id: eid.raw(),
+                    sample_count: hh.len(),
+                    first_clock_s: first,
+                    last_clock_s: last,
+                }
+            })
+            .collect();
+        health_histories.sort_by_key(|r| r.entity_id);
+
+        let mut shot_timelines: Vec<ShotTimelineRow> = shots
+            .iter()
+            .map(|(&eid, tl)| {
+                let first = tl.hits.first().map(|h| r3(h.clock.seconds()));
+                let last = tl.hits.last().map(|h| r3(h.clock.seconds()));
+                ShotTimelineRow {
+                    entity_id: eid.raw(),
+                    hit_count: tl.hits.len(),
+                    first_hit_clock_s: first,
+                    last_hit_clock_s: last,
+                }
+            })
+            .collect();
+        shot_timelines.sort_by_key(|r| r.entity_id);
+
+        let snapshot = Snapshot {
+            battle_start_s: r3(result.battle_start.seconds()),
+            events,
+            shot_counts,
+            health_histories,
+            shot_timelines,
+        };
+
+        insta::assert_yaml_snapshot!(snapshot);
+    }
+}
