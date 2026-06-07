@@ -355,8 +355,7 @@ pub(super) fn playback_thread(
     let (timeline_events, battle_start, shot_timelines) =
         match ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone()) {
             Ok(event_replay) => {
-                let (tr, shots) =
-                    extract_timeline_and_shots(&event_replay, &game_metadata, Some(&game_constants));
+                let (tr, shots) = extract_timeline_and_shots(&event_replay, &game_metadata, Some(&game_constants));
                 (tr.events, tr.battle_start, shots)
             }
             Err(_) => (Vec::new(), GameClock(0.0), HashMap::new()),

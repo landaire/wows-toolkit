@@ -116,9 +116,7 @@ impl<'c> VehicleFactsAccumulator<'c> {
                         entry.vehicle_id = parsed.ship_config().ship_params_id();
                     }
                 }
-                if entry.crew.params_id().raw() == 0
-                    && parsed.crew_modifiers_compact_params().params_id().raw() != 0
-                {
+                if entry.crew.params_id().raw() == 0 && parsed.crew_modifiers_compact_params().params_id().raw() != 0 {
                     entry.crew = parsed.crew_modifiers_compact_params().clone();
                 }
             }

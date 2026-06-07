@@ -444,4 +444,3 @@ pub fn capture_vehicle_facts<G: ResourceLoader>(world: &mut BattleWorld<'_, '_, 
     }
     out
 }
-

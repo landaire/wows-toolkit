@@ -285,9 +285,7 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
                     .map(|t| {
                         matches!(
                             t,
-                            ControlPointType::Base
-                                | ControlPointType::BaseWithPoints
-                                | ControlPointType::MegaBase
+                            ControlPointType::Base | ControlPointType::BaseWithPoints | ControlPointType::MegaBase
                         )
                     })
                     .unwrap_or(false);
@@ -611,10 +609,10 @@ pub(super) fn extract_timeline_and_shots(
     let timeline_result = TimelineExtractionResult { events: timeline_col.events, battle_start };
 
     for (eid, hh) in &timeline_col.health_histories {
-        shot_col.timelines.entry(*eid).or_insert_with(|| ShipShotTimeline {
-            hits: Vec::new(),
-            health_history: hh.clone(),
-        });
+        shot_col
+            .timelines
+            .entry(*eid)
+            .or_insert_with(|| ShipShotTimeline { hits: Vec::new(), health_history: hh.clone() });
         if let Some(tl) = shot_col.timelines.get_mut(eid)
             && tl.health_history.is_empty()
         {
@@ -631,7 +629,6 @@ pub(super) fn extract_timeline_and_shots(
     (timeline_result, shot_col.timelines)
 }
 
-
 #[cfg(test)]
 mod extraction_snapshots {
     use super::*;
@@ -644,12 +641,7 @@ mod extraction_snapshots {
     use wowsunpack::vfs::impls::physical::PhysicalFS;
 
     fn fixtures_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("tests")
-            .join("fixtures")
-            .join("replays")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("tests").join("fixtures").join("replays")
     }
 
     fn load_build_resources(build: u32) -> (GameMetadataProvider, GameConstants) {
@@ -745,18 +737,15 @@ mod extraction_snapshots {
         let (provider, constants) = load_build_resources(11965230);
 
         let fixture = fixtures_dir().join("20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay");
-        let replay = ReplayFile::from_file(&fixture)
-            .unwrap_or_else(|e| panic!("failed to load Vermont fixture: {e:?}"));
+        let replay =
+            ReplayFile::from_file(&fixture).unwrap_or_else(|e| panic!("failed to load Vermont fixture: {e:?}"));
 
         let (result, shots) = extract_timeline_and_shots(&replay, &provider, Some(&constants));
 
         let mut events: Vec<EventSnapshot> = result
             .events
             .iter()
-            .map(|e| EventSnapshot {
-                clock_s: r3(e.clock.seconds()),
-                kind: event_kind_label(&e.kind),
-            })
+            .map(|e| EventSnapshot { clock_s: r3(e.clock.seconds()), kind: event_kind_label(&e.kind) })
             .collect();
         events.sort_by(|a, b| a.clock_s.total_cmp(&b.clock_s).then(a.kind.cmp(&b.kind)));
 
@@ -794,8 +783,7 @@ mod extraction_snapshots {
             .map(|(&eid, tl)| {
                 let first = tl.hits.first().map(|h| r3(h.clock.seconds()));
                 let last = tl.hits.last().map(|h| r3(h.clock.seconds()));
-                let mut hit_type_counts: std::collections::BTreeMap<String, usize> =
-                    std::collections::BTreeMap::new();
+                let mut hit_type_counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
                 for peh in &tl.hits {
                     let label = format!("{}", peh.hit.hit.hit_type.shell_hit);
                     *hit_type_counts.entry(label).or_insert(0) += 1;

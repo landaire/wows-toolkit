@@ -8,7 +8,8 @@
 mod support;
 
 use serde::Serialize;
-use wows_battle_world::merged::{gather_damage_events, gather_replay_facts};
+use wows_battle_world::merged::gather_damage_events;
+use wows_battle_world::merged::gather_replay_facts;
 
 fn r3(v: f32) -> f32 {
     (v * 1000.0).round() / 1000.0
@@ -73,9 +74,7 @@ fn facts_and_damage_golden() {
             })
         })
         .collect();
-    damage.sort_by(|a, b| {
-        (a.aggressor, a.victim, a.clock.to_bits()).cmp(&(b.aggressor, b.victim, b.clock.to_bits()))
-    });
+    damage.sort_by(|a, b| (a.aggressor, a.victim, a.clock.to_bits()).cmp(&(b.aggressor, b.victim, b.clock.to_bits())));
 
     insta::assert_yaml_snapshot!(Snapshot { facts, damage });
 }
