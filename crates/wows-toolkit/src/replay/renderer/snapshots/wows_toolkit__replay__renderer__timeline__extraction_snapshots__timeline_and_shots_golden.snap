@@ -9,115 +9,115 @@ events:
   - clock_s: 126.744
     kind: CapBeingCaptured(C)
   - clock_s: 127.071
-    kind: HealthLost(/sonacles)
+    kind: HealthLost(/sonacles pct=416 new_hp=32277)
   - clock_s: 133.083
-    kind: HealthLost(/Waffelbrueder)
+    kind: HealthLost(/Waffelbrueder pct=358 new_hp=42932)
   - clock_s: 157.274
-    kind: HealthLost(/sonacles)
+    kind: HealthLost(/sonacles pct=301 new_hp=14926)
   - clock_s: 164.853
     kind: CapFlipped(A)
   - clock_s: 166.241
-    kind: AdvantageChanged(Moderate advantage gained)
+    kind: AdvantageChanged(Moderate advantage gained friendly=true)
   - clock_s: 185.728
     kind: CapFlipped(C)
   - clock_s: 187.481
-    kind: AdvantageChanged(Strong advantage gained)
+    kind: AdvantageChanged(Strong advantage gained friendly=true)
   - clock_s: 191.136
     kind: CapContested(C)
   - clock_s: 193.567
-    kind: AdvantageChanged(Dropped to Moderate advantage)
+    kind: AdvantageChanged(Dropped to Moderate advantage friendly=true)
   - clock_s: 196.563
     kind: CapContested(A)
   - clock_s: 196.632
-    kind: AdvantageChanged(Moderate advantage lost)
+    kind: AdvantageChanged(Moderate advantage lost friendly=false)
   - clock_s: 205.703
-    kind: AdvantageChanged(Moderate advantage gained)
+    kind: AdvantageChanged(Moderate advantage gained friendly=true)
   - clock_s: 205.733
     kind: CapBeingCaptured(B)
   - clock_s: 211.938
-    kind: HealthLost(/Amok_Squirrel)
+    kind: HealthLost(/Amok_Squirrel pct=404 new_hp=6003)
   - clock_s: 264.763
     kind: CapFlipped(B)
   - clock_s: 266.413
-    kind: AdvantageChanged(Strong advantage gained)
+    kind: AdvantageChanged(Strong advantage gained friendly=true)
   - clock_s: 284.181
     kind: CapFlipped(C)
   - clock_s: 284.693
-    kind: AdvantageChanged(Dropped to Moderate advantage)
+    kind: AdvantageChanged(Dropped to Moderate advantage friendly=true)
   - clock_s: 295.993
     kind: Death(/Amok_Squirrel)
   - clock_s: 402.785
-    kind: HealthLost(/HAIY_KFC)
+    kind: HealthLost(/HAIY_KFC pct=658 new_hp=12379)
   - clock_s: 405.803
-    kind: HealthLost(/HAIY_KFC)
+    kind: HealthLost(/HAIY_KFC pct=259 new_hp=637)
   - clock_s: 411.867
-    kind: HealthLost(/Killer211070)
+    kind: HealthLost(/Killer211070 pct=420 new_hp=18474)
   - clock_s: 428.858
     kind: Death(/andi9039)
   - clock_s: 429.569
     kind: CapBeingCaptured(B)
   - clock_s: 430.04
-    kind: HealthLost(/andi9039)
+    kind: HealthLost(/andi9039 pct=1000 new_hp=0)
   - clock_s: 432.859
     kind: Death(/Killer211070)
   - clock_s: 436.124
-    kind: AdvantageChanged(Strong advantage gained)
+    kind: AdvantageChanged(Strong advantage gained friendly=true)
   - clock_s: 436.124
-    kind: HealthLost(/Killer211070)
+    kind: HealthLost(/Killer211070 pct=456 new_hp=0)
   - clock_s: 475.869
     kind: Death(/sonacles)
   - clock_s: 476.991
     kind: CapContested(B)
   - clock_s: 478.466
-    kind: AdvantageChanged(Dropped to Weak advantage)
+    kind: AdvantageChanged(Dropped to Weak advantage friendly=true)
   - clock_s: 478.466
-    kind: HealthLost(/sonacles)
+    kind: HealthLost(/sonacles pct=326 new_hp=0)
   - clock_s: 494.152
     kind: Death(/Olrac69)
   - clock_s: 496.703
-    kind: AdvantageChanged(Moderate advantage gained)
+    kind: AdvantageChanged(Moderate advantage gained friendly=true)
   - clock_s: 496.703
-    kind: HealthLost(/Olrac69)
+    kind: HealthLost(/Olrac69 pct=818 new_hp=0)
   - clock_s: 502.737
-    kind: HealthLost(/xNeckro)
+    kind: HealthLost(/xNeckro pct=263 new_hp=5376)
   - clock_s: 505.77
-    kind: HealthLost(/xNeckro)
+    kind: HealthLost(/xNeckro pct=320 new_hp=551)
   - clock_s: 506.322
     kind: Death(/xNeckro)
   - clock_s: 508.801
-    kind: AdvantageChanged(Strong advantage gained)
+    kind: AdvantageChanged(Strong advantage gained friendly=true)
   - clock_s: 522.136
     kind: Death(/HAIY_KFC)
   - clock_s: 524.595
-    kind: AdvantageChanged(Dropped to Moderate advantage)
+    kind: AdvantageChanged(Dropped to Moderate advantage friendly=true)
   - clock_s: 533.651
-    kind: AdvantageChanged(Strong advantage gained)
+    kind: AdvantageChanged(Strong advantage gained friendly=true)
   - clock_s: 536.662
-    kind: AdvantageChanged(Dropped to Moderate advantage)
+    kind: AdvantageChanged(Dropped to Moderate advantage friendly=true)
   - clock_s: 539.677
-    kind: AdvantageChanged(Strong advantage gained)
+    kind: AdvantageChanged(Strong advantage gained friendly=true)
   - clock_s: 542.689
-    kind: HealthLost(/GrayGhos_CV6Enterprise)
+    kind: HealthLost(/GrayGhos_CV6Enterprise pct=798 new_hp=6698)
   - clock_s: 579.017
-    kind: HealthLost(/Ell1eEu_l2E)
+    kind: HealthLost(/Ell1eEu_l2E pct=284 new_hp=46865)
   - clock_s: 594.227
-    kind: HealthLost(/Rezzo_31)
+    kind: HealthLost(/Rezzo_31 pct=514 new_hp=7275)
   - clock_s: 621.344
     kind: Death(/Rezzo_31)
   - clock_s: 659.743
     kind: Death(/dinamis66)
   - clock_s: 660.93
-    kind: HealthLost(/dinamis66)
+    kind: HealthLost(/dinamis66 pct=889 new_hp=0)
   - clock_s: 721.483
-    kind: HealthLost(/Waffelbrueder)
+    kind: HealthLost(/Waffelbrueder pct=344 new_hp=6386)
   - clock_s: 722.762
     kind: Death(/Lutjens_G)
   - clock_s: 724.536
-    kind: HealthLost(/Lutjens_G)
+    kind: HealthLost(/Lutjens_G pct=501 new_hp=0)
   - clock_s: 726.15
     kind: Death(/_Bignuts_)
   - clock_s: 727.551
-    kind: HealthLost(/_Bignuts_)
+    kind: HealthLost(/_Bignuts_ pct=1000 new_hp=0)
 shot_counts:
   - entity_id: 968041
     shell_count: 24
@@ -166,196 +166,349 @@ health_histories:
     sample_count: 28
     first_clock_s: 0
     last_clock_s: 461.285
+    health_sum: 857132.94
+    min_health: 0
   - entity_id: 968043
     sample_count: 1
     first_clock_s: 0
     last_clock_s: 0
+    health_sum: 102200
+    min_health: 102200
   - entity_id: 968045
     sample_count: 2
     first_clock_s: 0
     last_clock_s: 457.287
+    health_sum: 52400
+    min_health: 0
   - entity_id: 968047
     sample_count: 27
     first_clock_s: 0
     last_clock_s: 324.492
+    health_sum: 173075.08
+    min_health: 0
   - entity_id: 968049
     sample_count: 48
     first_clock_s: 0
     last_clock_s: 685.825
+    health_sum: 3202441.8
+    min_health: 46562.58
   - entity_id: 968051
     sample_count: 49
     first_clock_s: 0
     last_clock_s: 604.693
+    health_sum: 4021977
+    min_health: 68925.47
   - entity_id: 968053
     sample_count: 28
     first_clock_s: 0
     last_clock_s: 649.282
+    health_sum: 1105162.1
+    min_health: 0
   - entity_id: 968055
     sample_count: 23
     first_clock_s: 0
     last_clock_s: 341.671
+    health_sum: 248271.75
+    min_health: 329
   - entity_id: 968057
     sample_count: 88
     first_clock_s: 0
     last_clock_s: 504.364
+    health_sum: 1825165
+    min_health: 0
   - entity_id: 968059
     sample_count: 61
     first_clock_s: 0
     last_clock_s: 740.788
+    health_sum: 3261552.5
+    min_health: 33603.207
   - entity_id: 968061
     sample_count: 77
     first_clock_s: 0
     last_clock_s: 550.258
+    health_sum: 1893658.5
+    min_health: 0
   - entity_id: 968063
     sample_count: 2
     first_clock_s: 0
     last_clock_s: 754.371
+    health_sum: 36150
+    min_health: 0
   - entity_id: 968065
     sample_count: 3
     first_clock_s: 0
     last_clock_s: 522.398
+    health_sum: 25629.82
+    min_health: 0
   - entity_id: 968067
     sample_count: 65
     first_clock_s: 0
     last_clock_s: 762.663
+    health_sum: 2203639.8
+    min_health: 1589.246
   - entity_id: 968069
     sample_count: 10
     first_clock_s: 0
     last_clock_s: 534.519
+    health_sum: 78279.41
+    min_health: 0
   - entity_id: 968071
     sample_count: 201
     first_clock_s: 0
     last_clock_s: 760.94
+    health_sum: 9120698
+    min_health: 20125.664
   - entity_id: 968073
     sample_count: 88
     first_clock_s: 0
     last_clock_s: 750.968
+    health_sum: 5745613
+    min_health: 0
   - entity_id: 968075
     sample_count: 2
     first_clock_s: 0
     last_clock_s: 568.098
+    health_sum: 39897.574
+    min_health: 6697.574
   - entity_id: 968077
     sample_count: 1
     first_clock_s: 0
     last_clock_s: 0
+    health_sum: 58000
+    min_health: 58000
   - entity_id: 968079
     sample_count: 6
     first_clock_s: 0
     last_clock_s: 568.098
+    health_sum: 557738.6
+    min_health: 79996.375
   - entity_id: 968081
     sample_count: 2
     first_clock_s: 0
     last_clock_s: 674.798
+    health_sum: 49446.246
+    min_health: 22546.25
   - entity_id: 968083
     sample_count: 10
     first_clock_s: 0
     last_clock_s: 688.107
+    health_sum: 941857.9
+    min_health: 0
   - entity_id: 968085
     sample_count: 7
     first_clock_s: 0
     last_clock_s: 749.928
+    health_sum: 401731.3
+    min_health: 51072.42
   - entity_id: 968087
     sample_count: 1
     first_clock_s: 0
     last_clock_s: 0
+    health_sum: 22500
+    min_health: 22500
 shot_timelines:
   - entity_id: 968041
     hit_count: 24
     first_hit_clock_s: 195.213
     last_hit_clock_s: 463.532
+    hit_type_counts:
+      SHELL_HIT_TYPE_MAJORHIT: 1
+      SHELL_HIT_TYPE_NOPENETRATION: 6
+      SHELL_HIT_TYPE_NORMAL: 11
+      SHELL_HIT_TYPE_OVERPENETRATION: 4
+      SHELL_HIT_TYPE_RICOCHET: 2
   - entity_id: 968043
     hit_count: 9
     first_hit_clock_s: 190.966
     last_hit_clock_s: 719.806
+    hit_type_counts:
+      SHELL_HIT_TYPE_NOPENETRATION: 5
+      SHELL_HIT_TYPE_NORMAL: 2
+      SHELL_HIT_TYPE_RICOCHET: 2
   - entity_id: 968045
     hit_count: 0
     first_hit_clock_s: ~
     last_hit_clock_s: ~
+    hit_type_counts: {}
   - entity_id: 968047
     hit_count: 42
     first_hit_clock_s: 231.207
     last_hit_clock_s: 324.237
+    hit_type_counts:
+      SHELL_HIT_TYPE_NOPENETRATION: 34
+      SHELL_HIT_TYPE_NORMAL: 7
+      SHELL_HIT_TYPE_OVERPENETRATION: 1
   - entity_id: 968049
     hit_count: 57
     first_hit_clock_s: 242.512
     last_hit_clock_s: 697.508
+    hit_type_counts:
+      SHELL_HIT_TYPE_NOPENETRATION: 9
+      SHELL_HIT_TYPE_NORMAL: 14
+      SHELL_HIT_TYPE_OVERPENETRATION: 8
+      SHELL_HIT_TYPE_RICOCHET: 26
   - entity_id: 968051
     hit_count: 47
     first_hit_clock_s: 387.367
     last_hit_clock_s: 750.7
+    hit_type_counts:
+      SHELL_HIT_TYPE_NOPENETRATION: 33
+      SHELL_HIT_TYPE_NORMAL: 7
+      SHELL_HIT_TYPE_OVERPENETRATION: 5
+      SHELL_HIT_TYPE_RICOCHET: 2
   - entity_id: 968053
     hit_count: 62
     first_hit_clock_s: 230.398
     last_hit_clock_s: 656.264
+    hit_type_counts:
+      SHELL_HIT_TYPE_MAJORHIT: 1
+      SHELL_HIT_TYPE_NOPENETRATION: 22
+      SHELL_HIT_TYPE_NORMAL: 28
+      SHELL_HIT_TYPE_OVERPENETRATION: 8
+      SHELL_HIT_TYPE_RICOCHET: 3
   - entity_id: 968055
     hit_count: 37
     first_hit_clock_s: 226.075
     last_hit_clock_s: 341.506
+    hit_type_counts:
+      SHELL_HIT_TYPE_NOPENETRATION: 16
+      SHELL_HIT_TYPE_NORMAL: 5
+      SHELL_HIT_TYPE_OVERPENETRATION: 14
+      SHELL_HIT_TYPE_RICOCHET: 2
   - entity_id: 968057
     hit_count: 59
     first_hit_clock_s: 153.921
     last_hit_clock_s: 440.699
+    hit_type_counts:
+      SHELL_HIT_TYPE_MAJORHIT: 3
+      SHELL_HIT_TYPE_NOPENETRATION: 50
+      SHELL_HIT_TYPE_NORMAL: 2
+      SHELL_HIT_TYPE_OVERPENETRATION: 4
   - entity_id: 968059
     hit_count: 24
     first_hit_clock_s: 552.934
     last_hit_clock_s: 740.102
+    hit_type_counts:
+      SHELL_HIT_TYPE_NOPENETRATION: 6
+      SHELL_HIT_TYPE_NORMAL: 6
+      SHELL_HIT_TYPE_OVERPENETRATION: 5
+      SHELL_HIT_TYPE_RICOCHET: 7
   - entity_id: 968061
     hit_count: 20
     first_hit_clock_s: 176.929
     last_hit_clock_s: 549.934
+    hit_type_counts:
+      SHELL_HIT_TYPE_MAJORHIT: 1
+      SHELL_HIT_TYPE_NOPENETRATION: 12
+      SHELL_HIT_TYPE_NORMAL: 4
+      SHELL_HIT_TYPE_OVERPENETRATION: 1
+      SHELL_HIT_TYPE_RICOCHET: 2
   - entity_id: 968063
     hit_count: 0
     first_hit_clock_s: ~
     last_hit_clock_s: ~
+    hit_type_counts: {}
   - entity_id: 968065
     hit_count: 0
     first_hit_clock_s: ~
     last_hit_clock_s: ~
+    hit_type_counts: {}
   - entity_id: 968067
     hit_count: 42
     first_hit_clock_s: 160.211
     last_hit_clock_s: 761.67
+    hit_type_counts:
+      SHELL_HIT_TYPE_NOPENETRATION: 14
+      SHELL_HIT_TYPE_NORMAL: 15
+      SHELL_HIT_TYPE_OVERPENETRATION: 7
+      SHELL_HIT_TYPE_RICOCHET: 6
   - entity_id: 968069
     hit_count: 51
     first_hit_clock_s: 490.968
     last_hit_clock_s: 535.823
+    hit_type_counts:
+      SHELL_HIT_TYPE_NOPENETRATION: 36
+      SHELL_HIT_TYPE_NORMAL: 14
+      SHELL_HIT_TYPE_OVERPENETRATION: 1
   - entity_id: 968070
     hit_count: 11
     first_hit_clock_s: 282.383
     last_hit_clock_s: 760.94
+    hit_type_counts:
+      SHELL_HIT_TYPE_OVERPENETRATION: 2
+      SHELL_HIT_TYPE_RICOCHET: 9
   - entity_id: 968071
     hit_count: 367
     first_hit_clock_s: 161.677
     last_hit_clock_s: 761.928
+    hit_type_counts:
+      SHELL_HIT_TYPE_MAJORHIT: 7
+      SHELL_HIT_TYPE_NOPENETRATION: 20
+      SHELL_HIT_TYPE_NORMAL: 301
+      SHELL_HIT_TYPE_OVERPENETRATION: 17
+      SHELL_HIT_TYPE_RICOCHET: 22
   - entity_id: 968073
     hit_count: 113
     first_hit_clock_s: 328.109
     last_hit_clock_s: 753.382
+    hit_type_counts:
+      SHELL_HIT_TYPE_NOPENETRATION: 79
+      SHELL_HIT_TYPE_NORMAL: 21
+      SHELL_HIT_TYPE_OVERPENETRATION: 10
+      SHELL_HIT_TYPE_RICOCHET: 3
   - entity_id: 968075
     hit_count: 2
     first_hit_clock_s: 704.361
     last_hit_clock_s: 704.361
+    hit_type_counts:
+      SHELL_HIT_TYPE_NORMAL: 2
   - entity_id: 968077
     hit_count: 0
     first_hit_clock_s: ~
     last_hit_clock_s: ~
+    hit_type_counts: {}
   - entity_id: 968079
     hit_count: 10
     first_hit_clock_s: 155.933
     last_hit_clock_s: 370.202
+    hit_type_counts:
+      SHELL_HIT_TYPE_NOPENETRATION: 1
+      SHELL_HIT_TYPE_NORMAL: 2
+      SHELL_HIT_TYPE_OVERPENETRATION: 3
+      SHELL_HIT_TYPE_RICOCHET: 4
   - entity_id: 968081
     hit_count: 81
     first_hit_clock_s: 349.666
     last_hit_clock_s: 674.25
+    hit_type_counts:
+      SHELL_HIT_TYPE_NOPENETRATION: 66
+      SHELL_HIT_TYPE_NORMAL: 11
+      SHELL_HIT_TYPE_OVERPENETRATION: 2
+      SHELL_HIT_TYPE_RICOCHET: 2
   - entity_id: 968083
     hit_count: 44
     first_hit_clock_s: 239.367
     last_hit_clock_s: 754.513
+    hit_type_counts:
+      SHELL_HIT_TYPE_NOPENETRATION: 25
+      SHELL_HIT_TYPE_NORMAL: 9
+      SHELL_HIT_TYPE_OVERPENETRATION: 5
+      SHELL_HIT_TYPE_RICOCHET: 5
   - entity_id: 968085
     hit_count: 19
     first_hit_clock_s: 667.109
     last_hit_clock_s: 754.677
+    hit_type_counts:
+      SHELL_HIT_TYPE_NOPENETRATION: 6
+      SHELL_HIT_TYPE_NORMAL: 2
+      SHELL_HIT_TYPE_OVERPENETRATION: 2
+      SHELL_HIT_TYPE_RICOCHET: 9
   - entity_id: 968087
     hit_count: 45
     first_hit_clock_s: 363.087
     last_hit_clock_s: 461.369
+    hit_type_counts:
+      SHELL_HIT_TYPE_MAJORHIT: 1
+      SHELL_HIT_TYPE_NOPENETRATION: 36
+      SHELL_HIT_TYPE_NORMAL: 6
+      SHELL_HIT_TYPE_OVERPENETRATION: 2

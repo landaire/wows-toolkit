@@ -744,6 +744,8 @@ mod extraction_snapshots {
         sample_count: usize,
         first_clock_s: f32,
         last_clock_s: f32,
+        health_sum: f32,
+        min_health: f32,
     }
 
     #[derive(serde::Serialize)]
@@ -752,6 +754,7 @@ mod extraction_snapshots {
         hit_count: usize,
         first_hit_clock_s: Option<f32>,
         last_hit_clock_s: Option<f32>,
+        hit_type_counts: std::collections::BTreeMap<String, usize>,
     }
 
     #[derive(serde::Serialize)]
@@ -769,8 +772,12 @@ mod extraction_snapshots {
 
     fn event_kind_label(kind: &TimelineEventKind) -> String {
         match kind {
-            TimelineEventKind::HealthLost { ship_name, player_name, .. } => {
-                format!("HealthLost({ship_name}/{player_name})")
+            TimelineEventKind::HealthLost { ship_name, player_name, percent_lost, new_hp, .. } => {
+                format!(
+                    "HealthLost({ship_name}/{player_name} pct={} new_hp={})",
+                    (percent_lost * 1000.0).round() as i64,
+                    new_hp.round() as i64,
+                )
             }
             TimelineEventKind::Death { ship_name, player_name, .. } => {
                 format!("Death({ship_name}/{player_name})")
@@ -781,7 +788,9 @@ mod extraction_snapshots {
             TimelineEventKind::RadarUsed { ship_name, player_name, .. } => {
                 format!("RadarUsed({ship_name}/{player_name})")
             }
-            TimelineEventKind::AdvantageChanged { label, .. } => format!("AdvantageChanged({label})"),
+            TimelineEventKind::AdvantageChanged { label, is_friendly } => {
+                format!("AdvantageChanged({label} friendly={is_friendly})")
+            }
             TimelineEventKind::Disconnected { ship_name, player_name, .. } => {
                 format!("Disconnected({ship_name}/{player_name})")
             }
@@ -834,11 +843,16 @@ mod extraction_snapshots {
             .map(|(&eid, hh)| {
                 let first = hh.keys().next().map(|c| r3(c.seconds())).unwrap_or(0.0);
                 let last = hh.keys().next_back().map(|c| r3(c.seconds())).unwrap_or(0.0);
+                let health_sum = r3(hh.values().map(|s| s.health).sum::<f32>());
+                let min_health = hh.values().map(|s| s.health).fold(f32::INFINITY, f32::min);
+                let min_health = r3(if min_health.is_infinite() { 0.0 } else { min_health });
                 HealthHistoryRow {
                     entity_id: eid.raw(),
                     sample_count: hh.len(),
                     first_clock_s: first,
                     last_clock_s: last,
+                    health_sum,
+                    min_health,
                 }
             })
             .collect();
@@ -849,11 +863,18 @@ mod extraction_snapshots {
             .map(|(&eid, tl)| {
                 let first = tl.hits.first().map(|h| r3(h.clock.seconds()));
                 let last = tl.hits.last().map(|h| r3(h.clock.seconds()));
+                let mut hit_type_counts: std::collections::BTreeMap<String, usize> =
+                    std::collections::BTreeMap::new();
+                for peh in &tl.hits {
+                    let label = format!("{}", peh.hit.hit.hit_type.shell_hit);
+                    *hit_type_counts.entry(label).or_insert(0) += 1;
+                }
                 ShotTimelineRow {
                     entity_id: eid.raw(),
                     hit_count: tl.hits.len(),
                     first_hit_clock_s: first,
                     last_hit_clock_s: last,
+                    hit_type_counts,
                 }
             })
             .collect();

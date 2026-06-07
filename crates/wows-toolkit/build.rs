@@ -1,19 +1,14 @@
-use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
+
+use serde::Deserialize;
 
 #[derive(Deserialize, Default)]
 struct Registry {
     latest_path: Option<PathBuf>,
     #[serde(default)]
-    builds: BTreeMap<String, RegistryEntry>,
-}
-
-#[derive(Deserialize)]
-struct RegistryEntry {
-    #[allow(dead_code)]
-    version: String,
+    builds: BTreeMap<String, toml::Value>,
 }
 
 fn find_workspace_root() -> Option<PathBuf> {
