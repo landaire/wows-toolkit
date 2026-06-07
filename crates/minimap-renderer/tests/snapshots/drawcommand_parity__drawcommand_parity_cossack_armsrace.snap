@@ -7,6 +7,18 @@ BuffZone pos=(378.27,384.00) r=5 color=[255, 255, 255] alpha=0.15 mn=Some("damag
 BuffZone pos=(386.59,381.44) r=5 color=[255, 255, 255] alpha=0.15 mn=Some("repair_inactive")
 BuffZone pos=(389.79,378.88) r=5 color=[255, 255, 255] alpha=0.15 mn=Some("health_inactive")
 BuffZone pos=(389.79,389.12) r=5 color=[255, 255, 255] alpha=0.15 mn=Some("health_inactive")
+CameraDirection eid=EntityId(1662062) pos=(392.05,383.34) yaw=-1.060 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(1662068) pos=(390.72,384.88) yaw=4.660 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(1662070) pos=(373.86,383.96) yaw=2.770 color=[254, 77, 42] len=18
+CameraDirection eid=EntityId(1662076) pos=(396.75,396.51) yaw=2.090 color=[254, 77, 42] len=18
+CameraDirection eid=EntityId(1662080) pos=(391.47,389.65) yaw=-0.470 color=[255, 255, 255] len=18
+CameraDirection eid=EntityId(1662084) pos=(385.66,383.65) yaw=1.250 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(1662086) pos=(400.86,378.20) yaw=4.390 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(1662088) pos=(381.89,398.97) yaw=1.010 color=[254, 77, 42] len=18
+CameraDirection eid=EntityId(1662090) pos=(395.95,392.25) yaw=2.210 color=[254, 77, 42] len=18
+CameraDirection eid=EntityId(1662092) pos=(401.43,380.17) yaw=4.100 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(1662102) pos=(393.08,400.52) yaw=1.740 color=[254, 77, 42] len=18
+CameraDirection eid=EntityId(1662104) pos=(369.29,381.90) yaw=-0.590 color=[76, 232, 170] len=18
 CapturePoint pos=(384.00,384.00) r=6 color=[255, 255, 255] alpha=0.15 label="A" prog=0.330 ic=Some([76, 232, 170])
 ConsumableIcons eid=EntityId(1662068) pos=(390.72,384.88) keys=["PCY017_TorpedoReloader"] friendly=true hp=true
 ConsumableIcons eid=EntityId(1662070) pos=(373.86,383.96) keys=["PCY004_Fighter"] friendly=false hp=true
@@ -137,23 +149,14 @@ Torpedo pos=(395.06,396.25) color=[255, 255, 255]
 Torpedo pos=(395.07,396.20) color=[255, 255, 255]
 Torpedo pos=(395.18,396.06) color=[255, 255, 255]
 Torpedo pos=(395.18,396.10) color=[255, 255, 255]
-TurretDirection eid=EntityId(1662062) pos=(392.10,383.34) yaw=-1.060 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(1662068) pos=(390.72,384.84) yaw=4.660 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(1662070) pos=(373.84,383.97) yaw=2.770 color=[254, 77, 42] len=18
-TurretDirection eid=EntityId(1662076) pos=(396.72,396.47) yaw=2.090 color=[254, 77, 42] len=18
-TurretDirection eid=EntityId(1662080) pos=(391.47,389.66) yaw=-0.470 color=[255, 255, 255] len=18
-TurretDirection eid=EntityId(1662084) pos=(385.66,383.72) yaw=1.250 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(1662086) pos=(400.85,378.22) yaw=4.390 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(1662088) pos=(381.84,398.98) yaw=1.010 color=[254, 77, 42] len=18
-TurretDirection eid=EntityId(1662090) pos=(395.91,392.29) yaw=2.210 color=[254, 77, 42] len=18
-TurretDirection eid=EntityId(1662092) pos=(401.48,380.15) yaw=4.100 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(1662102) pos=(393.10,400.54) yaw=1.740 color=[254, 77, 42] len=18
-TurretDirection eid=EntityId(1662104) pos=(369.27,381.91) yaw=-0.590 color=[76, 232, 170] len=18
 
 === final ===
 BattleResultOverlay result=Victory ft=Some(Known(Extermination)) color=[76, 232, 170] sa=false
 BuffZone pos=(381.47,378.88) r=5 color=[255, 255, 255] alpha=0.15 mn=Some("damage_inactive")
 BuffZone pos=(392.35,384.00) r=5 color=[255, 255, 255] alpha=0.15 mn=Some("repair_inactive")
+CameraDirection eid=EntityId(1662080) pos=(387.59,393.24) yaw=1.740 color=[255, 255, 255] len=18
+CameraDirection eid=EntityId(1662084) pos=(377.58,383.39) yaw=-0.290 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(1662086) pos=(396.90,389.81) yaw=2.770 color=[76, 232, 170] len=18
 CapturePoint pos=(384.00,384.00) r=6 color=[255, 255, 255] alpha=0.15 label="A" prog=0.000 ic=None
 ConsumableIcons eid=EntityId(1662080) pos=(387.59,393.24) keys=["PCY015_SpeedBoosterPremium"] friendly=true hp=true
 DeadShip eid=EntityId(1662062) pos=(384.93,380.87) yaw=1.470 sp=Some("Cruiser") color=None self=false pn=Some("Hlghwayman") sn=None
@@ -244,6 +247,3 @@ Torpedo pos=(386.76,387.68) color=[255, 255, 255]
 Torpedo pos=(386.89,387.72) color=[255, 255, 255]
 Torpedo pos=(387.00,387.78) color=[255, 255, 255]
 Torpedo pos=(387.07,387.83) color=[255, 255, 255]
-TurretDirection eid=EntityId(1662080) pos=(387.60,393.22) yaw=1.740 color=[255, 255, 255] len=18
-TurretDirection eid=EntityId(1662084) pos=(377.59,383.41) yaw=-0.290 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(1662086) pos=(396.91,389.78) yaw=2.770 color=[76, 232, 170] len=18

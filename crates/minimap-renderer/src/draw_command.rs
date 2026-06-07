@@ -394,11 +394,11 @@ pub enum DrawCommand {
         #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Skip))]
         flag_icon: Option<RgbaImage>,
     },
-    /// Turret direction indicator line from ship center
-    TurretDirection {
+    /// Camera/look direction indicator line from ship center
+    CameraDirection {
         entity_id: EntityId,
         pos: MinimapPos,
-        /// Turret yaw in radians (world-space, already includes ship heading)
+        /// Camera yaw in radians (world-space, already includes ship heading)
         yaw: f32,
         color: [u8; 3],
         /// Line length in pixels

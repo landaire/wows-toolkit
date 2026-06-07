@@ -385,7 +385,7 @@ pub enum DisplayOptionField {
     ShowShipNames,
     ShowCapturePoints,
     ShowBuildings,
-    ShowTurretDirection,
+    ShowCameraDirection,
     ShowConsumables,
     ShowDeadShips,
     ShowDeadShipNames,
@@ -427,7 +427,7 @@ pub struct CollabRenderOptions {
     pub show_ship_names: bool,
     pub show_capture_points: bool,
     pub show_buildings: bool,
-    pub show_turret_direction: bool,
+    pub show_camera_direction: bool,
     pub show_consumables: bool,
     pub show_dead_ships: bool,
     pub show_dead_ship_names: bool,
@@ -472,7 +472,7 @@ impl CollabRenderOptions {
         cmp!(show_ship_names, ShowShipNames);
         cmp!(show_capture_points, ShowCapturePoints);
         cmp!(show_buildings, ShowBuildings);
-        cmp!(show_turret_direction, ShowTurretDirection);
+        cmp!(show_camera_direction, ShowCameraDirection);
         cmp!(show_consumables, ShowConsumables);
         cmp!(show_dead_ships, ShowDeadShips);
         cmp!(show_dead_ship_names, ShowDeadShipNames);
@@ -510,7 +510,7 @@ impl CollabRenderOptions {
             DisplayOptionField::ShowShipNames => self.show_ship_names = value,
             DisplayOptionField::ShowCapturePoints => self.show_capture_points = value,
             DisplayOptionField::ShowBuildings => self.show_buildings = value,
-            DisplayOptionField::ShowTurretDirection => self.show_turret_direction = value,
+            DisplayOptionField::ShowCameraDirection => self.show_camera_direction = value,
             DisplayOptionField::ShowConsumables => self.show_consumables = value,
             DisplayOptionField::ShowDeadShips => self.show_dead_ships = value,
             DisplayOptionField::ShowDeadShipNames => self.show_dead_ship_names = value,

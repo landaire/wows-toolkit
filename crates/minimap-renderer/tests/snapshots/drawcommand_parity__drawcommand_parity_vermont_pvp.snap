@@ -3,6 +3,22 @@ source: crates/minimap-renderer/tests/drawcommand_parity.rs
 expression: "capture_frames(\"20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay\")"
 ---
 === mid (105536 pkts, mid=52768) ===
+CameraDirection eid=EntityId(968041) pos=(389.22,383.01) yaw=-1.300 color=[254, 77, 42] len=18
+CameraDirection eid=EntityId(968049) pos=(378.86,392.35) yaw=0.930 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968051) pos=(383.11,370.78) yaw=4.170 color=[254, 77, 42] len=18
+CameraDirection eid=EntityId(968057) pos=(386.65,394.62) yaw=2.110 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968059) pos=(367.84,386.91) yaw=1.550 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968061) pos=(397.17,394.48) yaw=2.210 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968067) pos=(391.78,376.45) yaw=-1.130 color=[254, 77, 42] len=18
+CameraDirection eid=EntityId(968071) pos=(404.17,390.77) yaw=2.140 color=[255, 255, 255] len=18
+CameraDirection eid=EntityId(968073) pos=(390.38,371.17) yaw=-1.420 color=[254, 77, 42] len=18
+CameraDirection eid=EntityId(968075) pos=(369.90,380.65) yaw=1.300 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968077) pos=(364.08,386.60) yaw=1.600 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968079) pos=(373.96,386.53) yaw=0.270 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968081) pos=(376.80,378.94) yaw=0.880 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968083) pos=(374.84,372.09) yaw=-1.350 color=[254, 77, 42] len=18
+CameraDirection eid=EntityId(968085) pos=(369.46,385.84) yaw=1.890 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968087) pos=(381.72,378.67) yaw=-0.150 color=[76, 232, 170] len=18
 CapturePoint pos=(370.43,384.00) r=5 color=[76, 232, 170] alpha=0.15 label="A" prog=0.000 ic=None
 CapturePoint pos=(382.90,384.00) r=5 color=[76, 232, 170] alpha=0.15 label="B" prog=0.000 ic=None
 CapturePoint pos=(393.09,384.00) r=5 color=[254, 77, 42] alpha=0.15 label="C" prog=0.000 ic=None
@@ -236,25 +252,22 @@ Torpedo pos=(377.28,370.47) color=[76, 232, 170]
 Torpedo pos=(377.48,370.47) color=[76, 232, 170]
 Torpedo pos=(377.69,370.46) color=[76, 232, 170]
 Torpedo pos=(377.89,370.46) color=[76, 232, 170]
-TurretDirection eid=EntityId(968041) pos=(389.22,383.03) yaw=-1.300 color=[254, 77, 42] len=18
-TurretDirection eid=EntityId(968049) pos=(378.84,392.35) yaw=0.930 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968051) pos=(383.16,370.77) yaw=4.170 color=[254, 77, 42] len=18
-TurretDirection eid=EntityId(968057) pos=(386.66,394.60) yaw=2.110 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968059) pos=(367.84,386.91) yaw=1.550 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968061) pos=(397.16,394.47) yaw=2.210 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968067) pos=(391.79,376.47) yaw=-1.130 color=[254, 77, 42] len=18
-TurretDirection eid=EntityId(968071) pos=(404.17,390.78) yaw=2.140 color=[255, 255, 255] len=18
-TurretDirection eid=EntityId(968073) pos=(390.35,371.15) yaw=-1.420 color=[254, 77, 42] len=18
-TurretDirection eid=EntityId(968075) pos=(369.90,380.65) yaw=1.300 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968077) pos=(364.08,386.60) yaw=1.600 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968079) pos=(373.96,386.53) yaw=0.270 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968081) pos=(376.84,378.97) yaw=0.880 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968083) pos=(374.84,372.09) yaw=-1.350 color=[254, 77, 42] len=18
-TurretDirection eid=EntityId(968085) pos=(369.46,385.84) yaw=1.890 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968087) pos=(381.78,378.72) yaw=-0.150 color=[76, 232, 170] len=18
 
 === final ===
 BattleResultOverlay result=Victory ft=Some(Known(ScoreExcess)) color=[76, 232, 170] sa=false
+CameraDirection eid=EntityId(968043) pos=(400.21,381.00) yaw=-1.520 color=[254, 77, 42] len=18
+CameraDirection eid=EntityId(968049) pos=(388.07,383.53) yaw=0.220 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968051) pos=(401.33,373.98) yaw=3.660 color=[254, 77, 42] len=18
+CameraDirection eid=EntityId(968055) pos=(399.45,386.63) yaw=-1.450 color=[254, 77, 42] len=18
+CameraDirection eid=EntityId(968059) pos=(385.62,377.87) yaw=0.220 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968067) pos=(392.54,378.10) yaw=2.500 color=[254, 77, 42] len=18
+CameraDirection eid=EntityId(968071) pos=(400.35,394.17) yaw=1.600 color=[255, 255, 255] len=18
+CameraDirection eid=EntityId(968075) pos=(390.73,381.55) yaw=1.100 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968077) pos=(364.65,373.46) yaw=1.600 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968079) pos=(382.48,385.31) yaw=0.660 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968081) pos=(390.33,373.40) yaw=-1.130 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968085) pos=(376.67,377.99) yaw=1.470 color=[76, 232, 170] len=18
+CameraDirection eid=EntityId(968087) pos=(397.02,390.88) yaw=0.710 color=[76, 232, 170] len=18
 CapturePoint pos=(370.43,384.00) r=5 color=[76, 232, 170] alpha=0.15 label="A" prog=0.000 ic=None
 CapturePoint pos=(382.90,384.00) r=5 color=[76, 232, 170] alpha=0.15 label="B" prog=0.000 ic=None
 CapturePoint pos=(393.09,384.00) r=5 color=[254, 77, 42] alpha=0.15 label="C" prog=0.000 ic=None
@@ -365,16 +378,3 @@ TeamAdvantage level=Some(Absolute) color=[76, 232, 170]
 TeamRoster side=Enemy x=1048 y=32 w=280 h=768 eids=[EntityId(968043), EntityId(968051), EntityId(968067), EntityId(968055), EntityId(968053), EntityId(968083), EntityId(968073), EntityId(968041), EntityId(968045), EntityId(968069), EntityId(968063), EntityId(968065)]
 TeamRoster side=Friendly x=0 y=32 w=280 h=768 eids=[EntityId(968085), EntityId(968079), EntityId(968059), EntityId(968071), EntityId(968049), EntityId(968077), EntityId(968081), EntityId(968087), EntityId(968075), EntityId(968061), EntityId(968057), EntityId(968047)]
 Timer tr=Some(464) el=ElapsedClock(735.96)
-TurretDirection eid=EntityId(968043) pos=(400.23,380.97) yaw=-1.520 color=[254, 77, 42] len=18
-TurretDirection eid=EntityId(968049) pos=(388.03,383.53) yaw=0.220 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968051) pos=(401.29,373.96) yaw=3.660 color=[254, 77, 42] len=18
-TurretDirection eid=EntityId(968055) pos=(399.48,386.66) yaw=-1.450 color=[254, 77, 42] len=18
-TurretDirection eid=EntityId(968059) pos=(385.59,377.90) yaw=0.220 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968067) pos=(392.54,378.09) yaw=2.500 color=[254, 77, 42] len=18
-TurretDirection eid=EntityId(968071) pos=(400.35,394.16) yaw=1.600 color=[255, 255, 255] len=18
-TurretDirection eid=EntityId(968075) pos=(390.72,381.53) yaw=1.100 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968077) pos=(364.65,373.46) yaw=1.600 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968079) pos=(382.47,385.28) yaw=0.660 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968081) pos=(390.35,373.40) yaw=-1.130 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968085) pos=(376.65,377.97) yaw=1.470 color=[76, 232, 170] len=18
-TurretDirection eid=EntityId(968087) pos=(396.98,390.85) yaw=0.710 color=[76, 232, 170] len=18

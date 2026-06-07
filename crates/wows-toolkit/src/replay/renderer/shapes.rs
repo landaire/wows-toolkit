@@ -56,7 +56,7 @@ pub(super) fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_
         DrawCommand::KillFeed { .. } => opts.show_kill_feed && !opts.stats_panel_visible(),
         DrawCommand::CapturePoint { .. } => opts.show_capture_points,
         DrawCommand::Building { .. } => opts.show_buildings,
-        DrawCommand::TurretDirection { .. } => opts.show_turret_direction,
+        DrawCommand::CameraDirection { .. } => opts.show_camera_direction,
         DrawCommand::ConsumableRadius { .. } => opts.show_consumables,
         DrawCommand::PatrolRadius { .. } => opts.show_planes,
         DrawCommand::ConsumableIcons { .. } => opts.show_consumables,

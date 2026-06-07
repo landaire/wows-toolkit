@@ -19,7 +19,7 @@ pub struct RenderOptions {
     pub show_capture_points: bool,
     pub show_buildings: bool,
     pub show_weather: bool,
-    pub show_turret_direction: bool,
+    pub show_camera_direction: bool,
     pub show_consumables: bool,
     pub show_armament: bool,
     pub show_trails: bool,
@@ -55,7 +55,7 @@ impl Default for RenderOptions {
             show_capture_points: true,
             show_buildings: true,
             show_weather: true,
-            show_turret_direction: true,
+            show_camera_direction: true,
             show_consumables: true,
             show_armament: false,
             show_trails: false,
@@ -100,7 +100,7 @@ pub struct CliOverrides {
     pub no_ship_names: bool,
     pub no_capture_points: bool,
     pub no_buildings: bool,
-    pub no_turret_direction: bool,
+    pub no_camera_direction: bool,
     pub no_armament: bool,
     pub no_kill_feed: bool,
     pub no_chat: bool,
@@ -126,7 +126,8 @@ pub struct RendererConfig {
     pub show_ship_names: bool,
     pub show_capture_points: bool,
     pub show_buildings: bool,
-    pub show_turret_direction: bool,
+    #[serde(alias = "show_turret_direction")]
+    pub show_camera_direction: bool,
     pub show_hp_bars: bool,
     pub show_tracers: bool,
     pub show_torpedoes: bool,
@@ -162,7 +163,7 @@ impl Default for RendererConfig {
             show_ship_names: true,
             show_capture_points: true,
             show_buildings: true,
-            show_turret_direction: true,
+            show_camera_direction: true,
             show_hp_bars: true,
             show_tracers: true,
             show_torpedoes: true,
@@ -208,7 +209,7 @@ impl RendererConfig {
             show_ship_names: self.show_ship_names,
             show_capture_points: self.show_capture_points,
             show_buildings: self.show_buildings,
-            show_turret_direction: self.show_turret_direction,
+            show_camera_direction: self.show_camera_direction,
             show_hp_bars: self.show_hp_bars,
             show_tracers: self.show_tracers,
             show_torpedoes: self.show_torpedoes,
@@ -256,8 +257,8 @@ show_capture_points = true
 # Show building markers (e.g. shipyard structures)
 show_buildings = true
 
-# Show turret direction indicators
-show_turret_direction = true
+# Show camera/look direction indicators
+show_camera_direction = true
 
 # Show health bars below ship icons
 show_hp_bars = true
@@ -337,8 +338,8 @@ include_pre_battle = false
         if overrides.no_buildings {
             self.show_buildings = false;
         }
-        if overrides.no_turret_direction {
-            self.show_turret_direction = false;
+        if overrides.no_camera_direction {
+            self.show_camera_direction = false;
         }
         if overrides.no_armament {
             self.show_armament = false;

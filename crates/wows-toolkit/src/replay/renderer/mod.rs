@@ -415,7 +415,7 @@ pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
         show_capture_points: saved.show_capture_points,
         show_buildings: saved.show_buildings,
         show_weather: saved.show_buildings, // TODO: add show_weather to SavedRenderOptions
-        show_turret_direction: saved.show_turret_direction,
+        show_camera_direction: saved.show_camera_direction,
         show_consumables: saved.show_consumables,
         show_armament: saved.show_armament,
         show_trails: saved.show_trails,
@@ -470,7 +470,7 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_ship_names: opts.show_ship_names,
         show_capture_points: opts.show_capture_points,
         show_buildings: opts.show_buildings,
-        show_turret_direction: opts.show_turret_direction,
+        show_camera_direction: opts.show_camera_direction,
         show_consumables: opts.show_consumables,
         show_dead_ships: false,
         show_dead_ship_names: opts.show_dead_ship_names,
@@ -1345,7 +1345,7 @@ impl ReplayRendererViewer {
                                     state.options.show_ship_names = opts.show_ship_names;
                                     state.options.show_capture_points = opts.show_capture_points;
                                     state.options.show_buildings = opts.show_buildings;
-                                    state.options.show_turret_direction = opts.show_turret_direction;
+                                    state.options.show_camera_direction = opts.show_camera_direction;
                                     state.options.show_consumables = opts.show_consumables;
                                     state.options.show_armament = opts.show_armament;
                                     state.options.show_trails = opts.show_trails;
@@ -3002,7 +3002,7 @@ impl ReplayRendererViewer {
                                                 changed |=
                                                     ui.checkbox(&mut opts.show_ship_names, t!("ui.renderer.settings.ship_names")).changed();
                                                 changed |= ui
-                                                    .checkbox(&mut opts.show_turret_direction, t!("ui.renderer.settings.turret_direction"))
+                                                    .checkbox(&mut opts.show_camera_direction, t!("ui.renderer.settings.camera_direction"))
                                                     .changed();
                                             });
 

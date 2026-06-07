@@ -1045,7 +1045,7 @@ pub fn draw_command_to_shapes(
             }
         }
 
-        DrawCommand::TurretDirection { pos, yaw, color, length, .. } => {
+        DrawCommand::CameraDirection { pos, yaw, color, length, .. } => {
             let start = transform.minimap_to_screen(pos);
             let dx = *length as f32 * yaw.cos();
             let dy = -*length as f32 * yaw.sin();

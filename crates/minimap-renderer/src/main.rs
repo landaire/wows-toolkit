@@ -101,9 +101,9 @@ struct Args {
     #[arg(long)]
     no_buildings: bool,
 
-    /// Hide turret direction indicators
-    #[arg(long)]
-    no_turret_direction: bool,
+    /// Hide camera/look direction indicators
+    #[arg(long, alias = "no-turret-direction")]
+    no_camera_direction: bool,
 
     /// Hide selected armament/ammo type below ship icons
     #[arg(long)]
@@ -360,7 +360,7 @@ fn main() -> Result<(), Report> {
         no_ship_names: args.no_ship_names,
         no_capture_points: args.no_capture_points,
         no_buildings: args.no_buildings,
-        no_turret_direction: args.no_turret_direction,
+        no_camera_direction: args.no_camera_direction,
         no_armament: args.no_armament,
         no_kill_feed: args.no_kill_feed,
         no_chat: args.no_chat,

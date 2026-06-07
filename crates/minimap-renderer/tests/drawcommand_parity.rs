@@ -157,9 +157,9 @@ fn normalize(cmd: &DrawCommand) -> String {
                 round2(*progress)
             )
         }
-        DrawCommand::TurretDirection { entity_id, pos, yaw, color, length } => {
+        DrawCommand::CameraDirection { entity_id, pos, yaw, color, length } => {
             format!(
-                "TurretDirection eid={entity_id:?} pos={} yaw={:.3} color={color:?} len={length}",
+                "CameraDirection eid={entity_id:?} pos={} yaw={:.3} color={color:?} len={length}",
                 fmt_pos(*pos),
                 round2(*yaw)
             )

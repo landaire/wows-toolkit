@@ -1940,7 +1940,7 @@ impl RenderTarget for ImageTarget {
                     &self.fonts,
                 );
             }
-            DrawCommand::TurretDirection { pos, yaw, color, length, .. } => {
+            DrawCommand::CameraDirection { pos, yaw, color, length, .. } => {
                 let x = pos.x + x_off;
                 let y = pos.y + y_off;
                 let dx = *length as f32 * yaw.cos();

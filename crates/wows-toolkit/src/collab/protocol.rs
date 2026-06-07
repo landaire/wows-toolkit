@@ -14,7 +14,7 @@ pub fn collab_render_options_from_saved(s: &crate::data::settings::SavedRenderOp
         show_ship_names: s.show_ship_names,
         show_capture_points: s.show_capture_points,
         show_buildings: s.show_buildings,
-        show_turret_direction: s.show_turret_direction,
+        show_camera_direction: s.show_camera_direction,
         show_consumables: s.show_consumables,
         show_dead_ships: s.show_dead_ships,
         show_dead_ship_names: s.show_dead_ship_names,
@@ -55,7 +55,7 @@ pub fn collab_render_options_from_render_options(
         show_ship_names: opts.show_ship_names,
         show_capture_points: opts.show_capture_points,
         show_buildings: opts.show_buildings,
-        show_turret_direction: opts.show_turret_direction,
+        show_camera_direction: opts.show_camera_direction,
         show_consumables: opts.show_consumables,
         show_dead_ships,
         show_dead_ship_names: opts.show_dead_ship_names,
@@ -100,7 +100,7 @@ mod tests {
         assert!(!opts.show_ship_names);
         assert!(!opts.show_capture_points);
         assert!(!opts.show_buildings);
-        assert!(!opts.show_turret_direction);
+        assert!(!opts.show_camera_direction);
         assert!(!opts.show_consumables);
         assert!(!opts.show_dead_ships);
         assert!(!opts.show_dead_ship_names);
@@ -154,7 +154,7 @@ mod tests {
             DisplayOptionField::ShowShipNames,
             DisplayOptionField::ShowCapturePoints,
             DisplayOptionField::ShowBuildings,
-            DisplayOptionField::ShowTurretDirection,
+            DisplayOptionField::ShowCameraDirection,
             DisplayOptionField::ShowConsumables,
             DisplayOptionField::ShowDeadShips,
             DisplayOptionField::ShowDeadShipNames,

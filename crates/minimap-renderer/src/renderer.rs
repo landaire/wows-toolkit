@@ -355,6 +355,29 @@ impl<'a> MinimapRenderer<'a> {
         interpolate_track(track, render_clock)
     }
 
+    /// Resolve a ship's minimap pixel position the same way the ship icon is
+    /// drawn: interpolated when a render clock is set, else the latest discrete
+    /// world position, else the quantized minimap position.
+    fn resolve_ship_px(
+        &self,
+        entity_id: EntityId,
+        map_info: &map_data::MapInfo,
+        ship_positions: &HashMap<EntityId, &wows_battle_world::components::Transform3d>,
+        minimap_positions: &HashMap<EntityId, &wows_battle_world::components::MinimapPlacement>,
+    ) -> Option<map_data::MinimapPos> {
+        match self.render_clock.and_then(|rc| self.interpolated_pos(entity_id, rc)) {
+            Some(SampledPos::World(p)) => Some(map_info.world_to_minimap(p, MINIMAP_SIZE)),
+            Some(SampledPos::Minimap(n)) => Some(map_info.normalized_to_minimap(&n, MINIMAP_SIZE)),
+            None => {
+                if let Some(w) = ship_positions.get(&entity_id) {
+                    Some(map_info.world_to_minimap(w.pos, MINIMAP_SIZE))
+                } else {
+                    minimap_positions.get(&entity_id).map(|mm| map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE))
+                }
+            }
+        }
+    }
+
     /// Mark whether this renderer is driving a merged session (primary plus
     /// one or more alt perspectives). Call before the first frame; affects
     /// whether enemy ship icons get the spotted outline.
@@ -1329,18 +1352,9 @@ impl<'a> MinimapRenderer<'a> {
             if detected {
                 let yaw = minimap_yaw.or(world_yaw).unwrap_or(0.0);
                 if let Some(mm) = minimap {
-                    // Smooth motion between packets: interpolate from the shared
-                    // timeline when a render clock is set. Each sample carries its
-                    // coordinate space so we project with the matching transform;
-                    // fall back to the latest discrete position otherwise.
-                    let px = match self.render_clock.and_then(|rc| self.interpolated_pos(*entity_id, rc)) {
-                        Some(SampledPos::World(p)) => map_info.world_to_minimap(p, MINIMAP_SIZE),
-                        Some(SampledPos::Minimap(n)) => map_info.normalized_to_minimap(&n, MINIMAP_SIZE),
-                        None => match world {
-                            Some(w) => map_info.world_to_minimap(w.pos, MINIMAP_SIZE),
-                            None => map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE),
-                        },
-                    };
+                    let px = self
+                        .resolve_ship_px(*entity_id, &map_info, &ship_positions, &minimap_positions)
+                        .unwrap_or_else(|| map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE));
                     let speed_raw = controller.vehicle_props(*entity_id).map(|p| p.server_speed_raw()).unwrap_or(0);
                     self.record_position(*entity_id, px, clock, speed_raw);
                     commands.push(DrawCommand::Ship {
@@ -1398,8 +1412,8 @@ impl<'a> MinimapRenderer<'a> {
             }
         }
 
-        // 6. Turret direction indicators (from targetLocalPos EntityProperty)
-        if self.options.show_turret_direction {
+        // 6. Camera/look direction indicators (from targetLocalPos EntityProperty)
+        if self.options.show_camera_direction {
             let target_yaws = controller.target_yaws();
             for (entity_id, &world_yaw) in &target_yaws {
                 // Skip dead ships
@@ -1413,10 +1427,7 @@ impl<'a> MinimapRenderer<'a> {
                 if !detected {
                     continue;
                 }
-                // Need a position for this ship
-                let px = if let Some(mm) = minimap_positions.get(entity_id) {
-                    map_info.normalized_to_minimap(&mm.pos, MINIMAP_SIZE)
-                } else {
+                let Some(px) = self.resolve_ship_px(*entity_id, &map_info, &ship_positions, &minimap_positions) else {
                     continue;
                 };
                 // targetLocalPos yaw is compass bearing (0=north, CW positive).
@@ -1424,7 +1435,7 @@ impl<'a> MinimapRenderer<'a> {
                 let screen_yaw = std::f32::consts::FRAC_PI_2 - world_yaw;
                 let relation = self.player_relations.get(entity_id).copied().unwrap_or(Relation::new(2));
                 let color = ship_color_rgb(relation, self.division_mates.contains(entity_id));
-                commands.push(DrawCommand::TurretDirection {
+                commands.push(DrawCommand::CameraDirection {
                     entity_id: *entity_id,
                     pos: px,
                     yaw: screen_yaw,
