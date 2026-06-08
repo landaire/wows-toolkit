@@ -319,6 +319,11 @@ pub fn draw_command_to_shapes(
             });
         }
 
+        DrawCommand::ShotTracerTip { at, color } => {
+            let p = transform.minimap_to_screen(at);
+            shapes.push(Shape::circle_filled(p, transform.scale_distance(2.0), color_from_rgb(*color)));
+        }
+
         DrawCommand::Torpedo { pos, color } => {
             let center = transform.minimap_to_screen(pos);
             shapes.push(Shape::circle_filled(center, transform.scale_distance(2.0), color_from_rgb(*color)));

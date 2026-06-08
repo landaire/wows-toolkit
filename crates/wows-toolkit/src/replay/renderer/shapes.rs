@@ -44,6 +44,7 @@ pub(super) use wt_collab_egui::draw_commands::color_from_rgb;
 pub(super) fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_ships: bool) -> bool {
     match cmd {
         DrawCommand::ShotTracer { .. } => opts.show_tracers,
+        DrawCommand::ShotTracerTip { .. } => opts.show_tracers,
         DrawCommand::Torpedo { .. } => opts.show_torpedoes,
         DrawCommand::Smoke { .. } => opts.show_smoke,
         DrawCommand::Ship { .. } => true, // ships always drawn; name visibility handled below

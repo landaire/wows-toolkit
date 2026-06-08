@@ -308,6 +308,8 @@ pub struct DamageBreakdownEntry {
 pub enum DrawCommand {
     /// Artillery tracer line segment
     ShotTracer { from: MinimapPos, to: MinimapPos, color: [u8; 3] },
+    /// Ammo-colored dot at a shell tracer's leading point (the shell tip)
+    ShotTracerTip { at: MinimapPos, color: [u8; 3] },
     /// Torpedo dot
     Torpedo { pos: MinimapPos, color: [u8; 3] },
     /// Smoke puff circle (alpha blended)

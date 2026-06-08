@@ -99,6 +99,9 @@ fn normalize(cmd: &DrawCommand) -> String {
         DrawCommand::ShotTracer { from, to, color } => {
             format!("ShotTracer from={} to={} color={color:?}", fmt_pos(*from), fmt_pos(*to))
         }
+        DrawCommand::ShotTracerTip { at, color } => {
+            format!("ShotTracerTip at={} color={color:?}", fmt_pos(*at))
+        }
         DrawCommand::Torpedo { pos, color } => {
             format!("Torpedo pos={} color={color:?}", fmt_pos(*pos))
         }
