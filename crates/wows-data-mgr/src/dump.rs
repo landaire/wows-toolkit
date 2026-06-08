@@ -193,7 +193,7 @@ pub fn dump_renderer_data(
     #[cfg(feature = "constants")]
     match crate::constants::ConstantsFetcher::new() {
         Ok(fetcher) => {
-            write_constants_for_build(&output_dir, build, &fetcher);
+            write_constants_for_build(&output_dir, build, Some(version_str), &fetcher);
         }
         Err(e) => {
             tracing::warn!("Could not initialize constants fetcher for build {build}: {e:?}");
@@ -695,7 +695,7 @@ pub fn refresh_derived(output_base: &Path, only_build: Option<u32>) -> Result<()
 
         #[cfg(feature = "constants")]
         let constants_added = if let Some(fetcher) = constants_fetcher.as_ref() {
-            update_constants_if_missing(&build_dir, entry.build, fetcher)
+            update_constants_if_missing(&build_dir, entry.build, Some(entry.version.as_str()), fetcher)
         } else {
             false
         };
@@ -721,8 +721,13 @@ pub fn refresh_derived(output_base: &Path, only_build: Option<u32>) -> Result<()
 /// build. Logs a warning and leaves the build alone when nothing is published
 /// (e.g. very old builds the wows-constants repo doesn't cover).
 #[cfg(feature = "constants")]
-fn write_constants_for_build(build_dir: &Path, build: u32, fetcher: &crate::constants::ConstantsFetcher) -> bool {
-    let Some((data, actual_build)) = fetcher.fetch(build) else {
+fn write_constants_for_build(
+    build_dir: &Path,
+    build: u32,
+    version: Option<&str>,
+    fetcher: &crate::constants::ConstantsFetcher,
+) -> bool {
+    let Some((data, actual_build)) = fetcher.fetch(build, version) else {
         tracing::warn!("No upstream constants available for build {build}");
         return false;
     };
@@ -748,11 +753,16 @@ fn write_constants_for_build(build_dir: &Path, build: u32, fetcher: &crate::cons
 /// builds don't change upstream, so leaving existing files alone keeps repeat
 /// refreshes idempotent and fast.
 #[cfg(feature = "constants")]
-fn update_constants_if_missing(build_dir: &Path, build: u32, fetcher: &crate::constants::ConstantsFetcher) -> bool {
+fn update_constants_if_missing(
+    build_dir: &Path,
+    build: u32,
+    version: Option<&str>,
+    fetcher: &crate::constants::ConstantsFetcher,
+) -> bool {
     if build_dir.join("constants.json").exists() {
         return false;
     }
-    write_constants_for_build(build_dir, build, fetcher)
+    write_constants_for_build(build_dir, build, version, fetcher)
 }
 
 /// Remove content-addressed objects no longer referenced by any build. An
