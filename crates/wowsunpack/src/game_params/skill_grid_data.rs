@@ -73,15 +73,18 @@ pub struct SkillGridSkill {
     pub skill_type: CrewSkillType,
     pub name: Option<String>,
     pub description: Option<String>,
-    pub point_cost: SkillPointCost,
+    /// Cost is `None` when the skill's cost for this ship species is not known
+    /// (event ship species not enumerated by `CrewSkillTiers`); never defaulted.
+    pub point_cost: Option<SkillPointCost>,
     pub learned: bool,
 }
 
 /// A row of the captain skill grid: every skill sharing one point cost.
+/// A row groups skills sharing one point cost, or all cost-unknown skills under `None`.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct SkillGridRow {
-    pub point_cost: SkillPointCost,
+    pub point_cost: Option<SkillPointCost>,
     pub skills: Vec<SkillGridSkill>,
 }
 
@@ -98,18 +101,19 @@ fn group_into_rows(skills: Vec<SkillGridSkill>) -> Vec<SkillGridRow> {
     rows
 }
 
-/// A skill's point cost for a species, or cost 1 for species without an explicit
-/// tier (Auxiliary/event ships) rather than panicking.
-fn point_cost_for_species(skill: &CrewSkill, species: Species) -> SkillPointCost {
+/// A skill's point cost for a species, or `None` for a species with no captain
+/// grid (e.g. event ships) rather than panicking. Avoids
+/// `CrewSkillTiers::get_for_species`, which panics on such species.
+fn point_cost_for_species(skill: &CrewSkill, species: Species) -> Option<SkillPointCost> {
     let tiers = skill.tier();
     match species {
-        Species::AirCarrier => tiers.aircraft_carrier(),
-        Species::Battleship => tiers.battleship(),
-        Species::Cruiser => tiers.cruiser(),
-        Species::Destroyer => tiers.destroyer(),
-        Species::Submarine => tiers.submarine(),
-        Species::Auxiliary => tiers.auxiliary(),
-        _ => SkillPointCost::new(1),
+        Species::AirCarrier => Some(tiers.aircraft_carrier()),
+        Species::Battleship => Some(tiers.battleship()),
+        Species::Cruiser => Some(tiers.cruiser()),
+        Species::Destroyer => Some(tiers.destroyer()),
+        Species::Submarine => Some(tiers.submarine()),
+        Species::Auxiliary => Some(tiers.auxiliary()),
+        _ => None,
     }
 }
 
@@ -145,7 +149,7 @@ pub fn build_skill_grid(
                 skill_type: skill.skill_type(),
                 name: skill.translated_name(metadata, version),
                 description: skill.translated_description(metadata, version),
-                point_cost: SkillPointCost::from_grid_row(slot.tier),
+                point_cost: Some(SkillPointCost::from_grid_row(slot.tier)),
                 learned: learned.contains(&skill.skill_type()),
             });
         }
@@ -1157,16 +1161,16 @@ mod build_skill_grid_tests {
             skill_type: CrewSkillType::new(1),
             name: None,
             description: None,
-            point_cost: SkillPointCost::new(1),
+            point_cost: Some(SkillPointCost::new(1)),
             learned: false,
         };
-        let b = SkillGridSkill { point_cost: SkillPointCost::new(1), ..a.clone() };
-        let c = SkillGridSkill { point_cost: SkillPointCost::new(2), ..a.clone() };
+        let b = SkillGridSkill { point_cost: Some(SkillPointCost::new(1)), ..a.clone() };
+        let c = SkillGridSkill { point_cost: Some(SkillPointCost::new(2)), ..a.clone() };
         let rows = group_into_rows(vec![a, b, c]);
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].point_cost, SkillPointCost::new(1));
+        assert_eq!(rows[0].point_cost, Some(SkillPointCost::new(1)));
         assert_eq!(rows[0].skills.len(), 2);
-        assert_eq!(rows[1].point_cost, SkillPointCost::new(2));
+        assert_eq!(rows[1].point_cost, Some(SkillPointCost::new(2)));
         assert_eq!(rows[1].skills.len(), 1);
     }
 }
