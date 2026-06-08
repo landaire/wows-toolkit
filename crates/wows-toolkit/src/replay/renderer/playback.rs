@@ -1209,7 +1209,7 @@ fn skill_tier_for_species(
         Species::Destroyer => tiers.destroyer(),
         Species::Submarine => tiers.submarine(),
         Species::Auxiliary => tiers.auxiliary(),
-        _ => Default::default(),
+        _ => wowsunpack::game_params::types::SkillPointCost::new(0),
     }
     .get()
 }

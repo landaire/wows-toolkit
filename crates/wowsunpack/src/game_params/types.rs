@@ -90,7 +90,8 @@ impl SkillPointCost {
         Self(cost)
     }
 
-    /// Convert a 0-based grid row index to its 1-based point cost.
+    /// Convert a 0-based grid row index to its 1-based point cost. Rows are 0-3
+    /// in real data; `row` must be < 255.
     pub fn from_grid_row(row: u8) -> Self {
         Self(row + 1)
     }
