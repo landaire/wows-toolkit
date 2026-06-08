@@ -18,4 +18,5 @@ pub use scan::EntityTrack;
 pub use scan::PositionTimeline;
 pub use scan::SalvoFlightTimes;
 pub use scan::SampledPos;
+pub use view::ActiveSecondaryShot;
 pub use world::BattleWorld;
