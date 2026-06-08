@@ -922,6 +922,7 @@ impl HullUpgradeConfig {
 /// `semi_axis_h` the radius along the beam (model X), `semi_axis_v` along the length (model Z).
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct CameraTrajectory {
     pub pos_center: [f32; 3],
     pub semi_axis_h: f32,
@@ -1033,6 +1034,9 @@ pub struct Vehicle {
     hit_locations: Option<HashMap<String, HitLocation>>,
     #[cfg_attr(feature = "serde", serde(default))]
     permoflages: Vec<String>,
+    /// Camera orbit trajectories (per mode) from the ship `Cameras` component.
+    #[cfg_attr(feature = "serde", serde(default))]
+    camera_trajectories: Vec<(String, CameraTrajectory)>,
 }
 
 impl Vehicle {
@@ -1070,6 +1074,10 @@ impl Vehicle {
 
     pub fn permoflages(&self) -> &[String] {
         &self.permoflages
+    }
+
+    pub fn camera_trajectories(&self) -> &[(String, CameraTrajectory)] {
+        &self.camera_trajectories
     }
 
     /// Look up a specific hull upgrade config by name.

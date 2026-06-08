@@ -1127,6 +1127,8 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
         })
         .unwrap_or_default();
 
+    let camera_trajectories = read_camera_trajectories(ship_data);
+
     Vehicle::builder()
         .level(level)
         .group(group)
@@ -1137,6 +1139,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
         .maybe_armor(armor)
         .maybe_hit_locations(hit_locations)
         .permoflages(permoflages)
+        .camera_trajectories(camera_trajectories)
         .build()
 }
 
