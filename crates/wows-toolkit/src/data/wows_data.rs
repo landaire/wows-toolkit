@@ -15,6 +15,7 @@ use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::CrewSkillName;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
 
@@ -414,6 +415,9 @@ pub struct WorldOfWarshipsData {
     /// (e.g. `"PCY009_CrashCrewPremium"`).
     pub consumable_icons: HashMap<String, Arc<GameAsset>>,
 
+    /// Captain-skill icons, lazy-loaded and cached. Keyed by skill name.
+    pub crew_skill_icons: HashMap<CrewSkillName, Arc<GameAsset>>,
+
     /// Cached game constants loaded from game files.
     pub game_constants: Arc<GameConstants>,
 
@@ -493,6 +497,23 @@ impl WorldOfWarshipsData {
         Some(asset)
     }
 
+    /// Look up a cached crew-skill icon (read-only, no loading).
+    pub fn cached_crew_skill_icon(&self, name: &CrewSkillName) -> Option<Arc<GameAsset>> {
+        self.crew_skill_icons.get(name).cloned()
+    }
+
+    /// Load and cache a crew-skill icon by skill name.
+    /// Only call this on a cache miss (when `cached_crew_skill_icon` returns None).
+    pub fn load_crew_skill_icon(&mut self, name: &CrewSkillName) -> Option<Arc<GameAsset>> {
+        if let Some(icon) = self.crew_skill_icons.get(name) {
+            return Some(icon.clone());
+        }
+
+        let asset = self.load_gui_asset(wowsunpack::game_assets::GuiAsset::CrewSkill { name })?;
+        self.crew_skill_icons.insert(name.clone(), asset.clone());
+        Some(asset)
+    }
+
     /// Rebuild this data from scratch after constants have changed.
     /// Retains: build_dir, replays_dir, game_metadata, pkg_loader, filtered_files, file_tree,
     /// full_version, patch_version, build_number.
@@ -537,6 +558,7 @@ impl WorldOfWarshipsData {
         self.subribbon_icons = new_subribbon_icons;
         self.achievement_icons = HashMap::new();
         self.consumable_icons = HashMap::new();
+        self.crew_skill_icons = HashMap::new();
         self.game_constants = Arc::new(new_game_constants);
         *self.replay_constants.write() = new_replay_constants;
         self.replay_constants_exact_match = exact_match;
