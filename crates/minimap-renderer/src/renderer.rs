@@ -6,6 +6,7 @@ use image::RgbaImage;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_params::types::PlaneCategory;
@@ -161,6 +162,17 @@ fn consumable_radius_color(consumable: &Recognized<Consumable>, is_friendly: boo
         (Some(Consumable::SubmarineSurveillance), false) => [160, 30, 60], // Dark crimson
         (_, true) => TEAM0_COLOR,
         (_, false) => TEAM1_COLOR,
+    }
+}
+
+/// Color for a shell ammo type. Single source of truth shared by the ship-name
+/// armament color and the shell-tracer tip so they cannot drift apart.
+fn ammo_type_color(ammo: &AmmoType) -> [u8; 3] {
+    match ammo {
+        AmmoType::AP => [140, 200, 255],
+        AmmoType::HE => [255, 180, 80],
+        AmmoType::SAP => [255, 100, 100],
+        AmmoType::Unknown(_) => [140, 200, 255],
     }
 }
 
@@ -703,12 +715,8 @@ impl<'a> MinimapRenderer<'a> {
         }
     }
 
-    /// Get the armament/ammo label for a ship based on its selected weapon and ammo.
     /// Get the armament color for a ship based on its selected weapon/ammo.
     fn get_armament_color(&self, entity_id: &EntityId, controller: &BattleView<'_>) -> Option<[u8; 3]> {
-        const COLOR_AP: [u8; 3] = [140, 200, 255]; // light blue
-        const COLOR_HE: [u8; 3] = [255, 180, 80]; // orange
-        const COLOR_SAP: [u8; 3] = [255, 100, 100]; // pinkish red
         const COLOR_TORP: [u8; 3] = [100, 255, 160]; // green
         const COLOR_PLANES: [u8; 3] = [200, 160, 255]; // lavender
         const COLOR_SONAR: [u8; 3] = [100, 220, 255]; // cyan
@@ -721,18 +729,12 @@ impl<'a> MinimapRenderer<'a> {
                 let ammo_param_id = selected_ammo.get(entity_id)?;
                 let param = GameParamProvider::game_param_by_id(self.game_params, *ammo_param_id)?;
                 let projectile = param.projectile()?;
-                let color = match projectile.ammo_type() {
-                    "AP" => COLOR_AP,
-                    "HE" => COLOR_HE,
-                    "CS" => COLOR_SAP,
-                    _ => COLOR_AP,
-                };
-                Some(color)
+                Some(ammo_type_color(&AmmoType::from_game_str(projectile.ammo_type())))
             }
             WeaponType::Torpedoes => Some(COLOR_TORP),
             WeaponType::Planes => Some(COLOR_PLANES),
             WeaponType::Pinger => Some(COLOR_SONAR),
-            WeaponType::Secondaries => Some(COLOR_HE),
+            WeaponType::Secondaries => Some(ammo_type_color(&AmmoType::HE)),
         }
     }
 
@@ -2823,5 +2825,19 @@ mod test {
             Some(SampledPos::Minimap(n)) => assert!((n.x - 0.5).abs() < 1e-4),
             other => panic!("expected minimap fallback, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod ammo_color_tests {
+    use super::ammo_type_color;
+    use wowsunpack::game_params::types::AmmoType;
+
+    #[test]
+    fn ammo_colors_match_known_values() {
+        assert_eq!(ammo_type_color(&AmmoType::AP), [140, 200, 255]);
+        assert_eq!(ammo_type_color(&AmmoType::HE), [255, 180, 80]);
+        assert_eq!(ammo_type_color(&AmmoType::SAP), [255, 100, 100]);
+        assert_eq!(ammo_type_color(&AmmoType::Unknown("x".into())), [140, 200, 255]);
     }
 }
