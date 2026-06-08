@@ -14,9 +14,9 @@ pub mod world;
 
 mod ingest;
 
+pub use resources::SecondaryShot;
 pub use scan::EntityTrack;
 pub use scan::PositionTimeline;
 pub use scan::SalvoFlightTimes;
 pub use scan::SampledPos;
-pub use resources::SecondaryShot;
 pub use world::BattleWorld;

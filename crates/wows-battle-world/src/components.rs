@@ -253,4 +253,3 @@ pub enum ProjectileState {
     Artillery { salvo: ArtillerySalvo, fired_at: GameClock, avatar_id: AvatarId },
     Torpedo { torpedo: TorpedoData, launched_at: GameClock, updated_at: GameClock, avatar_id: AvatarId },
 }
-
