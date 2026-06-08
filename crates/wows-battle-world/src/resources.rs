@@ -101,6 +101,13 @@ pub struct ActiveShotOrder(pub Vec<Entity>);
 #[derive(Resource, Debug, Clone, Default)]
 pub struct ActiveTorpedoOrder(pub Vec<Entity>);
 
+/// Ordered list of in-flight secondary (ATBA) shot entities.
+///
+/// Independent of ActiveShotOrder/ActiveTorpedoOrder: secondaries are a
+/// visualization-only stream with no salvo matching or hit resolution.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct ActiveSecondaryShotOrder(pub Vec<Entity>);
+
 /// Self-player ribbon counts and cumulative damage stats.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct SelfStats {
