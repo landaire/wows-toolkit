@@ -651,6 +651,17 @@ fn extract_mounts(ship_data: &BTreeMap<HashableValue, Value>, component_name: &s
         .collect()
 }
 
+/// Parse the trailing decimal digits of a hardpoint name as a sort key.
+/// Mounts without a trailing number sort last (u32::MAX).
+fn hardpoint_number(key: &str) -> u32 {
+    let digits: String = key.chars().rev().take_while(|c| c.is_ascii_digit()).collect::<String>();
+    if digits.is_empty() {
+        return u32::MAX;
+    }
+    let reversed: String = digits.chars().rev().collect();
+    reversed.parse().unwrap_or(u32::MAX)
+}
+
 fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
     let ability_data = game_param_to_type!(ship_data, keys::SHIP_ABILITIES, Option<HashMap<(), ()>>);
     let abilities: Option<Vec<Vec<(String, String)>>> = ability_data.map(|abilities_data| {
@@ -794,6 +805,8 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
     let mut secondary_battery_ammo = HashSet::new();
     let mut max_main_battery_m: Option<Meters> = None;
     let mut max_secondary_battery_m: Option<Meters> = None;
+    // (hardpoint_key, ammo_name); populated from the first atba-bearing hull only
+    let mut secondary_guns_raw: Vec<(String, String)> = Vec::new();
 
     for (_upgrade_name_val, upgrade_value) in upgrade_data.inner().iter() {
         let Some(upgrade_dict) = upgrade_value.dict_or_object_dict() else {
@@ -855,7 +868,8 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
                     _ => m,
                 });
             }
-            for (_mount_key, mount_val) in atba_data.inner().iter() {
+            let capture_per_gun = secondary_guns_raw.is_empty();
+            for (mount_key, mount_val) in atba_data.inner().iter() {
                 let Some(mount_dict) = mount_val.dict_or_object_dict() else {
                     continue;
                 };
@@ -872,6 +886,22 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
                     Value::Tuple(t) => t.inner().iter().for_each(&mut insert_ammo),
                     Value::List(l) => l.inner().iter().for_each(&mut insert_ammo),
                     _ => {}
+                }
+                if capture_per_gun {
+                    let first_ammo = match ammo_val {
+                        Value::Tuple(t) => {
+                            t.inner().iter().find_map(|i| i.string_ref().map(|s| s.inner().clone()))
+                        }
+                        Value::List(l) => {
+                            l.inner().iter().find_map(|i| i.string_ref().map(|s| s.inner().clone()))
+                        }
+                        _ => None,
+                    };
+                    if let (Some(name), Some(key_str)) =
+                        (first_ammo, mount_key.string_ref().map(|s| s.inner().clone()))
+                    {
+                        secondary_guns_raw.push((key_str, name));
+                    }
                 }
             }
         }
@@ -924,6 +954,9 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
         .and_then(|(_, config)| config.component_names.get(&keys::ComponentType::Hull).cloned());
     let hull_comp_key = first_hull_comp_name.as_deref().unwrap_or(keys::A_HULL);
 
+    secondary_guns_raw.sort_by_key(|(k, _)| hardpoint_number(k));
+    let secondary_guns: Vec<String> = secondary_guns_raw.into_iter().map(|(_, name)| name).collect();
+
     let config_data = if hull_upgrades.is_empty()
         && torpedo_ammo.is_empty()
         && main_battery_ammo.is_empty()
@@ -940,6 +973,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             torpedo_ammo,
             main_battery_ammo,
             secondary_battery_ammo,
+            secondary_guns,
         })
     };
 

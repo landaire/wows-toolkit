@@ -8,6 +8,7 @@ use crate::Rc;
 use crate::data::ResourceLoader;
 use crate::data::Version;
 use crate::game_types::GameParamId;
+use crate::game_types::GunId;
 
 /// Friendly game version (major, minor, patch) at which the captain-skill rework
 /// landed. Before this, a captain's learned skills are a single `learnedSkills`
@@ -825,6 +826,11 @@ pub struct ShipConfigData {
     pub main_battery_ammo: HashSet<String>,
     /// Names of secondary (ATBA) ammo GameParams across all hull upgrades.
     pub secondary_battery_ammo: HashSet<String>,
+    /// Secondary (ATBA) ammo GameParam name per gun, ordered by hardpoint number
+    /// (HP_GGS_<n>). Index == wire gunID under the assumption that the client's
+    /// gun list follows hardpoint numeric order. Used for per-gun dot pacing;
+    /// empty string marks a mount with no resolvable ammo so indices stay aligned.
+    pub secondary_guns: Vec<String>,
 }
 
 /// Resolved ship range values in real-world units.
@@ -1973,6 +1979,27 @@ pub fn secondary_ammo_param<P: GameParamProvider + ?Sized>(
     let ship_param = provider.game_param_by_id(ship)?;
     let ammo_name = ship_param.vehicle()?.config_data()?.secondary_battery_ammo.iter().min()?;
     Some(provider.game_param_by_name(ammo_name)?.id())
+}
+
+/// Resolve the secondary ammo projectile GameParamId for a specific gun.
+///
+/// `gun` is the wire gunID; it indexes `secondary_guns`, which is ordered by
+/// hardpoint number under the assumption that the client's gun list follows that
+/// order (the exact order would otherwise need model/visual data). Falls back to
+/// the representative `secondary_ammo_param` when the gun index is out of range
+/// or its ammo name does not resolve.
+pub fn secondary_gun_ammo_param<P: GameParamProvider + ?Sized>(
+    provider: &P,
+    ship: GameParamId,
+    gun: GunId,
+) -> Option<GameParamId> {
+    let ship_param = provider.game_param_by_id(ship)?;
+    let guns = &ship_param.vehicle()?.config_data()?.secondary_guns;
+    let name = guns.get(gun.index()).filter(|n| !n.is_empty());
+    match name.and_then(|n| provider.game_param_by_name(n)) {
+        Some(p) => Some(p.id()),
+        None => secondary_ammo_param(provider, ship),
+    }
 }
 
 #[cfg(test)]
