@@ -14,6 +14,7 @@ use std::io::Read;
 use vfs::VfsPath;
 
 use crate::data::Version;
+use crate::game_params::types::CrewSkillName;
 use crate::game_params::types::Species;
 
 /// Minimap ship-icon state.
@@ -54,6 +55,15 @@ impl Relation {
     }
 }
 
+/// The modern crew-skill icon filename stem for a skill: the snake_case form of
+/// its SkillTypeEnum name. The single home of this conversion so the renderer
+/// (texture-map keys) and the inspector (asset lookup) agree.
+pub fn crew_skill_icon_slug(name: &CrewSkillName) -> String {
+    use convert_case::Case;
+    use convert_case::Casing;
+    name.as_str().to_case(Case::Snake)
+}
+
 /// A GUI asset identified by what it represents, not by its file path.
 #[derive(Clone, Copy, Debug)]
 pub enum GuiAsset<'a> {
@@ -79,6 +89,9 @@ pub enum GuiAsset<'a> {
     ShipSilhouette(&'a str),
     /// Capture-point base flag by team relation.
     CapturePointFlag(Relation),
+    /// Captain-skill icon by skill name. Modern clients use a flat snake_case
+    /// PNG; pre-rework clients keep icon_perk_<Name>.png under big/ or small/.
+    CrewSkill { name: &'a CrewSkillName },
 }
 
 impl GuiAsset<'_> {
@@ -119,6 +132,16 @@ impl GuiAsset<'_> {
             GuiAsset::ShipSilhouette(index) => vec![format!("gui/ships_silhouettes/{index}.png")],
             GuiAsset::CapturePointFlag(rel) => {
                 vec![format!("gui/battle_hud/markers/capture_point/icon_base_{}_flag.png", rel.as_str())]
+            }
+            GuiAsset::CrewSkill { name } => {
+                let slug = crew_skill_icon_slug(name);
+                let internal = name.as_str();
+                vec![
+                    format!("gui/crew_commander/skills/{slug}.png"),
+                    format!("gui/crew_commander/skills/big/icon_perk_{internal}.png"),
+                    format!("gui/crew_commander/skills/small/icon_perk_{internal}.png"),
+                    format!("gui/crew_commander/skills/small/icon_perk_small_{internal}.png"),
+                ]
             }
         }
     }
@@ -230,8 +253,23 @@ impl GuiAssetDir {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game_params::types::CrewSkillName;
 
     const VERSION: Version = Version { major: 15, minor: 0, patch: 0, build: 11791718 };
+
+    #[test]
+    fn crew_skill_icon_slug_is_snake_case() {
+        assert_eq!(crew_skill_icon_slug(&CrewSkillName::from("TriggerSpreading")), "trigger_spreading");
+    }
+
+    #[test]
+    fn crew_skill_candidate_paths_cover_modern_and_prerework() {
+        let paths = GuiAsset::CrewSkill { name: &CrewSkillName::from("HePenetration") }.candidate_paths(Some(&VERSION));
+        assert_eq!(paths[0], "gui/crew_commander/skills/he_penetration.png");
+        assert_eq!(paths[1], "gui/crew_commander/skills/big/icon_perk_HePenetration.png");
+        assert_eq!(paths[2], "gui/crew_commander/skills/small/icon_perk_HePenetration.png");
+        assert_eq!(paths[3], "gui/crew_commander/skills/small/icon_perk_small_HePenetration.png");
+    }
 
     #[test]
     fn self_icon_falls_back_to_generic() {
