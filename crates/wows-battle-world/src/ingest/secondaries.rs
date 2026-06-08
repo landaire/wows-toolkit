@@ -61,7 +61,7 @@ pub fn handle_weapon_fired(
     let cutoff = clock.seconds() - SECONDARY_SHOT_TTL_S;
     let mut active = world.resource_mut::<ActiveSecondaryShots>();
     active.0.retain(|s| s.fired_at.seconds() > cutoff);
-    for (_gun, target) in new_shots {
+    for (gun, target) in new_shots {
         // Dots share the ship-center origin, so guns firing at the same target
         // this clock trace identical paths. Collapsing them (keyed by shooter,
         // target, fired_at) yields the intended single-line look and dedupes a
@@ -69,7 +69,7 @@ pub fn handle_weapon_fired(
         if active.0.iter().any(|s| s.shooter == shooter && s.target == target && s.fired_at == clock) {
             continue;
         }
-        active.0.push(SecondaryShot { shooter, target, fired_at: clock });
+        active.0.push(SecondaryShot { shooter, target, fired_at: clock, gun });
     }
 }
 

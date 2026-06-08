@@ -1251,9 +1251,11 @@ impl<'a> MinimapRenderer<'a> {
                 else {
                     continue;
                 };
-                let Some(ammo_id) =
-                    wowsunpack::game_params::types::secondary_ammo_param(self.game_params, ship_id)
-                else {
+                let Some(ammo_id) = wowsunpack::game_params::types::secondary_gun_ammo_param(
+                    self.game_params,
+                    ship_id,
+                    shot.gun,
+                ) else {
                     continue;
                 };
                 let ammo_param = GameParamProvider::game_param_by_id(self.game_params, ammo_id);
