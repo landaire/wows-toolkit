@@ -29,6 +29,7 @@
 //! ```
 
 pub mod camera;
+pub mod gizmo;
 pub mod picking;
 pub mod renderer;
 pub mod types;
