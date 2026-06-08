@@ -4,6 +4,35 @@ use na::Vector4;
 
 use super::types::Vec3;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Axis {
+    X,
+    Y,
+    Z,
+}
+
+/// Target (azimuth, elevation) for the orthographic view looking along a signed axis.
+/// Top/bottom keep the current azimuth so the spin is purely vertical.
+pub fn ortho_view(axis: Axis, positive: bool, current_azimuth: f32) -> (f32, f32) {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    let lim = FRAC_PI_2 - 0.01;
+    match axis {
+        Axis::Z => (if positive { 0.0 } else { PI }, 0.0),
+        Axis::X => (if positive { FRAC_PI_2 } else { -FRAC_PI_2 }, 0.0),
+        Axis::Y => (current_azimuth, if positive { lim } else { -lim }),
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CameraAnimation {
+    start_az: f32,
+    start_el: f32,
+    target_az: f32,
+    target_el: f32,
+    elapsed: f32,
+    duration: f32,
+}
+
 /// Arcball orbital camera for 3D model inspection.
 #[derive(Clone, Debug)]
 pub struct ArcballCamera {
@@ -21,6 +50,8 @@ pub struct ArcballCamera {
     pub near: f32,
     /// Far clip plane.
     pub far: f32,
+    /// Active snap animation, if any.
+    pub animation: Option<CameraAnimation>,
 }
 
 impl Default for ArcballCamera {
@@ -33,6 +64,7 @@ impl Default for ArcballCamera {
             fov: std::f32::consts::FRAC_PI_4,
             near: 0.1,
             far: 10000.0,
+            animation: None,
         }
     }
 }
@@ -54,12 +86,51 @@ impl ArcballCamera {
             fov,
             near: distance * 0.01,
             far: distance * 100.0,
+            animation: None,
         }
     }
 
     /// Reset camera to frame the given bounding box.
     pub fn reset(&mut self, min: Vec3, max: Vec3) {
         *self = Self::from_bounds(min, max);
+    }
+
+    /// Begin an eased move to (target_az, target_el), keeping target and distance.
+    /// Azimuth target is unwrapped to the shortest path from the current azimuth.
+    pub fn animate_to(&mut self, target_az: f32, target_el: f32, duration: f32) {
+        use std::f32::consts::PI;
+        let mut delta = (target_az - self.azimuth).rem_euclid(2.0 * PI);
+        if delta > PI {
+            delta -= 2.0 * PI;
+        }
+        self.animation = Some(CameraAnimation {
+            start_az: self.azimuth,
+            start_el: self.elevation,
+            target_az: self.azimuth + delta,
+            target_el,
+            elapsed: 0.0,
+            duration: duration.max(1e-3),
+        });
+    }
+
+    /// Advance a running animation by dt seconds. Returns true while still animating.
+    pub fn update_animation(&mut self, dt: f32) -> bool {
+        let Some(anim) = self.animation.as_mut() else {
+            return false;
+        };
+        anim.elapsed += dt;
+        let t = (anim.elapsed / anim.duration).clamp(0.0, 1.0);
+        let e = if t < 0.5 { 4.0 * t * t * t } else { 1.0 - (-2.0 * t + 2.0).powi(3) / 2.0 };
+        self.azimuth = anim.start_az + (anim.target_az - anim.start_az) * e;
+        self.elevation = anim.start_el + (anim.target_el - anim.start_el) * e;
+        let limit = std::f32::consts::FRAC_PI_2 - 0.01;
+        self.elevation = self.elevation.clamp(-limit, limit);
+        if t >= 1.0 {
+            self.animation = None;
+            false
+        } else {
+            true
+        }
     }
 
     /// Camera position in world space.
@@ -88,6 +159,7 @@ impl ArcballCamera {
 
     /// Handle mouse drag for orbiting.
     pub fn orbit(&mut self, delta: egui::Vec2, viewport_size: egui::Vec2) {
+        self.animation = None;
         let sensitivity = 2.0 * std::f32::consts::PI / viewport_size.x.max(1.0);
         self.azimuth -= delta.x * sensitivity;
         self.elevation += delta.y * sensitivity;
@@ -344,4 +416,64 @@ fn perspective(fov_y: f32, aspect: f32, near: f32, far: f32) -> [[f32; 4]; 4] {
 /// Multiply two 4x4 matrices (column-major layout: m[col][row]).
 pub(crate) fn mat4_mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
     na_to_mat4(mat4_to_na(a) * mat4_to_na(b))
+}
+
+#[cfg(test)]
+mod gizmo_anim_tests {
+    use super::*;
+    use std::f32::consts::{PI, FRAC_PI_2};
+
+    fn cam() -> ArcballCamera {
+        ArcballCamera::from_bounds(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0))
+    }
+
+    #[test]
+    fn animate_to_reaches_target_at_end() {
+        let mut c = cam();
+        c.animate_to(PI, 0.0, 0.4);
+        let still = c.update_animation(1.0);
+        assert!(!still);
+        assert!((c.azimuth - PI).abs() < 1e-3, "az={}", c.azimuth);
+        assert!(c.elevation.abs() < 1e-3, "el={}", c.elevation);
+        assert!(c.animation.is_none());
+    }
+
+    #[test]
+    fn animate_midpoint_is_between() {
+        let mut c = cam();
+        c.azimuth = 0.0; c.elevation = 0.0;
+        c.animate_to(FRAC_PI_2, 0.0, 0.4);
+        let still = c.update_animation(0.2);
+        assert!(still);
+        assert!(c.azimuth > 0.05 && c.azimuth < FRAC_PI_2 - 0.05, "az={}", c.azimuth);
+    }
+
+    #[test]
+    fn azimuth_takes_shortest_path() {
+        let mut c = cam();
+        c.azimuth = 0.1;
+        c.animate_to(2.0 * PI - 0.1, 0.0, 0.4);
+        c.update_animation(0.2);
+        let a = c.azimuth.rem_euclid(2.0 * PI);
+        assert!(a < 0.2 || a > 2.0 * PI - 0.2, "az={}", c.azimuth);
+    }
+
+    #[test]
+    fn orbit_cancels_animation() {
+        let mut c = cam();
+        c.animate_to(PI, 0.0, 0.4);
+        c.orbit(egui::Vec2::new(10.0, 0.0), egui::Vec2::new(400.0, 400.0));
+        assert!(c.animation.is_none());
+    }
+
+    #[test]
+    fn ortho_views_are_correct() {
+        let lim = FRAC_PI_2 - 0.01;
+        assert_eq!(ortho_view(Axis::Z, true, 1.23), (0.0, 0.0));
+        assert_eq!(ortho_view(Axis::Z, false, 1.23), (PI, 0.0));
+        assert_eq!(ortho_view(Axis::X, true, 1.23), (FRAC_PI_2, 0.0));
+        assert_eq!(ortho_view(Axis::X, false, 1.23), (-FRAC_PI_2, 0.0));
+        assert_eq!(ortho_view(Axis::Y, true, 1.23), (1.23, lim));
+        assert_eq!(ortho_view(Axis::Y, false, 1.23), (1.23, -lim));
+    }
 }
