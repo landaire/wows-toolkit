@@ -1160,17 +1160,26 @@ impl<'a> MinimapRenderer<'a> {
         if self.options.show_tracers {
             for shot in controller.active_shots() {
                 let owner = shot.salvo.owner_id;
-                let relation = self.player_relations.get(&owner).copied().unwrap_or(Relation::new(2));
+                // Color the salvo by its owner's actual relation. Skip rather than guess
+                // when the owner is not in the arena roster -- a wrong-colored tracer is
+                // worse than none.
+                let Some(relation) = self.player_relations.get(&owner).copied() else {
+                    continue;
+                };
                 let color = ship_color_rgb(relation, self.division_mates.contains(&owner));
                 // Resolve the salvo's projectile once (all shots share it): caliber sets
                 // the tracer length (larger guns draw longer) and ammo type tints the tip.
                 let salvo_param = GameParamProvider::game_param_by_id(self.game_params, shot.salvo.params_id);
                 let projectile = salvo_param.as_ref().and_then(|p| p.projectile());
-                let caliber_ratio = projectile
-                    .and_then(|p| p.bullet_diametr())
-                    .map(|d| ((d * 1000.0) / MAX_TRACER_CALIBER_MM).clamp(MIN_TRACER_LEN_RATIO, 1.0))
-                    .unwrap_or(1.0);
-                let tracer_len = TRACER_LEN * caliber_ratio;
+                let tracer_len = match projectile.and_then(|p| p.bullet_diametr()) {
+                    Some(diametr_m) => {
+                        let ratio = ((diametr_m * 1000.0) / MAX_TRACER_CALIBER_MM).clamp(MIN_TRACER_LEN_RATIO, 1.0);
+                        TRACER_LEN * ratio
+                    }
+                    // Caliber genuinely unavailable: keep the full-length tracer so the
+                    // salvo stays visible rather than shrinking to the floor.
+                    None => TRACER_LEN,
+                };
                 let tip_color = if self.options.show_armament {
                     projectile.map(|p| ammo_type_color(&AmmoType::from_game_str(p.ammo_type())))
                 } else {
@@ -1218,8 +1227,13 @@ impl<'a> MinimapRenderer<'a> {
                 if world.x.abs() > half_space || world.z.abs() > half_space {
                     continue;
                 }
-                let relation = self.player_relations.get(&torp.torpedo.owner_id).copied().unwrap_or(Relation::new(2));
-                let is_div = self.division_mates.contains(&torp.torpedo.owner_id);
+                let owner = torp.torpedo.owner_id;
+                // Color by the owner's actual relation; skip rather than guess when the
+                // owner is not in the arena roster.
+                let Some(relation) = self.player_relations.get(&owner).copied() else {
+                    continue;
+                };
+                let is_div = self.division_mates.contains(&owner);
                 let color = ship_color_rgb(relation, is_div);
                 commands.push(DrawCommand::Torpedo { pos: map_info.world_to_minimap(world, MINIMAP_SIZE), color });
             }
