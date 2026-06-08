@@ -628,8 +628,6 @@ pub struct SkillDisplay {
     pub name: String,
     pub description: String,
     pub tier: Option<u8>,
-    /// In-game ordering key within a tier row.
-    pub skill_type: u32,
     /// True when the player actually took this skill (vs shown for context).
     pub learned: bool,
 }

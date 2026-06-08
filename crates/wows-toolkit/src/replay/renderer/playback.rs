@@ -1125,7 +1125,6 @@ fn build_display_from_resolved(
                         name: s.name.unwrap_or_else(|| s.internal_name.to_string()),
                         description: s.description.unwrap_or_default(),
                         tier: s.point_cost.map(|c| c.get()),
-                        skill_type: s.skill_type.raw(),
                         learned: s.learned,
                     })
                     .collect(),
