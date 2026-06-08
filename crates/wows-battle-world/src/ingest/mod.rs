@@ -127,6 +127,7 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::ArtilleryShots { avatar_id, salvos } => {
             projectiles::handle_artillery_shots(avatar_id, salvos, clock, world, options.shot_tracking);
         }
+        DecodedPacketPayload::WeaponFired { .. } => {}
         DecodedPacketPayload::TorpedoesReceived { avatar_id, torpedoes } => {
             projectiles::handle_torpedoes_received(avatar_id, torpedoes, clock, world);
         }

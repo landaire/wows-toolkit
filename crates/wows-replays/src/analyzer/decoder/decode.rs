@@ -8,6 +8,7 @@ use crate::types::AvatarId;
 use crate::types::Direction;
 use crate::types::EntityId;
 use crate::types::GameParamId;
+use crate::types::GunBits;
 use crate::types::NormalizedPos;
 use crate::types::PlaneId;
 use crate::types::ShotId;
@@ -37,6 +38,7 @@ use wowsunpack::game_params::convert::pickle_to_json;
 use wowsunpack::game_params::types::BigWorldDistance;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
+use wowsunpack::game_types::WeaponType;
 use wowsunpack::rpc::typedefs::ArgValue;
 use wowsunpack::unpack_rpc_args;
 
@@ -1187,6 +1189,16 @@ pub enum DecodedPacketPayload<'replay, 'argtype, 'rawpacket> {
         avatar_id: AvatarId,
         salvos: Vec<ArtillerySalvo>,
     },
+    /// A ship fired a weapon group via shootOnClient / shootATBAGuns.
+    ///
+    /// `weapon_type` is decoded for shootOnClient and always Secondaries for
+    /// shootATBAGuns. `gun_bits` is the raw per-gun fire mask; expansion to gun
+    /// indices and target lookup happen in ingest where atbaTargets is known.
+    WeaponFired {
+        entity: EntityId,
+        weapon_type: Recognized<WeaponType, u32>,
+        gun_bits: GunBits,
+    },
     /// Torpedoes launched
     TorpedoesReceived {
         avatar_id: AvatarId,
@@ -2188,6 +2200,17 @@ where
                 });
             }
             DecodedPacketPayload::ArtilleryShots { avatar_id: AvatarId::from(*entity_id), salvos }
+        } else if *method == "shootOnClient" {
+            let weapon_type = WeaponType::from_raw(args.first().and_then(ArgValue::as_u32).unwrap_or(0));
+            let gun_bits = GunBits::from(args.get(1).and_then(ArgValue::as_u32).unwrap_or(0));
+            DecodedPacketPayload::WeaponFired { entity: *entity_id, weapon_type, gun_bits }
+        } else if *method == "shootATBAGuns" {
+            let gun_bits = GunBits::from(args.first().and_then(ArgValue::as_u32).unwrap_or(0));
+            DecodedPacketPayload::WeaponFired {
+                entity: *entity_id,
+                weapon_type: Recognized::Known(WeaponType::Secondaries),
+                gun_bits,
+            }
         } else if *method == "receiveTorpedoes" {
             let salvos_array = match &args[0] {
                 ArgValue::Array(a) => a,
