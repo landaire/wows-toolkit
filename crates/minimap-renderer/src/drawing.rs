@@ -1905,7 +1905,8 @@ impl RenderTarget for ImageTarget {
                 );
             }
             DrawCommand::ShotTracerTip { at, color } => {
-                draw_filled_circle(&mut self.canvas, at.x + x_off, at.y + y_off, 2.0, *color, 1.0);
+                // A bit wider than the 1.5px tracer line so the ammo color is noticeable.
+                draw_filled_circle(&mut self.canvas, at.x + x_off, at.y + y_off, 1.9, *color, 1.0);
             }
             DrawCommand::Torpedo { pos, color } => {
                 draw_filled_circle(&mut self.canvas, pos.x + x_off, pos.y + y_off, 2.5, *color, 1.0);

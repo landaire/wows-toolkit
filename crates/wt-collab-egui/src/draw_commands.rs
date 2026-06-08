@@ -321,7 +321,9 @@ pub fn draw_command_to_shapes(
 
         DrawCommand::ShotTracerTip { at, color } => {
             let p = transform.minimap_to_screen(at);
-            shapes.push(Shape::circle_filled(p, transform.scale_distance(2.0), color_from_rgb(*color)));
+            // Tip a bit wider than the tracer line so the ammo color is noticeable
+            // without ballooning. Window-scaled (non-zoom) so it tracks the line at any zoom.
+            shapes.push(Shape::circle_filled(p, transform.scale_stroke(1.25), color_from_rgb(*color)));
         }
 
         DrawCommand::Torpedo { pos, color } => {

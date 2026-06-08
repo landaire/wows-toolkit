@@ -2749,7 +2749,9 @@ impl ReplayRendererViewer {
                                                     // egui insets the slider thumb travel by its handle radius
                                                     // (default Rect handle: height/2.5 scaled by the 0.75 aspect).
                                                     let handle_r = rect.height() / 2.5 * 0.75;
-                                                    let tick_color = egui::Color32::from_rgb(225, 225, 225);
+                                                    // Fade the ticks with the rest of the controls.
+                                                    let tick_color =
+                                                        egui::Color32::from_rgba_unmultiplied(225, 225, 225, (255.0 * opacity) as u8);
                                                     let painter = ui.painter();
                                                     let start_x =
                                                         clock_tick_x(battle_start.seconds(), game_dur, rect, handle_r);

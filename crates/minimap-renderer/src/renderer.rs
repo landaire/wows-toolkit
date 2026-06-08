@@ -58,7 +58,11 @@ use crate::MINIMAP_SIZE;
 use crate::STATS_PANEL_WIDTH;
 
 // How long various effects persist in game-seconds
-const TRACER_LEN: f32 = 0.12; // fraction of total shot path length
+const TRACER_LEN: f32 = 0.12; // fraction of total shot path length, at the largest caliber
+// Caliber (mm) at or above which a tracer draws full length; smaller calibers scale down.
+const MAX_TRACER_CALIBER_MM: f32 = 460.0;
+// Floor on the caliber length ratio so small-caliber tracers stay visible.
+const MIN_TRACER_LEN_RATIO: f32 = 0.3;
 const KILL_FEED_DURATION: f32 = 10.0;
 
 /// Gaps larger than this between consecutive samples imply a spotting break /
@@ -1158,15 +1162,17 @@ impl<'a> MinimapRenderer<'a> {
                 let owner = shot.salvo.owner_id;
                 let relation = self.player_relations.get(&owner).copied().unwrap_or(Relation::new(2));
                 let color = ship_color_rgb(relation, self.division_mates.contains(&owner));
-                // All shots in a salvo share the same projectile, so resolve the ammo
-                // tip color once. None when armament coloring is off or the param does
-                // not resolve to a projectile.
+                // Resolve the salvo's projectile once (all shots share it): caliber sets
+                // the tracer length (larger guns draw longer) and ammo type tints the tip.
+                let salvo_param = GameParamProvider::game_param_by_id(self.game_params, shot.salvo.params_id);
+                let projectile = salvo_param.as_ref().and_then(|p| p.projectile());
+                let caliber_ratio = projectile
+                    .and_then(|p| p.bullet_diametr())
+                    .map(|d| ((d * 1000.0) / MAX_TRACER_CALIBER_MM).clamp(MIN_TRACER_LEN_RATIO, 1.0))
+                    .unwrap_or(1.0);
+                let tracer_len = TRACER_LEN * caliber_ratio;
                 let tip_color = if self.options.show_armament {
-                    let param = GameParamProvider::game_param_by_id(self.game_params, shot.salvo.params_id);
-                    param
-                        .as_ref()
-                        .and_then(|p| p.projectile())
-                        .map(|proj| ammo_type_color(&AmmoType::from_game_str(proj.ammo_type())))
+                    projectile.map(|p| ammo_type_color(&AmmoType::from_game_str(p.ammo_type())))
                 } else {
                     None
                 };
@@ -1186,7 +1192,7 @@ impl<'a> MinimapRenderer<'a> {
                     }
                     let frac = elapsed / flight_duration;
                     let head = origin.lerp(target, frac);
-                    let tail = origin.lerp(target, (frac - TRACER_LEN).max(0.0));
+                    let tail = origin.lerp(target, (frac - tracer_len).max(0.0));
                     let head_minimap = map_info.world_to_minimap(head, MINIMAP_SIZE);
                     commands.push(DrawCommand::ShotTracer {
                         from: map_info.world_to_minimap(tail, MINIMAP_SIZE),
