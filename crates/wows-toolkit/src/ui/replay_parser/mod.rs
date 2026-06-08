@@ -935,11 +935,13 @@ impl UiReport {
             let (skill_points, num_skills, highest_tier, num_tier_1_skills) = vehicle
                 .and_then(|v| v.commander_skills(species))
                 .map(|skills| {
-                    let points =
-                        skills.iter().fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species));
-                    let highest_tier = skills.iter().map(|skill| skill.tier().get_for_species(species)).max();
+                    let points = skills
+                        .iter()
+                        .fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species).get() as usize);
+                    let highest_tier =
+                        skills.iter().map(|skill| skill.tier().get_for_species(species).get() as usize).max();
                     let num_tier_1_skills = skills.iter().fold(0, |mut accum, skill| {
-                        if skill.tier().get_for_species(species) == 1 {
+                        if skill.tier().get_for_species(species).get() as usize == 1 {
                             accum += 1;
                         }
                         accum

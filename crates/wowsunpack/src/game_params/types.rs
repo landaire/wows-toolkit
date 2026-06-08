@@ -77,6 +77,29 @@ impl From<u32> for CrewSkillType {
     }
 }
 
+/// A captain-skill point cost (1-based: skills cost 1-4 points). Distinct from a
+/// 0-based grid row index, which never escapes the grid table.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct SkillPointCost(u8);
+
+impl SkillPointCost {
+    pub fn new(cost: u8) -> Self {
+        Self(cost)
+    }
+
+    /// Convert a 0-based grid row index to its 1-based point cost.
+    pub fn from_grid_row(row: u8) -> Self {
+        Self(row + 1)
+    }
+
+    pub fn get(self) -> u8 {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -1342,16 +1365,16 @@ pub struct CrewSkillLogicTrigger {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct CrewSkillTiers {
-    aircraft_carrier: usize,
-    auxiliary: usize,
-    battleship: usize,
-    cruiser: usize,
-    destroyer: usize,
-    submarine: usize,
+    aircraft_carrier: SkillPointCost,
+    auxiliary: SkillPointCost,
+    battleship: SkillPointCost,
+    cruiser: SkillPointCost,
+    destroyer: SkillPointCost,
+    submarine: SkillPointCost,
 }
 
 impl CrewSkillTiers {
-    pub fn get_for_species(&self, species: Species) -> usize {
+    pub fn get_for_species(&self, species: Species) -> SkillPointCost {
         match species {
             Species::AirCarrier => self.aircraft_carrier,
             Species::Battleship => self.battleship,
@@ -1363,27 +1386,27 @@ impl CrewSkillTiers {
         }
     }
 
-    pub fn aircraft_carrier(&self) -> usize {
+    pub fn aircraft_carrier(&self) -> SkillPointCost {
         self.aircraft_carrier
     }
 
-    pub fn auxiliary(&self) -> usize {
+    pub fn auxiliary(&self) -> SkillPointCost {
         self.auxiliary
     }
 
-    pub fn battleship(&self) -> usize {
+    pub fn battleship(&self) -> SkillPointCost {
         self.battleship
     }
 
-    pub fn cruiser(&self) -> usize {
+    pub fn cruiser(&self) -> SkillPointCost {
         self.cruiser
     }
 
-    pub fn destroyer(&self) -> usize {
+    pub fn destroyer(&self) -> SkillPointCost {
         self.destroyer
     }
 
-    pub fn submarine(&self) -> usize {
+    pub fn submarine(&self) -> SkillPointCost {
         self.submarine
     }
 }
@@ -2055,5 +2078,16 @@ mod skill_type_tests {
         let t = CrewSkillType::new(67);
         assert_eq!(t.raw(), 67);
         assert_eq!(CrewSkillType::from(67u8), CrewSkillType::new(67));
+    }
+}
+
+#[cfg(test)]
+mod point_cost_tests {
+    use super::SkillPointCost;
+
+    #[test]
+    fn from_grid_row_is_one_based() {
+        assert_eq!(SkillPointCost::from_grid_row(0).get(), 1);
+        assert_eq!(SkillPointCost::from_grid_row(3).get(), 4);
     }
 }

@@ -185,7 +185,7 @@ impl TranslatedCrewSkill {
         version: &Version,
     ) -> Self {
         Self {
-            tier: skill.tier().get_for_species(species),
+            tier: skill.tier().get_for_species(species).get() as usize,
             name: skill.translated_name(metadata_provider, version),
             description: skill.translated_description(metadata_provider, version),
             internal_name: skill.internal_name().to_string(),

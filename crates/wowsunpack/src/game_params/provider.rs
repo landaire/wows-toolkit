@@ -350,24 +350,25 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> 
                 Some(tier_data) => {
                     let tier_data = tier_data.inner();
                     CrewSkillTiers::builder()
-                        .aircraft_carrier(game_param_to_type!(tier_data, "AirCarrier", usize))
-                        .auxiliary(game_param_to_type!(tier_data, "Auxiliary", usize))
-                        .battleship(game_param_to_type!(tier_data, "Battleship", usize))
-                        .cruiser(game_param_to_type!(tier_data, "Cruiser", usize))
-                        .destroyer(game_param_to_type!(tier_data, "Destroyer", usize))
-                        .submarine(game_param_to_type!(tier_data, "Submarine", usize))
+                        .aircraft_carrier(SkillPointCost::new(game_param_to_type!(tier_data, "AirCarrier", usize) as u8))
+                        .auxiliary(SkillPointCost::new(game_param_to_type!(tier_data, "Auxiliary", usize) as u8))
+                        .battleship(SkillPointCost::new(game_param_to_type!(tier_data, "Battleship", usize) as u8))
+                        .cruiser(SkillPointCost::new(game_param_to_type!(tier_data, "Cruiser", usize) as u8))
+                        .destroyer(SkillPointCost::new(game_param_to_type!(tier_data, "Destroyer", usize) as u8))
+                        .submarine(SkillPointCost::new(game_param_to_type!(tier_data, "Submarine", usize) as u8))
                         .build()
                 }
                 None => {
                     let t =
                         skill_data.get(&pk("tier")).and_then(|v| v.i64_ref()).map(|&v| v as usize).unwrap_or_default();
+                    let cost = SkillPointCost::new(t as u8);
                     CrewSkillTiers::builder()
-                        .aircraft_carrier(t)
-                        .auxiliary(t)
-                        .battleship(t)
-                        .cruiser(t)
-                        .destroyer(t)
-                        .submarine(t)
+                        .aircraft_carrier(cost)
+                        .auxiliary(cost)
+                        .battleship(cost)
+                        .cruiser(cost)
+                        .destroyer(cost)
+                        .submarine(cost)
                         .build()
                 }
             };

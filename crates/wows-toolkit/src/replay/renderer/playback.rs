@@ -1202,16 +1202,16 @@ fn skill_tier_for_species(
 ) -> u8 {
     use wowsunpack::game_params::types::Species;
     let tiers = skill.tier();
-    let tier_usize = match species {
+    match species {
         Species::AirCarrier => tiers.aircraft_carrier(),
         Species::Battleship => tiers.battleship(),
         Species::Cruiser => tiers.cruiser(),
         Species::Destroyer => tiers.destroyer(),
         Species::Submarine => tiers.submarine(),
         Species::Auxiliary => tiers.auxiliary(),
-        _ => 0,
-    };
-    tier_usize as u8
+        _ => Default::default(),
+    }
+    .get()
 }
 
 /// Snapshot every player whose entity is currently tracked by `world`,
