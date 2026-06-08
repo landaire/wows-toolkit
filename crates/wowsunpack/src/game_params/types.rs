@@ -823,6 +823,8 @@ pub struct ShipConfigData {
     pub torpedo_ammo: HashSet<String>,
     /// Names of main battery ammo GameParams across all artillery upgrades.
     pub main_battery_ammo: HashSet<String>,
+    /// Names of secondary (ATBA) ammo GameParams across all hull upgrades.
+    pub secondary_battery_ammo: HashSet<String>,
 }
 
 /// Resolved ship range values in real-world units.

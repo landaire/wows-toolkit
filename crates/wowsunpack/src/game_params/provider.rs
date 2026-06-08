@@ -791,6 +791,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
     // Artillery, torpedo, and secondary upgrades are independent of hull selection.
     let mut torpedo_ammo = HashSet::new();
     let mut main_battery_ammo = HashSet::new();
+    let mut secondary_battery_ammo = HashSet::new();
     let mut max_main_battery_m: Option<Meters> = None;
     let mut max_secondary_battery_m: Option<Meters> = None;
 
@@ -843,16 +844,36 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             }
         }
 
-        // Collect secondary battery maxDist from _Hull upgrades
+        // Collect secondary battery maxDist and ammo from _Hull upgrades
         if uc_type == keys::UC_TYPE_HULL
             && let Some(atba_comp) = components.inner().get(&pk(keys::COMP_ATBA)).and_then(read_first_string)
             && let Some(atba_data) = ship_data.get(&pk(&atba_comp)).and_then(|v| v.dict_or_object_dict())
-            && let Some(m) = read_float(&atba_data.inner(), keys::MAX_DIST).map(Meters::from)
         {
-            max_secondary_battery_m = Some(match max_secondary_battery_m {
-                Some(prev) if prev.value() >= m.value() => prev,
-                _ => m,
-            });
+            if let Some(m) = read_float(&atba_data.inner(), keys::MAX_DIST).map(Meters::from) {
+                max_secondary_battery_m = Some(match max_secondary_battery_m {
+                    Some(prev) if prev.value() >= m.value() => prev,
+                    _ => m,
+                });
+            }
+            for (_mount_key, mount_val) in atba_data.inner().iter() {
+                let Some(mount_dict) = mount_val.dict_or_object_dict() else {
+                    continue;
+                };
+                let mount_inner = mount_dict.inner();
+                let Some(ammo_val) = mount_inner.get(&pk(keys::AMMO_LIST)) else {
+                    continue;
+                };
+                let mut insert_ammo = |item: &Value| {
+                    if let Some(name) = item.string_ref() {
+                        secondary_battery_ammo.insert(name.inner().clone());
+                    }
+                };
+                match ammo_val {
+                    Value::Tuple(t) => t.inner().iter().for_each(&mut insert_ammo),
+                    Value::List(l) => l.inner().iter().for_each(&mut insert_ammo),
+                    _ => {}
+                }
+            }
         }
 
         // Collect torpedo ammo from _Torpedoes upgrades
@@ -906,6 +927,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
     let config_data = if hull_upgrades.is_empty()
         && torpedo_ammo.is_empty()
         && main_battery_ammo.is_empty()
+        && secondary_battery_ammo.is_empty()
         && max_main_battery_m.is_none()
         && max_secondary_battery_m.is_none()
     {
@@ -917,6 +939,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             secondary_battery_m: max_secondary_battery_m,
             torpedo_ammo,
             main_battery_ammo,
+            secondary_battery_ammo,
         })
     };
 
