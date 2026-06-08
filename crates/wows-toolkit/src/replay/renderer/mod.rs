@@ -618,7 +618,7 @@ pub struct PlayerBuildDisplay {
 }
 
 pub struct SkillRow {
-    pub tier: u8,
+    pub tier: Option<u8>,
     pub skills: Vec<SkillDisplay>,
 }
 
@@ -627,7 +627,7 @@ pub struct SkillDisplay {
     pub icon_key: String,
     pub name: String,
     pub description: String,
-    pub tier: u8,
+    pub tier: Option<u8>,
     /// In-game ordering key within a tier row.
     pub skill_type: u32,
     /// True when the player actually took this skill (vs shown for context).
@@ -3476,7 +3476,9 @@ fn draw_skill_grid(ui: &mut egui::Ui, rows: &[SkillRow], icons: &HashMap<String,
         ui.horizontal(|ui| {
             ui.add_sized(
                 [14.0, ICON_SIZE],
-                egui::Label::new(egui::RichText::new(format!("{}", row.tier)).weak().small()),
+                egui::Label::new(
+                    egui::RichText::new(row.tier.map(|t| t.to_string()).unwrap_or_default()).weak().small(),
+                ),
             );
             for skill in &row.skills {
                 let Some(tex) = icons.get(&skill.icon_key) else {
@@ -3484,10 +3486,11 @@ fn draw_skill_grid(ui: &mut egui::Ui, rows: &[SkillRow], icons: &HashMap<String,
                     continue;
                 };
                 let status = if skill.learned { "" } else { " - not taken" };
+                let cost = skill.tier.map(|t| format!(" ({t} pt)")).unwrap_or_default();
                 let tooltip = if skill.description.is_empty() {
-                    format!("{} ({} pt){}", skill.name, skill.tier, status)
+                    format!("{}{}{}", skill.name, cost, status)
                 } else {
-                    format!("{} ({} pt){}\n\n{}", skill.name, skill.tier, status, skill.description)
+                    format!("{}{}{}\n\n{}", skill.name, cost, status, skill.description)
                 };
                 // Dim skills the player didn't take so the taken ones stand out.
                 let tint =

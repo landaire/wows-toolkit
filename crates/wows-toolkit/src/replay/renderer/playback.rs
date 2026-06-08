@@ -1103,80 +1103,34 @@ fn build_display_from_resolved(
     metadata: &GameMetadataProvider,
     version: &Version,
 ) -> super::PlayerBuildDisplay {
-    use convert_case::Case;
-    use convert_case::Casing;
     use wowsunpack::data::ResourceLoader;
 
     let captain_name = build.captain.as_deref().and_then(|c| metadata.localized_name_from_param(c));
 
-    // Lay out the captain's full per-species skill grid (rows = point cost,
-    // columns per the in-game layout), flagging the skills the player took.
-    // Modern builds (>=0.10) use the reverse-engineered SKILLS_BY_SHIP_TYPE
-    // layout table; older builds have no table here yet, so we fall back to
-    // listing only the learned skills.
     let crew = build.captain.as_deref().and_then(|c| c.data().crew_ref());
     let learned: std::collections::HashSet<wowsunpack::game_params::types::CrewSkillType> =
         build.skills.iter().map(|s| wowsunpack::game_params::types::CrewSkillType::from(*s)).collect();
-    // Modern (>=0.10) layout is per species; pre-0.10 is a shared grid. `None`
-    // when neither applies (e.g. a species with no captain grid).
-    let grid = wowsunpack::game_params::skill_grid_data::skill_grid(version.build, build.species);
 
-    let skill_rows: Vec<super::SkillRow> = if let (Some(crew), Some(grid)) = (crew, grid) {
-        let by_name: std::collections::HashMap<&str, &wowsunpack::game_params::types::CrewSkill> =
-            crew.skills().into_iter().flatten().map(|s| (s.internal_name().as_str(), s)).collect();
-        let mut rows: Vec<super::SkillRow> = Vec::new();
-        for slot in grid {
-            // Skip a layout entry whose skill this build's params don't define
-            // (version skew) rather than inventing a placeholder.
-            let Some(skill) = by_name.get(slot.skill).copied() else {
-                continue;
-            };
-            let display = super::SkillDisplay {
-                icon_key: slot.skill.to_case(Case::Snake),
-                // Fall back to the internal name only when a translation is genuinely absent.
-                name: skill.translated_name(metadata, version).unwrap_or_else(|| slot.skill.to_string()),
-                description: skill.translated_description(metadata, version).unwrap_or_default(),
-                tier: slot.tier + 1, // table tier is 0-based; display as point cost
-                skill_type: skill.skill_type().raw(),
-                learned: learned.contains(&skill.skill_type()),
-            };
-            match rows.last_mut() {
-                Some(row) if row.tier == display.tier => row.skills.push(display),
-                _ => rows.push(super::SkillRow { tier: display.tier, skills: vec![display] }),
-            }
-        }
-        rows
-    } else {
-        let mut all_skills: Vec<super::SkillDisplay> = crew
-            .map(|crew| {
-                build
+    let skill_rows: Vec<super::SkillRow> =
+        wowsunpack::game_params::skill_grid_data::build_skill_grid(crew, &learned, build.species, version.build, metadata, version)
+            .into_iter()
+            .map(|row| super::SkillRow {
+                tier: row.point_cost.map(|c| c.get()),
+                skills: row
                     .skills
-                    .iter()
-                    .filter_map(|skill_type| crew.skill_by_type(wowsunpack::game_params::types::CrewSkillType::from(*skill_type)))
-                    .map(|skill| {
-                        let internal = skill.internal_name().as_str();
-                        super::SkillDisplay {
-                            icon_key: internal.to_case(Case::Snake),
-                            name: skill.translated_name(metadata, version).unwrap_or_else(|| internal.to_string()),
-                            description: skill.translated_description(metadata, version).unwrap_or_default(),
-                            tier: skill_tier_for_species(skill, build.species),
-                            skill_type: skill.skill_type().raw(),
-                            learned: true,
-                        }
+                    .into_iter()
+                    .map(|s| super::SkillDisplay {
+                        icon_key: wowsunpack::game_assets::crew_skill_icon_slug(&s.internal_name),
+                        // Fall back to the internal name when a translation is absent.
+                        name: s.name.unwrap_or_else(|| s.internal_name.to_string()),
+                        description: s.description.unwrap_or_default(),
+                        tier: s.point_cost.map(|c| c.get()),
+                        skill_type: s.skill_type.raw(),
+                        learned: s.learned,
                     })
-                    .collect()
+                    .collect(),
             })
-            .unwrap_or_default();
-        all_skills.sort_by_key(|s| (s.tier, s.skill_type));
-        let mut rows: Vec<super::SkillRow> = Vec::new();
-        for skill in all_skills {
-            match rows.last_mut() {
-                Some(row) if row.tier == skill.tier => row.skills.push(skill),
-                _ => rows.push(super::SkillRow { tier: skill.tier, skills: vec![skill] }),
-            }
-        }
-        rows
-    };
+            .collect();
 
     let upgrades = build.upgrades.iter().map(|p| equipment_display_for_param(p, metadata)).collect();
     // `config.exteriors()` returns every exterior the player has mounted:
@@ -1191,27 +1145,6 @@ fn build_display_from_resolved(
         .map(|p| equipment_display_for_param(p, metadata))
         .collect();
     super::PlayerBuildDisplay { captain_name, skill_rows, upgrades, signals }
-}
-
-/// Look up a skill's tier for the captain's ship species. Returns 0 for
-/// species without an explicit tier (e.g. Auxiliary, Airship event ships)
-/// rather than panicking the way `CrewSkillTiers::get_for_species` does.
-fn skill_tier_for_species(
-    skill: &wowsunpack::game_params::types::CrewSkill,
-    species: wowsunpack::game_params::types::Species,
-) -> u8 {
-    use wowsunpack::game_params::types::Species;
-    let tiers = skill.tier();
-    match species {
-        Species::AirCarrier => tiers.aircraft_carrier(),
-        Species::Battleship => tiers.battleship(),
-        Species::Cruiser => tiers.cruiser(),
-        Species::Destroyer => tiers.destroyer(),
-        Species::Submarine => tiers.submarine(),
-        Species::Auxiliary => tiers.auxiliary(),
-        _ => wowsunpack::game_params::types::SkillPointCost::new(0),
-    }
-    .get()
 }
 
 /// Snapshot every player whose entity is currently tracked by `world`,
