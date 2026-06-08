@@ -10,7 +10,6 @@ use wows_replays::types::AccountId;
 use wows_replays::types::Relation;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
-use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Species;
@@ -97,7 +96,7 @@ pub struct TranslatedBuild {
     /// ship config, so old and new replays show the same loadout view.
     pub loadout: Vec<TranslatedModule>,
     pub abilities: Vec<TranslatedAbility>,
-    pub captain_skills: Option<Vec<TranslatedCrewSkill>>,
+    pub captain_skills: Option<Vec<wowsunpack::game_params::skill_grid_data::SkillGridRow>>,
 }
 
 impl TranslatedBuild {
@@ -152,44 +151,24 @@ impl TranslatedBuild {
                     Some(TranslatedAbility { name, game_params_name })
                 })
                 .collect(),
-            captain_skills: vehicle_entity.commander_skills(species).map(|skills| {
-                let mut skills: Vec<TranslatedCrewSkill> = skills
+            captain_skills: vehicle_entity.captain().and_then(|c| c.data().crew_ref()).map(|crew| {
+                let learned: std::collections::HashSet<wowsunpack::game_params::types::CrewSkillType> = vehicle_entity
+                    .commander_skills_raw(species)
                     .iter()
-                    .map(|skill| TranslatedCrewSkill::new(skill, species, metadata_provider, version))
+                    .map(|s| wowsunpack::game_params::types::CrewSkillType::from(*s))
                     .collect();
-
-                skills.sort_by_key(|skill| skill.tier);
-
-                skills
+                wowsunpack::game_params::skill_grid_data::build_skill_grid(
+                    Some(crew),
+                    &learned,
+                    species,
+                    version.build,
+                    metadata_provider,
+                    version,
+                )
             }),
         };
 
         Some(result)
-    }
-}
-
-/// A translated crew skill.
-#[derive(Clone, Serialize)]
-pub struct TranslatedCrewSkill {
-    pub tier: usize,
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub internal_name: String,
-}
-
-impl TranslatedCrewSkill {
-    pub fn new(
-        skill: &CrewSkill,
-        species: Species,
-        metadata_provider: &GameMetadataProvider,
-        version: &Version,
-    ) -> Self {
-        Self {
-            tier: skill.tier().get_for_species(species).get() as usize,
-            name: skill.translated_name(metadata_provider, version),
-            description: skill.translated_description(metadata_provider, version),
-            internal_name: skill.internal_name().to_string(),
-        }
     }
 }
 

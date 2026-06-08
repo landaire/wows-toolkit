@@ -325,9 +325,13 @@ impl From<Vehicle> for FlattenedVehicle {
         let (modules, abilities, captain_skills) = if let Some(translated_config) = translated_build {
             let modules = translated_config.modules.iter().filter_map(|module| module.name.clone()).collect();
             let abilities = translated_config.abilities.iter().filter_map(|ability| ability.name.clone()).collect();
-            let captain_skills = translated_config
-                .captain_skills
-                .map(|skills| skills.iter().filter_map(|skill| skill.name.clone()).collect());
+            let captain_skills = translated_config.captain_skills.map(|rows| {
+                rows.iter()
+                    .flat_map(|row| row.skills.iter())
+                    .filter(|skill| skill.learned)
+                    .filter_map(|skill| skill.name.clone())
+                    .collect()
+            });
             (Some(modules), Some(abilities), captain_skills)
         } else {
             (None, None, None)

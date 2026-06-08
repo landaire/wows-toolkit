@@ -2363,14 +2363,20 @@ impl UiReport {
 
                                     ui.separator();
 
-                                    if let Some(captain_skills) = build_info.captain_skills.as_ref() {
+                                    if let Some(captain_skill_rows) = build_info.captain_skills.as_ref() {
                                         ui.label(t!("ui.replay.sections.captain_skills"));
-                                        if captain_skills.is_empty() {
+                                        let learned_skills: Vec<_> = captain_skill_rows
+                                            .iter()
+                                            .flat_map(|row| row.skills.iter())
+                                            .filter(|s| s.learned)
+                                            .collect();
+                                        if learned_skills.is_empty() {
                                             ui.label(t!("ui.replay.sections.captain_skills_none"));
                                         } else {
-                                            for skill in captain_skills {
+                                            for skill in learned_skills {
                                                 if let Some(name) = &skill.name {
-                                                    let label = ui.label(format!("({}) {}", skill.tier, name));
+                                                    let cost = skill.point_cost.map(|c| c.get()).unwrap_or(0);
+                                                    let label = ui.label(format!("({}) {}", cost, name));
                                                     if let Some(hover_text) = skill.description.as_ref() {
                                                         label.on_hover_text(hover_text);
                                                     }
