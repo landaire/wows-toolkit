@@ -90,11 +90,14 @@ pub fn colorize_captain_points(
     let mut has_dazzle = false;
     let mut has_ifa = false;
     if let Some(raw_skills) = &raw_skills {
-        if raw_skills.iter().any(|skill| skill.skill_type().raw() as usize == crate::util::consts::DAZZLE_SKILL_ID) {
-            has_dazzle = true;
-        }
-        if raw_skills.iter().any(|skill| skill.skill_type().raw() as usize == crate::util::consts::IFA_SKILL_ID) {
-            has_ifa = true;
+        for skill in raw_skills {
+            match wowsunpack::game_params::types::KnownCrewSkill::recognize(skill.internal_name(), skill.skill_type())
+                .known()
+            {
+                Some(wowsunpack::game_params::types::KnownCrewSkill::Dazzle) => has_dazzle = true,
+                Some(wowsunpack::game_params::types::KnownCrewSkill::InertiaFuse) => has_ifa = true,
+                None => {}
+            }
         }
     }
 

@@ -1,2 +1,1 @@
-pub const IFA_SKILL_ID: usize = 19;
-pub const DAZZLE_SKILL_ID: usize = 67;
+// Skill ids were retired in favor of wowsunpack::game_params::types::KnownCrewSkill.

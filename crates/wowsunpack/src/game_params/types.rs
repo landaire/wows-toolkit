@@ -134,6 +134,30 @@ impl SkillPointCost {
     }
 }
 
+/// Captain skills the app recognizes for special treatment (e.g. stat-screen
+/// markers). Mapped from the stable CrewSkillName, not the per-version numeric
+/// id. Unrecognized skills fall through to Unknown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KnownCrewSkill {
+    /// "Inertia Fuse for HE Shells" (IFHE): HE penetration up, fire chance down.
+    InertiaFuse,
+    /// "Dazzle": worsens dispersion of shells fired at this ship.
+    Dazzle,
+}
+
+impl KnownCrewSkill {
+    pub fn recognize(
+        name: &CrewSkillName,
+        raw: CrewSkillType,
+    ) -> crate::recognized::Recognized<KnownCrewSkill, CrewSkillType> {
+        match name.as_str() {
+            "HePenetration" => crate::recognized::Recognized::Known(KnownCrewSkill::InertiaFuse),
+            "TriggerSpreading" => crate::recognized::Recognized::Known(KnownCrewSkill::Dazzle),
+            _ => crate::recognized::Recognized::Unknown(raw),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -2135,5 +2159,26 @@ mod skill_name_tests {
         let n = CrewSkillName::from("TriggerSpreading");
         assert_eq!(n.as_str(), "TriggerSpreading");
         assert_eq!(n.to_string(), "TriggerSpreading");
+    }
+}
+
+#[cfg(test)]
+mod known_skill_tests {
+    use super::{CrewSkillName, CrewSkillType, KnownCrewSkill};
+    use crate::recognized::Recognized;
+
+    #[test]
+    fn recognizes_known_skills_by_name() {
+        let dazzle = KnownCrewSkill::recognize(&CrewSkillName::from("TriggerSpreading"), CrewSkillType::new(67));
+        assert_eq!(dazzle, Recognized::Known(KnownCrewSkill::Dazzle));
+
+        let ifhe = KnownCrewSkill::recognize(&CrewSkillName::from("HePenetration"), CrewSkillType::new(33));
+        assert_eq!(ifhe, Recognized::Known(KnownCrewSkill::InertiaFuse));
+    }
+
+    #[test]
+    fn unknown_skill_preserves_raw_type() {
+        let other = KnownCrewSkill::recognize(&CrewSkillName::from("DetectionAlert"), CrewSkillType::new(19));
+        assert_eq!(other, Recognized::Unknown(CrewSkillType::new(19)));
     }
 }
