@@ -101,12 +101,24 @@ pub struct ActiveShotOrder(pub Vec<Entity>);
 #[derive(Resource, Debug, Clone, Default)]
 pub struct ActiveTorpedoOrder(pub Vec<Entity>);
 
-/// Ordered list of in-flight secondary (ATBA) shot entities.
+/// A single in-flight secondary (ATBA) shot: shooter, target, fire time.
 ///
-/// Independent of ActiveShotOrder/ActiveTorpedoOrder: secondaries are a
-/// visualization-only stream with no salvo matching or hit resolution.
+/// Plain data, not an entity: these records carry no other state, are never
+/// mutated per-frame, and are never queried. Position and ammo are resolved by
+/// the renderer from live entity positions and the shooter's ship params.
+#[derive(Debug, Clone, Copy)]
+pub struct SecondaryShot {
+    pub shooter: EntityId,
+    pub target: EntityId,
+    pub fired_at: GameClock,
+}
+
+/// In-flight secondary (ATBA) shots in fire order.
+///
+/// Independent of ActiveShotOrder/ActiveTorpedoOrder: a visualization-only
+/// stream with no salvo matching or hit resolution.
 #[derive(Resource, Debug, Clone, Default)]
-pub struct ActiveSecondaryShotOrder(pub Vec<Entity>);
+pub struct ActiveSecondaryShots(pub Vec<SecondaryShot>);
 
 /// Self-player ribbon counts and cumulative damage stats.
 #[derive(Resource, Debug, Clone, Default)]

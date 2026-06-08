@@ -60,7 +60,6 @@ use crate::components::MinimapPlacement;
 use crate::components::Plane;
 use crate::components::PlaneState;
 use crate::components::ProjectileState;
-use crate::components::SecondaryShotState;
 use crate::components::SmokeScreen;
 use crate::components::SmokeScreenState;
 use crate::components::Transform3d;
@@ -68,7 +67,8 @@ use crate::components::Vehicle;
 use crate::components::VehicleState;
 use crate::components::Ward;
 use crate::components::WardState;
-use crate::resources::ActiveSecondaryShotOrder;
+use crate::resources::ActiveSecondaryShots;
+use crate::resources::SecondaryShot;
 use crate::resources::ActiveShotOrder;
 use crate::resources::ActiveTorpedoOrder;
 use crate::resources::CapturePointOrder;
@@ -86,17 +86,6 @@ use crate::resources::TeamScores;
 use crate::resources::WeatherZoneOrder;
 use crate::units::MatchWinner;
 use crate::world::BattleWorld;
-
-/// A secondary (ATBA) shot in flight: shooter, target, and fire time.
-///
-/// Positions and ammo are resolved by the renderer from the world's live entity
-/// positions and the shooter's ship params, so none are carried here.
-#[derive(Debug, Clone, Copy)]
-pub struct ActiveSecondaryShot {
-    pub shooter: EntityId,
-    pub target: EntityId,
-    pub fired_at: GameClock,
-}
 
 /// Cached `QueryState`s reused across frames.
 ///
@@ -366,16 +355,8 @@ impl<'w> BattleView<'w> {
     }
 
     /// In-flight secondary (ATBA) shots, in fire order.
-    pub fn active_secondary_shots(&self) -> Vec<ActiveSecondaryShot> {
-        self.world
-            .resource::<ActiveSecondaryShotOrder>()
-            .0
-            .iter()
-            .filter_map(|&entity| {
-                let s = self.world.get_entity(entity).ok()?.get::<SecondaryShotState>()?;
-                Some(ActiveSecondaryShot { shooter: s.shooter, target: s.target, fired_at: s.fired_at })
-            })
-            .collect()
+    pub fn active_secondary_shots(&self) -> Vec<SecondaryShot> {
+        self.world.resource::<ActiveSecondaryShots>().0.clone()
     }
 
     /// In-flight torpedoes in BattleController.active_torpedoes order.
