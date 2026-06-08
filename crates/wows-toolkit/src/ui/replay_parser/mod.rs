@@ -1563,15 +1563,30 @@ impl UiReport {
         rows: &[wowsunpack::game_params::skill_grid_data::SkillGridRow],
     ) {
         const ICON_SIZE: f32 = 28.0;
+        let all_skills: Vec<&wowsunpack::game_params::skill_grid_data::SkillGridSkill> =
+            rows.iter().flat_map(|r| r.skills.iter()).collect();
+        let icons: Vec<Option<Arc<GameAsset>>> = {
+            let wows_data = self.wows_data.read();
+            all_skills.iter().map(|s| wows_data.cached_crew_skill_icon(&s.internal_name)).collect()
+        };
+        let icons: Vec<Option<Arc<GameAsset>>> = if icons.iter().any(|i| i.is_none()) {
+            let mut wows_data = self.wows_data.write();
+            all_skills
+                .iter()
+                .zip(icons)
+                .map(|(s, cached)| cached.or_else(|| wows_data.load_crew_skill_icon(&s.internal_name)))
+                .collect()
+        } else {
+            icons
+        };
+        let mut icon_idx = 0;
         for row in rows {
             ui.horizontal(|ui| {
                 let row_label = row.point_cost.map(|c| c.get().to_string()).unwrap_or_default();
                 ui.add_sized([14.0, ICON_SIZE], egui::Label::new(RichText::new(row_label).weak().small()));
                 for skill in &row.skills {
-                    let icon = {
-                        let cached = self.wows_data.read().cached_crew_skill_icon(&skill.internal_name);
-                        cached.or_else(|| self.wows_data.write().load_crew_skill_icon(&skill.internal_name))
-                    };
+                    let icon = &icons[icon_idx];
+                    icon_idx += 1;
                     let status = if skill.learned { "" } else { " - not taken" };
                     let display_name = skill.name.clone().unwrap_or_else(|| skill.internal_name.to_string());
                     let cost = skill.point_cost.map(|c| format!(" ({} pt)", c.get())).unwrap_or_default();
@@ -1598,7 +1613,7 @@ impl UiReport {
                             // Fallback for builds whose skill icons are absent.
                             let label = match skill.point_cost {
                                 Some(c) => format!("({}) {}", c.get(), display_name),
-                                None => display_name.clone(),
+                                None => display_name,
                             };
                             let mut text = RichText::new(label);
                             if !skill.learned {
