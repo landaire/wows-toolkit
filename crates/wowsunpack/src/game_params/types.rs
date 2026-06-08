@@ -1955,16 +1955,23 @@ where
     }
 }
 
-/// Resolve a ship's secondary (ATBA) ammo projectile GameParamId.
+/// Resolve a ship's representative secondary (ATBA) ammo projectile GameParamId.
 ///
-/// Secondary ammo is fixed per ship, so the first collected ammo name is used.
-/// Returns None for ships without secondaries or on builds predating the data.
+/// Ships with mixed-caliber secondaries (e.g. German BBs with 105mm and 150mm
+/// mounts) collect more than one ammo name. Per-gun resolution would need the
+/// client's gun ordering, which comes from the model/visual hardpoint layout and
+/// is out of scope, so one representative is chosen. The choice is the
+/// lexicographically smallest name purely to be deterministic across runs (the
+/// set is otherwise unordered). The ammo type is uniform per ship in practice,
+/// so the dot color is correct; only the muzzle-speed pacing is approximate for
+/// mixed-caliber ships. Returns None for ships without secondaries or on builds
+/// predating the data.
 pub fn secondary_ammo_param<P: GameParamProvider + ?Sized>(
     provider: &P,
     ship: GameParamId,
 ) -> Option<GameParamId> {
     let ship_param = provider.game_param_by_id(ship)?;
-    let ammo_name = ship_param.vehicle()?.config_data()?.secondary_battery_ammo.iter().next()?;
+    let ammo_name = ship_param.vehicle()?.config_data()?.secondary_battery_ammo.iter().min()?;
     Some(provider.game_param_by_name(ammo_name)?.id())
 }
 
