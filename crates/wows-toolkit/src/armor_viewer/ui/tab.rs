@@ -4593,18 +4593,15 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
         {
             pane.camera_ellipse_mode = first.clone();
         }
-        egui::ComboBox::from_id_salt("camera_ellipse_mode")
-            .selected_text(pane.camera_ellipse_mode.clone())
-            .show_ui(ui, |ui| {
-                for (name, _) in modes {
-                    if ui
-                        .selectable_value(&mut pane.camera_ellipse_mode, name.clone(), name.as_str())
-                        .changed()
-                    {
-                        combo_changed = true;
-                    }
+        ui.horizontal_wrapped(|ui| {
+            for (name, _) in modes {
+                let is_selected = pane.camera_ellipse_mode == *name;
+                if ui.selectable_label(is_selected, name.as_str()).clicked() && !is_selected {
+                    pane.camera_ellipse_mode = name.clone();
+                    combo_changed = true;
                 }
-            });
+            }
+        });
     });
     if combo_changed {
         zone_changed = true;
