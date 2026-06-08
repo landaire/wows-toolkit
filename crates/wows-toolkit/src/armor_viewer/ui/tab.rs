@@ -1174,6 +1174,22 @@ pub(crate) fn upload_armor_to_viewport(
         pane.viewport.add_world_space_mesh(device, &verts, &indices, LAYER_HULL);
     }
 
+    // Camera orbit ellipse (model-space so it rotates with the ship).
+    for mid in pane.camera_ellipse_mesh_ids.drain(..) {
+        pane.viewport.remove_mesh(mid);
+    }
+    if pane.show_camera_ellipse {
+        let mode = pane.camera_ellipse_mode.clone();
+        if let Some((_, traj)) = armor.camera_trajectories.iter().find(|(name, _)| *name == mode) {
+            let (verts, indices) =
+                crate::armor_viewer::camera_ellipse::build_camera_ellipse_mesh(traj, armor.waterline_dy, [0.0, 0.9, 1.0, 1.0]);
+            if !indices.is_empty() {
+                let id = pane.viewport.add_non_pickable_mesh(device, &verts, &indices, LAYER_OVERLAY);
+                pane.camera_ellipse_mesh_ids.push(id);
+            }
+        }
+    }
+
     pane.viewport.mark_dirty();
 }
 
