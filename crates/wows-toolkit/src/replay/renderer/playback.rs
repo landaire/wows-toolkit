@@ -1123,7 +1123,7 @@ fn build_display_from_resolved(
 
     let skill_rows: Vec<super::SkillRow> = if let (Some(crew), Some(grid)) = (crew, grid) {
         let by_name: std::collections::HashMap<&str, &wowsunpack::game_params::types::CrewSkill> =
-            crew.skills().into_iter().flatten().map(|s| (s.internal_name(), s)).collect();
+            crew.skills().into_iter().flatten().map(|s| (s.internal_name().as_str(), s)).collect();
         let mut rows: Vec<super::SkillRow> = Vec::new();
         for slot in grid {
             // Skip a layout entry whose skill this build's params don't define
@@ -1154,7 +1154,7 @@ fn build_display_from_resolved(
                     .iter()
                     .filter_map(|skill_type| crew.skill_by_type(wowsunpack::game_params::types::CrewSkillType::from(*skill_type)))
                     .map(|skill| {
-                        let internal = skill.internal_name();
+                        let internal = skill.internal_name().as_str();
                         super::SkillDisplay {
                             icon_key: internal.to_case(Case::Snake),
                             name: skill.translated_name(metadata, version).unwrap_or_else(|| internal.to_string()),

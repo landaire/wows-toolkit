@@ -375,7 +375,7 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> 
 
             Some(
                 CrewSkill::builder()
-                    .internal_name(skill_name.to_owned())
+                    .internal_name(CrewSkillName::from(skill_name.to_owned()))
                     .can_be_learned(game_param_to_type!(skill_data, "canBeLearned", Option<bool>).unwrap_or_default())
                     .is_epic(game_param_to_type!(skill_data, "isEpic", Option<bool>).unwrap_or_default())
                     .skill_type(CrewSkillType::new(

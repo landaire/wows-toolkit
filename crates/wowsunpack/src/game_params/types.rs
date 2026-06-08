@@ -77,6 +77,39 @@ impl From<u32> for CrewSkillType {
     }
 }
 
+/// A captain-skill's stable string identity (the client's `SkillTypeEnum` name,
+/// e.g. `TriggerSpreading`). Pairs with `CrewSkillType`: a string identity and a
+/// numeric identity for the same skill.
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct CrewSkillName(String);
+
+impl CrewSkillName {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for CrewSkillName {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for CrewSkillName {
+    fn from(s: &str) -> Self {
+        Self(s.to_owned())
+    }
+}
+
+impl std::fmt::Display for CrewSkillName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// A captain-skill point cost (1-based: skills cost 1-4 points). Distinct from a
 /// 0-based grid row index, which never escapes the grid table.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1416,7 +1449,7 @@ impl CrewSkillTiers {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct CrewSkill {
-    internal_name: String,
+    internal_name: CrewSkillName,
     logic_trigger: Option<CrewSkillLogicTrigger>,
     can_be_learned: bool,
     is_epic: bool,
@@ -1427,8 +1460,8 @@ pub struct CrewSkill {
 }
 
 impl CrewSkill {
-    pub fn internal_name(&self) -> &str {
-        self.internal_name.as_ref()
+    pub fn internal_name(&self) -> &CrewSkillName {
+        &self.internal_name
     }
 
     /// Build the gettext id for a skill string, choosing the key style by game
@@ -1442,8 +1475,8 @@ impl CrewSkill {
     fn skill_translation_keys(&self, prefix: &str, version: &Version) -> (String, String) {
         use convert_case::Case;
         use convert_case::Casing;
-        let snake = format!("{prefix}_{}", self.internal_name().to_case(Case::UpperSnake));
-        let plain = format!("{prefix}_{}", self.internal_name().to_uppercase());
+        let snake = format!("{prefix}_{}", self.internal_name().as_str().to_case(Case::UpperSnake));
+        let plain = format!("{prefix}_{}", self.internal_name().as_str().to_uppercase());
         let rework = Version {
             major: CAPTAIN_SKILL_REWORK_VERSION.0,
             minor: CAPTAIN_SKILL_REWORK_VERSION.1,
@@ -2090,5 +2123,17 @@ mod point_cost_tests {
     fn from_grid_row_is_one_based() {
         assert_eq!(SkillPointCost::from_grid_row(0).get(), 1);
         assert_eq!(SkillPointCost::from_grid_row(3).get(), 4);
+    }
+}
+
+#[cfg(test)]
+mod skill_name_tests {
+    use super::CrewSkillName;
+
+    #[test]
+    fn as_str_and_display_match() {
+        let n = CrewSkillName::from("TriggerSpreading");
+        assert_eq!(n.as_str(), "TriggerSpreading");
+        assert_eq!(n.to_string(), "TriggerSpreading");
     }
 }
