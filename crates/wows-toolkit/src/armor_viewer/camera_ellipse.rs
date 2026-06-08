@@ -36,8 +36,8 @@ fn push_segment(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, p0: Vec3, p1: V
 
 /// Build a model-space overlay mesh for one camera orbit trajectory: the
 /// horizontal orbit ring, a marker at the orbit center, and a vertical line
-/// down to the waterline plane (Y = 0). `waterline_dy` is the model shift
-/// applied to the armor; the ellipse uses the same frame.
+/// down to the waterline plane (Y = 0). `waterline_dy` is the waterline shift
+/// hook added to the orbit center height; currently 0.
 pub(crate) fn build_camera_ellipse_mesh(
     traj: &CameraTrajectory,
     waterline_dy: f32,

@@ -2229,7 +2229,6 @@ pub(crate) fn start_hull_lod_reload(
     use wowsunpack::game_params::types::GameParamProvider;
     let param = ship_assets.metadata().game_param_by_index(param_index);
     let vehicle = param.as_ref().and_then(|p| p.vehicle().cloned());
-    let waterline_dy = pane.loaded_armor.as_ref().map(|a| a.waterline_dy).unwrap_or(0.0);
     let selected_hull = pane.selected_hull.clone();
     let module_overrides = pane.selected_modules.clone();
 
@@ -2244,16 +2243,7 @@ pub(crate) fn start_hull_lod_reload(
                 module_overrides,
             };
             let ctx = assets.load_ship_from_vehicle(&vehicle, &options).map_err(|e| format!("{e:?}"))?;
-            let mut hull_meshes = ctx.interactive_hull_meshes().map_err(|e| format!("{e:?}"))?;
-
-            // Apply waterline offset to match the already-shifted armor meshes
-            if waterline_dy.abs() > 1e-7 {
-                for mesh in &mut hull_meshes {
-                    for pos in &mut mesh.positions {
-                        pos[1] += waterline_dy;
-                    }
-                }
-            }
+            let hull_meshes = ctx.interactive_hull_meshes().map_err(|e| format!("{e:?}"))?;
 
             let hull_part_groups = crate::armor_viewer::ui::tab::build_hull_part_groups(&hull_meshes);
             let hull_lod_count = ctx.hull_lod_count();
@@ -2330,7 +2320,6 @@ fn start_upgrade_reload(
     let selected_hull = pane.selected_hull.clone();
     let module_overrides = pane.selected_modules.clone();
     let lod = pane.hull_lod;
-    let waterline_dy = pane.loaded_armor.as_ref().map(|a| a.waterline_dy).unwrap_or(0.0);
 
     use wowsunpack::game_params::types::GameParamProvider;
     let param = ship_assets.metadata().game_param_by_index(param_index);
@@ -2349,16 +2338,7 @@ fn start_upgrade_reload(
             let ctx = assets.load_ship_from_vehicle(&vehicle, &options).map_err(|e| format!("{e:?}"))?;
 
             // Reload armor meshes (hull armor unchanged, turret armor re-mounted)
-            let mut armor_meshes = ctx.interactive_armor_meshes().map_err(|e| format!("{e:?}"))?;
-
-            // Apply waterline offset to match existing shifted coordinates
-            if waterline_dy.abs() > 1e-7 {
-                for mesh in &mut armor_meshes {
-                    for pos in &mut mesh.positions {
-                        pos[1] += waterline_dy;
-                    }
-                }
-            }
+            let armor_meshes = ctx.interactive_armor_meshes().map_err(|e| format!("{e:?}"))?;
 
             // Build zone/part/plate metadata from new armor meshes
             let mut zone_parts_map: std::collections::HashMap<String, std::collections::HashSet<String>> =
@@ -2410,16 +2390,7 @@ fn start_upgrade_reload(
             let zones: Vec<String> = zone_parts.iter().map(|(z, _)| z.clone()).collect();
 
             // Reload hull visual meshes
-            let mut hull_meshes = ctx.interactive_hull_meshes().map_err(|e| format!("{e:?}"))?;
-
-            // Apply waterline offset
-            if waterline_dy.abs() > 1e-7 {
-                for mesh in &mut hull_meshes {
-                    for pos in &mut mesh.positions {
-                        pos[1] += waterline_dy;
-                    }
-                }
-            }
+            let hull_meshes = ctx.interactive_hull_meshes().map_err(|e| format!("{e:?}"))?;
 
             let hull_part_groups = build_hull_part_groups(&hull_meshes);
 
