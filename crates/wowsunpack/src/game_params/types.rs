@@ -38,13 +38,44 @@ pub use wows_core::units::ShipModelDistance;
 
 /// Per-material armor thickness map.
 ///
-/// Outer key = collision material ID (0–254).
+/// Outer key = collision material ID (0-254).
 /// Inner key = model_index (1-based armor model ordinal).
 /// Value = thickness in mm for that model_index.
 ///
 /// The game registers the same geometry multiple times with different
 /// `model_index` values; each registration represents a separate armor layer.
 pub type ArmorMap = HashMap<u32, BTreeMap<u32, f32>>;
+
+/// A captain-skill type id (the client's `SkillTypeEnum` ordinal). This is a
+/// per-version ordinal used for same-version equality matching; the stable
+/// identity is the skill's name (CrewSkillName).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct CrewSkillType(u32);
+
+impl CrewSkillType {
+    pub fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u8> for CrewSkillType {
+    fn from(v: u8) -> Self {
+        Self(v as u32)
+    }
+}
+
+impl From<u32> for CrewSkillType {
+    fn from(v: u32) -> Self {
+        Self(v)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -1366,7 +1397,7 @@ pub struct CrewSkill {
     can_be_learned: bool,
     is_epic: bool,
     modifiers: Option<Vec<CrewSkillModifier>>,
-    skill_type: usize,
+    skill_type: CrewSkillType,
     tier: CrewSkillTiers,
     ui_treat_as_trigger: bool,
 }
@@ -1434,7 +1465,7 @@ impl CrewSkill {
         self.modifiers.as_ref()
     }
 
-    pub fn skill_type(&self) -> usize {
+    pub fn skill_type(&self) -> CrewSkillType {
         self.skill_type
     }
 
@@ -1457,8 +1488,8 @@ pub struct Crew {
 }
 
 impl Crew {
-    pub fn skill_by_type(&self, typ: u32) -> Option<&CrewSkill> {
-        self.skills.as_ref().and_then(|skills| skills.iter().find(|skill| skill.skill_type == typ as usize))
+    pub fn skill_by_type(&self, typ: CrewSkillType) -> Option<&CrewSkill> {
+        self.skills.as_ref().and_then(|skills| skills.iter().find(|skill| skill.skill_type == typ))
     }
 
     pub fn skills(&self) -> Option<&[CrewSkill]> {
@@ -2012,5 +2043,17 @@ mod tests {
         // renderer can color the dot.
         assert_eq!(AmmoType::from_game_str("HE"), AmmoType::HE);
         assert_eq!(AmmoType::from_game_str("CS"), AmmoType::SAP);
+    }
+}
+
+#[cfg(test)]
+mod skill_type_tests {
+    use super::CrewSkillType;
+
+    #[test]
+    fn crew_skill_type_roundtrips_raw() {
+        let t = CrewSkillType::new(67);
+        assert_eq!(t.raw(), 67);
+        assert_eq!(CrewSkillType::from(67u8), CrewSkillType::new(67));
     }
 }

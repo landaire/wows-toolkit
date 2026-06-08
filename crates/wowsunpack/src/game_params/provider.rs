@@ -377,7 +377,9 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> 
                     .internal_name(skill_name.to_owned())
                     .can_be_learned(game_param_to_type!(skill_data, "canBeLearned", Option<bool>).unwrap_or_default())
                     .is_epic(game_param_to_type!(skill_data, "isEpic", Option<bool>).unwrap_or_default())
-                    .skill_type(game_param_to_type!(skill_data, "skillType", Option<usize>).unwrap_or_default())
+                    .skill_type(CrewSkillType::new(
+                        game_param_to_type!(skill_data, "skillType", Option<usize>).unwrap_or_default() as u32,
+                    ))
                     .ui_treat_as_trigger(
                         game_param_to_type!(skill_data, "uiTreatAsTrigger", Option<bool>).unwrap_or_default(),
                     )

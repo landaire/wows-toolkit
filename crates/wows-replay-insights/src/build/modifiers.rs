@@ -77,7 +77,7 @@ impl ModifierSet {
             return;
         };
         for &skill_type in skill_types {
-            let Some(skill) = crew.skill_by_type(skill_type as u32) else {
+            let Some(skill) = crew.skill_by_type(wowsunpack::game_params::types::CrewSkillType::from(skill_type)) else {
                 continue;
             };
             let Some(modifiers) = skill.modifiers() else {

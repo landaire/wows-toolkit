@@ -1305,7 +1305,7 @@ impl VehicleEntity {
         let skills = skills_for_species
             .iter()
             .filter_map(|skill_type| {
-                let skill = captain.skill_by_type(*skill_type as u32);
+                let skill = captain.skill_by_type(wowsunpack::game_params::types::CrewSkillType::from(*skill_type));
                 if skill.is_none() {
                     tracing::warn!(
                         skill_type,

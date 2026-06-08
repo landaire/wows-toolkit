@@ -1115,7 +1115,8 @@ fn build_display_from_resolved(
     // layout table; older builds have no table here yet, so we fall back to
     // listing only the learned skills.
     let crew = build.captain.as_deref().and_then(|c| c.data().crew_ref());
-    let learned: std::collections::HashSet<u32> = build.skills.iter().map(|s| *s as u32).collect();
+    let learned: std::collections::HashSet<wowsunpack::game_params::types::CrewSkillType> =
+        build.skills.iter().map(|s| wowsunpack::game_params::types::CrewSkillType::from(*s)).collect();
     // Modern (>=0.10) layout is per species; pre-0.10 is a shared grid. `None`
     // when neither applies (e.g. a species with no captain grid).
     let grid = wowsunpack::game_params::skill_grid_data::skill_grid(version.build, build.species);
@@ -1136,8 +1137,8 @@ fn build_display_from_resolved(
                 name: skill.translated_name(metadata, version).unwrap_or_else(|| slot.skill.to_string()),
                 description: skill.translated_description(metadata, version).unwrap_or_default(),
                 tier: slot.tier + 1, // table tier is 0-based; display as point cost
-                skill_type: skill.skill_type() as u32,
-                learned: learned.contains(&(skill.skill_type() as u32)),
+                skill_type: skill.skill_type().raw(),
+                learned: learned.contains(&skill.skill_type()),
             };
             match rows.last_mut() {
                 Some(row) if row.tier == display.tier => row.skills.push(display),
@@ -1151,7 +1152,7 @@ fn build_display_from_resolved(
                 build
                     .skills
                     .iter()
-                    .filter_map(|skill_type| crew.skill_by_type(*skill_type as u32))
+                    .filter_map(|skill_type| crew.skill_by_type(wowsunpack::game_params::types::CrewSkillType::from(*skill_type)))
                     .map(|skill| {
                         let internal = skill.internal_name();
                         super::SkillDisplay {
@@ -1159,7 +1160,7 @@ fn build_display_from_resolved(
                             name: skill.translated_name(metadata, version).unwrap_or_else(|| internal.to_string()),
                             description: skill.translated_description(metadata, version).unwrap_or_default(),
                             tier: skill_tier_for_species(skill, build.species),
-                            skill_type: skill.skill_type() as u32,
+                            skill_type: skill.skill_type().raw(),
                             learned: true,
                         }
                     })
