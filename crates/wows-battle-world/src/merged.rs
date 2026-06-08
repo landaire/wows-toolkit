@@ -375,6 +375,8 @@ fn is_cross_perspective_method(method: &str) -> bool {
             | "syncGun"
             | "setAmmoForWeapon"
             | "syncShipCracks"
+            | "shootOnClient"
+            | "shootATBAGuns"
     )
 }
 
