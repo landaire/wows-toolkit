@@ -1557,6 +1557,61 @@ impl UiReport {
         });
     }
 
+    fn render_skill_grid(
+        &self,
+        ui: &mut egui::Ui,
+        rows: &[wowsunpack::game_params::skill_grid_data::SkillGridRow],
+    ) {
+        const ICON_SIZE: f32 = 28.0;
+        for row in rows {
+            ui.horizontal(|ui| {
+                let row_label = row.point_cost.map(|c| c.get().to_string()).unwrap_or_default();
+                ui.add_sized([14.0, ICON_SIZE], egui::Label::new(RichText::new(row_label).weak().small()));
+                for skill in &row.skills {
+                    let icon = {
+                        let cached = self.wows_data.read().cached_crew_skill_icon(&skill.internal_name);
+                        cached.or_else(|| self.wows_data.write().load_crew_skill_icon(&skill.internal_name))
+                    };
+                    let status = if skill.learned { "" } else { " - not taken" };
+                    let display_name = skill.name.clone().unwrap_or_else(|| skill.internal_name.to_string());
+                    let cost = skill.point_cost.map(|c| format!(" ({} pt)", c.get())).unwrap_or_default();
+                    let tooltip = match skill.description.as_deref() {
+                        Some(desc) if !desc.is_empty() => format!("{}{}{}\n\n{}", display_name, cost, status, desc),
+                        _ => format!("{}{}{}", display_name, cost, status),
+                    };
+                    match icon {
+                        Some(icon) => {
+                            let tint = if skill.learned {
+                                Color32::WHITE
+                            } else {
+                                Color32::from_rgba_unmultiplied(255, 255, 255, 55)
+                            };
+                            let image = Image::new(ImageSource::Bytes {
+                                uri: icon.path.clone().into(),
+                                bytes: icon.data.clone().into(),
+                            })
+                            .fit_to_exact_size((ICON_SIZE, ICON_SIZE).into())
+                            .tint(tint);
+                            ui.add(image).on_hover_text(tooltip);
+                        }
+                        None => {
+                            // Fallback for builds whose skill icons are absent.
+                            let label = match skill.point_cost {
+                                Some(c) => format!("({}) {}", c.get(), display_name),
+                                None => display_name.clone(),
+                            };
+                            let mut text = RichText::new(label);
+                            if !skill.learned {
+                                text = text.weak();
+                            }
+                            ui.label(text).on_hover_text(tooltip);
+                        }
+                    }
+                }
+            });
+        }
+    }
+
     fn render_consumable_inventory(&self, ui: &mut egui::Ui, consumables: &[models::PlayerConsumable]) {
         const NAME_COL_WIDTH: f32 = 170.0;
         const COUNT_COL_WIDTH: f32 = 64.0;
@@ -2363,25 +2418,12 @@ impl UiReport {
 
                                     ui.separator();
 
-                                    if let Some(captain_skill_rows) = build_info.captain_skills.as_ref() {
+                                    if let Some(captain_skills) = build_info.captain_skills.as_ref() {
                                         ui.label(t!("ui.replay.sections.captain_skills"));
-                                        let learned_skills: Vec<_> = captain_skill_rows
-                                            .iter()
-                                            .flat_map(|row| row.skills.iter())
-                                            .filter(|s| s.learned)
-                                            .collect();
-                                        if learned_skills.is_empty() {
+                                        if captain_skills.is_empty() {
                                             ui.label(t!("ui.replay.sections.captain_skills_none"));
                                         } else {
-                                            for skill in learned_skills {
-                                                if let Some(name) = &skill.name {
-                                                    let cost = skill.point_cost.map(|c| c.get()).unwrap_or(0);
-                                                    let label = ui.label(format!("({}) {}", cost, name));
-                                                    if let Some(hover_text) = skill.description.as_ref() {
-                                                        label.on_hover_text(hover_text);
-                                                    }
-                                                }
-                                            }
+                                            self.render_skill_grid(ui, captain_skills);
                                         }
                                     } else {
                                         ui.label(t!("ui.replay.sections.captain_skills_none"));
