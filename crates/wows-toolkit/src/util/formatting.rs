@@ -17,6 +17,7 @@ use wows_replays::types::Relation;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::CrewSkill;
+use wowsunpack::game_params::types::KnownCrewSkill;
 
 const TOOLKIT_REFERRER: &str = "landaire";
 
@@ -91,11 +92,9 @@ pub fn colorize_captain_points(
     let mut has_ifa = false;
     if let Some(raw_skills) = &raw_skills {
         for skill in raw_skills {
-            match wowsunpack::game_params::types::KnownCrewSkill::recognize(skill.internal_name(), skill.skill_type())
-                .known()
-            {
-                Some(wowsunpack::game_params::types::KnownCrewSkill::Dazzle) => has_dazzle = true,
-                Some(wowsunpack::game_params::types::KnownCrewSkill::InertiaFuse) => has_ifa = true,
+            match KnownCrewSkill::recognize(skill.internal_name(), skill.skill_type()).known() {
+                Some(KnownCrewSkill::Dazzle) => has_dazzle = true,
+                Some(KnownCrewSkill::InertiaFuse) => has_ifa = true,
                 None => {}
             }
         }

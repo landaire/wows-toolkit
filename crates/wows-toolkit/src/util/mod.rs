@@ -1,5 +1,4 @@
 pub(crate) mod build_tracker;
-pub(crate) mod consts;
 pub(crate) mod controls;
 pub mod error;
 pub(crate) mod formatting;
