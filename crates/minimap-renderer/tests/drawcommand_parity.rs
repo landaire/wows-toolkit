@@ -370,6 +370,14 @@ fn capture_frames(filename: &str) -> String {
     let map_info = Some(MapInfo { space_size: 30000 });
     let options = RenderOptions::default();
     let mut renderer = MinimapRenderer::new(map_info, res.provider, version, options);
+    let salvo_flight_times = wows_battle_world::scan::scan_salvo_flight_times(
+        &replay_count.meta,
+        res.provider,
+        res.constants,
+        version,
+        &replay_count,
+    );
+    renderer.set_salvo_flight_times(std::sync::Arc::new(salvo_flight_times));
 
     let mut parser = wows_replays::packet2::Parser::with_version(specs, version);
     let mut remaining = &replay_main.packet_data[..];

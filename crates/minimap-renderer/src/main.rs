@@ -425,6 +425,14 @@ fn main() -> Result<(), Report> {
     renderer.set_merged_perspectives(!merge_replays.is_empty());
     renderer.set_vehicle_facts(vehicle_facts.clone());
     renderer.set_damage_events(damage_events);
+    let salvo_flight_times = wows_battle_world::scan::scan_salvo_flight_times(
+        &replay_file.meta,
+        &controller_game_params,
+        &game_constants,
+        replay_version,
+        &replay_file,
+    );
+    renderer.set_salvo_flight_times(std::sync::Arc::new(salvo_flight_times));
     if let Some(sil) = self_silhouette {
         renderer.set_self_silhouette(sil);
     }

@@ -441,6 +441,14 @@ pub(super) fn playback_thread(
     let mut hit_cursor: usize = 0;
     let mut live_clock = GameClock(0.0);
 
+    let live_salvo_flight_times = Arc::new(wows_battle_world::scan::scan_salvo_flight_times(
+        &live_replay.meta,
+        &*game_metadata,
+        &game_constants,
+        version,
+        &live_replay,
+    ));
+
     let mut live_session = match MergedReplays::new(
         game_metadata.entity_specs(),
         &*game_metadata,
@@ -453,6 +461,7 @@ pub(super) fn playback_thread(
         Err(_) => return,
     };
     live_renderer.set_position_timeline(live_session.position_timeline());
+    live_renderer.set_salvo_flight_times(Arc::clone(&live_salvo_flight_times));
 
     // Capture the set of teams for which we have a recording-player replay.
     // The build popover gates enemy-team visibility on this: an enemy build
@@ -811,6 +820,7 @@ pub(super) fn playback_thread(
                 Err(_) => continue,
             };
             live_renderer.set_position_timeline(live_session.position_timeline());
+            live_renderer.set_salvo_flight_times(Arc::clone(&live_salvo_flight_times));
             // Rebuild bridge shot hits via staging (no intermediate empty state)
             let armor_bridges = shared_state.lock().armor_bridges.clone();
             let mut staging = init_bridge_staging(&armor_bridges);

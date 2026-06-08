@@ -590,6 +590,14 @@ pub(super) fn render_video_blocking(
         version,
     );
     renderer.set_position_timeline(session.position_timeline());
+    let salvo_flight_times = wows_battle_world::scan::scan_salvo_flight_times(
+        &replay_file.meta,
+        &*game_metadata,
+        &game_constants,
+        version,
+        &replay_file,
+    );
+    renderer.set_salvo_flight_times(std::sync::Arc::new(salvo_flight_times));
 
     // By default the export starts at battle start, skipping the pre-battle
     // spawn and countdown. The battle-start clock comes from the scanned
