@@ -5,7 +5,12 @@
 //! instead and are not covered here. Regenerate after adding game versions.
 #![allow(dead_code)]
 
-use super::types::Species;
+use std::collections::HashMap;
+use std::collections::HashSet;
+
+use super::provider::GameMetadataProvider;
+use super::types::{Crew, CrewSkill, CrewSkillName, CrewSkillType, SkillPointCost, Species};
+use crate::data::Version;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SkillGroup {
@@ -57,6 +62,110 @@ impl Layout {
 /// oldest extracted layout.
 pub fn skill_grid(build: u32, species: Species) -> Option<&'static [GridSlot]> {
     modern_grid(build, species).or_else(|| old_grid(build))
+}
+
+/// One skill in a SkillGridRow, translated and flagged learned. Carries the
+/// stable CrewSkillName; the icon slug is derived from it at render time.
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct SkillGridSkill {
+    pub internal_name: CrewSkillName,
+    pub skill_type: CrewSkillType,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub point_cost: SkillPointCost,
+    pub learned: bool,
+}
+
+/// A row of the captain skill grid: every skill sharing one point cost.
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct SkillGridRow {
+    pub point_cost: SkillPointCost,
+    pub skills: Vec<SkillGridSkill>,
+}
+
+/// Group a tier-ordered list of skills into rows by point cost. The input must
+/// already be ordered so equal-cost skills are adjacent.
+fn group_into_rows(skills: Vec<SkillGridSkill>) -> Vec<SkillGridRow> {
+    let mut rows: Vec<SkillGridRow> = Vec::new();
+    for skill in skills {
+        match rows.last_mut() {
+            Some(row) if row.point_cost == skill.point_cost => row.skills.push(skill),
+            _ => rows.push(SkillGridRow { point_cost: skill.point_cost, skills: vec![skill] }),
+        }
+    }
+    rows
+}
+
+/// A skill's point cost for a species, or cost 1 for species without an explicit
+/// tier (Auxiliary/event ships) rather than panicking.
+fn point_cost_for_species(skill: &CrewSkill, species: Species) -> SkillPointCost {
+    let tiers = skill.tier();
+    match species {
+        Species::AirCarrier => tiers.aircraft_carrier(),
+        Species::Battleship => tiers.battleship(),
+        Species::Cruiser => tiers.cruiser(),
+        Species::Destroyer => tiers.destroyer(),
+        Species::Submarine => tiers.submarine(),
+        Species::Auxiliary => tiers.auxiliary(),
+        _ => SkillPointCost::new(1),
+    }
+}
+
+/// Lay out a captain's full per-species skill grid as rows ordered by point
+/// cost, flagging the skills in `learned`. Modern builds (>=0.10) use the
+/// reverse-engineered grid table; older builds fall back to listing only the
+/// learned skills. Returns an empty vec when `crew` is absent or no skills apply.
+pub fn build_skill_grid(
+    crew: Option<&Crew>,
+    learned: &HashSet<CrewSkillType>,
+    species: Species,
+    build: u32,
+    metadata: &GameMetadataProvider,
+    version: &Version,
+) -> Vec<SkillGridRow> {
+    let Some(crew) = crew else {
+        return Vec::new();
+    };
+
+    let grid = skill_grid(build, species);
+
+    if let Some(grid) = grid {
+        let by_name: HashMap<&str, &CrewSkill> =
+            crew.skills().into_iter().flatten().map(|s| (s.internal_name().as_str(), s)).collect();
+        let mut skills: Vec<SkillGridSkill> = Vec::new();
+        for slot in grid {
+            // Skip a layout entry whose skill this build's params do not define.
+            let Some(skill) = by_name.get(slot.skill).copied() else {
+                continue;
+            };
+            skills.push(SkillGridSkill {
+                internal_name: skill.internal_name().clone(),
+                skill_type: skill.skill_type(),
+                name: skill.translated_name(metadata, version),
+                description: skill.translated_description(metadata, version),
+                point_cost: SkillPointCost::from_grid_row(slot.tier),
+                learned: learned.contains(&skill.skill_type()),
+            });
+        }
+        group_into_rows(skills)
+    } else {
+        let mut all: Vec<SkillGridSkill> = learned
+            .iter()
+            .filter_map(|st| crew.skill_by_type(*st))
+            .map(|skill| SkillGridSkill {
+                internal_name: skill.internal_name().clone(),
+                skill_type: skill.skill_type(),
+                name: skill.translated_name(metadata, version),
+                description: skill.translated_description(metadata, version),
+                point_cost: point_cost_for_species(skill, species),
+                learned: true,
+            })
+            .collect();
+        all.sort_by_key(|s| (s.point_cost, s.skill_type));
+        group_into_rows(all)
+    }
 }
 
 /// Modern (>=0.10) per-species layout. Picks the layout with the largest
@@ -1035,3 +1144,29 @@ static OLD_LAYOUTS: &[(u32, &[GridSlot])] = &[
         ],
     ),
 ];
+
+#[cfg(test)]
+mod build_skill_grid_tests {
+    use super::*;
+    use crate::game_params::types::{CrewSkillType, SkillPointCost};
+
+    #[test]
+    fn rows_are_grouped_by_point_cost() {
+        let a = SkillGridSkill {
+            internal_name: "A".into(),
+            skill_type: CrewSkillType::new(1),
+            name: None,
+            description: None,
+            point_cost: SkillPointCost::new(1),
+            learned: false,
+        };
+        let b = SkillGridSkill { point_cost: SkillPointCost::new(1), ..a.clone() };
+        let c = SkillGridSkill { point_cost: SkillPointCost::new(2), ..a.clone() };
+        let rows = group_into_rows(vec![a, b, c]);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].point_cost, SkillPointCost::new(1));
+        assert_eq!(rows[0].skills.len(), 2);
+        assert_eq!(rows[1].point_cost, SkillPointCost::new(2));
+        assert_eq!(rows[1].skills.len(), 1);
+    }
+}
