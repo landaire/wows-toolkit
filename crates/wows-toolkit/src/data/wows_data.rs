@@ -306,7 +306,8 @@ impl WoWsDataMap {
                     if !wows_data.replay_constants_exact_match
                         && let Some(tx) = &self.network_job_tx
                     {
-                        let _ = tx.send(NetworkJob::FetchVersionedConstants { build });
+                        let version = version.map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch));
+                        let _ = tx.send(NetworkJob::FetchVersionedConstants { build, version });
                     }
                     let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
                     self.insert(build, Arc::clone(&shared));
@@ -347,7 +348,8 @@ impl WoWsDataMap {
                         if !wows_data.replay_constants_exact_match
                             && let Some(tx) = &self.network_job_tx
                         {
-                            let _ = tx.send(NetworkJob::FetchVersionedConstants { build });
+                            let version = version.map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch));
+                            let _ = tx.send(NetworkJob::FetchVersionedConstants { build, version });
                         }
                         let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
                         self.insert(build, Arc::clone(&shared));

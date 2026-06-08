@@ -37,7 +37,9 @@ pub enum NetworkJob {
     /// Fetch PR expected values from wows-numbers.com.
     FetchPersonalRatingData,
     /// Fetch versioned constants for a specific game build from GitHub.
-    FetchVersionedConstants { build: u32 },
+    /// `version` is the replay's friendly version (major.minor.patch) used to
+    /// resolve constants across regions when the build number differs.
+    FetchVersionedConstants { build: u32, version: Option<String> },
 }
 
 /// A result sent back from the networking thread to the UI.
@@ -127,7 +129,7 @@ impl NetworkingThread {
                 self.fetch_latest_constants(current_commit);
             }
             NetworkJob::FetchPersonalRatingData => self.fetch_personal_rating_data(),
-            NetworkJob::FetchVersionedConstants { build } => self.fetch_versioned_constants(build),
+            NetworkJob::FetchVersionedConstants { build, version } => self.fetch_versioned_constants(build, version),
         }
     }
 
@@ -246,7 +248,7 @@ impl NetworkingThread {
     }
 
     #[instrument(skip(self))]
-    fn fetch_versioned_constants(&mut self, target_build: u32) {
+    fn fetch_versioned_constants(&mut self, target_build: u32, version: Option<String>) {
         // If already cached on disk, no need to download
         if load_versioned_constants_from_disk(target_build).is_some() {
             debug!("already on disk, skipping fetch");
@@ -255,9 +257,14 @@ impl NetworkingThread {
         }
 
         // Delegate to the shared constants module in wows-data-mgr
-        match self.runtime.block_on(wows_data_mgr::constants::fetch_versioned_constants(target_build)) {
+        match self
+            .runtime
+            .block_on(wows_data_mgr::constants::fetch_versioned_constants(target_build, version.as_deref()))
+        {
             Ok((data, actual_build)) => {
-                save_versioned_constants(actual_build, &data);
+                // Cache under the replay's build so later lookups by target_build hit,
+                // even when constants were resolved from a different (e.g. cross-region) build.
+                save_versioned_constants(target_build, &data);
                 if actual_build != target_build {
                     debug!(actual_build, "fetched fallback from GitHub");
                 } else {

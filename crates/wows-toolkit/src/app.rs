@@ -1032,7 +1032,13 @@ impl WowsToolkitApp {
 
                     // If the initial build used fallback constants, request the correct version
                     if !wows_data_ref.read().replay_constants_exact_match {
-                        self.tab_state.send_network_job(NetworkJob::FetchVersionedConstants { build: build_number });
+                        let version = wows_data_ref
+                            .read()
+                            .full_version
+                            .as_ref()
+                            .map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch));
+                        self.tab_state
+                            .send_network_job(NetworkJob::FetchVersionedConstants { build: build_number, version });
                     }
 
                     // Flush any constants data that arrived from the network before
@@ -2236,14 +2242,19 @@ impl WowsToolkitApp {
                 // The on-disk constants file is stale — delete it so the versioned
                 // system doesn't treat it as an exact match, then request a fresh fetch.
                 if let Some(wows_data) = &self.tab_state.world_of_warships_data {
-                    let build = wows_data.read().build_number;
+                    let (build, version) = {
+                        let guard = wows_data.read();
+                        let version =
+                            guard.full_version.as_ref().map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch));
+                        (guard.build_number, version)
+                    };
                     if let Some(storage_dir) = crate::storage_dir() {
                         let path = storage_dir.join(format!("constants_{build}.json"));
                         let _ = std::fs::remove_file(path);
                     }
                     // Mark as inexact so the fetch/rebuild path works
                     wows_data.write().replay_constants_exact_match = false;
-                    self.tab_state.send_network_job(NetworkJob::FetchVersionedConstants { build });
+                    self.tab_state.send_network_job(NetworkJob::FetchVersionedConstants { build, version });
                 }
                 // Also clear the saved commit so FetchLatestConstants re-downloads
                 self.tab_state.persisted.write().settings.game.constants_file_commit = None;
