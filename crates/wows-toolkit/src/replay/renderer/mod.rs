@@ -698,6 +698,9 @@ pub struct SharedRendererState {
     /// Absolute game clock at which the battle started (after pre-battle countdown).
     /// Used to convert between absolute clock (used by seeking) and elapsed time (used by timeline).
     pub battle_start: GameClock,
+    /// Absolute game clock at which the battle ended (from the BattleEnd packet).
+    /// None when the replay ends before the result is decided.
+    pub battle_end: Option<GameClock>,
     /// Actual game duration from the last packet's clock (may differ from metadata duration).
     pub actual_game_duration: Option<f32>,
     /// The replay owner's player name (from replay metadata).
@@ -912,6 +915,7 @@ pub fn launch_replay_renderer(
         viewport_ctx: None,
         timeline_events: None,
         battle_start: GameClock(0.0),
+        battle_end: None,
         actual_game_duration: None,
         self_player_name: None,
         self_entity_id: None,
@@ -1104,6 +1108,7 @@ pub fn launch_client_renderer(
         viewport_ctx: None,
         timeline_events: None,
         battle_start: GameClock(0.0),
+        battle_end: None,
         actual_game_duration: None,
         self_player_name: None,
         self_entity_id: None,

@@ -142,6 +142,7 @@ pub(crate) fn format_timeline_event(event: &TimelineEvent) -> String {
 pub(super) struct TimelineExtractionResult {
     pub(super) events: Vec<TimelineEvent>,
     pub(super) battle_start: GameClock,
+    pub(super) battle_end: Option<GameClock>,
 }
 
 struct TimelineEventsCollector<'a> {
@@ -163,6 +164,7 @@ struct TimelineEventsCollector<'a> {
     prev_advantage: wows_minimap_renderer::advantage::TeamAdvantage,
     advantage_check_clock: GameClock,
     battle_start: GameClock,
+    battle_end: Option<GameClock>,
 }
 
 impl<'a> TimelineEventsCollector<'a> {
@@ -186,6 +188,7 @@ impl<'a> TimelineEventsCollector<'a> {
             prev_advantage: wows_minimap_renderer::advantage::TeamAdvantage::Even,
             advantage_check_clock: GameClock(0.0),
             battle_start: GameClock(0.0),
+            battle_end: None,
         }
     }
 }
@@ -548,6 +551,7 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
             }
         }
         self.battle_start = view.battle_start_clock().unwrap_or(GameClock(0.0));
+        self.battle_end = view.battle_end_clock();
     }
 }
 
@@ -600,13 +604,14 @@ pub(super) fn extract_timeline_and_shots(
     }
 
     let battle_start = timeline_col.battle_start;
+    let battle_end = timeline_col.battle_end;
     for event in &mut timeline_col.events {
         let abs = GameClock(event.clock.seconds());
         event.clock = abs.to_elapsed(battle_start);
     }
     timeline_col.events.sort_by(|a, b| a.clock.cmp(&b.clock));
 
-    let timeline_result = TimelineExtractionResult { events: timeline_col.events, battle_start };
+    let timeline_result = TimelineExtractionResult { events: timeline_col.events, battle_start, battle_end };
 
     for (eid, hh) in &timeline_col.health_histories {
         shot_col

@@ -352,18 +352,19 @@ pub(super) fn playback_thread(
     let actual_game_duration = frame_snapshots.last().map(|s| s.clock.seconds()).unwrap_or(game_duration);
 
     // 4. Combined timeline + shot extraction — single full parse produces both.
-    let (timeline_events, battle_start, shot_timelines) =
+    let (timeline_events, battle_start, battle_end, shot_timelines) =
         match ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone()) {
             Ok(event_replay) => {
                 let (tr, shots) = extract_timeline_and_shots(&event_replay, &game_metadata, Some(&game_constants));
-                (tr.events, tr.battle_start, shots)
+                (tr.events, tr.battle_start, tr.battle_end, shots)
             }
-            Err(_) => (Vec::new(), GameClock(0.0), HashMap::new()),
+            Err(_) => (Vec::new(), GameClock(0.0), None, HashMap::new()),
         };
     {
         let mut state = shared_state.lock();
         state.timeline_events = Some(timeline_events);
         state.battle_start = battle_start;
+        state.battle_end = battle_end;
         state.actual_game_duration = Some(actual_game_duration);
         state.self_player_name = Some(replay_file.meta.playerName.clone());
     }
