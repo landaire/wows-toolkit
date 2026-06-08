@@ -1954,3 +1954,29 @@ where
         Self { params, id_to_params: lookups.by_id, index_to_params: lookups.by_index, name_to_params: lookups.by_name }
     }
 }
+
+/// Resolve a ship's secondary (ATBA) ammo projectile GameParamId.
+///
+/// Secondary ammo is fixed per ship, so the first collected ammo name is used.
+/// Returns None for ships without secondaries or on builds predating the data.
+pub fn secondary_ammo_param<P: GameParamProvider + ?Sized>(
+    provider: &P,
+    ship: GameParamId,
+) -> Option<GameParamId> {
+    let ship_param = provider.game_param_by_id(ship)?;
+    let ammo_name = ship_param.vehicle()?.config_data()?.secondary_battery_ammo.iter().next()?;
+    Some(provider.game_param_by_name(ammo_name)?.id())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secondary_ammo_strings_map_to_ammo_type() {
+        // Secondaries are HE or SAP ("CS" in game data); both must resolve so the
+        // renderer can color the dot.
+        assert_eq!(AmmoType::from_game_str("HE"), AmmoType::HE);
+        assert_eq!(AmmoType::from_game_str("CS"), AmmoType::SAP);
+    }
+}
