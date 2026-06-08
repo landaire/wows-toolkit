@@ -16,5 +16,6 @@ mod ingest;
 
 pub use scan::EntityTrack;
 pub use scan::PositionTimeline;
+pub use scan::SalvoFlightTimes;
 pub use scan::SampledPos;
 pub use world::BattleWorld;

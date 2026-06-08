@@ -194,6 +194,65 @@ impl ScanCollector for MetadataCollector<'_> {
     }
 }
 
+/// Per-shooter salvo flight times learned from actual impacts: owner entity ->
+/// sorted-by-fire-time list of (fired_at, flight_seconds). Used to pace shell
+/// tracers by the real time-to-impact instead of the unreliable serverTimeLeft.
+pub type SalvoFlightTimes = HashMap<EntityId, Vec<(GameClock, f32)>>;
+
+/// Accumulates per-salvo flight times from [`ResolvedShotHit`]s, averaging
+/// across all shells in a salvo for robustness against missing hits.
+///
+/// [`ResolvedShotHit`]: wows_replays::analyzer::battle_controller::state::ResolvedShotHit
+#[derive(Default)]
+pub struct SalvoImpactCollector {
+    acc: HashMap<(EntityId, u32), (f32, u32)>,
+}
+
+impl WorldScanCollector for SalvoImpactCollector {
+    fn observe(&mut self, _packet: &Packet<'_, '_>, _prev_clock: GameClock, view: &BattleView<'_>) {
+        for h in view.shot_hits() {
+            let Some(fired_at) = h.fired_at else { continue };
+            let flight = h.clock.0 - fired_at.0;
+            if flight <= 0.0 {
+                continue;
+            }
+            let owner = h.hit.owner_id;
+            let key = (owner, fired_at.0.to_bits());
+            let e = self.acc.entry(key).or_insert((0.0, 0));
+            e.0 += flight;
+            e.1 += 1;
+        }
+    }
+}
+
+impl SalvoImpactCollector {
+    pub fn into_flight_times(self) -> SalvoFlightTimes {
+        let mut out: SalvoFlightTimes = HashMap::new();
+        for ((owner, fa_bits), (sum, n)) in self.acc {
+            let fired_at = GameClock(f32::from_bits(fa_bits));
+            let flight = sum / n as f32;
+            out.entry(owner).or_default().push((fired_at, flight));
+        }
+        for v in out.values_mut() {
+            v.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
+        }
+        out
+    }
+}
+
+/// Pre-scan a replay and learn each shooter's salvo flight times from impacts.
+pub fn scan_salvo_flight_times<G: ResourceLoader>(
+    meta: &ReplayMeta,
+    game_params: &G,
+    game_constants: &GameConstants,
+    version: Version,
+    replay: &ReplayFile,
+) -> SalvoFlightTimes {
+    let mut col = SalvoImpactCollector::default();
+    scan_replay_world(meta, game_params, game_constants, version, replay, &mut [&mut col]);
+    col.into_flight_times()
+}
+
 /// Observes a `BattleWorld` stepped over one replay.
 ///
 /// `observe_pre` runs before the world processes a packet (pre-process state).

@@ -22,6 +22,7 @@ use wowsunpack::game_types::DamageStatWeapon;
 
 use wows_battle_world::EntityTrack;
 use wows_battle_world::PositionTimeline;
+use wows_battle_world::SalvoFlightTimes;
 use wows_battle_world::SampledPos;
 use wows_battle_world::view::BattleView;
 use wows_replay_insights::build::ResolvedBuild;
@@ -118,6 +119,21 @@ fn tracer_flight_duration(distance: f32, speed: f32, server_time_left: f32) -> f
     } else {
         3.0
     }
+}
+
+/// Resolve a salvo's tracer flight duration from learned impact times: pick the
+/// same shooter's nearest-in-time salvo (exact match when this salvo itself
+/// hit), else fall back to `fallback` (the serverTimeLeft/muzzle estimate).
+pub(crate) fn resolve_salvo_flight(times: Option<&Vec<(GameClock, f32)>>, fired_at: GameClock, fallback: f32) -> f32 {
+    let Some(list) = times else { return fallback };
+    let mut best: Option<(f32, f32)> = None;
+    for &(fa, fl) in list {
+        let dt = (fa.0 - fired_at.0).abs();
+        if best.map(|b| dt < b.0).unwrap_or(true) {
+            best = Some((dt, fl));
+        }
+    }
+    best.map(|b| b.1).unwrap_or(fallback)
 }
 
 // Visual constants
@@ -296,6 +312,9 @@ pub struct MinimapRenderer<'a> {
     /// Future-aware per-entity position samples for interpolation. None falls
     /// back to discrete packet positions.
     position_timeline: Option<Arc<PositionTimeline>>,
+
+    /// Real per-salvo flight times learned from impacts, for tracer pacing.
+    salvo_flight_times: Option<Arc<SalvoFlightTimes>>,
 }
 
 impl<'a> MinimapRenderer<'a> {
@@ -335,6 +354,7 @@ impl<'a> MinimapRenderer<'a> {
             has_merged_perspectives: false,
             render_clock: None,
             position_timeline: None,
+            salvo_flight_times: None,
         }
     }
 
@@ -348,6 +368,11 @@ impl<'a> MinimapRenderer<'a> {
     /// Install the shared position timeline used to smooth motion between packets.
     pub fn set_position_timeline(&mut self, timeline: Arc<PositionTimeline>) {
         self.position_timeline = Some(timeline);
+    }
+
+    /// Install per-salvo flight times pre-scanned from impacts, for tracer pacing.
+    pub fn set_salvo_flight_times(&mut self, times: Arc<SalvoFlightTimes>) {
+        self.salvo_flight_times = Some(times);
     }
 
     fn interpolated_pos(&self, entity_id: EntityId, render_clock: GameClock) -> Option<SampledPos> {
@@ -1137,7 +1162,9 @@ impl<'a> MinimapRenderer<'a> {
                     let dx = target.x - origin.x;
                     let dz = target.z - origin.z;
                     let distance = (dx * dx + dz * dz).sqrt();
-                    let flight_duration = tracer_flight_duration(distance, shot_data.speed, shot_data.server_time_left);
+                    let fallback = tracer_flight_duration(distance, shot_data.speed, shot_data.server_time_left);
+                    let owner_times = self.salvo_flight_times.as_ref().and_then(|t| t.get(&owner));
+                    let flight_duration = resolve_salvo_flight(owner_times, shot.fired_at, fallback);
 
                     let elapsed = clock - shot.fired_at;
                     if elapsed < 0.0 || elapsed > flight_duration {
@@ -2708,11 +2735,22 @@ fn consumable_to_base_icon_key(c: Consumable) -> Option<String> {
 mod test {
     use super::SampledPos;
     use super::interpolate_track;
+    use super::resolve_salvo_flight;
     use super::tracer_flight_duration;
     use wows_battle_world::EntityTrack;
     use wows_replays::types::GameClock;
     use wows_replays::types::NormalizedPos;
     use wows_replays::types::WorldPos;
+
+    #[test]
+    fn salvo_flight_prefers_learned_impact_over_fallback() {
+        let list = vec![(GameClock(10.0), 5.0), (GameClock(20.0), 8.0)];
+        assert!((resolve_salvo_flight(Some(&list), GameClock(10.0), 99.0) - 5.0).abs() < 1e-4);
+        assert!((resolve_salvo_flight(Some(&list), GameClock(18.0), 99.0) - 8.0).abs() < 1e-4);
+        assert!((resolve_salvo_flight(None, GameClock(5.0), 99.0) - 99.0).abs() < 1e-4);
+        let empty: Vec<(GameClock, f32)> = Vec::new();
+        assert!((resolve_salvo_flight(Some(&empty), GameClock(5.0), 99.0) - 99.0).abs() < 1e-4);
+    }
 
     #[test]
     fn flight_duration_prefers_server_time() {
