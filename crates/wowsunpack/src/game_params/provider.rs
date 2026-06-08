@@ -1214,7 +1214,23 @@ impl GameMetadataProvider {
                     .and_then(|v| v.dict_or_object_dict())
                     .map(|d| build_skill_modifiers(&d.inner()))
                     .unwrap_or_default();
-                Some(ParamData::Modernization(super::types::Modernization::new(modifiers)))
+                let slot = param_data
+                    .get(&pk("slot"))
+                    .and_then(|v| v.i64_ref())
+                    .and_then(|&v| if v >= 0 { Some(v as u8) } else { None });
+                let ship_levels = param_data
+                    .get(&pk("shiplevel"))
+                    .and_then(|v| v.list_ref())
+                    .map(|a| a.inner().iter().filter_map(|x| x.i64_ref().map(|&n| n as u32)).collect())
+                    .unwrap_or_default();
+                let ship_types = string_list_field(&*param_data, "shiptype");
+                let nations = string_list_field(&*param_data, "nation");
+                let groups = string_list_field(&*param_data, "group");
+                let ships = string_list_field(&*param_data, "ships");
+                let excludes = string_list_field(&*param_data, "excludes");
+                Some(ParamData::Modernization(super::types::Modernization::new(
+                    modifiers, slot, ship_levels, ship_types, nations, groups, ships, excludes,
+                )))
             }
             ParamType::Unit => Some(ParamData::Unit),
             ParamType::Drop => {

@@ -1936,15 +1936,133 @@ impl BuffDrop {
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct Modernization {
     modifiers: Vec<CrewSkillModifier>,
+    /// Upgrade slot index (0-based). `None` when the game slot is `< 0` (not slotted).
+    slot: Option<u8>,
+    ship_levels: Vec<u32>,
+    ship_types: Vec<String>,
+    nations: Vec<String>,
+    groups: Vec<String>,
+    ships: Vec<String>,
+    excludes: Vec<String>,
 }
 
 impl Modernization {
-    pub fn new(modifiers: Vec<CrewSkillModifier>) -> Self {
-        Self { modifiers }
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        modifiers: Vec<CrewSkillModifier>,
+        slot: Option<u8>,
+        ship_levels: Vec<u32>,
+        ship_types: Vec<String>,
+        nations: Vec<String>,
+        groups: Vec<String>,
+        ships: Vec<String>,
+        excludes: Vec<String>,
+    ) -> Self {
+        Self { modifiers, slot, ship_levels, ship_types, nations, groups, ships, excludes }
     }
 
     pub fn modifiers(&self) -> &[CrewSkillModifier] {
         &self.modifiers
+    }
+
+    pub fn slot(&self) -> Option<u8> {
+        self.slot
+    }
+
+    /// Port of the client's `isModApplicable`, on scalar ship attributes.
+    /// `ship_species` is the ship's `Species::name()` string (e.g. "Battleship").
+    pub fn applies_to(
+        &self,
+        ship_name: &str,
+        ship_level: u32,
+        ship_species: &str,
+        ship_nation: &str,
+        ship_group: &str,
+    ) -> bool {
+        if self.excludes.iter().any(|s| s == ship_name) {
+            return false;
+        }
+        let in_ships = self.ships.iter().any(|s| s == ship_name);
+        if !self.groups.iter().any(|g| g == ship_group) {
+            return in_ships;
+        }
+        if !self.nations.iter().any(|n| n == ship_nation) {
+            return in_ships;
+        }
+        if !self.ship_types.iter().any(|t| t == ship_species) {
+            return in_ships;
+        }
+        self.ship_levels.contains(&ship_level) || in_ships
+    }
+}
+
+/// Number of modernization (upgrade) slots a ship has: max applicable `slot` + 1.
+/// Returns 0 when `ship` is not a vehicle or no slotted modernization applies.
+pub fn modernization_slot_count(params: &[std::rc::Rc<Param>], ship: &Param) -> usize {
+    let Some(vehicle) = ship.vehicle() else { return 0 };
+    let Some(species) = ship.species().and_then(|r| r.known()) else { return 0 };
+    let species_name = species.name();
+    let ship_name = ship.name();
+    let level = vehicle.level();
+    let group = vehicle.group();
+    let nation = ship.nation();
+    let mut max_slot: i32 = -1;
+    for p in params {
+        let Some(m) = p.modernization() else { continue };
+        let Some(slot) = m.slot() else { continue };
+        if m.applies_to(ship_name, level, species_name, nation, group) {
+            max_slot = max_slot.max(slot as i32);
+        }
+    }
+    (max_slot + 1).max(0) as usize
+}
+
+#[cfg(test)]
+mod modernization_tests {
+    use super::Modernization;
+
+    fn mk(
+        slot: Option<u8>,
+        levels: &[u32],
+        types: &[&str],
+        nations: &[&str],
+        groups: &[&str],
+        ships: &[&str],
+        excludes: &[&str],
+    ) -> Modernization {
+        Modernization::new(
+            Vec::new(),
+            slot,
+            levels.to_vec(),
+            types.iter().map(|s| s.to_string()).collect(),
+            nations.iter().map(|s| s.to_string()).collect(),
+            groups.iter().map(|s| s.to_string()).collect(),
+            ships.iter().map(|s| s.to_string()).collect(),
+            excludes.iter().map(|s| s.to_string()).collect(),
+        )
+    }
+
+    #[test]
+    fn applies_respects_excludes_and_chain() {
+        let m = mk(
+            Some(2),
+            &[8, 9, 10],
+            &["Battleship"],
+            &["USA"],
+            &["upgradeable"],
+            &["PASB013_Arkansas_1912"],
+            &["PASB099_Excluded"],
+        );
+        // excluded by name
+        assert!(!m.applies_to("PASB099_Excluded", 10, "Battleship", "USA", "upgradeable"));
+        // full match + level in shiplevel
+        assert!(m.applies_to("PASB017_Montana_1945", 10, "Battleship", "USA", "upgradeable"));
+        // wrong type, not in ships -> false
+        assert!(!m.applies_to("PASC001_Foo", 10, "Cruiser", "USA", "upgradeable"));
+        // wrong type but explicitly in ships -> true
+        assert!(m.applies_to("PASB013_Arkansas_1912", 3, "Cruiser", "USA", "upgradeable"));
+        // full match but level not in shiplevel and not in ships -> false
+        assert!(!m.applies_to("PASB500_LowTier", 5, "Battleship", "USA", "upgradeable"));
     }
 }
 

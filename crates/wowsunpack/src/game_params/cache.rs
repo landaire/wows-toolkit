@@ -18,7 +18,7 @@ const MAGIC: [u8; 4] = *b"WUGP";
 /// caches. New writes always carry the latest version; reads that see an
 /// older or unknown version return `None`, prompting the caller to
 /// re-parse from the source VFS.
-pub const FORMAT_VERSION: u32 = 5;
+pub const FORMAT_VERSION: u32 = 6;
 
 const HEADER_LEN: usize = MAGIC.len() + std::mem::size_of::<u32>();
 
