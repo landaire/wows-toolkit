@@ -1604,7 +1604,7 @@ impl UiReport {
                             } else {
                                 Color32::from_rgba_unmultiplied(255, 255, 255, 55)
                             };
-                            if let Some(tex) = self.icon_texture(ui.ctx(), &icon) {
+                            if let Some(tex) = self.icon_texture(ui.ctx(), icon) {
                                 let image = egui::Image::new((tex.id(), egui::Vec2::new(ICON_SIZE, ICON_SIZE)))
                                     .tint(tint);
                                 ui.add(image).on_hover_text(tooltip);
@@ -1804,15 +1804,14 @@ impl UiReport {
                 let mut name_ui = ui.new_child(
                     egui::UiBuilder::new().max_rect(name_rect).layout(egui::Layout::left_to_right(egui::Align::Center)),
                 );
-                if let Some(icon) = icon.as_ref() {
-                    if let Some(tex) = self.icon_texture(name_ui.ctx(), &icon) {
+                if let Some(icon) = icon.as_ref()
+                    && let Some(tex) = self.icon_texture(name_ui.ctx(), icon) {
                         let image = egui::Image::new((tex.id(), egui::Vec2::new(ICON_SIZE, ICON_SIZE)));
                         let response = name_ui.add(image);
                         if !consumable.description.is_empty() {
                             response.on_hover_text(&consumable.description);
                         }
                     }
-                }
                 let name_label = name_ui.label(&consumable.display_name);
                 if !consumable.description.is_empty() {
                     name_label.on_hover_text(&consumable.description);
@@ -1928,7 +1927,7 @@ impl UiReport {
                     ReplayColumn::Name => {
                         // Add ship icon
                         if let Some(icon) = report.icon.as_ref() {
-                            if let Some(tex) = self.icon_texture(ui.ctx(), &icon) {
+                            if let Some(tex) = self.icon_texture(ui.ctx(), icon) {
                                 let image = egui::Image::new((tex.id(), egui::Vec2::new(20.0, 20.0)))
                                     .tint(report.color)
                                     .rotate(90.0_f32.to_radians(), Vec2::splat(0.5));
@@ -2384,13 +2383,12 @@ impl UiReport {
 
                                 for (achievement, icon) in report.achievements.iter().zip(icons) {
                                     ui.horizontal(|ui| {
-                                        if let Some(icon) = icon {
-                                            if let Some(tex) = self.icon_texture(ui.ctx(), &icon) {
+                                        if let Some(icon) = icon
+                                            && let Some(tex) = self.icon_texture(ui.ctx(), &icon) {
                                                 let image =
                                                     egui::Image::new((tex.id(), egui::Vec2::new(32.0, 32.0)));
                                                 ui.add(image).on_hover_text(&achievement.description);
                                             }
-                                        }
 
                                         let response = if achievement.count > 1 {
                                             ui.label(format!("{} ({}x)", &achievement.display_name, achievement.count))
@@ -2450,15 +2448,14 @@ impl UiReport {
 
                                         let size = if ribbon.is_subribbon { (32.0, 32.0) } else { (64.0, 64.0) };
 
-                                        if let Some(icon) = icon {
-                                            if let Some(tex) = self.icon_texture(ui.ctx(), icon) {
+                                        if let Some(icon) = icon
+                                            && let Some(tex) = self.icon_texture(ui.ctx(), icon) {
                                                 let image = egui::Image::new((
                                                     tex.id(),
                                                     egui::Vec2::new(size.0, size.1),
                                                 ));
                                                 ui.add(image).on_hover_text(&ribbon.description);
                                             }
-                                        }
 
                                         ui.label(format!("{} ({}x)", &ribbon.display_name, ribbon.count))
                                             .on_hover_text(&ribbon.description);

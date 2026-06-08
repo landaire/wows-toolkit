@@ -1223,11 +1223,11 @@ impl GameMetadataProvider {
                     .and_then(|v| v.list_ref())
                     .map(|a| a.inner().iter().filter_map(|x| x.i64_ref().map(|&n| n as u32)).collect())
                     .unwrap_or_default();
-                let ship_types = string_list_field(&*param_data, "shiptype");
-                let nations = string_list_field(&*param_data, "nation");
-                let groups = string_list_field(&*param_data, "group");
-                let ships = string_list_field(&*param_data, "ships");
-                let excludes = string_list_field(&*param_data, "excludes");
+                let ship_types = string_list_field(&param_data, "shiptype");
+                let nations = string_list_field(&param_data, "nation");
+                let groups = string_list_field(&param_data, "group");
+                let ships = string_list_field(&param_data, "ships");
+                let excludes = string_list_field(&param_data, "excludes");
                 Some(ParamData::Modernization(super::types::Modernization::new(
                     modifiers, slot, ship_levels, ship_types, nations, groups, ships, excludes,
                 )))
