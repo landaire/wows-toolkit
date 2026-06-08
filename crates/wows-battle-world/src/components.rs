@@ -257,12 +257,12 @@ pub enum ProjectileState {
 /// A single in-flight secondary (ATBA) shot, from one gun to one target.
 ///
 /// Kept separate from ProjectileState so the artillery/torpedo ordering that
-/// mirrors BattleController stays untouched. Positions are resolved live by the
-/// renderer from shooter/target, so none are snapshotted here.
+/// mirrors BattleController stays untouched. Position and ammo are resolved live
+/// by the renderer (from shooter/target and the shooter's ship params), so
+/// neither is snapshotted here.
 #[derive(Component, Debug, Clone)]
 pub struct SecondaryShotState {
     pub shooter: EntityId,
     pub target: EntityId,
     pub fired_at: GameClock,
-    pub ammo: GameParamId,
 }

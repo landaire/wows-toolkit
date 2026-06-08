@@ -8,6 +8,7 @@ pub mod entities;
 pub mod match_state;
 pub mod positions;
 pub mod projectiles;
+pub mod secondaries;
 pub mod vehicles;
 pub mod zones;
 
@@ -127,7 +128,9 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::ArtilleryShots { avatar_id, salvos } => {
             projectiles::handle_artillery_shots(avatar_id, salvos, clock, world, options.shot_tracking);
         }
-        DecodedPacketPayload::WeaponFired { .. } => {}
+        DecodedPacketPayload::WeaponFired { entity, weapon_type, gun_bits } => {
+            secondaries::handle_weapon_fired(entity, weapon_type, gun_bits, clock, world, options.shot_tracking);
+        }
         DecodedPacketPayload::TorpedoesReceived { avatar_id, torpedoes } => {
             projectiles::handle_torpedoes_received(avatar_id, torpedoes, clock, world);
         }
