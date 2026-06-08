@@ -323,7 +323,8 @@ impl From<Vehicle> for FlattenedVehicle {
         } = value;
 
         let (modules, abilities, captain_skills) = if let Some(translated_config) = translated_build {
-            let modules = translated_config.modules.iter().filter_map(|module| module.name.clone()).collect();
+            let modules =
+                translated_config.modernization_slots.iter().flatten().filter_map(|m| m.name.clone()).collect();
             let abilities = translated_config.abilities.iter().filter_map(|ability| ability.name.clone()).collect();
             let captain_skills = translated_config.captain_skills.map(|rows| {
                 rows.iter()

@@ -1201,19 +1201,10 @@ fn equipment_display_for_param(
     param: &wowsunpack::game_params::types::Param,
     metadata: &GameMetadataProvider,
 ) -> super::EquipmentDisplay {
-    use wowsunpack::data::ResourceLoader;
-    // Modernizations translate via IDS_TITLE_<NAME> / IDS_DESC_<NAME>.
-    let (mod_name, mod_desc) = wowsunpack::game_params::translations::translate_module(param.name(), metadata);
-    // Signal flags translate via IDS_<NAME> / IDS_<NAME>_DESCRIPTION
-    // (e.g. `IDS_PCEF019_JW1_SIGNALFLAG`). The "TITLE"/"DESC" prefixes
-    // only show up on modernization keys, so try the bare form here.
-    let upper = param.name().to_ascii_uppercase();
-    let direct_name = metadata.localized_name_from_id(&format!("IDS_{}", upper));
-    let direct_desc = metadata.localized_name_from_id(&format!("IDS_{}_DESCRIPTION", upper));
-    // Other exteriors (permoflages, ensigns) embed their own title key on
-    // the Exterior struct.
-    let exterior_name = param.exterior().and_then(|e| e.title()).and_then(|id| metadata.localized_name_from_id(id));
-    let name = mod_name.or(direct_name).or(exterior_name).unwrap_or_else(|| param.name().to_string());
-    let description = mod_desc.or(direct_desc).unwrap_or_default();
-    super::EquipmentDisplay { icon_key: param.name().to_string(), name, description }
+    let (name, description) = wowsunpack::game_params::translations::translate_exterior(param, metadata);
+    super::EquipmentDisplay {
+        icon_key: param.name().to_string(),
+        name: name.unwrap_or_else(|| param.name().to_string()),
+        description: description.unwrap_or_default(),
+    }
 }

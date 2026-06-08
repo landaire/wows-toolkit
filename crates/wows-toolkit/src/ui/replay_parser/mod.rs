@@ -2412,11 +2412,11 @@ impl UiReport {
                                 if let Some(build_info) = &report.translated_build {
                                     ui.separator();
 
-                                    if build_info.modules.is_empty() {
+                                    if build_info.modernization_slots.iter().all(|s| s.is_none()) {
                                         ui.label(t!("ui.replay.sections.modules_none"));
                                     } else {
                                         ui.label(t!("ui.replay.sections.modules"));
-                                        for module in &build_info.modules {
+                                        for module in build_info.modernization_slots.iter().flatten() {
                                             if let Some(name) = &module.name {
                                                 let label = ui.label(name);
                                                 if let Some(hover_text) = module.description.as_ref() {

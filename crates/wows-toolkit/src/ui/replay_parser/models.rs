@@ -89,8 +89,11 @@ pub struct TranslatedModule {
 /// A player's complete translated build including modules, abilities, and skills.
 #[derive(Clone, Serialize)]
 pub struct TranslatedBuild {
-    /// Modernization upgrades (slot upgrades).
-    pub modules: Vec<TranslatedModule>,
+    /// Upgrade slots in slot order; `None` is an empty slot. Length is the ship's
+    /// total modernization slot count.
+    pub modernization_slots: Vec<Option<TranslatedModule>>,
+    /// Mounted combat signal flags (game_params_name = Param::name() = icon key).
+    pub signals: Vec<TranslatedModule>,
     /// Equipped tech-tree modules (hull, guns, fire control, engine, ...) from the
     /// ship-config unit slots. Populated for every replay version that carries a
     /// ship config, so old and new replays show the same loadout view.
@@ -105,18 +108,51 @@ impl TranslatedBuild {
         let config = vehicle_entity.props().ship_config();
         let species = *player.vehicle().species()?.known()?;
         let result = Self {
-            modules: config
-                .modernization()
+            modernization_slots: {
+                let ship = player.vehicle();
+                let slot_count = wowsunpack::game_params::types::modernization_slot_count(
+                    <GameMetadataProvider as GameParamProvider>::params(metadata_provider),
+                    ship,
+                );
+                let mut slots: Vec<Option<TranslatedModule>> = vec![None; slot_count];
+                for id in config.modernization() {
+                    let Some(param) =
+                        <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)
+                    else {
+                        continue;
+                    };
+                    let game_params_name = param.name().to_string();
+                    let (name, description) = wowsunpack::game_params::translations::translate_module(
+                        &game_params_name,
+                        metadata_provider,
+                    );
+                    let module = TranslatedModule { name, description, game_params_name };
+                    match param.modernization().and_then(|m| m.slot()) {
+                        Some(i) if (i as usize) < slots.len() => slots[i as usize] = Some(module),
+                        _ => slots.push(Some(module)),
+                    }
+                }
+                slots
+            },
+            signals: config
+                .exteriors()
                 .iter()
                 .filter_map(|id| {
-                    let game_params_name =
-                        <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?
-                            .name()
-                            .to_string();
-                    let (name, description) =
-                        wowsunpack::game_params::translations::translate_module(&game_params_name, metadata_provider);
-
-                    Some(TranslatedModule { name, description, game_params_name })
+                    <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)
+                })
+                .filter(|param| {
+                    matches!(
+                        param.species().and_then(|r| r.known()),
+                        Some(wowsunpack::game_params::types::Species::Flags)
+                    )
+                })
+                .map(|param| {
+                    let game_params_name = param.name().to_string();
+                    let (name, description) = wowsunpack::game_params::translations::translate_exterior(
+                        &param,
+                        metadata_provider,
+                    );
+                    TranslatedModule { name, description, game_params_name }
                 })
                 .collect(),
             loadout: config

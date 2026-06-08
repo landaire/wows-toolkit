@@ -93,6 +93,22 @@ pub fn translate_module(
     (name, description)
 }
 
+/// Resolve a mounted exterior's (name, description). Tries upgrade keys
+/// (`IDS_TITLE_<NAME>`/`IDS_DESC_<NAME>`), then bare signal keys
+/// (`IDS_<NAME>`/`IDS_<NAME>_DESCRIPTION`), then the exterior's own title key.
+pub fn translate_exterior(
+    param: &crate::game_params::types::Param,
+    resource_loader: &dyn ResourceLoader,
+) -> (Option<String>, Option<String>) {
+    let (mod_name, mod_desc) = translate_module(param.name(), resource_loader);
+    let upper = param.name().to_ascii_uppercase();
+    let direct_name = resource_loader.localized_name_from_id(&format!("IDS_{upper}"));
+    let direct_desc = resource_loader.localized_name_from_id(&format!("IDS_{upper}_DESCRIPTION"));
+    let exterior_name =
+        param.exterior().and_then(|e| e.title()).and_then(|id| resource_loader.localized_name_from_id(id));
+    (mod_name.or(direct_name).or(exterior_name), mod_desc.or(direct_desc))
+}
+
 /// Translate a ship unit/module (hull, main battery, torpedoes, fire control, engine,
 /// ...) by its GameParams name. Units localize as `IDS_<NAME>` -- unlike upgrades, which
 /// use `IDS_TITLE_<NAME>`, and unlike ships, whose `param.index()` is only the name prefix.

@@ -1999,7 +1999,7 @@ impl Modernization {
 
 /// Number of modernization (upgrade) slots a ship has: max applicable `slot` + 1.
 /// Returns 0 when `ship` is not a vehicle or no slotted modernization applies.
-pub fn modernization_slot_count(params: &[std::rc::Rc<Param>], ship: &Param) -> usize {
+pub fn modernization_slot_count(params: &[crate::Rc<Param>], ship: &Param) -> usize {
     let Some(vehicle) = ship.vehicle() else { return 0 };
     let Some(species) = ship.species().and_then(|r| r.known()) else { return 0 };
     let species_name = species.name();
