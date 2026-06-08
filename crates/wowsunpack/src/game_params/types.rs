@@ -1969,8 +1969,9 @@ impl Modernization {
         self.slot
     }
 
-    /// Port of the client's `isModApplicable`, on scalar ship attributes.
-    /// `ship_species` is the ship's `Species::name()` string (e.g. "Battleship").
+    /// Port of the client's `isModApplicable`. An empty criterion list (e.g. empty
+    /// `ship_types`) is NOT "matches all": membership is false, so the mod falls
+    /// through to `name in ships` -- matching the game (validated: Montana = 6 slots).
     pub fn applies_to(
         &self,
         ship_name: &str,
@@ -2014,7 +2015,7 @@ pub fn modernization_slot_count(params: &[std::rc::Rc<Param>], ship: &Param) -> 
             max_slot = max_slot.max(slot as i32);
         }
     }
-    (max_slot + 1).max(0) as usize
+    (max_slot + 1) as usize
 }
 
 #[cfg(test)]
@@ -2063,6 +2064,17 @@ mod modernization_tests {
         assert!(m.applies_to("PASB013_Arkansas_1912", 3, "Cruiser", "USA", "upgradeable"));
         // full match but level not in shiplevel and not in ships -> false
         assert!(!m.applies_to("PASB500_LowTier", 5, "Battleship", "USA", "upgradeable"));
+    }
+
+    #[test]
+    fn empty_lists_fall_through_to_ships_not_match_all() {
+        // Empty criteria are not "match all"; a mod with explicit ships applies only to them.
+        let m = mk(Some(0), &[], &[], &[], &[], &["PASB013_Arkansas_1912"], &[]);
+        assert!(m.applies_to("PASB013_Arkansas_1912", 3, "Battleship", "USA", "upgradeable"));
+        assert!(!m.applies_to("PASB017_Montana_1945", 10, "Battleship", "USA", "upgradeable"));
+        // All-empty (including ships) applies to nobody.
+        let none = mk(Some(0), &[], &[], &[], &[], &[], &[]);
+        assert!(!none.applies_to("PASB017_Montana_1945", 10, "Battleship", "USA", "upgradeable"));
     }
 }
 
