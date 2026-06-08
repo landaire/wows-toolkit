@@ -1306,6 +1306,7 @@ impl ReplayRendererViewer {
                 let options = state.options.clone();
                 let show_dead_ships = state.show_dead_ships;
                 let battle_start = state.battle_start;
+                let battle_end = state.battle_end;
                 let actual_game_duration = state.actual_game_duration;
                 let frame_data =
                     state.frame.as_ref().map(|f| (f.frame_index, f.total_frames, f.clock, f.game_duration));
@@ -2741,7 +2742,22 @@ impl ReplayRendererViewer {
                                                     ui.spacing_mut().slider_width = ui.available_width();
                                                     let slider = egui::Slider::new(&mut seek_time, 0.0..=game_dur)
                                                         .show_value(false);
-                                                    seek_changed = ui.add(slider).changed();
+                                                    let resp = ui.add(slider);
+                                                    seek_changed = resp.changed();
+
+                                                    let rect = resp.rect;
+                                                    // egui insets the slider thumb travel by its handle radius
+                                                    // (default Rect handle: height/2.5 scaled by the 0.75 aspect).
+                                                    let handle_r = rect.height() / 2.5 * 0.75;
+                                                    let tick_color = egui::Color32::from_rgb(225, 225, 225);
+                                                    let painter = ui.painter();
+                                                    let start_x =
+                                                        clock_tick_x(battle_start.seconds(), game_dur, rect, handle_r);
+                                                    painter.vline(start_x, rect.y_range(), egui::Stroke::new(1.5, tick_color));
+                                                    if let Some(end) = battle_end {
+                                                        let end_x = clock_tick_x(end.seconds(), game_dur, rect, handle_r);
+                                                        painter.vline(end_x, rect.y_range(), egui::Stroke::new(1.5, tick_color));
+                                                    }
                                                 });
                                                 if seek_changed {
                                                     shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
@@ -3507,4 +3523,44 @@ fn draw_build_section(
             ui.image((tex.id(), Vec2::splat(28.0))).on_hover_text(tooltip);
         }
     });
+}
+
+/// Map an absolute clock value (seconds) to an x pixel on a seek-slider rect,
+/// inset from both ends by the slider handle radius so the tick lines up with the
+/// value position rather than the widget edge. Clamps to [0, 1] of the duration.
+fn clock_tick_x(clock_secs: f32, game_dur: f32, rect: egui::Rect, handle_radius: f32) -> f32 {
+    let frac = if game_dur > 0.0 { (clock_secs / game_dur).clamp(0.0, 1.0) } else { 0.0 };
+    let left = rect.left() + handle_radius;
+    let right = rect.right() - handle_radius;
+    left + frac * (right - left)
+}
+
+#[cfg(test)]
+mod tick_tests {
+    use super::clock_tick_x;
+    use egui::{Pos2, Rect};
+
+    fn rect() -> Rect {
+        Rect::from_min_max(Pos2::new(100.0, 0.0), Pos2::new(300.0, 10.0))
+    }
+
+    #[test]
+    fn maps_fraction_with_handle_inset() {
+        assert!((clock_tick_x(0.0, 100.0, rect(), 0.0) - 100.0).abs() < 0.01);
+        assert!((clock_tick_x(100.0, 100.0, rect(), 0.0) - 300.0).abs() < 0.01);
+        assert!((clock_tick_x(50.0, 100.0, rect(), 0.0) - 200.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn clamps_and_handles_zero_duration() {
+        assert!((clock_tick_x(150.0, 100.0, rect(), 0.0) - 300.0).abs() < 0.01);
+        assert!((clock_tick_x(-5.0, 100.0, rect(), 0.0) - 100.0).abs() < 0.01);
+        assert!((clock_tick_x(10.0, 0.0, rect(), 0.0) - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn applies_handle_radius_inset() {
+        assert!((clock_tick_x(0.0, 100.0, rect(), 10.0) - 110.0).abs() < 0.01);
+        assert!((clock_tick_x(100.0, 100.0, rect(), 10.0) - 290.0).abs() < 0.01);
+    }
 }
