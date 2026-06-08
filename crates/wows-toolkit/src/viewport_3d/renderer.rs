@@ -378,6 +378,7 @@ struct OffscreenTarget {
 /// creates one of these. Holds its own camera, offscreen target, and scene meshes.
 pub struct Viewport3D {
     pub camera: ArcballCamera,
+    pub gizmo: crate::viewport_3d::gizmo::NavGizmo,
     meshes: HashMap<MeshId, GpuMesh>,
     pick_data: HashMap<MeshId, PickableMesh>,
     offscreen: Option<OffscreenTarget>,
@@ -408,6 +409,7 @@ impl Viewport3D {
     pub fn new() -> Self {
         Self {
             camera: ArcballCamera::default(),
+            gizmo: crate::viewport_3d::gizmo::NavGizmo::default(),
             meshes: HashMap::new(),
             pick_data: HashMap::new(),
             offscreen: None,
@@ -1084,6 +1086,18 @@ impl Viewport3D {
             self.needs_redraw = true;
         }
         changed
+    }
+
+    pub fn gizmo_rect(&self, viewport: egui::Rect) -> egui::Rect {
+        crate::viewport_3d::gizmo::gizmo_rect(viewport)
+    }
+
+    pub fn handle_gizmo(&mut self, response: &egui::Response, rect: egui::Rect) -> bool {
+        crate::viewport_3d::gizmo::interact(&mut self.gizmo, response, rect, &mut self.camera)
+    }
+
+    pub fn draw_gizmo(&self, painter: &egui::Painter, rect: egui::Rect) {
+        crate::viewport_3d::gizmo::draw(painter, rect, &self.camera, &self.gizmo);
     }
 
     /// Free the offscreen textures and unregister from egui.
