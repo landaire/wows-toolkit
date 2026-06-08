@@ -5,8 +5,7 @@
 //! instead and are not covered here. Regenerate after adding game versions.
 #![allow(dead_code)]
 
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::provider::GameMetadataProvider;
 use super::types::{Crew, CrewSkill, CrewSkillName, CrewSkillType, SkillPointCost, Species};
@@ -65,7 +64,8 @@ pub fn skill_grid(build: u32, species: Species) -> Option<&'static [GridSlot]> {
 }
 
 /// One skill in a SkillGridRow, translated and flagged learned. Carries the
-/// stable CrewSkillName; the icon slug is derived from it at render time.
+/// stable CrewSkillName as its identity. `point_cost` is `None` when the cost
+/// for this ship species is unknown (event ships not enumerated by CrewSkillTiers).
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct SkillGridSkill {
@@ -79,8 +79,7 @@ pub struct SkillGridSkill {
     pub learned: bool,
 }
 
-/// A row of the captain skill grid: every skill sharing one point cost.
-/// A row groups skills sharing one point cost, or all cost-unknown skills under `None`.
+/// A row of the captain skill grid: all skills sharing one point cost, or `None` for species with no cost table.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct SkillGridRow {
@@ -1172,5 +1171,30 @@ mod build_skill_grid_tests {
         assert_eq!(rows[0].skills.len(), 2);
         assert_eq!(rows[1].point_cost, Some(SkillPointCost::new(2)));
         assert_eq!(rows[1].skills.len(), 1);
+    }
+
+    #[test]
+    fn point_cost_is_none_for_ungridded_species() {
+        use crate::game_params::types::{CrewSkill, CrewSkillTiers};
+        let tiers = CrewSkillTiers::builder()
+            .aircraft_carrier(SkillPointCost::new(1))
+            .auxiliary(SkillPointCost::new(1))
+            .battleship(SkillPointCost::new(1))
+            .cruiser(SkillPointCost::new(1))
+            .destroyer(SkillPointCost::new(1))
+            .submarine(SkillPointCost::new(1))
+            .build();
+        let skill = CrewSkill::builder()
+            .internal_name("Test".into())
+            .can_be_learned(true)
+            .is_epic(false)
+            .skill_type(CrewSkillType::new(1))
+            .tier(tiers)
+            .ui_treat_as_trigger(false)
+            .build();
+        // gridded species resolve to a cost
+        assert_eq!(point_cost_for_species(&skill, Species::Battleship), Some(SkillPointCost::new(1)));
+        // event-ship species (e.g. Airship) have no entry in CrewSkillTiers
+        assert_eq!(point_cost_for_species(&skill, Species::Airship), None);
     }
 }
