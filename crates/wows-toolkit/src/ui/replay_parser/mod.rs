@@ -57,8 +57,6 @@ use egui::ComboBox;
 use egui::Context;
 use egui::FontId;
 use egui::Id;
-use egui::Image;
-use egui::ImageSource;
 use egui::Label;
 use egui::Margin;
 use egui::OpenUrl;
@@ -532,6 +530,10 @@ pub struct UiReport {
     /// [`crate::data::wows_data::WoWsDataMap::newest_ribbon_icons`].
     fallback_ribbon_icons: HashMap<String, Arc<GameAsset>>,
     fallback_subribbon_icons: HashMap<String, Arc<GameAsset>>,
+    /// Decoded icon textures, cached per build so they stay version-correct
+    /// (icons can change between game versions). Mutex for interior mutability
+    /// from `&self` while staying Send+Sync.
+    icon_textures: Mutex<HashMap<String, egui::TextureHandle>>,
 }
 
 impl UiReport {
@@ -1355,6 +1357,7 @@ impl UiReport {
             resolved_results,
             fallback_ribbon_icons: deps.wows_data_map.newest_ribbon_icons(),
             fallback_subribbon_icons: deps.wows_data_map.newest_subribbon_icons(),
+            icon_textures: Mutex::new(HashMap::new()),
         }
     }
 
@@ -1601,13 +1604,22 @@ impl UiReport {
                             } else {
                                 Color32::from_rgba_unmultiplied(255, 255, 255, 55)
                             };
-                            let image = Image::new(ImageSource::Bytes {
-                                uri: icon.path.clone().into(),
-                                bytes: icon.data.clone().into(),
-                            })
-                            .fit_to_exact_size((ICON_SIZE, ICON_SIZE).into())
-                            .tint(tint);
-                            ui.add(image).on_hover_text(tooltip);
+                            if let Some(tex) = self.icon_texture(ui.ctx(), &icon) {
+                                let image = egui::Image::new((tex.id(), egui::Vec2::new(ICON_SIZE, ICON_SIZE)))
+                                    .tint(tint);
+                                ui.add(image).on_hover_text(tooltip);
+                            } else {
+                                // Fallback for builds whose skill icons are absent.
+                                let label = match skill.point_cost {
+                                    Some(c) => format!("({}) {}", c.get(), display_name),
+                                    None => display_name,
+                                };
+                                let mut text = RichText::new(label);
+                                if !skill.learned {
+                                    text = text.weak();
+                                }
+                                ui.label(text).on_hover_text(tooltip);
+                            }
                         }
                         None => {
                             // Fallback for builds whose skill icons are absent.
@@ -1625,6 +1637,22 @@ impl UiReport {
                 }
             });
         }
+    }
+
+    /// Decode + cache an icon's texture once per build. The cache key and the
+    /// egui texture name include the build so icons from different game versions
+    /// stay distinct. Returns None if the bytes fail to decode.
+    fn icon_texture(&self, ctx: &egui::Context, asset: &GameAsset) -> Option<egui::TextureHandle> {
+        let key = format!("{}:{}", self.version.build, asset.path);
+        if let Some(tex) = self.icon_textures.lock().get(&key) {
+            return Some(tex.clone());
+        }
+        let img = image::load_from_memory(&asset.data).ok()?.to_rgba8();
+        let size = [img.width() as usize, img.height() as usize];
+        let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
+        let tex = ctx.load_texture(key.clone(), color, egui::TextureOptions::LINEAR);
+        self.icon_textures.lock().insert(key, tex.clone());
+        Some(tex)
     }
 
     fn render_consumable_inventory(&self, ui: &mut egui::Ui, consumables: &[models::PlayerConsumable]) {
@@ -1687,14 +1715,12 @@ impl UiReport {
                     egui::UiBuilder::new().max_rect(name_rect).layout(egui::Layout::left_to_right(egui::Align::Center)),
                 );
                 if let Some(icon) = icon.as_ref() {
-                    let image = Image::new(ImageSource::Bytes {
-                        uri: icon.path.clone().into(),
-                        bytes: icon.data.clone().into(),
-                    })
-                    .fit_to_exact_size((ICON_SIZE, ICON_SIZE).into());
-                    let response = name_ui.add(image);
-                    if !consumable.description.is_empty() {
-                        response.on_hover_text(&consumable.description);
+                    if let Some(tex) = self.icon_texture(name_ui.ctx(), &icon) {
+                        let image = egui::Image::new((tex.id(), egui::Vec2::new(ICON_SIZE, ICON_SIZE)));
+                        let response = name_ui.add(image);
+                        if !consumable.description.is_empty() {
+                            response.on_hover_text(&consumable.description);
+                        }
                     }
                 }
                 let name_label = name_ui.label(&consumable.display_name);
@@ -1812,18 +1838,16 @@ impl UiReport {
                     ReplayColumn::Name => {
                         // Add ship icon
                         if let Some(icon) = report.icon.as_ref() {
-                            let image = Image::new(ImageSource::Bytes {
-                                uri: icon.path.clone().into(),
-                                // the icon size is <1k, this clone is fairly cheap
-                                bytes: icon.data.clone().into(),
-                            })
-                            .tint(report.color)
-                            .fit_to_exact_size((20.0, 20.0).into())
-                            .rotate(90.0_f32.to_radians(), Vec2::splat(0.5));
-
-                            let response = ui.add(image);
-                            if !report.ship_species_text.is_empty() {
-                                response.on_hover_text(&report.ship_species_text);
+                            if let Some(tex) = self.icon_texture(ui.ctx(), &icon) {
+                                let image = egui::Image::new((tex.id(), egui::Vec2::new(20.0, 20.0)))
+                                    .tint(report.color)
+                                    .rotate(90.0_f32.to_radians(), Vec2::splat(0.5));
+                                let response = ui.add(image);
+                                if !report.ship_species_text.is_empty() {
+                                    response.on_hover_text(&report.ship_species_text);
+                                }
+                            } else {
+                                ui.label(&report.ship_species_text);
                             }
                         } else {
                             ui.label(&report.ship_species_text);
@@ -2271,12 +2295,11 @@ impl UiReport {
                                 for (achievement, icon) in report.achievements.iter().zip(icons) {
                                     ui.horizontal(|ui| {
                                         if let Some(icon) = icon {
-                                            let image = Image::new(ImageSource::Bytes {
-                                                uri: icon.path.clone().into(),
-                                                bytes: icon.data.clone().into(),
-                                            })
-                                            .fit_to_exact_size((32.0, 32.0).into());
-                                            ui.add(image).on_hover_text(&achievement.description);
+                                            if let Some(tex) = self.icon_texture(ui.ctx(), &icon) {
+                                                let image =
+                                                    egui::Image::new((tex.id(), egui::Vec2::new(32.0, 32.0)));
+                                                ui.add(image).on_hover_text(&achievement.description);
+                                            }
                                         }
 
                                         let response = if achievement.count > 1 {
@@ -2338,12 +2361,13 @@ impl UiReport {
                                         let size = if ribbon.is_subribbon { (32.0, 32.0) } else { (64.0, 64.0) };
 
                                         if let Some(icon) = icon {
-                                            let image = Image::new(ImageSource::Bytes {
-                                                uri: icon.path.clone().into(),
-                                                bytes: icon.data.clone().into(),
-                                            })
-                                            .fit_to_exact_size(size.into());
-                                            ui.add(image).on_hover_text(&ribbon.description);
+                                            if let Some(tex) = self.icon_texture(ui.ctx(), icon) {
+                                                let image = egui::Image::new((
+                                                    tex.id(),
+                                                    egui::Vec2::new(size.0, size.1),
+                                                ));
+                                                ui.add(image).on_hover_text(&ribbon.description);
+                                            }
                                         }
 
                                         ui.label(format!("{} ({}x)", &ribbon.display_name, ribbon.count))
