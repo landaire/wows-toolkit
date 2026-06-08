@@ -80,23 +80,6 @@ pub(crate) fn build_hull_upgrade_names(vehicle: &Vehicle) -> Vec<(String, String
         .unwrap_or_default()
 }
 
-/// Look up `dock_y_offset` for the selected hull upgrade (or the first upgrade
-/// if `selected_hull` is `None`).
-pub(crate) fn resolve_dock_y_offset(vehicle: &Vehicle, selected_hull: &Option<String>) -> Option<f32> {
-    vehicle
-        .hull_upgrades()
-        .and_then(|upgrades| {
-            if let Some(sel) = selected_hull {
-                upgrades.get(sel)
-            } else {
-                let mut keys: Vec<&String> = upgrades.keys().collect();
-                keys.sort();
-                keys.first().and_then(|k| upgrades.get(*k))
-            }
-        })
-        .and_then(|c| c.dock_y_offset())
-}
-
 /// Options for [`load_ship_armor`]. Callers populate the fields they care about;
 /// others use sensible defaults via `..Default::default()`.
 #[derive(Default)]
@@ -115,8 +98,6 @@ pub(crate) struct ShipLoadOptions {
     pub module_alternatives: Vec<(ComponentType, Vec<String>)>,
     /// Pre-computed hull upgrade names (from [`build_hull_upgrade_names`]).
     pub hull_upgrade_names: Vec<(String, String)>,
-    /// Pre-computed dock Y offset (from [`resolve_dock_y_offset`]).
-    pub dock_y_offset: Option<f32>,
 }
 
 /// Full re-upload sequence after a zone/visibility change.
@@ -268,7 +249,7 @@ pub(crate) fn load_ship_armor(
         (None, Vec::new(), None)
     };
 
-    tracing::debug!("Ship loaded: dock_y_offset={:?}, bounds Y=[{:.4}, {:.4}]", options.dock_y_offset, min[1], max[1]);
+    tracing::debug!("Ship loaded: bounds Y=[{:.4}, {:.4}]", min[1], max[1]);
 
     // --- Hull albedo textures (DDS -> RGBA8) ---
     let mut hull_textures = std::collections::HashMap::new();
@@ -299,7 +280,6 @@ pub(crate) fn load_ship_armor(
         zone_part_plates,
         hull_meshes,
         hull_part_groups,
-        dock_y_offset: options.dock_y_offset,
         splash_data,
         splash_box_groups,
         hit_locations,

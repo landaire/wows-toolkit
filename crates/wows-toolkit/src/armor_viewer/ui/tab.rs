@@ -2148,12 +2148,8 @@ fn load_ship_for_pane_with_lod(
     let selected_hull = pane.selected_hull.clone();
     let module_overrides = pane.selected_modules.clone();
 
-    // Build sorted hull upgrade list and dock_y_offset via shared helpers
     let hull_upgrade_names =
         vehicle.as_ref().map(crate::armor_viewer::common::build_hull_upgrade_names).unwrap_or_default();
-
-    let dock_y_offset =
-        vehicle.as_ref().and_then(|v| crate::armor_viewer::common::resolve_dock_y_offset(v, &selected_hull));
 
     // Extract module alternatives from the selected hull upgrade config.
     // Only includes component types with >1 option (e.g. artillery, torpedoes).
@@ -2185,7 +2181,6 @@ fn load_ship_for_pane_with_lod(
                     include_hit_locations: true,
                     module_alternatives,
                     hull_upgrade_names,
-                    dock_y_offset,
                 };
                 crate::armor_viewer::common::load_ship_armor(&v, &assets, load_opts)
             }
@@ -4580,19 +4575,17 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
     if ui.checkbox(&mut pane.show_plate_edges, t!("ui.armor.plate_edges").as_ref()).changed() {
         zone_changed = true;
     }
-    if armor.dock_y_offset.is_some() {
-        if ui.checkbox(&mut pane.show_waterline, t!("ui.armor.waterline").as_ref()).changed() {
-            zone_changed = true;
-        }
-        if pane.show_waterline {
-            ui.horizontal(|ui| {
-                ui.add_space(20.0);
-                ui.label(t!("ui.armor.opacity").as_ref());
-                if ui.add(egui::Slider::new(&mut pane.waterline_opacity, 0.05..=1.0).fixed_decimals(2)).changed() {
-                    zone_changed = true;
-                }
-            });
-        }
+    if ui.checkbox(&mut pane.show_waterline, t!("ui.armor.waterline").as_ref()).changed() {
+        zone_changed = true;
+    }
+    if pane.show_waterline {
+        ui.horizontal(|ui| {
+            ui.add_space(20.0);
+            ui.label(t!("ui.armor.opacity").as_ref());
+            if ui.add(egui::Slider::new(&mut pane.waterline_opacity, 0.05..=1.0).fixed_decimals(2)).changed() {
+                zone_changed = true;
+            }
+        });
     }
     if ui.checkbox(&mut pane.show_zero_mm, "0 mm Plates").changed() {
         zone_changed = true;

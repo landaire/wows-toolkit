@@ -315,14 +315,12 @@ impl RealtimeArmorViewer {
                 let v =
                     param.as_ref().and_then(|p| p.vehicle().cloned()).ok_or_else(|| "No vehicle found".to_string())?;
 
-                let dock_y_offset = crate::armor_viewer::common::resolve_dock_y_offset(&v, &selected_hull);
                 let hull_upgrade_names = crate::armor_viewer::common::build_hull_upgrade_names(&v);
                 let load_opts = crate::armor_viewer::common::ShipLoadOptions {
                     display_name,
                     lod: requested_lod,
                     selected_hull,
                     hull_upgrade_names,
-                    dock_y_offset,
                     ..Default::default()
                 };
                 crate::armor_viewer::common::load_ship_armor(&v, &ship_assets, load_opts)

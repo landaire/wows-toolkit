@@ -292,9 +292,6 @@ pub struct LoadedShipArmor {
     pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
     /// Hull parts grouped by category (e.g. "Hull", "Main Battery"), each with sorted part names.
     pub hull_part_groups: Vec<(String, Vec<String>)>,
-    /// Normalized waterline offset from model origin [-1, 1].
-    /// -1 = bottom of bounding box, 0 = pivot (model origin), +1 = top.
-    pub dock_y_offset: Option<f32>,
     /// Parsed splash box data for HE splash visualization.
     pub splash_data: Option<crate::armor_viewer::splash::ShipSplashData>,
     /// Splash box names grouped by prefix (e.g. "Bow" -> ["CM_SB_Bow_01", "CM_SB_Bow_02"]).
@@ -322,30 +319,11 @@ pub struct LoadedShipArmor {
 }
 
 impl LoadedShipArmor {
-    /// Shift all mesh vertex positions and bounds so the waterline sits at Y=0.
-    ///
-    /// `dockYOffset` is the waterline Y position in model space (typically a small
-    /// negative value). Call this once after construction. All downstream consumers
-    /// (upload, picking, edges, trajectories, splash) then work in waterline-relative coordinates.
     pub fn apply_waterline_offset(&mut self) {
-        let dy = self.dock_y_offset.map_or(0.0, |offset| -offset);
-        if dy.abs() < 1e-7 {
-            return;
-        }
-
-        for mesh in &mut self.meshes {
-            for pos in &mut mesh.positions {
-                pos[1] += dy;
-            }
-        }
-        for mesh in &mut self.hull_meshes {
-            for pos in &mut mesh.positions {
-                pos[1] += dy;
-            }
-        }
-        self.bounds.0.y += dy;
-        self.bounds.1.y += dy;
-        self.waterline_dy = dy;
+        // The model is authored with the waterline at native Y = 0 (the ROOT node /
+        // designed waterline). dockYOffset is a port-scene seating value, not the
+        // battle waterline, so no vertical shift is applied here.
+        self.waterline_dy = 0.0;
     }
 
     /// Bounding-box center in model space.
