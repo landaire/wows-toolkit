@@ -555,6 +555,79 @@ fn read_string(dict: &BTreeMap<HashableValue, Value>, key: &str) -> Option<Strin
     dict.get(&pk(key)).and_then(|v| v.string_ref()).map(|s| s.inner().to_string())
 }
 
+fn value_f32(v: &Value) -> Option<f32> {
+    v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32))
+}
+
+/// Read the first numeric element from a list-or-tuple value (e.g. `[inner, outer]` pairs).
+fn read_pair_inner(v: &Value) -> Option<f32> {
+    if let Some(l) = v.list_ref() {
+        let guard = l.inner();
+        guard.first().and_then(value_f32)
+    } else if let Some(t) = v.tuple_ref() {
+        t.inner().first().and_then(value_f32)
+    } else {
+        None
+    }
+}
+
+/// Read a 3-element float triple from the first element of a nested list-or-tuple.
+/// Handles `posCenter = [[x,y,z],[x,y,z]]`; returns the inner triple at index 0.
+fn read_vec3_inner(v: &Value) -> Option<[f32; 3]> {
+    fn triple(elem: &Value) -> Option<[f32; 3]> {
+        if let Some(l) = elem.list_ref() {
+            let g = l.inner();
+            if g.len() != 3 { return None; }
+            Some([value_f32(&g[0])?, value_f32(&g[1])?, value_f32(&g[2])?])
+        } else if let Some(t) = elem.tuple_ref() {
+            let s = t.inner();
+            if s.len() != 3 { return None; }
+            Some([value_f32(&s[0])?, value_f32(&s[1])?, value_f32(&s[2])?])
+        } else {
+            None
+        }
+    }
+    if let Some(l) = v.list_ref() {
+        let guard = l.inner();
+        let first = guard.first()?;
+        triple(first)
+    } else if let Some(t) = v.tuple_ref() {
+        triple(t.inner().first()?)
+    } else {
+        None
+    }
+}
+
+/// Read camera orbit trajectories from a ship's pickled `ship_data` dict.
+/// Returns `(mode_name, trajectory)` per mode with a readable `InnerTrajectory`,
+/// sorted by mode name; missing/malformed entries are skipped.
+pub fn read_camera_trajectories(ship_data: &BTreeMap<HashableValue, Value>) -> Vec<(String, CameraTrajectory)> {
+    let Some(cameras) = ship_data.get(&pk("Cameras")).and_then(|v| v.dict_or_object_dict()) else {
+        return Vec::new();
+    };
+    let mut out: Vec<(String, CameraTrajectory)> = Vec::new();
+    let cameras_guard = cameras.inner();
+    for (key, val) in cameras_guard.iter() {
+        let Some(name) = key.string_ref().map(|s| s.inner().to_string()) else { continue; };
+        let Some(mode) = val.dict_or_object_dict() else { continue; };
+        let mode_guard = mode.inner();
+        let Some(inner_traj) = mode_guard.get(&pk("InnerTrajectory")).and_then(|v| v.dict_or_object_dict()) else {
+            continue;
+        };
+        let inner_guard = inner_traj.inner();
+        let (Some(pos_center), Some(semi_axis_h), Some(semi_axis_v)) = (
+            inner_guard.get(&pk("posCenter")).and_then(read_vec3_inner),
+            inner_guard.get(&pk("semiAxisH")).and_then(read_pair_inner),
+            inner_guard.get(&pk("semiAxisV")).and_then(read_pair_inner),
+        ) else {
+            continue;
+        };
+        out.push((name, CameraTrajectory { pos_center, semi_axis_h, semi_axis_v }));
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
 /// Extract `pitchDeadZones` from a mount dict.
 /// Each entry is `[yaw_min, yaw_max, pitch_min, pitch_max]` in degrees.
 fn parse_pitch_dead_zones(mount_dict: &BTreeMap<HashableValue, Value>) -> Vec<[f32; 4]> {
@@ -1503,5 +1576,97 @@ impl GameMetadataProvider {
         let projectile = param.projectile()?;
         let name = param.name().to_string();
         Some(projectile.to_shell_info(name))
+    }
+}
+
+#[cfg(test)]
+mod camera_tests {
+    use super::*;
+    use pickled::value::Shared;
+
+    fn fv(f: f64) -> Value {
+        Value::F64(f)
+    }
+
+    fn list(items: Vec<Value>) -> Value {
+        Value::List(Shared::new(items))
+    }
+
+    fn dict(entries: Vec<(HashableValue, Value)>) -> Value {
+        Value::Dict(Shared::new(entries.into_iter().collect()))
+    }
+
+    #[test]
+    fn read_pair_inner_returns_first_element() {
+        let v = list(vec![fv(6.552), fv(5.981)]);
+        let result = read_pair_inner(&v).unwrap();
+        assert!((result - 6.552_f32).abs() < 1e-4, "expected ~6.552, got {result}");
+    }
+
+    #[test]
+    fn read_vec3_inner_returns_first_triple() {
+        let inner0 = list(vec![fv(0.0), fv(1.958), fv(0.0)]);
+        let inner1 = list(vec![fv(0.0), fv(2.008), fv(0.0)]);
+        let v = list(vec![inner0, inner1]);
+        let result = read_vec3_inner(&v).unwrap();
+        assert_eq!(result[0], 0.0_f32);
+        assert!((result[1] - 1.958_f32).abs() < 1e-4, "expected ~1.958, got {}", result[1]);
+        assert_eq!(result[2], 0.0_f32);
+    }
+
+    #[test]
+    fn read_camera_trajectories_empty_dict_returns_empty() {
+        let ship_data: BTreeMap<HashableValue, Value> = BTreeMap::new();
+        let result = read_camera_trajectories(&ship_data);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn read_camera_trajectories_parses_mode() {
+        let pos_center = list(vec![
+            list(vec![fv(0.0), fv(1.958), fv(0.0)]),
+            list(vec![fv(0.0), fv(2.008), fv(0.0)]),
+        ]);
+        let semi_axis_h = list(vec![fv(6.552), fv(5.981)]);
+        let semi_axis_v = list(vec![fv(4.123), fv(3.999)]);
+        let inner_traj = dict(vec![
+            (pk("posCenter"), pos_center),
+            (pk("semiAxisH"), semi_axis_h),
+            (pk("semiAxisV"), semi_axis_v),
+        ]);
+        let mode = dict(vec![(pk("InnerTrajectory"), inner_traj)]);
+        let cameras = dict(vec![(pk("TestMode"), mode)]);
+        let ship_data: BTreeMap<HashableValue, Value> =
+            [(pk("Cameras"), cameras)].into_iter().collect();
+        let result = read_camera_trajectories(&ship_data);
+        assert_eq!(result.len(), 1);
+        let (name, traj) = &result[0];
+        assert_eq!(name, "TestMode");
+        assert!((traj.pos_center[1] - 1.958_f32).abs() < 1e-4);
+        assert!((traj.semi_axis_h - 6.552_f32).abs() < 1e-4);
+        assert!((traj.semi_axis_v - 4.123_f32).abs() < 1e-4);
+    }
+
+    #[test]
+    fn read_camera_trajectories_skips_scalar_sibling_keys() {
+        let pos_center = list(vec![
+            list(vec![fv(0.0), fv(1.0), fv(0.0)]),
+            list(vec![fv(0.0), fv(1.0), fv(0.0)]),
+        ]);
+        let inner_traj = dict(vec![
+            (pk("posCenter"), pos_center),
+            (pk("semiAxisH"), list(vec![fv(1.0), fv(1.0)])),
+            (pk("semiAxisV"), list(vec![fv(1.0), fv(1.0)])),
+        ]);
+        let mode = dict(vec![(pk("InnerTrajectory"), inner_traj)]);
+        let cameras = dict(vec![
+            (pk("RealMode"), mode),
+            (pk("inertialRollCoef"), Value::F64(0.5)),
+        ]);
+        let ship_data: BTreeMap<HashableValue, Value> =
+            [(pk("Cameras"), cameras)].into_iter().collect();
+        let result = read_camera_trajectories(&ship_data);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, "RealMode");
     }
 }

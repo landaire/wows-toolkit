@@ -917,6 +917,17 @@ impl HullUpgradeConfig {
     }
 }
 
+/// One camera orbit trajectory (inner state) from a ship's `Cameras` component.
+/// Values are raw ship-model units, ship-local: `pos_center` is the orbit center,
+/// `semi_axis_h` the radius along the beam (model X), `semi_axis_v` along the length (model Z).
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CameraTrajectory {
+    pub pos_center: [f32; 3],
+    pub semi_axis_h: f32,
+    pub semi_axis_v: f32,
+}
+
 /// Ship configuration data extracted from GameParams.
 ///
 /// Hull configs are keyed by the hull upgrade's GameParam ID so the renderer
