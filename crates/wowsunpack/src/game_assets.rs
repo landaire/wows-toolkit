@@ -126,7 +126,7 @@ impl GuiAsset<'_> {
             GuiAsset::Achievement(key) => vec![format!("gui/achievements/icon_achievement_{key}.png")],
             GuiAsset::Ribbon(name) => vec![format!("gui/ribbons/{name}.png")],
             GuiAsset::SubRibbon(name) => vec![format!("gui/ribbons/subribbons/{name}.png")],
-            GuiAsset::Modernization(name) => vec![format!("gui/modernization_icons/{name}.png")],
+            GuiAsset::Modernization(name) => vec![format!("gui/modernization_icons/icon_modernization_{name}.png")],
             GuiAsset::SignalFlag(name) => vec![format!("gui/signal_flags/{name}.png")],
             GuiAsset::NationFlag(nation) => vec![format!("gui/nation_flags/tiny/flag_{nation}.png")],
             GuiAsset::ShipSilhouette(index) => vec![format!("gui/ships_silhouettes/{index}.png")],
@@ -287,6 +287,22 @@ mod tests {
         assert_eq!(
             GuiAsset::CapturePointFlag(Relation::Enemy).candidate_paths(Some(&VERSION))[0],
             "gui/battle_hud/markers/capture_point/icon_base_enemy_flag.png"
+        );
+    }
+
+    #[test]
+    fn modernization_path_has_icon_prefix() {
+        assert_eq!(
+            GuiAsset::Modernization("PCM082_SpecialBonus_Mod_I").candidate_paths(Some(&VERSION))[0],
+            "gui/modernization_icons/icon_modernization_PCM082_SpecialBonus_Mod_I.png"
+        );
+    }
+
+    #[test]
+    fn signal_flag_path_is_bare() {
+        assert_eq!(
+            GuiAsset::SignalFlag("PCEF019_JW1_SignalFlag").candidate_paths(Some(&VERSION))[0],
+            "gui/signal_flags/PCEF019_JW1_SignalFlag.png"
         );
     }
 }

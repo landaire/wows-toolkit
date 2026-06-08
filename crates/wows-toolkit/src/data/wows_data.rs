@@ -418,6 +418,12 @@ pub struct WorldOfWarshipsData {
     /// Captain-skill icons, lazy-loaded and cached. Keyed by skill name.
     pub crew_skill_icons: HashMap<CrewSkillName, Arc<GameAsset>>,
 
+    /// Modernization (upgrade) icons, lazy-loaded and cached. Keyed by PCM name.
+    pub modernization_icons: HashMap<String, Arc<GameAsset>>,
+
+    /// Signal-flag icons, lazy-loaded and cached. Keyed by PCEF name.
+    pub signal_flag_icons: HashMap<String, Arc<GameAsset>>,
+
     /// Cached game constants loaded from game files.
     pub game_constants: Arc<GameConstants>,
 
@@ -514,6 +520,40 @@ impl WorldOfWarshipsData {
         Some(asset)
     }
 
+    /// Look up a cached modernization icon (read-only, no loading).
+    pub fn cached_modernization_icon(&self, name: &str) -> Option<Arc<GameAsset>> {
+        self.modernization_icons.get(name).cloned()
+    }
+
+    /// Load and cache a modernization icon by PCM name.
+    /// Only call this on a cache miss (when `cached_modernization_icon` returns None).
+    pub fn load_modernization_icon(&mut self, name: &str) -> Option<Arc<GameAsset>> {
+        if let Some(icon) = self.modernization_icons.get(name) {
+            return Some(icon.clone());
+        }
+
+        let asset = self.load_gui_asset(wowsunpack::game_assets::GuiAsset::Modernization(name))?;
+        self.modernization_icons.insert(name.to_string(), asset.clone());
+        Some(asset)
+    }
+
+    /// Look up a cached signal-flag icon (read-only, no loading).
+    pub fn cached_signal_flag_icon(&self, name: &str) -> Option<Arc<GameAsset>> {
+        self.signal_flag_icons.get(name).cloned()
+    }
+
+    /// Load and cache a signal-flag icon by PCEF name.
+    /// Only call this on a cache miss (when `cached_signal_flag_icon` returns None).
+    pub fn load_signal_flag_icon(&mut self, name: &str) -> Option<Arc<GameAsset>> {
+        if let Some(icon) = self.signal_flag_icons.get(name) {
+            return Some(icon.clone());
+        }
+
+        let asset = self.load_gui_asset(wowsunpack::game_assets::GuiAsset::SignalFlag(name))?;
+        self.signal_flag_icons.insert(name.to_string(), asset.clone());
+        Some(asset)
+    }
+
     /// Rebuild this data from scratch after constants have changed.
     /// Retains: build_dir, replays_dir, game_metadata, pkg_loader, filtered_files, file_tree,
     /// full_version, patch_version, build_number.
@@ -559,6 +599,8 @@ impl WorldOfWarshipsData {
         self.achievement_icons = HashMap::new();
         self.consumable_icons = HashMap::new();
         self.crew_skill_icons = HashMap::new();
+        self.modernization_icons = HashMap::new();
+        self.signal_flag_icons = HashMap::new();
         self.game_constants = Arc::new(new_game_constants);
         *self.replay_constants.write() = new_replay_constants;
         self.replay_constants_exact_match = exact_match;
