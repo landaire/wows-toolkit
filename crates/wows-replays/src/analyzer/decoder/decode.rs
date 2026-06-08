@@ -1191,9 +1191,11 @@ pub enum DecodedPacketPayload<'replay, 'argtype, 'rawpacket> {
     },
     /// A ship fired a weapon group via shootOnClient / shootATBAGuns.
     ///
-    /// `weapon_type` is decoded for shootOnClient and always Secondaries for
-    /// shootATBAGuns. `gun_bits` is the raw per-gun fire mask; expansion to gun
-    /// indices and target lookup happen in ingest where atbaTargets is known.
+    /// `entity` is the firing vehicle (these are Vehicle entity methods, unlike
+    /// the Avatar RPC fire events). `weapon_type` comes from the first arg of
+    /// shootOnClient and is always Secondaries for shootATBAGuns. `gun_bits` is
+    /// the raw per-gun fire mask; expansion to gun indices and target lookup
+    /// happen in ingest where atbaTargets is known.
     WeaponFired {
         entity: EntityId,
         weapon_type: Recognized<WeaponType, u32>,
@@ -2201,15 +2203,23 @@ where
             }
             DecodedPacketPayload::ArtilleryShots { avatar_id: AvatarId::from(*entity_id), salvos }
         } else if *method == "shootOnClient" {
-            let weapon_type = WeaponType::from_raw(args.first().and_then(ArgValue::as_u32).unwrap_or(0));
+            let Some(weapon_type_raw) = args.first().and_then(ArgValue::as_u32) else {
+                return DecodedPacketPayload::EntityMethod(packet);
+            };
             let gun_bits = GunBits::from(args.get(1).and_then(ArgValue::as_u32).unwrap_or(0));
-            DecodedPacketPayload::WeaponFired { entity: *entity_id, weapon_type, gun_bits }
+            DecodedPacketPayload::WeaponFired {
+                entity: *entity_id,
+                weapon_type: WeaponType::from_raw(weapon_type_raw),
+                gun_bits,
+            }
         } else if *method == "shootATBAGuns" {
-            let gun_bits = GunBits::from(args.first().and_then(ArgValue::as_u32).unwrap_or(0));
+            let Some(gun_bits_raw) = args.first().and_then(ArgValue::as_u32) else {
+                return DecodedPacketPayload::EntityMethod(packet);
+            };
             DecodedPacketPayload::WeaponFired {
                 entity: *entity_id,
                 weapon_type: Recognized::Known(WeaponType::Secondaries),
-                gun_bits,
+                gun_bits: GunBits::from(gun_bits_raw),
             }
         } else if *method == "receiveTorpedoes" {
             let salvos_array = match &args[0] {
