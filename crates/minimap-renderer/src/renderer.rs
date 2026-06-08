@@ -1158,6 +1158,18 @@ impl<'a> MinimapRenderer<'a> {
                 let owner = shot.salvo.owner_id;
                 let relation = self.player_relations.get(&owner).copied().unwrap_or(Relation::new(2));
                 let color = ship_color_rgb(relation, self.division_mates.contains(&owner));
+                // All shots in a salvo share the same projectile, so resolve the ammo
+                // tip color once. None when armament coloring is off or the param does
+                // not resolve to a projectile.
+                let tip_color = if self.options.show_armament {
+                    let param = GameParamProvider::game_param_by_id(self.game_params, shot.salvo.params_id);
+                    param
+                        .as_ref()
+                        .and_then(|p| p.projectile())
+                        .map(|proj| ammo_type_color(&AmmoType::from_game_str(proj.ammo_type())))
+                } else {
+                    None
+                };
                 for shot_data in &shot.salvo.shots {
                     let origin = shot_data.origin;
                     let target = shot_data.target;
@@ -1175,11 +1187,15 @@ impl<'a> MinimapRenderer<'a> {
                     let frac = elapsed / flight_duration;
                     let head = origin.lerp(target, frac);
                     let tail = origin.lerp(target, (frac - TRACER_LEN).max(0.0));
+                    let head_minimap = map_info.world_to_minimap(head, MINIMAP_SIZE);
                     commands.push(DrawCommand::ShotTracer {
                         from: map_info.world_to_minimap(tail, MINIMAP_SIZE),
-                        to: map_info.world_to_minimap(head, MINIMAP_SIZE),
+                        to: head_minimap,
                         color,
                     });
+                    if let Some(tip) = tip_color {
+                        commands.push(DrawCommand::ShotTracerTip { at: head_minimap, color: tip });
+                    }
                 }
             }
         }
