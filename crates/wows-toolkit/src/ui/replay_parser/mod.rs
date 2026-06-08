@@ -2539,19 +2539,6 @@ impl UiReport {
 
                                     ui.separator();
 
-                                    if build_info.abilities.is_empty() {
-                                        ui.label(t!("ui.replay.sections.abilities_none"));
-                                    } else {
-                                        ui.label(t!("ui.replay.sections.abilities"));
-                                        for ability in &build_info.abilities {
-                                            if let Some(name) = &ability.name {
-                                                ui.label(name);
-                                            }
-                                        }
-                                    }
-
-                                    ui.separator();
-
                                     if let Some(captain_skills) = build_info.captain_skills.as_ref() {
                                         ui.label(t!("ui.replay.sections.captain_skills"));
                                         if captain_skills.is_empty() {
@@ -2568,6 +2555,18 @@ impl UiReport {
                                     ui.separator();
                                     ui.label(t!("ui.replay.sections.consumables"));
                                     self.render_consumable_inventory(ui, &report.consumables);
+                                } else if let Some(build_info) = &report.translated_build
+                                    && !build_info.abilities.is_empty()
+                                {
+                                    // No activations were replayed; list the configured
+                                    // consumables by name instead of the used/total table.
+                                    ui.separator();
+                                    ui.label(t!("ui.replay.sections.consumables"));
+                                    for ability in &build_info.abilities {
+                                        if let Some(name) = &ability.name {
+                                            ui.label(name);
+                                        }
+                                    }
                                 }
                             });
                         }
