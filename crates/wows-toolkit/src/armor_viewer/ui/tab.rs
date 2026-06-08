@@ -4610,6 +4610,34 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
     if ui.checkbox(&mut pane.show_zero_mm, "0 mm Plates").changed() {
         zone_changed = true;
     }
+    if ui.checkbox(&mut pane.show_camera_ellipse, t!("ui.armor.camera_orbit").as_ref()).changed() {
+        zone_changed = true;
+    }
+    let mut combo_changed = false;
+    let enabled = pane.show_camera_ellipse;
+    ui.add_enabled_ui(enabled, |ui| {
+        let modes = &armor.camera_trajectories;
+        if !modes.iter().any(|(name, _)| *name == pane.camera_ellipse_mode)
+            && let Some((first, _)) = modes.first()
+        {
+            pane.camera_ellipse_mode = first.clone();
+        }
+        egui::ComboBox::from_id_salt("camera_ellipse_mode")
+            .selected_text(pane.camera_ellipse_mode.clone())
+            .show_ui(ui, |ui| {
+                for (name, _) in modes {
+                    if ui
+                        .selectable_value(&mut pane.camera_ellipse_mode, name.clone(), name.as_str())
+                        .changed()
+                    {
+                        combo_changed = true;
+                    }
+                }
+            });
+    });
+    if combo_changed {
+        zone_changed = true;
+    }
     if !armor.hull_meshes.is_empty() {
         let any_hull_on = pane.hull_visibility.values().any(|&v| v);
         let mut hull_checked = any_hull_on;
