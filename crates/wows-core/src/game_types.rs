@@ -55,6 +55,54 @@ impl From<i64> for EntityId {
     }
 }
 
+/// Index of a gun within a ship weapon component's gun list.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct GunId(u32);
+
+impl GunId {
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+
+    /// Index into a per-gun array (e.g. atbaTargets).
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl From<u32> for GunId {
+    fn from(v: u32) -> Self {
+        GunId(v)
+    }
+}
+
+/// Raw per-gun fire bitmask: bit `g` set means gun `g` fired (`bits & (1 << g)`).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct GunBits(u32);
+
+impl GunBits {
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+
+    /// Gun indices whose bit is set, ascending.
+    pub fn gun_ids(self) -> impl Iterator<Item = GunId> {
+        (0..u32::BITS).filter(move |g| self.0 & (1u32 << g) != 0).map(GunId::from)
+    }
+}
+
+impl From<u32> for GunBits {
+    fn from(v: u32) -> Self {
+        GunBits(v)
+    }
+}
+
 /// Entity identifier for the client-side Avatar entity.
 ///
 /// In WoWs replays the recording player has two entities: a Vehicle (the ship,
@@ -2539,5 +2587,23 @@ mod tests {
         let NormalizedPos(v) = m;
         assert!((v.x - 0.5).abs() < 1e-6);
         assert!((v.y - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn gun_bits_expand_to_set_indices() {
+        let bits = GunBits::from(0b1011u32);
+        let ids: Vec<u32> = bits.gun_ids().map(GunId::raw).collect();
+        assert_eq!(ids, vec![0, 1, 3]);
+    }
+
+    #[test]
+    fn gun_bits_empty_expands_to_nothing() {
+        assert_eq!(GunBits::from(0u32).gun_ids().count(), 0);
+    }
+
+    #[test]
+    fn gun_bits_high_bit_set() {
+        let ids: Vec<u32> = GunBits::from(1u32 << 31).gun_ids().map(GunId::raw).collect();
+        assert_eq!(ids, vec![31]);
     }
 }

@@ -5,6 +5,8 @@ pub use wowsunpack::game_types::AvatarId;
 pub use wowsunpack::game_types::Direction;
 pub use wowsunpack::game_types::ElapsedClock;
 pub use wowsunpack::game_types::EntityId;
+pub use wowsunpack::game_types::GunBits;
+pub use wowsunpack::game_types::GunId;
 pub use wowsunpack::game_types::GameClock;
 pub use wowsunpack::game_types::GameParamId;
 pub use wowsunpack::game_types::NormalizedPos;
