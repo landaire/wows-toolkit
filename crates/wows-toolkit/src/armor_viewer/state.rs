@@ -316,6 +316,8 @@ pub struct LoadedShipArmor {
     /// Module alternatives: component type -> list of component names.
     /// Only populated for types that have more than one option in the current hull upgrade.
     pub module_alternatives: Vec<(wowsunpack::game_params::keys::ComponentType, Vec<String>)>,
+    /// Camera orbit trajectories (mode name -> trajectory) for this ship.
+    pub camera_trajectories: Vec<(String, wowsunpack::game_params::types::CameraTrajectory)>,
 }
 
 impl LoadedShipArmor {
@@ -488,6 +490,12 @@ pub struct ArmorPane {
     pub trajectory_world_space: bool,
     /// When true, the shell simulation continues past ricochet plates instead of stopping.
     pub continue_on_ricochet: bool,
+    /// Show the camera orbit ellipse overlay.
+    pub show_camera_ellipse: bool,
+    /// Selected camera mode for the ellipse (e.g. "Artillery").
+    pub camera_ellipse_mode: String,
+    /// Tracked overlay mesh ids for the camera ellipse, removed before re-upload.
+    pub camera_ellipse_mesh_ids: Vec<crate::viewport_3d::MeshId>,
 }
 
 /// Data returned by a hull-only background reload (LOD change without full ship reload).
@@ -572,6 +580,9 @@ impl ArmorPane {
             selected_modules: HashMap::new(),
             trajectory_world_space: true,
             continue_on_ricochet: false,
+            show_camera_ellipse: false,
+            camera_ellipse_mode: "Artillery".to_string(),
+            camera_ellipse_mesh_ids: Vec::new(),
         }
     }
 }

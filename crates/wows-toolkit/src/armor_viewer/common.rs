@@ -98,6 +98,8 @@ pub(crate) struct ShipLoadOptions {
     pub module_alternatives: Vec<(ComponentType, Vec<String>)>,
     /// Pre-computed hull upgrade names (from [`build_hull_upgrade_names`]).
     pub hull_upgrade_names: Vec<(String, String)>,
+    /// Camera orbit trajectories for this ship.
+    pub camera_trajectories: Vec<(String, wowsunpack::game_params::types::CameraTrajectory)>,
 }
 
 /// Full re-upload sequence after a zone/visibility change.
@@ -290,6 +292,7 @@ pub(crate) fn load_ship_armor(
         hull_upgrade_names: options.hull_upgrade_names,
         loaded_hull: options.selected_hull,
         module_alternatives: options.module_alternatives,
+        camera_trajectories: options.camera_trajectories,
     };
     armor.apply_waterline_offset();
     Ok(armor)

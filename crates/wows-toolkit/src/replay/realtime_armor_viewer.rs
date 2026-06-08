@@ -316,11 +316,13 @@ impl RealtimeArmorViewer {
                     param.as_ref().and_then(|p| p.vehicle().cloned()).ok_or_else(|| "No vehicle found".to_string())?;
 
                 let hull_upgrade_names = crate::armor_viewer::common::build_hull_upgrade_names(&v);
+                let camera_trajectories = v.camera_trajectories().to_vec();
                 let load_opts = crate::armor_viewer::common::ShipLoadOptions {
                     display_name,
                     lod: requested_lod,
                     selected_hull,
                     hull_upgrade_names,
+                    camera_trajectories,
                     ..Default::default()
                 };
                 crate::armor_viewer::common::load_ship_armor(&v, &ship_assets, load_opts)

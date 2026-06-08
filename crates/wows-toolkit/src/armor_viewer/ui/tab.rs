@@ -2151,6 +2151,9 @@ fn load_ship_for_pane_with_lod(
     let hull_upgrade_names =
         vehicle.as_ref().map(crate::armor_viewer::common::build_hull_upgrade_names).unwrap_or_default();
 
+    let camera_trajectories =
+        vehicle.as_ref().map(|v| v.camera_trajectories().to_vec()).unwrap_or_default();
+
     // Extract module alternatives from the selected hull upgrade config.
     // Only includes component types with >1 option (e.g. artillery, torpedoes).
     let module_alternatives: Vec<(wowsunpack::game_params::keys::ComponentType, Vec<String>)> = param
@@ -2181,6 +2184,7 @@ fn load_ship_for_pane_with_lod(
                     include_hit_locations: true,
                     module_alternatives,
                     hull_upgrade_names,
+                    camera_trajectories,
                 };
                 crate::armor_viewer::common::load_ship_armor(&v, &assets, load_opts)
             }
