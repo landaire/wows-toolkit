@@ -1655,6 +1655,96 @@ impl UiReport {
         Some(tex)
     }
 
+    fn render_modernization_slots(&self, ui: &mut egui::Ui, slots: &[Option<models::TranslatedModule>]) {
+        const ICON_SIZE: f32 = 28.0;
+        let cached: Vec<Option<Arc<GameAsset>>> = {
+            let wows_data = self.wows_data.read();
+            slots
+                .iter()
+                .map(|s| s.as_ref().and_then(|m| wows_data.cached_modernization_icon(&m.game_params_name)))
+                .collect()
+        };
+        let icons: Vec<Option<Arc<GameAsset>>> =
+            if slots.iter().zip(&cached).any(|(s, c)| s.is_some() && c.is_none()) {
+                let mut wows_data = self.wows_data.write();
+                slots
+                    .iter()
+                    .zip(cached)
+                    .map(|(s, c)| match s {
+                        Some(m) => c.or_else(|| wows_data.load_modernization_icon(&m.game_params_name)),
+                        None => None,
+                    })
+                    .collect()
+            } else {
+                cached
+            };
+        ui.horizontal_wrapped(|ui| {
+            for (slot, icon) in slots.iter().zip(icons) {
+                match slot {
+                    Some(module) => {
+                        let display_name =
+                            module.name.clone().unwrap_or_else(|| module.game_params_name.clone());
+                        let tooltip = match module.description.as_deref() {
+                            Some(d) if !d.is_empty() => format!("{}\n\n{}", display_name, d),
+                            _ => display_name.clone(),
+                        };
+                        match icon.as_ref().and_then(|a| self.icon_texture(ui.ctx(), a)) {
+                            Some(tex) => {
+                                ui.add(egui::Image::new((tex.id(), egui::Vec2::splat(ICON_SIZE))))
+                                    .on_hover_text(tooltip);
+                            }
+                            None => {
+                                ui.label(RichText::new(&display_name).small()).on_hover_text(tooltip);
+                            }
+                        }
+                    }
+                    None => {
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::Vec2::splat(ICON_SIZE), egui::Sense::hover());
+                        ui.painter().rect_filled(rect, 2.0, ui.visuals().faint_bg_color);
+                    }
+                }
+            }
+        });
+    }
+
+    fn render_signals(&self, ui: &mut egui::Ui, signals: &[models::TranslatedModule]) {
+        const ICON_SIZE: f32 = 28.0;
+        let cached: Vec<Option<Arc<GameAsset>>> = {
+            let wows_data = self.wows_data.read();
+            signals.iter().map(|m| wows_data.cached_signal_flag_icon(&m.game_params_name)).collect()
+        };
+        let icons: Vec<Option<Arc<GameAsset>>> = if cached.iter().any(|c| c.is_none()) {
+            let mut wows_data = self.wows_data.write();
+            signals
+                .iter()
+                .zip(cached)
+                .map(|(m, c)| c.or_else(|| wows_data.load_signal_flag_icon(&m.game_params_name)))
+                .collect()
+        } else {
+            cached
+        };
+        ui.horizontal_wrapped(|ui| {
+            for (signal, icon) in signals.iter().zip(icons) {
+                let display_name =
+                    signal.name.clone().unwrap_or_else(|| signal.game_params_name.clone());
+                let tooltip = match signal.description.as_deref() {
+                    Some(d) if !d.is_empty() => format!("{}\n\n{}", display_name, d),
+                    _ => display_name.clone(),
+                };
+                match icon.as_ref().and_then(|a| self.icon_texture(ui.ctx(), a)) {
+                    Some(tex) => {
+                        ui.add(egui::Image::new((tex.id(), egui::Vec2::splat(ICON_SIZE))))
+                            .on_hover_text(tooltip);
+                    }
+                    None => {
+                        ui.label(RichText::new(&display_name).small()).on_hover_text(tooltip);
+                    }
+                }
+            }
+        });
+    }
+
     fn render_consumable_inventory(&self, ui: &mut egui::Ui, consumables: &[models::PlayerConsumable]) {
         const NAME_COL_WIDTH: f32 = 170.0;
         const COUNT_COL_WIDTH: f32 = 64.0;
@@ -2412,18 +2502,23 @@ impl UiReport {
                                 if let Some(build_info) = &report.translated_build {
                                     ui.separator();
 
-                                    if build_info.modernization_slots.iter().all(|s| s.is_none()) {
+                                    // A ship with slots but no upgrades mounted renders a row of
+                                    // empty placeholders (shows how many slots exist); only a
+                                    // ship whose slot count is unknown (0) shows the none label.
+                                    if build_info.modernization_slots.is_empty() {
                                         ui.label(t!("ui.replay.sections.modules_none"));
                                     } else {
                                         ui.label(t!("ui.replay.sections.modules"));
-                                        for module in build_info.modernization_slots.iter().flatten() {
-                                            if let Some(name) = &module.name {
-                                                let label = ui.label(name);
-                                                if let Some(hover_text) = module.description.as_ref() {
-                                                    label.on_hover_text(hover_text);
-                                                }
-                                            }
-                                        }
+                                        self.render_modernization_slots(
+                                            ui,
+                                            &build_info.modernization_slots,
+                                        );
+                                    }
+
+                                    if !build_info.signals.is_empty() {
+                                        ui.separator();
+                                        ui.label(t!("ui.replay.sections.signals"));
+                                        self.render_signals(ui, &build_info.signals);
                                     }
 
                                     ui.separator();
