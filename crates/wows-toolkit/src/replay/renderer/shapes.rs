@@ -133,6 +133,8 @@ pub(super) fn make_shared_textures<'a>(
         plane_icons: &textures.plane_icons,
         building_icons: Some(&textures.building_icons),
         consumable_icons: Some(&textures.consumable_icons),
+        ribbon_icons: Some(&textures.ribbon_icons),
+        subribbon_icons: Some(&textures.subribbon_icons),
         death_cause_icons: Some(&textures.death_cause_icons),
         powerup_icons: Some(&textures.powerup_icons),
         silhouette_texture: textures.silhouette_texture.as_ref(),

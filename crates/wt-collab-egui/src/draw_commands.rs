@@ -36,6 +36,8 @@ pub struct DrawCommandTextures<'a> {
     pub plane_icons: &'a HashMap<String, TextureHandle>,
     pub building_icons: Option<&'a HashMap<String, TextureHandle>>,
     pub consumable_icons: Option<&'a HashMap<String, TextureHandle>>,
+    pub ribbon_icons: Option<&'a HashMap<String, TextureHandle>>,
+    pub subribbon_icons: Option<&'a HashMap<String, TextureHandle>>,
     pub death_cause_icons: Option<&'a HashMap<String, TextureHandle>>,
     pub powerup_icons: Option<&'a HashMap<String, TextureHandle>>,
     /// Ship silhouette for the stats panel HP overlay (desktop only).

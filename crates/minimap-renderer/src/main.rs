@@ -295,8 +295,8 @@ fn main() -> Result<(), Report> {
     let plane_icons = load_plane_icons(vfs, version);
     let building_icons = load_building_icons(vfs, version);
     let consumable_icons = load_consumable_icons(vfs, version);
-    let _ribbon_icons = load_ribbon_icons(vfs, wowsunpack::game_assets::GuiAssetDir::Ribbons, version);
-    let _subribbon_icons = load_ribbon_icons(vfs, wowsunpack::game_assets::GuiAssetDir::SubRibbons, version);
+    let ribbon_icons = load_ribbon_icons(vfs, wowsunpack::game_assets::GuiAssetDir::Ribbons, version);
+    let subribbon_icons = load_ribbon_icons(vfs, wowsunpack::game_assets::GuiAssetDir::SubRibbons, version);
     let death_cause_icons = load_death_cause_icons(vfs, wows_minimap_renderer::assets::ICON_SIZE, version);
     let powerup_icons = load_powerup_icons(vfs, wows_minimap_renderer::assets::ICON_SIZE, version);
     let flag_icons = load_flag_icons(vfs, version);
@@ -388,6 +388,8 @@ fn main() -> Result<(), Report> {
         plane_icons,
         building_icons,
         consumable_icons,
+        ribbon_icons,
+        subribbon_icons,
         death_cause_icons,
         powerup_icons,
         wows_minimap_renderer::drawing::SidePanelLayout::from_options(&options),

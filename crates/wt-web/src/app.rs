@@ -709,6 +709,8 @@ impl WebApp {
                 plane_icons: &self.assets.plane_icons,
                 building_icons: None,
                 consumable_icons: Some(&self.assets.consumable_icons),
+                ribbon_icons: None,
+                subribbon_icons: None,
                 death_cause_icons: Some(&self.assets.death_cause_icons),
                 powerup_icons: Some(&self.assets.powerup_icons),
                 silhouette_texture: self.assets.silhouette_texture.as_ref(),

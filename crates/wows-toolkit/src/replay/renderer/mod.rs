@@ -123,6 +123,8 @@ pub struct RendererAssetCache {
     plane_icons: VersionedAssets,
     building_icons: VersionedAssets,
     consumable_icons: VersionedAssets,
+    ribbon_icons: VersionedAssets,
+    subribbon_icons: VersionedAssets,
     death_cause_icons: VersionedAssets,
     powerup_icons: VersionedAssets,
     crew_skill_icons: VersionedAssets,
@@ -299,6 +301,38 @@ impl RendererAssetCache {
         let src = self.icon_source(vfs, version, dump_dir);
         self.consumable_icons.get_or_load(src.version.as_ref(), || {
             convert_icons(assets::load_consumable_icons(&src.vfs, src.version.as_ref()))
+        })
+    }
+
+    pub fn get_or_load_ribbon_icons(
+        &mut self,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        dump_dir: Option<&std::path::Path>,
+    ) -> Arc<IconMap> {
+        let src = self.icon_source(vfs, version, dump_dir);
+        self.ribbon_icons.get_or_load(src.version.as_ref(), || {
+            convert_icons(assets::load_ribbon_icons(
+                &src.vfs,
+                wowsunpack::game_assets::GuiAssetDir::Ribbons,
+                src.version.as_ref(),
+            ))
+        })
+    }
+
+    pub fn get_or_load_subribbon_icons(
+        &mut self,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        dump_dir: Option<&std::path::Path>,
+    ) -> Arc<IconMap> {
+        let src = self.icon_source(vfs, version, dump_dir);
+        self.subribbon_icons.get_or_load(src.version.as_ref(), || {
+            convert_icons(assets::load_ribbon_icons(
+                &src.vfs,
+                wowsunpack::game_assets::GuiAssetDir::SubRibbons,
+                src.version.as_ref(),
+            ))
         })
     }
 
@@ -648,6 +682,8 @@ pub struct ReplayRendererAssets {
     pub plane_icons: Arc<HashMap<String, RgbaAsset>>,
     pub building_icons: Arc<HashMap<String, RgbaAsset>>,
     pub consumable_icons: Arc<HashMap<String, RgbaAsset>>,
+    pub ribbon_icons: Arc<HashMap<String, RgbaAsset>>,
+    pub subribbon_icons: Arc<HashMap<String, RgbaAsset>>,
     pub death_cause_icons: Arc<HashMap<String, RgbaAsset>>,
     pub powerup_icons: Arc<HashMap<String, RgbaAsset>>,
     pub crew_skill_icons: Arc<HashMap<String, RgbaAsset>>,
@@ -664,6 +700,8 @@ struct RendererTextures {
     plane_icons: HashMap<String, TextureHandle>,
     building_icons: HashMap<String, TextureHandle>,
     consumable_icons: HashMap<String, TextureHandle>,
+    ribbon_icons: HashMap<String, TextureHandle>,
+    subribbon_icons: HashMap<String, TextureHandle>,
     death_cause_icons: HashMap<String, TextureHandle>,
     powerup_icons: HashMap<String, TextureHandle>,
     crew_skill_icons: HashMap<String, TextureHandle>,
@@ -1043,6 +1081,8 @@ pub fn launch_client_renderer(
         plane_icons,
         building_icons,
         consumable_icons,
+        ribbon_icons,
+        subribbon_icons,
         death_cause_icons,
         powerup_icons,
         crew_skill_icons,
@@ -1062,15 +1102,19 @@ pub fn launch_client_renderer(
         let pi = cache.get_or_load_plane_icons(&vfs, version, dump_dir);
         let bi = cache.get_or_load_building_icons(&vfs, version, dump_dir);
         let ci = cache.get_or_load_consumable_icons(&vfs, version, dump_dir);
+        let ri = cache.get_or_load_ribbon_icons(&vfs, version, dump_dir);
+        let sri = cache.get_or_load_subribbon_icons(&vfs, version, dump_dir);
         let di = cache.get_or_load_death_cause_icons(&vfs, version, dump_dir);
         let pwi = cache.get_or_load_powerup_icons(&vfs, version, dump_dir);
         let ski = cache.get_or_load_crew_skill_icons(&vfs, version, dump_dir);
         let mi = cache.get_or_load_modernization_icons(&vfs, version, dump_dir);
         let sfi = cache.get_or_load_signal_flag_icons(&vfs, version, dump_dir);
         let gf = cache.get_or_load_game_fonts(&vfs, version, dump_dir);
-        (si, pi, bi, ci, di, pwi, ski, mi, sfi, Some(gf))
+        (si, pi, bi, ci, ri, sri, di, pwi, ski, mi, sfi, Some(gf))
     } else {
         (
+            Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
             Arc::new(HashMap::new()),
             Arc::new(HashMap::new()),
             Arc::new(HashMap::new()),
@@ -1093,6 +1137,8 @@ pub fn launch_client_renderer(
             plane_icons,
             building_icons,
             consumable_icons,
+            ribbon_icons,
+            subribbon_icons,
             death_cause_icons,
             powerup_icons,
             crew_skill_icons,

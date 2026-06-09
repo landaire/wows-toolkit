@@ -447,6 +447,8 @@ pub(super) fn render_video_blocking(
         plane_icons_rgba,
         building_icons_rgba,
         consumable_icons_rgba,
+        ribbon_icons_rgba,
+        subribbon_icons_rgba,
         death_cause_icons,
         powerup_icons,
         map_info,
@@ -457,6 +459,8 @@ pub(super) fn render_video_blocking(
         let plane_raw = cache.get_or_load_plane_icons(&vfs, version, dump_dir);
         let building_raw = cache.get_or_load_building_icons(&vfs, version, dump_dir);
         let consumable_raw = cache.get_or_load_consumable_icons(&vfs, version, dump_dir);
+        let ribbon_raw = cache.get_or_load_ribbon_icons(&vfs, version, dump_dir);
+        let subribbon_raw = cache.get_or_load_subribbon_icons(&vfs, version, dump_dir);
         let death_cause_raw = cache.get_or_load_death_cause_icons(&vfs, version, dump_dir);
         let powerup_raw = cache.get_or_load_powerup_icons(&vfs, version, dump_dir);
         let game_fonts = cache.get_or_load_game_fonts(&vfs, version, dump_dir);
@@ -472,6 +476,10 @@ pub(super) fn render_video_blocking(
             building_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
         let consumable_icons: HashMap<String, image::RgbaImage> =
             consumable_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
+        let ribbon_icons: HashMap<String, image::RgbaImage> =
+            ribbon_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
+        let subribbon_icons: HashMap<String, image::RgbaImage> =
+            subribbon_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
 
         let map_image = map_raw.as_ref().and_then(|arc| {
             // Cached data is RGBA, convert to RGB for ImageTarget
@@ -490,6 +498,8 @@ pub(super) fn render_video_blocking(
             plane_icons,
             building_icons,
             consumable_icons,
+            ribbon_icons,
+            subribbon_icons,
             death_cause_icons,
             powerup_icons,
             map_info,
@@ -536,6 +546,8 @@ pub(super) fn render_video_blocking(
         plane_icons_rgba,
         building_icons_rgba,
         consumable_icons_rgba,
+        ribbon_icons_rgba,
+        subribbon_icons_rgba,
         death_cause_icons,
         powerup_icons,
         wows_minimap_renderer::drawing::SidePanelLayout::from_options(&options),

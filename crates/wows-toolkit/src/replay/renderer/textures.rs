@@ -128,6 +128,28 @@ pub(super) fn upload_textures(
         })
         .collect();
 
+    let ribbon_icons: HashMap<String, TextureHandle> = assets
+        .ribbon_icons
+        .iter()
+        .map(|(key, asset)| {
+            let image =
+                egui::ColorImage::from_rgba_unmultiplied([asset.width as usize, asset.height as usize], &asset.data);
+            let handle = ctx.load_texture(format!("ribbon_{}", key), image, egui::TextureOptions::LINEAR);
+            (key.clone(), handle)
+        })
+        .collect();
+
+    let subribbon_icons: HashMap<String, TextureHandle> = assets
+        .subribbon_icons
+        .iter()
+        .map(|(key, asset)| {
+            let image =
+                egui::ColorImage::from_rgba_unmultiplied([asset.width as usize, asset.height as usize], &asset.data);
+            let handle = ctx.load_texture(format!("subribbon_{}", key), image, egui::TextureOptions::LINEAR);
+            (key.clone(), handle)
+        })
+        .collect();
+
     let death_cause_icons: HashMap<String, TextureHandle> = assets
         .death_cause_icons
         .iter()
@@ -195,6 +217,8 @@ pub(super) fn upload_textures(
         plane_icons,
         building_icons,
         consumable_icons,
+        ribbon_icons,
+        subribbon_icons,
         death_cause_icons,
         powerup_icons,
         crew_skill_icons,
