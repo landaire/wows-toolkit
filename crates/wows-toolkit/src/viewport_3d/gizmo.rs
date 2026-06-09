@@ -42,10 +42,12 @@ fn axis_unit(axis: Axis, positive: bool) -> [f32; 3] {
     }
 }
 
-/// Screen-space direction of a signed world axis under the camera view, plus view-space depth.
+/// Foreshortened screen-space projection of a signed world axis under the camera view, plus view-space depth.
 ///
 /// `view` is column-major: `view[col][row]`. Transforms the axis as a direction (w=0).
-/// Returns a unit egui Vec2 in screen space (Y-down) and the view-space z.
+/// Returns the raw (un-normalized) egui Vec2 in screen space (Y-down) with magnitude in [0, 1]:
+/// ~1 when the axis lies in the screen plane, ~0 when it points toward/away from the camera.
+/// Arms drawn at `center + dir * ARM_LEN` foreshorten naturally instead of collapsing to full length.
 pub(crate) fn axis_screen_dir(view: &[[f32; 4]; 4], axis: Axis, positive: bool) -> (egui::Vec2, f32) {
     let a = axis_unit(axis, positive);
     let mut out = [0.0f32; 3];
@@ -55,10 +57,7 @@ pub(crate) fn axis_screen_dir(view: &[[f32; 4]; 4], axis: Axis, positive: bool) 
         }
     }
     // egui Y is down, so negate the view-space Y to get screen-up = negative Y
-    let dir = egui::vec2(out[0], -out[1]);
-    let n = dir.length();
-    let dir = if n > 1e-6 { dir / n } else { egui::Vec2::ZERO };
-    (dir, out[2])
+    (egui::vec2(out[0], -out[1]), out[2])
 }
 
 /// The six signed axes paired with screen direction, ordered so the ball nearest
@@ -208,5 +207,16 @@ mod tests {
         assert_eq!((last.0, last.1), (Axis::Z, true), "nearest (+Z toward camera) must draw last");
         let max_depth = order.iter().map(|b| b.3).fold(f32::MIN, f32::max);
         assert!((last.3 - max_depth).abs() < 1e-6);
+    }
+
+    #[test]
+    fn axis_pointing_at_camera_foreshortens() {
+        let mut c = ArcballCamera::from_bounds(Vec3::new(-1.0,-1.0,-1.0), Vec3::new(1.0,1.0,1.0));
+        c.azimuth = 0.0; c.elevation = 0.0;
+        let view = c.view_matrix();
+        let (toward, _) = axis_screen_dir(&view, Axis::Z, true);   // +Z points at camera
+        let (in_plane, _) = axis_screen_dir(&view, Axis::X, true);  // +X in screen plane
+        assert!(toward.length() < 0.1, "toward len={}", toward.length());
+        assert!(in_plane.length() > 0.9, "in_plane len={}", in_plane.length());
     }
 }
