@@ -1601,6 +1601,10 @@ impl CrewSkillLogicTrigger {
     pub fn modifiers(&self) -> Option<&Vec<CrewSkillModifier>> {
         self.modifiers.as_ref()
     }
+
+    pub fn trigger_type(&self) -> &str {
+        &self.trigger_type
+    }
 }
 
 #[derive(Clone, Builder, Debug)]
@@ -1753,16 +1757,32 @@ impl CrewSkill {
                 metadata,
             ));
         }
-        if let Some(trig) = self.logic_trigger()
-            && let Some(tmods) = trig.modifiers()
-        {
-            for line in crate::game_params::modifier_settings_data::describe_modifiers(
-                build,
-                tmods.iter().map(|m| (m.name(), m.get_for_species(&species))),
-                species,
-                metadata,
-            ) {
-                lines.push(format!("{line} (when triggered)"));
+        if let Some(trig) = self.logic_trigger() {
+            // The trigger condition sentence is keyed by trigger TYPE (e.g.
+            // activationOnDetectTrigger -> IDS_SKILL_TRIGGER_ACTIVATIONONDETECTTRIGGER);
+            // triggerDescIds is often empty.
+            let sentence = metadata
+                .localized_name_from_id(&format!("IDS_SKILL_TRIGGER_{}", trig.trigger_type().to_uppercase()))
+                .and_then(|s| if s.is_empty() || s == " " { None } else { Some(s) });
+            let has_sentence = sentence.is_some();
+            if let Some(sentence) = sentence {
+                lines.push(sentence);
+            }
+            if let Some(tmods) = trig.modifiers() {
+                for line in crate::game_params::modifier_settings_data::describe_modifiers(
+                    build,
+                    tmods.iter().map(|m| (m.name(), m.get_for_species(&species))),
+                    species,
+                    metadata,
+                ) {
+                    // The sentence already conveys the condition; only fall back
+                    // to the suffix when no sentence resolved.
+                    if has_sentence {
+                        lines.push(line);
+                    } else {
+                        lines.push(format!("{line} (when triggered)"));
+                    }
+                }
             }
         }
         (!lines.is_empty()).then(|| lines.join("\n"))
@@ -2556,9 +2576,35 @@ mod crew_skill_description_tests {
     }
 
     /// Resolves only modifier label/unit ids, leaving skill description ids
-    /// empty so the generated path runs.
+    /// and trigger-type sentence ids empty so the generated path runs and the
+    /// "(when triggered)" suffix fallback is exercised.
     struct ModifierOnlyLoader;
     impl crate::data::ResourceLoader for ModifierOnlyLoader {
+        fn localized_name_from_param(&self, _param: &Param) -> Option<String> {
+            None
+        }
+        fn localized_name_from_id(&self, id: &str) -> Option<String> {
+            if id.starts_with("IDS_SKILL_DESC") || id.starts_with("IDS_SKILL_TRIGGER_") {
+                None
+            } else {
+                Some(id.to_string())
+            }
+        }
+        fn game_param_by_id(
+            &self,
+            _id: crate::game_types::GameParamId,
+        ) -> Option<crate::Rc<Param>> {
+            None
+        }
+        fn entity_specs(&self) -> &[crate::rpc::entitydefs::EntitySpec] {
+            &[]
+        }
+    }
+
+    /// Like [`ModifierOnlyLoader`] but resolves trigger-type sentence ids,
+    /// standing in for a catalog that has the trigger condition text.
+    struct TriggerSentenceLoader;
+    impl crate::data::ResourceLoader for TriggerSentenceLoader {
         fn localized_name_from_param(&self, _param: &Param) -> Option<String> {
             None
         }
@@ -2644,20 +2690,22 @@ mod crew_skill_description_tests {
         assert!(!out.contains("(when triggered)"), "plain modifier, got {out}");
     }
 
-    #[test]
-    fn trigger_modifiers_are_labeled_when_triggered() {
-        let trigger = CrewSkillLogicTrigger::builder()
+    fn trigger_with(trigger_type: &str, modifiers: Vec<CrewSkillModifier>) -> CrewSkillLogicTrigger {
+        CrewSkillLogicTrigger::builder()
             .consumable_type(String::new())
             .cooling_delay(0.0)
             .cooling_interpolator(Vec::new())
             .duration(0.0)
             .energy_coeff(0.0)
             .heat_interpolator(Vec::new())
-            .modifiers(vec![uniform_modifier("GMRotationSpeed", 1.1)])
+            .modifiers(modifiers)
             .trigger_desc_ids(String::new())
-            .trigger_type(String::new())
-            .build();
-        let skill = CrewSkill::builder()
+            .trigger_type(trigger_type.to_owned())
+            .build()
+    }
+
+    fn skill_with_trigger(trigger: CrewSkillLogicTrigger) -> CrewSkill {
+        CrewSkill::builder()
             .internal_name(CrewSkillName::from("GunFeeder"))
             .can_be_learned(true)
             .is_epic(false)
@@ -2665,12 +2713,39 @@ mod crew_skill_description_tests {
             .ui_treat_as_trigger(false)
             .tier(tiers())
             .logic_trigger(trigger)
-            .build();
+            .build()
+    }
+
+    #[test]
+    fn trigger_modifiers_are_labeled_when_triggered_without_sentence() {
+        // No trigger-type sentence resolves, so the modifier line keeps the
+        // "(when triggered)" suffix to still convey the condition.
+        let trigger = trigger_with("activationOnDetectTrigger", vec![uniform_modifier("GMRotationSpeed", 1.1)]);
+        let skill = skill_with_trigger(trigger);
         let out = skill
             .description_with(Species::Battleship, &ModifierOnlyLoader, &version())
             .expect("trigger-generated description");
         assert!(out.contains("(when triggered)"), "got {out}");
         assert!(out.contains("IDS_PARAMS_MODIFIER_GMROTATIONSPEED"), "got {out}");
+    }
+
+    #[test]
+    fn trigger_sentence_precedes_unsuffixed_modifier_lines() {
+        // When the trigger-type sentence resolves, it leads and the trigger
+        // modifier lines drop the "(when triggered)" suffix.
+        let trigger = trigger_with("activationOnDetectTrigger", vec![uniform_modifier("GMRotationSpeed", 1.1)]);
+        let skill = skill_with_trigger(trigger);
+        let out = skill
+            .description_with(Species::Battleship, &TriggerSentenceLoader, &version())
+            .expect("trigger-generated description");
+        let mut iter = out.lines();
+        assert_eq!(
+            iter.next(),
+            Some("IDS_SKILL_TRIGGER_ACTIVATIONONDETECTTRIGGER"),
+            "sentence should lead, got {out}"
+        );
+        assert!(out.contains("IDS_PARAMS_MODIFIER_GMROTATIONSPEED"), "got {out}");
+        assert!(!out.contains("(when triggered)"), "suffix should be dropped, got {out}");
     }
 
     #[test]

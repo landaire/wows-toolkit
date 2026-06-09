@@ -296,14 +296,14 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> 
             let skill_data = skill_data.dict_or_object_dict().expect("skill data is not dictionary");
             let skill_data = skill_data.inner();
 
-            let logic_modifiers = game_param_to_type!(skill_data, "modifiers", Option<HashMap<(), ()>>);
-
-            let logic_modifiers = logic_modifiers.map(|modifiers| build_skill_modifiers(&modifiers.inner()));
-
             let logic_trigger_data = game_param_to_type!(skill_data, "LogicTrigger", Option<HashMap<(), ()>>);
 
             let logic_trigger = logic_trigger_data.map(|logic_trigger_data| {
                 let logic_trigger_data = logic_trigger_data.inner();
+                // Triggered effects live on the trigger, not the skill: the
+                // skill-level "modifiers" is empty for triggered skills.
+                let trigger_modifiers = game_param_to_type!(logic_trigger_data, "modifiers", Option<HashMap<(), ()>>)
+                    .map(|m| build_skill_modifiers(&m.inner()));
                 CrewSkillLogicTrigger::builder()
                     .maybe_burn_count(game_param_to_type!(logic_trigger_data, "burnCount", Option<usize>))
                     .maybe_change_priority_target_penalty(game_param_to_type!(
@@ -321,7 +321,7 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> 
                     .maybe_flood_count(game_param_to_type!(logic_trigger_data, "floodCount", Option<usize>))
                     .maybe_health_factor(game_param_to_type!(logic_trigger_data, "healthFactor", Option<f32>))
                     .heat_interpolator(Vec::default())
-                    .maybe_modifiers(logic_modifiers)
+                    .maybe_modifiers(trigger_modifiers)
                     .trigger_desc_ids(game_param_to_type!(logic_trigger_data, "triggerDescIds", String))
                     .trigger_type(game_param_to_type!(logic_trigger_data, "triggerType", String))
                     .build()
