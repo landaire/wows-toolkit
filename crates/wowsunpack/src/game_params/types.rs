@@ -1076,16 +1076,109 @@ impl HullUpgradeConfig {
     }
 }
 
-/// One camera orbit trajectory (inner state) from a ship's `Cameras` component.
+/// One camera orbit trajectory (inner + outer states) from a ship's `Cameras` component.
 /// Values are raw ship-model units, ship-local: `pos_center` is the orbit center,
 /// `semi_axis_h` the radius along the beam (model X), `semi_axis_v` along the length (model Z).
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Index 0 = inner state (default zoom), index 1 = outer state (zoomed out).
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct CameraTrajectory {
+    pub pos_center: [[f32; 3]; 2],
+    pub semi_axis_h: [f32; 2],
+    pub semi_axis_v: [f32; 2],
+    pub tags: String,
+    pub ignore_height_multiplier: bool,
+}
+
+/// Resolved camera ring for a specific FOV blend and height offset.
+#[derive(Debug, Clone, Copy)]
+pub struct CameraRing {
     pub pos_center: [f32; 3],
     pub semi_axis_h: f32,
     pub semi_axis_v: f32,
+}
+
+// From CameraConstants.py heightMultiplierTags / innerOnlyHeightMultiplierTags.
+const HEIGHT_TAGS: &[u8] = b"AMTOPBb";
+const INNER_ONLY_TAGS: &[u8] = b"BbP";
+// INNER_HEIGHT_TRAJECTORY_COEF from m30c89f53.py. Approximated symmetrically.
+const HEIGHT_COEF: f32 = 2.0;
+
+impl CameraTrajectory {
+    fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+        [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+    }
+
+    fn height_applies(&self) -> bool {
+        !self.ignore_height_multiplier
+            && self.tags.bytes().any(|c| HEIGHT_TAGS.contains(&c))
+            && !self.tags.bytes().any(|c| INNER_ONLY_TAGS.contains(&c))
+    }
+
+    /// FOV blend only (height = 0).
+    pub fn ring(&self, fov: f32) -> CameraRing {
+        let f = fov.clamp(0.0, 1.0);
+        CameraRing {
+            pos_center: Self::lerp3(self.pos_center[0], self.pos_center[1], f),
+            semi_axis_h: self.semi_axis_h[0] + (self.semi_axis_h[1] - self.semi_axis_h[0]) * f,
+            semi_axis_v: self.semi_axis_v[0] + (self.semi_axis_v[1] - self.semi_axis_v[0]) * f,
+        }
+    }
+
+    /// FOV blend plus the game's gated height shift on posCenter.y.
+    pub fn resolve(&self, fov: f32, height: f32) -> CameraRing {
+        let mut r = self.ring(fov);
+        if self.height_applies() {
+            r.pos_center[1] += HEIGHT_COEF * height;
+        }
+        r
+    }
+}
+
+#[cfg(test)]
+mod camera_ring_tests {
+    use super::*;
+
+    fn traj(tags: &str, ignore: bool) -> CameraTrajectory {
+        CameraTrajectory {
+            pos_center: [[0.0, 1.958, 0.0], [0.0, 2.008, 0.0]],
+            semi_axis_h: [6.552, 5.981],
+            semi_axis_v: [9.6, 9.6],
+            tags: tags.to_string(),
+            ignore_height_multiplier: ignore,
+        }
+    }
+
+    #[test]
+    fn fov0_is_inner() {
+        let r = traj("AT", false).resolve(0.0, 0.0);
+        assert!((r.semi_axis_h - 6.552).abs() < 1e-4 && (r.pos_center[1] - 1.958).abs() < 1e-4);
+    }
+
+    #[test]
+    fn fov1_is_outer() {
+        let r = traj("AT", false).resolve(1.0, 0.0);
+        assert!((r.semi_axis_h - 5.981).abs() < 1e-4 && (r.pos_center[1] - 2.008).abs() < 1e-4);
+    }
+
+    #[test]
+    fn height_applies_for_artillery() {
+        let r = traj("AT", false).resolve(0.0, 1.0);
+        assert!((r.pos_center[1] - (1.958 + 2.0)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn height_skipped_for_periscope() {
+        let r = traj("B", false).resolve(0.0, 1.0);
+        assert!((r.pos_center[1] - 1.958).abs() < 1e-4);
+    }
+
+    #[test]
+    fn height_skipped_when_ignored() {
+        let r = traj("AT", true).resolve(0.0, 1.0);
+        assert!((r.pos_center[1] - 1.958).abs() < 1e-4);
+    }
 }
 
 /// Ship configuration data extracted from GameParams.

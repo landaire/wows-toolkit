@@ -2,7 +2,7 @@ extern crate nalgebra as na;
 
 use na::Vector3;
 
-use wowsunpack::game_params::types::CameraTrajectory;
+use wowsunpack::game_params::types::CameraRing;
 use crate::viewport_3d::types::Vertex;
 
 type Vec3 = Vector3<f32>;
@@ -34,40 +34,42 @@ fn push_segment(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, p0: Vec3, p1: V
     }
 }
 
-/// Build a model-space overlay mesh for one camera orbit trajectory: the
-/// horizontal orbit ring, a marker at the orbit center, and a vertical line
-/// down to the waterline plane (Y = 0). `waterline_dy` is the waterline shift
-/// hook added to the orbit center height; currently 0.
+/// Build a model-space overlay mesh for one resolved camera ring.
+/// `waterline_dy` shifts the orbit center height by the ship's waterline offset.
+/// When `with_markers` is true, also renders the orbit center marker and a
+/// vertical line down to Y = 0.
 pub(crate) fn build_camera_ellipse_mesh(
-    traj: &CameraTrajectory,
+    ring: &CameraRing,
     waterline_dy: f32,
     color: [f32; 4],
+    with_markers: bool,
 ) -> (Vec<Vertex>, Vec<u32>) {
     let mut verts: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    let cx = traj.pos_center[0];
-    let cy = traj.pos_center[1] + waterline_dy;
-    let cz = traj.pos_center[2];
+    let cx = ring.pos_center[0];
+    let cy = ring.pos_center[1] + waterline_dy;
+    let cz = ring.pos_center[2];
     let center = Vec3::new(cx, cy, cz);
 
     let x_axis = Vec3::x();
     let z_axis = Vec3::z();
 
-    let mut prev = center + x_axis * traj.semi_axis_h;
+    let mut prev = center + x_axis * ring.semi_axis_h;
     for i in 1..=RING_SEGMENTS {
         let t = (i as f32 / RING_SEGMENTS as f32) * std::f32::consts::TAU;
-        let p = center + x_axis * (t.cos() * traj.semi_axis_h) + z_axis * (t.sin() * traj.semi_axis_v);
+        let p = center + x_axis * (t.cos() * ring.semi_axis_h) + z_axis * (t.sin() * ring.semi_axis_v);
         push_segment(&mut verts, &mut indices, prev, p, color);
         prev = p;
     }
 
-    for axis in [Vec3::x(), Vec3::y(), Vec3::z()] {
-        push_segment(&mut verts, &mut indices, center - axis * MARKER_SIZE, center + axis * MARKER_SIZE, color);
+    if with_markers {
+        for axis in [Vec3::x(), Vec3::y(), Vec3::z()] {
+            push_segment(&mut verts, &mut indices, center - axis * MARKER_SIZE, center + axis * MARKER_SIZE, color);
+        }
+        let foot = Vec3::new(center.x, 0.0, center.z);
+        push_segment(&mut verts, &mut indices, center, foot, color);
     }
-
-    let foot = Vec3::new(center.x, 0.0, center.z);
-    push_segment(&mut verts, &mut indices, center, foot, color);
 
     (verts, indices)
 }
@@ -86,13 +88,13 @@ pub(crate) fn build_center_marker_mesh(center: Vec3, half: f32, color: [f32; 4])
 mod tests {
     use super::*;
 
-    fn traj() -> wowsunpack::game_params::types::CameraTrajectory {
-        wowsunpack::game_params::types::CameraTrajectory { pos_center: [0.0, 1.958, 0.0], semi_axis_h: 6.552, semi_axis_v: 9.6 }
+    fn ring() -> CameraRing {
+        CameraRing { pos_center: [0.0, 1.958, 0.0], semi_axis_h: 6.552, semi_axis_v: 9.6 }
     }
 
     #[test]
     fn ring_is_non_empty_and_indexed() {
-        let (verts, indices) = build_camera_ellipse_mesh(&traj(), 0.0, [0.0, 1.0, 1.0, 1.0]);
+        let (verts, indices) = build_camera_ellipse_mesh(&ring(), 0.0, [0.0, 1.0, 1.0, 1.0], true);
         assert!(!verts.is_empty());
         assert!(!indices.is_empty());
         assert_eq!(indices.len() % 3, 0);
@@ -101,7 +103,7 @@ mod tests {
 
     #[test]
     fn ring_extents_match_semi_axes() {
-        let (verts, _) = build_camera_ellipse_mesh(&traj(), 0.0, [0.0, 1.0, 1.0, 1.0]);
+        let (verts, _) = build_camera_ellipse_mesh(&ring(), 0.0, [0.0, 1.0, 1.0, 1.0], true);
         let max_x = verts.iter().map(|v| v.position[0]).fold(f32::MIN, f32::max);
         let max_z = verts.iter().map(|v| v.position[2]).fold(f32::MIN, f32::max);
         assert!((max_x - 6.552).abs() < 0.3, "max_x={max_x}");
@@ -110,7 +112,7 @@ mod tests {
 
     #[test]
     fn height_line_reaches_waterline() {
-        let (verts, _) = build_camera_ellipse_mesh(&traj(), 0.0, [0.0, 1.0, 1.0, 1.0]);
+        let (verts, _) = build_camera_ellipse_mesh(&ring(), 0.0, [0.0, 1.0, 1.0, 1.0], true);
         let min_y = verts.iter().map(|v| v.position[1]).fold(f32::MAX, f32::min);
         assert!(min_y.abs() < 0.2, "min_y={min_y}");
     }

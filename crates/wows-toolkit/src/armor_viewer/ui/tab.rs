@@ -1181,8 +1181,9 @@ pub(crate) fn upload_armor_to_viewport(
     if pane.show_camera_ellipse {
         let mode = pane.camera_ellipse_mode.clone();
         if let Some((_, traj)) = armor.camera_trajectories.iter().find(|(name, _)| *name == mode) {
+            let ring = traj.resolve(0.0, 0.0);
             let (verts, indices) =
-                crate::armor_viewer::camera_ellipse::build_camera_ellipse_mesh(traj, armor.waterline_dy, [0.0, 0.9, 1.0, 1.0]);
+                crate::armor_viewer::camera_ellipse::build_camera_ellipse_mesh(&ring, armor.waterline_dy, [0.0, 0.9, 1.0, 1.0], true);
             if !indices.is_empty() {
                 let id = pane.viewport.add_non_pickable_mesh(device, &verts, &indices, LAYER_OVERLAY);
                 pane.camera_ellipse_mesh_ids.push(id);

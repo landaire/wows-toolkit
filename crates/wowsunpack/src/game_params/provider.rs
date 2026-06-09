@@ -571,6 +571,43 @@ fn read_pair_inner(v: &Value) -> Option<f32> {
     }
 }
 
+/// Read both numeric elements from a list-or-tuple `[inner, outer]` pair.
+fn read_pair_both(v: &Value) -> Option<[f32; 2]> {
+    if let Some(l) = v.list_ref() {
+        let g = l.inner();
+        Some([value_f32(g.first()?)?, value_f32(g.get(1)?)?])
+    } else if let Some(t) = v.tuple_ref() {
+        let s = t.inner();
+        Some([value_f32(s.first()?)?, value_f32(s.get(1)?)?])
+    } else {
+        None
+    }
+}
+
+/// Read a 3-element float triple from the element at `idx` of a nested list-or-tuple.
+fn read_vec3_at(v: &Value, idx: usize) -> Option<[f32; 3]> {
+    fn triple(elem: &Value) -> Option<[f32; 3]> {
+        if let Some(l) = elem.list_ref() {
+            let g = l.inner();
+            if g.len() != 3 { return None; }
+            Some([value_f32(&g[0])?, value_f32(&g[1])?, value_f32(&g[2])?])
+        } else if let Some(t) = elem.tuple_ref() {
+            let s = t.inner();
+            if s.len() != 3 { return None; }
+            Some([value_f32(&s[0])?, value_f32(&s[1])?, value_f32(&s[2])?])
+        } else {
+            None
+        }
+    }
+    if let Some(l) = v.list_ref() {
+        triple(l.inner().get(idx)?)
+    } else if let Some(t) = v.tuple_ref() {
+        triple(t.inner().get(idx)?)
+    } else {
+        None
+    }
+}
+
 /// Read a 3-element float triple from the first element of a nested list-or-tuple.
 /// Handles `posCenter = [[x,y,z],[x,y,z]]`; returns the inner triple at index 0.
 fn read_vec3_inner(v: &Value) -> Option<[f32; 3]> {
@@ -615,14 +652,37 @@ pub fn read_camera_trajectories(ship_data: &BTreeMap<HashableValue, Value>) -> V
             continue;
         };
         let inner_guard = inner_traj.inner();
-        let (Some(pos_center), Some(semi_axis_h), Some(semi_axis_v)) = (
-            inner_guard.get(&pk("posCenter")).and_then(read_vec3_inner),
-            inner_guard.get(&pk("semiAxisH")).and_then(read_pair_inner),
-            inner_guard.get(&pk("semiAxisV")).and_then(read_pair_inner),
+        let pc_val = inner_guard.get(&pk("posCenter"));
+        let (Some(pc0), Some(pc1), Some(semi_axis_h), Some(semi_axis_v)) = (
+            pc_val.and_then(|v| read_vec3_at(v, 0)),
+            pc_val.and_then(|v| read_vec3_at(v, 1)),
+            inner_guard.get(&pk("semiAxisH")).and_then(read_pair_both),
+            inner_guard.get(&pk("semiAxisV")).and_then(read_pair_both),
         ) else {
             continue;
         };
-        out.push((name, CameraTrajectory { pos_center, semi_axis_h, semi_axis_v }));
+        let tags = mode_guard
+            .get(&pk("tags"))
+            .and_then(|v| v.string_ref())
+            .map(|s| s.inner().to_string())
+            .unwrap_or_default();
+        let ignore_height_multiplier = inner_guard
+            .get(&pk("ignoreHeightMultiplier"))
+            .map(|v| {
+                if let Some(b) = v.bool_ref() {
+                    *b
+                } else {
+                    v.i64_ref().map(|i| *i != 0).unwrap_or(false)
+                }
+            })
+            .unwrap_or(false);
+        out.push((name, CameraTrajectory {
+            pos_center: [pc0, pc1],
+            semi_axis_h,
+            semi_axis_v,
+            tags,
+            ignore_height_multiplier,
+        }));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
@@ -1624,19 +1684,27 @@ mod camera_tests {
         assert!(result.is_empty());
     }
 
-    #[test]
-    fn read_camera_trajectories_parses_mode() {
+    fn sv(s: &str) -> Value {
+        Value::String(s.to_string().into())
+    }
+
+    fn build_inner_traj(extra: Vec<(HashableValue, Value)>) -> Value {
         let pos_center = list(vec![
             list(vec![fv(0.0), fv(1.958), fv(0.0)]),
             list(vec![fv(0.0), fv(2.008), fv(0.0)]),
         ]);
-        let semi_axis_h = list(vec![fv(6.552), fv(5.981)]);
-        let semi_axis_v = list(vec![fv(4.123), fv(3.999)]);
-        let inner_traj = dict(vec![
+        let mut entries = vec![
             (pk("posCenter"), pos_center),
-            (pk("semiAxisH"), semi_axis_h),
-            (pk("semiAxisV"), semi_axis_v),
-        ]);
+            (pk("semiAxisH"), list(vec![fv(6.552), fv(5.981)])),
+            (pk("semiAxisV"), list(vec![fv(4.123), fv(3.999)])),
+        ];
+        entries.extend(extra);
+        dict(entries)
+    }
+
+    #[test]
+    fn read_camera_trajectories_parses_mode() {
+        let inner_traj = build_inner_traj(vec![]);
         let mode = dict(vec![(pk("InnerTrajectory"), inner_traj)]);
         let cameras = dict(vec![(pk("TestMode"), mode)]);
         let ship_data: BTreeMap<HashableValue, Value> =
@@ -1645,9 +1713,49 @@ mod camera_tests {
         assert_eq!(result.len(), 1);
         let (name, traj) = &result[0];
         assert_eq!(name, "TestMode");
-        assert!((traj.pos_center[1] - 1.958_f32).abs() < 1e-4);
-        assert!((traj.semi_axis_h - 6.552_f32).abs() < 1e-4);
-        assert!((traj.semi_axis_v - 4.123_f32).abs() < 1e-4);
+        assert!((traj.pos_center[0][1] - 1.958_f32).abs() < 1e-4);
+        assert!((traj.pos_center[1][1] - 2.008_f32).abs() < 1e-4);
+        assert!((traj.semi_axis_h[0] - 6.552_f32).abs() < 1e-4);
+        assert!((traj.semi_axis_h[1] - 5.981_f32).abs() < 1e-4);
+        assert!((traj.semi_axis_v[0] - 4.123_f32).abs() < 1e-4);
+        assert!((traj.semi_axis_v[1] - 3.999_f32).abs() < 1e-4);
+        // defaults when tags/ignoreHeightMultiplier are absent
+        assert_eq!(traj.tags, "");
+        assert!(!traj.ignore_height_multiplier);
+    }
+
+    #[test]
+    fn read_camera_trajectories_parses_tags_and_ignore_height_bool() {
+        let inner_traj = build_inner_traj(vec![
+            (pk("ignoreHeightMultiplier"), Value::Bool(true)),
+        ]);
+        let mode = dict(vec![
+            (pk("InnerTrajectory"), inner_traj),
+            (pk("tags"), sv("AT")),
+        ]);
+        let cameras = dict(vec![(pk("TagMode"), mode)]);
+        let ship_data: BTreeMap<HashableValue, Value> =
+            [(pk("Cameras"), cameras)].into_iter().collect();
+        let result = read_camera_trajectories(&ship_data);
+        assert_eq!(result.len(), 1);
+        let (name, traj) = &result[0];
+        assert_eq!(name, "TagMode");
+        assert_eq!(traj.tags, "AT");
+        assert!(traj.ignore_height_multiplier);
+    }
+
+    #[test]
+    fn read_camera_trajectories_parses_ignore_height_as_int() {
+        let inner_traj = build_inner_traj(vec![
+            (pk("ignoreHeightMultiplier"), Value::I64(1)),
+        ]);
+        let mode = dict(vec![(pk("InnerTrajectory"), inner_traj)]);
+        let cameras = dict(vec![(pk("IntMode"), mode)]);
+        let ship_data: BTreeMap<HashableValue, Value> =
+            [(pk("Cameras"), cameras)].into_iter().collect();
+        let result = read_camera_trajectories(&ship_data);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].1.ignore_height_multiplier);
     }
 
     #[test]
