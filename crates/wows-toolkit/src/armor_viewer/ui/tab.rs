@@ -4628,6 +4628,30 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
     if ui.checkbox(&mut pane.show_ship_center, t!("ui.armor.ship_center").as_ref()).changed() {
         zone_changed = true;
     }
+    if !armor.hull_meshes.is_empty() {
+        let any_hull_on = pane.hull_visibility.values().any(|&v| v);
+        let mut hull_checked = any_hull_on;
+        if ui.checkbox(&mut hull_checked, t!("ui.armor.ship_hull").as_ref()).changed() {
+            for (_, vis) in pane.hull_visibility.iter_mut() {
+                *vis = hull_checked;
+            }
+            zone_changed = true;
+        }
+        if any_hull_on {
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                if ui.checkbox(&mut pane.hull_opaque, t!("ui.armor.opaque_hull").as_ref()).changed() {
+                    zone_changed = true;
+                }
+            });
+        }
+    }
+    ui.horizontal(|ui| {
+        ui.label("Armor Opacity");
+        if ui.add(egui::Slider::new(&mut pane.armor_opacity, 0.1..=1.0).fixed_decimals(2)).changed() {
+            zone_changed = true;
+        }
+    });
     ui.separator();
     ui.label(t!("ui.armor.camera_rings").as_ref());
     if ui.checkbox(&mut pane.show_camera_ellipse, t!("ui.armor.show_camera_rings").as_ref()).changed() {
@@ -4673,30 +4697,6 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
     if combo_changed {
         zone_changed = true;
     }
-    if !armor.hull_meshes.is_empty() {
-        let any_hull_on = pane.hull_visibility.values().any(|&v| v);
-        let mut hull_checked = any_hull_on;
-        if ui.checkbox(&mut hull_checked, t!("ui.armor.ship_hull").as_ref()).changed() {
-            for (_, vis) in pane.hull_visibility.iter_mut() {
-                *vis = hull_checked;
-            }
-            zone_changed = true;
-        }
-        if any_hull_on {
-            ui.horizontal(|ui| {
-                ui.add_space(20.0);
-                if ui.checkbox(&mut pane.hull_opaque, t!("ui.armor.opaque_hull").as_ref()).changed() {
-                    zone_changed = true;
-                }
-            });
-        }
-    }
-    ui.horizontal(|ui| {
-        ui.label("Armor Opacity");
-        if ui.add(egui::Slider::new(&mut pane.armor_opacity, 0.1..=1.0).fixed_decimals(2)).changed() {
-            zone_changed = true;
-        }
-    });
     zone_changed
 }
 
