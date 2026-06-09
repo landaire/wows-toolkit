@@ -21,7 +21,6 @@ use wows_replays::analyzer::decoder::Recognized;
 use wows_replays::types::ArenaId;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
-use wows_replays::types::GunId;
 use wowsunpack::game_types::BattleStage;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
@@ -101,28 +100,6 @@ pub struct ActiveShotOrder(pub Vec<Entity>);
 /// later index-based lookups resolve to the same element the original would find.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct ActiveTorpedoOrder(pub Vec<Entity>);
-
-/// A single in-flight secondary (ATBA) shot: shooter, target, fire time, and the
-/// representative firing gun (lowest gunID hitting this target this clock).
-///
-/// Plain data, not an entity: these records carry no other state, are never
-/// mutated per-frame, and are never queried. Position and ammo are resolved by
-/// the renderer from live entity positions and the shooter's ship params; `gun`
-/// lets it pick that gun's shell for color and pacing on mixed-caliber ships.
-#[derive(Debug, Clone, Copy)]
-pub struct SecondaryShot {
-    pub shooter: EntityId,
-    pub target: EntityId,
-    pub fired_at: GameClock,
-    pub gun: GunId,
-}
-
-/// In-flight secondary (ATBA) shots in fire order.
-///
-/// Independent of ActiveShotOrder/ActiveTorpedoOrder: a visualization-only
-/// stream with no salvo matching or hit resolution.
-#[derive(Resource, Debug, Clone, Default)]
-pub struct ActiveSecondaryShots(pub Vec<SecondaryShot>);
 
 /// Self-player ribbon counts and cumulative damage stats.
 #[derive(Resource, Debug, Clone, Default)]

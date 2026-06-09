@@ -421,19 +421,6 @@ impl<'a> MinimapRenderer<'a> {
         }
     }
 
-    /// Live world position for an entity at the current render clock, preferring
-    /// the interpolated sample and falling back to the latest discrete position.
-    fn entity_world_pos(
-        &self,
-        entity_id: EntityId,
-        positions: &HashMap<EntityId, &wows_battle_world::components::Transform3d>,
-    ) -> Option<WorldPos> {
-        match self.render_clock.and_then(|rc| self.interpolated_pos(entity_id, rc)) {
-            Some(SampledPos::World(p)) => Some(p),
-            _ => positions.get(&entity_id).map(|t| t.pos),
-        }
-    }
-
     /// Mark whether this renderer is driving a merged session (primary plus
     /// one or more alt perspectives). Call before the first frame; affects
     /// whether enemy ship icons get the spotted outline.
@@ -1200,6 +1187,18 @@ impl<'a> MinimapRenderer<'a> {
                 } else {
                     None
                 };
+                // Secondary fire rides the same receiveArtilleryShots path as the main
+                // battery; the only discriminator is whether the shell is one of the
+                // owner ship's ATBA ammo. Dim those so they read as secondaries. When the
+                // owner or its ammo set cannot be resolved (unknown ship, or builds whose
+                // data predates secondary_battery_ammo) this stays false and the salvo
+                // renders as main battery, matching pre-classification behavior.
+                let is_secondary = controller
+                    .vehicle_props(owner)
+                    .map(|v| v.ship_config().ship_params_id())
+                    .is_some_and(|ship_id| {
+                        wowsunpack::game_params::types::is_secondary_ammo(self.game_params, ship_id, shot.salvo.params_id)
+                    });
                 for shot_data in &shot.salvo.shots {
                     let origin = shot_data.origin;
                     let target = shot_data.target;
@@ -1218,71 +1217,19 @@ impl<'a> MinimapRenderer<'a> {
                     let head = origin.lerp(target, frac);
                     let tail = origin.lerp(target, (frac - tracer_len).max(0.0));
                     let head_minimap = map_info.world_to_minimap(head, MINIMAP_SIZE);
-                    commands.push(DrawCommand::ShotTracer {
-                        from: map_info.world_to_minimap(tail, MINIMAP_SIZE),
-                        to: head_minimap,
-                        color,
-                    });
-                    if let Some(tip) = tip_color {
-                        commands.push(DrawCommand::ShotTracerTip { at: head_minimap, color: tip });
+                    let from = map_info.world_to_minimap(tail, MINIMAP_SIZE);
+                    if is_secondary {
+                        commands.push(DrawCommand::SecondaryShotTracer { from, to: head_minimap, color });
+                        if let Some(tip) = tip_color {
+                            commands.push(DrawCommand::SecondaryShotTracerTip { at: head_minimap, color: tip });
+                        }
+                    } else {
+                        commands.push(DrawCommand::ShotTracer { from, to: head_minimap, color });
+                        if let Some(tip) = tip_color {
+                            commands.push(DrawCommand::ShotTracerTip { at: head_minimap, color: tip });
+                        }
                     }
                 }
-            }
-        }
-
-        // Secondary (ATBA) battery dots: a small ammo-colored dot from each
-        // shooter to its per-gun target, paced by distance / muzzle speed. Gated
-        // like the main-battery tip (tracers and armament both enabled).
-        if self.options.show_tracers && self.options.show_armament {
-            let positions = controller.positions();
-            for shot in controller.active_secondary_shots() {
-                let elapsed = clock - shot.fired_at;
-                if elapsed < 0.0 {
-                    continue;
-                }
-                let Some(shooter_pos) = self.entity_world_pos(shot.shooter, &positions) else {
-                    continue;
-                };
-                let Some(target_pos) = self.entity_world_pos(shot.target, &positions) else {
-                    continue;
-                };
-                // Secondary ammo is fixed per ship; resolve from the shooter's ship params
-                // for color and muzzle speed.
-                let Some(ship_id) =
-                    controller.vehicle_props(shot.shooter).map(|v| v.ship_config().ship_params_id())
-                else {
-                    continue;
-                };
-                let Some(ammo_id) = wowsunpack::game_params::types::secondary_gun_ammo_param(
-                    self.game_params,
-                    ship_id,
-                    shot.gun,
-                ) else {
-                    continue;
-                };
-                let ammo_param = GameParamProvider::game_param_by_id(self.game_params, ammo_id);
-                let Some(projectile) = ammo_param.as_ref().and_then(|p| p.projectile()) else {
-                    continue;
-                };
-                let Some(speed) = projectile.bullet_speed() else {
-                    continue;
-                };
-                if speed <= 0.0 {
-                    continue;
-                }
-                let dx = target_pos.x - shooter_pos.x;
-                let dz = target_pos.z - shooter_pos.z;
-                let flight_duration = (dx * dx + dz * dz).sqrt() / speed;
-                if elapsed > flight_duration {
-                    continue;
-                }
-                let frac = elapsed / flight_duration;
-                let pos = shooter_pos.lerp(target_pos, frac);
-                let color = ammo_type_color(&AmmoType::from_game_str(projectile.ammo_type()));
-                commands.push(DrawCommand::ShotTracerTip {
-                    at: map_info.world_to_minimap(pos, MINIMAP_SIZE),
-                    color,
-                });
             }
         }
 

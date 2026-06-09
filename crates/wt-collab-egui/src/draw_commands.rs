@@ -325,7 +325,32 @@ pub fn draw_command_to_shapes(
             let p = transform.minimap_to_screen(at);
             // Tip a bit wider than the tracer line so the ammo color is noticeable
             // without ballooning. Window-scaled (non-zoom) so it tracks the line at any zoom.
-            shapes.push(Shape::circle_filled(p, transform.scale_stroke(1.25), color_from_rgb(*color)));
+            shapes.push(Shape::circle_filled(
+                p,
+                transform.scale_stroke(1.25),
+                color_from_rgba(*color, wows_minimap_renderer::draw_command::SHOT_TIP_ALPHA),
+            ));
+        }
+
+        DrawCommand::SecondaryShotTracer { from, to, color } => {
+            let p1 = transform.minimap_to_screen(from);
+            let p2 = transform.minimap_to_screen(to);
+            shapes.push(Shape::LineSegment {
+                points: [p1, p2],
+                stroke: Stroke::new(
+                    transform.scale_stroke(1.0),
+                    color_from_rgba(*color, wows_minimap_renderer::draw_command::SECONDARY_SHOT_ALPHA),
+                ),
+            });
+        }
+
+        DrawCommand::SecondaryShotTracerTip { at, color } => {
+            let p = transform.minimap_to_screen(at);
+            shapes.push(Shape::circle_filled(
+                p,
+                transform.scale_stroke(1.25),
+                color_from_rgba(*color, wows_minimap_renderer::draw_command::SECONDARY_SHOT_ALPHA),
+            ));
         }
 
         DrawCommand::Torpedo { pos, color } => {

@@ -67,7 +67,6 @@ use crate::components::Vehicle;
 use crate::components::VehicleState;
 use crate::components::Ward;
 use crate::components::WardState;
-use crate::resources::ActiveSecondaryShots;
 use crate::resources::ActiveShotOrder;
 use crate::resources::ActiveTorpedoOrder;
 use crate::resources::CapturePointOrder;
@@ -80,7 +79,6 @@ use crate::resources::KillLog;
 use crate::resources::MatchState;
 use crate::resources::PlayerIndex;
 use crate::resources::ScoringRules as ScoringRulesResource;
-use crate::resources::SecondaryShot;
 use crate::resources::SelfStats;
 use crate::resources::TeamScores;
 use crate::resources::WeatherZoneOrder;
@@ -352,11 +350,6 @@ impl<'w> BattleView<'w> {
                 ProjectileState::Torpedo { .. } => None,
             })
             .collect()
-    }
-
-    /// In-flight secondary (ATBA) shots, in fire order.
-    pub fn active_secondary_shots(&self) -> Vec<SecondaryShot> {
-        self.world.resource::<ActiveSecondaryShots>().0.clone()
     }
 
     /// In-flight torpedoes in BattleController.active_torpedoes order.

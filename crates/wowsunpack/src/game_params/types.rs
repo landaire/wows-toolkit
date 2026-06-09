@@ -2644,6 +2644,26 @@ pub fn secondary_ammo_param<P: GameParamProvider + ?Sized>(
     Some(provider.game_param_by_name(ammo_name)?.id())
 }
 
+/// Whether `ammo` is one of `ship`'s secondary (ATBA) battery shells.
+///
+/// Secondary fire arrives through the same `receiveArtilleryShots` path as the
+/// main battery, carrying the secondary shell's GameParamId; the packet has no
+/// weapon-type flag and the projectile species is `Artillery` for both. The only
+/// discriminator is whether the shell belongs to the ship's ATBA ammo set rather
+/// than its main battery, so the renderer can dim secondary tracers.
+pub fn is_secondary_ammo<P: GameParamProvider + ?Sized>(provider: &P, ship: GameParamId, ammo: GameParamId) -> bool {
+    let Some(ship_param) = provider.game_param_by_id(ship) else {
+        return false;
+    };
+    let Some(config) = ship_param.vehicle().and_then(|v| v.config_data()) else {
+        return false;
+    };
+    let Some(ammo_param) = provider.game_param_by_id(ammo) else {
+        return false;
+    };
+    config.secondary_battery_ammo.contains(ammo_param.name())
+}
+
 /// Resolve the secondary ammo projectile GameParamId for a specific gun.
 ///
 /// `gun` is the wire gunID; it indexes `secondary_guns`, which is ordered by
@@ -2675,6 +2695,58 @@ mod tests {
         // renderer can color the dot.
         assert_eq!(AmmoType::from_game_str("HE"), AmmoType::HE);
         assert_eq!(AmmoType::from_game_str("CS"), AmmoType::SAP);
+    }
+
+    fn shell_param(id: u32, name: &str) -> Param {
+        Param {
+            id: GameParamId::from(id),
+            index: name.to_string(),
+            name: name.to_string(),
+            species: None,
+            nation: String::new(),
+            data: ParamData::Unit,
+        }
+    }
+
+    #[test]
+    fn is_secondary_ammo_matches_only_the_atba_set() {
+        let ship_id = GameParamId::from(100u32);
+        let secondary_id = GameParamId::from(200u32);
+        let main_id = GameParamId::from(300u32);
+
+        let config = ShipConfigData {
+            secondary_battery_ammo: HashSet::from(["SECONDARY_SHELL".to_string()]),
+            ..Default::default()
+        };
+        let vehicle = Vehicle {
+            level: 0,
+            group: String::new(),
+            abilities: None,
+            upgrades: Vec::new(),
+            config_data: Some(config),
+            model_path: None,
+            armor: None,
+            hit_locations: None,
+            permoflages: Vec::new(),
+            camera_trajectories: Vec::new(),
+        };
+        let ship = Param {
+            id: ship_id,
+            index: "ship".to_string(),
+            name: "SHIP".to_string(),
+            species: None,
+            nation: String::new(),
+            data: ParamData::Vehicle(vehicle),
+        };
+
+        let params =
+            GameParams::from(vec![ship, shell_param(200, "SECONDARY_SHELL"), shell_param(300, "MAIN_SHELL")]);
+
+        assert!(is_secondary_ammo(&params, ship_id, secondary_id), "ATBA shell must classify as secondary");
+        assert!(!is_secondary_ammo(&params, ship_id, main_id), "main battery shell must not classify as secondary");
+        // Unknown ship or unknown ammo resolves to false rather than panicking.
+        assert!(!is_secondary_ammo(&params, GameParamId::from(999u32), secondary_id));
+        assert!(!is_secondary_ammo(&params, ship_id, GameParamId::from(999u32)));
     }
 }
 

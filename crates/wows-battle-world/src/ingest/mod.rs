@@ -8,7 +8,6 @@ pub mod entities;
 pub mod match_state;
 pub mod positions;
 pub mod projectiles;
-pub mod secondaries;
 pub mod vehicles;
 pub mod zones;
 
@@ -129,9 +128,10 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::ArtilleryShots { avatar_id, salvos } => {
             projectiles::handle_artillery_shots(avatar_id, salvos, clock, world, options.shot_tracking);
         }
-        DecodedPacketPayload::WeaponFired { entity, weapon_type, gun_bits } => {
-            secondaries::handle_weapon_fired(entity, weapon_type, gun_bits, clock, world, options.shot_tracking);
-        }
+        // Secondary fire is rendered from the shared receiveArtilleryShots path
+        // (classified by the owner ship's ATBA ammo), so the per-gun fire bitmask
+        // is unused.
+        DecodedPacketPayload::WeaponFired { .. } => {}
         DecodedPacketPayload::TorpedoesReceived { avatar_id, torpedoes } => {
             projectiles::handle_torpedoes_received(avatar_id, torpedoes, clock, world);
         }

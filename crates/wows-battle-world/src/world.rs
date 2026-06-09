@@ -19,7 +19,6 @@ use crate::components::GameId;
 use crate::ids::IngestOptions;
 use crate::ids::ShotTracking;
 use crate::ids::SourceTeam;
-use crate::resources::ActiveSecondaryShots;
 use crate::resources::ActiveShotOrder;
 use crate::resources::ActiveTorpedoOrder;
 use crate::resources::CapturePointOrder;
@@ -225,7 +224,6 @@ fn insert_empty_resources(world: &mut World) {
     world.insert_resource(ShotHitLog::default());
     world.insert_resource(ActiveShotOrder::default());
     world.insert_resource(ActiveTorpedoOrder::default());
-    world.insert_resource(ActiveSecondaryShots::default());
     world.insert_resource(SelfStats::default());
     world.insert_resource(CapturePointOrder::default());
     world.insert_resource(WeatherZoneOrder::default());

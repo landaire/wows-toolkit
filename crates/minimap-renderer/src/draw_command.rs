@@ -24,6 +24,16 @@ pub const STATS_RIBBON_ICON: i32 = 18;
 pub const STATS_RIBBON_CELL_W: i32 = 76;
 pub const STATS_RIBBON_ROW_H: i32 = 24;
 
+/// Opacity for the ammo-colored shell tip dot. Dimmed so the tips read as
+/// accents on the tracer rather than dominating the map. Shared by every render
+/// backend.
+pub const SHOT_TIP_ALPHA: f32 = 0.4;
+
+/// Opacity for secondary (ATBA) shell tracers and tips. Secondary batteries fire
+/// far more shots than the main battery, so dimming them keeps the map readable
+/// while still showing the fire. Shared by every render backend.
+pub const SECONDARY_SHOT_ALPHA: f32 = 0.25;
+
 /// The type of building icon to display on the minimap.
 ///
 /// Derived from the building's Species in GameParams.
@@ -323,6 +333,14 @@ pub enum DrawCommand {
     ShotTracer { from: MinimapPos, to: MinimapPos, color: [u8; 3] },
     /// Ammo-colored dot at a shell tracer's leading point (the shell tip)
     ShotTracerTip { at: MinimapPos, color: [u8; 3] },
+    /// Secondary (ATBA) tracer line segment. Same shape as `ShotTracer` but
+    /// rendered at `SECONDARY_SHOT_ALPHA` so dense secondary fire de-emphasizes
+    /// itself relative to main-battery tracers. The line (vs a lone dot) keeps it
+    /// distinguishable from torpedoes.
+    SecondaryShotTracer { from: MinimapPos, to: MinimapPos, color: [u8; 3] },
+    /// Secondary (ATBA) shell dot. Same shape as `ShotTracerTip` but rendered at
+    /// `SECONDARY_SHOT_ALPHA` to match its tracer line.
+    SecondaryShotTracerTip { at: MinimapPos, color: [u8; 3] },
     /// Torpedo dot
     Torpedo { pos: MinimapPos, color: [u8; 3] },
     /// Smoke puff circle (alpha blended)

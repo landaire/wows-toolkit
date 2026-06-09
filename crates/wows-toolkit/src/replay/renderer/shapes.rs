@@ -45,6 +45,8 @@ pub(super) fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_
     match cmd {
         DrawCommand::ShotTracer { .. } => opts.show_tracers,
         DrawCommand::ShotTracerTip { .. } => opts.show_tracers,
+        DrawCommand::SecondaryShotTracer { .. } => opts.show_tracers,
+        DrawCommand::SecondaryShotTracerTip { .. } => opts.show_tracers,
         DrawCommand::Torpedo { .. } => opts.show_torpedoes,
         DrawCommand::Smoke { .. } => opts.show_smoke,
         DrawCommand::Ship { .. } => true, // ships always drawn; name visibility handled below
