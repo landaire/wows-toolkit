@@ -2510,6 +2510,8 @@ impl WowsToolkitApp {
         let ship_icons = convert_icons(&cache.get_or_load_ship_icons(&wd.vfs, version, dump_dir));
         let plane_icons = convert_icons(&cache.get_or_load_plane_icons(&wd.vfs, version, dump_dir));
         let consumable_icons = convert_icons(&cache.get_or_load_consumable_icons(&wd.vfs, version, dump_dir));
+        let ribbon_icons = convert_icons(&cache.get_or_load_ribbon_icons(&wd.vfs, version, dump_dir));
+        let subribbon_icons = convert_icons(&cache.get_or_load_subribbon_icons(&wd.vfs, version, dump_dir));
         let death_cause_icons = convert_icons(&cache.get_or_load_death_cause_icons(&wd.vfs, version, dump_dir));
         let powerup_icons = convert_icons(&cache.get_or_load_powerup_icons(&wd.vfs, version, dump_dir));
 
@@ -2525,6 +2527,8 @@ impl WowsToolkitApp {
             ship_icons,
             plane_icons,
             consumable_icons,
+            ribbon_icons,
+            subribbon_icons,
             death_cause_icons,
             powerup_icons,
             game_fonts,

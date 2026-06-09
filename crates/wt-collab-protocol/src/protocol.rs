@@ -344,6 +344,10 @@ pub enum PeerMessage {
         plane_icons: Vec<(String, RgbaAssetWire)>,
         /// Consumable icons keyed by PCY name (e.g. "PCY015_SpeedBoosterPremium").
         consumable_icons: Vec<(String, RgbaAssetWire)>,
+        /// Ribbon icons keyed by file stem (e.g. "ribbon_main_caliber").
+        ribbon_icons: Vec<(String, RgbaAssetWire)>,
+        /// Subribbon icons keyed by file stem (e.g. "subribbon_main_caliber_penetration").
+        subribbon_icons: Vec<(String, RgbaAssetWire)>,
         /// Death cause icons keyed by name (e.g. "main_caliber").
         death_cause_icons: Vec<(String, RgbaAssetWire)>,
         /// Powerup icons keyed by name.
