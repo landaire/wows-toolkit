@@ -267,6 +267,10 @@ pub struct RibbonCount {
     pub count: usize,
     /// Localized display name (resolved via translate_ribbon, falls back to English).
     pub display_name: String,
+    /// Lowercased ribbon icon key (RIBBON_*.to_lowercase()); for subribbons the
+    /// renderers prepend "sub" to look up the subribbon map.
+    pub icon_key: String,
+    pub is_subribbon: bool,
 }
 
 /// An entry in the merged activity feed (kills + chat), sorted by game clock.
@@ -560,6 +564,7 @@ pub enum DrawCommand {
         hp_fraction: f32,
         hp_current: f32,
         hp_max: f32,
+        hp_healable: f32,
         /// Player name to display above the silhouette.
         player_name: Option<String>,
         /// Clan tag (e.g. "CLAN"), empty string or None if none.

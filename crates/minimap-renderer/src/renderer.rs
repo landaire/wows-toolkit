@@ -2111,16 +2111,19 @@ impl<'a> MinimapRenderer<'a> {
             commands.push(DrawCommand::StatsPanel { x: panel_x, width: panel_w });
 
             // Ship silhouette + HP
-            let (hp_fraction, hp_current, hp_max, ship_param_id) = self
+            let (hp_fraction, hp_current, hp_max, hp_healable, ship_param_id) = self
                 .self_entity_id
                 .and_then(|eid| {
                     let props = controller.vehicle_props(eid)?;
                     let max = props.max_health();
                     let cur = props.health();
+                    let regen_limit = props.regen_crew_hp_limit();
+                    let regenerated = props.regenerated_health();
+                    let healable = (regen_limit - regenerated).max(0.0).min((max - cur).max(0.0));
                     let param_id = self.ship_param_ids.get(&eid).copied();
-                    if max > 0.0 { Some(((cur / max).clamp(0.0, 1.0), cur, max, param_id)) } else { None }
+                    if max > 0.0 { Some(((cur / max).clamp(0.0, 1.0), cur, max, healable, param_id)) } else { None }
                 })
-                .unwrap_or((1.0, 0.0, 0.0, None));
+                .unwrap_or((1.0, 0.0, 0.0, 0.0, None));
 
             let (self_player_name, self_ship_name, self_clan_tag, self_clan_color) = self
                 .self_entity_id
@@ -2143,6 +2146,7 @@ impl<'a> MinimapRenderer<'a> {
                 hp_fraction,
                 hp_current,
                 hp_max,
+                hp_healable,
                 player_name: self_player_name,
                 clan_tag: self_clan_tag,
                 clan_color: self_clan_color,
@@ -2199,25 +2203,38 @@ impl<'a> MinimapRenderer<'a> {
                 potential_breakdowns,
             });
 
-            // Ribbons: sort by count descending, resolve localized display names
+            // Ribbons: stable icon-position order, resolve localized display names
             let self_ribbons = controller.self_ribbons();
             let mut ribbons: Vec<RibbonCount> = self_ribbons
                 .iter()
                 .map(|(ribbon, &count)| {
-                    let display_name = ribbon
-                        .translation_key()
-                        .and_then(|key| {
-                            wowsunpack::game_params::translations::translate_ribbon(
-                                key,
-                                self.game_params as &dyn ResourceLoader,
-                            )
-                        })
-                        .map(|t| t.display_name)
-                        .unwrap_or_else(|| ribbon_fallback_name(ribbon).to_string());
-                    RibbonCount { ribbon: *ribbon, count, display_name }
+                    let translation = ribbon.translation_key().and_then(|key| {
+                        wowsunpack::game_params::translations::translate_ribbon(
+                            key,
+                            self.game_params as &dyn ResourceLoader,
+                        )
+                    });
+                    let (display_name, icon_key, is_subribbon) = match translation {
+                        Some(t) => (t.display_name, t.icon_key, t.is_subribbon),
+                        None => (ribbon_fallback_name(ribbon).to_string(), String::new(), false),
+                    };
+                    RibbonCount { ribbon: *ribbon, count, display_name, icon_key, is_subribbon }
                 })
                 .collect();
-            ribbons.sort_by(|a, b| b.count.cmp(&a.count));
+
+            {
+                use crate::panel_math::order_ribbon_keys;
+                let mut keys: Vec<String> =
+                    ribbons.iter().filter_map(|rc| rc.ribbon.translation_key().map(str::to_string)).collect();
+                order_ribbon_keys(&mut keys);
+                let rank = |rc: &RibbonCount| {
+                    rc.ribbon
+                        .translation_key()
+                        .and_then(|k| keys.iter().position(|kk| kk == k))
+                        .unwrap_or(usize::MAX)
+                };
+                ribbons.sort_by_key(|rc| rank(rc));
+            }
             let ribbon_y = HUD_HEIGHT as i32 + 80 + damage_section_height;
             let ribbon_count = ribbons.len();
             commands.push(DrawCommand::StatsRibbons { x: panel_x, y: ribbon_y, width: panel_w, ribbons });

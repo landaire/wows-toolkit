@@ -106,3 +106,41 @@ mod tests {
         assert_eq!(darken([80, 200, 120], 1.0), [80, 200, 120]);
     }
 }
+
+/// Stable display order for stats-panel ribbons so icons hold fixed positions
+/// across the match and only counts change. Sorts by the `RIBBON_*` key
+/// ascending, then moves `RIBBON_BULGE` (torpedo protection) to immediately
+/// after `RIBBON_MAIN_CALIBER`, matching the replay inspector.
+pub fn order_ribbon_keys(keys: &mut Vec<String>) {
+    keys.sort();
+    if let Some(mc) = keys.iter().position(|k| k == "RIBBON_MAIN_CALIBER")
+        && let Some(bulge) = keys.iter().position(|k| k == "RIBBON_BULGE")
+    {
+        let bulge_key = keys.remove(bulge);
+        let insert_at = if bulge < mc { mc } else { mc + 1 };
+        keys.insert(insert_at, bulge_key);
+    }
+}
+
+#[cfg(test)]
+mod ribbon_order_tests {
+    use super::*;
+
+    #[test]
+    fn bulge_moves_after_main_caliber() {
+        let mut keys = vec![
+            "RIBBON_BULGE".to_string(),
+            "RIBBON_MAIN_CALIBER".to_string(),
+            "RIBBON_SET_FIRE".to_string(),
+        ];
+        order_ribbon_keys(&mut keys);
+        assert_eq!(keys, vec!["RIBBON_MAIN_CALIBER", "RIBBON_BULGE", "RIBBON_SET_FIRE"]);
+    }
+
+    #[test]
+    fn plain_alpha_sort_without_special_keys() {
+        let mut keys = vec!["RIBBON_TORPEDO".to_string(), "RIBBON_CITADEL".to_string()];
+        order_ribbon_keys(&mut keys);
+        assert_eq!(keys, vec!["RIBBON_CITADEL", "RIBBON_TORPEDO"]);
+    }
+}

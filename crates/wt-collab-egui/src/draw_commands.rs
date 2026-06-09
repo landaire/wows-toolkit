@@ -1400,6 +1400,7 @@ pub fn draw_command_to_shapes(
             hp_fraction,
             hp_current,
             hp_max,
+            hp_healable: _,
             player_name,
             clan_tag,
             clan_color,
