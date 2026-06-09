@@ -1592,12 +1592,11 @@ impl UiReport {
                 for skill in &row.skills {
                     let icon = &icons[icon_idx];
                     icon_idx += 1;
-                    let status = if skill.learned { "" } else { " - not taken" };
                     let display_name = skill.name.clone().unwrap_or_else(|| skill.internal_name.to_string());
                     let cost = skill.point_cost.map(|c| format!(" ({} pt)", c.get())).unwrap_or_default();
                     let tooltip = match skill.description.as_deref() {
-                        Some(desc) if !desc.is_empty() => format!("{}{}{}\n\n{}", display_name, cost, status, desc),
-                        _ => format!("{}{}{}", display_name, cost, status),
+                        Some(desc) if !desc.is_empty() => format!("{}{}\n\n{}", display_name, cost, desc),
+                        _ => format!("{}{}", display_name, cost),
                     };
                     match icon {
                         Some(icon) => {

@@ -3483,12 +3483,11 @@ fn draw_skill_grid(ui: &mut egui::Ui, rows: &[SkillRow], icons: &HashMap<String,
                     tracing::warn!(icon_key = %skill.icon_key, "missing skill icon");
                     continue;
                 };
-                let status = if skill.learned { "" } else { " - not taken" };
                 let cost = skill.tier.map(|t| format!(" ({t} pt)")).unwrap_or_default();
                 let tooltip = if skill.description.is_empty() {
-                    format!("{}{}{}", skill.name, cost, status)
+                    format!("{}{}", skill.name, cost)
                 } else {
-                    format!("{}{}{}\n\n{}", skill.name, cost, status, skill.description)
+                    format!("{}{}\n\n{}", skill.name, cost, skill.description)
                 };
                 // Dim skills the player didn't take so the taken ones stand out.
                 let tint =
