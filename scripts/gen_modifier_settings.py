@@ -564,7 +564,7 @@ pub fn modifier_setting(build: u32, name: &str) -> Option<&'static ModifierSetti
     let mut chosen: Option<&Table> = None;
     for table in TABLES {{
         if table.min_build <= build
-            && chosen.map_or(true, |c| table.min_build > c.min_build)
+            && chosen.is_none_or(|c| table.min_build > c.min_build)
         {{
             chosen = Some(table);
         }}
