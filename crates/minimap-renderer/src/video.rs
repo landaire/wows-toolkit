@@ -16,11 +16,10 @@ use wows_replays::types::GameClock;
 use crate::codec::VideoCodec;
 use crate::draw_command::RenderTarget;
 use crate::drawing::ImageTarget;
-use crate::encoder::EncodedFrame;
-use crate::encoder::EncoderBackend;
 use crate::encoder::Mode;
 use crate::encoder::worker::EncodedSample;
-use crate::encoder::worker::build_sample;
+use crate::encoder::worker::EncoderOutput;
+use crate::encoder::worker::EncoderWorker;
 use crate::error::VideoError;
 use crate::renderer::MinimapRenderer;
 
@@ -72,8 +71,7 @@ pub struct VideoEncoder {
     /// `[start_clock, game_duration]`. Defaults to the replay start (no skip).
     start_clock: GameClock,
     last_rendered_frame: i64,
-    backend: Option<EncoderBackend>,
-    samples: Vec<EncodedSample>,
+    worker: Option<EncoderWorker>,
     encoder_error: Option<String>,
     codec_choice: CodecChoice,
     mode: Mode,
@@ -103,8 +101,7 @@ impl VideoEncoder {
             game_duration: match_time_limit,
             start_clock: GameClock(0.0),
             last_rendered_frame: -1,
-            backend: None,
-            samples: Vec::with_capacity(total_frames),
+            worker: None,
             encoder_error: None,
             codec_choice: CodecChoice::Auto,
             mode: Mode::Auto,
@@ -188,7 +185,7 @@ impl VideoEncoder {
     }
 
     fn ensure_encoder(&mut self) -> rootcause::Result<(), VideoError> {
-        if self.backend.is_some() {
+        if self.worker.is_some() {
             return Ok(());
         }
         let status = crate::encoder::check_encoder();
@@ -196,39 +193,21 @@ impl VideoEncoder {
             CodecChoice::Explicit(c) => c,
             CodecChoice::Auto => status.best_codec(matches!(self.mode, Mode::ForceCpu)),
         };
-        let created =
-            EncoderBackend::create(self.canvas_width, self.canvas_height, codec, self.mode, self.encoder_config)?;
-        self.active_codec = Some(created.codec);
-        self.backend = Some(created.backend);
+        let (worker, resolved_codec, kind) =
+            EncoderWorker::spawn(self.canvas_width, self.canvas_height, codec, self.mode, self.encoder_config)?;
+        self.active_codec = Some(resolved_codec);
+        self.worker = Some(worker);
         info!(
             frames = self.total_frames(),
             width = self.canvas_width,
             height = self.canvas_height,
             duration = self.game_duration,
-            codec = %created.codec,
-            kind = %created.kind,
+            codec = %resolved_codec,
+            kind = %kind,
             fps = FPS,
             "Rendering"
         );
         Ok(())
-    }
-
-    fn encode_frame(&mut self, target: &ImageTarget) -> rootcause::Result<(), VideoError> {
-        let backend =
-            self.backend.as_mut().ok_or_else(|| report!(VideoError::EncodeFailed("Encoder not initialized".into())))?;
-        let frame_image = target.frame();
-        let rgb_data = frame_image.as_raw();
-        let encoded = backend.encode_frame(rgb_data, self.canvas_width, self.canvas_height)?;
-        let codec = self.active_codec.expect("codec resolved during init");
-        for chunk in encoded {
-            self.push_encoded(chunk, codec);
-        }
-        Ok(())
-    }
-
-    fn push_encoded(&mut self, chunk: EncodedFrame, codec: VideoCodec) {
-        let idx = self.samples.len();
-        self.samples.push(build_sample(chunk, codec, idx));
     }
 
     pub fn advance_clock(
@@ -344,18 +323,17 @@ impl VideoEncoder {
                 }
                 target.end_frame();
 
-                if let Err(e) = self.encode_frame(target) {
-                    error!(error = %e, "Frame encoding failed");
+                let frame = target.frame().as_raw().to_vec();
+                let worker = self.worker.as_ref().expect("worker is Some after ensure_encoder succeeded");
+                if let Err(e) = worker.submit(frame) {
+                    error!(error = %e, "Frame submission failed");
                     self.encoder_error = Some(format!("{e}"));
                     return;
                 }
 
                 if let Some(ref cb) = self.progress_callback {
-                    cb(RenderProgress {
-                        stage: RenderStage::Encoding,
-                        current: (self.last_rendered_frame + 1) as u64,
-                        total: self.expected_frames,
-                    });
+                    let encoded = self.worker.as_ref().map(|w| w.encoded_count()).unwrap_or(0);
+                    cb(RenderProgress { stage: RenderStage::Encoding, current: encoded, total: self.expected_frames });
                 }
             }
         }
@@ -437,26 +415,33 @@ impl VideoEncoder {
 
         writer.flush().expect("flushing output to stdout failed");
 
-        if let Some(backend) = self.backend.as_mut() {
-            let drained = backend.finish()?;
-            let codec = self.active_codec.expect("codec resolved during init");
-            for chunk in drained {
-                self.push_encoded(chunk, codec);
+        let output = match self.worker.take() {
+            Some(worker) => worker.finish()?,
+            None => {
+                // No frames were ever submitted (for example window_duration <= 0).
+                EncoderOutput { samples: Vec::new(), codec: self.active_codec.unwrap_or(VideoCodec::H264) }
             }
+        };
+
+        if let Some(ref cb) = self.progress_callback {
+            cb(RenderProgress {
+                stage: RenderStage::Encoding,
+                current: output.samples.len() as u64,
+                total: self.expected_frames,
+            });
         }
 
-        self.mux_to_mp4()
+        self.mux_to_mp4(&output.samples, output.codec)
     }
 
-    fn mux_to_mp4(&self) -> rootcause::Result<(), VideoError> {
-        if self.samples.is_empty() {
+    fn mux_to_mp4(&self, samples: &[EncodedSample], codec: VideoCodec) -> rootcause::Result<(), VideoError> {
+        if samples.is_empty() {
             if let Some(ref err) = self.encoder_error {
                 bail!(VideoError::MuxFailed(format!("No frames were encoded. Encoder failed earlier: {err}")));
             }
             bail!(VideoError::MuxFailed("No frames to mux".into()));
         }
 
-        let codec = self.active_codec.expect("codec resolved during init");
         let output_path = self.output_path.as_ref().expect("output path required for video mode");
         let file = File::create(output_path).context_transform(VideoError::Io)?;
         let writer = BufWriter::new(file);
@@ -466,8 +451,8 @@ impl VideoEncoder {
             .build()
             .map_err(|e| report!(VideoError::MuxFailed(format!("muxer init: {e:?}"))))?;
 
-        let total = self.samples.len() as u64;
-        for (idx, sample) in self.samples.iter().enumerate() {
+        let total = samples.len() as u64;
+        for (idx, sample) in samples.iter().enumerate() {
             muxer
                 .write_video(sample.pts_seconds, &sample.data, sample.is_keyframe)
                 .map_err(|e| report!(VideoError::MuxFailed(format!("write_video frame {idx}: {e:?}"))))?;
