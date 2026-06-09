@@ -1942,6 +1942,7 @@ pub fn draw_command_to_shapes(
         DrawCommand::TeamRoster { side, x, y, width, height, rows } => {
             use wows_minimap_renderer::draw_command::ChargeCount as RosterCharge;
             use wows_minimap_renderer::draw_command::RosterSide;
+            use wows_minimap_renderer::panel_math::{darken, team_hp_fraction};
 
             let origin = transform.hud_pos(*x as f32, *y as f32);
             let panel_size = Vec2::new(*width as f32 * ws, *height as f32 * ws);
@@ -1952,14 +1953,40 @@ pub fn draw_command_to_shapes(
                 CornerRadius::same(2),
                 Color32::from_rgba_unmultiplied(20, 24, 32, 200),
             ));
-            let accent = match side {
-                RosterSide::Friendly => Color32::from_rgb(80, 200, 120),
-                RosterSide::Enemy => Color32::from_rgb(220, 90, 90),
+            let accent_rgb = match side {
+                RosterSide::Friendly => [80u8, 200, 120],
+                RosterSide::Enemy => [220u8, 90, 90],
             };
-            shapes.push(Shape::LineSegment {
-                points: [Pos2::new(origin.x, origin.y), Pos2::new(origin.x + panel_size.x, origin.y)],
-                stroke: Stroke::new(ws * 1.5, accent),
-            });
+            let accent = Color32::from_rgb(accent_rgb[0], accent_rgb[1], accent_rgb[2]);
+
+            // Team HP bar replaces the old 1px accent line.
+            let bar_h = 14.0 * ws;
+            let track_rgb = darken(accent_rgb, 0.4);
+            let track_rect = Rect::from_min_size(origin, Vec2::new(panel_size.x, bar_h));
+            shapes.push(Shape::rect_filled(
+                track_rect,
+                CornerRadius::ZERO,
+                Color32::from_rgba_unmultiplied(track_rgb[0], track_rgb[1], track_rgb[2], 242),
+            ));
+            if let Some(frac) = team_hp_fraction(rows.iter().map(|r| (r.hp_current, r.hp_max))) {
+                let fill_rect = Rect::from_min_size(origin, Vec2::new(panel_size.x * frac, bar_h));
+                shapes.push(Shape::rect_filled(fill_rect, CornerRadius::ZERO, accent));
+            }
+            let total_cur: f32 = rows.iter().map(|r| r.hp_current.max(0.0)).sum();
+            let total_max: f32 = rows.iter().map(|r| r.hp_max).sum();
+            let hp_bar_text =
+                format!("{} / {}", format_number_egui(total_cur as i64), format_number_egui(total_max as i64));
+            let bar_font = game_font(10.0 * ws);
+            let bar_galley =
+                ctx.fonts_mut(|f| f.layout_no_wrap(hp_bar_text, bar_font.clone(), Color32::WHITE));
+            let bar_galley_size = bar_galley.size();
+            let bt_margin = 4.0 * ws;
+            let bt_x = origin.x + panel_size.x - bar_galley_size.x - bt_margin;
+            let bt_y = origin.y + (bar_h - bar_galley_size.y) * 0.5;
+            let shadow_galley =
+                ctx.fonts_mut(|f| f.layout_no_wrap(bar_galley.text().to_owned(), bar_font.clone(), Color32::BLACK));
+            shapes.push(Shape::galley(Pos2::new(bt_x + 1.0, bt_y + 1.0), shadow_galley, Color32::TRANSPARENT));
+            shapes.push(Shape::galley(Pos2::new(bt_x, bt_y), bar_galley, Color32::TRANSPARENT));
 
             let row_height = 64.0 * ws;
             let row_padding = 4.0 * ws;
@@ -1978,7 +2005,7 @@ pub fn draw_command_to_shapes(
             };
 
             for (idx, row) in rows.iter().enumerate() {
-                let row_top = origin.y + idx as f32 * row_height + row_padding;
+                let row_top = origin.y + bar_h + idx as f32 * row_height + row_padding;
                 if row_top + row_height > origin.y + panel_size.y {
                     break;
                 }

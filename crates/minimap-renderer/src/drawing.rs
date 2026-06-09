@@ -1433,13 +1433,33 @@ fn draw_team_roster(
     let panel_w = width as f32;
     let panel_h = height as f32;
 
-    // Panel background + accent line.
+    use crate::panel_math::{darken, team_hp_fraction};
+
+    // Panel background.
     draw_filled_rect(pm, panel_x, panel_y, panel_w, panel_h, [20, 24, 32], 0.78);
     let accent: [u8; 3] = match side {
         RosterSide::Friendly => [80, 200, 120],
         RosterSide::Enemy => [220, 90, 90],
     };
-    draw_line(pm, panel_x, panel_y, panel_x + panel_w, panel_y, accent, 1.0, 1.5);
+
+    // Team HP bar replaces the old 1px accent line.
+    let bar_h: f32 = 14.0;
+    draw_filled_rect(pm, panel_x, panel_y, panel_w, bar_h, darken(accent, 0.4), 0.95);
+    if let Some(frac) = team_hp_fraction(rows.iter().map(|r| (r.hp_current, r.hp_max))) {
+        draw_filled_rect(pm, panel_x, panel_y, panel_w * frac, bar_h, accent, 1.0);
+    }
+    let total_cur: f32 = rows.iter().map(|r| r.hp_current.max(0.0)).sum();
+    let total_max: f32 = rows.iter().map(|r| r.hp_max).sum();
+    let hp_bar_text = format!("{} / {}", format_number(total_cur as i64), format_number(total_max as i64));
+    let bar_text_scale = fonts.scale(10.0);
+    let (btw_u, bth_u) = text_size(bar_text_scale, &fonts.primary, &hp_bar_text);
+    let btw = btw_u as f32;
+    let bth = bth_u as f32;
+    let bt_margin: f32 = 4.0;
+    let bt_x = panel_x + panel_w - btw - bt_margin;
+    let bt_y = panel_y + (bar_h - bth) * 0.5;
+    draw_text(pm, [0, 0, 0], (bt_x + 1.0) as i32, (bt_y + 1.0) as i32, bar_text_scale, &fonts.primary, &hp_bar_text);
+    draw_text(pm, [255, 255, 255], bt_x as i32, bt_y as i32, bar_text_scale, &fonts.primary, &hp_bar_text);
 
     let row_height: f32 = 64.0;
     let row_padding: f32 = 4.0;
@@ -1464,7 +1484,7 @@ fn draw_team_roster(
     let hp_bar_w = (inner_w - consumables_strip_w - strip_gap).max(40.0);
 
     for (idx, row) in rows.iter().enumerate() {
-        let row_top = panel_y + idx as f32 * row_height + row_padding;
+        let row_top = panel_y + bar_h + idx as f32 * row_height + row_padding;
         if row_top + row_height > panel_y + panel_h {
             break;
         }
