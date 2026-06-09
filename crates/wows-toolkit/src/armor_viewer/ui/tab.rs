@@ -1180,13 +1180,24 @@ pub(crate) fn upload_armor_to_viewport(
     }
     if pane.show_camera_ellipse {
         let mode = pane.camera_ellipse_mode.clone();
+        let fov = pane.camera_fov;
+        let height = pane.camera_height;
         if let Some((_, traj)) = armor.camera_trajectories.iter().find(|(name, _)| *name == mode) {
-            let ring = traj.resolve(0.0, 0.0);
-            let (verts, indices) =
-                crate::armor_viewer::camera_ellipse::build_camera_ellipse_mesh(&ring, armor.waterline_dy, [0.0, 0.9, 1.0, 1.0], true);
-            if !indices.is_empty() {
-                let id = pane.viewport.add_non_pickable_mesh(device, &verts, &indices, LAYER_OVERLAY);
+            let solid = traj.resolve(fov, height);
+            let (sv, si) = crate::armor_viewer::camera_ellipse::build_camera_ellipse_mesh(
+                &solid, armor.waterline_dy, [0.0, 0.9, 1.0, 1.0], true);
+            if !si.is_empty() {
+                let id = pane.viewport.add_non_pickable_mesh(device, &sv, &si, LAYER_OVERLAY);
                 pane.camera_ellipse_mesh_ids.push(id);
+            }
+            for fov_end in [0.0_f32, 1.0] {
+                let ring = traj.resolve(fov_end, height);
+                let (ev, ei) = crate::armor_viewer::camera_ellipse::build_camera_ellipse_mesh(
+                    &ring, armor.waterline_dy, [0.0, 0.9, 1.0, 0.25], false);
+                if !ei.is_empty() {
+                    let id = pane.viewport.add_non_pickable_mesh(device, &ev, &ei, LAYER_OVERLAY);
+                    pane.camera_ellipse_mesh_ids.push(id);
+                }
             }
         }
     }
@@ -4638,6 +4649,12 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
                 }
             }
         });
+        if ui.add(egui::Slider::new(&mut pane.camera_fov, 0.0..=1.0).text(t!("ui.armor.camera_fov").as_ref())).changed() {
+            combo_changed = true;
+        }
+        if ui.add(egui::Slider::new(&mut pane.camera_height, -1.0..=1.0).text(t!("ui.armor.camera_height").as_ref())).changed() {
+            combo_changed = true;
+        }
     });
     if combo_changed {
         zone_changed = true;

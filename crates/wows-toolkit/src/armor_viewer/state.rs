@@ -500,6 +500,10 @@ pub struct ArmorPane {
     pub show_ship_center: bool,
     /// Tracked overlay mesh ids for the ship-center marker, removed before re-upload.
     pub center_marker_mesh_ids: Vec<crate::viewport_3d::MeshId>,
+    /// FOV blend factor for the camera orbit ring (0 = inner, 1 = outer).
+    pub camera_fov: f32,
+    /// Height offset for the camera orbit ring (-1..1).
+    pub camera_height: f32,
 }
 
 /// Data returned by a hull-only background reload (LOD change without full ship reload).
@@ -589,6 +593,8 @@ impl ArmorPane {
             camera_ellipse_mesh_ids: Vec::new(),
             show_ship_center: false,
             center_marker_mesh_ids: Vec::new(),
+            camera_fov: 0.0,
+            camera_height: 0.0,
         }
     }
 }
