@@ -33,6 +33,7 @@ impl AssetStore {
     }
 
     /// Load all assets from a received AssetBundle into egui textures.
+    #[allow(clippy::too_many_arguments)]
     pub fn load_from_bundle(
         ctx: &egui::Context,
         ship_icons: Vec<(String, RgbaAssetWire)>,

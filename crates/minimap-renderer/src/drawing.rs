@@ -2680,7 +2680,7 @@ impl RenderTarget for ImageTarget {
                         draw_icon_at(&mut self.canvas, &resized, cur_x, cur_y);
                         let count_x = cur_x + STATS_RIBBON_ICON + 2;
                         let (_, th) = text_size(scale, &self.fonts.primary, &count_str);
-                        let count_y = cur_y + (STATS_RIBBON_ICON as i32 - th as i32) / 2;
+                        let count_y = cur_y + (STATS_RIBBON_ICON - th as i32) / 2;
                         draw_text_shadow(
                             &mut self.canvas,
                             [255, 220, 100],
