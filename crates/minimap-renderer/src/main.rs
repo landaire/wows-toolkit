@@ -22,6 +22,7 @@ use wows_minimap_renderer::EncoderKind;
 use wows_minimap_renderer::VideoCodec;
 use wows_minimap_renderer::assets::load_building_icons;
 use wows_minimap_renderer::assets::load_consumable_icons;
+use wows_minimap_renderer::assets::load_ribbon_icons;
 use wows_minimap_renderer::assets::load_death_cause_icons;
 use wows_minimap_renderer::assets::load_flag_icons;
 use wows_minimap_renderer::assets::load_game_fonts;
@@ -294,6 +295,8 @@ fn main() -> Result<(), Report> {
     let plane_icons = load_plane_icons(vfs, version);
     let building_icons = load_building_icons(vfs, version);
     let consumable_icons = load_consumable_icons(vfs, version);
+    let _ribbon_icons = load_ribbon_icons(vfs, wowsunpack::game_assets::GuiAssetDir::Ribbons, version);
+    let _subribbon_icons = load_ribbon_icons(vfs, wowsunpack::game_assets::GuiAssetDir::SubRibbons, version);
     let death_cause_icons = load_death_cause_icons(vfs, wows_minimap_renderer::assets::ICON_SIZE, version);
     let powerup_icons = load_powerup_icons(vfs, wows_minimap_renderer::assets::ICON_SIZE, version);
     let flag_icons = load_flag_icons(vfs, version);

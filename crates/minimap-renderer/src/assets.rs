@@ -321,6 +321,35 @@ pub fn load_consumable_icons(vfs: &VfsPath, version: Option<&Version>) -> HashMa
     icons
 }
 
+/// Load ribbon icons from `gui/ribbons` (or `gui/ribbons/subribbons` when
+/// `dir` is `SubRibbons`), keyed by file stem to match `translate_ribbon`'s
+/// lowercased icon key. Absent in Flash-era builds; returns an empty map then.
+pub fn load_ribbon_icons(
+    vfs: &VfsPath,
+    dir: GuiAssetDir,
+    version: Option<&Version>,
+) -> HashMap<String, RgbaImage> {
+    let mut icons = HashMap::new();
+
+    if let Some(dir) = dir.resolve(vfs, version)
+        && let Ok(entries) = dir.read_dir()
+    {
+        for entry in entries {
+            let filename = entry.filename();
+            let Some(stem) = std::path::Path::new(&filename).file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if let Some(img) = load_image_entry(&entry) {
+                let resized = image::imageops::resize(&img, 32, 32, image::imageops::FilterType::Lanczos3);
+                icons.insert(stem.to_string(), resized);
+            }
+        }
+    }
+
+    debug!(count = icons.len(), "Loaded ribbon icons");
+    icons
+}
+
 /// Load captain-skill icons from `gui/crew_commander/skills/`.
 ///
 /// Filenames are snake_case matching `CrewSkill::internal_name()` after a
