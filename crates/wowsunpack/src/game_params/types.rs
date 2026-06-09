@@ -1402,6 +1402,44 @@ impl CrewSkillModifier {
         }
     }
 
+    pub fn aircraft_carrier(&self) -> f32 {
+        self.aircraft_carrier
+    }
+
+    pub fn auxiliary(&self) -> f32 {
+        self.auxiliary
+    }
+
+    pub fn battleship(&self) -> f32 {
+        self.battleship
+    }
+
+    pub fn cruiser(&self) -> f32 {
+        self.cruiser
+    }
+
+    pub fn destroyer(&self) -> f32 {
+        self.destroyer
+    }
+
+    pub fn submarine(&self) -> f32 {
+        self.submarine
+    }
+
+    /// Raw per-species value. Non-combat species fall back to the battleship
+    /// column (modifiers carry identical values across columns in practice).
+    pub fn value_for_species(&self, species: Species) -> f32 {
+        match species {
+            Species::AirCarrier => self.aircraft_carrier,
+            Species::Battleship => self.battleship,
+            Species::Cruiser => self.cruiser,
+            Species::Destroyer => self.destroyer,
+            Species::Submarine => self.submarine,
+            Species::Auxiliary => self.auxiliary,
+            _ => self.battleship,
+        }
+    }
+
     pub fn excluded_consumables(&self) -> &[String] {
         &self.excluded_consumables
     }

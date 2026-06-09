@@ -650,9 +650,194 @@ static TABLES: &[Table] = &[
     },
 ];
 
+/// Format `val` for display: round to `round_digits` decimals, but use 2
+/// decimals when `abs(val) < 1.0`. Integral results show no decimals; trailing
+/// zeros are stripped. `signed_positive` chooses an explicit `+`/`-` prefix on
+/// the magnitude; `None` keeps the value's natural sign.
+fn format_number(val: f32, round_digits: u8, signed_positive: Option<bool>) -> String {
+    let digits = if val.abs() < 1.0 { 2 } else { round_digits as usize };
+    let (magnitude, prefix) = match signed_positive {
+        Some(true) => (val.abs(), "+"),
+        Some(false) => (val.abs(), "-"),
+        None => (val, ""),
+    };
+    let factor = 10f32.powi(digits as i32);
+    let rounded = (magnitude * factor).round() / factor;
+    let mut s = format!("{rounded:.digits$}");
+    if s.contains('.') {
+        s = s.trim_end_matches('0').trim_end_matches('.').to_string();
+    }
+    format!("{prefix}{s}")
+}
+
+/// Reproduce the client tooltip formatting for a single modifier: a description
+/// fragment like "+10% Main battery reload time". `None` when the modifier is
+/// hidden or its value equals the base (no change).
+///
+/// Label key order: `IDS_PARAMS_MODIFIER_<NAME>`, then the per-species suffix
+/// `IDS_PARAMS_MODIFIER_<NAME>_<SPECIES>`, then the raw modifier name.
+///
+/// NOTE: `round_percents` is not yet honored; percent values always use the
+/// `(v - base) * 100` path regardless of that flag.
+pub fn format_modifier(
+    build: u32,
+    name: &str,
+    value: f32,
+    species: crate::game_params::types::Species,
+    metadata: &dyn crate::data::ResourceLoader,
+) -> Option<String> {
+    let s = modifier_setting(build, name)?;
+    if s.hidden {
+        return None;
+    }
+
+    let label_only = matches!(s.transform, Transform::LabelOnly);
+    if !label_only && value == s.base_value {
+        return None;
+    }
+
+    let label = {
+        let upper = name.to_uppercase();
+        let species_upper = format!("{species:?}").to_uppercase();
+        metadata
+            .localized_name_from_id(&format!("IDS_PARAMS_MODIFIER_{upper}"))
+            .or_else(|| {
+                metadata.localized_name_from_id(&format!(
+                    "IDS_PARAMS_MODIFIER_{upper}_{species_upper}"
+                ))
+            })
+            .unwrap_or_else(|| name.to_string())
+    };
+
+    if label_only {
+        return Some(label);
+    }
+
+    let signed_positive = if s.display_sign {
+        Some((value > s.base_value) == s.positive)
+    } else {
+        None
+    };
+
+    let number = if s.measure_value_hidden {
+        String::new()
+    } else {
+        let val = if s.measure == Measure::Percent {
+            (value - s.base_value) * 100.0
+        } else {
+            value * s.multiplier
+        };
+        let unit = s
+            .measure
+            .unit_ids_key()
+            .and_then(|key| metadata.localized_name_from_id(key))
+            .unwrap_or_default();
+        let num = format_number(val, s.round_digits, signed_positive);
+        if s.measure.space_before() {
+            format!("{num} {unit}")
+        } else {
+            format!("{num}{unit}")
+        }
+    };
+
+    if number.is_empty() {
+        Some(label)
+    } else {
+        Some(format!("{number} {label}"))
+    }
+}
+
+/// Format each `(name, value)` modifier for `species`, dropping the ones that
+/// are hidden or unchanged.
+pub fn describe_modifiers<'a>(
+    build: u32,
+    mods: impl IntoIterator<Item = (&'a str, f32)>,
+    species: crate::game_params::types::Species,
+    metadata: &dyn crate::data::ResourceLoader,
+) -> Vec<String> {
+    mods.into_iter()
+        .filter_map(|(n, v)| format_modifier(build, n, v, species, metadata))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game_params::types::Species;
+
+    /// Echoes any id back so tests can assert value/unit exactly and that the
+    /// label fragment carries the id.
+    struct EchoLoader;
+    impl crate::data::ResourceLoader for EchoLoader {
+        fn localized_name_from_param(
+            &self,
+            _param: &crate::game_params::types::Param,
+        ) -> Option<String> {
+            None
+        }
+        fn localized_name_from_id(&self, id: &str) -> Option<String> {
+            Some(id.to_string())
+        }
+        fn game_param_by_id(
+            &self,
+            _id: crate::game_types::GameParamId,
+        ) -> Option<crate::Rc<crate::game_params::types::Param>> {
+            None
+        }
+        fn entity_specs(&self) -> &[crate::rpc::entitydefs::EntitySpec] {
+            &[]
+        }
+    }
+
+    const BUILD: u32 = 11791718;
+
+    #[test]
+    fn percent_negative_positive_flag_true() {
+        // GMRotationSpeed: percent, base 1.0, positive=true. v < base => "-".
+        let out = format_modifier(BUILD, "GMRotationSpeed", 0.9, Species::Battleship, &EchoLoader)
+            .expect("should render");
+        assert!(out.starts_with("-10IDS_PERCENT "), "got {out}");
+        assert!(out.contains("IDS_PARAMS_MODIFIER_GMROTATIONSPEED"), "got {out}");
+    }
+
+    #[test]
+    fn percent_positive_when_positive_flag_false() {
+        // GMShotDelay: percent, base 1.0, positive=false. v < base => "+".
+        let out = format_modifier(BUILD, "GMShotDelay", 0.9, Species::Battleship, &EchoLoader)
+            .expect("should render");
+        assert!(out.starts_with("+10IDS_PERCENT "), "got {out}");
+    }
+
+    #[test]
+    fn value_equal_base_is_none() {
+        assert!(
+            format_modifier(BUILD, "GMShotDelay", 1.0, Species::Battleship, &EchoLoader).is_none()
+        );
+    }
+
+    #[test]
+    fn hidden_modifier_is_none() {
+        // artilleryAlertMinDistance is hidden.
+        assert!(
+            format_modifier(BUILD, "artilleryAlertMinDistance", 5.0, Species::Battleship, &EchoLoader)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn describe_filters_unchanged_and_hidden() {
+        let out = describe_modifiers(
+            BUILD,
+            [
+                ("GMRotationSpeed", 0.9),
+                ("GMShotDelay", 1.0),
+                ("artilleryAlertMinDistance", 5.0),
+            ],
+            Species::Battleship,
+            &EchoLoader,
+        );
+        assert_eq!(out.len(), 1, "got {out:?}");
+    }
 
     #[test]
     fn lookup_is_version_gated() {
