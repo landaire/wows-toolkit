@@ -659,7 +659,11 @@ static TABLES: &[Table] = &[
 fn format_number(val: f32, round_digits: u8, display_sign: bool) -> String {
     let digits = if val.abs() < 2.0 { 2 } else { round_digits as usize };
     let factor = 10f32.powi(digits as i32);
-    let rounded = (val * factor).round() / factor;
+    let mut rounded = (val * factor).round() / factor;
+    // Force positive zero so a tiny negative delta never renders "-0".
+    if rounded == 0.0 {
+        rounded = 0.0;
+    }
     let mut s = format!("{rounded:.digits$}");
     if s.contains('.') {
         s = s.trim_end_matches('0').trim_end_matches('.').to_string();
@@ -787,6 +791,17 @@ mod tests {
     }
 
     const BUILD: u32 = 11791718;
+
+    #[test]
+    fn format_number_negative_zero_renders_positive() {
+        // A tiny negative delta rounds to zero; it must render "0", never "-0".
+        let plain = format_number(-0.0001, 2, false);
+        assert_eq!(plain, "0", "got {plain}");
+        assert!(!plain.contains("-0"), "got {plain}");
+        let signed = format_number(-0.0001, 2, true);
+        assert_eq!(signed, "+0", "got {signed}");
+        assert!(!signed.contains("-0"), "got {signed}");
+    }
 
     #[test]
     fn percent_negative_delta_natural_sign() {
