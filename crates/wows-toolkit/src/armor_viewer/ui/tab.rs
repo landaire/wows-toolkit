@@ -1680,7 +1680,8 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         .sense(egui::Sense::click_and_drag()),
                 );
 
-                let gz_rect = pane.viewport.gizmo_rect(response.rect);
+                // Clamp the gizmo box to the visible viewport so it tracks the pane and never overflows off-screen.
+                let gz_rect = pane.viewport.gizmo_rect(response.rect.intersect(vp_ui.clip_rect()));
                 let gizmo_consumed = pane.viewport.handle_gizmo(&response, gz_rect);
                 let camera_interacted = if gizmo_consumed { true } else { pane.viewport.handle_input(&response, bounds) };
                 if camera_interacted {
@@ -2092,7 +2093,8 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                 // Draw disclaimer watermark
                 draw_viewport_watermark(vp_ui.painter(), response.rect);
 
-                let gz_rect = pane.viewport.gizmo_rect(response.rect);
+                // Clamp the gizmo box to the visible viewport so it tracks the pane and never overflows off-screen.
+                let gz_rect = pane.viewport.gizmo_rect(response.rect.intersect(vp_ui.clip_rect()));
                 pane.viewport.draw_gizmo(vp_ui.painter(), gz_rect);
             }
         } else {
