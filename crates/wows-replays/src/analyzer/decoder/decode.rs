@@ -1947,8 +1947,8 @@ where
                 cause,
             }
         } else if *method == "onRibbon" {
-            let (ribbon,) = unpack_rpc_args!(args, i8);
-            let ribbon = match ribbon {
+            let (ribbon_id,) = unpack_rpc_args!(args, i8);
+            let ribbon = match ribbon_id {
                 1 => Ribbon::TorpedoHit,
                 3 => Ribbon::PlaneShotDown,
                 4 => Ribbon::Incapacitation,
@@ -1976,12 +1976,11 @@ where
                 39 => Ribbon::SonarOneHit,
                 40 => Ribbon::SonarTwoHits,
                 41 => Ribbon::SonarNeutralized,
-                ribbon => {
+                other => {
                     if audit {
-                        return DecodedPacketPayload::Audit(format!("onRibbon(unknown ribbon {})", ribbon));
-                    } else {
-                        Ribbon::Unknown(ribbon)
+                        return DecodedPacketPayload::Audit(format!("onRibbon(unknown ribbon {other})"));
                     }
+                    Ribbon::Unknown(other)
                 }
             };
             DecodedPacketPayload::Ribbon(ribbon)

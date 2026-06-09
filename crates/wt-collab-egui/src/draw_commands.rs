@@ -1671,17 +1671,21 @@ pub fn draw_command_to_shapes(
             let origin = transform.hud_pos(*x as f32, *y as f32);
             let inner_x = origin.x + padding;
             let inner_w = *width as f32 * ws - padding * 2.0;
-            let cell_w = STATS_RIBBON_CELL_W as f32 * ws;
+            let icon_h = STATS_RIBBON_ICON as f32 * ws;
             let row_h = STATS_RIBBON_ROW_H as f32 * ws;
-            let icon_sz = STATS_RIBBON_ICON as f32 * ws;
+            let cell_w = STATS_RIBBON_CELL_W as f32 * ws;
+            let gap = 2.0 * ws;
             let font = game_font(14.0 * ws);
-            let count_color = Color32::from_rgb(255, 220, 100);
+            let count_color = Color32::WHITE;
             let name_color = Color32::from_rgb(180, 180, 180);
 
             let mut cur_x = inner_x;
             let mut cur_y = origin.y;
             for rc in ribbons.iter() {
-                if cur_x + cell_w > inner_x + inner_w {
+                // Fixed-width cell: wrap when the next whole cell would overflow.
+                // Matches the emitter's `inner_w / cell_w` row math so the feed
+                // below never lands on top of a wrapped row.
+                if cur_x > inner_x && cur_x + cell_w > inner_x + inner_w {
                     cur_x = inner_x;
                     cur_y += row_h;
                 }
@@ -1689,25 +1693,31 @@ pub fn draw_command_to_shapes(
                 let rib = textures.ribbon_icons.and_then(|m| m.get(&rc.icon_key));
                 let subrib = textures.subribbon_icons.and_then(|m| m.get(&sub_key));
                 let icon = if rc.is_subribbon { subrib.or(rib) } else { rib.or(subrib) };
-                let count_str = format!("x{}", rc.count);
-                if let Some(tex) = icon {
+                let count_galley =
+                    ctx.fonts_mut(|f| f.layout_no_wrap(format!("x{}", rc.count), font.clone(), count_color));
+
+                // Icon drawn at fixed height with aspect-preserved width (ribbon
+                // icons are wide); fall back to a truncated name when no icon.
+                let lead_w = if let Some(tex) = icon {
+                    let sz = tex.size();
+                    let aspect = if sz[1] > 0 { sz[0] as f32 / sz[1] as f32 } else { 1.0 };
+                    let w = icon_h * aspect;
+                    let rect = Rect::from_min_size(Pos2::new(cur_x, cur_y), Vec2::new(w, icon_h));
                     let mut mesh = egui::Mesh::with_texture(tex.id());
-                    let rect = Rect::from_min_size(Pos2::new(cur_x, cur_y), Vec2::splat(icon_sz));
-                    let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                    mesh.add_rect_with_uv(rect, uv, Color32::WHITE);
+                    mesh.add_rect_with_uv(rect, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
                     shapes.push(Shape::Mesh(mesh.into()));
-                    let count_galley = ctx.fonts_mut(|f| f.layout_no_wrap(count_str, font.clone(), count_color));
-                    let count_x = cur_x + icon_sz + 2.0 * ws;
-                    let count_y = cur_y + (icon_sz - count_galley.size().y) / 2.0;
-                    shapes.push(Shape::galley(Pos2::new(count_x, count_y), count_galley, Color32::TRANSPARENT));
+                    w
                 } else {
                     let label: String = rc.display_name.chars().take(8).collect();
-                    let name_galley = ctx.fonts_mut(|f| f.layout_no_wrap(label, font.clone(), name_color));
-                    shapes.push(Shape::galley(Pos2::new(cur_x, cur_y), name_galley, Color32::TRANSPARENT));
-                    let count_galley = ctx.fonts_mut(|f| f.layout_no_wrap(count_str, font.clone(), count_color));
-                    let count_x = cur_x + cell_w - count_galley.size().x;
-                    shapes.push(Shape::galley(Pos2::new(count_x, cur_y), count_galley, Color32::TRANSPARENT));
-                }
+                    let g = ctx.fonts_mut(|f| f.layout_no_wrap(label, font.clone(), name_color));
+                    let w = g.size().x;
+                    let ny = cur_y + (icon_h - g.size().y) / 2.0;
+                    shapes.push(Shape::galley(Pos2::new(cur_x, ny), g, Color32::TRANSPARENT));
+                    w
+                };
+                let count_x = cur_x + lead_w + gap;
+                let count_y = cur_y + (icon_h - count_galley.size().y) / 2.0;
+                shapes.push(Shape::galley(Pos2::new(count_x, count_y), count_galley, Color32::TRANSPARENT));
                 cur_x += cell_w;
             }
         }

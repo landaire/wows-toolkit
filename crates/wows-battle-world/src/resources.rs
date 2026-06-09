@@ -128,6 +128,12 @@ pub struct ActiveSecondaryShots(pub Vec<SecondaryShot>);
 #[derive(Resource, Debug, Clone, Default)]
 pub struct SelfStats {
     pub ribbons: HashMap<Ribbon, usize>,
+    /// Raw mirror of the avatar's `privateVehicleState.ribbons` array, indexed by
+    /// array position as `(ribbon_id, count)`. Modern replays deliver ribbons as
+    /// nested updates into this array (add element, then bump its `count`), so we
+    /// keep the positional slots to resolve `ArrayIndex` count updates, then
+    /// rebuild `ribbons` from it. Empty for legacy (`onRibbon`) replays.
+    pub ribbon_slots: Vec<(i32, usize)>,
     pub damage_stats: HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry>,
 }
 

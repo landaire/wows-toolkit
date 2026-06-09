@@ -16,10 +16,13 @@ pub use wowsunpack::game_types::Ribbon;
 
 use crate::map_data::MinimapPos;
 
-/// Cell metrics for the stats-panel ribbon grid.
-pub const STATS_RIBBON_ICON: i32 = 22;
-pub const STATS_RIBBON_CELL_W: i32 = 58;
-pub const STATS_RIBBON_ROW_H: i32 = 26;
+/// Cell metrics for the stats-panel ribbon grid. Cells are fixed width so the
+/// command emitter (which positions the activity feed below the grid) and the
+/// render backends agree exactly on rows-per-line. `CELL_W` fits the widest
+/// ribbon icon (~2.6:1 at `ICON` height) plus a 2-digit count.
+pub const STATS_RIBBON_ICON: i32 = 18;
+pub const STATS_RIBBON_CELL_W: i32 = 76;
+pub const STATS_RIBBON_ROW_H: i32 = 24;
 
 /// The type of building icon to display on the minimap.
 ///

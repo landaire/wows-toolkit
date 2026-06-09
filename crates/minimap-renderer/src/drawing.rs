@@ -2659,11 +2659,17 @@ impl RenderTarget for ImageTarget {
                 let inner_x = *x + padding;
                 let inner_w = *width - padding * 2;
                 let scale = self.fonts.scale(14.0);
+                let icon_h = STATS_RIBBON_ICON;
+                let cell_w = STATS_RIBBON_CELL_W;
+                let gap = 2;
 
                 let mut cur_x = inner_x;
                 let mut cur_y = *y;
                 for rc in ribbons.iter() {
-                    if cur_x + STATS_RIBBON_CELL_W > inner_x + inner_w {
+                    // Fixed-width cell, wrapping by whole cells, matching the
+                    // emitter's `inner_w / cell_w` row math so the activity feed
+                    // below never overlaps a wrapped row.
+                    if cur_x > inner_x && cur_x + cell_w > inner_x + inner_w {
                         cur_x = inner_x;
                         cur_y += STATS_RIBBON_ROW_H;
                     }
@@ -2674,45 +2680,37 @@ impl RenderTarget for ImageTarget {
                         self.ribbon_icons.get(&rc.icon_key).or_else(|| self.subribbon_icons.get(&sub_key))
                     };
                     let count_str = format!("x{}", rc.count);
-                    if let Some(img) = icon {
-                        let icon_sz = STATS_RIBBON_ICON as u32;
-                        let resized = image::imageops::resize(img, icon_sz, icon_sz, image::imageops::FilterType::Lanczos3);
+                    let (_, th) = text_size(scale, &self.fonts.primary, &count_str);
+
+                    // Icon at fixed height, aspect-preserved width (ribbon icons
+                    // are wide); fall back to a truncated name when missing.
+                    let lead_w = if let Some(img) = icon {
+                        let w = if img.height() > 0 {
+                            ((icon_h as f32 * img.width() as f32 / img.height() as f32).round() as i32).max(1)
+                        } else {
+                            icon_h
+                        };
+                        let resized =
+                            image::imageops::resize(img, w as u32, icon_h as u32, image::imageops::FilterType::Lanczos3);
                         draw_icon_at(&mut self.canvas, &resized, cur_x, cur_y);
-                        let count_x = cur_x + STATS_RIBBON_ICON + 2;
-                        let (_, th) = text_size(scale, &self.fonts.primary, &count_str);
-                        let count_y = cur_y + (STATS_RIBBON_ICON - th as i32) / 2;
-                        draw_text_shadow(
-                            &mut self.canvas,
-                            [255, 220, 100],
-                            count_x,
-                            count_y,
-                            scale,
-                            &self.fonts.primary,
-                            &count_str,
-                        );
+                        w
                     } else {
                         let label: String = rc.display_name.chars().take(8).collect();
-                        draw_text_shadow(
-                            &mut self.canvas,
-                            [180, 180, 180],
-                            cur_x,
-                            cur_y,
-                            scale,
-                            &self.fonts.primary,
-                            &label,
-                        );
-                        let (tw, _) = text_size(scale, &self.fonts.primary, &count_str);
-                        draw_text_shadow(
-                            &mut self.canvas,
-                            [255, 220, 100],
-                            cur_x + STATS_RIBBON_CELL_W - tw as i32,
-                            cur_y,
-                            scale,
-                            &self.fonts.primary,
-                            &count_str,
-                        );
-                    }
-                    cur_x += STATS_RIBBON_CELL_W;
+                        let (lw, _) = text_size(scale, &self.fonts.primary, &label);
+                        draw_text_shadow(&mut self.canvas, [180, 180, 180], cur_x, cur_y, scale, &self.fonts.primary, &label);
+                        lw as i32
+                    };
+                    let count_y = cur_y + (icon_h - th as i32) / 2;
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        [255, 255, 255],
+                        cur_x + lead_w + gap,
+                        count_y,
+                        scale,
+                        &self.fonts.primary,
+                        &count_str,
+                    );
+                    cur_x += cell_w;
                 }
             }
             DrawCommand::StatsActivityFeed { x, y, width, height, entries } => {

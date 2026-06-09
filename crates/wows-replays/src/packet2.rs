@@ -891,16 +891,16 @@ impl<'argtype> Parser<'argtype> {
         }
         let prop_idx = reader.read_u8(spec.properties.len().next_power_of_two().trailing_zeros() as u8);
         if prop_idx as usize >= entity.properties.len() {
-            // This is almost certainly a nested property set on the player avatar.
-            // Currently, we assume that all properties are created when the entity is
-            // created. However, apparently the properties can go un-initialized at the
-            // beginning, and then later get created by a nested property update.
-            //
-            // We should do two things:
-            // - Store the entity's properties as a HashMap
-            // - Separate finding the path from updating the property value, and then here
-            //   we can create the entry if the property hasn't been created yet.
-            return Err(failure(ParseError::UnsupportedInternalPropSet { entity_id, entity_type: spec.name.clone() }));
+            // Properties are not always materialized at entity-create: some stay
+            // uninitialized and are created only by a later nested update (e.g.
+            // the avatar's `privateVehicleState`, which carries the player's
+            // ribbons/buffs and only appears once the first one is earned). Grow
+            // the property store with type-default values up to this index so the
+            // update below applies, instead of dropping the packet.
+            for missing in entity.properties.len()..=prop_idx as usize {
+                let default = crate::nested_property_path::default_arg_value(&spec.properties[missing].prop_type);
+                entity.properties.push(default);
+            }
         }
 
         let update_cmd = crate::nested_property_path::get_nested_prop_path_helper(

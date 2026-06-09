@@ -2108,6 +2108,11 @@ impl<'a> MinimapRenderer<'a> {
         if self.options.show_stats_panel && !self.options.show_team_rosters {
             let panel_x = MINIMAP_SIZE as i32;
             let panel_w = STATS_PANEL_WIDTH as i32;
+            // The score bar spans only the minimap width, not this side strip, so
+            // the panel's top is free. Start the header near the top (a small pad
+            // matching the score-bar pill inset) instead of below the HUD, which
+            // moves the block up and frees vertical room for the ribbon grid.
+            let stats_top = 4i32;
 
             // Panel background
             commands.push(DrawCommand::StatsPanel { x: panel_x, width: panel_w });
@@ -2141,7 +2146,7 @@ impl<'a> MinimapRenderer<'a> {
 
             commands.push(DrawCommand::StatsSilhouette {
                 x: panel_x,
-                y: HUD_HEIGHT as i32,
+                y: stats_top,
                 width: panel_w,
                 height: 110,
                 ship_param_id,
@@ -2196,7 +2201,7 @@ impl<'a> MinimapRenderer<'a> {
 
             commands.push(DrawCommand::StatsDamage {
                 x: panel_x,
-                y: HUD_HEIGHT as i32 + 80,
+                y: stats_top + 80,
                 width: panel_w,
                 breakdowns,
                 damage_spotting,
@@ -2237,7 +2242,7 @@ impl<'a> MinimapRenderer<'a> {
                 };
                 ribbons.sort_by_key(|rc| rank(rc));
             }
-            let ribbon_y = HUD_HEIGHT as i32 + 80 + damage_section_height;
+            let ribbon_y = stats_top + 80 + damage_section_height;
             let ribbon_count = ribbons.len();
             commands.push(DrawCommand::StatsRibbons { x: panel_x, y: ribbon_y, width: panel_w, ribbons });
 
@@ -2625,6 +2630,42 @@ fn ribbon_fallback_name(ribbon: &wowsunpack::game_types::Ribbon) -> &'static str
         Ribbon::SonarOneHit => "Sonar 1",
         Ribbon::SonarTwoHits => "Sonar 2",
         Ribbon::SonarNeutralized => "Sonar Neut",
+        Ribbon::MainCaliber => "Main Bty",
+        Ribbon::Bomb => "Bomb",
+        Ribbon::Suppressed => "Suppressed",
+        Ribbon::BuildingKill => "Bldg Kill",
+        Ribbon::BombOverPenetration => "Bomb Overpen",
+        Ribbon::BombNonPenetration => "Bomb Shatter",
+        Ribbon::BombRicochet => "Bomb Ric",
+        Ribbon::Rocket => "Rocket",
+        Ribbon::BombTorpedoProtectionHit => "Bomb Belt",
+        Ribbon::Drop => "Drop",
+        Ribbon::RocketRicochet => "Rocket Ric",
+        Ribbon::RocketOverPenetration => "Rocket Overpen",
+        Ribbon::WaveKillTorpedo => "Wave Kill Torp",
+        Ribbon::WaveCutWave => "Wave Cut",
+        Ribbon::WaveHitVehicle => "Wave Hit",
+        Ribbon::AcousticHitVehicleNew => "Sonar New",
+        Ribbon::AcousticHitVehicleCurr => "Sonar Curr",
+        Ribbon::AcousticHitVehicleBlock => "Sonar Block",
+        Ribbon::Acid => "Acid",
+        Ribbon::DepthChargeFullDamage => "DC Full",
+        Ribbon::DepthChargePartialDamage => "DC Partial",
+        Ribbon::Mine => "Mine",
+        Ribbon::DeminingMine => "Demine",
+        Ribbon::DeminingMinefield => "Demine Field",
+        Ribbon::TorpedoPhotonHit => "Photon Torp",
+        Ribbon::TorpedoPhotonSplash => "Photon Splash",
+        Ribbon::AimPulseTorpedoPhoton => "Photon Pulse",
+        Ribbon::PhaserLaser => "Phaser",
+        Ribbon::ShieldHit => "Shield Hit",
+        Ribbon::ShieldRemoved => "Shield Down",
+        Ribbon::Assist => "Assist",
+        Ribbon::Missile => "Missile",
+        Ribbon::ShotDownMissile => "Missile Kill",
+        Ribbon::Wave => "Wave",
+        Ribbon::TorpedoPhoton => "Photon",
+        Ribbon::Shield => "Shield",
         Ribbon::Unknown(_) => "???",
     }
 }

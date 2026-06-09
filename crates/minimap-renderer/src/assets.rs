@@ -340,7 +340,16 @@ pub fn load_ribbon_icons(
                 continue;
             };
             if let Some(img) = load_image_entry(&entry) {
-                let resized = image::imageops::resize(&img, 32, 32, image::imageops::FilterType::Lanczos3);
+                // Ribbon icons are wide (e.g. 133x51), so resize to a fixed
+                // height with proportional width to avoid squishing them.
+                let target_h = 32u32;
+                let (w, h) = (img.width(), img.height());
+                let target_w = if h > 0 {
+                    (((w as f32 / h as f32) * target_h as f32).round() as u32).max(1)
+                } else {
+                    target_h
+                };
+                let resized = image::imageops::resize(&img, target_w, target_h, image::imageops::FilterType::Lanczos3);
                 icons.insert(stem.to_string(), resized);
             }
         }

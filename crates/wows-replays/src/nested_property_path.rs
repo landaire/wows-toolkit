@@ -1,6 +1,55 @@
+use std::collections::HashMap;
+
 use serde::Serialize;
 use wowsunpack::rpc::typedefs::ArgType;
 use wowsunpack::rpc::typedefs::ArgValue;
+use wowsunpack::rpc::typedefs::PrimitiveType;
+
+/// Build a zero/empty default value for a property type. Used when a nested
+/// property update targets a property that was left uninitialized at entity
+/// create (e.g. the avatar's `privateVehicleState`, which is materialized only
+/// once the first ribbon/buff arrives); the default gives the update a value to
+/// walk into instead of the packet being dropped.
+pub(crate) fn default_arg_value<'argtype>(arg_type: &'argtype ArgType) -> ArgValue<'argtype> {
+    match arg_type {
+        ArgType::Primitive(p) => match p {
+            PrimitiveType::Uint8 => ArgValue::Uint8(0),
+            PrimitiveType::Uint16 => ArgValue::Uint16(0),
+            PrimitiveType::Uint32 => ArgValue::Uint32(0),
+            PrimitiveType::Uint64 => ArgValue::Uint64(0),
+            PrimitiveType::Int8 => ArgValue::Int8(0),
+            PrimitiveType::Int16 => ArgValue::Int16(0),
+            PrimitiveType::Int32 => ArgValue::Int32(0),
+            PrimitiveType::Int64 => ArgValue::Int64(0),
+            PrimitiveType::Float32 => ArgValue::Float32(0.0),
+            PrimitiveType::Float64 => ArgValue::Float64(0.0),
+            PrimitiveType::Vector2 => ArgValue::Vector2((0.0, 0.0)),
+            PrimitiveType::Vector3 => ArgValue::Vector3((0.0, 0.0, 0.0)),
+            PrimitiveType::String => ArgValue::String(Vec::new()),
+            PrimitiveType::UnicodeString => ArgValue::UnicodeString(Vec::new()),
+            PrimitiveType::Blob => ArgValue::Blob(Vec::new()),
+        },
+        // Fixed-size arrays materialize their slots so element-set updates land;
+        // variable arrays start empty and grow via add/extend updates.
+        ArgType::Array((size, element_type)) => {
+            let n = size.unwrap_or(0);
+            ArgValue::Array((0..n).map(|_| default_arg_value(element_type)).collect())
+        }
+        ArgType::FixedDict((allow_none, properties)) => {
+            let map: HashMap<&'argtype str, ArgValue<'argtype>> =
+                properties.iter().map(|p| (p.name.as_str(), default_arg_value(&p.prop_type))).collect();
+            // A nullable dict defaults to a materialized `Some(defaults)`, not
+            // `None`: this value only exists because an update is about to write
+            // into it, and the navigation helper has no path that materializes a
+            // `None` mid-walk. The arriving update overwrites the real fields.
+            if *allow_none { ArgValue::NullableFixedDict(Some(map)) } else { ArgValue::FixedDict(map) }
+        }
+        ArgType::Tuple((element_type, size)) => {
+            ArgValue::Tuple((0..*size).map(|_| default_arg_value(element_type)).collect())
+        }
+        ArgType::Named { inner, .. } => default_arg_value(inner),
+    }
+}
 
 /// MSB-first bit reader over a byte slice.
 pub(crate) struct BitReader<'a> {
@@ -206,9 +255,16 @@ pub(crate) fn get_nested_prop_path_helper<'argtype>(
             nesting
         }
         (ArgType::Array((_size, element_type)), ArgValue::Array(arr)) => {
-            let idx = reader.read_u8(arr.len().next_power_of_two().trailing_zeros() as u8);
-            let mut nesting = get_nested_prop_path_helper(is_slice, element_type, &mut arr[idx as usize], reader);
-            nesting.levels.insert(0, PropertyNestLevel::ArrayIndex(idx as usize));
+            let idx = reader.read_u8(arr.len().next_power_of_two().trailing_zeros() as u8) as usize;
+            // A property that was default-constructed (uninitialized at entity
+            // create, materialized lazily) can have an empty array here; grow it
+            // with defaults so navigating to element `idx` applies the update
+            // instead of panicking on an out-of-bounds index.
+            if idx >= arr.len() {
+                arr.resize_with(idx + 1, || default_arg_value(element_type));
+            }
+            let mut nesting = get_nested_prop_path_helper(is_slice, element_type, &mut arr[idx], reader);
+            nesting.levels.insert(0, PropertyNestLevel::ArrayIndex(idx));
             nesting
         }
         x => {
