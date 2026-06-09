@@ -2384,7 +2384,7 @@ impl RenderTarget for ImageTarget {
                 hp_fraction,
                 hp_current,
                 hp_max,
-                hp_healable: _,
+                hp_healable,
                 player_name,
                 clan_tag,
                 clan_color,
@@ -2430,18 +2430,18 @@ impl RenderTarget for ImageTarget {
                             name_part,
                         );
                     }
-                    label_y += 14;
+                    label_y += 13;
                 }
                 if let Some(name) = ship_name {
                     let (ship_font, ship_font_scale) = self.fonts.font_and_scale(name, 10.0);
                     let (tw, _) = text_size(ship_font_scale, ship_font, name);
                     let tx = inner_x + (inner_w - tw as i32) / 2;
                     draw_text_shadow(&mut self.canvas, [180, 180, 180], tx, label_y, ship_font_scale, ship_font, name);
-                    label_y += 14;
+                    label_y += 13;
                 }
 
-                // Draw silhouette (gray base + yellow HP overlay)
-                let sil_y = label_y + 2;
+                // Draw silhouette: gray base + colored HP + white healable overlay
+                let sil_y = label_y + 1;
                 let sil_h = (*y + *height - 18 - sil_y).max(20);
                 if let Some(sil_img) = silhouette {
                     // Scale silhouette to fit the available area
@@ -2456,7 +2456,7 @@ impl RenderTarget for ImageTarget {
                     let draw_w = draw_w.max(1);
                     let draw_h = draw_h.max(1);
 
-                    // Gray silhouette (background / lost HP)
+                    // Gray silhouette base (remainder = unhealable lost HP shows through)
                     let gray_sil = tint_silhouette(sil_img, [200, 200, 200]);
                     let resized_gray =
                         image::imageops::resize(&gray_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
@@ -2464,15 +2464,30 @@ impl RenderTarget for ImageTarget {
                     let sil_cy = sil_y + (sil_h - draw_h as i32) / 2;
                     draw_icon_at(&mut self.canvas, &resized_gray, sil_x, sil_cy);
 
-                    // Yellow HP overlay: mask to hp_fraction width
+                    let regions =
+                        crate::panel_math::silhouette_regions(*hp_current, *hp_healable, *hp_max);
+
+                    // Colored region: current HP portion
                     let hp_color = hp_bar_color_lerp(*hp_fraction);
                     let hp_sil = tint_silhouette(sil_img, hp_color);
                     let resized_hp =
                         image::imageops::resize(&hp_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
-                    let hp_px = (draw_w as f32 * hp_fraction) as u32;
-                    if hp_px > 0 {
-                        let cropped = image::imageops::crop_imm(&resized_hp, 0, 0, hp_px, draw_h).to_image();
+                    let colored_px = (draw_w as f32 * regions.colored) as u32;
+                    if colored_px > 0 {
+                        let cropped = image::imageops::crop_imm(&resized_hp, 0, 0, colored_px, draw_h).to_image();
                         draw_icon_at(&mut self.canvas, &cropped, sil_x, sil_cy);
+                    }
+
+                    // White region: healable pool drawn immediately after the colored region
+                    let white_x = (draw_w as f32 * regions.colored) as u32;
+                    let white_w = (draw_w as f32 * regions.white) as u32;
+                    if white_w > 0 {
+                        let white_sil = tint_silhouette(sil_img, [255, 255, 255]);
+                        let resized_white =
+                            image::imageops::resize(&white_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
+                        let cropped =
+                            image::imageops::crop_imm(&resized_white, white_x, 0, white_w, draw_h).to_image();
+                        draw_icon_at(&mut self.canvas, &cropped, sil_x + white_x as i32, sil_cy);
                     }
                 }
 

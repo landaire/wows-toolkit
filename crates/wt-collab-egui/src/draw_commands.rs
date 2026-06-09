@@ -1402,7 +1402,7 @@ pub fn draw_command_to_shapes(
             hp_fraction,
             hp_current,
             hp_max,
-            hp_healable: _,
+            hp_healable,
             player_name,
             clan_tag,
             clan_color,
@@ -1420,7 +1420,7 @@ pub fn draw_command_to_shapes(
             let shadow_color = Color32::from_rgba_unmultiplied(0, 0, 0, 180);
             let shadow_off = (1.0 * ws).min(2.0);
             let mut label_y = origin.y + 2.0 * ws;
-            let line_h = 14.0 * ws;
+            let line_h = 13.0 * ws;
 
             if player_name.is_some() || clan_tag.is_some() {
                 // Build "[CLAN] PlayerName" with clan part colored
@@ -1480,12 +1480,12 @@ pub fn draw_command_to_shapes(
             }
 
             // Remaining area for silhouette + HP text
-            let sil_top = label_y + 2.0 * ws;
+            let sil_top = label_y + 1.0 * ws;
             let total_h = *height as f32 * ws;
             let hp_text_h = 20.0 * ws;
             let sil_area_h = (origin.y + total_h - hp_text_h - sil_top).max(0.0);
 
-            // Draw silhouette with HP overlay if texture is available
+            // Draw silhouette with three-region HP overlay if texture is available
             if let Some(sil_tex) = textures.silhouette_texture {
                 let tex_size = sil_tex.size_vec2();
                 let aspect = tex_size.x / tex_size.y;
@@ -1496,7 +1496,7 @@ pub fn draw_command_to_shapes(
                 let sil_y = sil_top + (sil_area_h - fit_h) / 2.0;
                 let sil_rect = Rect::from_min_size(Pos2::new(sil_x, sil_y), Vec2::new(fit_w, fit_h));
 
-                // Gray silhouette (base — represents missing HP)
+                // Gray silhouette base (unhealable lost HP shows through)
                 let mut gray_mesh = egui::Mesh::with_texture(sil_tex.id());
                 gray_mesh.add_rect_with_uv(
                     sil_rect,
@@ -1505,18 +1505,39 @@ pub fn draw_command_to_shapes(
                 );
                 shapes.push(Shape::Mesh(gray_mesh.into()));
 
-                // HP-colored overlay clipped to hp_fraction from the left
+                let regions =
+                    wows_minimap_renderer::panel_math::silhouette_regions(*hp_current, *hp_healable, *hp_max);
+
+                // Colored region: current HP, clipped from the left by regions.colored
                 let hp_color = hp_bar_color_egui(*hp_fraction);
-                let fill_w = fit_w * hp_fraction;
-                if fill_w > 0.0 {
-                    let clip_rect = Rect::from_min_size(Pos2::new(sil_x, sil_y), Vec2::new(fill_w, fit_h));
+                let colored_w = fit_w * regions.colored;
+                if colored_w > 0.0 {
+                    let clip_rect = Rect::from_min_size(Pos2::new(sil_x, sil_y), Vec2::new(colored_w, fit_h));
                     let mut hp_mesh = egui::Mesh::with_texture(sil_tex.id());
                     hp_mesh.add_rect_with_uv(
                         clip_rect,
-                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(*hp_fraction, 1.0)),
+                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(regions.colored, 1.0)),
                         hp_color,
                     );
                     shapes.push(Shape::Mesh(hp_mesh.into()));
+                }
+
+                // White region: healable pool, drawn immediately after the colored region
+                let white_start = regions.colored;
+                let white_w = fit_w * regions.white;
+                if white_w > 0.0 {
+                    let clip_rect =
+                        Rect::from_min_size(Pos2::new(sil_x + fit_w * white_start, sil_y), Vec2::new(white_w, fit_h));
+                    let mut white_mesh = egui::Mesh::with_texture(sil_tex.id());
+                    white_mesh.add_rect_with_uv(
+                        clip_rect,
+                        Rect::from_min_max(
+                            egui::pos2(white_start, 0.0),
+                            egui::pos2(white_start + regions.white, 1.0),
+                        ),
+                        Color32::WHITE,
+                    );
+                    shapes.push(Shape::Mesh(white_mesh.into()));
                 }
             } else {
                 // Fallback: simple HP bar when no silhouette texture
