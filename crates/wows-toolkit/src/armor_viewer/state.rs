@@ -496,6 +496,10 @@ pub struct ArmorPane {
     pub camera_ellipse_mode: String,
     /// Tracked overlay mesh ids for the camera ellipse, removed before re-upload.
     pub camera_ellipse_mesh_ids: Vec<crate::viewport_3d::MeshId>,
+    /// Show a 3-axis cross at the model origin (0,0,0) in the overlay layer.
+    pub show_ship_center: bool,
+    /// Tracked overlay mesh ids for the ship-center marker, removed before re-upload.
+    pub center_marker_mesh_ids: Vec<crate::viewport_3d::MeshId>,
 }
 
 /// Data returned by a hull-only background reload (LOD change without full ship reload).
@@ -583,6 +587,8 @@ impl ArmorPane {
             show_camera_ellipse: false,
             camera_ellipse_mode: "Artillery".to_string(),
             camera_ellipse_mesh_ids: Vec::new(),
+            show_ship_center: false,
+            center_marker_mesh_ids: Vec::new(),
         }
     }
 }

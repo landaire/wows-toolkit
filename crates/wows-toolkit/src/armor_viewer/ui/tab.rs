@@ -1190,6 +1190,23 @@ pub(crate) fn upload_armor_to_viewport(
         }
     }
 
+    // Ship-center 3-axis cross marker (model-space overlay, rotates with the ship).
+    for mid in pane.center_marker_mesh_ids.drain(..) {
+        pane.viewport.remove_mesh(mid);
+    }
+    if pane.show_ship_center {
+        let (min, max) = armor.bounds;
+        let extent = max - min;
+        let half = (extent.x.max(extent.y).max(extent.z) * 0.05).max(0.2);
+        let center = crate::viewport_3d::types::Vec3::new(0.0, armor.waterline_dy, 0.0);
+        let (verts, indices) =
+            crate::armor_viewer::camera_ellipse::build_center_marker_mesh(center, half, [1.0, 0.85, 0.1, 1.0]);
+        if !indices.is_empty() {
+            let id = pane.viewport.add_non_pickable_mesh(device, &verts, &indices, LAYER_OVERLAY);
+            pane.center_marker_mesh_ids.push(id);
+        }
+    }
+
     pane.viewport.mark_dirty();
 }
 
@@ -4597,6 +4614,9 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
         zone_changed = true;
     }
     if ui.checkbox(&mut pane.show_camera_ellipse, t!("ui.armor.camera_orbit").as_ref()).changed() {
+        zone_changed = true;
+    }
+    if ui.checkbox(&mut pane.show_ship_center, t!("ui.armor.ship_center").as_ref()).changed() {
         zone_changed = true;
     }
     let mut combo_changed = false;

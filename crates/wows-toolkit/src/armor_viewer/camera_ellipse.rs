@@ -72,6 +72,16 @@ pub(crate) fn build_camera_ellipse_mesh(
     (verts, indices)
 }
 
+/// A 3-axis cross marker centered at `center` (model space), each arm `half` long.
+pub(crate) fn build_center_marker_mesh(center: Vec3, half: f32, color: [f32; 4]) -> (Vec<Vertex>, Vec<u32>) {
+    let mut verts: Vec<Vertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    for axis in [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)] {
+        push_segment(&mut verts, &mut indices, center - axis * half, center + axis * half, color);
+    }
+    (verts, indices)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,5 +113,20 @@ mod tests {
         let (verts, _) = build_camera_ellipse_mesh(&traj(), 0.0, [0.0, 1.0, 1.0, 1.0]);
         let min_y = verts.iter().map(|v| v.position[1]).fold(f32::MAX, f32::min);
         assert!(min_y.abs() < 0.2, "min_y={min_y}");
+    }
+
+    #[test]
+    fn center_marker_non_empty_valid_indices_bounded() {
+        let center = Vec3::new(0.0, 0.0, 0.0);
+        let half = 0.4_f32;
+        let (verts, indices) = build_center_marker_mesh(center, half, [1.0, 0.85, 0.1, 1.0]);
+        assert!(!verts.is_empty());
+        assert!(!indices.is_empty());
+        assert_eq!(indices.len() % 3, 0);
+        for &i in &indices {
+            assert!((i as usize) < verts.len(), "index {i} out of bounds (len {})", verts.len());
+        }
+        let max_coord = verts.iter().flat_map(|v| v.position).map(f32::abs).fold(0.0_f32, f32::max);
+        assert!(max_coord <= half + LINE_WIDTH, "max coord {max_coord} exceeds half+line_width");
     }
 }
