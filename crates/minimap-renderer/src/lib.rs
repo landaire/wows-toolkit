@@ -12,6 +12,7 @@ pub mod drawing;
 pub mod encoder;
 pub mod error;
 pub mod map_data;
+pub mod panel_math;
 #[cfg(feature = "rendering")]
 pub mod renderer;
 #[cfg(feature = "rendering")]
