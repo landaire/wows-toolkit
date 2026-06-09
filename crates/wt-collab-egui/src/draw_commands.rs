@@ -1701,9 +1701,8 @@ pub fn draw_command_to_shapes(
                     let count_y = cur_y + (icon_sz - count_galley.size().y) / 2.0;
                     shapes.push(Shape::galley(Pos2::new(count_x, count_y), count_galley, Color32::TRANSPARENT));
                 } else {
-                    let label = if rc.display_name.len() > 8 { &rc.display_name[..8] } else { &rc.display_name };
-                    let name_galley =
-                        ctx.fonts_mut(|f| f.layout_no_wrap(label.to_string(), font.clone(), name_color));
+                    let label: String = rc.display_name.chars().take(8).collect();
+                    let name_galley = ctx.fonts_mut(|f| f.layout_no_wrap(label, font.clone(), name_color));
                     shapes.push(Shape::galley(Pos2::new(cur_x, cur_y), name_galley, Color32::TRANSPARENT));
                     let count_galley = ctx.fonts_mut(|f| f.layout_no_wrap(count_str, font.clone(), count_color));
                     let count_x = cur_x + cell_w - count_galley.size().x;

@@ -2671,11 +2671,7 @@ impl RenderTarget for ImageTarget {
                             &count_str,
                         );
                     } else {
-                        let label = if rc.display_name.len() > 8 {
-                            &rc.display_name[..8]
-                        } else {
-                            &rc.display_name
-                        };
+                        let label: String = rc.display_name.chars().take(8).collect();
                         draw_text_shadow(
                             &mut self.canvas,
                             [180, 180, 180],
@@ -2683,7 +2679,7 @@ impl RenderTarget for ImageTarget {
                             cur_y,
                             scale,
                             &self.fonts.primary,
-                            label,
+                            &label,
                         );
                         let (tw, _) = text_size(scale, &self.fonts.primary, &count_str);
                         draw_text_shadow(

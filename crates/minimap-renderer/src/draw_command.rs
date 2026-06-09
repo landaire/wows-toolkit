@@ -16,8 +16,7 @@ pub use wowsunpack::game_types::Ribbon;
 
 use crate::map_data::MinimapPos;
 
-/// Stats-panel ribbon grid cell metrics, shared by emission (feed offset) and
-/// both render backends so the wrapped rows line up.
+/// Cell metrics for the stats-panel ribbon grid.
 pub const STATS_RIBBON_ICON: i32 = 22;
 pub const STATS_RIBBON_CELL_W: i32 = 58;
 pub const STATS_RIBBON_ROW_H: i32 = 26;
