@@ -94,6 +94,8 @@ pub mod cpu;
 #[cfg(feature = "cpu-av1")]
 pub mod cpu_av1;
 
+pub mod worker;
+
 /// Snapshot of which (codec, backend) combinations are usable on this system.
 #[derive(Debug, Default, Clone)]
 pub struct EncoderStatus {

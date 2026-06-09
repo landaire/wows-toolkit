@@ -19,6 +19,8 @@ use crate::drawing::ImageTarget;
 use crate::encoder::EncodedFrame;
 use crate::encoder::EncoderBackend;
 use crate::encoder::Mode;
+use crate::encoder::worker::EncodedSample;
+use crate::encoder::worker::build_sample;
 use crate::error::VideoError;
 use crate::renderer::MinimapRenderer;
 
@@ -58,13 +60,6 @@ pub enum CodecChoice {
     Auto,
     /// Use the named codec.
     Explicit(VideoCodec),
-}
-
-/// Stored encoded output per frame, with metadata muxide needs.
-struct EncodedSample {
-    data: Vec<u8>,
-    is_keyframe: bool,
-    pts_seconds: f64,
 }
 
 pub struct VideoEncoder {
@@ -232,21 +227,8 @@ impl VideoEncoder {
     }
 
     fn push_encoded(&mut self, chunk: EncodedFrame, codec: VideoCodec) {
-        match chunk {
-            EncodedFrame::AnnexB(data) => {
-                let pts = self.samples.len() as f64 / FPS;
-                let is_keyframe = is_annexb_keyframe(&data, codec);
-                self.samples.push(EncodedSample { data, is_keyframe, pts_seconds: pts });
-            }
-            EncodedFrame::Av1Packet(packet) => {
-                let pts = packet.input_frameno as f64 / FPS;
-                self.samples.push(EncodedSample {
-                    data: packet.data,
-                    is_keyframe: packet.is_keyframe,
-                    pts_seconds: pts,
-                });
-            }
-        }
+        let idx = self.samples.len();
+        self.samples.push(build_sample(chunk, codec, idx));
     }
 
     pub fn advance_clock(
@@ -509,65 +491,3 @@ fn map_codec(c: VideoCodec) -> MuxideCodec {
     }
 }
 
-/// Walk an Annex B byte stream looking for a NAL that signals a random-access
-/// point for the given codec. AV1 OBUs are handled separately and never reach
-/// this function.
-fn is_annexb_keyframe(data: &[u8], codec: VideoCodec) -> bool {
-    for nal in parse_annexb_nals(data) {
-        if nal.is_empty() {
-            continue;
-        }
-        match codec {
-            VideoCodec::H264 => {
-                let nal_type = nal[0] & 0x1f;
-                if nal_type == 5 {
-                    return true;
-                }
-            }
-            VideoCodec::H265 => {
-                let nal_type = (nal[0] >> 1) & 0x3f;
-                if (16..=21).contains(&nal_type) {
-                    return true;
-                }
-            }
-            VideoCodec::Av1 => return false,
-        }
-    }
-    false
-}
-
-/// Parse Annex B byte stream into individual NAL units (without start codes).
-fn parse_annexb_nals(data: &[u8]) -> Vec<&[u8]> {
-    let mut nals = Vec::new();
-    let mut i = 0;
-    while i < data.len() {
-        if i + 2 < data.len() && data[i] == 0 && data[i + 1] == 0 {
-            let start = if i + 3 < data.len() && data[i + 2] == 0 && data[i + 3] == 1 {
-                i + 4
-            } else if data[i + 2] == 1 {
-                i + 3
-            } else {
-                i += 1;
-                continue;
-            };
-            let mut end = start;
-            while end < data.len() {
-                if end + 2 < data.len()
-                    && data[end] == 0
-                    && data[end + 1] == 0
-                    && (data[end + 2] == 1 || (end + 3 < data.len() && data[end + 2] == 0 && data[end + 3] == 1))
-                {
-                    break;
-                }
-                end += 1;
-            }
-            if end > start {
-                nals.push(&data[start..end]);
-            }
-            i = end;
-        } else {
-            i += 1;
-        }
-    }
-    nals
-}
