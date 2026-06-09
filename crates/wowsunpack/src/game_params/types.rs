@@ -134,15 +134,92 @@ impl SkillPointCost {
     }
 }
 
-/// Captain skills the app recognizes for special treatment (e.g. stat-screen
-/// markers). Mapped from the stable CrewSkillName, not the per-version numeric
-/// id. Unrecognized skills fall through to Unknown.
+/// Captain skills recognized by internal_name; Unknown covers future/unseen skills.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KnownCrewSkill {
-    /// "Inertia Fuse for HE Shells" (IFHE): HE penetration up, fire chance down.
-    InertiaFuse,
-    /// "Dazzle": worsens dispersion of shells fired at this ship.
+    IncomingFireAlert,
     Dazzle,
+    InertiaFuse,
+    MainBatteryAndAaSpecialist,
+    BasicsOfSurvivability,
+    GreaseTheGears,
+    FillTheTubes,
+    EmergencyRepairSpecialist,
+    ConsumableEnhancements,
+    Vigilance,
+    DemolitionExpert,
+    MainBatteryAndAaExpert,
+    AircraftArmor,
+    ImprovedEngineBoost,
+    ConcealmentExpert,
+    ConsumableSpecialist,
+    FirePreventionExpert,
+    SightStabilization,
+    ImprovedEngines,
+    Superintendent,
+    PreventiveMaintenance,
+    LastStand,
+    GunFeeder,
+    Interceptor,
+    AdrenalineRush,
+    SwiftFish,
+    SurvivabilityExpert,
+    ManualSecondaryBatteryAiming,
+    FocusFireTraining,
+    PriorityTarget,
+    AirSupremacy,
+    PackAPunch,
+    DirectionCenterForFighters,
+    EngineTechie,
+    RadioLocation,
+    AaDefenseAndAswExpert,
+    SecondaryArmamentExpert,
+    SuperHeavyApShells,
+    HeavyApShells,
+    ExtraHeavyAmmunition,
+    LongRangeSecondaryBatteryShells,
+    DefensiveFireExpert,
+    EmergencyRepairExpert,
+    EyeInTheSky,
+    ImprovedRepairPartyReadiness,
+    HiddenMenace,
+    Pyrotechnician,
+    HeavyHeAndSapShells,
+    EnhancedArmorPiercingAmmunition,
+    PatrolGroupLeader,
+    EnhancedReactions,
+    SearchAndDestroy,
+    RepairSpecialist,
+    EnhancedAircraftArmor,
+    BomberFlightControl,
+    LastGasp,
+    SurvivabilityExpertAircraft,
+    TorpedoBomber,
+    SwiftFlyingFish,
+    ProximityFuze,
+    Liquidator,
+    Brisk,
+    CloseQuartersCombat,
+    TopGradeGunner,
+    FearlessBrawler,
+    SwiftInSilence,
+    Outnumbered,
+    EnhancedSonar,
+    EnhancedImpulseGenerator,
+    Sonarman,
+    SonarmanExpert,
+    TorpedoCrewTraining,
+    TorpedoAimingMaster,
+    Helmsman,
+    ImprovedBatteryCapacity,
+    Watchful,
+    ImprovedBatteryEfficiency,
+    EnlargedPropellerShaft,
+    SubmarineConsumableSpecialist,
+    SubmarineConsumableEnhancements,
+    Furious,
+    SubmarineAdrenalineRush,
+    PlanesActiveManeuvering,
 }
 
 impl KnownCrewSkill {
@@ -150,9 +227,91 @@ impl KnownCrewSkill {
         name: &CrewSkillName,
         raw: CrewSkillType,
     ) -> crate::recognized::Recognized<KnownCrewSkill, CrewSkillType> {
+        use crate::recognized::Recognized::Known;
         match name.as_str() {
-            "HePenetration" => crate::recognized::Recognized::Known(KnownCrewSkill::InertiaFuse),
-            "TriggerSpreading" => crate::recognized::Recognized::Known(KnownCrewSkill::Dazzle),
+            "GmReloadAaDamageConstant" => Known(KnownCrewSkill::MainBatteryAndAaSpecialist),
+            "DefenceCritFireFlooding" => Known(KnownCrewSkill::BasicsOfSurvivability),
+            "GmTurn" => Known(KnownCrewSkill::GreaseTheGears),
+            "TorpedoReload" => Known(KnownCrewSkill::FillTheTubes),
+            "ConsumablesCrashcrewRegencrewReload" => Known(KnownCrewSkill::EmergencyRepairSpecialist),
+            "ConsumablesDuration" => Known(KnownCrewSkill::ConsumableEnhancements),
+            "DetectionTorpedoRange" => Known(KnownCrewSkill::Vigilance),
+            "HeFireProbability" => Known(KnownCrewSkill::DemolitionExpert),
+            "GmRangeAaDamageBubbles" => Known(KnownCrewSkill::MainBatteryAndAaExpert),
+            "PlanesDefenseDamageConstant" => Known(KnownCrewSkill::AircraftArmor),
+            "PlanesForsageDuration" => Known(KnownCrewSkill::ImprovedEngineBoost),
+            "DetectionVisibilityRange" => Known(KnownCrewSkill::ConcealmentExpert),
+            "ConsumablesReload" => Known(KnownCrewSkill::ConsumableSpecialist),
+            "DefenceFireProbability" => Known(KnownCrewSkill::FirePreventionExpert),
+            "PlanesAimingBoost" => Known(KnownCrewSkill::SightStabilization),
+            "PlanesSpeed" => Known(KnownCrewSkill::ImprovedEngines),
+            "ConsumablesAdditional" => Known(KnownCrewSkill::Superintendent),
+            "DefenseCritProbability" => Known(KnownCrewSkill::PreventiveMaintenance),
+            "DetectionAlert" => Known(KnownCrewSkill::IncomingFireAlert),
+            "Maneuverability" => Known(KnownCrewSkill::LastStand),
+            "GmShellReload" => Known(KnownCrewSkill::GunFeeder),
+            "PlanesConsumablesCallfightersUpgrade" => Known(KnownCrewSkill::Interceptor),
+            "ArmamentReloadAaDamage" => Known(KnownCrewSkill::AdrenalineRush),
+            "TorpedoSpeed" => Known(KnownCrewSkill::SwiftFish),
+            "DefenseHp" => Known(KnownCrewSkill::SurvivabilityExpert),
+            "AtbaAccuracy" => Known(KnownCrewSkill::ManualSecondaryBatteryAiming),
+            "AaPrioritysectorDamageConstant" => Known(KnownCrewSkill::FocusFireTraining),
+            "DetectionAiming" => Known(KnownCrewSkill::PriorityTarget),
+            "PlanesReload" => Known(KnownCrewSkill::AirSupremacy),
+            "TorpedoDamage" => Known(KnownCrewSkill::PackAPunch),
+            "ConsumablesFighterAdditional" => Known(KnownCrewSkill::DirectionCenterForFighters),
+            "PlanesConsumablesSpeedboosterReload" => Known(KnownCrewSkill::EngineTechie),
+            "HePenetration" => Known(KnownCrewSkill::InertiaFuse),
+            "DetectionDirection" => Known(KnownCrewSkill::RadioLocation),
+            "AaDamageConstantBubbles" => Known(KnownCrewSkill::AaDefenseAndAswExpert),
+            "AaDamageConstantBubblesCv" => Known(KnownCrewSkill::SecondaryArmamentExpert),
+            "ApDamageBb" => Known(KnownCrewSkill::SuperHeavyApShells),
+            "ApDamageCa" => Known(KnownCrewSkill::HeavyApShells),
+            "ApDamageDd" => Known(KnownCrewSkill::ExtraHeavyAmmunition),
+            "AtbaRange" => Known(KnownCrewSkill::LongRangeSecondaryBatteryShells),
+            "AtbaUpgrade" => Known(KnownCrewSkill::DefensiveFireExpert),
+            "ConsumablesCrashcrewRegencrewUpgrade" => Known(KnownCrewSkill::EmergencyRepairExpert),
+            "ConsumablesSpotterUpgrade" => Known(KnownCrewSkill::EyeInTheSky),
+            "DefenceUw" => Known(KnownCrewSkill::ImprovedRepairPartyReadiness),
+            "DetectionVisibilityCrashcrew" => Known(KnownCrewSkill::HiddenMenace),
+            "HeFireProbabilityCv" => Known(KnownCrewSkill::Pyrotechnician),
+            "HeSapDamage" => Known(KnownCrewSkill::HeavyHeAndSapShells),
+            "PlanesApDamage" => Known(KnownCrewSkill::EnhancedArmorPiercingAmmunition),
+            "PlanesConsumablesCallfightersAdditional" => Known(KnownCrewSkill::PatrolGroupLeader),
+            "PlanesConsumablesCallfightersPreparationtime" => Known(KnownCrewSkill::EnhancedReactions),
+            "PlanesConsumablesCallfightersRange" => Known(KnownCrewSkill::SearchAndDestroy),
+            "PlanesConsumablesRegeneratehealthUpgrade" => Known(KnownCrewSkill::RepairSpecialist),
+            "PlanesDefenseDamageBubbles" => Known(KnownCrewSkill::EnhancedAircraftArmor),
+            "PlanesDivebomberSpeed" => Known(KnownCrewSkill::BomberFlightControl),
+            "PlanesForsageRenewal" => Known(KnownCrewSkill::LastGasp),
+            "PlanesHp" => Known(KnownCrewSkill::SurvivabilityExpertAircraft),
+            "PlanesTorpedoArmingrange" => Known(KnownCrewSkill::TorpedoBomber),
+            "PlanesTorpedoSpeed" => Known(KnownCrewSkill::SwiftFlyingFish),
+            "PlanesTorpedoUwReduced" => Known(KnownCrewSkill::ProximityFuze),
+            "TorpedoFloodingProbability" => Known(KnownCrewSkill::Liquidator),
+            "TriggerSpeedBb" => Known(KnownCrewSkill::Brisk),
+            "TriggerGmAtbaReloadBb" => Known(KnownCrewSkill::CloseQuartersCombat),
+            "TriggerGmAtbaReloadCa" => Known(KnownCrewSkill::TopGradeGunner),
+            "TriggerGmReload" => Known(KnownCrewSkill::FearlessBrawler),
+            "TriggerSpeed" => Known(KnownCrewSkill::SwiftInSilence),
+            "TriggerSpeedAccuracy" => Known(KnownCrewSkill::Outnumbered),
+            "TriggerSpreading" => Known(KnownCrewSkill::Dazzle),
+            "TriggerPingerReloadBuff" => Known(KnownCrewSkill::EnhancedSonar),
+            "TriggerPingerSpeedBuff" => Known(KnownCrewSkill::EnhancedImpulseGenerator),
+            "SubmarineHoldSectors" => Known(KnownCrewSkill::Sonarman),
+            "TriggerConsSonarTimeCoeff" => Known(KnownCrewSkill::SonarmanExpert),
+            "TriggerSeenTorpedoReload" => Known(KnownCrewSkill::TorpedoCrewTraining),
+            "SubmarineTorpedoPingDamage" => Known(KnownCrewSkill::TorpedoAimingMaster),
+            "TriggerConsRudderTimeCoeff" => Known(KnownCrewSkill::Helmsman),
+            "SubmarineBatteryCapacity" => Known(KnownCrewSkill::ImprovedBatteryCapacity),
+            "SubmarineDangerAlert" => Known(KnownCrewSkill::Watchful),
+            "SubmarineBatteryBurnDown" => Known(KnownCrewSkill::ImprovedBatteryEfficiency),
+            "SubmarineSpeed" => Known(KnownCrewSkill::EnlargedPropellerShaft),
+            "SubmarineConsumablesReload" => Known(KnownCrewSkill::SubmarineConsumableSpecialist),
+            "SubmarineConsumablesDuration" => Known(KnownCrewSkill::SubmarineConsumableEnhancements),
+            "TriggerBurnGmReload" => Known(KnownCrewSkill::Furious),
+            "ArmamentReloadSubmarine" => Known(KnownCrewSkill::SubmarineAdrenalineRush),
+            "PlanesConsumablesActiveManeuveringUpgrade" => Known(KnownCrewSkill::PlanesActiveManeuvering),
             _ => crate::recognized::Recognized::Unknown(raw),
         }
     }
@@ -2534,11 +2693,24 @@ mod known_skill_tests {
 
         let ifhe = KnownCrewSkill::recognize(&CrewSkillName::from("HePenetration"), CrewSkillType::new(33));
         assert_eq!(ifhe, Recognized::Known(KnownCrewSkill::InertiaFuse));
+
+        let concealment = KnownCrewSkill::recognize(&CrewSkillName::from("DetectionVisibilityRange"), CrewSkillType::new(14));
+        assert_eq!(concealment, Recognized::Known(KnownCrewSkill::ConcealmentExpert));
+
+        let sub_adrenaline = KnownCrewSkill::recognize(&CrewSkillName::from("ArmamentReloadSubmarine"), CrewSkillType::new(82));
+        assert_eq!(sub_adrenaline, Recognized::Known(KnownCrewSkill::SubmarineAdrenalineRush));
+    }
+
+    #[test]
+    fn detection_alert_is_incoming_fire_alert() {
+        // "IFA" siren marker means Incoming Fire Alert (DetectionAlert), not Inertia Fuse.
+        let ifa = KnownCrewSkill::recognize(&CrewSkillName::from("DetectionAlert"), CrewSkillType::new(19));
+        assert_eq!(ifa, Recognized::Known(KnownCrewSkill::IncomingFireAlert));
     }
 
     #[test]
     fn unknown_skill_preserves_raw_type() {
-        let other = KnownCrewSkill::recognize(&CrewSkillName::from("DetectionAlert"), CrewSkillType::new(19));
-        assert_eq!(other, Recognized::Unknown(CrewSkillType::new(19)));
+        let other = KnownCrewSkill::recognize(&CrewSkillName::from("NotARealSkill"), CrewSkillType::new(255));
+        assert_eq!(other, Recognized::Unknown(CrewSkillType::new(255)));
     }
 }

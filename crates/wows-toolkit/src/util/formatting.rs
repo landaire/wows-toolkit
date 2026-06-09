@@ -94,8 +94,8 @@ pub fn colorize_captain_points(
         for skill in raw_skills {
             match KnownCrewSkill::recognize(skill.internal_name(), skill.skill_type()).known() {
                 Some(KnownCrewSkill::Dazzle) => has_dazzle = true,
-                Some(KnownCrewSkill::InertiaFuse) => has_ifa = true,
-                None => {}
+                Some(KnownCrewSkill::IncomingFireAlert) => has_ifa = true,
+                _ => {}
             }
         }
     }
