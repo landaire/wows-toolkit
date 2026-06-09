@@ -4625,10 +4625,12 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
     if ui.checkbox(&mut pane.show_zero_mm, "0 mm Plates").changed() {
         zone_changed = true;
     }
-    if ui.checkbox(&mut pane.show_camera_ellipse, t!("ui.armor.camera_orbit").as_ref()).changed() {
+    if ui.checkbox(&mut pane.show_ship_center, t!("ui.armor.ship_center").as_ref()).changed() {
         zone_changed = true;
     }
-    if ui.checkbox(&mut pane.show_ship_center, t!("ui.armor.ship_center").as_ref()).changed() {
+    ui.separator();
+    ui.label(t!("ui.armor.camera_rings").as_ref());
+    if ui.checkbox(&mut pane.show_camera_ellipse, t!("ui.armor.show_camera_rings").as_ref()).changed() {
         zone_changed = true;
     }
     let mut combo_changed = false;
@@ -4649,12 +4651,24 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
                 }
             }
         });
-        if ui.add(egui::Slider::new(&mut pane.camera_fov, 0.0..=1.0).text(t!("ui.armor.camera_fov").as_ref())).changed() {
-            combo_changed = true;
-        }
-        if ui.add(egui::Slider::new(&mut pane.camera_height, -1.0..=1.0).text(t!("ui.armor.camera_height").as_ref())).changed() {
-            combo_changed = true;
-        }
+        ui.horizontal(|ui| {
+            if ui.add(egui::Slider::new(&mut pane.camera_fov, 0.0..=1.0).text(t!("ui.armor.camera_fov").as_ref())).changed() {
+                combo_changed = true;
+            }
+            if ui.small_button(icons::ARROW_COUNTER_CLOCKWISE).clicked() {
+                pane.camera_fov = 0.0;
+                combo_changed = true;
+            }
+        });
+        ui.horizontal(|ui| {
+            if ui.add(egui::Slider::new(&mut pane.camera_height, -1.0..=1.0).text(t!("ui.armor.camera_height").as_ref())).changed() {
+                combo_changed = true;
+            }
+            if ui.small_button(icons::ARROW_COUNTER_CLOCKWISE).clicked() {
+                pane.camera_height = 0.0;
+                combo_changed = true;
+            }
+        });
     });
     if combo_changed {
         zone_changed = true;
