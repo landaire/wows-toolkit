@@ -1667,6 +1667,9 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
 
             let dt = vp_ui.ctx().input(|i| i.stable_dt);
             if pane.viewport.camera.update_animation(dt) {
+                pane.viewport.mark_dirty();
+                mirror_camera_signal.set(Some(pane_id));
+                active_pane_signal.set(Some(pane_id));
                 vp_ui.ctx().request_repaint();
             }
 

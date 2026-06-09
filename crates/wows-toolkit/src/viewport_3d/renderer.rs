@@ -1093,7 +1093,11 @@ impl Viewport3D {
     }
 
     pub fn handle_gizmo(&mut self, response: &egui::Response, rect: egui::Rect) -> bool {
-        crate::viewport_3d::gizmo::interact(&mut self.gizmo, response, rect, &mut self.camera)
+        let consumed = crate::viewport_3d::gizmo::interact(&mut self.gizmo, response, rect, &mut self.camera);
+        if consumed {
+            self.needs_redraw = true;
+        }
+        consumed
     }
 
     pub fn draw_gizmo(&self, painter: &egui::Painter, rect: egui::Rect) {
