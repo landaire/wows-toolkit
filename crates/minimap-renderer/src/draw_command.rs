@@ -270,6 +270,7 @@ pub struct RibbonCount {
     /// Lowercased ribbon icon key (RIBBON_*.to_lowercase()); for subribbons the
     /// renderers prepend "sub" to look up the subribbon map.
     pub icon_key: String,
+    /// When true, renderers prefer the subribbon icon (the "sub"+icon_key atlas).
     pub is_subribbon: bool,
 }
 
