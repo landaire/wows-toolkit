@@ -779,9 +779,14 @@ fn load_from_extracted(
         }
     };
 
-    let mut game_params = GameMetadataProvider::from_params_no_specs(params.clone())
+    // Build providers with entity specs from the extracted VFS. The replay
+    // scan (scan_salvo_flight_times) reads entity defs through the provider's
+    // entity_specs(); from_params_no_specs would leave that empty and the
+    // packet parser would have no specs to resolve EntityCreate against. This
+    // matches the game-dir path, which builds providers via from_vfs.
+    let mut game_params = GameMetadataProvider::from_params_with_vfs(params.clone(), &vfs)
         .map_err(|e| report!("Failed to build GameMetadataProvider: {e:?}"))?;
-    let mut controller_game_params = GameMetadataProvider::from_params_no_specs(params)
+    let mut controller_game_params = GameMetadataProvider::from_params_with_vfs(params, &vfs)
         .map_err(|e| report!("Failed to build controller GameMetadataProvider: {e:?}"))?;
 
     // Load translations

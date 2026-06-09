@@ -1177,9 +1177,21 @@ impl<'argtype> Parser<'argtype> {
         let num_props = le_u8.parse_next(&mut sub)?;
         let mut props: HashMap<&str, _> = HashMap::new();
         let mut stored_props: Vec<_> = vec![];
+        // Resolve the entity's spec up front; sibling handlers return structured
+        // errors here rather than panicking on a bad index. parse_packet wraps
+        // any Err into an Invalid packet so the stream keeps parsing. With specs
+        // matching the replay version these bounds always hold, so a failure here
+        // signals mismatched specs or a decoder bug, not normal version drift.
+        let entity_spec = (entity_type as usize)
+            .checked_sub(1)
+            .and_then(|idx| self.specs.get(idx))
+            .ok_or_else(|| failure(ParseError::EntityTypeOutOfBounds { entity_type, spec_count: self.specs.len() }))?;
         for _ in 0..num_props {
             let prop_id = le_u8.parse_next(&mut sub)?;
-            let spec = &self.specs[entity_type as usize - 1].properties[prop_id as usize];
+            let spec = entity_spec
+                .properties
+                .get(prop_id as usize)
+                .ok_or_else(|| failure(ParseError::PropertyIdOutOfBounds { prop_id: prop_id as u32, entity_type }))?;
             let value = match spec.prop_type.parse_value(&mut sub) {
                 Ok(x) => x,
                 Err(e) => {
@@ -1201,7 +1213,7 @@ impl<'argtype> Parser<'argtype> {
         Ok(PacketType::EntityCreate(EntityCreatePacket {
             entity_id: entity_id.into(),
             spec_idx: entity_type as usize,
-            entity_type: &self.specs[entity_type as usize - 1].name,
+            entity_type: &entity_spec.name,
             space_id,
             vehicle_id: vehicle_id.into(),
             position,
@@ -1467,6 +1479,38 @@ mod tests {
                 assert_eq!(id.raw(), raw, "0x{raw:02x} did not round-trip");
             }
         }
+    }
+
+    /// Regression: an EntityCreate whose `entity_type` is out of range for the
+    /// loaded specs must return a structured error, not panic. This used to
+    /// index `self.specs[entity_type - 1]` directly and crashed the process
+    /// when the parser was built with empty specs (the extracted-dir loader
+    /// path). `parse_packet` relies on the error to degrade the packet to
+    /// `Invalid` and keep parsing.
+    #[test]
+    fn entity_create_out_of_range_entity_type_errors_instead_of_panicking() {
+        let specs: Vec<EntitySpec> = Vec::new();
+        let mut parser = Parser::new(&specs);
+
+        let mut payload: Vec<u8> = Vec::new();
+        payload.extend_from_slice(&0u32.to_le_bytes()); // entity_id
+        payload.extend_from_slice(&2u16.to_le_bytes()); // entity_type (out of range: specs is empty)
+        payload.extend_from_slice(&0u32.to_le_bytes()); // vehicle_id
+        payload.extend_from_slice(&0u32.to_le_bytes()); // space_id
+        payload.extend_from_slice(&[0u8; 12]); // position
+        payload.extend_from_slice(&[0u8; 12]); // rotation
+        payload.extend_from_slice(&0u32.to_le_bytes()); // state_length
+        payload.push(1); // state blob: num_props = 1
+
+        let mut slice = payload.as_slice();
+        let result = parser.parse_entity_create(&mut slice);
+        assert!(
+            matches!(
+                result,
+                Err(winnow::error::ErrMode::Cut(ParseError::EntityTypeOutOfBounds { entity_type: 2, spec_count: 0 }))
+            ),
+            "expected EntityTypeOutOfBounds, got {result:?}"
+        );
     }
 }
 
