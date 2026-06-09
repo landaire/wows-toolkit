@@ -57,6 +57,13 @@ impl CpuAv1Encoder {
         cfg.max_key_frame_interval = FPS as u64;
         cfg.low_latency = true;
         cfg.speed_settings = SpeedSettings::from_preset(6);
+        // Encode tiles in parallel across rav1e's default Rayon pool. Tiling is
+        // the speed lever with the smallest quality cost: independent tiles lose
+        // some cross-tile prediction (a few percent of compression efficiency)
+        // but keep the preset-6 fidelity that small HUD/HP-bar text relies on,
+        // unlike raising the speed preset. Cap the count so the efficiency loss
+        // stays modest on high-core machines.
+        cfg.tiles = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(8);
         // rav1e knobs:
         //   - explicit `target_bitrate_bps` -> bitrate-based ABR
         //   - explicit `av1_quantizer`      -> quantizer-based CQP
