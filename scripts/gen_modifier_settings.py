@@ -1,0 +1,636 @@
+# -*- coding: utf-8 -*-
+"""Generate the Rust modifier value-formatting table from the client's
+MODIFIER_SETTINGS dict plus the ModifierValueType (MVT) isPositive registry.
+
+Emits crates/wowsunpack/src/game_params/modifier_settings_data.rs: a generated,
+version-gated table mirroring scripts/gen_skill_grid_rs.py. The toolkit compiles
+it in so there is no runtime/data dependency.
+
+Sources (deob client build, default 11791718):
+  - ModifierSettings.py: AST-parsed for the MODIFIER_SETTINGS dict and the
+    Measures class. NEVER exec'd -- it does not import standalone.
+  - ModifierValueType: the MVT name -> isPositive registry. The shipped file is
+    an obfuscated .pyc that stock marshal/uncompyle6 cannot read, so for a .pyc
+    input we deobfuscate it with wowsdeob, disassemble with xdis (pydisasm), and
+    parse the create(...) calls. A plain .py input is AST-parsed instead.
+
+Usage:
+  python scripts/gen_modifier_settings.py [ModifierSettings.py] [ModifierValueType.pyc] [build]
+
+Defensive by design: a per-entry parse failure is logged to stderr and skipped;
+the script never crashes on one bad entry. Re-run per game version.
+"""
+import ast
+import io
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+RS_OUT = os.path.join(ROOT, "crates", "wowsunpack", "src", "game_params", "modifier_settings_data.rs")
+
+DEFAULT_MS = r"G:/deob/scripts/mbf4783af/ModifierSettings.py"
+DEFAULT_MVT = r"G:/deob/scripts/Modifiers/ModifierValueType.pyc"
+DEFAULT_BUILD = 11791718
+
+# Tools for decompiling the obfuscated MVT .pyc.
+WOWSDEOB = r"G:/dev/wowsdeob/target/release/wowsdeob.exe"
+PYDISASM = r"C:/Users/lander/AppData/Local/Programs/Python/Python38-32/Scripts/pydisasm.exe"
+
+# Measures.<NAME> string-constant -> Rust Measure::<Variant>. The Rust enum only
+# emits variants actually referenced by the table, plus None.
+MEASURE_VARIANTS = {
+    "CANTIMETER": "Cantimeter",
+    "MILLIMETER": "Millimeter",
+    "METER": "Meter",
+    "TONN": "Tonn",
+    "SECOND": "Second",
+    "SECOND_SPACE": "SecondSpace",
+    "MINUTE": "Minute",
+    "KILOMETER": "Kilometer",
+    "KILOMETER_SPACE": "KilometerSpace",
+    "KILOMETER_HOUR": "KilometerHour",
+    "HORSE_POWER": "HorsePower",
+    "KNOTS_SPACE": "KnotsSpace",
+    "KNOTS_SHORT": "KnotsShort",
+    "SQUADRONS": "Squadrons",
+    "AIRPLANES": "Airplanes",
+    "AIR_FLIGHT": "AirFlight",
+    "PERCENT": "Percent",
+    "DEGREE_SECOND": "DegreeSecond",
+    "SHOT_MINUTE": "ShotMinute",
+    "UNITS": "Units",
+    "HP_SECOND": "HpSecond",
+    "METER_SECOND": "MeterSecond",
+    "TORPEDO_BOMBER": "TorpedoBomber",
+    "BOMBER": "Bomber",
+    "FIGHTER": "Fighter",
+    "SMOKE_CHARGE": "SmokeCharge",
+    "CHARGE": "Charge",
+    "PERCENT_SECOND": "PercentSecond",
+    "UNITS_SECOND": "UnitsSecond",
+    "UNITS_SQUARE": "UnitsSquare",
+    "DEGREE": "Degree",
+    "NONE": "None",
+    "SHIP_ICONS": "ShipIcons",
+}
+
+# Measure variant -> (IDS key or None, space_before). space_before is false only
+# for Percent. Variants whose Measures value is '' or a format string have no key.
+MEASURE_IDS = {
+    "Cantimeter": "IDS_CANTIMETER",
+    "Millimeter": "IDS_MILLIMETER",
+    "Meter": "IDS_METER",
+    "Tonn": "IDS_TONN",
+    "Second": "IDS_SECOND",
+    "SecondSpace": "IDS_SECOND_SPACE",
+    "Minute": "IDS_MINUTE",
+    "Kilometer": "IDS_KILOMETER",
+    "KilometerSpace": "IDS_KILOMETER_SPACE",
+    "KilometerHour": "IDS_KILOMETER_HOUR",
+    "HorsePower": "IDS_HORSE_POWER",
+    "KnotsSpace": "IDS_KNOT_SPACE",
+    "KnotsShort": "IDS_KNOT",
+    "Squadrons": "IDS_PL_SQUADRONS",
+    "Airplanes": "IDS_PL_AIRPLANES",
+    "AirFlight": "IDS_PL_AIR_FLIGHT",
+    "Percent": "IDS_PERCENT",
+    "DegreeSecond": "IDS_DEGREE_SECOND",
+    "ShotMinute": "IDS_SHOT_MINUTE",
+    "Units": "IDS_UNITS",
+    "HpSecond": "IDS_HP_SECOND",
+    "MeterSecond": "IDS_METER_SECOND",
+    "TorpedoBomber": "IDS_CREW_SKILL_MEASURE_TORPEDO_BOMBER",
+    "Bomber": "IDS_CREW_SKILL_MEASURE_BOMBER",
+    "Fighter": "IDS_CREW_SKILL_MEASURE_FIGHTER",
+    "SmokeCharge": "IDS_CREW_SKILL_MEASURE_SMOKE_CHARGE",
+    "Charge": "IDS_CREW_SKILL_MEASURE_CHARGE",
+    "PercentSecond": "IDS_PERCENT_SECOND",
+    "UnitsSecond": "IDS_UNITS_SECOND",
+    "UnitsSquare": "IDS_UNITS_SQUARE",
+    "Degree": "IDS_DEGREE",
+    "None": None,
+    "ShipIcons": None,
+}
+
+
+def warn(msg):
+    sys.stderr.write("warn: " + msg + "\n")
+
+
+def parse_mvt_from_disasm(text):
+    """Parse xdis disassembly of the deobfuscated ModifierValueType module.
+
+    Each value type is registered as
+        ModifierValueType.create(<name>, _ValueGroup.X, isPositive=BOOL, ...)
+        ModifierValueType.<name> = <result>     # STORE_ATTR <name>
+    isPositive defaults to True when the keyword is absent.
+    """
+    ins = []
+    for ln in text.splitlines():
+        m = re.match(r"\s*(?:>>)?\s*(\d+)\s+([A-Z_]+)\s*(?:\((.*)\))?\s*$", ln)
+        if m:
+            ins.append((m.group(2), (m.group(3) or "").strip()))
+    res = {}
+    n = len(ins)
+    i = 0
+    while i < n:
+        op, arg = ins[i]
+        if op == "LOAD_ATTR" and arg == "create":
+            is_pos = True
+            pending = None
+            name = None
+            j = i + 1
+            while j < n:
+                o2, a2 = ins[j]
+                if o2 == "CALL_FUNCTION":
+                    k = j + 1
+                    while k < n and ins[k][0] not in ("STORE_ATTR", "LOAD_ATTR"):
+                        k += 1
+                    if k < n and ins[k][0] == "STORE_ATTR":
+                        name = ins[k][1]
+                    break
+                if o2 == "LOAD_CONST" and a2 == "'isPositive'":
+                    pending = "isPositive"
+                elif pending == "isPositive" and o2 in ("LOAD_NAME", "LOAD_GLOBAL", "LOAD_CONST"):
+                    is_pos = a2 in ("True", "1")
+                    pending = None
+                j += 1
+            if name:
+                res[name] = is_pos
+            i = j + 1
+            continue
+        i += 1
+    return res
+
+
+def mvt_from_pyc(pyc_path):
+    work = tempfile.mkdtemp(prefix="mvt_deob_")
+    try:
+        subprocess.run([WOWSDEOB, pyc_path, work], check=True, capture_output=True)
+    except Exception as e:
+        warn("wowsdeob failed on %s: %s" % (pyc_path, e))
+        return {}
+    deob = None
+    for fn in os.listdir(work):
+        if fn.endswith("_stage2_deob.pyc"):
+            deob = os.path.join(work, fn)
+            break
+    if not deob:
+        warn("wowsdeob produced no stage2_deob pyc for %s" % pyc_path)
+        return {}
+    try:
+        out = subprocess.run([PYDISASM, deob], check=True, capture_output=True)
+    except Exception as e:
+        warn("pydisasm failed: %s" % e)
+        return {}
+    text = out.stdout.decode("utf-8", "replace")
+    return parse_mvt_from_disasm(text)
+
+
+def mvt_from_py(py_path):
+    """AST-parse a plain .py MVT module for name -> isPositive (best effort)."""
+    src = io.open(py_path, encoding="utf-8", errors="replace").read()
+    tree = ast.parse(src)
+    res = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        if not (isinstance(fn, ast.Attribute) and fn.attr == "create"):
+            continue
+        if not node.args:
+            continue
+        name = literal_str(node.args[0])
+        if name is None:
+            continue
+        is_pos = True
+        for kw in node.keywords:
+            if kw.arg == "isPositive":
+                v = literal_bool(kw.value)
+                if v is not None:
+                    is_pos = v
+        res[name] = is_pos
+    return res
+
+
+def build_mvt_map(path):
+    if path.endswith(".pyc"):
+        return mvt_from_pyc(path)
+    res = mvt_from_py(path)
+    if not res:
+        warn("no MVT entries parsed from %s; isPositive defaults to True" % path)
+    return res
+
+
+def literal_str(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def literal_bool(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, bool):
+        return node.value
+    return None
+
+
+def literal_num(node):
+    """A numeric literal, allowing a leading unary minus."""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        v = literal_num(node.operand)
+        return None if v is None else -v
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+        return float(node.value)
+    return None
+
+
+def key_name(node):
+    """Modifier name from a dict key node.
+
+    'literal'           -> the literal
+    MVT.<x>.name        -> <x>
+    <x>.name            -> <x>
+    """
+    s = literal_str(node)
+    if s is not None:
+        return s
+    # X.name  (Attribute attr == 'name')
+    if isinstance(node, ast.Attribute) and node.attr == "name":
+        inner = node.value
+        # MVT.<x>.name : inner is Attribute MVT.<x>
+        if isinstance(inner, ast.Attribute):
+            return inner.attr
+        if isinstance(inner, ast.Name):
+            return inner.id
+    return None
+
+
+def measure_variant(node):
+    """Measures.<NAME> -> Rust variant; default Meter on failure (logged)."""
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "Measures":
+        v = MEASURE_VARIANTS.get(node.attr)
+        if v is None:
+            warn("unknown Measures.%s; using None" % node.attr)
+            return "None"
+        return v
+    warn("measure arg is not Measures.<X>; using None")
+    return "None"
+
+
+def value_type_positive(node, mvt_map, stats):
+    """Resolve `positive` from a valueType arg.
+
+    ValueTypeDummy(<bool>?, ...) -> first positional bool (default True)
+    MVT.<name> / <name>          -> mvt_map[<name>] (default True, counted)
+    """
+    if node is None:
+        return True
+    if isinstance(node, ast.Call):
+        fn = node.func
+        is_dummy = (isinstance(fn, ast.Name) and fn.id == "ValueTypeDummy") or (
+            isinstance(fn, ast.Attribute) and fn.attr == "ValueTypeDummy"
+        )
+        if is_dummy:
+            if node.args:
+                b = literal_bool(node.args[0])
+                if b is not None:
+                    return b
+            return True
+        # other calls (rare) -- default True
+        return True
+    # MVT.<name> or bare <name>
+    name = None
+    if isinstance(node, ast.Attribute):
+        name = node.attr
+    elif isinstance(node, ast.Name):
+        name = node.id
+    if name is None:
+        return True
+    if name in mvt_map:
+        return mvt_map[name]
+    stats["mvt_unresolved"] += 1
+    return True
+
+
+def parse_ms_call(call, mvt_map, stats):
+    """An MS(...) call -> dict of fields, applying constructor defaults. Returns
+    None if `call` is not an MS/ModifierSettings call."""
+    fn = call.func
+    is_ms = (isinstance(fn, ast.Name) and fn.id in ("MS", "ModifierSettings")) or (
+        isinstance(fn, ast.Attribute) and fn.attr in ("MS", "ModifierSettings")
+    )
+    if not is_ms:
+        return None
+
+    # ModifierSettings(measure, baseValue, displaySign=True, multiplier=1.0,
+    #   getter=None, valueConverter=None, translations=None, hidden=False,
+    #   measureValueHidden=False, sortIndex=None, roundDigits=1,
+    #   roundPercents=False, valueType=None)
+    POSITIONAL = [
+        "measure", "baseValue", "displaySign", "multiplier", "getter",
+        "valueConverter", "translations", "hidden", "measureValueHidden",
+        "sortIndex", "roundDigits", "roundPercents", "valueType",
+    ]
+    args = {}
+    for i, a in enumerate(call.args):
+        if i < len(POSITIONAL):
+            args[POSITIONAL[i]] = a
+    for kw in call.keywords:
+        if kw.arg:
+            args[kw.arg] = kw.value
+
+    out = {
+        "measure": "Meter",
+        "base_value": 0.0,
+        "display_sign": True,
+        "multiplier": 1.0,
+        "round_digits": 1,
+        "round_percents": False,
+        "hidden": False,
+        "measure_value_hidden": False,
+        "positive": True,
+        "transform": "None",
+    }
+
+    if "measure" in args:
+        out["measure"] = measure_variant(args["measure"])
+    else:
+        warn("MS call missing measure; using Meter")
+
+    bv = literal_num(args.get("baseValue"))
+    if bv is not None:
+        out["base_value"] = bv
+
+    ds = literal_bool(args.get("displaySign"))
+    if ds is not None:
+        out["display_sign"] = ds
+
+    mul = literal_num(args.get("multiplier"))
+    if mul is not None:
+        out["multiplier"] = mul
+
+    rd = literal_num(args.get("roundDigits"))
+    if rd is not None:
+        out["round_digits"] = int(rd)
+
+    rp = literal_bool(args.get("roundPercents"))
+    if rp is not None:
+        out["round_percents"] = rp
+
+    h = literal_bool(args.get("hidden"))
+    if h is not None:
+        out["hidden"] = h
+
+    mvh = literal_bool(args.get("measureValueHidden"))
+    if mvh is not None:
+        out["measure_value_hidden"] = mvh
+
+    out["positive"] = value_type_positive(args.get("valueType"), mvt_map, stats)
+
+    # A getter or valueConverter means the displayed value is transformed; the
+    # ports of those getters come in a later task, so tag LabelOnly for now.
+    if "getter" in args or "valueConverter" in args:
+        out["transform"] = "LabelOnly"
+        stats["label_only"] += 1
+
+    return out
+
+
+def find_modifier_settings_dict(ms_path):
+    src = io.open(ms_path, encoding="utf-8", errors="replace").read()
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == "MODIFIER_SETTINGS":
+                    if isinstance(node.value, ast.Dict):
+                        return node.value
+    return None
+
+
+def extract_entries(ms_path, mvt_map, stats):
+    d = find_modifier_settings_dict(ms_path)
+    if d is None:
+        warn("MODIFIER_SETTINGS dict not found in %s" % ms_path)
+        return []
+    entries = []
+    seen = set()
+    for k, v in zip(d.keys, d.values):
+        name = key_name(k)
+        if name is None:
+            warn("skip entry: unparseable key %r" % ast.dump(k))
+            continue
+        if not isinstance(v, ast.Call):
+            warn("skip %s: value is not a call" % name)
+            continue
+        try:
+            fields = parse_ms_call(v, mvt_map, stats)
+        except Exception as e:
+            warn("skip %s: %s" % (name, e))
+            continue
+        if fields is None:
+            warn("skip %s: not an MS call" % name)
+            continue
+        if name in seen:
+            warn("duplicate key %s; keeping first" % name)
+            continue
+        seen.add(name)
+        entries.append((name, fields))
+    return entries
+
+
+HEADER = """\
+//! GENERATED by scripts/gen_modifier_settings.py for client build {build}.
+//! Do not edit by hand. Re-run per game version. Modifier value-formatting
+//! settings (the client MODIFIER_SETTINGS table), version-gated by build.
+#![allow(dead_code)]
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Measure {{
+{measure_variants}
+}}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Transform {{
+    None,
+    /// Value is produced by a client getter/valueConverter not yet ported; show
+    /// the label only until the transform is implemented.
+    LabelOnly,
+}}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ModifierSetting {{
+    pub measure: Measure,
+    pub base_value: f32,
+    pub display_sign: bool,
+    pub multiplier: f32,
+    pub round_digits: u8,
+    pub round_percents: bool,
+    pub hidden: bool,
+    pub measure_value_hidden: bool,
+    pub positive: bool,
+    pub transform: Transform,
+}}
+
+impl Measure {{
+    /// The `IDS_*` translation key for this measure's unit suffix, or `None`
+    /// when the measure has no displayed unit.
+    pub fn unit_ids_key(self) -> Option<&'static str> {{
+        match self {{
+{unit_arms}
+        }}
+    }}
+
+    /// Whether a space separates the value from its unit. False only for
+    /// percent (e.g. "+5%", but "5 km").
+    pub fn space_before(self) -> bool {{
+        !matches!(self, Measure::Percent)
+    }}
+}}
+
+struct Table {{
+    min_build: u32,
+    entries: &'static [(&'static str, ModifierSetting)],
+}}
+
+/// The formatting settings for `name` at game `build`: the newest table with
+/// `min_build <= build`, then the entry for `name`. `None` if no table covers
+/// the build or the modifier is absent.
+pub fn modifier_setting(build: u32, name: &str) -> Option<&'static ModifierSetting> {{
+    let mut chosen: Option<&Table> = None;
+    for table in TABLES {{
+        if table.min_build <= build {{
+            chosen = Some(table);
+        }} else {{
+            break;
+        }}
+    }}
+    let table = chosen?;
+    table
+        .entries
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, s)| s)
+}}
+
+"""
+
+
+def emit(entries, build, used_variants):
+    # Order: emit used variants (deterministic), always include None.
+    order = list(MEASURE_VARIANTS.values())
+    seen = set()
+    variants = []
+    for v in order:
+        if (v in used_variants or v == "None") and v not in seen:
+            seen.add(v)
+            variants.append(v)
+    measure_variants = "\n".join("    %s," % v for v in variants)
+
+    unit_arms = []
+    for v in variants:
+        ids = MEASURE_IDS.get(v)
+        if ids is None:
+            unit_arms.append('            Measure::%s => None,' % v)
+        else:
+            unit_arms.append('            Measure::%s => Some("%s"),' % (v, ids))
+    unit_arms = "\n".join(unit_arms)
+
+    out = io.StringIO()
+    out.write(HEADER.format(
+        build=build,
+        measure_variants=measure_variants,
+        unit_arms=unit_arms,
+    ))
+    out.write("static TABLES: &[Table] = &[\n")
+    out.write("    Table {\n")
+    out.write("        min_build: %d,\n" % build)
+    out.write("        entries: &[\n")
+    for name, f in entries:
+        out.write(
+            '            ("%s", ModifierSetting { '
+            'measure: Measure::%s, base_value: %s, display_sign: %s, '
+            'multiplier: %s, round_digits: %d, round_percents: %s, '
+            'hidden: %s, measure_value_hidden: %s, positive: %s, '
+            'transform: Transform::%s }),\n'
+            % (
+                name,
+                f["measure"],
+                rust_f32(f["base_value"]),
+                rust_bool(f["display_sign"]),
+                rust_f32(f["multiplier"]),
+                f["round_digits"],
+                rust_bool(f["round_percents"]),
+                rust_bool(f["hidden"]),
+                rust_bool(f["measure_value_hidden"]),
+                rust_bool(f["positive"]),
+                f["transform"],
+            )
+        )
+    out.write("        ],\n")
+    out.write("    },\n")
+    out.write("];\n")
+    out.write(TESTS)
+    return out.getvalue()
+
+
+def rust_bool(b):
+    return "true" if b else "false"
+
+
+def rust_f32(x):
+    if x == int(x):
+        return "%d.0" % int(x)
+    return repr(float(x))
+
+
+TESTS = """
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lookup_is_version_gated() {
+        assert!(modifier_setting(11791718, "shootShift").is_some());
+        assert!(modifier_setting(1, "shootShift").is_none());
+        assert!(modifier_setting(11791718, "definitely_not_a_modifier").is_none());
+    }
+
+    #[test]
+    fn measure_units() {
+        assert_eq!(Measure::Percent.unit_ids_key(), Some("IDS_PERCENT"));
+        assert!(!Measure::Percent.space_before());
+        assert_eq!(Measure::None.unit_ids_key(), None);
+    }
+}
+"""
+
+
+def main():
+    ms_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MS
+    mvt_path = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_MVT
+    build = int(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_BUILD
+
+    mvt_map = build_mvt_map(mvt_path)
+    sys.stderr.write("MVT registry: %d entries\n" % len(mvt_map))
+
+    stats = {"label_only": 0, "mvt_unresolved": 0}
+    entries = extract_entries(ms_path, mvt_map, stats)
+
+    used = set(f["measure"] for _, f in entries)
+    rust = emit(entries, build, used)
+
+    with io.open(RS_OUT, "w", encoding="utf-8", newline="\n") as f:
+        f.write(rust)
+
+    sys.stderr.write("emitted %d entries to %s\n" % (len(entries), RS_OUT))
+    sys.stderr.write("Transform::LabelOnly: %d\n" % stats["label_only"])
+    sys.stderr.write("MVT isPositive unresolved (defaulted True): %d\n" % stats["mvt_unresolved"])
+
+
+if __name__ == "__main__":
+    main()
