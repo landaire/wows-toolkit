@@ -19,6 +19,12 @@ Usage:
 
 Defensive by design: a per-entry parse failure is logged to stderr and skipped;
 the script never crashes on one bad entry. Re-run per game version.
+
+When a formatting-critical numeric arg (multiplier, baseValue, roundDigits) is a
+non-literal expression (e.g. ConstantsShip.BW_TO_BALLISTIC/1000, 1/KM_TO_M) it
+cannot be resolved here, so the entry is tagged Transform::LabelOnly (label shown
+without a wrong number) and counted as unresolved_value -- it is NOT silently
+treated as 1.0/0.0.
 """
 import ast
 import io
@@ -36,9 +42,12 @@ DEFAULT_MS = r"G:/deob/scripts/mbf4783af/ModifierSettings.py"
 DEFAULT_MVT = r"G:/deob/scripts/Modifiers/ModifierValueType.pyc"
 DEFAULT_BUILD = 11791718
 
-# Tools for decompiling the obfuscated MVT .pyc.
-WOWSDEOB = r"G:/dev/wowsdeob/target/release/wowsdeob.exe"
-PYDISASM = r"C:/Users/lander/AppData/Local/Programs/Python/Python38-32/Scripts/pydisasm.exe"
+# Tools for decompiling the obfuscated MVT .pyc. Overridable via env vars.
+WOWSDEOB = os.environ.get("WOWSDEOB", r"G:/dev/wowsdeob/target/release/wowsdeob.exe")
+PYDISASM = os.environ.get(
+    "PYDISASM",
+    r"C:/Users/lander/AppData/Local/Programs/Python/Python38-32/Scripts/pydisasm.exe",
+)
 
 # Measures.<NAME> string-constant -> Rust Measure::<Variant>. The Rust enum only
 # emits variants actually referenced by the table, plus None.
@@ -361,9 +370,15 @@ def parse_ms_call(call, mvt_map, stats):
     else:
         warn("MS call missing measure; using Meter")
 
+    # A formatting-critical numeric arg that is present but non-literal cannot be
+    # resolved here; mark the entry LabelOnly so we never render a wrong number.
+    unresolved_field = None
+
     bv = literal_num(args.get("baseValue"))
     if bv is not None:
         out["base_value"] = bv
+    elif "baseValue" in args:
+        unresolved_field = "baseValue"
 
     ds = literal_bool(args.get("displaySign"))
     if ds is not None:
@@ -372,10 +387,14 @@ def parse_ms_call(call, mvt_map, stats):
     mul = literal_num(args.get("multiplier"))
     if mul is not None:
         out["multiplier"] = mul
+    elif "multiplier" in args:
+        unresolved_field = "multiplier"
 
     rd = literal_num(args.get("roundDigits"))
     if rd is not None:
         out["round_digits"] = int(rd)
+    elif "roundDigits" in args:
+        unresolved_field = "roundDigits"
 
     rp = literal_bool(args.get("roundPercents"))
     if rp is not None:
@@ -396,6 +415,11 @@ def parse_ms_call(call, mvt_map, stats):
     if "getter" in args or "valueConverter" in args:
         out["transform"] = "LabelOnly"
         stats["label_only"] += 1
+
+    if unresolved_field is not None:
+        out["transform"] = "LabelOnly"
+        out["unresolved_field"] = unresolved_field
+        stats["unresolved_value"] += 1
 
     return out
 
@@ -438,6 +462,9 @@ def extract_entries(ms_path, mvt_map, stats):
         if name in seen:
             warn("duplicate key %s; keeping first" % name)
             continue
+        uf = fields.pop("unresolved_field", None)
+        if uf is not None:
+            warn("%s: non-literal %s; tagging LabelOnly" % (name, uf))
         seen.add(name)
         entries.append((name, fields))
     return entries
@@ -499,14 +526,14 @@ struct Table {{
 
 /// The formatting settings for `name` at game `build`: the newest table with
 /// `min_build <= build`, then the entry for `name`. `None` if no table covers
-/// the build or the modifier is absent.
+/// the build or the modifier is absent. Order-independent over TABLES.
 pub fn modifier_setting(build: u32, name: &str) -> Option<&'static ModifierSetting> {{
     let mut chosen: Option<&Table> = None;
     for table in TABLES {{
-        if table.min_build <= build {{
+        if table.min_build <= build
+            && chosen.map_or(true, |c| table.min_build > c.min_build)
+        {{
             chosen = Some(table);
-        }} else {{
-            break;
         }}
     }}
     let table = chosen?;
@@ -618,7 +645,7 @@ def main():
     mvt_map = build_mvt_map(mvt_path)
     sys.stderr.write("MVT registry: %d entries\n" % len(mvt_map))
 
-    stats = {"label_only": 0, "mvt_unresolved": 0}
+    stats = {"label_only": 0, "mvt_unresolved": 0, "unresolved_value": 0}
     entries = extract_entries(ms_path, mvt_map, stats)
 
     used = set(f["measure"] for _, f in entries)
@@ -628,7 +655,8 @@ def main():
         f.write(rust)
 
     sys.stderr.write("emitted %d entries to %s\n" % (len(entries), RS_OUT))
-    sys.stderr.write("Transform::LabelOnly: %d\n" % stats["label_only"])
+    sys.stderr.write("Transform::LabelOnly (getter/valueConverter): %d\n" % stats["label_only"])
+    sys.stderr.write("Transform::LabelOnly (unresolved_value): %d\n" % stats["unresolved_value"])
     sys.stderr.write("MVT isPositive unresolved (defaulted True): %d\n" % stats["mvt_unresolved"])
 
 
