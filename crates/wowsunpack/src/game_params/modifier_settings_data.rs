@@ -650,24 +650,25 @@ static TABLES: &[Table] = &[
     },
 ];
 
-/// Format `val` for display: round to `round_digits` decimals, but use 2
-/// decimals when `abs(val) < 1.0`. Integral results show no decimals; trailing
-/// zeros are stripped. `signed_positive` chooses an explicit `+`/`-` prefix on
-/// the magnitude; `None` keeps the value's natural sign.
-fn format_number(val: f32, round_digits: u8, signed_positive: Option<bool>) -> String {
-    let digits = if val.abs() < 1.0 { 2 } else { round_digits as usize };
-    let (magnitude, prefix) = match signed_positive {
-        Some(true) => (val.abs(), "+"),
-        Some(false) => (val.abs(), "-"),
-        None => (val, ""),
-    };
+/// Format the signed delta `val` for display: round to `round_digits` decimals,
+/// but use 2 decimals when `abs(val) < 2.0` (the client's
+/// MAXIMUM_ROUNDING_LIMIT_TO_TWO_DECIMAL_PLACES). Integral results show no
+/// decimals; trailing zeros are stripped. The sign is the value's own: negatives
+/// keep `-`, and when `display_sign` is set a `+` is forced for non-negative
+/// values (the client `{:+}`/`{:-}` formats).
+fn format_number(val: f32, round_digits: u8, display_sign: bool) -> String {
+    let digits = if val.abs() < 2.0 { 2 } else { round_digits as usize };
     let factor = 10f32.powi(digits as i32);
-    let rounded = (magnitude * factor).round() / factor;
+    let rounded = (val * factor).round() / factor;
     let mut s = format!("{rounded:.digits$}");
     if s.contains('.') {
         s = s.trim_end_matches('0').trim_end_matches('.').to_string();
     }
-    format!("{prefix}{s}")
+    if display_sign && !s.starts_with('-') {
+        format!("+{s}")
+    } else {
+        s
+    }
 }
 
 /// Reproduce the client tooltip formatting for a single modifier: a description
@@ -713,12 +714,8 @@ pub fn format_modifier(
         return Some(label);
     }
 
-    let signed_positive = if s.display_sign {
-        Some((value > s.base_value) == s.positive)
-    } else {
-        None
-    };
-
+    // `positive` is color-only (green/red category in the client) and is not
+    // used here: the number's sign is the delta's own.
     let number = if s.measure_value_hidden {
         String::new()
     } else {
@@ -732,7 +729,7 @@ pub fn format_modifier(
             .unit_ids_key()
             .and_then(|key| metadata.localized_name_from_id(key))
             .unwrap_or_default();
-        let num = format_number(val, s.round_digits, signed_positive);
+        let num = format_number(val, s.round_digits, s.display_sign);
         if s.measure.space_before() {
             format!("{num} {unit}")
         } else {
@@ -792,8 +789,8 @@ mod tests {
     const BUILD: u32 = 11791718;
 
     #[test]
-    fn percent_negative_positive_flag_true() {
-        // GMRotationSpeed: percent, base 1.0, positive=true. v < base => "-".
+    fn percent_negative_delta_natural_sign() {
+        // GMRotationSpeed: percent, base 1.0. delta (0.9-1.0)*100 = -10 => "-".
         let out = format_modifier(BUILD, "GMRotationSpeed", 0.9, Species::Battleship, &EchoLoader)
             .expect("should render");
         assert!(out.starts_with("-10IDS_PERCENT "), "got {out}");
@@ -801,11 +798,30 @@ mod tests {
     }
 
     #[test]
-    fn percent_positive_when_positive_flag_false() {
-        // GMShotDelay: percent, base 1.0, positive=false. v < base => "+".
+    fn percent_negative_delta_follows_value_not_positive_flag() {
+        // GMShotDelay: percent, base 1.0, positive=false. delta -10 => "-10",
+        // not "+10": the sign follows the delta, not the value-type flag.
         let out = format_modifier(BUILD, "GMShotDelay", 0.9, Species::Battleship, &EchoLoader)
             .expect("should render");
+        assert!(out.starts_with("-10IDS_PERCENT "), "got {out}");
+    }
+
+    #[test]
+    fn percent_positive_delta_with_display_sign() {
+        // GMRotationSpeed: display_sign=true. delta (1.1-1.0)*100 = +10 => "+".
+        let out = format_modifier(BUILD, "GMRotationSpeed", 1.1, Species::Battleship, &EchoLoader)
+            .expect("should render");
         assert!(out.starts_with("+10IDS_PERCENT "), "got {out}");
+    }
+
+    #[test]
+    fn label_only_renders_label_without_number() {
+        // patrolPlaneCount: Transform::LabelOnly. Renders the label id only, no
+        // digits or unit, and stays Some even when value equals the base.
+        let out = format_modifier(BUILD, "patrolPlaneCount", 0.0, Species::AirCarrier, &EchoLoader)
+            .expect("LabelOnly should render even when value == base");
+        assert_eq!(out, "IDS_PARAMS_MODIFIER_PATROLPLANECOUNT", "got {out}");
+        assert!(!out.chars().any(|c| c.is_ascii_digit()), "got {out}");
     }
 
     #[test]
