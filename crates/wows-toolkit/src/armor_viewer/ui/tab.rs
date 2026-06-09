@@ -1665,6 +1665,11 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
 
             let bounds = pane.loaded_armor.as_ref().map(|a| a.bounds);
 
+            let dt = vp_ui.ctx().input(|i| i.stable_dt);
+            if pane.viewport.camera.update_animation(dt) {
+                vp_ui.ctx().request_repaint();
+            }
+
             // Render to offscreen texture
             if let Some(tex_id) = pane.viewport.render(render_state, gpu_pipeline, pixel_size) {
                 let response = vp_ui.add(
@@ -1672,8 +1677,10 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         .sense(egui::Sense::click_and_drag()),
                 );
 
-                // Camera interaction
-                if pane.viewport.handle_input(&response, bounds) {
+                let gz_rect = pane.viewport.gizmo_rect(response.rect);
+                let gizmo_consumed = pane.viewport.handle_gizmo(&response, gz_rect);
+                let camera_interacted = if gizmo_consumed { true } else { pane.viewport.handle_input(&response, bounds) };
+                if camera_interacted {
                     vp_ui.ctx().request_repaint();
                     mirror_camera_signal.set(Some(pane_id));
                     active_pane_signal.set(Some(pane_id));
@@ -2081,6 +2088,9 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
 
                 // Draw disclaimer watermark
                 draw_viewport_watermark(vp_ui.painter(), response.rect);
+
+                let gz_rect = pane.viewport.gizmo_rect(response.rect);
+                pane.viewport.draw_gizmo(vp_ui.painter(), gz_rect);
             }
         } else {
             vp_ui.vertical_centered(|ui| {
