@@ -1438,6 +1438,12 @@ pub struct CrewSkillLogicTrigger {
     trigger_type: String,
 }
 
+impl CrewSkillLogicTrigger {
+    pub fn modifiers(&self) -> Option<&Vec<CrewSkillModifier>> {
+        self.modifiers.as_ref()
+    }
+}
+
 #[derive(Clone, Builder, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -1541,12 +1547,66 @@ impl CrewSkill {
         metadata_provider: &GameMetadataProvider,
         version: &Version,
     ) -> Option<String> {
+        self.translated_description_with(metadata_provider, version)
+    }
+
+    fn translated_description_with(
+        &self,
+        metadata: &dyn crate::data::ResourceLoader,
+        version: &Version,
+    ) -> Option<String> {
         let (primary, fallback) = self.skill_translation_keys("IDS_SKILL_DESC", version);
-        let description = metadata_provider
+        let description = metadata
             .localized_name_from_id(&primary)
-            .or_else(|| metadata_provider.localized_name_from_id(&fallback));
+            .or_else(|| metadata.localized_name_from_id(&fallback));
 
         description.and_then(|desc| if desc.is_empty() || desc == " " { None } else { Some(desc) })
+    }
+
+    /// Static localized description when present, else a description generated
+    /// from this skill's modifiers (and its logic-trigger modifiers, labeled as
+    /// triggered effects). Returns `None` when neither source yields any text.
+    pub fn description(
+        &self,
+        species: Species,
+        metadata: &GameMetadataProvider,
+        version: &Version,
+    ) -> Option<String> {
+        self.description_with(species, metadata, version)
+    }
+
+    fn description_with(
+        &self,
+        species: Species,
+        metadata: &dyn crate::data::ResourceLoader,
+        version: &Version,
+    ) -> Option<String> {
+        if let Some(d) = self.translated_description_with(metadata, version) {
+            return Some(d);
+        }
+        let build = version.build;
+        let mut lines: Vec<String> = Vec::new();
+        if let Some(mods) = self.modifiers() {
+            lines.extend(crate::game_params::modifier_settings_data::describe_modifiers(
+                build,
+                mods.iter().map(|m| (m.name(), m.get_for_species(&species))),
+                species,
+                metadata,
+            ));
+        }
+        if let Some(trig) = self.logic_trigger()
+            && let Some(tmods) = trig.modifiers()
+        {
+            for line in crate::game_params::modifier_settings_data::describe_modifiers(
+                build,
+                tmods.iter().map(|m| (m.name(), m.get_for_species(&species))),
+                species,
+                metadata,
+            ) {
+                lines.push(format!("{line} (when triggered)"));
+            }
+        }
+        (!lines.is_empty()).then(|| lines.join("\n"))
     }
 
     pub fn logic_trigger(&self) -> Option<&CrewSkillLogicTrigger> {
@@ -2308,6 +2368,157 @@ mod skill_name_tests {
         let n = CrewSkillName::from("TriggerSpreading");
         assert_eq!(n.as_str(), "TriggerSpreading");
         assert_eq!(n.to_string(), "TriggerSpreading");
+    }
+}
+
+#[cfg(test)]
+mod crew_skill_description_tests {
+    use super::*;
+    use crate::data::Version;
+
+    /// Returns any requested id verbatim, standing in for present static text.
+    struct EchoLoader;
+    impl crate::data::ResourceLoader for EchoLoader {
+        fn localized_name_from_param(&self, _param: &Param) -> Option<String> {
+            None
+        }
+        fn localized_name_from_id(&self, id: &str) -> Option<String> {
+            Some(id.to_string())
+        }
+        fn game_param_by_id(
+            &self,
+            _id: crate::game_types::GameParamId,
+        ) -> Option<crate::Rc<Param>> {
+            None
+        }
+        fn entity_specs(&self) -> &[crate::rpc::entitydefs::EntitySpec] {
+            &[]
+        }
+    }
+
+    /// Resolves only modifier label/unit ids, leaving skill description ids
+    /// empty so the generated path runs.
+    struct ModifierOnlyLoader;
+    impl crate::data::ResourceLoader for ModifierOnlyLoader {
+        fn localized_name_from_param(&self, _param: &Param) -> Option<String> {
+            None
+        }
+        fn localized_name_from_id(&self, id: &str) -> Option<String> {
+            if id.starts_with("IDS_SKILL_DESC") {
+                None
+            } else {
+                Some(id.to_string())
+            }
+        }
+        fn game_param_by_id(
+            &self,
+            _id: crate::game_types::GameParamId,
+        ) -> Option<crate::Rc<Param>> {
+            None
+        }
+        fn entity_specs(&self) -> &[crate::rpc::entitydefs::EntitySpec] {
+            &[]
+        }
+    }
+
+    const BUILD: u32 = 11791718;
+
+    fn version() -> Version {
+        Version { major: 13, minor: 0, patch: 0, build: BUILD }
+    }
+
+    fn tiers() -> CrewSkillTiers {
+        CrewSkillTiers::builder()
+            .aircraft_carrier(SkillPointCost::new(1))
+            .auxiliary(SkillPointCost::new(1))
+            .battleship(SkillPointCost::new(1))
+            .cruiser(SkillPointCost::new(1))
+            .destroyer(SkillPointCost::new(1))
+            .submarine(SkillPointCost::new(1))
+            .build()
+    }
+
+    fn uniform_modifier(name: &str, value: f32) -> CrewSkillModifier {
+        CrewSkillModifier::builder()
+            .name(name.to_owned())
+            .aircraft_carrier(value)
+            .auxiliary(value)
+            .battleship(value)
+            .cruiser(value)
+            .destroyer(value)
+            .submarine(value)
+            .excluded_consumables(Vec::new())
+            .build()
+    }
+
+    fn skill_with_modifiers(modifiers: Vec<CrewSkillModifier>) -> CrewSkill {
+        CrewSkill::builder()
+            .internal_name(CrewSkillName::from("GunFeeder"))
+            .can_be_learned(true)
+            .is_epic(false)
+            .skill_type(CrewSkillType::new(1))
+            .ui_treat_as_trigger(false)
+            .tier(tiers())
+            .modifiers(modifiers)
+            .build()
+    }
+
+    #[test]
+    fn static_description_wins_over_generated() {
+        // With a loader that resolves the skill desc id, description returns that
+        // static text and never falls through to modifier generation.
+        let skill = skill_with_modifiers(vec![uniform_modifier("GMRotationSpeed", 0.9)]);
+        let out = skill
+            .description_with(Species::Battleship, &EchoLoader, &version())
+            .expect("static description present");
+        assert!(out.contains("IDS_SKILL_DESC"), "expected static desc id, got {out}");
+        assert!(!out.contains("IDS_PARAMS_MODIFIER"), "should not generate, got {out}");
+    }
+
+    #[test]
+    fn generates_from_modifiers_when_static_absent() {
+        let skill = skill_with_modifiers(vec![uniform_modifier("GMRotationSpeed", 0.9)]);
+        let out = skill
+            .description_with(Species::Battleship, &ModifierOnlyLoader, &version())
+            .expect("modifier-generated description");
+        assert!(out.contains("IDS_PARAMS_MODIFIER_GMROTATIONSPEED"), "got {out}");
+        assert!(!out.contains("(when triggered)"), "plain modifier, got {out}");
+    }
+
+    #[test]
+    fn trigger_modifiers_are_labeled_when_triggered() {
+        let trigger = CrewSkillLogicTrigger::builder()
+            .consumable_type(String::new())
+            .cooling_delay(0.0)
+            .cooling_interpolator(Vec::new())
+            .duration(0.0)
+            .energy_coeff(0.0)
+            .heat_interpolator(Vec::new())
+            .modifiers(vec![uniform_modifier("GMRotationSpeed", 1.1)])
+            .trigger_desc_ids(String::new())
+            .trigger_type(String::new())
+            .build();
+        let skill = CrewSkill::builder()
+            .internal_name(CrewSkillName::from("GunFeeder"))
+            .can_be_learned(true)
+            .is_epic(false)
+            .skill_type(CrewSkillType::new(1))
+            .ui_treat_as_trigger(false)
+            .tier(tiers())
+            .logic_trigger(trigger)
+            .build();
+        let out = skill
+            .description_with(Species::Battleship, &ModifierOnlyLoader, &version())
+            .expect("trigger-generated description");
+        assert!(out.contains("(when triggered)"), "got {out}");
+        assert!(out.contains("IDS_PARAMS_MODIFIER_GMROTATIONSPEED"), "got {out}");
+    }
+
+    #[test]
+    fn no_text_yields_none() {
+        // No static desc and no modifiers means nothing to show.
+        let skill = skill_with_modifiers(Vec::new());
+        assert!(skill.description_with(Species::Battleship, &ModifierOnlyLoader, &version()).is_none());
     }
 }
 

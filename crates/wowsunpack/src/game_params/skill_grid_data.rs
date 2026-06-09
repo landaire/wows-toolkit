@@ -147,7 +147,7 @@ pub fn build_skill_grid(
                 internal_name: skill.internal_name().clone(),
                 skill_type: skill.skill_type(),
                 name: skill.translated_name(metadata, version),
-                description: skill.translated_description(metadata, version),
+                description: skill.description(species, metadata, version),
                 point_cost: Some(SkillPointCost::from_grid_row(slot.tier)),
                 learned: learned.contains(&skill.skill_type()),
             });
@@ -161,7 +161,7 @@ pub fn build_skill_grid(
                 internal_name: skill.internal_name().clone(),
                 skill_type: skill.skill_type(),
                 name: skill.translated_name(metadata, version),
-                description: skill.translated_description(metadata, version),
+                description: skill.description(species, metadata, version),
                 point_cost: point_cost_for_species(skill, species),
                 learned: true,
             })
