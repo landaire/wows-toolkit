@@ -1666,29 +1666,50 @@ pub fn draw_command_to_shapes(
         }
 
         DrawCommand::StatsRibbons { x, y, width, ribbons } => {
+            use wows_minimap_renderer::draw_command::{STATS_RIBBON_CELL_W, STATS_RIBBON_ICON, STATS_RIBBON_ROW_H};
             let padding = 8.0 * ws;
             let origin = transform.hud_pos(*x as f32, *y as f32);
             let inner_x = origin.x + padding;
-            let inner_w = (*width as f32 * ws - padding * 2.0) / 2.0;
-            let row_h = 20.0 * ws;
+            let inner_w = *width as f32 * ws - padding * 2.0;
+            let cell_w = STATS_RIBBON_CELL_W as f32 * ws;
+            let row_h = STATS_RIBBON_ROW_H as f32 * ws;
+            let icon_sz = STATS_RIBBON_ICON as f32 * ws;
             let font = game_font(14.0 * ws);
-            let name_color = Color32::from_rgb(180, 180, 180);
             let count_color = Color32::from_rgb(255, 220, 100);
+            let name_color = Color32::from_rgb(180, 180, 180);
 
-            for (i, rc) in ribbons.iter().take(12).enumerate() {
-                let col = i % 2;
-                let row = i / 2;
-                let rx = inner_x + col as f32 * inner_w;
-                let ry = origin.y + row as f32 * row_h;
-
-                let name_galley =
-                    ctx.fonts_mut(|f| f.layout_no_wrap(rc.display_name.clone(), font.clone(), name_color));
-                shapes.push(Shape::galley(Pos2::new(rx, ry), name_galley, Color32::TRANSPARENT));
-
+            let mut cur_x = inner_x;
+            let mut cur_y = origin.y;
+            for rc in ribbons.iter() {
+                if cur_x + cell_w > inner_x + inner_w {
+                    cur_x = inner_x;
+                    cur_y += row_h;
+                }
+                let sub_key = format!("sub{}", rc.icon_key);
+                let rib = textures.ribbon_icons.and_then(|m| m.get(&rc.icon_key));
+                let subrib = textures.subribbon_icons.and_then(|m| m.get(&sub_key));
+                let icon = if rc.is_subribbon { subrib.or(rib) } else { rib.or(subrib) };
                 let count_str = format!("x{}", rc.count);
-                let count_galley = ctx.fonts_mut(|f| f.layout_no_wrap(count_str, font.clone(), count_color));
-                let count_x = rx + inner_w - count_galley.size().x;
-                shapes.push(Shape::galley(Pos2::new(count_x, ry), count_galley, Color32::TRANSPARENT));
+                if let Some(tex) = icon {
+                    let mut mesh = egui::Mesh::with_texture(tex.id());
+                    let rect = Rect::from_min_size(Pos2::new(cur_x, cur_y), Vec2::splat(icon_sz));
+                    let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                    mesh.add_rect_with_uv(rect, uv, Color32::WHITE);
+                    shapes.push(Shape::Mesh(mesh.into()));
+                    let count_galley = ctx.fonts_mut(|f| f.layout_no_wrap(count_str, font.clone(), count_color));
+                    let count_x = cur_x + icon_sz + 2.0 * ws;
+                    let count_y = cur_y + (icon_sz - count_galley.size().y) / 2.0;
+                    shapes.push(Shape::galley(Pos2::new(count_x, count_y), count_galley, Color32::TRANSPARENT));
+                } else {
+                    let label = if rc.display_name.len() > 8 { &rc.display_name[..8] } else { &rc.display_name };
+                    let name_galley =
+                        ctx.fonts_mut(|f| f.layout_no_wrap(label.to_string(), font.clone(), name_color));
+                    shapes.push(Shape::galley(Pos2::new(cur_x, cur_y), name_galley, Color32::TRANSPARENT));
+                    let count_galley = ctx.fonts_mut(|f| f.layout_no_wrap(count_str, font.clone(), count_color));
+                    let count_x = cur_x + cell_w - count_galley.size().x;
+                    shapes.push(Shape::galley(Pos2::new(count_x, cur_y), count_galley, Color32::TRANSPARENT));
+                }
+                cur_x += cell_w;
             }
         }
 

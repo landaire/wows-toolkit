@@ -2634,39 +2634,69 @@ impl RenderTarget for ImageTarget {
                 }
             }
             DrawCommand::StatsRibbons { x, y, width, ribbons } => {
+                use crate::draw_command::{STATS_RIBBON_CELL_W, STATS_RIBBON_ICON, STATS_RIBBON_ROW_H};
                 let padding = 8;
                 let inner_x = *x + padding;
                 let inner_w = *width - padding * 2;
-                let col_w = inner_w / 2;
-                let row_h = 20;
                 let scale = self.fonts.scale(14.0);
 
-                for (i, rc) in ribbons.iter().take(12).enumerate() {
-                    let col = i % 2;
-                    let row = i / 2;
-                    let rx = inner_x + col as i32 * col_w;
-                    let ry = *y + row as i32 * row_h;
-
+                let mut cur_x = inner_x;
+                let mut cur_y = *y;
+                for rc in ribbons.iter() {
+                    if cur_x + STATS_RIBBON_CELL_W > inner_x + inner_w {
+                        cur_x = inner_x;
+                        cur_y += STATS_RIBBON_ROW_H;
+                    }
+                    let sub_key = format!("sub{}", rc.icon_key);
+                    let icon = if rc.is_subribbon {
+                        self.subribbon_icons.get(&sub_key).or_else(|| self.ribbon_icons.get(&rc.icon_key))
+                    } else {
+                        self.ribbon_icons.get(&rc.icon_key).or_else(|| self.subribbon_icons.get(&sub_key))
+                    };
                     let count_str = format!("x{}", rc.count);
-                    draw_text_shadow(
-                        &mut self.canvas,
-                        [180, 180, 180],
-                        rx,
-                        ry,
-                        scale,
-                        &self.fonts.primary,
-                        &rc.display_name,
-                    );
-                    let (tw, _) = text_size(scale, &self.fonts.primary, &count_str);
-                    draw_text_shadow(
-                        &mut self.canvas,
-                        [255, 220, 100],
-                        rx + col_w - tw as i32,
-                        ry,
-                        scale,
-                        &self.fonts.primary,
-                        &count_str,
-                    );
+                    if let Some(img) = icon {
+                        let icon_sz = STATS_RIBBON_ICON as u32;
+                        let resized = image::imageops::resize(img, icon_sz, icon_sz, image::imageops::FilterType::Lanczos3);
+                        draw_icon_at(&mut self.canvas, &resized, cur_x, cur_y);
+                        let count_x = cur_x + STATS_RIBBON_ICON + 2;
+                        let (_, th) = text_size(scale, &self.fonts.primary, &count_str);
+                        let count_y = cur_y + (STATS_RIBBON_ICON as i32 - th as i32) / 2;
+                        draw_text_shadow(
+                            &mut self.canvas,
+                            [255, 220, 100],
+                            count_x,
+                            count_y,
+                            scale,
+                            &self.fonts.primary,
+                            &count_str,
+                        );
+                    } else {
+                        let label = if rc.display_name.len() > 8 {
+                            &rc.display_name[..8]
+                        } else {
+                            &rc.display_name
+                        };
+                        draw_text_shadow(
+                            &mut self.canvas,
+                            [180, 180, 180],
+                            cur_x,
+                            cur_y,
+                            scale,
+                            &self.fonts.primary,
+                            label,
+                        );
+                        let (tw, _) = text_size(scale, &self.fonts.primary, &count_str);
+                        draw_text_shadow(
+                            &mut self.canvas,
+                            [255, 220, 100],
+                            cur_x + STATS_RIBBON_CELL_W - tw as i32,
+                            cur_y,
+                            scale,
+                            &self.fonts.primary,
+                            &count_str,
+                        );
+                    }
+                    cur_x += STATS_RIBBON_CELL_W;
                 }
             }
             DrawCommand::StatsActivityFeed { x, y, width, height, entries } => {

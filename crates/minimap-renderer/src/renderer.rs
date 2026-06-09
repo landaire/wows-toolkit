@@ -49,6 +49,8 @@ use crate::draw_command::DrawCommand;
 use crate::draw_command::FontHint;
 use crate::draw_command::KillFeedEntry;
 use crate::draw_command::RibbonCount;
+use crate::draw_command::STATS_RIBBON_CELL_W;
+use crate::draw_command::STATS_RIBBON_ROW_H;
 use crate::draw_command::ShipConfigCircleKind;
 use crate::draw_command::ShipVisibility;
 use crate::map_data;
@@ -2332,7 +2334,10 @@ impl<'a> MinimapRenderer<'a> {
             // Sort merged entries by game clock
             activity_entries.sort_by(|a, b| a.clock.cmp(&b.clock));
 
-            let ribbon_section_height = (ribbon_count.min(12) as i32 + 1) / 2 * 20 + 8; // 2-column grid
+            let inner_w = panel_w - 16;
+            let per_row = (inner_w / STATS_RIBBON_CELL_W).max(1);
+            let rows = ((ribbon_count as i32) + per_row - 1) / per_row;
+            let ribbon_section_height = rows * STATS_RIBBON_ROW_H + 8;
             let feed_y = ribbon_y + ribbon_section_height;
             let feed_height = (MINIMAP_SIZE as i32 + HUD_HEIGHT as i32) - feed_y;
             commands.push(DrawCommand::StatsActivityFeed {
