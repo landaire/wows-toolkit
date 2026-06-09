@@ -466,7 +466,7 @@ impl From<u32> for ShotId {
 /// (positions, velocities, directions). Domain newtypes wrap this and gate which
 /// values can be mixed with which.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct Vec3 {
     pub x: f32,
@@ -530,7 +530,7 @@ impl Vec3 {
 
 /// Base 2-component vector. Shared arithmetic for 2D quantities.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct Vec2 {
     pub x: f32,

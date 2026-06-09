@@ -47,18 +47,18 @@ pub(crate) fn build_camera_ellipse_mesh(
     let mut verts: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    let cx = ring.pos_center[0];
-    let cy = ring.pos_center[1] + waterline_dy;
-    let cz = ring.pos_center[2];
+    let cx = ring.pos_center.x;
+    let cy = ring.pos_center.y + waterline_dy;
+    let cz = ring.pos_center.z;
     let center = Vec3::new(cx, cy, cz);
 
     let x_axis = Vec3::x();
     let z_axis = Vec3::z();
 
-    let mut prev = center + x_axis * ring.semi_axis_h;
+    let mut prev = center + x_axis * ring.semi_axes.x;
     for i in 1..=RING_SEGMENTS {
         let t = (i as f32 / RING_SEGMENTS as f32) * std::f32::consts::TAU;
-        let p = center + x_axis * (t.cos() * ring.semi_axis_h) + z_axis * (t.sin() * ring.semi_axis_v);
+        let p = center + x_axis * (t.cos() * ring.semi_axes.x) + z_axis * (t.sin() * ring.semi_axes.y);
         push_segment(&mut verts, &mut indices, prev, p, color);
         prev = p;
     }
@@ -72,6 +72,26 @@ pub(crate) fn build_camera_ellipse_mesh(
     }
 
     (verts, indices)
+}
+
+/// Model-space points around one resolved ring, matching the drawn ellipse
+/// (`waterline_dy` folded into Y). Used for screen-space cursor proximity.
+pub(crate) fn sample_ring_points(ring: &CameraRing, waterline_dy: f32, n: usize) -> Vec<Vec3> {
+    let center = Vec3::new(ring.pos_center.x, ring.pos_center.y + waterline_dy, ring.pos_center.z);
+    (0..n)
+        .map(|i| {
+            let t = (i as f32 / n as f32) * std::f32::consts::TAU;
+            center + Vec3::x() * (t.cos() * ring.semi_axes.x) + Vec3::z() * (t.sin() * ring.semi_axes.y)
+        })
+        .collect()
+}
+
+/// Terse hover label for one ring: which mode/orbit it is and its key values.
+pub(crate) fn ring_label(mode: &str, kind: &str, fov_tag: &str, ring: &CameraRing) -> String {
+    format!(
+        "{mode} {kind} ({fov_tag})\ny {:.2}  semiH {:.2}  semiV {:.2}",
+        ring.pos_center.y, ring.semi_axes.x, ring.semi_axes.y
+    )
 }
 
 /// A 3-axis cross marker centered at `center` (model space), each arm `half` long.
@@ -89,7 +109,8 @@ mod tests {
     use super::*;
 
     fn ring() -> CameraRing {
-        CameraRing { pos_center: [0.0, 1.958, 0.0], semi_axis_h: 6.552, semi_axis_v: 9.6 }
+        use wowsunpack::game_types::{Vec2 as CoreVec2, Vec3 as CoreVec3};
+        CameraRing { pos_center: CoreVec3::new(0.0, 1.958, 0.0), semi_axes: CoreVec2::new(6.552, 9.6) }
     }
 
     #[test]
@@ -130,5 +151,30 @@ mod tests {
         }
         let max_coord = verts.iter().flat_map(|v| v.position).map(f32::abs).fold(0.0_f32, f32::max);
         assert!(max_coord <= half + LINE_WIDTH, "max coord {max_coord} exceeds half+line_width");
+    }
+
+    #[test]
+    fn sample_points_count_and_extents() {
+        let pts = sample_ring_points(&ring(), 0.0, 32);
+        assert_eq!(pts.len(), 32);
+        let max_x = pts.iter().map(|p| p.x).fold(f32::MIN, f32::max);
+        let max_z = pts.iter().map(|p| p.z).fold(f32::MIN, f32::max);
+        assert!((max_x - 6.552).abs() < 0.3, "max_x={max_x}");
+        assert!((max_z - 9.6).abs() < 0.3, "max_z={max_z}");
+    }
+
+    #[test]
+    fn sample_points_y_includes_waterline() {
+        for p in sample_ring_points(&ring(), 0.5, 16) {
+            assert!((p.y - (1.958 + 0.5)).abs() < 1e-4, "y={}", p.y);
+        }
+    }
+
+    #[test]
+    fn ring_label_has_name_and_values() {
+        let label = ring_label("Observe", "outer", "FOV max", &ring());
+        assert!(label.contains("Observe outer (FOV max)"), "{label}");
+        assert!(label.contains("semiH 6.55"), "{label}");
+        assert!(label.contains("semiV 9.60"), "{label}");
     }
 }

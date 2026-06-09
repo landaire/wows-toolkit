@@ -277,6 +277,15 @@ pub struct ArmorTriangleTooltip {
     pub color: [f32; 4],
 }
 
+/// One camera-ellipse ring's hover target: its resolved geometry plus the
+/// tooltip text to show when the cursor is near it.
+#[derive(Clone, Debug)]
+pub struct CameraRingHover {
+    pub label: String,
+    pub ring: wowsunpack::game_params::types::CameraRing,
+    pub waterline_dy: f32,
+}
+
 /// Data for a loaded ship's armor.
 #[allow(dead_code)]
 pub struct LoadedShipArmor {
@@ -496,6 +505,8 @@ pub struct ArmorPane {
     pub camera_ellipse_mode: String,
     /// Tracked overlay mesh ids for the camera ellipse, removed before re-upload.
     pub camera_ellipse_mesh_ids: Vec<crate::viewport_3d::MeshId>,
+    /// Per-ring hover targets for the camera ellipse, rebuilt each upload.
+    pub camera_ring_hovers: Vec<CameraRingHover>,
     /// Show a 3-axis cross at the model origin (0,0,0) in the overlay layer.
     pub show_ship_center: bool,
     /// Tracked overlay mesh ids for the ship-center marker, removed before re-upload.
@@ -591,6 +602,7 @@ impl ArmorPane {
             show_camera_ellipse: false,
             camera_ellipse_mode: "Artillery".to_string(),
             camera_ellipse_mesh_ids: Vec::new(),
+            camera_ring_hovers: Vec::new(),
             show_ship_center: false,
             center_marker_mesh_ids: Vec::new(),
             camera_fov: 0.0,

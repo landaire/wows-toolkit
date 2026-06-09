@@ -43,6 +43,8 @@ use crate::error::GameDataError;
 #[cfg(feature = "vfs")]
 use crate::game_params::convert::game_params_to_pickle;
 use crate::game_types::GameParamId;
+use crate::game_types::Vec2;
+use crate::game_types::Vec3;
 use crate::rpc::entitydefs::EntitySpec;
 #[cfg(feature = "vfs")]
 use crate::rpc::entitydefs::parse_scripts;
@@ -596,9 +598,39 @@ fn read_vec3_at(v: &Value, idx: usize) -> Option<[f32; 3]> {
     }
 }
 
+fn read_ignore_height(v: Option<&Value>) -> bool {
+    v.map(|v| {
+        if let Some(b) = v.bool_ref() {
+            *b
+        } else {
+            v.i64_ref().map(|i| *i != 0).unwrap_or(false)
+        }
+    })
+    .unwrap_or(false)
+}
+
+/// Parse one trajectory dict's orbit geometry: both posCenter FOV endpoints,
+/// the per-endpoint ellipse radii, and the height gate. Returns `None` if any
+/// are missing. `semi_axes[i]` carries `(semiAxisH, semiAxisV)` for FOV endpoint `i`.
+fn read_trajectory_geometry(traj: &Value) -> Option<TrajectoryGeometry> {
+    let dict = traj.dict_or_object_dict()?;
+    let guard = dict.inner();
+    let pc_val = guard.get(&pk("posCenter"));
+    let pc0 = pc_val.and_then(|v| read_vec3_at(v, 0))?;
+    let pc1 = pc_val.and_then(|v| read_vec3_at(v, 1))?;
+    let h = guard.get(&pk("semiAxisH")).and_then(read_pair_both)?;
+    let v = guard.get(&pk("semiAxisV")).and_then(read_pair_both)?;
+    Some(TrajectoryGeometry {
+        pos_center: [Vec3::new(pc0[0], pc0[1], pc0[2]), Vec3::new(pc1[0], pc1[1], pc1[2])],
+        semi_axes: [Vec2::new(h[0], v[0]), Vec2::new(h[1], v[1])],
+        ignore_height_multiplier: read_ignore_height(guard.get(&pk("ignoreHeightMultiplier"))),
+    })
+}
+
 /// Read camera orbit trajectories from a ship's pickled `ship_data` dict.
 /// Returns `(mode_name, trajectory)` per mode with a readable `InnerTrajectory`,
-/// sorted by mode name; missing/malformed entries are skipped.
+/// sorted by mode name; missing/malformed entries are skipped. A mode's
+/// `OuterTrajectory` is read into `outer` when present.
 pub fn read_camera_trajectories(ship_data: &BTreeMap<HashableValue, Value>) -> Vec<(String, CameraTrajectory)> {
     let Some(cameras) = ship_data.get(&pk("Cameras")).and_then(|v| v.dict_or_object_dict()) else {
         return Vec::new();
@@ -609,17 +641,7 @@ pub fn read_camera_trajectories(ship_data: &BTreeMap<HashableValue, Value>) -> V
         let Some(name) = key.string_ref().map(|s| s.inner().to_string()) else { continue; };
         let Some(mode) = val.dict_or_object_dict() else { continue; };
         let mode_guard = mode.inner();
-        let Some(inner_traj) = mode_guard.get(&pk("InnerTrajectory")).and_then(|v| v.dict_or_object_dict()) else {
-            continue;
-        };
-        let inner_guard = inner_traj.inner();
-        let pc_val = inner_guard.get(&pk("posCenter"));
-        let (Some(pc0), Some(pc1), Some(semi_axis_h), Some(semi_axis_v)) = (
-            pc_val.and_then(|v| read_vec3_at(v, 0)),
-            pc_val.and_then(|v| read_vec3_at(v, 1)),
-            inner_guard.get(&pk("semiAxisH")).and_then(read_pair_both),
-            inner_guard.get(&pk("semiAxisV")).and_then(read_pair_both),
-        ) else {
+        let Some(inner) = mode_guard.get(&pk("InnerTrajectory")).and_then(read_trajectory_geometry) else {
             continue;
         };
         let tags = mode_guard
@@ -627,22 +649,13 @@ pub fn read_camera_trajectories(ship_data: &BTreeMap<HashableValue, Value>) -> V
             .and_then(|v| v.string_ref())
             .map(|s| s.inner().to_string())
             .unwrap_or_default();
-        let ignore_height_multiplier = inner_guard
-            .get(&pk("ignoreHeightMultiplier"))
-            .map(|v| {
-                if let Some(b) = v.bool_ref() {
-                    *b
-                } else {
-                    v.i64_ref().map(|i| *i != 0).unwrap_or(false)
-                }
-            })
-            .unwrap_or(false);
+        let outer = mode_guard.get(&pk("OuterTrajectory")).and_then(read_trajectory_geometry);
         out.push((name, CameraTrajectory {
-            pos_center: [pc0, pc1],
-            semi_axis_h,
-            semi_axis_v,
+            pos_center: inner.pos_center,
+            semi_axes: inner.semi_axes,
             tags,
-            ignore_height_multiplier,
+            ignore_height_multiplier: inner.ignore_height_multiplier,
+            outer,
         }));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1656,12 +1669,12 @@ mod camera_tests {
         assert_eq!(result.len(), 1);
         let (name, traj) = &result[0];
         assert_eq!(name, "TestMode");
-        assert!((traj.pos_center[0][1] - 1.958_f32).abs() < 1e-4);
-        assert!((traj.pos_center[1][1] - 2.008_f32).abs() < 1e-4);
-        assert!((traj.semi_axis_h[0] - 6.552_f32).abs() < 1e-4);
-        assert!((traj.semi_axis_h[1] - 5.981_f32).abs() < 1e-4);
-        assert!((traj.semi_axis_v[0] - 4.123_f32).abs() < 1e-4);
-        assert!((traj.semi_axis_v[1] - 3.999_f32).abs() < 1e-4);
+        assert!((traj.pos_center[0].y - 1.958_f32).abs() < 1e-4);
+        assert!((traj.pos_center[1].y - 2.008_f32).abs() < 1e-4);
+        assert!((traj.semi_axes[0].x - 6.552_f32).abs() < 1e-4);
+        assert!((traj.semi_axes[1].x - 5.981_f32).abs() < 1e-4);
+        assert!((traj.semi_axes[0].y - 4.123_f32).abs() < 1e-4);
+        assert!((traj.semi_axes[1].y - 3.999_f32).abs() < 1e-4);
         // defaults when tags/ignoreHeightMultiplier are absent
         assert_eq!(traj.tags, "");
         assert!(!traj.ignore_height_multiplier);
@@ -1699,6 +1712,47 @@ mod camera_tests {
         let result = read_camera_trajectories(&ship_data);
         assert_eq!(result.len(), 1);
         assert!(result[0].1.ignore_height_multiplier);
+    }
+
+    fn build_outer_traj() -> Value {
+        let pos_center = list(vec![
+            list(vec![fv(0.0), fv(4.199), fv(0.0)]),
+            list(vec![fv(0.0), fv(6.023), fv(0.0)]),
+        ]);
+        dict(vec![
+            (pk("posCenter"), pos_center),
+            (pk("semiAxisH"), list(vec![fv(18.785), fv(17.315)])),
+            (pk("semiAxisV"), list(vec![fv(12.5), fv(11.0)])),
+        ])
+    }
+
+    #[test]
+    fn read_camera_trajectories_parses_outer_trajectory() {
+        let mode = dict(vec![
+            (pk("InnerTrajectory"), build_inner_traj(vec![])),
+            (pk("OuterTrajectory"), build_outer_traj()),
+        ]);
+        let cameras = dict(vec![(pk("PairMode"), mode)]);
+        let ship_data: BTreeMap<HashableValue, Value> =
+            [(pk("Cameras"), cameras)].into_iter().collect();
+        let result = read_camera_trajectories(&ship_data);
+        assert_eq!(result.len(), 1);
+        let outer = result[0].1.outer.as_ref().expect("outer parsed");
+        assert!((outer.pos_center[0].y - 4.199_f32).abs() < 1e-4);
+        assert!((outer.pos_center[1].y - 6.023_f32).abs() < 1e-4);
+        assert!((outer.semi_axes[0].x - 18.785_f32).abs() < 1e-4);
+        assert!((outer.semi_axes[0].y - 12.5_f32).abs() < 1e-4);
+        assert!((outer.semi_axes[1].y - 11.0_f32).abs() < 1e-4);
+    }
+
+    #[test]
+    fn read_camera_trajectories_outer_absent_is_none() {
+        let mode = dict(vec![(pk("InnerTrajectory"), build_inner_traj(vec![]))]);
+        let cameras = dict(vec![(pk("NoOuter"), mode)]);
+        let ship_data: BTreeMap<HashableValue, Value> =
+            [(pk("Cameras"), cameras)].into_iter().collect();
+        let result = read_camera_trajectories(&ship_data);
+        assert!(result[0].1.outer.is_none());
     }
 
     #[test]

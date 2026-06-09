@@ -9,6 +9,8 @@ use crate::data::ResourceLoader;
 use crate::data::Version;
 use crate::game_types::GameParamId;
 use crate::game_types::GunId;
+use crate::game_types::Vec2;
+use crate::game_types::Vec3;
 
 /// Friendly game version (major, minor, patch) at which the captain-skill rework
 /// landed. Before this, a captain's learned skills are a single `learnedSkills`
@@ -1077,26 +1079,43 @@ impl HullUpgradeConfig {
 }
 
 /// One camera orbit trajectory from a ship's `Cameras` component.
-/// Values are raw ship-model units, ship-local: `pos_center` is the orbit center,
-/// `semi_axis_h` the radius along the beam (model X), `semi_axis_v` along the length (model Z).
-/// Index 0 and 1 are the FOV-range endpoints; the active value is `lerp(v[0], v[1], fov)`.
+/// Values are raw ship-model units, ship-local. `pos_center` holds the two
+/// FOV-range endpoints; the active point is `pos_center[0].lerp(pos_center[1], fov)`.
+/// `semi_axes` are the ellipse radii per endpoint: `.x` along the beam (model X),
+/// `.y` along the length (model Z).
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct CameraTrajectory {
-    pub pos_center: [[f32; 3]; 2],
-    pub semi_axis_h: [f32; 2],
-    pub semi_axis_v: [f32; 2],
+    pub pos_center: [Vec3; 2],
+    pub semi_axes: [Vec2; 2],
     pub tags: String,
+    pub ignore_height_multiplier: bool,
+    /// The scrolled-out orbit, when the mode defines one. Carries the same
+    /// FOV-endpoint layout as the inner trajectory and its own height gate;
+    /// `tags` are shared from the parent mode.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub outer: Option<TrajectoryGeometry>,
+}
+
+/// Authored orbit geometry for one trajectory (inner or outer): both posCenter
+/// FOV endpoints, the per-endpoint ellipse radii, and the height gate. Distinct
+/// from [`CameraRing`], which is a single resolved ring.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct TrajectoryGeometry {
+    pub pos_center: [Vec3; 2],
+    pub semi_axes: [Vec2; 2],
     pub ignore_height_multiplier: bool,
 }
 
 /// Resolved camera ring for a specific FOV blend and height offset.
+/// `semi_axes.x` is the beam (model X) radius, `.y` the length (model Z) radius.
 #[derive(Debug, Clone, Copy)]
 pub struct CameraRing {
-    pub pos_center: [f32; 3],
-    pub semi_axis_h: f32,
-    pub semi_axis_v: f32,
+    pub pos_center: Vec3,
+    pub semi_axes: Vec2,
 }
 
 // From CameraConstants.py heightMultiplierTags / innerOnlyHeightMultiplierTags.
@@ -1106,33 +1125,49 @@ const INNER_ONLY_TAGS: &[u8] = b"BbP";
 const HEIGHT_COEF: f32 = 2.0;
 
 impl CameraTrajectory {
-    fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
-        [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
-    }
-
-    fn height_applies(&self) -> bool {
-        !self.ignore_height_multiplier
+    fn height_applies(&self, ignore_height_multiplier: bool) -> bool {
+        !ignore_height_multiplier
             && self.tags.bytes().any(|c| HEIGHT_TAGS.contains(&c))
             && !self.tags.bytes().any(|c| INNER_ONLY_TAGS.contains(&c))
     }
 
-    /// FOV blend only (height = 0).
-    pub fn ring(&self, fov: f32) -> CameraRing {
+    fn blend_ring(pos_center: &[Vec3; 2], semi_axes: &[Vec2; 2], fov: f32) -> CameraRing {
         let f = fov.clamp(0.0, 1.0);
         CameraRing {
-            pos_center: Self::lerp3(self.pos_center[0], self.pos_center[1], f),
-            semi_axis_h: self.semi_axis_h[0] + (self.semi_axis_h[1] - self.semi_axis_h[0]) * f,
-            semi_axis_v: self.semi_axis_v[0] + (self.semi_axis_v[1] - self.semi_axis_v[0]) * f,
+            pos_center: pos_center[0].lerp(pos_center[1], f),
+            semi_axes: semi_axes[0].lerp(semi_axes[1], f),
         }
+    }
+
+    /// FOV blend only (height = 0).
+    pub fn ring(&self, fov: f32) -> CameraRing {
+        Self::blend_ring(&self.pos_center, &self.semi_axes, fov)
     }
 
     /// FOV blend plus the game's gated height shift on posCenter.y.
     pub fn resolve(&self, fov: f32, height: f32) -> CameraRing {
         let mut r = self.ring(fov);
-        if self.height_applies() {
-            r.pos_center[1] += HEIGHT_COEF * height;
+        if self.height_applies(self.ignore_height_multiplier) {
+            r.pos_center.y += HEIGHT_COEF * height;
         }
         r
+    }
+
+    /// The outer orbit at the given FOV blend, when this mode defines one.
+    pub fn outer_ring(&self, fov: f32) -> Option<CameraRing> {
+        let o = self.outer.as_ref()?;
+        Some(Self::blend_ring(&o.pos_center, &o.semi_axes, fov))
+    }
+
+    /// Outer orbit FOV blend plus the gated height shift, when this mode
+    /// defines an outer trajectory.
+    pub fn resolve_outer(&self, fov: f32, height: f32) -> Option<CameraRing> {
+        let o = self.outer.as_ref()?;
+        let mut r = self.outer_ring(fov)?;
+        if self.height_applies(o.ignore_height_multiplier) {
+            r.pos_center.y += HEIGHT_COEF * height;
+        }
+        Some(r)
     }
 }
 
@@ -1142,42 +1177,77 @@ mod camera_ring_tests {
 
     fn traj(tags: &str, ignore: bool) -> CameraTrajectory {
         CameraTrajectory {
-            pos_center: [[0.0, 1.958, 0.0], [0.0, 2.008, 0.0]],
-            semi_axis_h: [6.552, 5.981],
-            semi_axis_v: [9.6, 9.6],
+            pos_center: [Vec3::new(0.0, 1.958, 0.0), Vec3::new(0.0, 2.008, 0.0)],
+            semi_axes: [Vec2::new(6.552, 9.6), Vec2::new(5.981, 9.6)],
             tags: tags.to_string(),
             ignore_height_multiplier: ignore,
+            outer: None,
         }
     }
 
     #[test]
     fn fov0_is_inner() {
         let r = traj("AT", false).resolve(0.0, 0.0);
-        assert!((r.semi_axis_h - 6.552).abs() < 1e-4 && (r.pos_center[1] - 1.958).abs() < 1e-4);
+        assert!((r.semi_axes.x - 6.552).abs() < 1e-4 && (r.pos_center.y - 1.958).abs() < 1e-4);
     }
 
     #[test]
     fn fov1_is_outer() {
         let r = traj("AT", false).resolve(1.0, 0.0);
-        assert!((r.semi_axis_h - 5.981).abs() < 1e-4 && (r.pos_center[1] - 2.008).abs() < 1e-4);
+        assert!((r.semi_axes.x - 5.981).abs() < 1e-4 && (r.pos_center.y - 2.008).abs() < 1e-4);
     }
 
     #[test]
     fn height_applies_for_artillery() {
         let r = traj("AT", false).resolve(0.0, 1.0);
-        assert!((r.pos_center[1] - (1.958 + 2.0)).abs() < 1e-4);
+        assert!((r.pos_center.y - (1.958 + 2.0)).abs() < 1e-4);
     }
 
     #[test]
     fn height_skipped_for_periscope() {
         let r = traj("B", false).resolve(0.0, 1.0);
-        assert!((r.pos_center[1] - 1.958).abs() < 1e-4);
+        assert!((r.pos_center.y - 1.958).abs() < 1e-4);
     }
 
     #[test]
     fn height_skipped_when_ignored() {
         let r = traj("AT", true).resolve(0.0, 1.0);
-        assert!((r.pos_center[1] - 1.958).abs() < 1e-4);
+        assert!((r.pos_center.y - 1.958).abs() < 1e-4);
+    }
+
+    fn traj_with_outer() -> CameraTrajectory {
+        let mut t = traj("AT", false);
+        t.outer = Some(TrajectoryGeometry {
+            pos_center: [Vec3::new(0.0, 4.199, 0.0), Vec3::new(0.0, 6.023, 0.0)],
+            semi_axes: [Vec2::new(18.785, 18.785), Vec2::new(17.315, 17.315)],
+            ignore_height_multiplier: false,
+        });
+        t
+    }
+
+    #[test]
+    fn resolve_outer_absent_returns_none() {
+        assert!(traj("AT", false).resolve_outer(0.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn resolve_outer_fov0_uses_first_endpoint() {
+        let r = traj_with_outer().resolve_outer(0.0, 0.0).expect("outer present");
+        assert!((r.semi_axes.x - 18.785).abs() < 1e-4);
+        assert!((r.pos_center.y - 4.199).abs() < 1e-4);
+    }
+
+    #[test]
+    fn resolve_outer_fov1_uses_second_endpoint() {
+        let r = traj_with_outer().resolve_outer(1.0, 0.0).expect("outer present");
+        assert!((r.semi_axes.y - 17.315).abs() < 1e-4);
+        assert!((r.pos_center.y - 6.023).abs() < 1e-4);
+    }
+
+    #[test]
+    fn resolve_outer_height_applies_for_artillery() {
+        let r = traj_with_outer().resolve_outer(0.0, 1.0).expect("outer present");
+        assert!((r.pos_center.y - (4.199 + 2.0)).abs() < 1e-4);
     }
 }
 

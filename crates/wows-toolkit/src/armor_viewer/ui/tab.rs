@@ -1178,25 +1178,37 @@ pub(crate) fn upload_armor_to_viewport(
     for mid in pane.camera_ellipse_mesh_ids.drain(..) {
         pane.viewport.remove_mesh(mid);
     }
+    pane.camera_ring_hovers.clear();
     if pane.show_camera_ellipse {
         let mode = pane.camera_ellipse_mode.clone();
         let fov = pane.camera_fov;
         let height = pane.camera_height;
         if let Some((_, traj)) = armor.camera_trajectories.iter().find(|(name, _)| *name == mode) {
-            let solid = traj.resolve(fov, height);
-            let (sv, si) = crate::armor_viewer::camera_ellipse::build_camera_ellipse_mesh(
-                &solid, armor.waterline_dy, [0.0, 0.9, 1.0, 1.0], true);
-            if !si.is_empty() {
-                let id = pane.viewport.add_non_pickable_mesh(device, &sv, &si, LAYER_OVERLAY);
-                pane.camera_ellipse_mesh_ids.push(id);
+            use crate::armor_viewer::camera_ellipse::{build_camera_ellipse_mesh, ring_label};
+            use crate::armor_viewer::state::CameraRingHover;
+            let waterline_dy = armor.waterline_dy;
+            let viewport = &mut pane.viewport;
+            let mesh_ids = &mut pane.camera_ellipse_mesh_ids;
+            let hovers = &mut pane.camera_ring_hovers;
+            let mut push_ring = |kind: &str, tag: &str, ring: wowsunpack::game_params::types::CameraRing, color: [f32; 4], markers: bool| {
+                let (verts, indices) = build_camera_ellipse_mesh(&ring, waterline_dy, color, markers);
+                if !indices.is_empty() {
+                    mesh_ids.push(viewport.add_non_pickable_mesh(device, &verts, &indices, LAYER_OVERLAY));
+                }
+                hovers.push(CameraRingHover { label: ring_label(&mode, kind, tag, &ring), ring, waterline_dy });
+            };
+            // Inner orbit (scrolled in): cyan. Solid at the current FOV, faint at the FOV extremes.
+            push_ring("inner", "current FOV", traj.resolve(fov, height), [0.0, 0.9, 1.0, 1.0], true);
+            for (f, tag) in [(0.0_f32, "FOV min"), (1.0, "FOV max")] {
+                push_ring("inner", tag, traj.resolve(f, height), [0.0, 0.9, 1.0, 0.25], false);
             }
-            for fov_end in [0.0_f32, 1.0] {
-                let ring = traj.resolve(fov_end, height);
-                let (ev, ei) = crate::armor_viewer::camera_ellipse::build_camera_ellipse_mesh(
-                    &ring, armor.waterline_dy, [0.0, 0.9, 1.0, 0.25], false);
-                if !ei.is_empty() {
-                    let id = pane.viewport.add_non_pickable_mesh(device, &ev, &ei, LAYER_OVERLAY);
-                    pane.camera_ellipse_mesh_ids.push(id);
+            // Outer orbit (scrolled out): amber, drawn at its own raised posCenter height.
+            if let Some(ring) = traj.resolve_outer(fov, height) {
+                push_ring("outer", "current FOV", ring, [1.0, 0.6, 0.1, 1.0], true);
+                for (f, tag) in [(0.0_f32, "FOV min"), (1.0, "FOV max")] {
+                    if let Some(ring) = traj.resolve_outer(f, height) {
+                        push_ring("outer", tag, ring, [1.0, 0.6, 0.1, 0.25], false);
+                    }
                 }
             }
         }
@@ -4700,6 +4712,45 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
     zone_changed
 }
 
+/// Distance in pixels from `p` to segment `a`-`b`.
+fn dist_point_segment(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
+    let abx = b.x - a.x;
+    let aby = b.y - a.y;
+    let len2 = abx * abx + aby * aby;
+    if len2 <= f32::EPSILON {
+        return p.distance(a);
+    }
+    let t = (((p.x - a.x) * abx + (p.y - a.y) * aby) / len2).clamp(0.0, 1.0);
+    p.distance(egui::pos2(a.x + abx * t, a.y + aby * t))
+}
+
+/// Label of the camera ring whose projected curve is nearest the cursor, if one
+/// is within the hover threshold. Thin overlay rings can't be reliably
+/// ray-picked, so this measures screen-space distance to the projected polyline.
+fn nearest_camera_ring_label(pane: &ArmorPane, rect: egui::Rect, cursor: egui::Pos2) -> Option<String> {
+    if !pane.show_camera_ellipse {
+        return None;
+    }
+    const THRESHOLD_PX: f32 = 8.0;
+    let mut best: Option<(f32, &str)> = None;
+    for hover in &pane.camera_ring_hovers {
+        let pts: Vec<Option<egui::Pos2>> = crate::armor_viewer::camera_ellipse::sample_ring_points(&hover.ring, hover.waterline_dy, 96)
+            .into_iter()
+            .map(|p| pane.viewport.camera.project_to_screen(pane.viewport.pos_to_world_space(p), rect))
+            .collect();
+        let mut min_d = f32::MAX;
+        for i in 0..pts.len() {
+            if let (Some(a), Some(b)) = (pts[i], pts[(i + 1) % pts.len()]) {
+                min_d = min_d.min(dist_point_segment(cursor, a, b));
+            }
+        }
+        if best.is_none_or(|(d, _)| min_d < d) {
+            best = Some((min_d, hover.label.as_str()));
+        }
+    }
+    best.filter(|(d, _)| *d <= THRESHOLD_PX).map(|(_, l)| l.to_string())
+}
+
 /// Handle viewport hover (tooltip + highlight), click-to-hide, and right-click context menu.
 /// Returns true if visibility changed (zone_changed).
 #[allow(clippy::too_many_arguments)]
@@ -4721,6 +4772,15 @@ pub(crate) fn handle_plate_interaction(
     if response.hovered()
         && let Some(hover_pos) = response.hover_pos()
     {
+        // A camera ring under the cursor takes the tooltip; the plate behind it still picks for clicks.
+        let ring_label = nearest_camera_ring_label(pane, response.rect, hover_pos);
+        if let Some(label) = &ring_label
+            && !context_menu_open
+        {
+            egui::containers::Tooltip::for_widget(response).at_pointer().show(|ui| {
+                ui.add(egui::Label::new(label.as_str()).wrap_mode(egui::TextWrapMode::Extend));
+            });
+        }
         if let Some(hit) = pane.viewport.pick(hover_pos, response.rect) {
             let tooltip = pane
                 .mesh_triangle_info
@@ -4732,7 +4792,7 @@ pub(crate) fn handle_plate_interaction(
                 let thickness_key = (tooltip.thickness_mm * 10.0).round() as i32;
                 hovered_plate_key = Some((tooltip.zone.clone(), tooltip.material_name.clone(), thickness_key));
                 pane.hovered_info = Some(tooltip.clone());
-                if !context_menu_open {
+                if !context_menu_open && ring_label.is_none() {
                     egui::containers::Tooltip::for_widget(response).at_pointer().show(|ui| {
                         show_armor_tooltip(ui, tooltip, comparison_ships, ifhe_enabled, translate_part);
                     });
@@ -4829,4 +4889,24 @@ pub(crate) fn handle_plate_interaction(
     }
 
     zone_changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dist_point_segment;
+    use egui::pos2;
+
+    #[test]
+    fn point_segment_distance_cases() {
+        let a = pos2(0.0, 0.0);
+        let b = pos2(10.0, 0.0);
+        // perpendicular to the segment interior
+        assert!((dist_point_segment(pos2(5.0, 3.0), a, b) - 3.0).abs() < 1e-4);
+        // exactly on the segment
+        assert!(dist_point_segment(pos2(4.0, 0.0), a, b) < 1e-4);
+        // past an endpoint clamps to that endpoint
+        assert!((dist_point_segment(pos2(-3.0, 4.0), a, b) - 5.0).abs() < 1e-4);
+        // degenerate (zero-length) segment falls back to point distance
+        assert!((dist_point_segment(pos2(3.0, 4.0), a, a) - 5.0).abs() < 1e-4);
+    }
 }
