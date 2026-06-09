@@ -1076,10 +1076,10 @@ impl HullUpgradeConfig {
     }
 }
 
-/// One camera orbit trajectory (inner + outer states) from a ship's `Cameras` component.
+/// One camera orbit trajectory from a ship's `Cameras` component.
 /// Values are raw ship-model units, ship-local: `pos_center` is the orbit center,
 /// `semi_axis_h` the radius along the beam (model X), `semi_axis_v` along the length (model Z).
-/// Index 0 = inner state (default zoom), index 1 = outer state (zoomed out).
+/// Index 0 and 1 are the FOV-range endpoints; the active value is `lerp(v[0], v[1], fov)`.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]

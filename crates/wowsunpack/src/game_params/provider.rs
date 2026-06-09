@@ -559,18 +559,6 @@ fn value_f32(v: &Value) -> Option<f32> {
     v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32))
 }
 
-/// Read the first numeric element from a list-or-tuple value (e.g. `[inner, outer]` pairs).
-fn read_pair_inner(v: &Value) -> Option<f32> {
-    if let Some(l) = v.list_ref() {
-        let guard = l.inner();
-        guard.first().and_then(value_f32)
-    } else if let Some(t) = v.tuple_ref() {
-        t.inner().first().and_then(value_f32)
-    } else {
-        None
-    }
-}
-
 /// Read both numeric elements from a list-or-tuple `[inner, outer]` pair.
 fn read_pair_both(v: &Value) -> Option<[f32; 2]> {
     if let Some(l) = v.list_ref() {
@@ -603,33 +591,6 @@ fn read_vec3_at(v: &Value, idx: usize) -> Option<[f32; 3]> {
         triple(l.inner().get(idx)?)
     } else if let Some(t) = v.tuple_ref() {
         triple(t.inner().get(idx)?)
-    } else {
-        None
-    }
-}
-
-/// Read a 3-element float triple from the first element of a nested list-or-tuple.
-/// Handles `posCenter = [[x,y,z],[x,y,z]]`; returns the inner triple at index 0.
-fn read_vec3_inner(v: &Value) -> Option<[f32; 3]> {
-    fn triple(elem: &Value) -> Option<[f32; 3]> {
-        if let Some(l) = elem.list_ref() {
-            let g = l.inner();
-            if g.len() != 3 { return None; }
-            Some([value_f32(&g[0])?, value_f32(&g[1])?, value_f32(&g[2])?])
-        } else if let Some(t) = elem.tuple_ref() {
-            let s = t.inner();
-            if s.len() != 3 { return None; }
-            Some([value_f32(&s[0])?, value_f32(&s[1])?, value_f32(&s[2])?])
-        } else {
-            None
-        }
-    }
-    if let Some(l) = v.list_ref() {
-        let guard = l.inner();
-        let first = guard.first()?;
-        triple(first)
-    } else if let Some(t) = v.tuple_ref() {
-        triple(t.inner().first()?)
     } else {
         None
     }
@@ -1657,24 +1618,6 @@ mod camera_tests {
 
     fn dict(entries: Vec<(HashableValue, Value)>) -> Value {
         Value::Dict(Shared::new(entries.into_iter().collect()))
-    }
-
-    #[test]
-    fn read_pair_inner_returns_first_element() {
-        let v = list(vec![fv(6.552), fv(5.981)]);
-        let result = read_pair_inner(&v).unwrap();
-        assert!((result - 6.552_f32).abs() < 1e-4, "expected ~6.552, got {result}");
-    }
-
-    #[test]
-    fn read_vec3_inner_returns_first_triple() {
-        let inner0 = list(vec![fv(0.0), fv(1.958), fv(0.0)]);
-        let inner1 = list(vec![fv(0.0), fv(2.008), fv(0.0)]);
-        let v = list(vec![inner0, inner1]);
-        let result = read_vec3_inner(&v).unwrap();
-        assert_eq!(result[0], 0.0_f32);
-        assert!((result[1] - 1.958_f32).abs() < 1e-4, "expected ~1.958, got {}", result[1]);
-        assert_eq!(result[2], 0.0_f32);
     }
 
     #[test]
