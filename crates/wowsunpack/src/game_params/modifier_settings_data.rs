@@ -19,8 +19,12 @@ pub enum Measure {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Transform {
     None,
-    /// Value is produced by a client getter/valueConverter not yet ported; show
-    /// the label only until the transform is implemented.
+    /// Take the absolute value before formatting (client `abs(value)` converter,
+    /// e.g. newWaterline).
+    Abs,
+    /// Value is produced by a client getter/valueConverter that depends on
+    /// per-ship runtime params (shipParams / GameParams / FieldParams) or an
+    /// unresolved constant, so it cannot be ported as data; show the label only.
     LabelOnly,
 }
 
@@ -524,7 +528,7 @@ static TABLES: &[Table] = &[
             ("engineForsageCoef", ModifierSetting { measure: Measure::Percent, base_value: 1.0, display_sign: true, multiplier: 1.0, round_digits: 1, round_percents: false, hidden: false, measure_value_hidden: false, positive: true, transform: Transform::None }),
             ("mainGaugeBurnProbabilityForCapture", ModifierSetting { measure: Measure::Percent, base_value: 0.0, display_sign: true, multiplier: 1.0, round_digits: 1, round_percents: false, hidden: false, measure_value_hidden: false, positive: true, transform: Transform::None }),
             ("shipSpeedCoefForPotentialDamage", ModifierSetting { measure: Measure::Percent, base_value: 1.0, display_sign: true, multiplier: 1.0, round_digits: 1, round_percents: false, hidden: false, measure_value_hidden: false, positive: true, transform: Transform::None }),
-            ("newWaterline", ModifierSetting { measure: Measure::Meter, base_value: 0.0, display_sign: false, multiplier: 1.0, round_digits: 1, round_percents: false, hidden: false, measure_value_hidden: false, positive: true, transform: Transform::LabelOnly }),
+            ("newWaterline", ModifierSetting { measure: Measure::Meter, base_value: 0.0, display_sign: false, multiplier: 1.0, round_digits: 1, round_percents: false, hidden: false, measure_value_hidden: false, positive: true, transform: Transform::Abs }),
             ("shipSpeedCoeffForRibbons", ModifierSetting { measure: Measure::Percent, base_value: 1.0, display_sign: true, multiplier: 1.0, round_digits: 1, round_percents: false, hidden: false, measure_value_hidden: false, positive: true, transform: Transform::None }),
             ("squadronSpeedCoeffForRibbons", ModifierSetting { measure: Measure::Percent, base_value: 1.0, display_sign: true, multiplier: 1.0, round_digits: 1, round_percents: false, hidden: false, measure_value_hidden: false, positive: true, transform: Transform::None }),
             ("consumableWorkTime", ModifierSetting { measure: Measure::Percent, base_value: 1.0, display_sign: true, multiplier: 1.0, round_digits: 1, round_percents: false, hidden: false, measure_value_hidden: false, positive: true, transform: Transform::None }),
@@ -697,6 +701,12 @@ pub fn format_modifier(
     }
 
     let label_only = matches!(s.transform, Transform::LabelOnly);
+    // Apply the ported value transform before the base-value compare and the
+    // percent/multiplier step; LabelOnly skips numbers entirely.
+    let value = match s.transform {
+        Transform::Abs => value.abs(),
+        Transform::None | Transform::LabelOnly => value,
+    };
     if !label_only && value == s.base_value {
         return None;
     }
@@ -827,6 +837,17 @@ mod tests {
         let out = format_modifier(BUILD, "GMRotationSpeed", 1.1, Species::Battleship, &EchoLoader)
             .expect("should render");
         assert!(out.starts_with("+10IDS_PERCENT "), "got {out}");
+    }
+
+    #[test]
+    fn abs_transform_uses_absolute_value() {
+        // newWaterline: Transform::Abs (client `abs(value)`), Meter, base 0.0,
+        // display_sign=false. A negative raw value renders its magnitude.
+        let out = format_modifier(BUILD, "newWaterline", -5.0, Species::Submarine, &EchoLoader)
+            .expect("abs of -5 differs from base 0, should render");
+        assert!(out.starts_with("5 IDS_METER "), "got {out}");
+        assert!(!out.contains("-5"), "got {out}");
+        assert!(out.contains("IDS_PARAMS_MODIFIER_NEWWATERLINE"), "got {out}");
     }
 
     #[test]
