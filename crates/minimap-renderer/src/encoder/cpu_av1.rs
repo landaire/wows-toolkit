@@ -45,9 +45,10 @@ impl CpuAv1Encoder {
             ))));
         }
 
-        // Speed preset 6 trades ~2x encode time vs preset 8 for noticeably
-        // better fidelity on small UI text in the HUD/HP-bars.
-        let mut cfg = EncoderConfig::with_speed_preset(6);
+        // Preset 8 prioritizes encode speed (~2x faster than preset 6); the cost
+        // is softer fidelity on small UI text in the HUD/HP-bars. Combined with
+        // 16-way tiling below it brings a full-match AV1 render to ~30s.
+        let mut cfg = EncoderConfig::with_speed_preset(8);
         cfg.width = width as usize;
         cfg.height = height as usize;
         cfg.bit_depth = 8;
@@ -56,14 +57,12 @@ impl CpuAv1Encoder {
         cfg.min_key_frame_interval = 0;
         cfg.max_key_frame_interval = FPS as u64;
         cfg.low_latency = true;
-        cfg.speed_settings = SpeedSettings::from_preset(6);
-        // Encode tiles in parallel across rav1e's default Rayon pool. Tiling is
-        // the speed lever with the smallest quality cost: independent tiles lose
-        // some cross-tile prediction (a few percent of compression efficiency)
-        // but keep the preset-6 fidelity that small HUD/HP-bar text relies on,
-        // unlike raising the speed preset. Cap the count so the efficiency loss
-        // stays modest on high-core machines.
-        cfg.tiles = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(8);
+        cfg.speed_settings = SpeedSettings::from_preset(8);
+        // Encode tiles in parallel across rav1e's default Rayon pool. Independent
+        // tiles lose some cross-tile prediction (a few percent of compression
+        // efficiency) in exchange for near-linear parallelism. Cap at 16 to bound
+        // the efficiency loss on high-core machines while still using them.
+        cfg.tiles = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(16);
         // rav1e knobs:
         //   - explicit `target_bitrate_bps` -> bitrate-based ABR
         //   - explicit `av1_quantizer`      -> quantizer-based CQP
