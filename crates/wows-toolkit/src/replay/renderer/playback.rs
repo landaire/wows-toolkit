@@ -1131,7 +1131,8 @@ fn build_display_from_resolved(
             })
             .collect();
 
-    let upgrades = build.upgrades.iter().map(|p| equipment_display_for_param(p, metadata)).collect();
+    let upgrades =
+        build.upgrades.iter().map(|p| equipment_display_for_param(p, metadata, build.species, version.build)).collect();
     // `config.exteriors()` returns every exterior the player has mounted:
     // signal flags, permoflages, ensigns, camos, skins, boosters. The popover
     // has a single Signals row aimed at combat flags, which GameParams tags
@@ -1141,7 +1142,7 @@ fn build_display_from_resolved(
         .signals
         .iter()
         .filter(|p| matches!(p.species().and_then(|r| r.known()), Some(wowsunpack::game_params::types::Species::Flags)))
-        .map(|p| equipment_display_for_param(p, metadata))
+        .map(|p| equipment_display_for_param(p, metadata, build.species, version.build))
         .collect();
     super::PlayerBuildDisplay { captain_name, skill_rows, upgrades, signals }
 }
@@ -1200,11 +1201,16 @@ fn snapshot_player_builds<F: FnMut(EntityId) -> bool>(
 fn equipment_display_for_param(
     param: &wowsunpack::game_params::types::Param,
     metadata: &GameMetadataProvider,
+    species: wowsunpack::game_params::types::Species,
+    build: u32,
 ) -> super::EquipmentDisplay {
     let (name, description) = wowsunpack::game_params::translations::translate_exterior(param, metadata);
+    let description = description
+        .or_else(|| wowsunpack::game_params::translations::generated_param_description(param, species, metadata, build))
+        .unwrap_or_default();
     super::EquipmentDisplay {
         icon_key: param.name().to_string(),
         name: name.unwrap_or_else(|| param.name().to_string()),
-        description: description.unwrap_or_default(),
+        description,
     }
 }

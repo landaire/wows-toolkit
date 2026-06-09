@@ -126,6 +126,14 @@ impl TranslatedBuild {
                         &game_params_name,
                         metadata_provider,
                     );
+                    let description = description.or_else(|| {
+                        wowsunpack::game_params::translations::generated_param_description(
+                            &param,
+                            species,
+                            metadata_provider,
+                            version.build,
+                        )
+                    });
                     let module = TranslatedModule { name, description, game_params_name };
                     match param.modernization().and_then(|m| m.slot()) {
                         Some(i) if (i as usize) < slots.len() => slots[i as usize] = Some(module),
@@ -152,6 +160,14 @@ impl TranslatedBuild {
                         &param,
                         metadata_provider,
                     );
+                    let description = description.or_else(|| {
+                        wowsunpack::game_params::translations::generated_param_description(
+                            &param,
+                            species,
+                            metadata_provider,
+                            version.build,
+                        )
+                    });
                     TranslatedModule { name, description, game_params_name }
                 })
                 .collect(),

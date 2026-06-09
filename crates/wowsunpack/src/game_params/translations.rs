@@ -109,6 +109,26 @@ pub fn translate_exterior(
     (mod_name.or(direct_name).or(exterior_name), mod_desc.or(direct_desc))
 }
 
+/// Generated description for a modifier-based param (modernization or exterior),
+/// from its modifiers for the given ship species. `None` when the param has no
+/// modifiers or none format for this build.
+pub fn generated_param_description(
+    param: &crate::game_params::types::Param,
+    species: crate::game_params::types::Species,
+    resource_loader: &dyn ResourceLoader,
+    build: u32,
+) -> Option<String> {
+    let mods =
+        param.modernization().map(|m| m.modifiers()).or_else(|| param.exterior().map(|e| e.modifiers()))?;
+    let lines = crate::game_params::modifier_settings_data::describe_modifiers(
+        build,
+        mods.iter().map(|m| (m.name(), m.get_for_species(&species))),
+        species,
+        resource_loader,
+    );
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
 /// Translate a ship unit/module (hull, main battery, torpedoes, fire control, engine,
 /// ...) by its GameParams name. Units localize as `IDS_<NAME>` -- unlike upgrades, which
 /// use `IDS_TITLE_<NAME>`, and unlike ships, whose `param.index()` is only the name prefix.
