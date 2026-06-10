@@ -166,6 +166,8 @@ enable_logging_tooltip = "將偵錯日誌寫入應用程式資料目錄中的檔
 send_replay_data = "將排位戰和隨機戰回放的配裝傳送至 ShipBuilds.com"
 zoom_factor = "縮放比例（Ctrl + 和 Ctrl - 也可更改此設定）"
 language = "語言"
+open_data_dir = "開啟應用程式資料資料夾"
+open_data_dir_tooltip = "在檔案管理器中開啟應用程式資料資料夾（設定、日誌、快取資料）。"
 
 [ui.settings.wows]
 heading = "World of Warships 設定"
@@ -319,6 +321,7 @@ abilities = "消耗品："
 abilities_none = "無消耗品"
 captain_skills = "艦長技能："
 captain_skills_none = "無艦長技能"
+damage_events = "傷害事件"
 
 [ui.replay.debug]
 view_raw_metadata = "查看原始玩家中繼資料"
@@ -631,7 +634,8 @@ load_failed = "載入艦船資料失敗：%{error}"
 empty = "空"
 mirror_cameras = "鏡像攝影機"
 sync_options = "同步選項"
-sync_tooltip = "在所有面板之間同步裝甲/船體可見性"
+sync_tooltip = "在所有面板之間同步裝甲/船體可見性與顯示覆蓋層（船舶中心、水線、攝影機環）"
+common_settings = "通用設定"
 compare_split = "在新分割中比較"
 export_model = "匯出艦船模型"
 armor_thickness = "裝甲厚度"

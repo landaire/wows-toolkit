@@ -166,6 +166,8 @@ enable_logging_tooltip = "Debug-Protokolle in eine Datei im Anwendungsdatenverze
 send_replay_data = "Builds aus Rang- und Zufallsgefecht-Replays an ShipBuilds.com senden"
 zoom_factor = "Zoomfaktor (Strg + und Strg - ändert dies ebenfalls)"
 language = "Sprache"
+open_data_dir = "Anwendungsdatenordner öffnen"
+open_data_dir_tooltip = "Den Anwendungsdatenordner (Einstellungen, Protokolle, zwischengespeicherte Daten) im Dateimanager öffnen."
 
 [ui.settings.wows]
 heading = "World of Warships Einstellungen"
@@ -319,6 +321,7 @@ abilities = "Fähigkeiten:"
 abilities_none = "Keine Fähigkeiten"
 captain_skills = "Kapitänsfertigkeiten:"
 captain_skills_none = "Keine Kapitänsfertigkeiten"
+damage_events = "Schadensereignisse"
 
 [ui.replay.debug]
 view_raw_metadata = "Rohe Spielermetadaten anzeigen"
@@ -631,7 +634,8 @@ load_failed = "Laden der Schiffsdaten fehlgeschlagen: %{error}"
 empty = "Leer"
 mirror_cameras = "Kameras spiegeln"
 sync_options = "Optionen synchronisieren"
-sync_tooltip = "Panzerungs-/Rumpfsichtbarkeit über alle Fenster synchron halten"
+common_settings = "Gemeinsame Einstellungen"
+sync_tooltip = "Panzerungs-/Rumpfsichtbarkeit und Anzeige-Overlays (Schiffsmitte, Wasserlinie, Kameraringe) über alle Fenster synchron halten"
 compare_split = "In neuem Split vergleichen"
 export_model = "Schiffsmodell exportieren"
 armor_thickness = "Panzerungsdicke"

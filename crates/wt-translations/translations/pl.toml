@@ -142,6 +142,8 @@ enable_logging_tooltip = "Zapisuj logi debugowania do pliku w katalogu danych ap
 send_replay_data = "Wysyłaj buildy z powtórek bitew rankingowych i losowych do ShipBuilds.com"
 zoom_factor = "Współczynnik powiększenia (Ctrl + i Ctrl - również to zmienia)"
 language = "Język"
+open_data_dir = "Otwórz folder danych aplikacji"
+open_data_dir_tooltip = "Otwórz folder danych aplikacji (ustawienia, logi, dane w pamięci podręcznej) w menedżerze plików."
 
 [ui.settings.wows]
 heading = "Ustawienia World of Warships"
@@ -293,6 +295,7 @@ abilities = "Zdolności:"
 abilities_none = "Brak zdolności"
 captain_skills = "Umiejętności kapitana:"
 captain_skills_none = "Brak umiejętności kapitana"
+damage_events = "Zdarzenia obrażeń"
 
 [ui.replay.debug]
 view_raw_metadata = "Zobacz surowe metadane gracza"
@@ -587,7 +590,8 @@ load_failed = "Nie udało się wczytać danych okrętu: %{error}"
 empty = "Pusty"
 mirror_cameras = "Lustrzane kamery"
 sync_options = "Synchronizuj opcje"
-sync_tooltip = "Synchronizuj widoczność pancerza/kadłuba we wszystkich panelach"
+sync_tooltip = "Synchronizuj widoczność pancerza/kadłuba oraz nakładki wyświetlania (środek okrętu, linia wodna, pierścienie kamery) we wszystkich panelach"
+common_settings = "Wspólne ustawienia"
 compare_split = "Porównaj w nowym panelu"
 export_model = "Eksportuj model okrętu"
 armor_thickness = "Grubość pancerza"

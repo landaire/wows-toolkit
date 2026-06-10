@@ -166,6 +166,8 @@ enable_logging_tooltip = "Schrijf debuglogboeken naar een bestand in de applicat
 send_replay_data = "Builds van classificatie- en willekeurige gevechtsreplays naar ShipBuilds.com sturen"
 zoom_factor = "Zoomfactor (Ctrl + en Ctrl - wijzigen dit ook)"
 language = "Taal"
+open_data_dir = "App-gegevensmap openen"
+open_data_dir_tooltip = "Open de applicatiegegevensmap (instellingen, logboeken, gecachte gegevens) in uw bestandsbeheerder."
 
 [ui.settings.wows]
 heading = "World of Warships-instellingen"
@@ -319,6 +321,7 @@ abilities = "Vaardigheden:"
 abilities_none = "Geen vaardigheden"
 captain_skills = "Kapiteinvaardigheden:"
 captain_skills_none = "Geen kapiteinvaardigheden"
+damage_events = "Schadegebeurtenissen"
 
 [ui.replay.debug]
 view_raw_metadata = "Ruwe spelersmetadata bekijken"
@@ -631,7 +634,8 @@ load_failed = "Kan scheepsgegevens niet laden: %{error}"
 empty = "Leeg"
 mirror_cameras = "Camera's spiegelen"
 sync_options = "Opties synchroniseren"
-sync_tooltip = "Houd pantser-/rompzichtbaarheid gesynchroniseerd over alle panelen"
+sync_tooltip = "Houd pantser-/rompzichtbaarheid en weergave-overlays (scheepscentrum, waterlijn, cameraringen) gesynchroniseerd over alle panelen"
+common_settings = "Algemene instellingen"
 compare_split = "Vergelijken in nieuw paneel"
 export_model = "Scheepsmodel exporteren"
 armor_thickness = "Pantserdikte"

@@ -166,6 +166,8 @@ enable_logging_tooltip = "애플리케이션 데이터 디렉토리의 파일에
 send_replay_data = "랭크전 및 랜덤 전투 리플레이의 빌드를 ShipBuilds.com으로 전송"
 zoom_factor = "확대 배율 (Ctrl + 및 Ctrl -로도 변경 가능)"
 language = "언어"
+open_data_dir = "앱 데이터 폴더 열기"
+open_data_dir_tooltip = "파일 관리자에서 애플리케이션 데이터 폴더(설정, 로그, 캐시 데이터)를 엽니다."
 
 [ui.settings.wows]
 heading = "World of Warships 설정"
@@ -319,6 +321,7 @@ abilities = "능력:"
 abilities_none = "능력 없음"
 captain_skills = "함장 기술:"
 captain_skills_none = "함장 기술 없음"
+damage_events = "피해 이벤트"
 
 [ui.replay.debug]
 view_raw_metadata = "플레이어 원본 메타데이터 보기"
@@ -631,7 +634,8 @@ load_failed = "함선 데이터 로드 실패: %{error}"
 empty = "비어 있음"
 mirror_cameras = "카메라 미러링"
 sync_options = "동기화 옵션"
-sync_tooltip = "모든 패널에서 장갑/선체 표시를 동기화 유지"
+sync_tooltip = "모든 패널에서 장갑/선체 표시 및 표시 오버레이(함선 중심, 수선, 카메라 링)를 동기화 유지"
+common_settings = "공통 설정"
 compare_split = "새 분할로 비교"
 export_model = "함선 모델 내보내기"
 armor_thickness = "장갑 두께"

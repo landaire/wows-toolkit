@@ -166,6 +166,8 @@ enable_logging_tooltip = "将调试日志写入应用程序数据目录中的文
 send_replay_data = "将排位赛和随机战斗回放的配置发送到 ShipBuilds.com"
 zoom_factor = "缩放比例（Ctrl + 和 Ctrl - 也可更改）"
 language = "语言"
+open_data_dir = "打开应用数据文件夹"
+open_data_dir_tooltip = "在文件管理器中打开应用数据文件夹（设置、日志、缓存数据）。"
 
 [ui.settings.wows]
 heading = "World of Warships 设置"
@@ -319,6 +321,7 @@ abilities = "技能："
 abilities_none = "无技能"
 captain_skills = "舰长技能："
 captain_skills_none = "无舰长技能"
+damage_events = "伤害事件"
 
 [ui.replay.debug]
 view_raw_metadata = "查看原始玩家元数据"
@@ -631,7 +634,8 @@ load_failed = "加载舰船数据失败：%{error}"
 empty = "空"
 mirror_cameras = "镜像摄像机"
 sync_options = "同步选项"
-sync_tooltip = "在所有面板中保持装甲/船体可见性同步"
+sync_tooltip = "在所有面板中保持装甲/船体可见性和显示叠加层（船体中心、水线、摄像机环）同步"
+common_settings = "通用设置"
 compare_split = "在新分栏中比较"
 export_model = "导出舰船模型"
 armor_thickness = "装甲厚度"

@@ -166,6 +166,8 @@ enable_logging_tooltip = "Scrivi i log di debug in un file nella cartella dati d
 send_replay_data = "Invia build dalle partite classificate e casuali a ShipBuilds.com"
 zoom_factor = "Fattore di zoom (anche Ctrl + e Ctrl - lo modificano)"
 language = "Lingua"
+open_data_dir = "Apri cartella dati applicazione"
+open_data_dir_tooltip = "Apri la cartella dati dell'applicazione (impostazioni, log, dati in cache) nel tuo gestore file."
 
 [ui.settings.wows]
 heading = "Impostazioni World of Warships"
@@ -319,6 +321,7 @@ abilities = "Consumabili:"
 abilities_none = "Nessun consumabile"
 captain_skills = "Abilità capitano:"
 captain_skills_none = "Nessuna abilità capitano"
+damage_events = "Eventi danno"
 
 [ui.replay.debug]
 view_raw_metadata = "Visualizza metadati grezzi giocatore"
@@ -631,7 +634,8 @@ load_failed = "Impossibile caricare i dati della nave: %{error}"
 empty = "Vuoto"
 mirror_cameras = "Specchia telecamere"
 sync_options = "Sincronizza opzioni"
-sync_tooltip = "Mantieni la visibilità corazza/scafo sincronizzata tra tutti i pannelli"
+sync_tooltip = "Mantieni sincronizzati tra tutti i pannelli la visibilità corazza/scafo e gli overlay di visualizzazione (centro nave, linea di galleggiamento, anelli telecamera)"
+common_settings = "Impostazioni comuni"
 compare_split = "Confronta in nuovo pannello"
 export_model = "Esporta modello nave"
 armor_thickness = "Spessore corazza"

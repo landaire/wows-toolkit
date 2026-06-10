@@ -166,6 +166,8 @@ enable_logging_tooltip = "アプリケーションデータディレクトリ内
 send_replay_data = "ランク戦とランダム戦のリプレイからビルドを ShipBuilds.com に送信"
 zoom_factor = "ズーム倍率（Ctrl + と Ctrl - でも変更可能）"
 language = "言語"
+open_data_dir = "アプリデータフォルダを開く"
+open_data_dir_tooltip = "アプリケーションデータフォルダ（設定、ログ、キャッシュデータ）をファイルマネージャーで開きます。"
 
 [ui.settings.wows]
 heading = "World of Warships 設定"
@@ -319,6 +321,7 @@ abilities = "消耗品:"
 abilities_none = "消耗品なし"
 captain_skills = "艦長スキル:"
 captain_skills_none = "艦長スキルなし"
+damage_events = "ダメージイベント"
 
 [ui.replay.debug]
 view_raw_metadata = "生のプレイヤーメタデータを表示"
@@ -631,7 +634,8 @@ load_failed = "艦船データの読み込みに失敗: %{error}"
 empty = "空"
 mirror_cameras = "カメラをミラー"
 sync_options = "オプションを同期"
-sync_tooltip = "全ペイン間で装甲/船体の表示を同期"
+sync_tooltip = "全ペイン間で装甲/船体の表示と表示オーバーレイ（船体中心、喫水線、カメラリング）を同期"
+common_settings = "共通設定"
 compare_split = "新しい分割で比較"
 export_model = "艦船モデルをエクスポート"
 armor_thickness = "装甲厚"

@@ -166,6 +166,8 @@ enable_logging_tooltip = "Écrire les journaux de débogage dans un fichier du r
 send_replay_data = "Envoyer les builds des replays de batailles classées et aléatoires à ShipBuilds.com"
 zoom_factor = "Facteur de zoom (Ctrl + et Ctrl - modifient également ceci)"
 language = "Langue"
+open_data_dir = "Ouvrir le dossier de données de l'application"
+open_data_dir_tooltip = "Ouvrir le dossier de données de l'application (paramètres, journaux, données en cache) dans votre gestionnaire de fichiers."
 
 [ui.settings.wows]
 heading = "Paramètres de World of Warships"
@@ -319,6 +321,7 @@ abilities = "Capacités :"
 abilities_none = "Aucune capacité"
 captain_skills = "Compétences du commandant :"
 captain_skills_none = "Aucune compétence de commandant"
+damage_events = "Événements de dégâts"
 
 [ui.replay.debug]
 view_raw_metadata = "Voir les métadonnées brutes du joueur"
@@ -631,7 +634,8 @@ load_failed = "Échec du chargement des données du navire : %{error}"
 empty = "Vide"
 mirror_cameras = "Miroir des caméras"
 sync_options = "Options de synchronisation"
-sync_tooltip = "Garder la visibilité du blindage/coque synchronisée entre tous les panneaux"
+sync_tooltip = "Garder la visibilité du blindage/coque et les surcouches d'affichage (centre du navire, ligne de flottaison, anneaux de caméra) synchronisées entre tous les panneaux"
+common_settings = "Paramètres communs"
 compare_split = "Comparer dans un nouveau panneau"
 export_model = "Exporter le modèle du navire"
 armor_thickness = "Épaisseur du blindage"

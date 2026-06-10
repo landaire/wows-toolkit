@@ -142,6 +142,8 @@ enable_logging_tooltip = "Uygulama veri dizinindeki bir dosyaya hata ayıklama g
 send_replay_data = "Dereceli ve Rastgele Savaş Tekrarlarından Buildleri ShipBuilds.com'a Gönder"
 zoom_factor = "Yakınlaştırma Faktörü (Ctrl + ve Ctrl - bunu da değiştirir)"
 language = "Dil"
+open_data_dir = "Uygulama Veri Klasörünü Aç"
+open_data_dir_tooltip = "Uygulama veri klasörünü (ayarlar, günlükler, önbelleğe alınmış veriler) dosya yöneticinizde açın."
 
 [ui.settings.wows]
 heading = "World of Warships Ayarları"
@@ -293,6 +295,7 @@ abilities = "Yetenekler:"
 abilities_none = "Yetenek Yok"
 captain_skills = "Kaptan Becerileri:"
 captain_skills_none = "Kaptan Becerisi Yok"
+damage_events = "Hasar Olayları"
 
 [ui.replay.debug]
 view_raw_metadata = "Ham Oyuncu Meta Verilerini Görüntüle"
@@ -587,7 +590,8 @@ load_failed = "Gemi verileri yüklenemedi: %{error}"
 empty = "Boş"
 mirror_cameras = "Ayna kameralar"
 sync_options = "Seçenekleri senkronize et"
-sync_tooltip = "Tüm panellerde zırh/gövde görünürlüğünü senkronize tut"
+sync_tooltip = "Zırh/gövde görünürlüğünü ve görüntü kaplamalarını (gemi merkezi, su hattı, kamera halkaları) tüm panellerde senkronize tut"
+common_settings = "Ortak Ayarlar"
 compare_split = "Yeni panelde karşılaştır"
 export_model = "Gemi Modelini Dışa Aktar"
 armor_thickness = "Zırh Kalınlığı"
