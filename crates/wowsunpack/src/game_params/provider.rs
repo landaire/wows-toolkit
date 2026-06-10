@@ -502,6 +502,8 @@ fn build_ability_category(category_data: &BTreeMap<HashableValue, Value>) -> Abi
         .maybe_dist_torpedo(dist_torpedo)
         .maybe_hydrophone_wave_radius(hydrophone_wave_radius)
         .maybe_patrol_radius(patrol_radius)
+        .maybe_regeneration_hp_speed(read_f32("regenerationHPSpeed"))
+        .maybe_regeneration_hp_speed_units(read_f32("regenerationHPSpeedUnits"))
         .build()
 }
 

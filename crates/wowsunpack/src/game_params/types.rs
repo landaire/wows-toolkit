@@ -1521,6 +1521,14 @@ pub struct AbilityCategory {
     /// Fighter patrol radius. BigWorld units.
     #[cfg_attr(feature = "serde", serde(default))]
     patrol_radius: Option<BigWorldDistance>,
+    /// Repair Party heal rate as a fraction of max HP per second. `None` for
+    /// non-heal consumables.
+    #[cfg_attr(feature = "serde", serde(default))]
+    regeneration_hp_speed: Option<f32>,
+    /// Repair Party flat heal rate in HP per second (added to the fraction
+    /// term). `None` for non-heal consumables.
+    #[cfg_attr(feature = "serde", serde(default))]
+    regeneration_hp_speed_units: Option<f32>,
 }
 
 impl AbilityCategory {
@@ -1575,6 +1583,16 @@ impl AbilityCategory {
     /// Fighter patrol radius in meters.
     pub fn patrol_radius(&self) -> Option<Meters> {
         self.patrol_radius.map(|d| d.to_meters())
+    }
+
+    /// Repair Party heal rate, fraction of max HP per second (RegenCrew only).
+    pub fn regeneration_hp_speed(&self) -> Option<f32> {
+        self.regeneration_hp_speed
+    }
+
+    /// Repair Party flat heal rate, HP per second (RegenCrew only).
+    pub fn regeneration_hp_speed_units(&self) -> Option<f32> {
+        self.regeneration_hp_speed_units
     }
 }
 
