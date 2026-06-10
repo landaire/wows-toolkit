@@ -28,16 +28,16 @@ name = "wows-toolkit"
 
 [workspace.dependencies]
 # Internal crates (versions synced by scripts/bump-versions.sh)
-wows-core = { version = "0.1.0", path = "crates/wows-core", default-features = false }
-wowsunpack = { version = "0.33.0", path = "crates/wowsunpack", default-features = false }
-wows_replays = { version = "0.34.0", path = "crates/wows-replays", default-features = false }
-wows_minimap_renderer = { version = "0.27.0", path = "crates/minimap-renderer", default-features = false }
-wows-battle-world = { version = "0.1.0", path = "crates/wows-battle-world", default-features = false }
-wows-data-mgr = { version = "0.9.0", path = "crates/wows-data-mgr", default-features = false }
-wows-replay-insights = { version = "0.1.0", path = "crates/wows-replay-insights", default-features = false }
+wows-core = { version = "0.2.0", path = "crates/wows-core", default-features = false }
+wowsunpack = { version = "0.34.0", path = "crates/wowsunpack", default-features = false }
+wows_replays = { version = "0.35.0", path = "crates/wows-replays", default-features = false }
+wows_minimap_renderer = { version = "0.28.0", path = "crates/minimap-renderer", default-features = false }
+wows-battle-world = { version = "0.2.0", path = "crates/wows-battle-world", default-features = false }
+wows-data-mgr = { version = "0.10.0", path = "crates/wows-data-mgr", default-features = false }
+wows-replay-insights = { version = "0.2.0", path = "crates/wows-replay-insights", default-features = false }
 wt-collab-protocol = { path = "crates/wt-collab-protocol" }
 wt-collab-egui = { path = "crates/wt-collab-egui" }
-wt-translations = { version = "0.4.0", path = "crates/wt-translations" }
+wt-translations = { version = "0.5.0", path = "crates/wt-translations" }
 # Shared UI dependencies
 egui = "0.34.1"
 egui-phosphor = "0.12"
@@ -58,7 +58,7 @@ image_dds = { version = "0.7", default-features = false }
 itertools = "0.14"
 paste = "1"
 pickled = { version = "2.0.0-alpha8" }
-iroh = { version = "0.97", default-features = false }
+iroh = { version = "1.0.0-rc.1", default-features = false, features = ["tls-ring"] }
 rkyv = "0.8.15"
 rootcause = "0.12"
 roxmltree = "0.21"
