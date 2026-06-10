@@ -1511,6 +1511,7 @@ impl RealtimeArmorViewer {
             (available_size.y * ui.ctx().pixels_per_point()) as u32,
         );
 
+        self.pane.viewport.lighting = self.pane.lighting.clone();
         if let Some(tex_id) = self.pane.viewport.render(&self.render_state, &self.gpu_pipeline, pixel_size) {
             let response = ui.add(
                 egui::Image::new(egui::load::SizedTexture::new(tex_id, available_size))

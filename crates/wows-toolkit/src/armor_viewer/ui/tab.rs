@@ -1299,9 +1299,9 @@ pub(crate) fn upload_hull_meshes_to_viewport(
         let texture_data = mesh.mfm_path.as_ref().and_then(|p| armor.hull_textures.get(p));
         let has_texture = texture_data.is_some() && has_uvs;
 
-        // Brightness boost compensates for the shader's 0.7 ambient multiplier.
-        // Textured:  3.5 * 0.7 ≈ 2.45 effective (vivid hull textures).
-        // Baked/flat: 2.0 * 0.7 ≈ 1.40 effective.
+        // Vertex-color brightness boost for hull meshes. The lighting shader multiplies
+        // this base by (flat + key*halfLambert); the boost keeps textured camo vivid.
+        // Textured hulls use a stronger boost than baked-color hulls.
         let hull_brightness: f32 = 2.0;
         let tex_brightness: f32 = 3.5;
         let fallback_color: [f32; 4] =
@@ -1336,6 +1336,7 @@ pub(crate) fn upload_hull_meshes_to_viewport(
             } else {
                 pane.viewport.add_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer)
             };
+            pane.viewport.set_lit(mid, true);
             pane.hull_mesh_ids.push(mid);
         }
     }
@@ -1760,6 +1761,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
             }
 
             // Render to offscreen texture
+            pane.viewport.lighting = pane.lighting.clone();
             if let Some(tex_id) = pane.viewport.render(render_state, gpu_pipeline, pixel_size) {
                 let response = vp_ui.add(
                     egui::Image::new(egui::load::SizedTexture::new(tex_id, available_size))
