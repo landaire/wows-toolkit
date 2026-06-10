@@ -90,7 +90,29 @@ fn main() -> eframe::Result<()> {
 
     let mut wgpu_options = eframe::egui_wgpu::WgpuConfiguration::default();
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(ref mut setup) = wgpu_options.wgpu_setup {
-        setup.instance_descriptor.backends = wgpu::Backends::DX12;
+        // Keep the default wide backend set (PRIMARY | GL, overridable with WGPU_BACKEND) so we
+        // run on Vulkan/Metal/DX12/GL across platforms. Bias adapter selection toward DX12 on
+        // Windows, otherwise prefer a discrete GPU on a real graphics API over a GL fallback.
+        setup.native_adapter_selector = Some(std::sync::Arc::new(|adapters, surface| {
+            adapters
+                .iter()
+                .filter(|adapter| surface.is_none_or(|surface| adapter.is_surface_supported(surface)))
+                .min_by_key(|adapter| {
+                    let info = adapter.get_info();
+                    let prefer_dx12 = u8::from(!(cfg!(windows) && info.backend == wgpu::Backend::Dx12));
+                    let device_rank = match info.device_type {
+                        wgpu::DeviceType::DiscreteGpu => 0u8,
+                        wgpu::DeviceType::IntegratedGpu => 1,
+                        wgpu::DeviceType::VirtualGpu => 2,
+                        wgpu::DeviceType::Cpu => 3,
+                        wgpu::DeviceType::Other => 4,
+                    };
+                    let avoid_gl = u8::from(info.backend == wgpu::Backend::Gl);
+                    (prefer_dx12, device_rank, avoid_gl)
+                })
+                .cloned()
+                .ok_or_else(|| "no compatible wgpu adapter available".to_string())
+        }));
     }
 
     let native_options = eframe::NativeOptions { viewport, wgpu_options, ..Default::default() };
