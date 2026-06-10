@@ -6,3 +6,4 @@ pub mod replay_parser;
 pub mod session_stats_chart;
 mod settings_tab;
 pub mod stats_tab;
+pub mod team_performance;

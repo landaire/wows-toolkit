@@ -47,6 +47,7 @@ impl TabViewer for StatsTabViewer<'_> {
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         match tab {
             StatsSubTab::Overview => wt_translations::icon_t(icons::LIST, &t!("ui.stats.overview")).into(),
+            StatsSubTab::Team => wt_translations::icon_t(icons::USERS, &t!("ui.stats.team_title")).into(),
             StatsSubTab::Charts(id) => {
                 let p = self.tab_state.persisted.read();
                 let cfg = match p.chart_configs.get(id) {
@@ -87,23 +88,30 @@ impl TabViewer for StatsTabViewer<'_> {
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         match *tab {
             StatsSubTab::Overview => build_stats_overview(self.tab_state, ui),
+            StatsSubTab::Team => crate::ui::team_performance::build_team_performance(self.tab_state, ui),
             StatsSubTab::Charts(id) => build_stats_charts(self.tab_state, id, ui),
         }
     }
 
-    fn closeable(&mut self, tab: &mut Self::Tab) -> bool {
+    fn is_closeable(&self, tab: &Self::Tab) -> bool {
         match tab {
-            StatsSubTab::Overview => false,
-            // Charts tabs are only closeable when there are more than one.
+            StatsSubTab::Overview | StatsSubTab::Team => false,
             StatsSubTab::Charts(_) => self.chart_tab_count > 1,
         }
     }
 
     fn on_close(&mut self, tab: &mut Self::Tab) -> OnCloseResponse {
-        if let StatsSubTab::Charts(id) = tab {
-            self.tab_state.remove_chart_config(*id);
+        match tab {
+            StatsSubTab::Overview | StatsSubTab::Team => OnCloseResponse::Ignore,
+            StatsSubTab::Charts(id) => {
+                if self.chart_tab_count <= 1 {
+                    OnCloseResponse::Ignore
+                } else {
+                    self.tab_state.remove_chart_config(*id);
+                    OnCloseResponse::Close
+                }
+            }
         }
-        OnCloseResponse::Close
     }
 
     fn on_add(&mut self, path: egui_dock::NodePath) {
@@ -191,13 +199,14 @@ impl ToolkitTabViewer<'_> {
         }
 
         // ── Dock area with sub-tabs ──
-        // Validate persisted dock state: must have Overview and at least one Charts tab.
+        // Validate persisted dock state: must have Overview, Team, and at least one Charts tab.
         {
             let p = self.tab_state.persisted.read();
             let has_overview = p.stats_dock_state.iter_all_tabs().any(|(_, t)| matches!(t, StatsSubTab::Overview));
+            let has_team = p.stats_dock_state.iter_all_tabs().any(|(_, t)| matches!(t, StatsSubTab::Team));
             let has_chart = p.stats_dock_state.iter_all_tabs().any(|(_, t)| matches!(t, StatsSubTab::Charts(_)));
             drop(p);
-            if !has_overview || !has_chart {
+            if !has_overview || !has_team || !has_chart {
                 self.tab_state.persisted.write().stats_dock_state = crate::tab_state::default_stats_dock_state();
             }
         }
