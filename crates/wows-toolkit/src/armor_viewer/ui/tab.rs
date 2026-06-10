@@ -1229,9 +1229,7 @@ pub(crate) fn upload_armor_to_viewport(
                     }
                 }
             }
-            // Zoom-path spokes: straight connectors from the inner orbit to the
-            // outer orbit at sampled azimuths, showing the camera eye's path
-            // while zooming. Only present when the mode defines an outer orbit.
+            // Zoom-path spokes: inner-to-outer connectors trace the camera's zoom path (outer-orbit modes only).
             if show_zoom_path {
                 use crate::armor_viewer::camera_ellipse::build_zoom_path_mesh;
                 for (enabled, f, alpha) in
