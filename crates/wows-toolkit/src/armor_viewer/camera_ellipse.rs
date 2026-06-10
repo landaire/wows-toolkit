@@ -10,8 +10,20 @@ type Vec3 = Vector3<f32>;
 const RING_SEGMENTS: usize = 96;
 const LINE_WIDTH: f32 = 0.03;
 const MARKER_SIZE: f32 = 0.06;
+const SPOKE_COUNT: usize = 24;
 
 fn push_segment(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, p0: Vec3, p1: Vec3, color: [f32; 4]) {
+    push_segment_gradient(verts, indices, p0, p1, color, color);
+}
+
+fn push_segment_gradient(
+    verts: &mut Vec<Vertex>,
+    indices: &mut Vec<u32>,
+    p0: Vec3,
+    p1: Vec3,
+    color0: [f32; 4],
+    color1: [f32; 4],
+) {
     let raw = p1 - p0;
     let len = raw.norm();
     if len < 1e-9 {
@@ -26,10 +38,10 @@ fn push_segment(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, p0: Vec3, p1: V
     for perp in [perp1, perp2] {
         let off = perp * (LINE_WIDTH * 0.5);
         let b = verts.len() as u32;
-        verts.push(Vertex { position: (p0 - off).into(), normal, color, uv: [0.0, 0.0] });
-        verts.push(Vertex { position: (p0 + off).into(), normal, color, uv: [0.0, 0.0] });
-        verts.push(Vertex { position: (p1 + off).into(), normal, color, uv: [0.0, 0.0] });
-        verts.push(Vertex { position: (p1 - off).into(), normal, color, uv: [0.0, 0.0] });
+        verts.push(Vertex { position: (p0 - off).into(), normal, color: color0, uv: [0.0, 0.0] });
+        verts.push(Vertex { position: (p0 + off).into(), normal, color: color0, uv: [0.0, 0.0] });
+        verts.push(Vertex { position: (p1 + off).into(), normal, color: color1, uv: [0.0, 0.0] });
+        verts.push(Vertex { position: (p1 - off).into(), normal, color: color1, uv: [0.0, 0.0] });
         indices.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
     }
 }
@@ -84,6 +96,31 @@ pub(crate) fn sample_ring_points(ring: &CameraRing, waterline_dy: f32, n: usize)
             center + Vec3::x() * (t.cos() * ring.semi_axes.x) + Vec3::z() * (t.sin() * ring.semi_axes.y)
         })
         .collect()
+}
+
+/// Build a model-space overlay mesh of radial spokes from the inner ring to the
+/// outer ring at `SPOKE_COUNT` evenly spaced azimuths. Each spoke is one segment
+/// whose color fades from `color_inner` at the inner endpoint to `color_outer`
+/// at the outer endpoint, tracing the camera eye's straight-line zoom path for
+/// that azimuth. `waterline_dy` folds into both rings' Y, matching the drawn
+/// ellipses.
+pub(crate) fn build_zoom_path_mesh(
+    inner: &CameraRing,
+    outer: &CameraRing,
+    waterline_dy: f32,
+    color_inner: [f32; 4],
+    color_outer: [f32; 4],
+) -> (Vec<Vertex>, Vec<u32>) {
+    let mut verts: Vec<Vertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    let inner_pts = sample_ring_points(inner, waterline_dy, SPOKE_COUNT);
+    let outer_pts = sample_ring_points(outer, waterline_dy, SPOKE_COUNT);
+    for (p_inner, p_outer) in inner_pts.into_iter().zip(outer_pts) {
+        push_segment_gradient(&mut verts, &mut indices, p_inner, p_outer, color_inner, color_outer);
+    }
+
+    (verts, indices)
 }
 
 /// Terse hover label for one ring: which mode/orbit it is and its key values.
@@ -179,5 +216,64 @@ mod tests {
         assert!(label.contains("Observe outer (FOV max)"), "{label}");
         assert!(label.contains("semiH 6.55"), "{label}");
         assert!(label.contains("semiV 9.60"), "{label}");
+    }
+
+    fn ring_pair() -> (CameraRing, CameraRing) {
+        use wowsunpack::game_types::Vec2 as CoreVec2;
+        use wowsunpack::game_types::Vec3 as CoreVec3;
+        let inner = CameraRing { pos_center: CoreVec3::new(0.0, 2.0, 0.0), semi_axes: CoreVec2::new(6.0, 9.0) };
+        let outer = CameraRing { pos_center: CoreVec3::new(0.0, 4.0, 0.0), semi_axes: CoreVec2::new(10.0, 14.0) };
+        (inner, outer)
+    }
+
+    #[test]
+    fn zoom_path_non_empty_valid_indices() {
+        let (inner, outer) = ring_pair();
+        let (verts, indices) =
+            build_zoom_path_mesh(&inner, &outer, 0.0, [0.0, 0.9, 1.0, 0.85], [1.0, 0.6, 0.1, 0.85]);
+        assert!(!verts.is_empty());
+        assert!(!indices.is_empty());
+        assert_eq!(indices.len() % 3, 0);
+        for &i in &indices {
+            assert!((i as usize) < verts.len());
+        }
+    }
+
+    #[test]
+    fn zoom_path_has_one_segment_per_spoke() {
+        let (inner, outer) = ring_pair();
+        let (verts, _) =
+            build_zoom_path_mesh(&inner, &outer, 0.0, [0.0, 0.9, 1.0, 0.85], [1.0, 0.6, 0.1, 0.85]);
+        // Each spoke is one gradient segment = 2 quads = 8 vertices.
+        assert_eq!(verts.len(), SPOKE_COUNT * 8);
+    }
+
+    #[test]
+    fn zoom_path_endpoints_lie_on_both_ellipses() {
+        let (inner, outer) = ring_pair();
+        let (verts, _) =
+            build_zoom_path_mesh(&inner, &outer, 0.0, [0.0, 0.9, 1.0, 0.85], [1.0, 0.6, 0.1, 0.85]);
+        let on_ellipse = |c: &CameraRing, p: &[f32; 3]| {
+            let dx = (p[0] - c.pos_center.x) / c.semi_axes.x;
+            let dz = (p[2] - c.pos_center.z) / c.semi_axes.y;
+            (dx * dx + dz * dz - 1.0).abs() < 0.1 && (p[1] - c.pos_center.y).abs() < 0.1
+        };
+        let inner_hits = verts.iter().filter(|v| on_ellipse(&inner, &v.position)).count();
+        let outer_hits = verts.iter().filter(|v| on_ellipse(&outer, &v.position)).count();
+        assert!(inner_hits >= SPOKE_COUNT, "inner_hits={inner_hits}");
+        assert!(outer_hits >= SPOKE_COUNT, "outer_hits={outer_hits}");
+    }
+
+    #[test]
+    fn zoom_path_colors_are_per_endpoint() {
+        let (inner, outer) = ring_pair();
+        let ci = [0.0, 0.9, 1.0, 0.85];
+        let co = [1.0, 0.6, 0.1, 0.85];
+        let (verts, _) = build_zoom_path_mesh(&inner, &outer, 0.0, ci, co);
+        let inner_colored = verts.iter().filter(|v| v.color == ci).count();
+        let outer_colored = verts.iter().filter(|v| v.color == co).count();
+        assert_eq!(inner_colored, verts.len() / 2);
+        assert_eq!(outer_colored, verts.len() / 2);
+        assert_eq!(inner_colored + outer_colored, verts.len());
     }
 }
