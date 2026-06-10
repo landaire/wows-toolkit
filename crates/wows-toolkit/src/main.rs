@@ -99,7 +99,7 @@ fn main() -> eframe::Result<()> {
                 .filter(|adapter| surface.is_none_or(|surface| adapter.is_surface_supported(surface)))
                 .min_by_key(|adapter| {
                     let info = adapter.get_info();
-                    let prefer_dx12 = u8::from(!(cfg!(windows) && info.backend == wgpu::Backend::Dx12));
+                    // Pick the most capable GPU first.
                     let device_rank = match info.device_type {
                         wgpu::DeviceType::DiscreteGpu => 0u8,
                         wgpu::DeviceType::IntegratedGpu => 1,
@@ -107,8 +107,17 @@ fn main() -> eframe::Result<()> {
                         wgpu::DeviceType::Cpu => 3,
                         wgpu::DeviceType::Other => 4,
                     };
-                    let avoid_gl = u8::from(info.backend == wgpu::Backend::Gl);
-                    (prefer_dx12, device_rank, avoid_gl)
+                    // Then prefer Vulkan/Metal over DX12: the DXGI flip-model swapchain
+                    // stutters during native window moves and non-client hover animations on
+                    // Windows. GL avoids it too but is the least battle-tested backend, so it
+                    // stays the last resort. DX12 remains the fallback when Vulkan is absent.
+                    let backend_rank = match info.backend {
+                        wgpu::Backend::Vulkan | wgpu::Backend::Metal => 0u8,
+                        wgpu::Backend::Dx12 => 1,
+                        wgpu::Backend::Gl => 2,
+                        _ => 3,
+                    };
+                    (device_rank, backend_rank)
                 })
                 .cloned()
                 .ok_or_else(|| "no compatible wgpu adapter available".to_string())
