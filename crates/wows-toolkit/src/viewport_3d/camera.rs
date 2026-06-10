@@ -147,6 +147,22 @@ impl ArcballCamera {
         self.target + offset
     }
 
+    /// Place the camera so its derived eye sits at `eye` while it looks toward
+    /// `target`, back-solving distance/azimuth/elevation. No-op if eye and
+    /// target coincide. The perspective lock uses this and bypasses the orbit
+    /// elevation clamp.
+    pub fn set_eye_and_target(&mut self, eye: Vec3, target: Vec3) {
+        let offset = eye - target;
+        let distance = offset.norm();
+        if distance < 1e-6 {
+            return;
+        }
+        self.target = target;
+        self.distance = distance;
+        self.elevation = (offset.y / distance).clamp(-1.0, 1.0).asin();
+        self.azimuth = offset.x.atan2(offset.z);
+    }
+
     /// Compute the view matrix (world -> camera).
     pub fn view_matrix(&self) -> [[f32; 4]; 4] {
         let eye = self.eye_position();
@@ -417,6 +433,46 @@ fn perspective(fov_y: f32, aspect: f32, near: f32, far: f32) -> [[f32; 4]; 4] {
 /// Multiply two 4x4 matrices (column-major layout: m[col][row]).
 pub(crate) fn mat4_mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
     na_to_mat4(mat4_to_na(a) * mat4_to_na(b))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_eye_and_target_round_trips_eye() {
+        let mut c = ArcballCamera::default();
+        let cases = [
+            (Vec3::new(10.0, 5.0, 3.0), Vec3::new(0.0, 0.0, 0.0)),
+            (Vec3::new(-4.0, 2.0, 7.0), Vec3::new(1.0, 1.0, -1.0)),
+            (Vec3::new(0.0, 8.0, 0.0), Vec3::new(0.0, 0.0, 0.0)),
+        ];
+        for (eye, target) in cases {
+            c.set_eye_and_target(eye, target);
+            let got = c.eye_position();
+            assert!((got - eye).norm() < 1e-4, "eye {got:?} != {eye:?}");
+            assert!((c.target - target).norm() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn set_eye_and_target_aims_at_target() {
+        let mut c = ArcballCamera::default();
+        let eye = Vec3::new(5.0, 3.0, -2.0);
+        let target = Vec3::new(-1.0, 0.5, 4.0);
+        c.set_eye_and_target(eye, target);
+        let look = (c.target - c.eye_position()).normalize();
+        let want = (target - eye).normalize();
+        assert!((look - want).norm() < 1e-4, "look {look:?} want {want:?}");
+    }
+
+    #[test]
+    fn set_eye_and_target_noop_when_coincident() {
+        let mut c = ArcballCamera::default();
+        let before = (c.target, c.distance, c.azimuth, c.elevation);
+        c.set_eye_and_target(Vec3::new(1.0, 1.0, 1.0), Vec3::new(1.0, 1.0, 1.0));
+        assert_eq!(before, (c.target, c.distance, c.azimuth, c.elevation));
+    }
 }
 
 #[cfg(test)]
