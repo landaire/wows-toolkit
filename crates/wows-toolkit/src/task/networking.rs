@@ -248,9 +248,10 @@ impl NetworkingThread {
                 let _ = self.result_tx.send(NetworkResult::PersonalRatingDataFetched(data));
             }
             Err(e) => {
-                let _ = self
-                    .result_tx
-                    .send(NetworkResult::PersonalRatingDataFetchFailed(format!("failed to fetch PR data: {e}")));
+                let _ = self.result_tx.send(NetworkResult::PersonalRatingDataFetchFailed(format!(
+                    "failed to fetch PR data: {}",
+                    crate::util::http::error_chain(&e)
+                )));
             }
         }
     }

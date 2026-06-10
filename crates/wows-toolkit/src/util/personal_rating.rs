@@ -256,13 +256,38 @@ pub fn needs_update() -> bool {
     true
 }
 
-/// Fetch expected values from the API
+/// Failure fetching or validating the wows-numbers expected-values data.
+#[derive(Debug, thiserror::Error)]
+pub enum FetchExpectedValuesError {
+    #[error("request failed")]
+    Http(#[from] reqwest::Error),
+    #[error("response was not valid expected-values JSON")]
+    InvalidJson(#[from] serde_json::Error),
+    #[error("expected-values response contained no ship data")]
+    Empty,
+}
+
+/// Validate a downloaded expected-values payload before it is cached. The body
+/// must parse into `ExpectedValuesData` with a non-empty ship map; wows-numbers
+/// downtime has served HTML error pages with a 200 status that must not
+/// overwrite good cached data.
+fn validate_expected_values(bytes: &[u8]) -> Result<(), FetchExpectedValuesError> {
+    let parsed: ExpectedValuesData = serde_json::from_slice(bytes)?;
+    if parsed.data.is_empty() {
+        return Err(FetchExpectedValuesError::Empty);
+    }
+    Ok(())
+}
+
+/// Fetch expected values from the API, returning the raw bytes only if the
+/// response is a valid, non-empty expected-values document.
 #[instrument]
-pub async fn fetch_expected_values() -> Result<Vec<u8>, reqwest::Error> {
+pub async fn fetch_expected_values() -> Result<Vec<u8>, FetchExpectedValuesError> {
     let client = crate::util::http::async_client()?;
     let response = crate::util::http::get_with_retry(&client, EXPECTED_VALUES_URL).await?;
-    let bytes = response.bytes().await?;
-    Ok(bytes.to_vec())
+    let bytes = response.bytes().await?.to_vec();
+    validate_expected_values(&bytes)?;
+    Ok(bytes)
 }
 
 /// Save expected values to disk
@@ -335,6 +360,31 @@ mod tests {
         let pr = loaded_pr_data();
         let ev = pr.get_ship_expected(GameParamId::from(9999999999u64));
         assert!(ev.is_none());
+    }
+
+    // -- Download validation --
+
+    #[test]
+    fn validate_accepts_real_fixture() {
+        validate_expected_values(&fixture_bytes()).expect("fixture should pass validation");
+    }
+
+    #[test]
+    fn validate_rejects_html_error_page() {
+        let html = b"<!DOCTYPE html><html><body>503 Service Unavailable</body></html>";
+        assert!(matches!(validate_expected_values(html), Err(FetchExpectedValuesError::InvalidJson(_))));
+    }
+
+    #[test]
+    fn validate_rejects_truncated_json() {
+        let truncated = br#"{"time":123,"data":{"3374266064":{"average_damage_dealt":"#;
+        assert!(matches!(validate_expected_values(truncated), Err(FetchExpectedValuesError::InvalidJson(_))));
+    }
+
+    #[test]
+    fn validate_rejects_empty_data() {
+        let empty = br#"{"time":123,"data":{}}"#;
+        assert!(matches!(validate_expected_values(empty), Err(FetchExpectedValuesError::Empty)));
     }
 
     // -- PR calculation --
