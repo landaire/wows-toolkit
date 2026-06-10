@@ -4812,30 +4812,6 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
                         combo_changed = true;
                     }
                 });
-                ui.horizontal(|ui| {
-                    use crate::armor_viewer::camera_perspective::LookTarget;
-                    ui.label(t!("ui.armor.perspective_look_at").as_ref());
-                    if ui
-                        .selectable_value(
-                            &mut pane.perspective.look_target,
-                            LookTarget::AimDirection,
-                            t!("ui.armor.perspective_look_aim").as_ref(),
-                        )
-                        .changed()
-                    {
-                        combo_changed = true;
-                    }
-                    if ui
-                        .selectable_value(
-                            &mut pane.perspective.look_target,
-                            LookTarget::ShipCenter,
-                            t!("ui.armor.perspective_look_center").as_ref(),
-                        )
-                        .changed()
-                    {
-                        combo_changed = true;
-                    }
-                });
             }
         }
     });
@@ -4871,14 +4847,14 @@ fn handle_perspective_input(pane: &mut ArmorPane, response: &egui::Response, ui:
             changed = true;
         }
         if d.y != 0.0 {
-            pane.perspective.pitch -= d.y * PITCH_SENS;
+            pane.perspective.pitch += d.y * PITCH_SENS;
             changed = true;
         }
     }
     if response.hovered() {
         let scroll = ui.input(|i| i.smooth_scroll_delta.y);
         if scroll != 0.0 {
-            pane.perspective.zoom += scroll * ZOOM_SENS;
+            pane.perspective.zoom -= scroll * ZOOM_SENS;
             changed = true;
         }
     }
@@ -4905,9 +4881,10 @@ fn apply_perspective_to_viewport(pane: &mut ArmorPane) -> bool {
         };
         (traj.clone(), armor.waterline_dy, armor.bounds.0, armor.bounds.1)
     };
-    let (eye_m, target_m) = pane.perspective.eye_and_target(&traj, pane.camera_fov, pane.camera_height, waterline_dy);
+    let (eye_m, dir_m) = pane.perspective.eye_and_look_dir(&traj, pane.camera_fov, pane.camera_height, waterline_dy);
     let eye = pane.viewport.pos_to_world_space(eye_m);
-    let target = pane.viewport.pos_to_world_space(target_m);
+    let dir = pane.viewport.pos_to_world_space(dir_m);
+    let target = crate::armor_viewer::camera_perspective::water_aim_point(eye, dir, 5000.0);
     let fov = pane.perspective.fov_deg.to_radians();
     let far = ((max - min).norm() * 8.0).max(10.0);
 
