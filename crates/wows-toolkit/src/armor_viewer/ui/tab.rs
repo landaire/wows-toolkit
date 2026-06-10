@@ -4842,6 +4842,69 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
             });
         }
     }
+    ui.separator();
+    ui.label("Hull Lighting");
+    if ui.checkbox(&mut pane.lighting.enabled, "Enable lighting").changed() {
+        zone_changed = true;
+    }
+    let mut lighting_changed = false;
+    ui.add_enabled_ui(pane.lighting.enabled, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("In-Game").clicked() {
+                let keep = pane.lighting.enabled;
+                pane.lighting = crate::viewport_3d::LightingSettings::in_game();
+                pane.lighting.enabled = keep;
+                lighting_changed = true;
+            }
+            if ui.button("Flat").clicked() {
+                let keep = pane.lighting.enabled;
+                pane.lighting = crate::viewport_3d::LightingSettings::flat();
+                pane.lighting.enabled = keep;
+                lighting_changed = true;
+            }
+            if ui.button("Studio").clicked() {
+                let keep = pane.lighting.enabled;
+                pane.lighting = crate::viewport_3d::LightingSettings::studio();
+                pane.lighting.enabled = keep;
+                lighting_changed = true;
+            }
+        });
+        let l = &mut pane.lighting;
+        if ui.add(egui::Slider::new(&mut l.flat_intensity, 0.0..=1.5).text("Flat (ambient)")).changed() {
+            lighting_changed = true;
+        }
+        if ui.add(egui::Slider::new(&mut l.key_intensity, 0.0..=1.5).text("Directional (key)")).changed() {
+            lighting_changed = true;
+        }
+        if ui.add(egui::Slider::new(&mut l.azimuth_deg, 0.0..=360.0).text("Light azimuth")).changed() {
+            lighting_changed = true;
+        }
+        if ui.add(egui::Slider::new(&mut l.elevation_deg, -90.0..=90.0).text("Light elevation")).changed() {
+            lighting_changed = true;
+        }
+        if ui.add(egui::Slider::new(&mut l.rim_strength, 0.0..=1.0).text("Rim")).changed() {
+            lighting_changed = true;
+        }
+        if ui.add(egui::Slider::new(&mut l.specular_strength, 0.0..=1.0).text("Specular")).changed() {
+            lighting_changed = true;
+        }
+        if ui.add(egui::Slider::new(&mut l.shininess, 1.0..=128.0).text("Shininess")).changed() {
+            lighting_changed = true;
+        }
+        ui.horizontal(|ui| {
+            ui.label("Key color");
+            if ui.color_edit_button_rgb(&mut l.key_color).changed() {
+                lighting_changed = true;
+            }
+            ui.label("Ambient color");
+            if ui.color_edit_button_rgb(&mut l.flat_color).changed() {
+                lighting_changed = true;
+            }
+        });
+    });
+    if lighting_changed {
+        zone_changed = true;
+    }
     if combo_changed {
         zone_changed = true;
     }
