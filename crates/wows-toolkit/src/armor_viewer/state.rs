@@ -515,6 +515,13 @@ pub struct ArmorPane {
     pub camera_fov: f32,
     /// Height offset for the camera orbit ring (-1..1).
     pub camera_height: f32,
+    /// Show straight spoke connectors between the inner and outer camera orbits
+    /// (the camera eye's zoom path). No effect for modes without an outer orbit.
+    pub show_camera_zoom_path: bool,
+    /// Draw zoom-path spokes evaluated at the live `camera_fov` slider value.
+    pub zoom_path_regular_fov: bool,
+    /// Draw zoom-path spokes evaluated at max FOV (1.0).
+    pub zoom_path_max_fov: bool,
 }
 
 /// Snapshot of the per-pane settings that "Sync options" broadcasts from the active
@@ -531,6 +538,9 @@ pub struct SyncedPaneSettings {
     pub camera_ellipse_mode: String,
     pub camera_fov: f32,
     pub camera_height: f32,
+    pub show_camera_zoom_path: bool,
+    pub zoom_path_regular_fov: bool,
+    pub zoom_path_max_fov: bool,
 }
 
 impl SyncedPaneSettings {
@@ -545,6 +555,9 @@ impl SyncedPaneSettings {
             camera_ellipse_mode: pane.camera_ellipse_mode.clone(),
             camera_fov: pane.camera_fov,
             camera_height: pane.camera_height,
+            show_camera_zoom_path: pane.show_camera_zoom_path,
+            zoom_path_regular_fov: pane.zoom_path_regular_fov,
+            zoom_path_max_fov: pane.zoom_path_max_fov,
         }
     }
 
@@ -559,6 +572,9 @@ impl SyncedPaneSettings {
             || self.camera_ellipse_mode != pane.camera_ellipse_mode
             || self.camera_fov != pane.camera_fov
             || self.camera_height != pane.camera_height
+            || self.show_camera_zoom_path != pane.show_camera_zoom_path
+            || self.zoom_path_regular_fov != pane.zoom_path_regular_fov
+            || self.zoom_path_max_fov != pane.zoom_path_max_fov
     }
 
     pub fn apply_to(&self, pane: &mut ArmorPane) {
@@ -571,6 +587,9 @@ impl SyncedPaneSettings {
         pane.camera_ellipse_mode = self.camera_ellipse_mode.clone();
         pane.camera_fov = self.camera_fov;
         pane.camera_height = self.camera_height;
+        pane.show_camera_zoom_path = self.show_camera_zoom_path;
+        pane.zoom_path_regular_fov = self.zoom_path_regular_fov;
+        pane.zoom_path_max_fov = self.zoom_path_max_fov;
     }
 }
 
@@ -664,6 +683,9 @@ impl ArmorPane {
             center_marker_mesh_ids: Vec::new(),
             camera_fov: 0.0,
             camera_height: 0.0,
+            show_camera_zoom_path: false,
+            zoom_path_regular_fov: true,
+            zoom_path_max_fov: false,
         }
     }
 }
