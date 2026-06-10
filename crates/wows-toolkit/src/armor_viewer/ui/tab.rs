@@ -1193,6 +1193,9 @@ pub(crate) fn upload_armor_to_viewport(
         let mode = pane.camera_ellipse_mode.clone();
         let fov = pane.camera_fov;
         let height = pane.camera_height;
+        let show_zoom_path = pane.show_camera_zoom_path;
+        let zoom_path_regular = pane.zoom_path_regular_fov;
+        let zoom_path_max = pane.zoom_path_max_fov;
         if let Some((_, traj)) = armor.camera_trajectories.iter().find(|(name, _)| *name == mode) {
             use crate::armor_viewer::camera_ellipse::build_camera_ellipse_mesh;
             use crate::armor_viewer::camera_ellipse::ring_label;
@@ -1223,6 +1226,29 @@ pub(crate) fn upload_armor_to_viewport(
                 for (f, tag) in [(0.0_f32, "FOV min"), (1.0, "FOV max")] {
                     if let Some(ring) = traj.resolve_outer(f, height) {
                         push_ring("outer", tag, ring, [1.0, 0.6, 0.1, 0.25], false);
+                    }
+                }
+            }
+            // Zoom-path spokes: straight connectors from the inner orbit to the
+            // outer orbit at sampled azimuths, showing the camera eye's path
+            // while zooming. Only present when the mode defines an outer orbit.
+            if show_zoom_path {
+                use crate::armor_viewer::camera_ellipse::build_zoom_path_mesh;
+                for (enabled, f, alpha) in
+                    [(zoom_path_regular, fov, 0.85_f32), (zoom_path_max, 1.0_f32, 0.5_f32)]
+                {
+                    if !enabled {
+                        continue;
+                    }
+                    let inner = traj.resolve(f, height);
+                    let Some(outer) = traj.resolve_outer(f, height) else {
+                        continue;
+                    };
+                    let ci = [0.0, 0.9, 1.0, alpha];
+                    let co = [1.0, 0.6, 0.1, alpha];
+                    let (verts, indices) = build_zoom_path_mesh(&inner, &outer, waterline_dy, ci, co);
+                    if !indices.is_empty() {
+                        mesh_ids.push(viewport.add_non_pickable_mesh(device, &verts, &indices, LAYER_OVERLAY));
                     }
                 }
             }
