@@ -650,6 +650,23 @@ pub enum HealState {
     Active,
 }
 
+impl HealState {
+    /// RGB for the healable-HP region, or `None` when the region should be
+    /// hidden. Shared by every render backend so the gray (ready) / white
+    /// (actively healing) treatment stays in sync.
+    pub const fn healable_rgb(self) -> Option<[u8; 3]> {
+        match self {
+            HealState::Unavailable => None,
+            HealState::Ready => Some([140, 140, 140]),
+            HealState::Active => Some([255, 255, 255]),
+        }
+    }
+}
+
+/// Charcoal tint for the stats-panel ship silhouette base/outline. Shared so
+/// both render backends match.
+pub const SILHOUETTE_BASE_RGB: [u8; 3] = [55, 55, 60];
+
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct RosterRow {

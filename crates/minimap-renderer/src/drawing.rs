@@ -1609,11 +1609,13 @@ fn draw_team_roster(
             let fill_w = hp_bar_w * fill_ratio;
             let fill_color = hp_bar_color_lerp(fill_ratio);
             draw_filled_rect(pm, inner_x, hp_bar_y, fill_w, hp_bar_h, fill_color, 1.0);
-            if row.hp_healable > 0.0 {
+            if let Some(color) = row.heal_state.healable_rgb()
+                && row.hp_healable > 0.0
+            {
                 let heal_ratio = (row.hp_healable / row.hp_max).clamp(0.0, 1.0);
                 let heal_w = (hp_bar_w * heal_ratio).min(hp_bar_w - fill_w);
                 if heal_w > 0.0 {
-                    draw_filled_rect(pm, inner_x + fill_w, hp_bar_y, heal_w, hp_bar_h, [110, 150, 110], 0.63);
+                    draw_filled_rect(pm, inner_x + fill_w, hp_bar_y, heal_w, hp_bar_h, color, 0.85);
                 }
             }
         }
@@ -2435,7 +2437,7 @@ impl RenderTarget for ImageTarget {
                 hp_current,
                 hp_max,
                 hp_healable,
-                heal_state: _,
+                heal_state,
                 player_name,
                 clan_tag,
                 clan_color,
@@ -2507,13 +2509,13 @@ impl RenderTarget for ImageTarget {
                     let draw_w = draw_w.max(1);
                     let draw_h = draw_h.max(1);
 
-                    // Gray silhouette base (remainder = unhealable lost HP shows through)
-                    let gray_sil = tint_silhouette(sil_img, [200, 200, 200]);
-                    let resized_gray =
-                        image::imageops::resize(&gray_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
+                    // Charcoal silhouette base (remainder = unhealable lost HP shows through)
+                    let base_sil = tint_silhouette(sil_img, crate::draw_command::SILHOUETTE_BASE_RGB);
+                    let resized_base =
+                        image::imageops::resize(&base_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
                     let sil_x = inner_x + (inner_w - draw_w as i32) / 2;
                     let sil_cy = sil_y + (sil_h - draw_h as i32) / 2;
-                    draw_icon_at(&mut self.canvas, &resized_gray, sil_x, sil_cy);
+                    draw_icon_at(&mut self.canvas, &resized_base, sil_x, sil_cy);
 
                     let regions = crate::panel_math::silhouette_regions(*hp_current, *hp_healable, *hp_max);
 
@@ -2528,15 +2530,19 @@ impl RenderTarget for ImageTarget {
                         draw_icon_at(&mut self.canvas, &cropped, sil_x, sil_cy);
                     }
 
-                    // White region: healable pool drawn immediately after the colored region
-                    let white_x = (draw_w as f32 * regions.colored) as u32;
-                    let white_w = (draw_w as f32 * regions.white) as u32;
-                    if white_w > 0 {
-                        let white_sil = tint_silhouette(sil_img, [255, 255, 255]);
-                        let resized_white =
-                            image::imageops::resize(&white_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
-                        let cropped = image::imageops::crop_imm(&resized_white, white_x, 0, white_w, draw_h).to_image();
-                        draw_icon_at(&mut self.canvas, &cropped, sil_x + white_x as i32, sil_cy);
+                    // Healable region: gray when a heal is ready, white while healing,
+                    // hidden when no heal is available.
+                    if let Some(color) = heal_state.healable_rgb() {
+                        let region_x = (draw_w as f32 * regions.colored) as u32;
+                        let region_w = (draw_w as f32 * regions.white) as u32;
+                        if region_w > 0 {
+                            let region_sil = tint_silhouette(sil_img, color);
+                            let resized_region =
+                                image::imageops::resize(&region_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
+                            let cropped =
+                                image::imageops::crop_imm(&resized_region, region_x, 0, region_w, draw_h).to_image();
+                            draw_icon_at(&mut self.canvas, &cropped, sil_x + region_x as i32, sil_cy);
+                        }
                     }
                 }
 
