@@ -4750,6 +4750,34 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
                 combo_changed = true;
             }
         });
+        if armor
+            .camera_trajectories
+            .iter()
+            .any(|(name, traj)| *name == pane.camera_ellipse_mode && traj.outer.is_some())
+        {
+            if ui
+                .checkbox(&mut pane.show_camera_zoom_path, t!("ui.armor.show_camera_zoom_path").as_ref())
+                .changed()
+            {
+                combo_changed = true;
+            }
+            if pane.show_camera_zoom_path {
+                ui.horizontal(|ui| {
+                    if ui
+                        .checkbox(&mut pane.zoom_path_regular_fov, t!("ui.armor.zoom_path_regular_fov").as_ref())
+                        .changed()
+                    {
+                        combo_changed = true;
+                    }
+                    if ui
+                        .checkbox(&mut pane.zoom_path_max_fov, t!("ui.armor.zoom_path_max_fov").as_ref())
+                        .changed()
+                    {
+                        combo_changed = true;
+                    }
+                });
+            }
+        }
     });
     if combo_changed {
         zone_changed = true;
