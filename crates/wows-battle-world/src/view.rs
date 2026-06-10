@@ -54,6 +54,7 @@ use crate::components::BuffZoneData;
 use crate::components::Building;
 use crate::components::BuildingState;
 use crate::components::Consumables;
+use crate::components::Division;
 use crate::components::EntityKind;
 use crate::components::GameId;
 use crate::components::MinimapPlacement;
@@ -97,6 +98,7 @@ pub struct QueryCache {
     vehicles: QueryState<(&'static GameId, &'static VehicleState)>,
     aims: QueryState<(&'static GameId, &'static Aim)>,
     consumables: QueryState<(&'static GameId, &'static Consumables)>,
+    divisions: QueryState<(&'static GameId, &'static Division)>,
     planes: QueryState<&'static PlaneState, bevy_ecs::query::With<Plane>>,
     wards: QueryState<&'static WardState, bevy_ecs::query::With<Ward>>,
     buff_zones: QueryState<(&'static GameId, &'static BuffZoneData)>,
@@ -117,6 +119,7 @@ impl QueryCache {
             vehicles: world.query(),
             aims: world.query(),
             consumables: world.query(),
+            divisions: world.query(),
             planes: world.query_filtered(),
             wards: world.query_filtered(),
             buff_zones: world.query(),
@@ -140,6 +143,7 @@ impl QueryCache {
         self.vehicles.update_archetypes(world);
         self.aims.update_archetypes(world);
         self.consumables.update_archetypes(world);
+        self.divisions.update_archetypes(world);
         self.planes.update_archetypes(world);
         self.wards.update_archetypes(world);
         self.buff_zones.update_archetypes(world);
@@ -196,6 +200,11 @@ impl<'w> BattleView<'w> {
     /// Players parsed from the arena roster, keyed by entity id.
     pub fn player_entities(&self) -> &'w HashMap<EntityId, Rc<Player>> {
         &self.world.resource::<PlayerIndex>().0
+    }
+
+    /// In-game division label (A, B, C...) per vehicle entity, for vehicles in a division.
+    pub fn divisions(&self) -> HashMap<EntityId, char> {
+        self.cache.divisions.iter_manual(self.world).map(|(gid, d)| (gid.0, d.letter)).collect()
     }
 
     /// Vehicle props for a single entity, if it is a vehicle.

@@ -143,6 +143,22 @@ pub struct Consumables {
 #[derive(Component, Debug, Clone)]
 pub struct PlayerLink(pub Rc<Player>);
 
+/// Division (pre-battle group) membership for a vehicle, derived from the roster.
+///
+/// `letter` mirrors the in-game label: within each team the distinct non-zero
+/// prebattle ids are sorted ascending and labelled A, B, C... This reconstructs the
+/// game's per-team division `sign` (the displayed letter is `'A' + sign`). The
+/// replay's per-player `preBattleSign` is left at 0 by the server, so the label is
+/// rebuilt from prebattle-id order. Only attached to vehicles whose player is in a
+/// division (prebattle id > 0).
+#[derive(Component, Debug, Clone, Copy)]
+pub struct Division {
+    /// Server-assigned division id (the `prebattleId` shared by division members).
+    pub prebattle_id: i64,
+    /// In-game division label (A, B, C...).
+    pub letter: char,
+}
+
 /// Captain (crew) resolved at EntityCreate time; never updated on later property changes.
 ///
 /// Mirrors the BattleController: captain is frozen from the create-time crew params id.

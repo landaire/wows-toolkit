@@ -559,8 +559,9 @@ impl UiReport {
 
         let players = report.players().to_vec();
 
-        let mut divisions: HashMap<u32, char> = Default::default();
-        let mut remaining_div_identifiers: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().rev().collect();
+        // Division labels (A, B, C...) keyed by vehicle entity id, reconstructed by the
+        // battle world to match the in-game per-team labelling.
+        let divisions = report.divisions();
 
         let self_player = players.iter().find(|player| player.relation().is_self()).cloned();
 
@@ -625,12 +626,7 @@ impl UiReport {
             };
 
             // Assign division
-            let div = player_state.division_id() as u32;
-            let division_char = if div > 0 {
-                Some(*divisions.entry(div).or_insert_with(|| remaining_div_identifiers.pop().unwrap_or('?')))
-            } else {
-                None
-            };
+            let division_char = divisions.get(&player_state.entity_id()).copied();
 
             let div_text = division_char.map(|div| format!("({div})"));
 

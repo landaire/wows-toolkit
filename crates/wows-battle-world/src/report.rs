@@ -36,6 +36,7 @@ use wowsunpack::game_types::ElapsedClock;
 
 use crate::components::BuildingState;
 use crate::components::Captain;
+use crate::components::Division;
 use crate::components::GameId;
 use crate::components::VehicleState;
 use crate::resources::ChatLog;
@@ -60,6 +61,7 @@ pub struct BattleReport {
     game_type: Recognized<BattleType>,
     match_group: String,
     players: Vec<Rc<Player>>,
+    divisions: HashMap<EntityId, char>,
     game_chat: Vec<GameMessage>,
     battle_results: Option<String>,
     frags: HashMap<Rc<Player>, Vec<DeathInfo>>,
@@ -110,6 +112,14 @@ impl BattleReport {
 
     pub fn players(&self) -> &[Rc<Player>] {
         &self.players
+    }
+
+    /// In-game division label (A, B, C...) keyed by vehicle entity id.
+    ///
+    /// Only contains entries for players in a division; look up by
+    /// `player.initial_state().entity_id()`.
+    pub fn divisions(&self) -> &HashMap<EntityId, char> {
+        &self.divisions
     }
 
     pub fn game_chat(&self) -> &[GameMessage] {
@@ -341,6 +351,12 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         let self_damage_stats: Vec<DamageStatEntry> =
             self.world().resource::<SelfStats>().damage_stats.values().cloned().collect();
 
+        // Division labels were materialized onto vehicle entities during ingest.
+        let divisions: HashMap<EntityId, char> = {
+            let mut query = self.world_mut().query::<(&GameId, &Division)>();
+            query.iter(self.world()).map(|(gid, d)| (gid.0, d.letter)).collect()
+        };
+
         let buildings = self.report_buildings();
         let capture_points = self.capture_points();
         let team_scores = self.team_scores();
@@ -358,6 +374,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             game_type,
             match_group,
             players,
+            divisions,
             game_chat,
             battle_results,
             frags,

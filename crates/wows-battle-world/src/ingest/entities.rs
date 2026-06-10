@@ -32,6 +32,7 @@ use crate::components::BuildingState;
 use crate::components::Captain;
 use crate::components::CapturePoint;
 use crate::components::CapturePointData;
+use crate::components::Division;
 use crate::components::GameId;
 use crate::components::PlayerLink;
 use crate::components::SmokeScreen;
@@ -465,6 +466,54 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
             if let Some(player_rc) = player_rc {
                 e.insert(PlayerLink(player_rc));
             }
+        }
+    }
+
+    derive_divisions(world);
+}
+
+/// Attach `Division` components, reconstructing the in-game per-team division labels.
+///
+/// Within each team the distinct non-zero prebattle ids are sorted ascending and
+/// labelled A, B, C... matching the game's per-team division `sign` (letter =
+/// `'A' + sign`); the replay's per-player `preBattleSign` is server-zeroed, so the
+/// label is rebuilt from prebattle-id order. Idempotent: re-running overwrites the
+/// component, so repeated arena-state seeding stays consistent.
+fn derive_divisions(world: &mut World) {
+    // Snapshot (entity, team, prebattle_id) for every vehicle whose player is in a division.
+    let mut members: Vec<(bevy_ecs::entity::Entity, i64, i64)> = Vec::new();
+    {
+        let mut query = world.query_filtered::<(bevy_ecs::entity::Entity, &PlayerLink), bevy_ecs::query::With<Vehicle>>();
+        for (entity, link) in query.iter(world) {
+            let state = link.0.initial_state();
+            let prebattle_id = state.division_id();
+            if prebattle_id > 0 {
+                members.push((entity, state.team_id(), prebattle_id));
+            }
+        }
+    }
+
+    // Per team, sort the distinct prebattle ids ascending; position becomes the letter.
+    let mut ids_by_team: std::collections::HashMap<i64, Vec<i64>> = std::collections::HashMap::new();
+    for (_, team, prebattle_id) in &members {
+        let ids = ids_by_team.entry(*team).or_default();
+        if !ids.contains(prebattle_id) {
+            ids.push(*prebattle_id);
+        }
+    }
+    let mut letter_by_id: std::collections::HashMap<i64, char> = std::collections::HashMap::new();
+    for ids in ids_by_team.values_mut() {
+        ids.sort_unstable();
+        for (idx, prebattle_id) in ids.iter().enumerate() {
+            letter_by_id.insert(*prebattle_id, char::from(b'A'.saturating_add(idx as u8)));
+        }
+    }
+
+    for (entity, _, prebattle_id) in members {
+        if let Some(&letter) = letter_by_id.get(&prebattle_id)
+            && let Ok(mut e) = world.get_entity_mut(entity)
+        {
+            e.insert(Division { prebattle_id, letter });
         }
     }
 }

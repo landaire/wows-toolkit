@@ -166,6 +166,7 @@ struct PlayerEntry {
     relation: String,
     is_bot: bool,
     vehicle_id: String,
+    division: Option<char>,
 }
 
 #[derive(Serialize)]
@@ -261,6 +262,7 @@ fn report_snapshot(filename: &str) -> Option<ReportSnapshot> {
                 relation: format!("{:?}", p.relation()),
                 is_bot: p.is_bot(),
                 vehicle_id: format!("{:?}", p.vehicle().id()),
+                division: report.divisions().get(&st.entity_id()).copied(),
             }
         })
         .collect();
