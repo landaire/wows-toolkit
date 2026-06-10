@@ -1035,6 +1035,7 @@ impl UpdateFromReplayArgs for VehicleProps {
         const TARGET_LOCAL_POSITION_KEY: &str = "targetLocalPos";
         const TRIGGERED_SKILLS_DATA_KEY: &str = "triggeredSkillsData";
         const REGENERATED_HEALTH_KEY: &str = "regeneratedHealth";
+        const REGENERATION_HEALTH_KEY: &str = "regenerationHealth";
         const BLOCKED_CONTROLS_KEY: &str = "blockedControls";
         const IS_INVISIBLE_KEY: &str = "isInvisible";
         const IS_FOG_HORN_ON_KEY: &str = "isFogHornOn";
@@ -1143,6 +1144,8 @@ impl UpdateFromReplayArgs for VehicleProps {
         set_arg_value!(self.triggered_skills_data, args, TRIGGERED_SKILLS_DATA_KEY, Vec<u8>);
 
         set_arg_value!(self.regenerated_health, args, REGENERATED_HEALTH_KEY, f32);
+
+        set_arg_value!(self.regeneration_health, args, REGENERATION_HEALTH_KEY, f32);
 
         set_arg_value!(self.blocked_controls, args, BLOCKED_CONTROLS_KEY, u8);
 
@@ -1395,5 +1398,28 @@ impl Entity {
             Entity::Building(_ref_cell) => EntityKind::Building,
             Entity::SmokeScreen(_ref_cell) => EntityKind::SmokeScreen,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use wowsunpack::data::Version;
+    use wowsunpack::rpc::typedefs::ArgValue;
+
+    use crate::game_constants::GameConstants;
+
+    use super::VehicleProps;
+
+    #[test]
+    fn update_from_args_sets_regeneration_health() {
+        let mut props = VehicleProps::default();
+        let version = Version::default();
+        let constants = GameConstants::defaults();
+        let args: HashMap<&str, ArgValue<'_>> =
+            [("regenerationHealth", ArgValue::Float32(2295.0))].into_iter().collect();
+        props.update_from_args(&args, version, &constants);
+        assert_eq!(props.regeneration_health(), 2295.0);
     }
 }
