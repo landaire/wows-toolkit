@@ -28,13 +28,13 @@ depends_post = ["fmt"]
 
 [tasks.clippy-fix]
 description = "Runs cargo-clippy-fix against all features"
-run = "cargo clippy --fix --all-features --allow-dirty"
+run = "cargo clippy --fix --all-features --all-targets --allow-dirty"
 depends_post = ["fmt"]
 
 [tasks.fix-all]
 description = "Runs clippy fix, fmt, and checks WASM target"
 run = [
-    "cargo clippy --fix --all-features --allow-dirty",
+    "cargo clippy --fix --all-features --all-targets --allow-dirty",
     "cargo check -p wt-web --target wasm32-unknown-unknown",
 ]
 depends_post = ["fmt"]

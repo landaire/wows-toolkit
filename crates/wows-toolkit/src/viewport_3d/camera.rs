@@ -458,7 +458,7 @@ mod gizmo_anim_tests {
         c.animate_to(2.0 * PI - 0.1, 0.0, 0.4);
         c.update_animation(0.2);
         let a = c.azimuth.rem_euclid(2.0 * PI);
-        assert!(a < 0.2 || a > 2.0 * PI - 0.2, "az={}", c.azimuth);
+        assert!(!(0.2..=2.0 * PI - 0.2).contains(&a), "az={}", c.azimuth);
     }
 
     #[test]
