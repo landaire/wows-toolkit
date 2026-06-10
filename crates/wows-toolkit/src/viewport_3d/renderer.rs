@@ -9,6 +9,7 @@ use crate::viewport_3d::camera::mat4_mul;
 use crate::viewport_3d::picking;
 use crate::viewport_3d::picking::PickableMesh;
 use crate::viewport_3d::types::HitResult;
+use crate::viewport_3d::types::LightingSettings;
 use crate::viewport_3d::types::MeshId;
 use crate::viewport_3d::types::Uniforms;
 use crate::viewport_3d::types::Vec3;
@@ -22,6 +23,9 @@ struct Uniforms {
     mvp: mat4x4<f32>,
     model_view: mat4x4<f32>,
     light_dir: vec4<f32>,
+    flat_color: vec4<f32>,
+    key_color: vec4<f32>,
+    params: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -62,8 +66,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let tex_color = textureSample(diffuse_texture, diffuse_sampler, in.uv);
     let base_color = tex_color * in.color;
 
-    // Flat lighting — uniform brightness, no directional shading.
-    let color = base_color.rgb;
+    var color = base_color.rgb;
+    if (uniforms.light_dir.w > 0.5) {
+        // Hull lighting: half-Lambert key over a flat ambient floor, plus rim and specular.
+        // Half-Lambert keeps the far side lit (never fully black) so all angles stay visible.
+        let N = normalize(in.normal_vs);
+        let V = normalize(-in.position_vs);
+        let L = normalize(uniforms.light_dir.xyz);
+        let half_lambert = dot(N, L) * 0.5 + 0.5;
+        let H = normalize(L + V);
+        let spec = pow(max(dot(N, H), 0.0), uniforms.params.w) * uniforms.params.z;
+        let rim = pow(1.0 - max(dot(N, V), 0.0), uniforms.params.y) * uniforms.params.x;
+        let lighting = uniforms.flat_color.rgb + uniforms.key_color.rgb * half_lambert;
+        color = base_color.rgb * lighting + vec3<f32>(rim + spec, rim + spec, rim + spec);
+    }
 
     return vec4(color, base_color.a);
 }
@@ -357,6 +373,8 @@ struct GpuMesh {
     texture_bind_group: Option<wgpu::BindGroup>,
     /// If true, this mesh is in world space and should NOT be affected by model_roll.
     world_space: bool,
+    /// If true, this mesh participates in hull lighting (when lighting is enabled).
+    lit: bool,
 }
 
 /// Offscreen render target (MSAA color + resolve color + depth).
@@ -387,6 +405,9 @@ pub struct Viewport3D {
     /// Separate uniform buffer for world-space meshes (no model rotation).
     world_uniform_buffer: Option<wgpu::Buffer>,
     world_uniform_bind_group: Option<wgpu::BindGroup>,
+    /// Model-space uniforms with the lit flag forced off - used for armor meshes.
+    model_unlit_uniform_buffer: Option<wgpu::Buffer>,
+    model_unlit_uniform_bind_group: Option<wgpu::BindGroup>,
     next_mesh_id: u64,
     pub clear_color: wgpu::Color,
     /// Whether the scene has changed and needs re-rendering.
@@ -397,12 +418,21 @@ pub struct Viewport3D {
     pub model_yaw: f32,
     /// Cursor position in NDC ([-1,1] range), updated each frame for flashlight lighting.
     pub cursor_ndc: Option<[f32; 2]>,
+    /// Hull lighting parameters used when building per-frame uniforms.
+    pub lighting: LightingSettings,
 }
 
 impl Default for Viewport3D {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BindKind {
+    World,
+    ModelLit,
+    ModelUnlit,
 }
 
 impl Viewport3D {
@@ -417,12 +447,15 @@ impl Viewport3D {
             uniform_bind_group: None,
             world_uniform_buffer: None,
             world_uniform_bind_group: None,
+            model_unlit_uniform_buffer: None,
+            model_unlit_uniform_bind_group: None,
             next_mesh_id: 0,
             clear_color: wgpu::Color { r: 0.12, g: 0.12, b: 0.18, a: 1.0 },
             needs_redraw: true,
             model_roll: 0.0,
             model_yaw: 0.0,
             cursor_ndc: None,
+            lighting: LightingSettings::default(),
         }
     }
 
@@ -449,6 +482,7 @@ impl Viewport3D {
             id,
             GpuMesh {
                 world_space: false,
+                lit: false,
                 vertex_buffer,
                 index_buffer,
                 index_count: indices.len() as u32,
@@ -496,6 +530,7 @@ impl Viewport3D {
             id,
             GpuMesh {
                 world_space: false,
+                lit: false,
                 vertex_buffer,
                 index_buffer,
                 index_count: indices.len() as u32,
@@ -542,6 +577,7 @@ impl Viewport3D {
             id,
             GpuMesh {
                 world_space: false,
+                lit: false,
                 vertex_buffer,
                 index_buffer,
                 index_count: indices.len() as u32,
@@ -584,6 +620,7 @@ impl Viewport3D {
             id,
             GpuMesh {
                 world_space: true,
+                lit: false,
                 vertex_buffer,
                 index_buffer,
                 index_count: indices.len() as u32,
@@ -627,6 +664,7 @@ impl Viewport3D {
             id,
             GpuMesh {
                 world_space: false,
+                lit: false,
                 vertex_buffer,
                 index_buffer,
                 index_count: indices.len() as u32,
@@ -663,6 +701,7 @@ impl Viewport3D {
             id,
             GpuMesh {
                 world_space: false,
+                lit: false,
                 vertex_buffer,
                 index_buffer,
                 index_count: indices.len() as u32,
@@ -710,6 +749,14 @@ impl Viewport3D {
     pub fn set_world_space(&mut self, id: MeshId, world_space: bool) {
         if let Some(mesh) = self.meshes.get_mut(&id) {
             mesh.world_space = world_space;
+        }
+    }
+
+    /// Mark a mesh as lit (participates in hull lighting). Default is unlit.
+    pub fn set_lit(&mut self, id: MeshId, lit: bool) {
+        if let Some(mesh) = self.meshes.get_mut(&id) {
+            mesh.lit = lit;
+            self.needs_redraw = true;
         }
     }
 
@@ -843,45 +890,80 @@ impl Viewport3D {
         let model_view = mat4_mul(view_mat, model_mat);
         let mvp = mat4_mul(proj_mat, model_view);
 
-        // light_dir is kept in the uniform struct for layout compatibility but
-        // the shader now uses a uniform camera-forward headlamp instead.
-        let light_dir = [0.0_f32, 0.0, -1.0, 0.0];
-        let uniforms = Uniforms { mvp, model_view, light_dir };
+        // World-fixed key light: transform the world-space direction into view space
+        // (rotation only, w=0) so highlights stay on a fixed world side as the camera
+        // orbits. The model rotation must NOT affect the light, so this uses the pure
+        // view matrix, not model_view.
+        let lw = self.lighting.light_dir_world();
+        let lv = [
+            view_mat[0][0] * lw[0] + view_mat[1][0] * lw[1] + view_mat[2][0] * lw[2],
+            view_mat[0][1] * lw[0] + view_mat[1][1] * lw[1] + view_mat[2][1] * lw[2],
+            view_mat[0][2] * lw[0] + view_mat[1][2] * lw[1] + view_mat[2][2] * lw[2],
+        ];
+        let len = (lv[0] * lv[0] + lv[1] * lv[1] + lv[2] * lv[2]).sqrt().max(1e-6);
+        let lit_flag = if self.lighting.enabled { 1.0 } else { 0.0 };
+        let light_dir = [lv[0] / len, lv[1] / len, lv[2] / len, lit_flag];
+        let flat = self.lighting.flat_rgb();
+        let key = self.lighting.key_rgb();
+        let flat_color = [flat[0], flat[1], flat[2], 0.0];
+        let key_color = [key[0], key[1], key[2], 0.0];
+        let params = [
+            self.lighting.rim_strength,
+            self.lighting.rim_power,
+            self.lighting.specular_strength,
+            self.lighting.shininess,
+        ];
 
-        // World-space uniforms (no model rotation) — used for waterline etc.
+        let uniforms = Uniforms { mvp, model_view, light_dir, flat_color, key_color, params };
+
+        // World-space uniforms (no model rotation) - used for waterline etc. Always unlit.
         let world_mvp = mat4_mul(proj_mat, view_mat);
-        let world_uniforms = Uniforms { mvp: world_mvp, model_view: view_mat, light_dir };
+        let world_uniforms = Uniforms {
+            mvp: world_mvp,
+            model_view: view_mat,
+            light_dir: [light_dir[0], light_dir[1], light_dir[2], 0.0],
+            flat_color,
+            key_color,
+            params,
+        };
 
-        if let (Some(ub), Some(wub)) = (self.uniform_buffer.as_ref(), self.world_uniform_buffer.as_ref()) {
+        let model_unlit_uniforms = Uniforms {
+            light_dir: [light_dir[0], light_dir[1], light_dir[2], 0.0],
+            ..uniforms
+        };
+
+        if let (Some(ub), Some(wub), Some(mub)) = (
+            self.uniform_buffer.as_ref(),
+            self.world_uniform_buffer.as_ref(),
+            self.model_unlit_uniform_buffer.as_ref(),
+        ) {
             queue.write_buffer(ub, 0, bytemuck::bytes_of(&uniforms));
             queue.write_buffer(wub, 0, bytemuck::bytes_of(&world_uniforms));
+            queue.write_buffer(mub, 0, bytemuck::bytes_of(&model_unlit_uniforms));
         } else {
             use wgpu::util::DeviceExt;
-            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("viewport_3d_uniforms"),
-                contents: bytemuck::bytes_of(&uniforms),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("viewport_3d_uniform_bg"),
-                layout: &pipeline.uniform_bind_group_layout,
-                entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
-            });
-            self.uniform_buffer = Some(buffer);
-            self.uniform_bind_group = Some(bind_group);
-
-            let world_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("viewport_3d_world_uniforms"),
-                contents: bytemuck::bytes_of(&world_uniforms),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
-            let world_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("viewport_3d_world_uniform_bg"),
-                layout: &pipeline.uniform_bind_group_layout,
-                entries: &[wgpu::BindGroupEntry { binding: 0, resource: world_buffer.as_entire_binding() }],
-            });
-            self.world_uniform_buffer = Some(world_buffer);
-            self.world_uniform_bind_group = Some(world_bind_group);
+            let make = |contents: &[u8], label: &str| {
+                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(label),
+                    layout: &pipeline.uniform_bind_group_layout,
+                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
+                });
+                (buffer, bind_group)
+            };
+            let (b0, g0) = make(bytemuck::bytes_of(&uniforms), "viewport_3d_uniforms");
+            let (b1, g1) = make(bytemuck::bytes_of(&world_uniforms), "viewport_3d_world_uniforms");
+            let (b2, g2) = make(bytemuck::bytes_of(&model_unlit_uniforms), "viewport_3d_model_unlit_uniforms");
+            self.uniform_buffer = Some(b0);
+            self.uniform_bind_group = Some(g0);
+            self.world_uniform_buffer = Some(b1);
+            self.world_uniform_bind_group = Some(g1);
+            self.model_unlit_uniform_buffer = Some(b2);
+            self.model_unlit_uniform_bind_group = Some(g2);
         }
 
         // Render
@@ -905,9 +987,10 @@ impl Viewport3D {
                 ..Default::default()
             });
 
-            let model_bg = self.uniform_bind_group.as_ref().unwrap();
+            let model_lit_bg = self.uniform_bind_group.as_ref().unwrap();
+            let model_unlit_bg = self.model_unlit_uniform_bind_group.as_ref().unwrap();
             let world_bg = self.world_uniform_bind_group.as_ref().unwrap();
-            pass.set_bind_group(0, model_bg, &[]);
+            pass.set_bind_group(0, model_unlit_bg, &[]);
             // Start with fallback texture; per-mesh textures override below.
             pass.set_bind_group(1, &pipeline.fallback_texture_bind_group, &[]);
 
@@ -918,7 +1001,7 @@ impl Viewport3D {
 
             let mut current_layer_kind: i32 = -1; // force first set_pipeline
             let mut has_custom_texture = false; // track whether we need to rebind fallback
-            let mut current_world_space = false;
+            let mut current_bind = BindKind::ModelUnlit;
             for (_id, mesh) in sorted {
                 let layer_kind = if mesh.layer <= LAYER_OPAQUE_MAX {
                     0 // opaque
@@ -936,10 +1019,23 @@ impl Viewport3D {
                     current_layer_kind = layer_kind;
                 }
 
-                // Switch uniform bind group for world-space vs model-space meshes
-                if mesh.world_space != current_world_space {
-                    pass.set_bind_group(0, if mesh.world_space { world_bg } else { model_bg }, &[]);
-                    current_world_space = mesh.world_space;
+                // Pick the uniform bind group: world-space (always unlit), model-space lit
+                // (hull), or model-space unlit (armor/overlays).
+                let desired_bg = if mesh.world_space {
+                    BindKind::World
+                } else if mesh.lit {
+                    BindKind::ModelLit
+                } else {
+                    BindKind::ModelUnlit
+                };
+                if desired_bg != current_bind {
+                    let bg = match desired_bg {
+                        BindKind::World => world_bg,
+                        BindKind::ModelLit => model_lit_bg,
+                        BindKind::ModelUnlit => model_unlit_bg,
+                    };
+                    pass.set_bind_group(0, bg, &[]);
+                    current_bind = desired_bg;
                 }
 
                 // Bind per-mesh texture or fallback

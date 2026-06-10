@@ -156,7 +156,14 @@ impl LightingSettings {
 pub(crate) struct Uniforms {
     pub mvp: [[f32; 4]; 4],
     pub model_view: [[f32; 4]; 4],
+    /// xyz = view-space light direction (toward light); w = lit flag (0 or 1).
     pub light_dir: [f32; 4],
+    /// rgb = flat/ambient color premultiplied by intensity; a unused.
+    pub flat_color: [f32; 4],
+    /// rgb = key color premultiplied by intensity; a unused.
+    pub key_color: [f32; 4],
+    /// rim_strength, rim_power, specular_strength, shininess.
+    pub params: [f32; 4],
 }
 
 #[cfg(test)]
