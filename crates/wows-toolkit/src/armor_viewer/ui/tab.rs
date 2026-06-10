@@ -1387,6 +1387,12 @@ pub(crate) fn init_armor_viewport(
 
     // Frame camera on the model
     pane.viewport.camera = crate::viewport_3d::ArcballCamera::from_bounds(armor.bounds.0, armor.bounds.1);
+    // Keep the perspective-mode restore target in sync with the freshly
+    // framed camera so exiting perspective after a ship change restores
+    // a camera framed on the current ship, not the previous one.
+    if pane.perspective_enabled {
+        pane.saved_camera = Some(pane.viewport.camera.clone());
+    }
     pane.viewport.mark_dirty();
 }
 
