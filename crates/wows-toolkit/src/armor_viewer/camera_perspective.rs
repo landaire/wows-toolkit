@@ -1,5 +1,3 @@
-extern crate nalgebra as na;
-
 use crate::viewport_3d::types::Vec3;
 use wowsunpack::game_params::types::CameraRing;
 use wowsunpack::game_params::types::CameraTrajectory;
