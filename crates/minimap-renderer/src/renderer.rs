@@ -175,12 +175,18 @@ fn is_heal_consumable(c: &Recognized<Consumable>) -> bool {
     matches!(c.known(), Some(Consumable::RepairParty) | Some(Consumable::RegenerateHealth))
 }
 
-/// HP the active/next Repair Party charge will restore for an entity:
-/// `work_time * (units + speed * max_health)` from the heal slot. `None` when
-/// the ship has no heal slot or the rate params are absent.
-fn heal_per_charge_capacity(
+/// HP span of the heal's bright region for an entity. While a heal is running
+/// this is the restore still owed by the current activation
+/// (`rate * work_time_left`), so the bright region's far edge (`current HP +
+/// span`) holds at the activation's target HP as the ship heals up to it.
+/// With no heal running it is a full charge's worth (`rate * work_time`) as a
+/// preview. `rate = units + speed * max_health`. `None` when the ship has no
+/// heal slot or the rate params are absent.
+fn heal_bright_amount(
+    active: &HashMap<EntityId, Vec<ActiveConsumable>>,
     inventories: &HashMap<EntityId, Vec<ConsumableInventory>>,
     entity_id: EntityId,
+    clock: GameClock,
     max_health: f32,
 ) -> Option<f32> {
     let slot = inventories
@@ -190,7 +196,15 @@ fn heal_per_charge_capacity(
         .find(|s| is_heal_consumable(&s.consumable))?;
     let speed = slot.regen_hp_speed?;
     let units = slot.regen_hp_speed_units.unwrap_or(0.0);
-    Some((slot.work_time * (units + speed * max_health)).max(0.0))
+    let rate = units + speed * max_health;
+    let work_left = active
+        .get(&entity_id)
+        .into_iter()
+        .flatten()
+        .filter(|a| is_heal_consumable(&a.consumable))
+        .map(|a| a.activated_at.seconds() + a.duration - clock.seconds())
+        .rfind(|t| *t > 0.0);
+    Some((rate * work_left.unwrap_or(slot.work_time)).max(0.0))
 }
 
 /// Availability of the consumable(s) matched by `matches` for an entity,
@@ -2157,19 +2171,15 @@ impl<'a> MinimapRenderer<'a> {
                         let cur = props.health();
                         let healable = props.regeneration_health().max(0.0).min((max - cur).max(0.0));
                         let inventories = controller.consumable_inventories();
-                        let healable_per_charge = heal_per_charge_capacity(&inventories, eid, max)
-                            .map(|pc| healable.min(pc))
+                        let active = controller.active_consumables();
+                        let clock = controller.clock();
+                        let healable_per_charge = heal_bright_amount(&active, &inventories, eid, clock, max)
+                            .map(|b| healable.min(b))
                             .unwrap_or(healable);
                         let param_id = self.ship_param_ids.get(&eid).copied();
                         let is_dead = max > 0.0 && cur <= 0.0;
-                        let heal_availability = consumable_availability(
-                            &controller.active_consumables(),
-                            &inventories,
-                            eid,
-                            controller.clock(),
-                            is_dead,
-                            is_heal_consumable,
-                        );
+                        let heal_availability =
+                            consumable_availability(&active, &inventories, eid, clock, is_dead, is_heal_consumable);
                         if max > 0.0 {
                             Some((
                                 (cur / max).clamp(0.0, 1.0),
@@ -2464,8 +2474,8 @@ impl<'a> MinimapRenderer<'a> {
             };
             let is_dead = dead.contains_key(&entity_id) || (hp_max > 0.0 && hp_current <= 0.0);
             let heal_availability = consumable_availability(&active, &inventories, entity_id, clock, is_dead, is_heal_consumable);
-            let hp_healable_per_charge = heal_per_charge_capacity(&inventories, entity_id, hp_max)
-                .map(|pc| hp_healable.min(pc))
+            let hp_healable_per_charge = heal_bright_amount(&active, &inventories, entity_id, clock, hp_max)
+                .map(|b| hp_healable.min(b))
                 .unwrap_or(hp_healable);
             // Same source as the yellow ship-icon outline: visibilityFlags on
             // the live VehicleEntity. Non-zero means the game has confirmed
