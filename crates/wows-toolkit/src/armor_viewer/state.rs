@@ -549,7 +549,6 @@ pub struct SyncedPaneSettings {
     pub zoom_path_max_fov: bool,
     pub perspective_enabled: bool,
     pub perspective_fov_deg: f32,
-    pub perspective_look_target: crate::armor_viewer::camera_perspective::LookTarget,
 }
 
 impl SyncedPaneSettings {
@@ -569,7 +568,6 @@ impl SyncedPaneSettings {
             zoom_path_max_fov: pane.zoom_path_max_fov,
             perspective_enabled: pane.perspective_enabled,
             perspective_fov_deg: pane.perspective.fov_deg,
-            perspective_look_target: pane.perspective.look_target,
         }
     }
 
@@ -589,7 +587,6 @@ impl SyncedPaneSettings {
             || self.zoom_path_max_fov != pane.zoom_path_max_fov
             || self.perspective_enabled != pane.perspective_enabled
             || self.perspective_fov_deg != pane.perspective.fov_deg
-            || self.perspective_look_target != pane.perspective.look_target
     }
 
     pub fn apply_to(&self, pane: &mut ArmorPane) {
@@ -606,7 +603,6 @@ impl SyncedPaneSettings {
         pane.zoom_path_regular_fov = self.zoom_path_regular_fov;
         pane.zoom_path_max_fov = self.zoom_path_max_fov;
         pane.perspective.fov_deg = self.perspective_fov_deg;
-        pane.perspective.look_target = self.perspective_look_target;
         pane.set_perspective_enabled(self.perspective_enabled);
     }
 }
