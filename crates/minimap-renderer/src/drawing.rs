@@ -1609,7 +1609,7 @@ fn draw_team_roster(
             let fill_w = hp_bar_w * fill_ratio;
             let fill_color = hp_bar_color_lerp(fill_ratio);
             draw_filled_rect(pm, inner_x, hp_bar_y, fill_w, hp_bar_h, fill_color, 1.0);
-            if let Some(color) = row.heal_state.healable_rgb()
+            if let Some(color) = row.heal_availability.healable_rgb()
                 && row.hp_healable > 0.0
             {
                 let heal_ratio = (row.hp_healable / row.hp_max).clamp(0.0, 1.0);
@@ -1664,7 +1664,6 @@ fn draw_team_roster(
                 let icon_x = strip_x + i as f32 * (icon_size + icon_gap);
                 let charges_remaining = cons.total_charges.remaining(cons.charges_used);
                 let is_exhausted = matches!(charges_remaining, RosterCharge::Finite(0));
-                let is_active = cons.active_remaining_secs.is_some() && !row.is_dead;
 
                 if let Some(icon) = consumable_icons.get(&cons.icon_key) {
                     let resized = image::imageops::resize(
@@ -1693,13 +1692,7 @@ fn draw_team_roster(
                 if label.is_empty() {
                     continue;
                 }
-                let label_color = if is_exhausted {
-                    [220, 90, 90]
-                } else if is_active {
-                    [255, 220, 80]
-                } else {
-                    [220, 220, 220]
-                };
+                let label_color = cons.availability.charge_count_rgb();
                 let charges_scale = fonts.scale(9.0);
                 let (lw_u, lh_u) = text_size(charges_scale, &fonts.primary, &label);
                 let lx = icon_x + icon_size - lw_u as f32 - 1.0;
@@ -2437,7 +2430,7 @@ impl RenderTarget for ImageTarget {
                 hp_current,
                 hp_max,
                 hp_healable,
-                heal_state,
+                heal_availability,
                 player_name,
                 clan_tag,
                 clan_color,
@@ -2532,7 +2525,7 @@ impl RenderTarget for ImageTarget {
 
                     // Healable region: gray when a heal is ready, white while healing,
                     // hidden when no heal is available.
-                    if let Some(color) = heal_state.healable_rgb() {
+                    if let Some(color) = heal_availability.healable_rgb() {
                         let region_x = (draw_w as f32 * regions.colored) as u32;
                         let region_w = (draw_w as f32 * regions.white) as u32;
                         if region_w > 0 {

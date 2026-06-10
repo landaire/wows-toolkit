@@ -15,9 +15,9 @@ use egui::TextureHandle;
 use egui::Vec2;
 
 use wows_minimap_renderer::HUD_HEIGHT;
+use wows_minimap_renderer::draw_command::ConsumableAvailability;
 use wows_minimap_renderer::draw_command::DamageBreakdownEntry;
 use wows_minimap_renderer::draw_command::DrawCommand;
-use wows_minimap_renderer::draw_command::HealState;
 use wt_translations::TextResolver;
 use wt_translations::TranslatableText;
 
@@ -1429,7 +1429,7 @@ pub fn draw_command_to_shapes(
             hp_current,
             hp_max,
             hp_healable,
-            heal_state,
+            heal_availability,
             player_name,
             clan_tag,
             clan_color,
@@ -1553,7 +1553,7 @@ pub fn draw_command_to_shapes(
 
                 // Healable region: gray when a heal is ready, white while healing,
                 // hidden when no heal is available. Drawn after the colored region.
-                if let Some(color) = healable_color_egui(*heal_state, 255) {
+                if let Some(color) = healable_color_egui(*heal_availability, 255) {
                     let region_start = regions.colored;
                     let region_w = fit_w * regions.white;
                     if region_w > 0.0 {
@@ -2247,7 +2247,7 @@ pub fn draw_command_to_shapes(
                         CornerRadius::same(1),
                         fill_color,
                     ));
-                    if let Some(color) = healable_color_egui(row.heal_state, 217)
+                    if let Some(color) = healable_color_egui(row.heal_availability, 217)
                         && row.hp_healable > 0.0
                     {
                         let heal_ratio = (row.hp_healable / row.hp_max).clamp(0.0, 1.0);
@@ -2391,12 +2391,9 @@ pub fn draw_command_to_shapes(
                         if label_text.is_empty() {
                             continue;
                         }
-                        let label_color = if is_exhausted {
-                            Color32::from_rgb(220, 90, 90)
-                        } else if is_active {
-                            Color32::from_rgb(255, 220, 80)
-                        } else {
-                            Color32::from_rgba_unmultiplied(220, 220, 220, 220)
+                        let label_color = {
+                            let [r, g, b] = cons.availability.charge_count_rgb();
+                            Color32::from_rgb(r, g, b)
                         };
                         // Render the charges/timer text overlaid on the
                         // bottom-right of the icon, with a dark drop shadow so
@@ -2484,9 +2481,9 @@ fn damage_label_color(label: &str) -> Color32 {
 }
 
 /// Egui color for the healable-HP region, or `None` to hide it. The RGB comes
-/// from the shared `HealState` mapping so the egui and pixmap backends stay in
-/// sync; alpha is supplied per call site.
-fn healable_color_egui(state: HealState, alpha: u8) -> Option<Color32> {
+/// from the shared `ConsumableAvailability` mapping so the egui and pixmap
+/// backends stay in sync; alpha is supplied per call site.
+fn healable_color_egui(state: ConsumableAvailability, alpha: u8) -> Option<Color32> {
     state.healable_rgb().map(|[r, g, b]| Color32::from_rgba_unmultiplied(r, g, b, alpha))
 }
 

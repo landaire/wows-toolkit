@@ -155,11 +155,11 @@ pub struct ConsumableInventory {
     /// `Some(clock)` while a consumable is active. Cleared by renderers when
     /// the current clock passes the activation expiry.
     pub active_until: Option<GameClock>,
-    // Reload-remaining is deliberately not tracked here. Server-authoritative
-    // cooldown isn't broadcast, and several ships (Valparaiso, San Martin)
-    // refund consumables early via special abilities, which would silently
-    // desync any local cooldown estimate. Consumers display charges remaining
-    // instead and rely on the next activation packet to confirm readiness.
+    // No stored reload-remaining: the server broadcasts discrete activation
+    // events, not a live cooldown countdown. Renderers that want a readiness
+    // indicator estimate the reload window from `reload_time` and the last
+    // activation. That estimate runs long for ships that refund consumables
+    // early (Valparaiso, San Martin); the next activation packet corrects it.
 }
 
 impl ConsumableInventory {

@@ -592,8 +592,8 @@ pub enum DrawCommand {
         hp_current: f32,
         hp_max: f32,
         hp_healable: f32,
-        /// Repair-party availability for this ship (drives healable region).
-        heal_state: HealState,
+        /// Repair Party (heal) availability for this ship (drives healable region).
+        heal_availability: ConsumableAvailability,
         /// Player name to display above the silhouette.
         player_name: Option<String>,
         /// Clan tag (e.g. "CLAN"), empty string or None if none.
@@ -637,28 +637,42 @@ pub enum RosterSide {
     Enemy,
 }
 
-/// Whether a ship's Repair Party heal is available, and whether it is
-/// currently running. Drives visibility and color of the healable-HP region.
+/// Availability of a consumable: unavailable (reloading or out of charges),
+/// ready (a charge remains and not running), or active (currently running).
+/// Drives visibility and color of the healable-HP region and the charge-count
+/// label color in the roster.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
-pub enum HealState {
-    /// No heal ready (no charges remaining) and none running. Hide the region.
+pub enum ConsumableAvailability {
+    /// No charge ready (reloading or out of charges) and none running. Hide the region.
     Unavailable,
-    /// At least one charge remains and no heal is running. Gray region.
+    /// At least one charge remains and nothing running. Gray region.
     Ready,
-    /// A heal is currently running. White region.
+    /// Currently running. White region.
     Active,
 }
 
-impl HealState {
+impl ConsumableAvailability {
     /// RGB for the healable-HP region, or `None` when the region should be
     /// hidden. Shared by every render backend so the gray (ready) / white
     /// (actively healing) treatment stays in sync.
     pub const fn healable_rgb(self) -> Option<[u8; 3]> {
         match self {
-            HealState::Unavailable => None,
-            HealState::Ready => Some([140, 140, 140]),
-            HealState::Active => Some([255, 255, 255]),
+            ConsumableAvailability::Unavailable => None,
+            ConsumableAvailability::Ready => Some([140, 140, 140]),
+            ConsumableAvailability::Active => Some([255, 255, 255]),
+        }
+    }
+
+    /// RGB for a roster consumable's charge-count label. Yellow while the
+    /// consumable is running, normal gray when ready, muted gray when it is
+    /// unavailable (reloading or out of charges) so the unavailable state
+    /// recedes rather than draws attention.
+    pub const fn charge_count_rgb(self) -> [u8; 3] {
+        match self {
+            ConsumableAvailability::Active => [255, 220, 80],
+            ConsumableAvailability::Ready => [220, 220, 220],
+            ConsumableAvailability::Unavailable => [90, 90, 90],
         }
     }
 }
@@ -696,8 +710,8 @@ pub struct RosterRow {
     /// (regen-crew limit minus already-regenerated). Drawn as a darker segment
     /// in the HP bar between current HP and permanent damage.
     pub hp_healable: f32,
-    /// Repair-party availability for this ship (drives healable HP-bar segment).
-    pub heal_state: HealState,
+    /// Repair Party (heal) availability for this ship (drives healable HP-bar segment).
+    pub heal_availability: ConsumableAvailability,
     pub is_dead: bool,
     /// Highlight this row (player's own ship, or own division-mate).
     pub is_self: bool,
@@ -736,6 +750,8 @@ pub struct RosterConsumable {
     pub reload_time_secs: f32,
     /// Seconds of activation remaining, or `None` when not active.
     pub active_remaining_secs: Option<f32>,
+    /// Availability of this consumable (drives the charge-count label color).
+    pub availability: ConsumableAvailability,
 }
 
 /// Mirror of `wowsunpack::game_types::ChargeCount` for the draw command

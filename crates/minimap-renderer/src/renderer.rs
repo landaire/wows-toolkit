@@ -46,10 +46,10 @@ use crate::draw_command::ActivityFeedKind;
 use crate::draw_command::BuildingIconType;
 use crate::draw_command::BuildingRelation;
 use crate::draw_command::ChatEntry;
+use crate::draw_command::ConsumableAvailability;
 use crate::draw_command::DamageBreakdownEntry;
 use crate::draw_command::DrawCommand;
 use crate::draw_command::FontHint;
-use crate::draw_command::HealState;
 use crate::draw_command::KillFeedEntry;
 use crate::draw_command::RibbonCount;
 use crate::draw_command::STATS_RIBBON_CELL_W;
@@ -158,45 +158,65 @@ const UNDETECTED_OPACITY: f32 = 0.4;
 const TEAM0_COLOR: [u8; 3] = [76, 232, 170]; // Green
 const TEAM1_COLOR: [u8; 3] = [254, 77, 42]; // Red
 
-/// Pure heal-state decision from the observed facts. Separated so it is
-/// unit-testable without a BattleView.
-fn decide_heal_state(is_dead: bool, heal_active: bool, charge_remaining: bool) -> HealState {
-    if !is_dead && heal_active {
-        HealState::Active
-    } else if charge_remaining {
-        HealState::Ready
+/// Pure availability decision from observed facts. `Active` (while running, if
+/// alive) takes precedence; otherwise `Ready` only when a charge remains AND
+/// the consumable is not mid-reload; else `Unavailable` (reloading or empty).
+fn availability_from(is_dead: bool, active_now: bool, reloading: bool, charge_remaining: bool) -> ConsumableAvailability {
+    if !is_dead && active_now {
+        ConsumableAvailability::Active
+    } else if charge_remaining && !reloading {
+        ConsumableAvailability::Ready
     } else {
-        HealState::Unavailable
+        ConsumableAvailability::Unavailable
     }
 }
 
-/// Repair-party availability for an entity. Active if a heal is currently
-/// running (dead ships never Active), else Ready if a charge remains, else
-/// Unavailable. Heal consumable is RepairParty/RegenerateHealth.
-fn heal_state_for(
+fn is_heal_consumable(c: &Recognized<Consumable>) -> bool {
+    matches!(c.known(), Some(Consumable::RepairParty) | Some(Consumable::RegenerateHealth))
+}
+
+/// Availability of the consumable(s) matched by `matches` for an entity,
+/// estimating reload cooldown locally from the latest activation:
+/// Active during work, Unavailable during the following reload_time window,
+/// then Ready if a charge remains else Unavailable.
+///
+/// Reload is a local estimate (the server broadcasts only activation events,
+/// not a cooldown countdown); it runs long for ships that refund consumables
+/// early, until their next activation packet arrives.
+fn consumable_availability(
     active: &HashMap<EntityId, Vec<ActiveConsumable>>,
     inventories: &HashMap<EntityId, Vec<ConsumableInventory>>,
     entity_id: EntityId,
     clock: GameClock,
     is_dead: bool,
-) -> HealState {
-    let is_heal = |c: &Recognized<Consumable>| {
-        matches!(c.known(), Some(Consumable::RepairParty) | Some(Consumable::RegenerateHealth))
+    matches: impl Fn(&Recognized<Consumable>) -> bool,
+) -> ConsumableAvailability {
+    // Latest matching activation (the `active` list is appended chronologically).
+    let last = active
+        .get(&entity_id)
+        .into_iter()
+        .flatten()
+        .filter(|a| matches(&a.consumable))
+        .last();
+    let slot = inventories
+        .get(&entity_id)
+        .into_iter()
+        .flatten()
+        .find(|s| matches(&s.consumable));
+    let reload_time = slot.map(|s| s.reload_time).unwrap_or(0.0);
+    let charge_remaining = slot.is_some_and(|s| {
+        let r = s.charges_remaining();
+        r.is_unlimited() || r.finite().is_some_and(|n| n > 0)
+    });
+    let (active_now, reloading) = match last {
+        Some(a) => {
+            let work_end = a.activated_at.seconds() + a.duration;
+            let now = clock.seconds();
+            (now < work_end, now >= work_end && now < work_end + reload_time)
+        }
+        None => (false, false),
     };
-    let heal_active = active.get(&entity_id).is_some_and(|list| {
-        list.iter()
-            .any(|a| is_heal(&a.consumable) && (a.activated_at.seconds() + a.duration - clock.seconds()) > 0.0)
-    });
-    let charge_remaining = inventories.get(&entity_id).is_some_and(|slots| {
-        slots.iter().any(|s| {
-            if !is_heal(&s.consumable) {
-                return false;
-            }
-            let remaining = s.charges_remaining();
-            remaining.is_unlimited() || remaining.finite().is_some_and(|n| n > 0)
-        })
-    });
-    decide_heal_state(is_dead, heal_active, charge_remaining)
+    availability_from(is_dead, active_now, reloading, charge_remaining)
 }
 
 /// Per-consumable radius circle color, with friendly/enemy variants.
@@ -2111,7 +2131,7 @@ impl<'a> MinimapRenderer<'a> {
             commands.push(DrawCommand::StatsPanel { x: panel_x, width: panel_w });
 
             // Ship silhouette + HP
-            let (hp_fraction, hp_current, hp_max, hp_healable, ship_param_id, self_heal_state) = self
+            let (hp_fraction, hp_current, hp_max, hp_healable, ship_param_id, self_heal_availability) = self
                 .self_entity_id
                 .and_then(|eid| {
                     let props = controller.vehicle_props(eid)?;
@@ -2120,20 +2140,21 @@ impl<'a> MinimapRenderer<'a> {
                     let healable = props.regeneration_health().max(0.0).min((max - cur).max(0.0));
                     let param_id = self.ship_param_ids.get(&eid).copied();
                     let is_dead = max > 0.0 && cur <= 0.0;
-                    let heal_state = heal_state_for(
+                    let heal_availability = consumable_availability(
                         &controller.active_consumables(),
                         &controller.consumable_inventories(),
                         eid,
                         controller.clock(),
                         is_dead,
+                        is_heal_consumable,
                     );
                     if max > 0.0 {
-                        Some(((cur / max).clamp(0.0, 1.0), cur, max, healable, param_id, heal_state))
+                        Some(((cur / max).clamp(0.0, 1.0), cur, max, healable, param_id, heal_availability))
                     } else {
                         None
                     }
                 })
-                .unwrap_or((1.0, 0.0, 0.0, 0.0, None, HealState::Unavailable));
+                .unwrap_or((1.0, 0.0, 0.0, 0.0, None, ConsumableAvailability::Unavailable));
 
             let (self_player_name, self_ship_name, self_clan_tag, self_clan_color) = self
                 .self_entity_id
@@ -2157,7 +2178,7 @@ impl<'a> MinimapRenderer<'a> {
                 hp_current,
                 hp_max,
                 hp_healable,
-                heal_state: self_heal_state,
+                heal_availability: self_heal_availability,
                 player_name: self_player_name,
                 clan_tag: self_clan_tag,
                 clan_color: self_clan_color,
@@ -2411,7 +2432,7 @@ impl<'a> MinimapRenderer<'a> {
                 (0.0, 0.0, 0.0)
             };
             let is_dead = dead.contains_key(&entity_id) || (hp_max > 0.0 && hp_current <= 0.0);
-            let heal_state = heal_state_for(&active, &inventories, entity_id, clock, is_dead);
+            let heal_availability = consumable_availability(&active, &inventories, entity_id, clock, is_dead, is_heal_consumable);
             // Same source as the yellow ship-icon outline: visibilityFlags on
             // the live VehicleEntity. Non-zero means the game has confirmed
             // the ship is detected (radar, hydro, direct vision, etc.).
@@ -2494,6 +2515,14 @@ impl<'a> MinimapRenderer<'a> {
                                 self.game_params,
                             )
                             .unwrap_or_default();
+                            let availability = consumable_availability(
+                                &active,
+                                &inventories,
+                                entity_id,
+                                clock,
+                                is_dead,
+                                |c| c.known() == slot.consumable.known(),
+                            );
                             RosterConsumable {
                                 icon_key: slot.icon_key.clone(),
                                 display_name,
@@ -2503,6 +2532,7 @@ impl<'a> MinimapRenderer<'a> {
                                 work_time_secs: slot.work_time,
                                 reload_time_secs: slot.reload_time,
                                 active_remaining_secs,
+                                availability,
                             }
                         })
                         .collect()
@@ -2523,7 +2553,7 @@ impl<'a> MinimapRenderer<'a> {
                 hp_current,
                 hp_max,
                 hp_healable,
-                heal_state,
+                heal_availability,
                 is_dead,
                 is_self,
                 is_spotted,
@@ -3012,28 +3042,36 @@ mod ammo_color_tests {
 }
 
 #[cfg(test)]
-mod heal_state_tests {
-    use super::decide_heal_state;
-    use crate::draw_command::HealState;
+mod availability_tests {
+    use super::availability_from;
+    use crate::draw_command::ConsumableAvailability;
 
     #[test]
     fn active_takes_precedence_over_ready() {
-        assert_eq!(decide_heal_state(false, true, true), HealState::Active);
+        assert_eq!(availability_from(false, true, false, true), ConsumableAvailability::Active);
     }
     #[test]
     fn dead_ship_is_never_active() {
-        assert_eq!(decide_heal_state(true, true, true), HealState::Ready);
+        assert_eq!(availability_from(true, true, false, true), ConsumableAvailability::Ready);
     }
     #[test]
-    fn ready_when_charge_remains_and_not_active() {
-        assert_eq!(decide_heal_state(false, false, true), HealState::Ready);
+    fn reloading_with_charges_is_unavailable() {
+        assert_eq!(availability_from(false, false, true, true), ConsumableAvailability::Unavailable);
     }
     #[test]
-    fn unavailable_when_no_charge_and_not_active() {
-        assert_eq!(decide_heal_state(false, false, false), HealState::Unavailable);
+    fn reloading_last_charge_is_unavailable() {
+        assert_eq!(availability_from(false, false, true, false), ConsumableAvailability::Unavailable);
     }
     #[test]
-    fn dead_with_no_charge_is_unavailable() {
-        assert_eq!(decide_heal_state(true, true, false), HealState::Unavailable);
+    fn ready_when_charge_remains_and_not_active_or_reloading() {
+        assert_eq!(availability_from(false, false, false, true), ConsumableAvailability::Ready);
+    }
+    #[test]
+    fn unavailable_when_empty() {
+        assert_eq!(availability_from(false, false, false, false), ConsumableAvailability::Unavailable);
+    }
+    #[test]
+    fn active_wins_even_if_reloading_flag_set() {
+        assert_eq!(availability_from(false, true, true, true), ConsumableAvailability::Active);
     }
 }
