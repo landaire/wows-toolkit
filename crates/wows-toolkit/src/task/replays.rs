@@ -880,7 +880,7 @@ pub struct BackgroundParserThread {
 pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
     debug!("starting background parsing thread");
     let _join_handle = crate::util::thread::spawn_logged("background-replay-parser", move || {
-        let client = reqwest::blocking::Client::new();
+        let client = crate::util::http::blocking_client().expect("failed to build HTTP client");
 
         #[cfg(not(feature = "shipbuilds_debugging"))]
         {

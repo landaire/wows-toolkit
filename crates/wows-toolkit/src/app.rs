@@ -302,6 +302,22 @@ impl WowsToolkitApp {
         // Install the ring crypto provider for rustls before any networking happens.
         let _ = rustls::crypto::ring::default_provider().install_default();
 
+        // Configure the global GitHub client (app-update and constants checks) with
+        // connect/read timeouts so a stalled network fails fast instead of hanging.
+        // octocrab keeps its default transient-failure retry.
+        match octocrab::Octocrab::builder()
+            .set_connect_timeout(Some(std::time::Duration::from_secs(15)))
+            .set_read_timeout(Some(std::time::Duration::from_secs(30)))
+            .build()
+        {
+            Ok(client) => {
+                octocrab::initialise(client);
+            }
+            Err(e) => {
+                tracing::warn!("failed to configure GitHub client timeouts: {}", crate::util::http::error_chain(&e));
+            }
+        }
+
         // Include phosphor icons
         let mut fonts = egui::FontDefinitions::default();
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);

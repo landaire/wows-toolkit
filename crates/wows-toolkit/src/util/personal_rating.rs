@@ -259,7 +259,8 @@ pub fn needs_update() -> bool {
 /// Fetch expected values from the API
 #[instrument]
 pub async fn fetch_expected_values() -> Result<Vec<u8>, reqwest::Error> {
-    let response = reqwest::get(EXPECTED_VALUES_URL).await?;
+    let client = crate::util::http::async_client()?;
+    let response = crate::util::http::get_with_retry(&client, EXPECTED_VALUES_URL).await?;
     let bytes = response.bytes().await?;
     Ok(bytes.to_vec())
 }

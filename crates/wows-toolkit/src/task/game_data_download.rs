@@ -64,10 +64,7 @@ pub fn start_game_data_validation_task(output_base: PathBuf) -> BackgroundTask {
 }
 
 fn build_client() -> Result<reqwest::Client, Report> {
-    Ok(reqwest::Client::builder()
-        .user_agent(concat!("wows-toolkit/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .attach_with(|| "failed to build HTTP client")?)
+    Ok(crate::util::http::async_client().attach_with(|| "failed to build HTTP client")?)
 }
 
 fn download(

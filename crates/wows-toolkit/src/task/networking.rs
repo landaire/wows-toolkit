@@ -157,9 +157,10 @@ impl NetworkingThread {
                 }
             },
             Err(e) => {
-                let _ = self
-                    .result_tx
-                    .send(NetworkResult::AppUpdateCheckFailed(format!("failed to check GitHub releases: {e}")));
+                let _ = self.result_tx.send(NetworkResult::AppUpdateCheckFailed(format!(
+                    "failed to check GitHub releases: {}",
+                    crate::util::http::error_chain(&e)
+                )));
             }
         }
     }
@@ -208,13 +209,20 @@ impl NetworkingThread {
                                     data.extend_from_slice(chunk);
                                 }
                             }
-                            Err(e) => return Err(format!("failed to read constants response body: {e}")),
+                            Err(e) => {
+                                return Err(format!(
+                                    "failed to read constants response body: {}",
+                                    crate::util::http::error_chain(&e)
+                                ));
+                            }
                         }
                     }
 
                     Ok(Some((data, latest_commit)))
                 }
-                Err(e) => Err(format!("failed to fetch constants from GitHub: {e}")),
+                Err(e) => {
+                    Err(format!("failed to fetch constants from GitHub: {}", crate::util::http::error_chain(&e)))
+                }
             }
         });
 
@@ -328,7 +336,10 @@ pub fn load_versioned_constants_from_disk_with_fallback(target_build: u32) -> Op
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Result<PathBuf, Report> {
-    let mut body = reqwest::get(file)
+    let client = crate::util::http::async_client().context("failed to build HTTP client for update download")?;
+    let mut body = client
+        .get(file)
+        .send()
         .await
         .context("failed to get HTTP response for update file")?
         .error_for_status()
@@ -386,6 +397,10 @@ pub fn start_download_update_task(runtime: &Runtime, release: &Asset) -> Backgro
 
     runtime.spawn(async move {
         let result = download_update(progress_tx, url).await.map(BackgroundTaskCompletion::UpdateDownloaded);
+
+        if let Err(report) = &result {
+            tracing::warn!("update download failed: {report:?}");
+        }
 
         let _ = tx.send(result);
     });
