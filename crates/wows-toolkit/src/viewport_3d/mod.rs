@@ -41,6 +41,7 @@ pub use renderer::LAYER_HULL;
 pub use renderer::LAYER_OVERLAY;
 pub use renderer::Viewport3D;
 pub use types::HitResult;
+pub use types::LightingSettings;
 pub use types::MeshId;
 pub use types::Vec3;
 pub use types::Vertex;
