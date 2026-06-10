@@ -517,6 +517,63 @@ pub struct ArmorPane {
     pub camera_height: f32,
 }
 
+/// Snapshot of the per-pane settings that "Sync options" broadcasts from the active
+/// pane to every other pane: armor/hull visibility plus the display overlays
+/// (ship center, waterline, camera rings).
+#[derive(Clone)]
+pub struct SyncedPaneSettings {
+    pub part_visibility: HashMap<(String, String), bool>,
+    pub hull_visibility: HashMap<String, bool>,
+    pub show_ship_center: bool,
+    pub show_waterline: bool,
+    pub waterline_opacity: f32,
+    pub show_camera_ellipse: bool,
+    pub camera_ellipse_mode: String,
+    pub camera_fov: f32,
+    pub camera_height: f32,
+}
+
+impl SyncedPaneSettings {
+    pub fn capture(pane: &ArmorPane) -> Self {
+        Self {
+            part_visibility: pane.part_visibility.clone(),
+            hull_visibility: pane.hull_visibility.clone(),
+            show_ship_center: pane.show_ship_center,
+            show_waterline: pane.show_waterline,
+            waterline_opacity: pane.waterline_opacity,
+            show_camera_ellipse: pane.show_camera_ellipse,
+            camera_ellipse_mode: pane.camera_ellipse_mode.clone(),
+            camera_fov: pane.camera_fov,
+            camera_height: pane.camera_height,
+        }
+    }
+
+    #[allow(clippy::float_cmp)]
+    pub fn differs_from(&self, pane: &ArmorPane) -> bool {
+        self.part_visibility != pane.part_visibility
+            || self.hull_visibility != pane.hull_visibility
+            || self.show_ship_center != pane.show_ship_center
+            || self.show_waterline != pane.show_waterline
+            || self.waterline_opacity != pane.waterline_opacity
+            || self.show_camera_ellipse != pane.show_camera_ellipse
+            || self.camera_ellipse_mode != pane.camera_ellipse_mode
+            || self.camera_fov != pane.camera_fov
+            || self.camera_height != pane.camera_height
+    }
+
+    pub fn apply_to(&self, pane: &mut ArmorPane) {
+        pane.part_visibility = self.part_visibility.clone();
+        pane.hull_visibility = self.hull_visibility.clone();
+        pane.show_ship_center = self.show_ship_center;
+        pane.show_waterline = self.show_waterline;
+        pane.waterline_opacity = self.waterline_opacity;
+        pane.show_camera_ellipse = self.show_camera_ellipse;
+        pane.camera_ellipse_mode = self.camera_ellipse_mode.clone();
+        pane.camera_fov = self.camera_fov;
+        pane.camera_height = self.camera_height;
+    }
+}
+
 /// Data returned by a hull-only background reload (LOD change without full ship reload).
 pub struct HullReloadData {
     pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,

@@ -27,6 +27,7 @@ use crate::armor_viewer::state::LoadedShipArmor;
 use crate::armor_viewer::state::PlateKey;
 use crate::armor_viewer::state::ShipAssetsState;
 use crate::armor_viewer::state::SidebarHighlightKey;
+use crate::armor_viewer::state::SyncedPaneSettings;
 use crate::armor_viewer::state::UpgradeReloadData;
 use crate::armor_viewer::state::VisibilitySnapshot;
 use crate::armor_viewer::state::ZonePart;
@@ -233,15 +234,9 @@ impl ToolkitTabViewer<'_> {
 
         let nation_flags = &state.nation_flag_textures;
 
-        // Multi-pane toolbar (only shown when multiple panes exist)
+        // Common settings for multi-pane mode live in the sidebar (below) so they don't
+        // push the 3D view area down.
         let pane_count = state.dock_state.main_surface().num_tabs();
-        if pane_count > 1 {
-            ui.horizontal(|ui| {
-                ui.toggle_value(&mut state.mirror_cameras, t!("ui.armor.mirror_cameras").as_ref());
-                ui.toggle_value(&mut state.sync_options, t!("ui.armor.sync_options").as_ref())
-                    .on_hover_text(t!("ui.armor.sync_tooltip").as_ref());
-            });
-        }
 
         // Track which pane's camera was interacted with during rendering.
         let active_camera_pane: std::cell::Cell<Option<u64>> = std::cell::Cell::new(None);
@@ -300,6 +295,22 @@ impl ToolkitTabViewer<'_> {
         {
             let mut sidebar_ui =
                 ui.new_child(egui::UiBuilder::new().max_rect(sidebar_rect).id_salt("armor_sidebar_global"));
+
+            // Common settings for multi-pane mode (mirror cameras / sync options).
+            if pane_count > 1 {
+                let common_btn =
+                    sidebar_ui.button(wt_translations::icon_t(icons::GEAR_FINE, &t!("ui.armor.common_settings")));
+                egui::Popup::from_toggle_button_response(&common_btn)
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                    .show(|ui| {
+                        ui.set_min_width(180.0);
+                        ui.toggle_value(&mut state.mirror_cameras, t!("ui.armor.mirror_cameras").as_ref());
+                        ui.toggle_value(&mut state.sync_options, t!("ui.armor.sync_options").as_ref())
+                            .on_hover_text(t!("ui.armor.sync_tooltip").as_ref());
+                    });
+                sidebar_ui.separator();
+            }
+
             // Search bar
             sidebar_ui.horizontal(|ui| {
                 ui.label(icons::MAGNIFYING_GLASS);
@@ -664,19 +675,18 @@ impl ToolkitTabViewer<'_> {
             state.active_pane_id = new_active;
         }
 
-        // Sync options: broadcast visibility from active pane to all others each frame
+        // Sync options: broadcast visibility and display overlays from the active pane to all others each frame.
         if state.sync_options {
             let active_id = state.active_pane_id;
-            let source_vis = state
+            let source = state
                 .dock_state
                 .iter_all_tabs()
                 .find(|(_, tab)| tab.id == active_id)
-                .map(|(_, tab)| (tab.part_visibility.clone(), tab.hull_visibility.clone()));
-            if let Some((part_vis, hull_vis)) = source_vis {
+                .map(|(_, tab)| SyncedPaneSettings::capture(tab));
+            if let Some(source) = source {
                 for (_, tab) in state.dock_state.iter_all_tabs_mut() {
-                    if tab.id != active_id && (tab.part_visibility != part_vis || tab.hull_visibility != hull_vis) {
-                        tab.part_visibility = part_vis.clone();
-                        tab.hull_visibility = hull_vis.clone();
+                    if tab.id != active_id && source.differs_from(tab) {
+                        source.apply_to(tab);
                         if let Some(armor) = tab.loaded_armor.take() {
                             upload_armor_to_viewport(
                                 tab,
