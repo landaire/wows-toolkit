@@ -17,6 +17,7 @@ use egui::Vec2;
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::draw_command::DamageBreakdownEntry;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::HealState;
 use wt_translations::TextResolver;
 use wt_translations::TranslatableText;
 
@@ -1428,6 +1429,7 @@ pub fn draw_command_to_shapes(
             hp_current,
             hp_max,
             hp_healable,
+            heal_state,
             player_name,
             clan_tag,
             clan_color,
@@ -1521,14 +1523,17 @@ pub fn draw_command_to_shapes(
                 let sil_y = sil_top + (sil_area_h - fit_h) / 2.0;
                 let sil_rect = Rect::from_min_size(Pos2::new(sil_x, sil_y), Vec2::new(fit_w, fit_h));
 
-                // Gray silhouette base (unhealable lost HP shows through)
-                let mut gray_mesh = egui::Mesh::with_texture(sil_tex.id());
-                gray_mesh.add_rect_with_uv(
+                // Charcoal silhouette base (unhealable lost HP shows through)
+                let mut base_mesh = egui::Mesh::with_texture(sil_tex.id());
+                base_mesh.add_rect_with_uv(
                     sil_rect,
                     Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    Color32::from_rgb(200, 200, 200),
+                    {
+                        let [r, g, b] = wows_minimap_renderer::draw_command::SILHOUETTE_BASE_RGB;
+                        Color32::from_rgb(r, g, b)
+                    },
                 );
-                shapes.push(Shape::Mesh(gray_mesh.into()));
+                shapes.push(Shape::Mesh(base_mesh.into()));
 
                 let regions = wows_minimap_renderer::panel_math::silhouette_regions(*hp_current, *hp_healable, *hp_max);
 
@@ -1546,19 +1551,27 @@ pub fn draw_command_to_shapes(
                     shapes.push(Shape::Mesh(hp_mesh.into()));
                 }
 
-                // White region: healable pool, drawn immediately after the colored region
-                let white_start = regions.colored;
-                let white_w = fit_w * regions.white;
-                if white_w > 0.0 {
-                    let clip_rect =
-                        Rect::from_min_size(Pos2::new(sil_x + fit_w * white_start, sil_y), Vec2::new(white_w, fit_h));
-                    let mut white_mesh = egui::Mesh::with_texture(sil_tex.id());
-                    white_mesh.add_rect_with_uv(
-                        clip_rect,
-                        Rect::from_min_max(egui::pos2(white_start, 0.0), egui::pos2(white_start + regions.white, 1.0)),
-                        Color32::WHITE,
-                    );
-                    shapes.push(Shape::Mesh(white_mesh.into()));
+                // Healable region: gray when a heal is ready, white while healing,
+                // hidden when no heal is available. Drawn after the colored region.
+                if let Some(color) = healable_color_egui(*heal_state, 255) {
+                    let region_start = regions.colored;
+                    let region_w = fit_w * regions.white;
+                    if region_w > 0.0 {
+                        let clip_rect = Rect::from_min_size(
+                            Pos2::new(sil_x + fit_w * region_start, sil_y),
+                            Vec2::new(region_w, fit_h),
+                        );
+                        let mut region_mesh = egui::Mesh::with_texture(sil_tex.id());
+                        region_mesh.add_rect_with_uv(
+                            clip_rect,
+                            Rect::from_min_max(
+                                egui::pos2(region_start, 0.0),
+                                egui::pos2(region_start + regions.white, 1.0),
+                            ),
+                            color,
+                        );
+                        shapes.push(Shape::Mesh(region_mesh.into()));
+                    }
                 }
             } else {
                 // Fallback: simple HP bar when no silhouette texture
@@ -2234,14 +2247,16 @@ pub fn draw_command_to_shapes(
                         CornerRadius::same(1),
                         fill_color,
                     ));
-                    if row.hp_healable > 0.0 {
+                    if let Some(color) = healable_color_egui(row.heal_state, 217)
+                        && row.hp_healable > 0.0
+                    {
                         let heal_ratio = (row.hp_healable / row.hp_max).clamp(0.0, 1.0);
                         let heal_w = (hp_bar_w * heal_ratio).min(hp_bar_w - fill_w);
                         if heal_w > 0.0 {
                             shapes.push(Shape::rect_filled(
                                 Rect::from_min_size(Pos2::new(inner_x + fill_w, hp_bar_y), Vec2::new(heal_w, hp_bar_h)),
                                 CornerRadius::same(1),
-                                Color32::from_rgba_unmultiplied(110, 150, 110, 160),
+                                color,
                             ));
                         }
                     }
@@ -2466,6 +2481,13 @@ fn damage_label_color(label: &str) -> Color32 {
         "MISSILE" => Color32::from_rgb(220, 130, 220),
         _ => Color32::from_rgb(180, 180, 180),
     }
+}
+
+/// Egui color for the healable-HP region, or `None` to hide it. The RGB comes
+/// from the shared `HealState` mapping so the egui and pixmap backends stay in
+/// sync; alpha is supplied per call site.
+fn healable_color_egui(state: HealState, alpha: u8) -> Option<Color32> {
+    state.healable_rgb().map(|[r, g, b]| Color32::from_rgba_unmultiplied(r, g, b, alpha))
 }
 
 fn hp_bar_color_egui(fraction: f32) -> Color32 {
