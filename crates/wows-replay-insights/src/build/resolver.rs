@@ -133,7 +133,7 @@ fn resolve_slots<P: GameParamProvider>(
     let mut out = Vec::with_capacity(chosen_abilities.len());
     for (slot_index, ability_id) in chosen_abilities.iter().enumerate() {
         let Some(ability_param) = gp.game_param_by_id(*ability_id) else {
-            tracing::debug!(
+            tracing::trace!(
                 ?ability_id,
                 ship = ship.index(),
                 slot_index,
