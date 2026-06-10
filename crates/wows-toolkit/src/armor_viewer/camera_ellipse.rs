@@ -8,6 +8,7 @@ use wowsunpack::game_params::types::CameraRing;
 type Vec3 = Vector3<f32>;
 
 const RING_SEGMENTS: usize = 96;
+const MARKER_SEGMENTS: usize = 48;
 const LINE_WIDTH: f32 = 0.03;
 const MARKER_SIZE: f32 = 0.06;
 const SPOKE_COUNT: usize = 24;
@@ -129,6 +130,28 @@ pub(crate) fn ring_label(mode: &str, kind: &str, fov_tag: &str, ring: &CameraRin
         "{mode} {kind} ({fov_tag})\ny {:.2}  semiH {:.2}  semiV {:.2}",
         ring.pos_center.y, ring.semi_axes.x, ring.semi_axes.y
     )
+}
+
+/// Build a flat ring + center cross lying in the XZ plane at `center` (its `y`
+/// is the water height), for the perspective aim-point marker. World-space.
+pub(crate) fn build_water_marker_mesh(center: Vec3, radius: f32, color: [f32; 4]) -> (Vec<Vertex>, Vec<u32>) {
+    let mut verts: Vec<Vertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    let x_axis = Vec3::x();
+    let z_axis = Vec3::z();
+
+    let mut prev = center + x_axis * radius;
+    for i in 1..=MARKER_SEGMENTS {
+        let t = (i as f32 / MARKER_SEGMENTS as f32) * std::f32::consts::TAU;
+        let p = center + x_axis * (t.cos() * radius) + z_axis * (t.sin() * radius);
+        push_segment(&mut verts, &mut indices, prev, p, color);
+        prev = p;
+    }
+    let arm = radius * 0.5;
+    push_segment(&mut verts, &mut indices, center - x_axis * arm, center + x_axis * arm, color);
+    push_segment(&mut verts, &mut indices, center - z_axis * arm, center + z_axis * arm, color);
+
+    (verts, indices)
 }
 
 /// A 3-axis cross marker centered at `center` (model space), each arm `half` long.
@@ -291,5 +314,27 @@ mod tests {
         let outer_colored = verts.iter().filter(|v| v.color == co).count();
         assert_eq!(inner_colored, verts.len() / 2);
         assert_eq!(outer_colored, verts.len() / 2);
+    }
+
+    #[test]
+    fn water_marker_non_empty_on_radius_colored() {
+        let c = Vec3::new(5.0, 0.0, -3.0);
+        let r = 4.0;
+        let col = [1.0, 0.6, 0.1, 0.85];
+        let (verts, indices) = build_water_marker_mesh(c, r, col);
+        assert!(!verts.is_empty() && !indices.is_empty());
+        assert_eq!(indices.len() % 3, 0);
+        for &i in &indices {
+            assert!((i as usize) < verts.len());
+        }
+        for v in &verts {
+            assert_eq!(v.color, col);
+        }
+        let on_ring = verts.iter().any(|v| {
+            let dx = v.position[0] - c.x;
+            let dz = v.position[2] - c.z;
+            ((dx * dx + dz * dz).sqrt() - r).abs() < 0.2
+        });
+        assert!(on_ring, "no vertex near ring radius");
     }
 }
