@@ -522,6 +522,12 @@ pub struct ArmorPane {
     pub zoom_path_regular_fov: bool,
     /// Draw zoom-path spokes evaluated at max FOV (1.0).
     pub zoom_path_max_fov: bool,
+    /// First-person camera lock onto the orbit ring.
+    pub perspective_enabled: bool,
+    /// Live perspective state (yaw/pitch/zoom/fov/look target).
+    pub perspective: crate::armor_viewer::camera_perspective::CameraPerspective,
+    /// Free camera saved on entering perspective mode, restored on exit.
+    pub saved_camera: Option<crate::viewport_3d::camera::ArcballCamera>,
 }
 
 /// Snapshot of the per-pane settings that "Sync options" broadcasts from the active
@@ -541,6 +547,9 @@ pub struct SyncedPaneSettings {
     pub show_camera_zoom_path: bool,
     pub zoom_path_regular_fov: bool,
     pub zoom_path_max_fov: bool,
+    pub perspective_enabled: bool,
+    pub perspective_fov_deg: f32,
+    pub perspective_look_target: crate::armor_viewer::camera_perspective::LookTarget,
 }
 
 impl SyncedPaneSettings {
@@ -558,6 +567,9 @@ impl SyncedPaneSettings {
             show_camera_zoom_path: pane.show_camera_zoom_path,
             zoom_path_regular_fov: pane.zoom_path_regular_fov,
             zoom_path_max_fov: pane.zoom_path_max_fov,
+            perspective_enabled: pane.perspective_enabled,
+            perspective_fov_deg: pane.perspective.fov_deg,
+            perspective_look_target: pane.perspective.look_target,
         }
     }
 
@@ -575,6 +587,9 @@ impl SyncedPaneSettings {
             || self.show_camera_zoom_path != pane.show_camera_zoom_path
             || self.zoom_path_regular_fov != pane.zoom_path_regular_fov
             || self.zoom_path_max_fov != pane.zoom_path_max_fov
+            || self.perspective_enabled != pane.perspective_enabled
+            || self.perspective_fov_deg != pane.perspective.fov_deg
+            || self.perspective_look_target != pane.perspective.look_target
     }
 
     pub fn apply_to(&self, pane: &mut ArmorPane) {
@@ -590,6 +605,9 @@ impl SyncedPaneSettings {
         pane.show_camera_zoom_path = self.show_camera_zoom_path;
         pane.zoom_path_regular_fov = self.zoom_path_regular_fov;
         pane.zoom_path_max_fov = self.zoom_path_max_fov;
+        pane.perspective.fov_deg = self.perspective_fov_deg;
+        pane.perspective.look_target = self.perspective_look_target;
+        pane.set_perspective_enabled(self.perspective_enabled);
     }
 }
 
@@ -686,6 +704,27 @@ impl ArmorPane {
             show_camera_zoom_path: false,
             zoom_path_regular_fov: true,
             zoom_path_max_fov: false,
+            perspective_enabled: false,
+            perspective: crate::armor_viewer::camera_perspective::CameraPerspective::default(),
+            saved_camera: None,
         }
+    }
+
+    /// Toggle the perspective lock, snapshotting the free camera on enter and
+    /// restoring it on exit. No-op when the value is unchanged.
+    pub fn set_perspective_enabled(&mut self, on: bool) {
+        if on == self.perspective_enabled {
+            return;
+        }
+        if on {
+            self.saved_camera = Some(self.viewport.camera.clone());
+            self.perspective.yaw = self.viewport.camera.azimuth;
+            self.perspective.pitch = self.viewport.camera.elevation;
+            self.perspective.clamp();
+        } else if let Some(cam) = self.saved_camera.take() {
+            self.viewport.camera = cam;
+        }
+        self.perspective_enabled = on;
+        self.viewport.mark_dirty();
     }
 }
