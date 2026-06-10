@@ -105,6 +105,25 @@ impl NetworkingThread {
     fn run(&mut self) {
         debug!("Networking thread started");
 
+        // Configure the global GitHub client (app-update and constants checks) with
+        // connect/read timeouts so a stalled network fails fast instead of hanging.
+        // Built inside the runtime because octocrab's tower Buffer spawns a worker
+        // task; it keeps octocrab's default transient-failure retry.
+        self.runtime.block_on(async {
+            match octocrab::Octocrab::builder()
+                .set_connect_timeout(Some(Duration::from_secs(15)))
+                .set_read_timeout(Some(Duration::from_secs(30)))
+                .build()
+            {
+                Ok(client) => {
+                    octocrab::initialise(client);
+                }
+                Err(e) => {
+                    tracing::warn!("failed to configure GitHub client timeouts: {}", crate::util::http::error_chain(&e));
+                }
+            }
+        });
+
         loop {
             // Wait for a job, with a timeout for periodic checks
             match self.job_rx.recv_timeout(Duration::from_secs(60)) {
