@@ -1768,7 +1768,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
 
                 let camera_interacted = if pane.perspective_enabled {
                     let input_changed = handle_perspective_input(pane, &response, vp_ui);
-                    let applied = apply_perspective_to_viewport(pane);
+                    let applied = apply_perspective_to_viewport(pane, &render_state.device);
                     input_changed || applied
                 } else {
                     // Clamp the gizmo box to the visible viewport so it tracks the pane and never overflows off-screen.
@@ -4794,27 +4794,52 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
                 });
             }
         }
-        if !armor.camera_trajectories.is_empty() {
-            let mut perspective_on = pane.perspective_enabled;
-            if ui.checkbox(&mut perspective_on, t!("ui.armor.camera_perspective").as_ref()).changed() {
-                pane.set_perspective_enabled(perspective_on);
-                combo_changed = true;
-            }
-            if pane.perspective_enabled {
-                ui.horizontal(|ui| {
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut pane.perspective.fov_deg, 30.0..=120.0)
-                                .text(t!("ui.armor.perspective_fov").as_ref()),
-                        )
-                        .changed()
-                    {
-                        combo_changed = true;
-                    }
-                });
-            }
-        }
     });
+    if !armor.camera_trajectories.is_empty() {
+        if !armor.camera_trajectories.iter().any(|(name, _)| *name == pane.camera_ellipse_mode)
+            && let Some((first, _)) = armor.camera_trajectories.first()
+        {
+            pane.camera_ellipse_mode = first.clone();
+        }
+        let mut perspective_on = pane.perspective_enabled;
+        if ui.checkbox(&mut perspective_on, t!("ui.armor.camera_perspective").as_ref()).changed() {
+            pane.set_perspective_enabled(perspective_on);
+            combo_changed = true;
+        }
+        if pane.perspective_enabled {
+            ui.horizontal(|ui| {
+                if ui
+                    .add(
+                        egui::Slider::new(&mut pane.perspective.fov_deg, 30.0..=120.0)
+                            .text(t!("ui.armor.perspective_fov").as_ref()),
+                    )
+                    .changed()
+                {
+                    combo_changed = true;
+                }
+            });
+            ui.horizontal(|ui| {
+                use crate::armor_viewer::camera_perspective::LookMode;
+                ui.label(t!("ui.armor.perspective_projection").as_ref());
+                if ui
+                    .selectable_value(&mut pane.perspective.look_mode, LookMode::Game, t!("ui.armor.perspective_proj_game").as_ref())
+                    .changed()
+                {
+                    combo_changed = true;
+                }
+                if ui
+                    .selectable_value(
+                        &mut pane.perspective.look_mode,
+                        LookMode::ThroughCenter,
+                        t!("ui.armor.perspective_proj_center").as_ref(),
+                    )
+                    .changed()
+                {
+                    combo_changed = true;
+                }
+            });
+        }
+    }
     if combo_changed {
         zone_changed = true;
     }
@@ -4867,7 +4892,7 @@ fn handle_perspective_input(pane: &mut ArmorPane, response: &egui::Response, ui:
 /// Recompute and apply the locked camera from the pane's current perspective
 /// state. Returns true if the resulting camera changed. No-op when perspective
 /// mode is off or no trajectory matches the selected mode.
-fn apply_perspective_to_viewport(pane: &mut ArmorPane) -> bool {
+fn apply_perspective_to_viewport(pane: &mut ArmorPane, device: &wgpu::Device) -> bool {
     if !pane.perspective_enabled {
         return false;
     }
@@ -4881,6 +4906,7 @@ fn apply_perspective_to_viewport(pane: &mut ArmorPane) -> bool {
         };
         (traj.clone(), armor.waterline_dy, armor.bounds.0, armor.bounds.1)
     };
+    pane.perspective.clamp_pitch_to_far_side(&traj, pane.camera_fov, pane.camera_height, waterline_dy);
     let (eye_m, dir_m) = pane.perspective.eye_and_look_dir(&traj, pane.camera_fov, pane.camera_height, waterline_dy);
     let eye = pane.viewport.pos_to_world_space(eye_m);
     let dir = pane.viewport.pos_to_world_space(dir_m);
@@ -4898,6 +4924,18 @@ fn apply_perspective_to_viewport(pane: &mut ArmorPane) -> bool {
     cam.far = far;
     if changed {
         pane.viewport.mark_dirty();
+    }
+    if changed || pane.perspective_aim_mesh_ids.is_empty() {
+        for id in pane.perspective_aim_mesh_ids.drain(..) {
+            pane.viewport.remove_mesh(id);
+        }
+        let radius = ((max - min).norm() * 0.03).clamp(1.0, 8.0);
+        let (verts, indices) =
+            crate::armor_viewer::camera_ellipse::build_water_marker_mesh(target, radius, [1.0, 0.6, 0.1, 0.85]);
+        if !indices.is_empty() {
+            let id = pane.viewport.add_world_space_mesh(device, &verts, &indices, LAYER_OVERLAY);
+            pane.perspective_aim_mesh_ids.push(id);
+        }
     }
     changed
 }
