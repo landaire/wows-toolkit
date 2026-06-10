@@ -528,6 +528,8 @@ pub struct ArmorPane {
     pub perspective: crate::armor_viewer::camera_perspective::CameraPerspective,
     /// Free camera saved on entering perspective mode, restored on exit.
     pub saved_camera: Option<crate::viewport_3d::camera::ArcballCamera>,
+    /// Tracked world-space overlay meshes for the perspective aim-point marker.
+    pub perspective_aim_mesh_ids: Vec<crate::viewport_3d::MeshId>,
 }
 
 /// Snapshot of the per-pane settings that "Sync options" broadcasts from the active
@@ -549,6 +551,7 @@ pub struct SyncedPaneSettings {
     pub zoom_path_max_fov: bool,
     pub perspective_enabled: bool,
     pub perspective_fov_deg: f32,
+    pub perspective_look_mode: crate::armor_viewer::camera_perspective::LookMode,
 }
 
 impl SyncedPaneSettings {
@@ -568,6 +571,7 @@ impl SyncedPaneSettings {
             zoom_path_max_fov: pane.zoom_path_max_fov,
             perspective_enabled: pane.perspective_enabled,
             perspective_fov_deg: pane.perspective.fov_deg,
+            perspective_look_mode: pane.perspective.look_mode,
         }
     }
 
@@ -587,6 +591,7 @@ impl SyncedPaneSettings {
             || self.zoom_path_max_fov != pane.zoom_path_max_fov
             || self.perspective_enabled != pane.perspective_enabled
             || self.perspective_fov_deg != pane.perspective.fov_deg
+            || self.perspective_look_mode != pane.perspective.look_mode
     }
 
     pub fn apply_to(&self, pane: &mut ArmorPane) {
@@ -603,6 +608,7 @@ impl SyncedPaneSettings {
         pane.zoom_path_regular_fov = self.zoom_path_regular_fov;
         pane.zoom_path_max_fov = self.zoom_path_max_fov;
         pane.perspective.fov_deg = self.perspective_fov_deg;
+        pane.perspective.look_mode = self.perspective_look_mode;
         pane.set_perspective_enabled(self.perspective_enabled);
     }
 }
@@ -703,6 +709,7 @@ impl ArmorPane {
             perspective_enabled: false,
             perspective: crate::armor_viewer::camera_perspective::CameraPerspective::default(),
             saved_camera: None,
+            perspective_aim_mesh_ids: Vec::new(),
         }
     }
 
@@ -717,8 +724,13 @@ impl ArmorPane {
             self.perspective.yaw = self.viewport.camera.azimuth;
             self.perspective.pitch = self.viewport.camera.elevation;
             self.perspective.clamp();
-        } else if let Some(cam) = self.saved_camera.take() {
-            self.viewport.camera = cam;
+        } else {
+            for id in self.perspective_aim_mesh_ids.drain(..) {
+                self.viewport.remove_mesh(id);
+            }
+            if let Some(cam) = self.saved_camera.take() {
+                self.viewport.camera = cam;
+            }
         }
         self.perspective_enabled = on;
         self.viewport.mark_dirty();
