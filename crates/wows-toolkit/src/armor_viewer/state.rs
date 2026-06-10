@@ -524,7 +524,7 @@ pub struct ArmorPane {
     pub zoom_path_max_fov: bool,
     /// First-person camera lock onto the orbit ring.
     pub perspective_enabled: bool,
-    /// Live perspective state (yaw/pitch/zoom/fov/look target).
+    /// Live perspective state (yaw/pitch/zoom/fov).
     pub perspective: crate::armor_viewer::camera_perspective::CameraPerspective,
     /// Free camera saved on entering perspective mode, restored on exit.
     pub saved_camera: Option<crate::viewport_3d::camera::ArcballCamera>,

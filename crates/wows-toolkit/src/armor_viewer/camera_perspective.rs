@@ -10,7 +10,7 @@ const PITCH_MAX: f32 = 1.4;
 pub struct CameraPerspective {
     /// Ring parameter / aim yaw, radians.
     pub yaw: f32,
-    /// Look tilt, radians; positive looks up.
+    /// Downward look tilt, radians; positive aims toward the water.
     pub pitch: f32,
     /// Inner(0)..outer(1) orbit blend.
     pub zoom: f32,
