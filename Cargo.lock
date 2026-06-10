@@ -2484,6 +2484,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_inbox"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2060b5648598bd7fb8b2e5826095fd93bdf4393d853fb6ed9d1108f720407ecb"
+dependencies = [
+ "egui",
+ "parking_lot",
+]
+
+[[package]]
 name = "egui_ltreeview"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11185,6 +11195,7 @@ dependencies = [
  "egui_commonmark",
  "egui_dock",
  "egui_extras",
+ "egui_inbox",
  "egui_ltreeview",
  "egui_plot",
  "egui_table",

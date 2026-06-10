@@ -2052,7 +2052,7 @@ impl WowsToolkitApp {
             self.tab_state.pending_host = false;
             self.do_host_session();
         }
-        self.poll_host_session_events();
+        self.poll_host_session_events(ctx);
         self.poll_client_session_events(ctx);
 
         // Pop open something to view the clicked file from the unpacker tab
@@ -2559,10 +2559,10 @@ impl WowsToolkitApp {
         }
     }
 
-    fn poll_host_session_events(&mut self) {
-        let Some(ref session) = self.tab_state.host_session else {
+    fn poll_host_session_events(&mut self, ctx: &egui::Context) {
+        if self.tab_state.host_session.is_none() {
             return;
-        };
+        }
 
         // Lazily build the asset bundle once game data becomes available.
         if let Some(ref bundle_slot) = self.tab_state.web_asset_bundle
@@ -2572,8 +2572,14 @@ impl WowsToolkitApp {
             *bundle_slot.lock() = Some(bundle);
         }
 
+        // Drain queued session events; the inbox sender wakes the UI on send.
+        let events: Vec<crate::collab::SessionEvent> = match self.tab_state.host_session {
+            Some(ref session) => session.event_inbox.read(ctx).collect(),
+            None => return,
+        };
+
         let mut session_ended = false;
-        while let Ok(event) = session.event_rx.try_recv() {
+        for event in events {
             match event {
                 crate::collab::SessionEvent::Started => {
                     self.tab_state.toasts.lock().info(t!("ui.messages.session_started"));
@@ -2661,12 +2667,13 @@ impl WowsToolkitApp {
     }
 
     fn poll_client_session_events(&mut self, ctx: &egui::Context) {
-        let Some(ref session) = self.tab_state.client_session else {
-            return;
+        // Drain queued session events; the inbox sender wakes the UI on send.
+        let events: Vec<crate::collab::SessionEvent> = match self.tab_state.client_session {
+            Some(ref session) => session.event_inbox.read(ctx).collect(),
+            None => return,
         };
 
-        // Poll events
-        while let Ok(event) = session.event_rx.try_recv() {
+        for event in events {
             match event {
                 crate::collab::SessionEvent::Started => {
                     self.tab_state.toasts.lock().info(t!("ui.messages.connected_to_session"));
@@ -2812,9 +2819,6 @@ impl WowsToolkitApp {
                 _ => {}
             }
         }
-
-        // Request repaint while session is active to keep polling events
-        ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
 }
 

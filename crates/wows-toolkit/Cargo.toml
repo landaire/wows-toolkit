@@ -102,6 +102,7 @@ rustls = { version = "0.23.37", default-features = false, features = ["ring", "s
 rust-i18n = { workspace = true }
 sys-locale = { workspace = true }
 ron = "0.12.1"
+egui_inbox = "0.11.0"
 
 [dev-dependencies]
 insta = { workspace = true }

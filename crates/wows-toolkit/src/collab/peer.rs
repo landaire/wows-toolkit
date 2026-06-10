@@ -139,8 +139,9 @@ pub enum LocalEvent {
 
 /// Handle returned from `start_peer_session` for UI interaction.
 pub struct PeerSessionHandle {
-    /// Receive session events.
-    pub event_rx: mpsc::Receiver<SessionEvent>,
+    /// Receive session events. The inbox sender wakes the UI on send, so the UI
+    /// does not need to poll for events.
+    pub event_inbox: egui_inbox::UiInbox<SessionEvent>,
     /// Send commands to the session.
     pub command_tx: mpsc::Sender<SessionCommand>,
     /// Send frames for broadcast (host/co-host only). `try_send` to avoid blocking.
@@ -160,7 +161,14 @@ pub fn start_peer_session(
     mode: PeerMode,
     state: Arc<Mutex<SessionState>>,
 ) -> PeerSessionHandle {
-    let (event_tx, event_rx) = mpsc::channel();
+    let mut event_inbox = egui_inbox::UiInbox::new();
+    // Bind the main window context now if the UI has registered it, so the peer
+    // task's first events (handshake status, errors) wake the UI immediately
+    // rather than waiting for the next idle tick to bind it on first read.
+    if let Some(ctx) = state.lock().egui_ctx.clone() {
+        event_inbox.set_ctx(&ctx);
+    }
+    let event_tx = event_inbox.sender();
     let (command_tx, command_rx) = mpsc::channel();
     let (frame_tx, frame_broadcast_rx) = mpsc::sync_channel(2);
     let (local_tx, local_rx) = mpsc::channel();
@@ -183,7 +191,7 @@ pub fn start_peer_session(
 
     runtime.spawn(peer_task(mode, event_tx, command_rx, frame_broadcast_rx, local_rx, state_clone));
 
-    PeerSessionHandle { event_rx, command_tx, frame_tx, local_tx, state }
+    PeerSessionHandle { event_inbox, command_tx, frame_tx, local_tx, state }
 }
 /// A connected peer in the mesh (from our perspective).
 struct MeshPeer {
@@ -232,7 +240,7 @@ impl MeshState {
 }
 async fn peer_task(
     mode: PeerMode,
-    event_tx: mpsc::Sender<SessionEvent>,
+    event_tx: egui_inbox::UiInboxSender<SessionEvent>,
     command_rx: mpsc::Receiver<SessionCommand>,
     frame_broadcast_rx: mpsc::Receiver<FrameBroadcast>,
     local_rx: mpsc::Receiver<LocalEvent>,
@@ -249,7 +257,7 @@ async fn peer_task(
 }
 async fn host_main(
     params: HostParams,
-    event_tx: mpsc::Sender<SessionEvent>,
+    event_tx: egui_inbox::UiInboxSender<SessionEvent>,
     command_rx: mpsc::Receiver<SessionCommand>,
     frame_broadcast_rx: mpsc::Receiver<FrameBroadcast>,
     local_rx: mpsc::Receiver<LocalEvent>,
@@ -747,7 +755,7 @@ async fn host_accept_peer(
     endpoint: &Endpoint,
     mesh: Arc<Mutex<MeshState>>,
     ui_state: Arc<Mutex<SessionState>>,
-    event_tx: mpsc::Sender<SessionEvent>,
+    event_tx: egui_inbox::UiInboxSender<SessionEvent>,
     peer_msg_tx: tokio::sync::mpsc::Sender<(u64, PeerMessage)>,
     mut frame_rx: tokio::sync::broadcast::Receiver<Arc<Vec<u8>>>,
     last_frame_bytes: Arc<Mutex<Option<Arc<Vec<u8>>>>>,
@@ -1163,7 +1171,7 @@ async fn host_accept_peer(
 }
 async fn join_main(
     params: JoinParams,
-    event_tx: mpsc::Sender<SessionEvent>,
+    event_tx: egui_inbox::UiInboxSender<SessionEvent>,
     command_rx: mpsc::Receiver<SessionCommand>,
     frame_broadcast_rx: mpsc::Receiver<FrameBroadcast>,
     local_rx: mpsc::Receiver<LocalEvent>,
@@ -1714,7 +1722,7 @@ fn handle_incoming_message(
     msg: PeerMessage,
     mesh: &Arc<Mutex<MeshState>>,
     ui_state: &Arc<Mutex<SessionState>>,
-    event_tx: &mpsc::Sender<SessionEvent>,
+    event_tx: &egui_inbox::UiInboxSender<SessionEvent>,
 ) {
     let m = mesh.lock();
     let sender_is_authority = m.is_authority(sender_id);
@@ -2447,8 +2455,8 @@ mod tests {
     struct MessageTestHarness {
         mesh: Arc<Mutex<MeshState>>,
         ui_state: Arc<Mutex<SessionState>>,
-        event_rx: mpsc::Receiver<SessionEvent>,
-        event_tx: mpsc::Sender<SessionEvent>,
+        event_inbox: egui_inbox::UiInbox<SessionEvent>,
+        event_tx: egui_inbox::UiInboxSender<SessionEvent>,
     }
 
     impl MessageTestHarness {
@@ -2464,8 +2472,9 @@ mod tests {
                 m
             }));
             let ui_state = Arc::new(Mutex::new(SessionState::default()));
-            let (event_tx, event_rx) = mpsc::channel();
-            Self { mesh, ui_state, event_rx, event_tx }
+            let event_inbox = egui_inbox::UiInbox::new();
+            let event_tx = event_inbox.sender();
+            Self { mesh, ui_state, event_inbox, event_tx }
         }
 
         fn with_permissions(self, annotations_locked: bool, settings_locked: bool) -> Self {
@@ -2822,7 +2831,7 @@ mod tests {
         assert_eq!(s.role, PeerRole::CoHost);
 
         // Event should be emitted.
-        let event = h.event_rx.try_recv().unwrap();
+        let event = h.event_inbox.read_without_ctx().next().unwrap();
         match event {
             SessionEvent::PeerPromoted { user_id } => assert_eq!(user_id, 1),
             _ => panic!("Expected PeerPromoted event"),
