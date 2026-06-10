@@ -1551,6 +1551,11 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         .id(display_popup_id)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
+                            if ui.button(wt_translations::icon_t(icons::ARROW_SQUARE_OUT, "Pop out")).clicked() {
+                                pane.display_window_open = true;
+                                ui.close();
+                            }
+                            ui.separator();
                             if draw_display_settings_popover(ui, pane, &armor) {
                                 zone_changed = true;
                             }
@@ -1708,6 +1713,31 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                     }
                 });
                 vp_ui.separator();
+            }
+            if pane.display_window_open {
+                let ctx = vp_ui.ctx().clone();
+                let title = format!("{} - {}", t!("ui.armor.display"), armor.display_name);
+                let mut open = pane.display_window_open;
+                egui::Window::new(title)
+                    .id(egui::Id::new(("armor_display_window", pane_id)))
+                    .open(&mut open)
+                    .resizable(true)
+                    .collapsible(true)
+                    .default_width(280.0)
+                    .show(&ctx, |ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            if draw_display_settings_popover(ui, pane, &armor) {
+                                zone_changed = true;
+                            }
+                            if !pane.trajectories.is_empty() {
+                                ui.horizontal(|ui| {
+                                    ui.label(t!("ui.armor.marker_opacity").as_ref());
+                                    ui.add(egui::Slider::new(&mut pane.marker_opacity, 0.0..=1.0).fixed_decimals(2));
+                                });
+                            }
+                        });
+                    });
+                pane.display_window_open = open;
             }
             pane.loaded_armor = Some(armor);
         }
