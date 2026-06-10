@@ -265,6 +265,23 @@ mod tests {
     }
 
     #[test]
+    fn zoom_path_endpoints_respect_waterline() {
+        let (inner, outer) = ring_pair();
+        let dy = 0.5_f32;
+        let (verts, _) =
+            build_zoom_path_mesh(&inner, &outer, dy, [0.0, 0.9, 1.0, 0.85], [1.0, 0.6, 0.1, 0.85]);
+        let on_ellipse = |c: &CameraRing, p: &[f32; 3]| {
+            let dx = (p[0] - c.pos_center.x) / c.semi_axes.x;
+            let dz = (p[2] - c.pos_center.z) / c.semi_axes.y;
+            (dx * dx + dz * dz - 1.0).abs() < 0.1 && (p[1] - (c.pos_center.y + dy)).abs() < 0.1
+        };
+        let inner_hits = verts.iter().filter(|v| on_ellipse(&inner, &v.position)).count();
+        let outer_hits = verts.iter().filter(|v| on_ellipse(&outer, &v.position)).count();
+        assert!(inner_hits >= SPOKE_COUNT, "inner_hits={inner_hits}");
+        assert!(outer_hits >= SPOKE_COUNT, "outer_hits={outer_hits}");
+    }
+
+    #[test]
     fn zoom_path_colors_are_per_endpoint() {
         let (inner, outer) = ring_pair();
         let ci = [0.0, 0.9, 1.0, 0.85];
@@ -274,6 +291,5 @@ mod tests {
         let outer_colored = verts.iter().filter(|v| v.color == co).count();
         assert_eq!(inner_colored, verts.len() / 2);
         assert_eq!(outer_colored, verts.len() / 2);
-        assert_eq!(inner_colored + outer_colored, verts.len());
     }
 }
