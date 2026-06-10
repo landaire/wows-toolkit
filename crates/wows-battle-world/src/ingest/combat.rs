@@ -8,13 +8,13 @@ use wows_replays::analyzer::decoder::DamageReceived as AggressorDamage;
 use wows_replays::analyzer::decoder::DamageStatEntry;
 use wows_replays::analyzer::decoder::DeathCause;
 use wows_replays::analyzer::decoder::Recognized;
+use wows_replays::nested_property_path::PropertyNestLevel;
+use wows_replays::nested_property_path::UpdateAction;
+use wows_replays::packet2::PropertyUpdatePacket;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::NormalizedPos;
 use wows_replays::types::WorldPos;
-use wows_replays::nested_property_path::PropertyNestLevel;
-use wows_replays::nested_property_path::UpdateAction;
-use wows_replays::packet2::PropertyUpdatePacket;
 use wowsunpack::game_types::Ribbon;
 use wowsunpack::rpc::typedefs::ArgValue;
 

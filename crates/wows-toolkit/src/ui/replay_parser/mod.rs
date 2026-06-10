@@ -1554,11 +1554,7 @@ impl UiReport {
         });
     }
 
-    fn render_skill_grid(
-        &self,
-        ui: &mut egui::Ui,
-        rows: &[wowsunpack::game_params::skill_grid_data::SkillGridRow],
-    ) {
+    fn render_skill_grid(&self, ui: &mut egui::Ui, rows: &[wowsunpack::game_params::skill_grid_data::SkillGridRow]) {
         const ICON_SIZE: f32 = 28.0;
         let all_skills: Vec<&wowsunpack::game_params::skill_grid_data::SkillGridSkill> =
             rows.iter().flat_map(|r| r.skills.iter()).collect();
@@ -1598,8 +1594,8 @@ impl UiReport {
                                 Color32::from_rgba_unmultiplied(255, 255, 255, 55)
                             };
                             if let Some(tex) = self.icon_texture(ui.ctx(), icon) {
-                                let image = egui::Image::new((tex.id(), egui::Vec2::new(ICON_SIZE, ICON_SIZE)))
-                                    .tint(tint);
+                                let image =
+                                    egui::Image::new((tex.id(), egui::Vec2::new(ICON_SIZE, ICON_SIZE))).tint(tint);
                                 ui.add(image).on_hover_text(tooltip);
                             } else {
                                 // Fallback for builds whose skill icons are absent.
@@ -1657,26 +1653,24 @@ impl UiReport {
                 .map(|s| s.as_ref().and_then(|m| wows_data.cached_modernization_icon(&m.game_params_name)))
                 .collect()
         };
-        let icons: Vec<Option<Arc<GameAsset>>> =
-            if slots.iter().zip(&cached).any(|(s, c)| s.is_some() && c.is_none()) {
-                let mut wows_data = self.wows_data.write();
-                slots
-                    .iter()
-                    .zip(cached)
-                    .map(|(s, c)| match s {
-                        Some(m) => c.or_else(|| wows_data.load_modernization_icon(&m.game_params_name)),
-                        None => None,
-                    })
-                    .collect()
-            } else {
-                cached
-            };
+        let icons: Vec<Option<Arc<GameAsset>>> = if slots.iter().zip(&cached).any(|(s, c)| s.is_some() && c.is_none()) {
+            let mut wows_data = self.wows_data.write();
+            slots
+                .iter()
+                .zip(cached)
+                .map(|(s, c)| match s {
+                    Some(m) => c.or_else(|| wows_data.load_modernization_icon(&m.game_params_name)),
+                    None => None,
+                })
+                .collect()
+        } else {
+            cached
+        };
         ui.horizontal_wrapped(|ui| {
             for (slot, icon) in slots.iter().zip(icons) {
                 match slot {
                     Some(module) => {
-                        let display_name =
-                            module.name.clone().unwrap_or_else(|| module.game_params_name.clone());
+                        let display_name = module.name.clone().unwrap_or_else(|| module.game_params_name.clone());
                         let tooltip = match module.description.as_deref() {
                             Some(d) if !d.is_empty() => format!("{}\n\n{}", display_name, d),
                             _ => display_name.clone(),
@@ -1692,8 +1686,7 @@ impl UiReport {
                         }
                     }
                     None => {
-                        let (rect, _) =
-                            ui.allocate_exact_size(egui::Vec2::splat(ICON_SIZE), egui::Sense::hover());
+                        let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(ICON_SIZE), egui::Sense::hover());
                         ui.painter().rect_filled(rect, 2.0, ui.visuals().faint_bg_color);
                     }
                 }
@@ -1719,16 +1712,14 @@ impl UiReport {
         };
         ui.horizontal_wrapped(|ui| {
             for (signal, icon) in signals.iter().zip(icons) {
-                let display_name =
-                    signal.name.clone().unwrap_or_else(|| signal.game_params_name.clone());
+                let display_name = signal.name.clone().unwrap_or_else(|| signal.game_params_name.clone());
                 let tooltip = match signal.description.as_deref() {
                     Some(d) if !d.is_empty() => format!("{}\n\n{}", display_name, d),
                     _ => display_name.clone(),
                 };
                 match icon.as_ref().and_then(|a| self.icon_texture(ui.ctx(), a)) {
                     Some(tex) => {
-                        ui.add(egui::Image::new((tex.id(), egui::Vec2::splat(ICON_SIZE))))
-                            .on_hover_text(tooltip);
+                        ui.add(egui::Image::new((tex.id(), egui::Vec2::splat(ICON_SIZE)))).on_hover_text(tooltip);
                     }
                     None => {
                         ui.label(RichText::new(&display_name).small()).on_hover_text(tooltip);
@@ -1798,13 +1789,14 @@ impl UiReport {
                     egui::UiBuilder::new().max_rect(name_rect).layout(egui::Layout::left_to_right(egui::Align::Center)),
                 );
                 if let Some(icon) = icon.as_ref()
-                    && let Some(tex) = self.icon_texture(name_ui.ctx(), icon) {
-                        let image = egui::Image::new((tex.id(), egui::Vec2::new(ICON_SIZE, ICON_SIZE)));
-                        let response = name_ui.add(image);
-                        if !consumable.description.is_empty() {
-                            response.on_hover_text(&consumable.description);
-                        }
+                    && let Some(tex) = self.icon_texture(name_ui.ctx(), icon)
+                {
+                    let image = egui::Image::new((tex.id(), egui::Vec2::new(ICON_SIZE, ICON_SIZE)));
+                    let response = name_ui.add(image);
+                    if !consumable.description.is_empty() {
+                        response.on_hover_text(&consumable.description);
                     }
+                }
                 let name_label = name_ui.label(&consumable.display_name);
                 if !consumable.description.is_empty() {
                     name_label.on_hover_text(&consumable.description);
@@ -2486,10 +2478,7 @@ impl UiReport {
                                         ui.label(t!("ui.replay.sections.modules_none"));
                                     } else {
                                         ui.label(t!("ui.replay.sections.modules"));
-                                        self.render_modernization_slots(
-                                            ui,
-                                            &build_info.modernization_slots,
-                                        );
+                                        self.render_modernization_slots(ui, &build_info.modernization_slots);
                                     }
 
                                     if !build_info.signals.is_empty() {

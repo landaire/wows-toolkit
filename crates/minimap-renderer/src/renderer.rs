@@ -1193,11 +1193,13 @@ impl<'a> MinimapRenderer<'a> {
                 // owner or its ammo set cannot be resolved (unknown ship, or builds whose
                 // data predates secondary_battery_ammo) this stays false and the salvo
                 // renders as main battery, matching pre-classification behavior.
-                let is_secondary = controller
-                    .vehicle_props(owner)
-                    .map(|v| v.ship_config().ship_params_id())
-                    .is_some_and(|ship_id| {
-                        wowsunpack::game_params::types::is_secondary_ammo(self.game_params, ship_id, shot.salvo.params_id)
+                let is_secondary =
+                    controller.vehicle_props(owner).map(|v| v.ship_config().ship_params_id()).is_some_and(|ship_id| {
+                        wowsunpack::game_params::types::is_secondary_ammo(
+                            self.game_params,
+                            ship_id,
+                            shot.salvo.params_id,
+                        )
                     });
                 for shot_data in &shot.salvo.shots {
                     let origin = shot_data.origin;
@@ -2182,10 +2184,7 @@ impl<'a> MinimapRenderer<'a> {
                     ribbons.iter().filter_map(|rc| rc.ribbon.translation_key().map(str::to_string)).collect();
                 order_ribbon_keys(&mut keys);
                 let rank = |rc: &RibbonCount| {
-                    rc.ribbon
-                        .translation_key()
-                        .and_then(|k| keys.iter().position(|kk| kk == k))
-                        .unwrap_or(usize::MAX)
+                    rc.ribbon.translation_key().and_then(|k| keys.iter().position(|kk| kk == k)).unwrap_or(usize::MAX)
                 };
                 ribbons.sort_by_key(|rc| rank(rc));
             }

@@ -1194,13 +1194,18 @@ pub(crate) fn upload_armor_to_viewport(
         let fov = pane.camera_fov;
         let height = pane.camera_height;
         if let Some((_, traj)) = armor.camera_trajectories.iter().find(|(name, _)| *name == mode) {
-            use crate::armor_viewer::camera_ellipse::{build_camera_ellipse_mesh, ring_label};
+            use crate::armor_viewer::camera_ellipse::build_camera_ellipse_mesh;
+            use crate::armor_viewer::camera_ellipse::ring_label;
             use crate::armor_viewer::state::CameraRingHover;
             let waterline_dy = armor.waterline_dy;
             let viewport = &mut pane.viewport;
             let mesh_ids = &mut pane.camera_ellipse_mesh_ids;
             let hovers = &mut pane.camera_ring_hovers;
-            let mut push_ring = |kind: &str, tag: &str, ring: wowsunpack::game_params::types::CameraRing, color: [f32; 4], markers: bool| {
+            let mut push_ring = |kind: &str,
+                                 tag: &str,
+                                 ring: wowsunpack::game_params::types::CameraRing,
+                                 color: [f32; 4],
+                                 markers: bool| {
                 let (verts, indices) = build_camera_ellipse_mesh(&ring, waterline_dy, color, markers);
                 if !indices.is_empty() {
                     mesh_ids.push(viewport.add_non_pickable_mesh(device, &verts, &indices, LAYER_OVERLAY));
@@ -1734,7 +1739,8 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                 // Clamp the gizmo box to the visible viewport so it tracks the pane and never overflows off-screen.
                 let gz_rect = pane.viewport.gizmo_rect(response.rect.intersect(vp_ui.clip_rect()));
                 let gizmo_consumed = pane.viewport.handle_gizmo(&response, gz_rect);
-                let camera_interacted = if gizmo_consumed { true } else { pane.viewport.handle_input(&response, bounds) };
+                let camera_interacted =
+                    if gizmo_consumed { true } else { pane.viewport.handle_input(&response, bounds) };
                 if camera_interacted {
                     vp_ui.ctx().request_repaint();
                     mirror_camera_signal.set(Some(pane_id));
@@ -2233,8 +2239,7 @@ fn load_ship_for_pane_with_lod(
     let hull_upgrade_names =
         vehicle.as_ref().map(crate::armor_viewer::common::build_hull_upgrade_names).unwrap_or_default();
 
-    let camera_trajectories =
-        vehicle.as_ref().map(|v| v.camera_trajectories().to_vec()).unwrap_or_default();
+    let camera_trajectories = vehicle.as_ref().map(|v| v.camera_trajectories().to_vec()).unwrap_or_default();
 
     // Extract module alternatives from the selected hull upgrade config.
     // Only includes component types with >1 option (e.g. artillery, torpedoes).
@@ -4698,7 +4703,10 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
             }
         });
         ui.horizontal(|ui| {
-            if ui.add(egui::Slider::new(&mut pane.camera_fov, 0.0..=1.0).text(t!("ui.armor.camera_fov").as_ref())).changed() {
+            if ui
+                .add(egui::Slider::new(&mut pane.camera_fov, 0.0..=1.0).text(t!("ui.armor.camera_fov").as_ref()))
+                .changed()
+            {
                 combo_changed = true;
             }
             if ui.small_button(icons::ARROW_COUNTER_CLOCKWISE).clicked() {
@@ -4707,7 +4715,10 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
             }
         });
         ui.horizontal(|ui| {
-            if ui.add(egui::Slider::new(&mut pane.camera_height, -1.0..=1.0).text(t!("ui.armor.camera_height").as_ref())).changed() {
+            if ui
+                .add(egui::Slider::new(&mut pane.camera_height, -1.0..=1.0).text(t!("ui.armor.camera_height").as_ref()))
+                .changed()
+            {
                 combo_changed = true;
             }
             if ui.small_button(icons::ARROW_COUNTER_CLOCKWISE).clicked() {
@@ -4744,10 +4755,11 @@ fn nearest_camera_ring_label(pane: &ArmorPane, rect: egui::Rect, cursor: egui::P
     const THRESHOLD_PX: f32 = 8.0;
     let mut best: Option<(f32, &str)> = None;
     for hover in &pane.camera_ring_hovers {
-        let pts: Vec<Option<egui::Pos2>> = crate::armor_viewer::camera_ellipse::sample_ring_points(&hover.ring, hover.waterline_dy, 96)
-            .into_iter()
-            .map(|p| pane.viewport.camera.project_to_screen(pane.viewport.pos_to_world_space(p), rect))
-            .collect();
+        let pts: Vec<Option<egui::Pos2>> =
+            crate::armor_viewer::camera_ellipse::sample_ring_points(&hover.ring, hover.waterline_dy, 96)
+                .into_iter()
+                .map(|p| pane.viewport.camera.project_to_screen(pane.viewport.pos_to_world_space(p), rect))
+                .collect();
         let mut min_d = f32::MAX;
         for i in 0..pts.len() {
             if let (Some(a), Some(b)) = (pts[i], pts[(i + 1) % pts.len()]) {

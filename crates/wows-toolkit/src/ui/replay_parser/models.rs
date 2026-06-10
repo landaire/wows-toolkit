@@ -122,10 +122,8 @@ impl TranslatedBuild {
                         continue;
                     };
                     let game_params_name = param.name().to_string();
-                    let (name, description) = wowsunpack::game_params::translations::translate_module(
-                        &game_params_name,
-                        metadata_provider,
-                    );
+                    let (name, description) =
+                        wowsunpack::game_params::translations::translate_module(&game_params_name, metadata_provider);
                     let description = description.or_else(|| {
                         wowsunpack::game_params::translations::generated_param_description(
                             &param,
@@ -145,9 +143,7 @@ impl TranslatedBuild {
             signals: config
                 .exteriors()
                 .iter()
-                .filter_map(|id| {
-                    <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)
-                })
+                .filter_map(|id| <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id))
                 .filter(|param| {
                     matches!(
                         param.species().and_then(|r| r.known()),
@@ -156,10 +152,8 @@ impl TranslatedBuild {
                 })
                 .map(|param| {
                     let game_params_name = param.name().to_string();
-                    let (name, description) = wowsunpack::game_params::translations::translate_exterior(
-                        &param,
-                        metadata_provider,
-                    );
+                    let (name, description) =
+                        wowsunpack::game_params::translations::translate_exterior(&param, metadata_provider);
                     let description = description.or_else(|| {
                         wowsunpack::game_params::translations::generated_param_description(
                             &param,

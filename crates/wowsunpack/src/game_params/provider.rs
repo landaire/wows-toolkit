@@ -352,7 +352,9 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> 
                 Some(tier_data) => {
                     let tier_data = tier_data.inner();
                     CrewSkillTiers::builder()
-                        .aircraft_carrier(SkillPointCost::new(game_param_to_type!(tier_data, "AirCarrier", usize) as u8))
+                        .aircraft_carrier(
+                            SkillPointCost::new(game_param_to_type!(tier_data, "AirCarrier", usize) as u8),
+                        )
                         .auxiliary(SkillPointCost::new(game_param_to_type!(tier_data, "Auxiliary", usize) as u8))
                         .battleship(SkillPointCost::new(game_param_to_type!(tier_data, "Battleship", usize) as u8))
                         .cruiser(SkillPointCost::new(game_param_to_type!(tier_data, "Cruiser", usize) as u8))
@@ -579,11 +581,15 @@ fn read_vec3_at(v: &Value, idx: usize) -> Option<[f32; 3]> {
     fn triple(elem: &Value) -> Option<[f32; 3]> {
         if let Some(l) = elem.list_ref() {
             let g = l.inner();
-            if g.len() != 3 { return None; }
+            if g.len() != 3 {
+                return None;
+            }
             Some([value_f32(&g[0])?, value_f32(&g[1])?, value_f32(&g[2])?])
         } else if let Some(t) = elem.tuple_ref() {
             let s = t.inner();
-            if s.len() != 3 { return None; }
+            if s.len() != 3 {
+                return None;
+            }
             Some([value_f32(&s[0])?, value_f32(&s[1])?, value_f32(&s[2])?])
         } else {
             None
@@ -599,14 +605,8 @@ fn read_vec3_at(v: &Value, idx: usize) -> Option<[f32; 3]> {
 }
 
 fn read_ignore_height(v: Option<&Value>) -> bool {
-    v.map(|v| {
-        if let Some(b) = v.bool_ref() {
-            *b
-        } else {
-            v.i64_ref().map(|i| *i != 0).unwrap_or(false)
-        }
-    })
-    .unwrap_or(false)
+    v.map(|v| if let Some(b) = v.bool_ref() { *b } else { v.i64_ref().map(|i| *i != 0).unwrap_or(false) })
+        .unwrap_or(false)
 }
 
 /// Parse one trajectory dict's orbit geometry: both posCenter FOV endpoints,
@@ -638,25 +638,29 @@ pub fn read_camera_trajectories(ship_data: &BTreeMap<HashableValue, Value>) -> V
     let mut out: Vec<(String, CameraTrajectory)> = Vec::new();
     let cameras_guard = cameras.inner();
     for (key, val) in cameras_guard.iter() {
-        let Some(name) = key.string_ref().map(|s| s.inner().to_string()) else { continue; };
-        let Some(mode) = val.dict_or_object_dict() else { continue; };
+        let Some(name) = key.string_ref().map(|s| s.inner().to_string()) else {
+            continue;
+        };
+        let Some(mode) = val.dict_or_object_dict() else {
+            continue;
+        };
         let mode_guard = mode.inner();
         let Some(inner) = mode_guard.get(&pk("InnerTrajectory")).and_then(read_trajectory_geometry) else {
             continue;
         };
-        let tags = mode_guard
-            .get(&pk("tags"))
-            .and_then(|v| v.string_ref())
-            .map(|s| s.inner().to_string())
-            .unwrap_or_default();
+        let tags =
+            mode_guard.get(&pk("tags")).and_then(|v| v.string_ref()).map(|s| s.inner().to_string()).unwrap_or_default();
         let outer = mode_guard.get(&pk("OuterTrajectory")).and_then(read_trajectory_geometry);
-        out.push((name, CameraTrajectory {
-            pos_center: inner.pos_center,
-            semi_axes: inner.semi_axes,
-            tags,
-            ignore_height_multiplier: inner.ignore_height_multiplier,
-            outer,
-        }));
+        out.push((
+            name,
+            CameraTrajectory {
+                pos_center: inner.pos_center,
+                semi_axes: inner.semi_axes,
+                tags,
+                ignore_height_multiplier: inner.ignore_height_multiplier,
+                outer,
+            },
+        ));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
@@ -999,16 +1003,11 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
                 }
                 if capture_per_gun {
                     let first_ammo = match ammo_val {
-                        Value::Tuple(t) => {
-                            t.inner().iter().find_map(|i| i.string_ref().map(|s| s.inner().clone()))
-                        }
-                        Value::List(l) => {
-                            l.inner().iter().find_map(|i| i.string_ref().map(|s| s.inner().clone()))
-                        }
+                        Value::Tuple(t) => t.inner().iter().find_map(|i| i.string_ref().map(|s| s.inner().clone())),
+                        Value::List(l) => l.inner().iter().find_map(|i| i.string_ref().map(|s| s.inner().clone())),
                         _ => None,
                     };
-                    if let (Some(name), Some(key_str)) =
-                        (first_ammo, mount_key.string_ref().map(|s| s.inner().clone()))
+                    if let (Some(name), Some(key_str)) = (first_ammo, mount_key.string_ref().map(|s| s.inner().clone()))
                     {
                         secondary_guns_raw.push((key_str, name));
                     }
@@ -1339,7 +1338,14 @@ impl GameMetadataProvider {
                 let ships = string_list_field(&param_data, "ships");
                 let excludes = string_list_field(&param_data, "excludes");
                 Some(ParamData::Modernization(super::types::Modernization::new(
-                    modifiers, slot, ship_levels, ship_types, nations, groups, ships, excludes,
+                    modifiers,
+                    slot,
+                    ship_levels,
+                    ship_types,
+                    nations,
+                    groups,
+                    ships,
+                    excludes,
                 )))
             }
             ParamType::Unit => Some(ParamData::Unit),
@@ -1645,10 +1651,7 @@ mod camera_tests {
     }
 
     fn build_inner_traj(extra: Vec<(HashableValue, Value)>) -> Value {
-        let pos_center = list(vec![
-            list(vec![fv(0.0), fv(1.958), fv(0.0)]),
-            list(vec![fv(0.0), fv(2.008), fv(0.0)]),
-        ]);
+        let pos_center = list(vec![list(vec![fv(0.0), fv(1.958), fv(0.0)]), list(vec![fv(0.0), fv(2.008), fv(0.0)])]);
         let mut entries = vec![
             (pk("posCenter"), pos_center),
             (pk("semiAxisH"), list(vec![fv(6.552), fv(5.981)])),
@@ -1663,8 +1666,7 @@ mod camera_tests {
         let inner_traj = build_inner_traj(vec![]);
         let mode = dict(vec![(pk("InnerTrajectory"), inner_traj)]);
         let cameras = dict(vec![(pk("TestMode"), mode)]);
-        let ship_data: BTreeMap<HashableValue, Value> =
-            [(pk("Cameras"), cameras)].into_iter().collect();
+        let ship_data: BTreeMap<HashableValue, Value> = [(pk("Cameras"), cameras)].into_iter().collect();
         let result = read_camera_trajectories(&ship_data);
         assert_eq!(result.len(), 1);
         let (name, traj) = &result[0];
@@ -1682,16 +1684,10 @@ mod camera_tests {
 
     #[test]
     fn read_camera_trajectories_parses_tags_and_ignore_height_bool() {
-        let inner_traj = build_inner_traj(vec![
-            (pk("ignoreHeightMultiplier"), Value::Bool(true)),
-        ]);
-        let mode = dict(vec![
-            (pk("InnerTrajectory"), inner_traj),
-            (pk("tags"), sv("AT")),
-        ]);
+        let inner_traj = build_inner_traj(vec![(pk("ignoreHeightMultiplier"), Value::Bool(true))]);
+        let mode = dict(vec![(pk("InnerTrajectory"), inner_traj), (pk("tags"), sv("AT"))]);
         let cameras = dict(vec![(pk("TagMode"), mode)]);
-        let ship_data: BTreeMap<HashableValue, Value> =
-            [(pk("Cameras"), cameras)].into_iter().collect();
+        let ship_data: BTreeMap<HashableValue, Value> = [(pk("Cameras"), cameras)].into_iter().collect();
         let result = read_camera_trajectories(&ship_data);
         assert_eq!(result.len(), 1);
         let (name, traj) = &result[0];
@@ -1702,23 +1698,17 @@ mod camera_tests {
 
     #[test]
     fn read_camera_trajectories_parses_ignore_height_as_int() {
-        let inner_traj = build_inner_traj(vec![
-            (pk("ignoreHeightMultiplier"), Value::I64(1)),
-        ]);
+        let inner_traj = build_inner_traj(vec![(pk("ignoreHeightMultiplier"), Value::I64(1))]);
         let mode = dict(vec![(pk("InnerTrajectory"), inner_traj)]);
         let cameras = dict(vec![(pk("IntMode"), mode)]);
-        let ship_data: BTreeMap<HashableValue, Value> =
-            [(pk("Cameras"), cameras)].into_iter().collect();
+        let ship_data: BTreeMap<HashableValue, Value> = [(pk("Cameras"), cameras)].into_iter().collect();
         let result = read_camera_trajectories(&ship_data);
         assert_eq!(result.len(), 1);
         assert!(result[0].1.ignore_height_multiplier);
     }
 
     fn build_outer_traj() -> Value {
-        let pos_center = list(vec![
-            list(vec![fv(0.0), fv(4.199), fv(0.0)]),
-            list(vec![fv(0.0), fv(6.023), fv(0.0)]),
-        ]);
+        let pos_center = list(vec![list(vec![fv(0.0), fv(4.199), fv(0.0)]), list(vec![fv(0.0), fv(6.023), fv(0.0)])]);
         dict(vec![
             (pk("posCenter"), pos_center),
             (pk("semiAxisH"), list(vec![fv(18.785), fv(17.315)])),
@@ -1728,13 +1718,10 @@ mod camera_tests {
 
     #[test]
     fn read_camera_trajectories_parses_outer_trajectory() {
-        let mode = dict(vec![
-            (pk("InnerTrajectory"), build_inner_traj(vec![])),
-            (pk("OuterTrajectory"), build_outer_traj()),
-        ]);
+        let mode =
+            dict(vec![(pk("InnerTrajectory"), build_inner_traj(vec![])), (pk("OuterTrajectory"), build_outer_traj())]);
         let cameras = dict(vec![(pk("PairMode"), mode)]);
-        let ship_data: BTreeMap<HashableValue, Value> =
-            [(pk("Cameras"), cameras)].into_iter().collect();
+        let ship_data: BTreeMap<HashableValue, Value> = [(pk("Cameras"), cameras)].into_iter().collect();
         let result = read_camera_trajectories(&ship_data);
         assert_eq!(result.len(), 1);
         let outer = result[0].1.outer.as_ref().expect("outer parsed");
@@ -1749,30 +1736,22 @@ mod camera_tests {
     fn read_camera_trajectories_outer_absent_is_none() {
         let mode = dict(vec![(pk("InnerTrajectory"), build_inner_traj(vec![]))]);
         let cameras = dict(vec![(pk("NoOuter"), mode)]);
-        let ship_data: BTreeMap<HashableValue, Value> =
-            [(pk("Cameras"), cameras)].into_iter().collect();
+        let ship_data: BTreeMap<HashableValue, Value> = [(pk("Cameras"), cameras)].into_iter().collect();
         let result = read_camera_trajectories(&ship_data);
         assert!(result[0].1.outer.is_none());
     }
 
     #[test]
     fn read_camera_trajectories_skips_scalar_sibling_keys() {
-        let pos_center = list(vec![
-            list(vec![fv(0.0), fv(1.0), fv(0.0)]),
-            list(vec![fv(0.0), fv(1.0), fv(0.0)]),
-        ]);
+        let pos_center = list(vec![list(vec![fv(0.0), fv(1.0), fv(0.0)]), list(vec![fv(0.0), fv(1.0), fv(0.0)])]);
         let inner_traj = dict(vec![
             (pk("posCenter"), pos_center),
             (pk("semiAxisH"), list(vec![fv(1.0), fv(1.0)])),
             (pk("semiAxisV"), list(vec![fv(1.0), fv(1.0)])),
         ]);
         let mode = dict(vec![(pk("InnerTrajectory"), inner_traj)]);
-        let cameras = dict(vec![
-            (pk("RealMode"), mode),
-            (pk("inertialRollCoef"), Value::F64(0.5)),
-        ]);
-        let ship_data: BTreeMap<HashableValue, Value> =
-            [(pk("Cameras"), cameras)].into_iter().collect();
+        let cameras = dict(vec![(pk("RealMode"), mode), (pk("inertialRollCoef"), Value::F64(0.5))]);
+        let ship_data: BTreeMap<HashableValue, Value> = [(pk("Cameras"), cameras)].into_iter().collect();
         let result = read_camera_trajectories(&ship_data);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, "RealMode");

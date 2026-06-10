@@ -324,11 +324,7 @@ pub fn load_consumable_icons(vfs: &VfsPath, version: Option<&Version>) -> HashMa
 /// Load ribbon icons from `gui/ribbons` (or `gui/ribbons/subribbons` when
 /// `dir` is `SubRibbons`), keyed by file stem to match `translate_ribbon`'s
 /// lowercased icon key. Absent in Flash-era builds; returns an empty map then.
-pub fn load_ribbon_icons(
-    vfs: &VfsPath,
-    dir: GuiAssetDir,
-    version: Option<&Version>,
-) -> HashMap<String, RgbaImage> {
+pub fn load_ribbon_icons(vfs: &VfsPath, dir: GuiAssetDir, version: Option<&Version>) -> HashMap<String, RgbaImage> {
     let mut icons = HashMap::new();
 
     if let Some(dir) = dir.resolve(vfs, version)
@@ -344,11 +340,8 @@ pub fn load_ribbon_icons(
                 // height with proportional width to avoid squishing them.
                 let target_h = 32u32;
                 let (w, h) = (img.width(), img.height());
-                let target_w = if h > 0 {
-                    (((w as f32 / h as f32) * target_h as f32).round() as u32).max(1)
-                } else {
-                    target_h
-                };
+                let target_w =
+                    if h > 0 { (((w as f32 / h as f32) * target_h as f32).round() as u32).max(1) } else { target_h };
                 let resized = image::imageops::resize(&img, target_w, target_h, image::imageops::FilterType::Lanczos3);
                 icons.insert(stem.to_string(), resized);
             }

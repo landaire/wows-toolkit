@@ -1115,25 +1115,31 @@ fn build_display_from_resolved(
     let learned: std::collections::HashSet<wowsunpack::game_params::types::CrewSkillType> =
         build.skills.iter().map(|s| wowsunpack::game_params::types::CrewSkillType::from(*s)).collect();
 
-    let skill_rows: Vec<super::SkillRow> =
-        wowsunpack::game_params::skill_grid_data::build_skill_grid(crew, &learned, build.species, version.build, metadata, version)
+    let skill_rows: Vec<super::SkillRow> = wowsunpack::game_params::skill_grid_data::build_skill_grid(
+        crew,
+        &learned,
+        build.species,
+        version.build,
+        metadata,
+        version,
+    )
+    .into_iter()
+    .map(|row| super::SkillRow {
+        tier: row.point_cost.map(|c| c.get()),
+        skills: row
+            .skills
             .into_iter()
-            .map(|row| super::SkillRow {
-                tier: row.point_cost.map(|c| c.get()),
-                skills: row
-                    .skills
-                    .into_iter()
-                    .map(|s| super::SkillDisplay {
-                        icon_key: wowsunpack::game_assets::crew_skill_icon_slug(&s.internal_name),
-                        // Fall back to the internal name when a translation is absent.
-                        name: s.name.unwrap_or_else(|| s.internal_name.to_string()),
-                        description: s.description.unwrap_or_default(),
-                        tier: s.point_cost.map(|c| c.get()),
-                        learned: s.learned,
-                    })
-                    .collect(),
+            .map(|s| super::SkillDisplay {
+                icon_key: wowsunpack::game_assets::crew_skill_icon_slug(&s.internal_name),
+                // Fall back to the internal name when a translation is absent.
+                name: s.name.unwrap_or_else(|| s.internal_name.to_string()),
+                description: s.description.unwrap_or_default(),
+                tier: s.point_cost.map(|c| c.get()),
+                learned: s.learned,
             })
-            .collect();
+            .collect(),
+    })
+    .collect();
 
     let upgrades =
         build.upgrades.iter().map(|p| equipment_display_for_param(p, metadata, build.species, version.build)).collect();

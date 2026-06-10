@@ -14,7 +14,8 @@ pub enum Axis {
 /// Target (azimuth, elevation) for the orthographic view looking along a signed axis.
 /// Top/bottom keep the current azimuth so the spin is purely vertical.
 pub fn ortho_view(axis: Axis, positive: bool, current_azimuth: f32) -> (f32, f32) {
-    use std::f32::consts::{FRAC_PI_2, PI};
+    use std::f32::consts::FRAC_PI_2;
+    use std::f32::consts::PI;
     let lim = FRAC_PI_2 - 0.01;
     match axis {
         Axis::Z => (if positive { 0.0 } else { PI }, 0.0),
@@ -421,7 +422,8 @@ pub(crate) fn mat4_mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
 #[cfg(test)]
 mod gizmo_anim_tests {
     use super::*;
-    use std::f32::consts::{PI, FRAC_PI_2};
+    use std::f32::consts::FRAC_PI_2;
+    use std::f32::consts::PI;
 
     fn cam() -> ArcballCamera {
         ArcballCamera::from_bounds(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0))
@@ -441,7 +443,8 @@ mod gizmo_anim_tests {
     #[test]
     fn animate_midpoint_is_between() {
         let mut c = cam();
-        c.azimuth = 0.0; c.elevation = 0.0;
+        c.azimuth = 0.0;
+        c.elevation = 0.0;
         c.animate_to(FRAC_PI_2, 0.0, 0.4);
         let still = c.update_animation(0.2);
         assert!(still);

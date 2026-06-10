@@ -45,11 +45,7 @@ pub fn team_hp_fraction(rows: impl IntoIterator<Item = (f32, f32)>) -> Option<f3
 /// Scale an RGB color toward black by `factor` in `[0, 1]` (1.0 = unchanged).
 pub fn darken(color: [u8; 3], factor: f32) -> [u8; 3] {
     let f = factor.clamp(0.0, 1.0);
-    [
-        (color[0] as f32 * f) as u8,
-        (color[1] as f32 * f) as u8,
-        (color[2] as f32 * f) as u8,
-    ]
+    [(color[0] as f32 * f) as u8, (color[1] as f32 * f) as u8, (color[2] as f32 * f) as u8]
 }
 
 #[cfg(test)]

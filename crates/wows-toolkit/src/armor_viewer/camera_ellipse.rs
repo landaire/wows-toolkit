@@ -2,8 +2,8 @@ extern crate nalgebra as na;
 
 use na::Vector3;
 
-use wowsunpack::game_params::types::CameraRing;
 use crate::viewport_3d::types::Vertex;
+use wowsunpack::game_params::types::CameraRing;
 
 type Vec3 = Vector3<f32>;
 
@@ -109,7 +109,8 @@ mod tests {
     use super::*;
 
     fn ring() -> CameraRing {
-        use wowsunpack::game_types::{Vec2 as CoreVec2, Vec3 as CoreVec3};
+        use wowsunpack::game_types::Vec2 as CoreVec2;
+        use wowsunpack::game_types::Vec3 as CoreVec3;
         CameraRing { pos_center: CoreVec3::new(0.0, 1.958, 0.0), semi_axes: CoreVec2::new(6.552, 9.6) }
     }
 
@@ -119,7 +120,9 @@ mod tests {
         assert!(!verts.is_empty());
         assert!(!indices.is_empty());
         assert_eq!(indices.len() % 3, 0);
-        for &i in &indices { assert!((i as usize) < verts.len()); }
+        for &i in &indices {
+            assert!((i as usize) < verts.len());
+        }
     }
 
     #[test]

@@ -26,7 +26,7 @@ pub enum ConnectionEvent {
     /// Successfully connected and received SessionInfo.
     Connected { my_user_id: u64, my_name: String, my_color: [u8; 3], host_user_id: u64, frame_source_id: u64 },
     /// Received a PeerMessage from the host.
-    Message(PeerMessage),
+    Message(Box<PeerMessage>),
     /// Connection was rejected by the host.
     Rejected(String),
     /// Connection error (terminal — will not auto-reconnect).
@@ -262,11 +262,11 @@ async fn try_connect_and_handshake(
 
             // Add host and peers as connected users.
             for peer in &peers {
-                events.borrow_mut().push_back(ConnectionEvent::Message(PeerMessage::UserJoined {
+                events.borrow_mut().push_back(ConnectionEvent::Message(Box::new(PeerMessage::UserJoined {
                     user_id: peer.user_id,
                     name: peer.name.clone(),
                     color: peer.color,
-                }));
+                })));
             }
 
             ctx.request_repaint();
@@ -307,7 +307,7 @@ async fn run_message_loop(
                 match read_peer_message(&mut recv, MAX_MESSAGE_SIZE).await {
                     Ok(Some(msg)) => {
                         last_received.set(web_time::Instant::now());
-                        events.borrow_mut().push_back(ConnectionEvent::Message(msg));
+                        events.borrow_mut().push_back(ConnectionEvent::Message(Box::new(msg)));
                         ctx.request_repaint();
                     }
                     Ok(None) => {

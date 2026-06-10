@@ -1133,10 +1133,7 @@ impl CameraTrajectory {
 
     fn blend_ring(pos_center: &[Vec3; 2], semi_axes: &[Vec2; 2], fov: f32) -> CameraRing {
         let f = fov.clamp(0.0, 1.0);
-        CameraRing {
-            pos_center: pos_center[0].lerp(pos_center[1], f),
-            semi_axes: semi_axes[0].lerp(semi_axes[1], f),
-        }
+        CameraRing { pos_center: pos_center[0].lerp(pos_center[1], f), semi_axes: semi_axes[0].lerp(semi_axes[1], f) }
     }
 
     /// FOV blend only (height = 0).
@@ -1882,9 +1879,8 @@ impl CrewSkill {
         version: &Version,
     ) -> Option<String> {
         let (primary, fallback) = self.skill_translation_keys("IDS_SKILL_DESC", version);
-        let description = metadata
-            .localized_name_from_id(&primary)
-            .or_else(|| metadata.localized_name_from_id(&fallback));
+        let description =
+            metadata.localized_name_from_id(&primary).or_else(|| metadata.localized_name_from_id(&fallback));
 
         description.and_then(|desc| if desc.is_empty() || desc == " " { None } else { Some(desc) })
     }
@@ -1892,12 +1888,7 @@ impl CrewSkill {
     /// Static localized description when present, else a description generated
     /// from this skill's modifiers (and its logic-trigger modifiers, labeled as
     /// triggered effects). Returns `None` when neither source yields any text.
-    pub fn description(
-        &self,
-        species: Species,
-        metadata: &GameMetadataProvider,
-        version: &Version,
-    ) -> Option<String> {
+    pub fn description(&self, species: Species, metadata: &GameMetadataProvider, version: &Version) -> Option<String> {
         self.description_with(species, metadata, version)
     }
 
@@ -2635,10 +2626,7 @@ where
 /// so the dot color is correct; only the muzzle-speed pacing is approximate for
 /// mixed-caliber ships. Returns None for ships without secondaries or on builds
 /// predating the data.
-pub fn secondary_ammo_param<P: GameParamProvider + ?Sized>(
-    provider: &P,
-    ship: GameParamId,
-) -> Option<GameParamId> {
+pub fn secondary_ammo_param<P: GameParamProvider + ?Sized>(provider: &P, ship: GameParamId) -> Option<GameParamId> {
     let ship_param = provider.game_param_by_id(ship)?;
     let ammo_name = ship_param.vehicle()?.config_data()?.secondary_battery_ammo.iter().min()?;
     Some(provider.game_param_by_name(ammo_name)?.id())
@@ -2739,8 +2727,7 @@ mod tests {
             data: ParamData::Vehicle(vehicle),
         };
 
-        let params =
-            GameParams::from(vec![ship, shell_param(200, "SECONDARY_SHELL"), shell_param(300, "MAIN_SHELL")]);
+        let params = GameParams::from(vec![ship, shell_param(200, "SECONDARY_SHELL"), shell_param(300, "MAIN_SHELL")]);
 
         assert!(is_secondary_ammo(&params, ship_id, secondary_id), "ATBA shell must classify as secondary");
         assert!(!is_secondary_ammo(&params, ship_id, main_id), "main battery shell must not classify as secondary");
@@ -2799,10 +2786,7 @@ mod crew_skill_description_tests {
         fn localized_name_from_id(&self, id: &str) -> Option<String> {
             Some(id.to_string())
         }
-        fn game_param_by_id(
-            &self,
-            _id: crate::game_types::GameParamId,
-        ) -> Option<crate::Rc<Param>> {
+        fn game_param_by_id(&self, _id: crate::game_types::GameParamId) -> Option<crate::Rc<Param>> {
             None
         }
         fn entity_specs(&self) -> &[crate::rpc::entitydefs::EntitySpec] {
@@ -2825,10 +2809,7 @@ mod crew_skill_description_tests {
                 Some(id.to_string())
             }
         }
-        fn game_param_by_id(
-            &self,
-            _id: crate::game_types::GameParamId,
-        ) -> Option<crate::Rc<Param>> {
+        fn game_param_by_id(&self, _id: crate::game_types::GameParamId) -> Option<crate::Rc<Param>> {
             None
         }
         fn entity_specs(&self) -> &[crate::rpc::entitydefs::EntitySpec] {
@@ -2844,16 +2825,9 @@ mod crew_skill_description_tests {
             None
         }
         fn localized_name_from_id(&self, id: &str) -> Option<String> {
-            if id.starts_with("IDS_SKILL_DESC") {
-                None
-            } else {
-                Some(id.to_string())
-            }
+            if id.starts_with("IDS_SKILL_DESC") { None } else { Some(id.to_string()) }
         }
-        fn game_param_by_id(
-            &self,
-            _id: crate::game_types::GameParamId,
-        ) -> Option<crate::Rc<Param>> {
+        fn game_param_by_id(&self, _id: crate::game_types::GameParamId) -> Option<crate::Rc<Param>> {
             None
         }
         fn entity_specs(&self) -> &[crate::rpc::entitydefs::EntitySpec] {
@@ -2908,9 +2882,8 @@ mod crew_skill_description_tests {
         // With a loader that resolves the skill desc id, description returns that
         // static text and never falls through to modifier generation.
         let skill = skill_with_modifiers(vec![uniform_modifier("GMRotationSpeed", 0.9)]);
-        let out = skill
-            .description_with(Species::Battleship, &EchoLoader, &version())
-            .expect("static description present");
+        let out =
+            skill.description_with(Species::Battleship, &EchoLoader, &version()).expect("static description present");
         assert!(out.contains("IDS_SKILL_DESC"), "expected static desc id, got {out}");
         assert!(!out.contains("IDS_PARAMS_MODIFIER"), "should not generate, got {out}");
     }
@@ -2974,11 +2947,7 @@ mod crew_skill_description_tests {
             .description_with(Species::Battleship, &TriggerSentenceLoader, &version())
             .expect("trigger-generated description");
         let mut iter = out.lines();
-        assert_eq!(
-            iter.next(),
-            Some("IDS_SKILL_TRIGGER_ACTIVATIONONDETECTTRIGGER"),
-            "sentence should lead, got {out}"
-        );
+        assert_eq!(iter.next(), Some("IDS_SKILL_TRIGGER_ACTIVATIONONDETECTTRIGGER"), "sentence should lead, got {out}");
         assert!(out.contains("IDS_PARAMS_MODIFIER_GMROTATIONSPEED"), "got {out}");
         assert!(!out.contains("(when triggered)"), "suffix should be dropped, got {out}");
     }
@@ -2993,7 +2962,9 @@ mod crew_skill_description_tests {
 
 #[cfg(test)]
 mod known_skill_tests {
-    use super::{CrewSkillName, CrewSkillType, KnownCrewSkill};
+    use super::CrewSkillName;
+    use super::CrewSkillType;
+    use super::KnownCrewSkill;
     use crate::recognized::Recognized;
 
     #[test]
@@ -3004,10 +2975,12 @@ mod known_skill_tests {
         let ifhe = KnownCrewSkill::recognize(&CrewSkillName::from("HePenetration"), CrewSkillType::new(33));
         assert_eq!(ifhe, Recognized::Known(KnownCrewSkill::InertiaFuse));
 
-        let concealment = KnownCrewSkill::recognize(&CrewSkillName::from("DetectionVisibilityRange"), CrewSkillType::new(14));
+        let concealment =
+            KnownCrewSkill::recognize(&CrewSkillName::from("DetectionVisibilityRange"), CrewSkillType::new(14));
         assert_eq!(concealment, Recognized::Known(KnownCrewSkill::ConcealmentExpert));
 
-        let sub_adrenaline = KnownCrewSkill::recognize(&CrewSkillName::from("ArmamentReloadSubmarine"), CrewSkillType::new(82));
+        let sub_adrenaline =
+            KnownCrewSkill::recognize(&CrewSkillName::from("ArmamentReloadSubmarine"), CrewSkillType::new(82));
         assert_eq!(sub_adrenaline, Recognized::Known(KnownCrewSkill::SubmarineAdrenalineRush));
     }
 

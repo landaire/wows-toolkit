@@ -5,10 +5,16 @@
 //! instead and are not covered here. Regenerate after adding game versions.
 #![allow(dead_code)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 
 use super::provider::GameMetadataProvider;
-use super::types::{Crew, CrewSkill, CrewSkillName, CrewSkillType, SkillPointCost, Species};
+use super::types::Crew;
+use super::types::CrewSkill;
+use super::types::CrewSkillName;
+use super::types::CrewSkillType;
+use super::types::SkillPointCost;
+use super::types::Species;
 use crate::data::Version;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1151,7 +1157,8 @@ static OLD_LAYOUTS: &[(u32, &[GridSlot])] = &[
 #[cfg(test)]
 mod build_skill_grid_tests {
     use super::*;
-    use crate::game_params::types::{CrewSkillType, SkillPointCost};
+    use crate::game_params::types::CrewSkillType;
+    use crate::game_params::types::SkillPointCost;
 
     #[test]
     fn rows_are_grouped_by_point_cost() {
@@ -1175,7 +1182,8 @@ mod build_skill_grid_tests {
 
     #[test]
     fn point_cost_is_none_for_ungridded_species() {
-        use crate::game_params::types::{CrewSkill, CrewSkillTiers};
+        use crate::game_params::types::CrewSkill;
+        use crate::game_params::types::CrewSkillTiers;
         let tiers = CrewSkillTiers::builder()
             .aircraft_carrier(SkillPointCost::new(1))
             .auxiliary(SkillPointCost::new(1))

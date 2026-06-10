@@ -1,4 +1,5 @@
-use crate::viewport_3d::camera::{ArcballCamera, Axis};
+use crate::viewport_3d::camera::ArcballCamera;
+use crate::viewport_3d::camera::Axis;
 
 pub(crate) const BOX_SIZE: f32 = 64.0;
 pub(crate) const ARM_LEN: f32 = 22.0;
@@ -157,7 +158,8 @@ pub(crate) fn interact(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::viewport_3d::camera::{ArcballCamera, Axis};
+    use crate::viewport_3d::camera::ArcballCamera;
+    use crate::viewport_3d::camera::Axis;
     use crate::viewport_3d::types::Vec3;
 
     fn cam_facing_neg_z() -> ArcballCamera {
@@ -188,11 +190,12 @@ mod tests {
 
     #[test]
     fn toward_camera_axis_has_larger_depth() {
-        let mut c = ArcballCamera::from_bounds(Vec3::new(-1.0,-1.0,-1.0), Vec3::new(1.0,1.0,1.0));
-        c.azimuth = 0.0; c.elevation = 0.0;
+        let mut c = ArcballCamera::from_bounds(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+        c.azimuth = 0.0;
+        c.elevation = 0.0;
         let view = c.view_matrix();
-        let (_d_pos, depth_toward) = axis_screen_dir(&view, Axis::Z, true);   // +Z toward camera (eye on +Z)
-        let (_d_neg, depth_away) = axis_screen_dir(&view, Axis::Z, false);    // -Z away
+        let (_d_pos, depth_toward) = axis_screen_dir(&view, Axis::Z, true); // +Z toward camera (eye on +Z)
+        let (_d_neg, depth_away) = axis_screen_dir(&view, Axis::Z, false); // -Z away
         assert!(depth_toward != depth_away);
         // Toward-camera axis maps to larger view-space z; ascending sort places it last (on top).
         assert!(depth_toward > depth_away, "toward={depth_toward} away={depth_away}");
@@ -200,8 +203,9 @@ mod tests {
 
     #[test]
     fn nearest_ball_draws_last() {
-        let mut c = ArcballCamera::from_bounds(Vec3::new(-1.0,-1.0,-1.0), Vec3::new(1.0,1.0,1.0));
-        c.azimuth = 0.0; c.elevation = 0.0; // eye on +Z, so +Z axis points toward camera
+        let mut c = ArcballCamera::from_bounds(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+        c.azimuth = 0.0;
+        c.elevation = 0.0; // eye on +Z, so +Z axis points toward camera
         let order = ball_draw_order(&c.view_matrix());
         let last = order.last().unwrap();
         assert_eq!((last.0, last.1), (Axis::Z, true), "nearest (+Z toward camera) must draw last");
@@ -211,11 +215,12 @@ mod tests {
 
     #[test]
     fn axis_pointing_at_camera_foreshortens() {
-        let mut c = ArcballCamera::from_bounds(Vec3::new(-1.0,-1.0,-1.0), Vec3::new(1.0,1.0,1.0));
-        c.azimuth = 0.0; c.elevation = 0.0;
+        let mut c = ArcballCamera::from_bounds(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+        c.azimuth = 0.0;
+        c.elevation = 0.0;
         let view = c.view_matrix();
-        let (toward, _) = axis_screen_dir(&view, Axis::Z, true);   // +Z points at camera
-        let (in_plane, _) = axis_screen_dir(&view, Axis::X, true);  // +X in screen plane
+        let (toward, _) = axis_screen_dir(&view, Axis::Z, true); // +Z points at camera
+        let (in_plane, _) = axis_screen_dir(&view, Axis::X, true); // +X in screen plane
         assert!(toward.length() < 0.1, "toward len={}", toward.length());
         assert!(in_plane.length() > 0.9, "in_plane len={}", in_plane.length());
     }

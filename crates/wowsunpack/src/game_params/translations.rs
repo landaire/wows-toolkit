@@ -118,8 +118,7 @@ pub fn generated_param_description(
     resource_loader: &dyn ResourceLoader,
     build: u32,
 ) -> Option<String> {
-    let mods =
-        param.modernization().map(|m| m.modifiers()).or_else(|| param.exterior().map(|e| e.modifiers()))?;
+    let mods = param.modernization().map(|m| m.modifiers()).or_else(|| param.exterior().map(|e| e.modifiers()))?;
     let lines = crate::game_params::modifier_settings_data::describe_modifiers(
         build,
         mods.iter().map(|m| (m.name(), m.get_for_species(&species))),

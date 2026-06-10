@@ -1530,8 +1530,7 @@ pub fn draw_command_to_shapes(
                 );
                 shapes.push(Shape::Mesh(gray_mesh.into()));
 
-                let regions =
-                    wows_minimap_renderer::panel_math::silhouette_regions(*hp_current, *hp_healable, *hp_max);
+                let regions = wows_minimap_renderer::panel_math::silhouette_regions(*hp_current, *hp_healable, *hp_max);
 
                 // Colored region: current HP, clipped from the left by regions.colored
                 let hp_color = hp_bar_color_egui(*hp_fraction);
@@ -1556,10 +1555,7 @@ pub fn draw_command_to_shapes(
                     let mut white_mesh = egui::Mesh::with_texture(sil_tex.id());
                     white_mesh.add_rect_with_uv(
                         clip_rect,
-                        Rect::from_min_max(
-                            egui::pos2(white_start, 0.0),
-                            egui::pos2(white_start + regions.white, 1.0),
-                        ),
+                        Rect::from_min_max(egui::pos2(white_start, 0.0), egui::pos2(white_start + regions.white, 1.0)),
                         Color32::WHITE,
                     );
                     shapes.push(Shape::Mesh(white_mesh.into()));
@@ -1691,7 +1687,9 @@ pub fn draw_command_to_shapes(
         }
 
         DrawCommand::StatsRibbons { x, y, width, ribbons } => {
-            use wows_minimap_renderer::draw_command::{STATS_RIBBON_CELL_W, STATS_RIBBON_ICON, STATS_RIBBON_ROW_H};
+            use wows_minimap_renderer::draw_command::STATS_RIBBON_CELL_W;
+            use wows_minimap_renderer::draw_command::STATS_RIBBON_ICON;
+            use wows_minimap_renderer::draw_command::STATS_RIBBON_ROW_H;
             let padding = 8.0 * ws;
             let origin = transform.hud_pos(*x as f32, *y as f32);
             let inner_x = origin.x + padding;
@@ -1729,7 +1727,11 @@ pub fn draw_command_to_shapes(
                     let w = icon_h * aspect;
                     let rect = Rect::from_min_size(Pos2::new(cur_x, cur_y), Vec2::new(w, icon_h));
                     let mut mesh = egui::Mesh::with_texture(tex.id());
-                    mesh.add_rect_with_uv(rect, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+                    mesh.add_rect_with_uv(
+                        rect,
+                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
                     shapes.push(Shape::Mesh(mesh.into()));
                     w
                 } else {
@@ -1977,7 +1979,8 @@ pub fn draw_command_to_shapes(
         DrawCommand::TeamRoster { side, x, y, width, height, rows } => {
             use wows_minimap_renderer::draw_command::ChargeCount as RosterCharge;
             use wows_minimap_renderer::draw_command::RosterSide;
-            use wows_minimap_renderer::panel_math::{darken, team_hp_fraction};
+            use wows_minimap_renderer::panel_math::darken;
+            use wows_minimap_renderer::panel_math::team_hp_fraction;
 
             let origin = transform.hud_pos(*x as f32, *y as f32);
             let panel_size = Vec2::new(*width as f32 * ws, *height as f32 * ws);
@@ -2012,8 +2015,7 @@ pub fn draw_command_to_shapes(
             let hp_bar_text =
                 format!("{} / {}", format_number_egui(total_cur as i64), format_number_egui(total_max as i64));
             let bar_font = game_font(10.0 * ws);
-            let bar_galley =
-                ctx.fonts_mut(|f| f.layout_no_wrap(hp_bar_text, bar_font.clone(), Color32::WHITE));
+            let bar_galley = ctx.fonts_mut(|f| f.layout_no_wrap(hp_bar_text, bar_font.clone(), Color32::WHITE));
             let bar_galley_size = bar_galley.size();
             let bt_margin = 4.0 * ws;
             let bt_x = origin.x + panel_size.x - bar_galley_size.x - bt_margin;

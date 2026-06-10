@@ -1433,7 +1433,8 @@ fn draw_team_roster(
     let panel_w = width as f32;
     let panel_h = height as f32;
 
-    use crate::panel_math::{darken, team_hp_fraction};
+    use crate::panel_math::darken;
+    use crate::panel_math::team_hp_fraction;
 
     // Panel background.
     draw_filled_rect(pm, panel_x, panel_y, panel_w, panel_h, [20, 24, 32], 0.78);
@@ -2513,8 +2514,7 @@ impl RenderTarget for ImageTarget {
                     let sil_cy = sil_y + (sil_h - draw_h as i32) / 2;
                     draw_icon_at(&mut self.canvas, &resized_gray, sil_x, sil_cy);
 
-                    let regions =
-                        crate::panel_math::silhouette_regions(*hp_current, *hp_healable, *hp_max);
+                    let regions = crate::panel_math::silhouette_regions(*hp_current, *hp_healable, *hp_max);
 
                     // Colored region: current HP portion
                     let hp_color = hp_bar_color_lerp(*hp_fraction);
@@ -2534,8 +2534,7 @@ impl RenderTarget for ImageTarget {
                         let white_sil = tint_silhouette(sil_img, [255, 255, 255]);
                         let resized_white =
                             image::imageops::resize(&white_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
-                        let cropped =
-                            image::imageops::crop_imm(&resized_white, white_x, 0, white_w, draw_h).to_image();
+                        let cropped = image::imageops::crop_imm(&resized_white, white_x, 0, white_w, draw_h).to_image();
                         draw_icon_at(&mut self.canvas, &cropped, sil_x + white_x as i32, sil_cy);
                     }
                 }
@@ -2683,7 +2682,9 @@ impl RenderTarget for ImageTarget {
                 }
             }
             DrawCommand::StatsRibbons { x, y, width, ribbons } => {
-                use crate::draw_command::{STATS_RIBBON_CELL_W, STATS_RIBBON_ICON, STATS_RIBBON_ROW_H};
+                use crate::draw_command::STATS_RIBBON_CELL_W;
+                use crate::draw_command::STATS_RIBBON_ICON;
+                use crate::draw_command::STATS_RIBBON_ROW_H;
                 let padding = 8;
                 let inner_x = *x + padding;
                 let inner_w = *width - padding * 2;
@@ -2719,14 +2720,26 @@ impl RenderTarget for ImageTarget {
                         } else {
                             icon_h
                         };
-                        let resized =
-                            image::imageops::resize(img, w as u32, icon_h as u32, image::imageops::FilterType::Lanczos3);
+                        let resized = image::imageops::resize(
+                            img,
+                            w as u32,
+                            icon_h as u32,
+                            image::imageops::FilterType::Lanczos3,
+                        );
                         draw_icon_at(&mut self.canvas, &resized, cur_x, cur_y);
                         w
                     } else {
                         let label: String = rc.display_name.chars().take(8).collect();
                         let (lw, _) = text_size(scale, &self.fonts.primary, &label);
-                        draw_text_shadow(&mut self.canvas, [180, 180, 180], cur_x, cur_y, scale, &self.fonts.primary, &label);
+                        draw_text_shadow(
+                            &mut self.canvas,
+                            [180, 180, 180],
+                            cur_x,
+                            cur_y,
+                            scale,
+                            &self.fonts.primary,
+                            &label,
+                        );
                         lw as i32
                     };
                     let count_y = cur_y + (icon_h - th as i32) / 2;

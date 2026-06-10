@@ -242,7 +242,7 @@ impl WebApp {
                     });
                 }
                 ConnectionEvent::Message(msg) => {
-                    self.handle_message(msg, ctx);
+                    self.handle_message(*msg, ctx);
                 }
                 ConnectionEvent::Rejected(reason) => {
                     self.connection_status = ConnectionStatus::Error(format!("Rejected: {reason}"));

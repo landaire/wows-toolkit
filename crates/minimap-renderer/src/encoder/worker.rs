@@ -11,9 +11,9 @@ use rootcause::prelude::*;
 
 use crate::codec::EncoderKind;
 use crate::codec::VideoCodec;
+use crate::encoder::EncodedFrame;
 use crate::encoder::EncoderBackend;
 use crate::encoder::EncoderConfig;
-use crate::encoder::EncodedFrame;
 use crate::encoder::Mode;
 use crate::error::VideoError;
 use crate::video::FPS;

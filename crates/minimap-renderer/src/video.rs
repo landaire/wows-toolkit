@@ -475,4 +475,3 @@ fn map_codec(c: VideoCodec) -> MuxideCodec {
         VideoCodec::Av1 => MuxideCodec::Av1,
     }
 }
-

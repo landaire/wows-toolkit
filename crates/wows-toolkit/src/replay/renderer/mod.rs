@@ -3586,7 +3586,8 @@ fn clock_tick_x(clock_secs: f32, game_dur: f32, rect: egui::Rect, handle_radius:
 #[cfg(test)]
 mod tick_tests {
     use super::clock_tick_x;
-    use egui::{Pos2, Rect};
+    use egui::Pos2;
+    use egui::Rect;
 
     fn rect() -> Rect {
         Rect::from_min_max(Pos2::new(100.0, 0.0), Pos2::new(300.0, 10.0))
