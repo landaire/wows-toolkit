@@ -746,6 +746,7 @@ impl ToolkitTabViewer<'_> {
             d.hull_all_visible = hull_all_on;
             d.armor_all_visible = armor_all_on;
             d.show_splash_boxes = active_pane.show_splash_boxes;
+            d.lighting = active_pane.lighting.clone();
         }
 
         // Handle export signal from toolbar button
@@ -1582,6 +1583,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                     hull_all_visible: hull_all_on,
                                     armor_all_visible: armor_all_on,
                                     show_splash_boxes: pane.show_splash_boxes,
+                                    lighting: pane.lighting.clone(),
                                     // Preserve legend state -- it's updated separately by the window itself
                                     ..Default::default()
                                 }));
