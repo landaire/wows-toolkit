@@ -592,6 +592,9 @@ pub enum DrawCommand {
         hp_current: f32,
         hp_max: f32,
         hp_healable: f32,
+        /// HP the active/next heal charge will restore (the brighter part of
+        /// the healable region). The remainder of `hp_healable` is drawn dimmer.
+        hp_healable_per_charge: f32,
         /// Repair Party (heal) availability for this ship (drives healable region).
         heal_availability: ConsumableAvailability,
         /// Player name to display above the silhouette.
@@ -710,6 +713,9 @@ pub struct RosterRow {
     /// (regen-crew limit minus already-regenerated). Drawn as a darker segment
     /// in the HP bar between current HP and permanent damage.
     pub hp_healable: f32,
+    /// HP the active/next heal charge will restore (the brighter part of
+    /// the healable region). The remainder of `hp_healable` is drawn dimmer.
+    pub hp_healable_per_charge: f32,
     /// Repair Party (heal) availability for this ship (drives healable HP-bar segment).
     pub heal_availability: ConsumableAvailability,
     pub is_dead: bool,

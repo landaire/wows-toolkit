@@ -175,6 +175,24 @@ fn is_heal_consumable(c: &Recognized<Consumable>) -> bool {
     matches!(c.known(), Some(Consumable::RepairParty) | Some(Consumable::RegenerateHealth))
 }
 
+/// HP the active/next Repair Party charge will restore for an entity:
+/// `work_time * (units + speed * max_health)` from the heal slot. `None` when
+/// the ship has no heal slot or the rate params are absent.
+fn heal_per_charge_capacity(
+    inventories: &HashMap<EntityId, Vec<ConsumableInventory>>,
+    entity_id: EntityId,
+    max_health: f32,
+) -> Option<f32> {
+    let slot = inventories
+        .get(&entity_id)
+        .into_iter()
+        .flatten()
+        .find(|s| is_heal_consumable(&s.consumable))?;
+    let speed = slot.regen_hp_speed?;
+    let units = slot.regen_hp_speed_units.unwrap_or(0.0);
+    Some((slot.work_time * (units + speed * max_health)).max(0.0))
+}
+
 /// Availability of the consumable(s) matched by `matches` for an entity,
 /// estimating reload cooldown locally from the latest activation:
 /// Active during work, Unavailable during the following reload_time window,
@@ -2131,30 +2149,42 @@ impl<'a> MinimapRenderer<'a> {
             commands.push(DrawCommand::StatsPanel { x: panel_x, width: panel_w });
 
             // Ship silhouette + HP
-            let (hp_fraction, hp_current, hp_max, hp_healable, ship_param_id, self_heal_availability) = self
-                .self_entity_id
-                .and_then(|eid| {
-                    let props = controller.vehicle_props(eid)?;
-                    let max = props.max_health();
-                    let cur = props.health();
-                    let healable = props.regeneration_health().max(0.0).min((max - cur).max(0.0));
-                    let param_id = self.ship_param_ids.get(&eid).copied();
-                    let is_dead = max > 0.0 && cur <= 0.0;
-                    let heal_availability = consumable_availability(
-                        &controller.active_consumables(),
-                        &controller.consumable_inventories(),
-                        eid,
-                        controller.clock(),
-                        is_dead,
-                        is_heal_consumable,
-                    );
-                    if max > 0.0 {
-                        Some(((cur / max).clamp(0.0, 1.0), cur, max, healable, param_id, heal_availability))
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or((1.0, 0.0, 0.0, 0.0, None, ConsumableAvailability::Unavailable));
+            let (hp_fraction, hp_current, hp_max, hp_healable, hp_healable_per_charge, ship_param_id, self_heal_availability) =
+                self.self_entity_id
+                    .and_then(|eid| {
+                        let props = controller.vehicle_props(eid)?;
+                        let max = props.max_health();
+                        let cur = props.health();
+                        let healable = props.regeneration_health().max(0.0).min((max - cur).max(0.0));
+                        let inventories = controller.consumable_inventories();
+                        let healable_per_charge = heal_per_charge_capacity(&inventories, eid, max)
+                            .map(|pc| healable.min(pc))
+                            .unwrap_or(healable);
+                        let param_id = self.ship_param_ids.get(&eid).copied();
+                        let is_dead = max > 0.0 && cur <= 0.0;
+                        let heal_availability = consumable_availability(
+                            &controller.active_consumables(),
+                            &inventories,
+                            eid,
+                            controller.clock(),
+                            is_dead,
+                            is_heal_consumable,
+                        );
+                        if max > 0.0 {
+                            Some((
+                                (cur / max).clamp(0.0, 1.0),
+                                cur,
+                                max,
+                                healable,
+                                healable_per_charge,
+                                param_id,
+                                heal_availability,
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or((1.0, 0.0, 0.0, 0.0, 0.0, None, ConsumableAvailability::Unavailable));
 
             let (self_player_name, self_ship_name, self_clan_tag, self_clan_color) = self
                 .self_entity_id
@@ -2178,6 +2208,7 @@ impl<'a> MinimapRenderer<'a> {
                 hp_current,
                 hp_max,
                 hp_healable,
+                hp_healable_per_charge,
                 heal_availability: self_heal_availability,
                 player_name: self_player_name,
                 clan_tag: self_clan_tag,
@@ -2433,6 +2464,9 @@ impl<'a> MinimapRenderer<'a> {
             };
             let is_dead = dead.contains_key(&entity_id) || (hp_max > 0.0 && hp_current <= 0.0);
             let heal_availability = consumable_availability(&active, &inventories, entity_id, clock, is_dead, is_heal_consumable);
+            let hp_healable_per_charge = heal_per_charge_capacity(&inventories, entity_id, hp_max)
+                .map(|pc| hp_healable.min(pc))
+                .unwrap_or(hp_healable);
             // Same source as the yellow ship-icon outline: visibilityFlags on
             // the live VehicleEntity. Non-zero means the game has confirmed
             // the ship is detected (radar, hydro, direct vision, etc.).
@@ -2553,6 +2587,7 @@ impl<'a> MinimapRenderer<'a> {
                 hp_current,
                 hp_max,
                 hp_healable,
+                hp_healable_per_charge,
                 heal_availability,
                 is_dead,
                 is_self,

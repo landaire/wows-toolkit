@@ -4,24 +4,28 @@
 
 /// Fractions of a horizontal meter for the silhouette HP overlay.
 ///
-/// `colored` is the current-HP portion (drawn in the HP color). `white` is
-/// the healable pool drawn immediately after it. The remainder (unhealable
-/// lost HP) is left transparent. All values are clamped to `[0, 1]` and the
-/// two returned fractions never sum past 1.0.
+/// `colored` is the current-HP portion (drawn in the HP color). `healable_bright`
+/// is the HP the active/next heal charge will restore, drawn immediately after
+/// it; `healable_dim` is the remaining regenerable pool beyond that charge,
+/// drawn darker. The remainder (unhealable lost HP) is left transparent. All
+/// values are clamped to `[0, 1]` and the returned fractions never sum past 1.0.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SilhouetteRegions {
     pub colored: f32,
-    pub white: f32,
+    pub healable_bright: f32,
+    pub healable_dim: f32,
 }
 
-pub fn silhouette_regions(hp_current: f32, hp_healable: f32, hp_max: f32) -> SilhouetteRegions {
+pub fn silhouette_regions(hp_current: f32, hp_healable: f32, hp_healable_per_charge: f32, hp_max: f32) -> SilhouetteRegions {
     if hp_max <= 0.0 {
-        return SilhouetteRegions { colored: 0.0, white: 0.0 };
+        return SilhouetteRegions { colored: 0.0, healable_bright: 0.0, healable_dim: 0.0 };
     }
     let colored = (hp_current / hp_max).clamp(0.0, 1.0);
     let lost = (1.0 - colored).max(0.0);
-    let white = (hp_healable / hp_max).clamp(0.0, lost);
-    SilhouetteRegions { colored, white }
+    let total = (hp_healable / hp_max).clamp(0.0, lost);
+    let bright = (hp_healable_per_charge / hp_max).clamp(0.0, total);
+    let dim = (total - bright).max(0.0);
+    SilhouetteRegions { colored, healable_bright: bright, healable_dim: dim }
 }
 
 /// Total current HP over total possible HP for one roster side.
@@ -54,28 +58,38 @@ mod tests {
 
     #[test]
     fn silhouette_full_hp_is_all_colored() {
-        let r = silhouette_regions(100.0, 0.0, 100.0);
-        assert_eq!(r, SilhouetteRegions { colored: 1.0, white: 0.0 });
+        let r = silhouette_regions(100.0, 0.0, 0.0, 100.0);
+        assert_eq!(r, SilhouetteRegions { colored: 1.0, healable_bright: 0.0, healable_dim: 0.0 });
     }
 
     #[test]
     fn silhouette_healable_clamped_to_lost_portion() {
-        let r = silhouette_regions(40.0, 80.0, 100.0);
+        let r = silhouette_regions(40.0, 80.0, 30.0, 100.0);
         assert_eq!(r.colored, 0.4);
-        assert_eq!(r.white, 0.6);
+        assert!((r.healable_bright - 0.3).abs() < 1e-6);
+        assert!((r.healable_dim - 0.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn silhouette_bright_capped_at_total() {
+        let r = silhouette_regions(50.0, 20.0, 50.0, 100.0);
+        assert_eq!(r.colored, 0.5);
+        assert_eq!(r.healable_bright, 0.2);
+        assert_eq!(r.healable_dim, 0.0);
     }
 
     #[test]
     fn silhouette_partial_healable() {
-        let r = silhouette_regions(50.0, 20.0, 100.0);
+        let r = silhouette_regions(50.0, 20.0, 8.0, 100.0);
         assert_eq!(r.colored, 0.5);
-        assert_eq!(r.white, 0.2);
+        assert!((r.healable_bright - 0.08).abs() < 1e-6);
+        assert!((r.healable_dim - 0.12).abs() < 1e-6);
     }
 
     #[test]
     fn silhouette_zero_max_is_empty() {
-        let r = silhouette_regions(0.0, 0.0, 0.0);
-        assert_eq!(r, SilhouetteRegions { colored: 0.0, white: 0.0 });
+        let r = silhouette_regions(0.0, 0.0, 0.0, 0.0);
+        assert_eq!(r, SilhouetteRegions { colored: 0.0, healable_bright: 0.0, healable_dim: 0.0 });
     }
 
     #[test]

@@ -1612,10 +1612,17 @@ fn draw_team_roster(
             if let Some(color) = row.heal_availability.healable_rgb()
                 && row.hp_healable > 0.0
             {
-                let heal_ratio = (row.hp_healable / row.hp_max).clamp(0.0, 1.0);
-                let heal_w = (hp_bar_w * heal_ratio).min(hp_bar_w - fill_w);
-                if heal_w > 0.0 {
-                    draw_filled_rect(pm, inner_x + fill_w, hp_bar_y, heal_w, hp_bar_h, color, 0.85);
+                // Bright = HP the next heal charge restores; dim = the regenerable
+                // pool beyond that charge.
+                let bright_w =
+                    (hp_bar_w * (row.hp_healable_per_charge.min(row.hp_healable) / row.hp_max)).clamp(0.0, hp_bar_w - fill_w);
+                if bright_w > 0.0 {
+                    draw_filled_rect(pm, inner_x + fill_w, hp_bar_y, bright_w, hp_bar_h, color, 0.85);
+                }
+                let dim_total = (hp_bar_w * (row.hp_healable / row.hp_max)).min(hp_bar_w - fill_w);
+                let dim_w = (dim_total - bright_w).max(0.0);
+                if dim_w > 0.0 {
+                    draw_filled_rect(pm, inner_x + fill_w + bright_w, hp_bar_y, dim_w, hp_bar_h, darken(color, 0.5), 0.85);
                 }
             }
         }
@@ -2430,6 +2437,7 @@ impl RenderTarget for ImageTarget {
                 hp_current,
                 hp_max,
                 hp_healable,
+                hp_healable_per_charge,
                 heal_availability,
                 player_name,
                 clan_tag,
@@ -2510,7 +2518,8 @@ impl RenderTarget for ImageTarget {
                     let sil_cy = sil_y + (sil_h - draw_h as i32) / 2;
                     draw_icon_at(&mut self.canvas, &resized_base, sil_x, sil_cy);
 
-                    let regions = crate::panel_math::silhouette_regions(*hp_current, *hp_healable, *hp_max);
+                    let regions =
+                        crate::panel_math::silhouette_regions(*hp_current, *hp_healable, *hp_healable_per_charge, *hp_max);
 
                     // Colored region: current HP portion
                     let hp_color = hp_bar_color_lerp(*hp_fraction);
@@ -2523,19 +2532,32 @@ impl RenderTarget for ImageTarget {
                         draw_icon_at(&mut self.canvas, &cropped, sil_x, sil_cy);
                     }
 
-                    // Healable region: gray when a heal is ready, white while healing,
-                    // hidden when no heal is available.
+                    // Healable region: bright = HP the next heal charge restores,
+                    // dim = the regenerable pool beyond that charge. Gray when a
+                    // heal is ready, white while healing, hidden when unavailable.
                     if let Some(color) = heal_availability.healable_rgb() {
-                        let region_x = (draw_w as f32 * regions.colored) as u32;
-                        let region_w = (draw_w as f32 * regions.white) as u32;
-                        if region_w > 0 {
-                            let region_sil = tint_silhouette(sil_img, color);
-                            let resized_region =
-                                image::imageops::resize(&region_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
-                            let cropped =
-                                image::imageops::crop_imm(&resized_region, region_x, 0, region_w, draw_h).to_image();
-                            draw_icon_at(&mut self.canvas, &cropped, sil_x + region_x as i32, sil_cy);
-                        }
+                        let mut draw_region = |fraction_start: f32, fraction_w: f32, tint: [u8; 3]| {
+                            let region_x = (draw_w as f32 * fraction_start) as u32;
+                            let region_w = (draw_w as f32 * fraction_w) as u32;
+                            if region_w > 0 {
+                                let region_sil = tint_silhouette(sil_img, tint);
+                                let resized_region = image::imageops::resize(
+                                    &region_sil,
+                                    draw_w,
+                                    draw_h,
+                                    image::imageops::FilterType::Triangle,
+                                );
+                                let cropped =
+                                    image::imageops::crop_imm(&resized_region, region_x, 0, region_w, draw_h).to_image();
+                                draw_icon_at(&mut self.canvas, &cropped, sil_x + region_x as i32, sil_cy);
+                            }
+                        };
+                        draw_region(regions.colored, regions.healable_bright, color);
+                        draw_region(
+                            regions.colored + regions.healable_bright,
+                            regions.healable_dim,
+                            crate::panel_math::darken(color, 0.5),
+                        );
                     }
                 }
 
