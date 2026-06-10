@@ -8,6 +8,7 @@ use wowsunpack::game_params::types::Km;
 
 use crate::viewport_3d::ArcballCamera;
 use crate::viewport_3d::GpuPipeline;
+use crate::viewport_3d::LightingSettings;
 use crate::viewport_3d::MeshId;
 use crate::viewport_3d::Vec3;
 use crate::viewport_3d::Viewport3D;
@@ -86,6 +87,7 @@ pub struct ArmorViewerDefaults {
     pub show_legend: bool,
     pub legend_collapsed: bool,
     pub legend_pos: Option<[f32; 2]>,
+    pub lighting: LightingSettings,
 }
 
 impl Default for ArmorViewerDefaults {
@@ -103,6 +105,7 @@ impl Default for ArmorViewerDefaults {
             show_legend: true,
             legend_collapsed: false,
             legend_pos: None,
+            lighting: LightingSettings::default(),
         }
     }
 }
@@ -262,6 +265,7 @@ impl ArmorViewerState {
             pane.show_waterline = defaults.show_waterline;
             pane.show_zero_mm = defaults.show_zero_mm;
             pane.armor_opacity = defaults.armor_opacity;
+            pane.lighting = defaults.lighting.clone();
         }
     }
 }
@@ -530,6 +534,11 @@ pub struct ArmorPane {
     pub saved_camera: Option<crate::viewport_3d::camera::ArcballCamera>,
     /// Tracked world-space overlay meshes for the perspective aim-point marker.
     pub perspective_aim_mesh_ids: Vec<crate::viewport_3d::MeshId>,
+    /// Per-pane hull lighting parameters.
+    pub lighting: LightingSettings,
+    /// When true, the display settings render in a floating egui window instead of
+    /// the toolbar popover. Per-pane, ephemeral (not persisted).
+    pub display_window_open: bool,
 }
 
 /// Snapshot of the per-pane settings that "Sync options" broadcasts from the active
@@ -710,6 +719,8 @@ impl ArmorPane {
             perspective: crate::armor_viewer::camera_perspective::CameraPerspective::default(),
             saved_camera: None,
             perspective_aim_mesh_ids: Vec::new(),
+            lighting: defaults.lighting.clone(),
+            display_window_open: false,
         }
     }
 
