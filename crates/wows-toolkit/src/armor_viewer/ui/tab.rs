@@ -4788,6 +4788,50 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
                 });
             }
         }
+        if !armor.camera_trajectories.is_empty() {
+            let mut perspective_on = pane.perspective_enabled;
+            if ui.checkbox(&mut perspective_on, t!("ui.armor.camera_perspective").as_ref()).changed() {
+                pane.set_perspective_enabled(perspective_on);
+                combo_changed = true;
+            }
+            if pane.perspective_enabled {
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut pane.perspective.fov_deg, 30.0..=120.0)
+                                .text(t!("ui.armor.perspective_fov").as_ref()),
+                        )
+                        .changed()
+                    {
+                        combo_changed = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    use crate::armor_viewer::camera_perspective::LookTarget;
+                    ui.label(t!("ui.armor.perspective_look_at").as_ref());
+                    if ui
+                        .selectable_value(
+                            &mut pane.perspective.look_target,
+                            LookTarget::AimDirection,
+                            t!("ui.armor.perspective_look_aim").as_ref(),
+                        )
+                        .changed()
+                    {
+                        combo_changed = true;
+                    }
+                    if ui
+                        .selectable_value(
+                            &mut pane.perspective.look_target,
+                            LookTarget::ShipCenter,
+                            t!("ui.armor.perspective_look_center").as_ref(),
+                        )
+                        .changed()
+                    {
+                        combo_changed = true;
+                    }
+                });
+            }
+        }
     });
     if combo_changed {
         zone_changed = true;
