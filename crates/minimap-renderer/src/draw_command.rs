@@ -592,6 +592,8 @@ pub enum DrawCommand {
         hp_current: f32,
         hp_max: f32,
         hp_healable: f32,
+        /// Repair-party availability for this ship (drives healable region).
+        heal_state: HealState,
         /// Player name to display above the silhouette.
         player_name: Option<String>,
         /// Clan tag (e.g. "CLAN"), empty string or None if none.
@@ -635,6 +637,19 @@ pub enum RosterSide {
     Enemy,
 }
 
+/// Whether a ship's Repair Party heal is available, and whether it is
+/// currently running. Drives visibility and color of the healable-HP region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum HealState {
+    /// No heal ready (no charges remaining) and none running. Hide the region.
+    Unavailable,
+    /// At least one charge remains and no heal is running. Gray region.
+    Ready,
+    /// A heal is currently running. White region.
+    Active,
+}
+
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct RosterRow {
@@ -664,6 +679,8 @@ pub struct RosterRow {
     /// (regen-crew limit minus already-regenerated). Drawn as a darker segment
     /// in the HP bar between current HP and permanent damage.
     pub hp_healable: f32,
+    /// Repair-party availability for this ship (drives healable HP-bar segment).
+    pub heal_state: HealState,
     pub is_dead: bool,
     /// Highlight this row (player's own ship, or own division-mate).
     pub is_self: bool,

@@ -2435,6 +2435,7 @@ impl RenderTarget for ImageTarget {
                 hp_current,
                 hp_max,
                 hp_healable,
+                heal_state: _,
                 player_name,
                 clan_tag,
                 clan_color,

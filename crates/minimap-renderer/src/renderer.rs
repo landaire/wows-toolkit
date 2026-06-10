@@ -29,6 +29,8 @@ use wows_battle_world::view::BattleView;
 use wows_replay_insights::build::ResolvedBuild;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
+use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
+use wows_replays::analyzer::battle_controller::state::ConsumableInventory;
 use wows_replays::analyzer::battle_controller::state::ControlPointType;
 use wows_replays::analyzer::decoder::Consumable;
 use wows_replays::types::EntityId;
@@ -47,6 +49,7 @@ use crate::draw_command::ChatEntry;
 use crate::draw_command::DamageBreakdownEntry;
 use crate::draw_command::DrawCommand;
 use crate::draw_command::FontHint;
+use crate::draw_command::HealState;
 use crate::draw_command::KillFeedEntry;
 use crate::draw_command::RibbonCount;
 use crate::draw_command::STATS_RIBBON_CELL_W;
@@ -154,6 +157,47 @@ const HP_BAR_BG_ALPHA: f32 = 0.7;
 const UNDETECTED_OPACITY: f32 = 0.4;
 const TEAM0_COLOR: [u8; 3] = [76, 232, 170]; // Green
 const TEAM1_COLOR: [u8; 3] = [254, 77, 42]; // Red
+
+/// Pure heal-state decision from the observed facts. Separated so it is
+/// unit-testable without a BattleView.
+fn decide_heal_state(is_dead: bool, heal_active: bool, charge_remaining: bool) -> HealState {
+    if !is_dead && heal_active {
+        HealState::Active
+    } else if charge_remaining {
+        HealState::Ready
+    } else {
+        HealState::Unavailable
+    }
+}
+
+/// Repair-party availability for an entity. Active if a heal is currently
+/// running (dead ships never Active), else Ready if a charge remains, else
+/// Unavailable. Heal consumable is RepairParty/RegenerateHealth.
+fn heal_state_for(
+    active: &HashMap<EntityId, Vec<ActiveConsumable>>,
+    inventories: &HashMap<EntityId, Vec<ConsumableInventory>>,
+    entity_id: EntityId,
+    clock: GameClock,
+    is_dead: bool,
+) -> HealState {
+    let is_heal = |c: &Recognized<Consumable>| {
+        matches!(c.known(), Some(Consumable::RepairParty) | Some(Consumable::RegenerateHealth))
+    };
+    let heal_active = active.get(&entity_id).is_some_and(|list| {
+        list.iter()
+            .any(|a| is_heal(&a.consumable) && (a.activated_at.seconds() + a.duration - clock.seconds()) > 0.0)
+    });
+    let charge_remaining = inventories.get(&entity_id).is_some_and(|slots| {
+        slots.iter().any(|s| {
+            if !is_heal(&s.consumable) {
+                return false;
+            }
+            let remaining = s.charges_remaining();
+            remaining.is_unlimited() || remaining.finite().is_some_and(|n| n > 0)
+        })
+    });
+    decide_heal_state(is_dead, heal_active, charge_remaining)
+}
 
 /// Per-consumable radius circle color, with friendly/enemy variants.
 fn consumable_radius_color(consumable: &Recognized<Consumable>, is_friendly: bool) -> [u8; 3] {
@@ -2067,19 +2111,29 @@ impl<'a> MinimapRenderer<'a> {
             commands.push(DrawCommand::StatsPanel { x: panel_x, width: panel_w });
 
             // Ship silhouette + HP
-            let (hp_fraction, hp_current, hp_max, hp_healable, ship_param_id) = self
+            let (hp_fraction, hp_current, hp_max, hp_healable, ship_param_id, self_heal_state) = self
                 .self_entity_id
                 .and_then(|eid| {
                     let props = controller.vehicle_props(eid)?;
                     let max = props.max_health();
                     let cur = props.health();
-                    let regen_limit = props.regen_crew_hp_limit();
-                    let regenerated = props.regenerated_health();
-                    let healable = (regen_limit - regenerated).max(0.0).min((max - cur).max(0.0));
+                    let healable = props.regeneration_health().max(0.0).min((max - cur).max(0.0));
                     let param_id = self.ship_param_ids.get(&eid).copied();
-                    if max > 0.0 { Some(((cur / max).clamp(0.0, 1.0), cur, max, healable, param_id)) } else { None }
+                    let is_dead = max > 0.0 && cur <= 0.0;
+                    let heal_state = heal_state_for(
+                        &controller.active_consumables(),
+                        &controller.consumable_inventories(),
+                        eid,
+                        controller.clock(),
+                        is_dead,
+                    );
+                    if max > 0.0 {
+                        Some(((cur / max).clamp(0.0, 1.0), cur, max, healable, param_id, heal_state))
+                    } else {
+                        None
+                    }
                 })
-                .unwrap_or((1.0, 0.0, 0.0, 0.0, None));
+                .unwrap_or((1.0, 0.0, 0.0, 0.0, None, HealState::Unavailable));
 
             let (self_player_name, self_ship_name, self_clan_tag, self_clan_color) = self
                 .self_entity_id
@@ -2103,6 +2157,7 @@ impl<'a> MinimapRenderer<'a> {
                 hp_current,
                 hp_max,
                 hp_healable,
+                heal_state: self_heal_state,
                 player_name: self_player_name,
                 clan_tag: self_clan_tag,
                 clan_color: self_clan_color,
@@ -2342,9 +2397,7 @@ impl<'a> MinimapRenderer<'a> {
             let (hp_current, hp_max, hp_healable) = if let Some(props) = vehicle_props.as_ref() {
                 let live_max = props.max_health();
                 let live_cur = props.health();
-                let regen_limit = props.regen_crew_hp_limit();
-                let regenerated = props.regenerated_health();
-                let healable = (regen_limit - regenerated).max(0.0).min((live_max - live_cur).max(0.0));
+                let healable = props.regeneration_health().max(0.0).min((live_max - live_cur).max(0.0));
                 if live_max > 0.0 {
                     (live_cur, live_max, healable)
                 } else if let Some(f) = cached {
@@ -2358,6 +2411,7 @@ impl<'a> MinimapRenderer<'a> {
                 (0.0, 0.0, 0.0)
             };
             let is_dead = dead.contains_key(&entity_id) || (hp_max > 0.0 && hp_current <= 0.0);
+            let heal_state = heal_state_for(&active, &inventories, entity_id, clock, is_dead);
             // Same source as the yellow ship-icon outline: visibilityFlags on
             // the live VehicleEntity. Non-zero means the game has confirmed
             // the ship is detected (radar, hydro, direct vision, etc.).
@@ -2469,6 +2523,7 @@ impl<'a> MinimapRenderer<'a> {
                 hp_current,
                 hp_max,
                 hp_healable,
+                heal_state,
                 is_dead,
                 is_self,
                 is_spotted,
@@ -2953,5 +3008,32 @@ mod ammo_color_tests {
         assert_eq!(ammo_type_color(&AmmoType::HE), [255, 180, 80]);
         assert_eq!(ammo_type_color(&AmmoType::SAP), [255, 100, 100]);
         assert_eq!(ammo_type_color(&AmmoType::Unknown("x".into())), [140, 200, 255]);
+    }
+}
+
+#[cfg(test)]
+mod heal_state_tests {
+    use super::decide_heal_state;
+    use crate::draw_command::HealState;
+
+    #[test]
+    fn active_takes_precedence_over_ready() {
+        assert_eq!(decide_heal_state(false, true, true), HealState::Active);
+    }
+    #[test]
+    fn dead_ship_is_never_active() {
+        assert_eq!(decide_heal_state(true, true, true), HealState::Ready);
+    }
+    #[test]
+    fn ready_when_charge_remains_and_not_active() {
+        assert_eq!(decide_heal_state(false, false, true), HealState::Ready);
+    }
+    #[test]
+    fn unavailable_when_no_charge_and_not_active() {
+        assert_eq!(decide_heal_state(false, false, false), HealState::Unavailable);
+    }
+    #[test]
+    fn dead_with_no_charge_is_unavailable() {
+        assert_eq!(decide_heal_state(true, true, false), HealState::Unavailable);
     }
 }
