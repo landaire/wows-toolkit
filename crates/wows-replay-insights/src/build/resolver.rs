@@ -187,6 +187,10 @@ fn resolve_slots<P: GameParamProvider>(
         let work_time = Duration::from_secs_f32((category.work_time() * work_factor).max(0.0));
         let reload_time = Duration::from_secs_f32((category.reload_time() * reload_factor).max(0.0));
 
+        let regen_factor = modifiers.regeneration_hp_speed_factor();
+        let regen_hp_speed = category.regeneration_hp_speed().map(|s| s * regen_factor);
+        let regen_hp_speed_units = category.regeneration_hp_speed_units().map(|u| u * regen_factor);
+
         // Icon files are stored as `consumable_<full_name>.png` and the
         // minimap renderer keys its icon map by `<full_name>` (e.g.
         // `PCY009_CrashCrewPremium`). `Param::index()` is the short prefix
@@ -202,6 +206,8 @@ fn resolve_slots<P: GameParamProvider>(
             total_charges,
             work_time,
             reload_time,
+            regen_hp_speed,
+            regen_hp_speed_units,
             icon_key: ability_param.name().to_owned(),
         });
     }

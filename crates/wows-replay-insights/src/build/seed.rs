@@ -34,6 +34,8 @@ pub fn build_inventory_for_player<P: GameParamProvider>(
             charges_used: 0,
             work_time: slot.work_time.as_secs_f32(),
             reload_time: slot.reload_time.as_secs_f32(),
+            regen_hp_speed: slot.regen_hp_speed,
+            regen_hp_speed_units: slot.regen_hp_speed_units,
             active_until: None,
         })
         .collect()
@@ -137,6 +139,8 @@ pub fn build_inventory_from_facts<P: GameParamProvider>(
             charges_used: 0,
             work_time: slot.work_time.as_secs_f32(),
             reload_time: slot.reload_time.as_secs_f32(),
+            regen_hp_speed: slot.regen_hp_speed,
+            regen_hp_speed_units: slot.regen_hp_speed_units,
             active_until: None,
         })
         .collect()

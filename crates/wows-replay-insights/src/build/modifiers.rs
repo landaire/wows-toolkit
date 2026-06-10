@@ -119,6 +119,12 @@ impl ModifierSet {
         universal * per_type * scoped
     }
 
+    /// Multiplicative factor on the Repair Party heal rate (both the
+    /// fraction-of-maxHP and flat-HP-per-second terms) from build modifiers.
+    pub fn regeneration_hp_speed_factor(&self) -> f32 {
+        self.coefficient("regenerationHPSpeed")
+    }
+
     /// Effective work-time coefficient for a given consumable type.
     pub fn consumable_work_time_factor(&self, consumable_type: &str) -> f32 {
         let universal = self.coefficient("ConsumablesWorkTime");

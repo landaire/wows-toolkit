@@ -24,6 +24,12 @@ pub struct ConsumableSlot {
     pub total_charges: ChargeCount,
     pub work_time: Duration,
     pub reload_time: Duration,
+    /// Repair Party heal rate, fraction of max HP per second, with build
+    /// modifiers applied. `None` for non-heal consumables.
+    pub regen_hp_speed: Option<f32>,
+    /// Repair Party flat heal rate, HP per second, with build modifiers
+    /// applied. `None` for non-heal consumables.
+    pub regen_hp_speed_units: Option<f32>,
     /// Lookup key for the consumable icon map. Equals `ability.name()`.
     pub icon_key: String,
 }

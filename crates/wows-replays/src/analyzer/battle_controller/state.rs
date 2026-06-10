@@ -152,6 +152,13 @@ pub struct ConsumableInventory {
     pub work_time: f32,
     /// Cooldown between activations, in seconds.
     pub reload_time: f32,
+    /// Repair Party heal rate, fraction of max HP per second, build modifiers
+    /// applied. `None` for non-heal consumables. The renderer derives per-charge
+    /// heal capacity as `work_time * (regen_hp_speed_units + regen_hp_speed * maxHealth)`.
+    pub regen_hp_speed: Option<f32>,
+    /// Repair Party flat heal rate, HP per second, build modifiers applied.
+    /// `None` for non-heal consumables.
+    pub regen_hp_speed_units: Option<f32>,
     /// `Some(clock)` while a consumable is active. Cleared by renderers when
     /// the current clock passes the activation expiry.
     pub active_until: Option<GameClock>,
