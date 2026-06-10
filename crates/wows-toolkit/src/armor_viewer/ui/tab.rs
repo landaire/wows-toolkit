@@ -1760,11 +1760,16 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         .sense(egui::Sense::click_and_drag()),
                 );
 
-                // Clamp the gizmo box to the visible viewport so it tracks the pane and never overflows off-screen.
-                let gz_rect = pane.viewport.gizmo_rect(response.rect.intersect(vp_ui.clip_rect()));
-                let gizmo_consumed = pane.viewport.handle_gizmo(&response, gz_rect);
-                let camera_interacted =
-                    if gizmo_consumed { true } else { pane.viewport.handle_input(&response, bounds) };
+                let camera_interacted = if pane.perspective_enabled {
+                    let input_changed = handle_perspective_input(pane, &response, vp_ui);
+                    let applied = apply_perspective_to_viewport(pane);
+                    input_changed || applied
+                } else {
+                    // Clamp the gizmo box to the visible viewport so it tracks the pane and never overflows off-screen.
+                    let gz_rect = pane.viewport.gizmo_rect(response.rect.intersect(vp_ui.clip_rect()));
+                    let gizmo_consumed = pane.viewport.handle_gizmo(&response, gz_rect);
+                    if gizmo_consumed { true } else { pane.viewport.handle_input(&response, bounds) }
+                };
                 if camera_interacted {
                     vp_ui.ctx().request_repaint();
                     mirror_camera_signal.set(Some(pane_id));
@@ -2126,17 +2131,20 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                     }
                 }
 
-                // Hover tooltip, click-to-toggle, right-click context menu, hover highlight
-                if handle_plate_interaction(
-                    vp_ui,
-                    &response,
-                    pane,
-                    &render_state.device,
-                    translate_part,
-                    !pane.trajectory_mode && !pane.splash_mode,
-                    comparison_ships,
-                    ifhe_enabled,
-                ) {
+                // Hover tooltip, click-to-toggle, right-click context menu, hover highlight.
+                // Suppressed while perspective lock owns the camera.
+                if !pane.perspective_enabled
+                    && handle_plate_interaction(
+                        vp_ui,
+                        &response,
+                        pane,
+                        &render_state.device,
+                        translate_part,
+                        !pane.trajectory_mode && !pane.splash_mode,
+                        comparison_ships,
+                        ifhe_enabled,
+                    )
+                {
                     zone_changed = true;
                 }
 
@@ -2174,9 +2182,11 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                 // Draw disclaimer watermark
                 draw_viewport_watermark(vp_ui.painter(), response.rect);
 
-                // Clamp the gizmo box to the visible viewport so it tracks the pane and never overflows off-screen.
-                let gz_rect = pane.viewport.gizmo_rect(response.rect.intersect(vp_ui.clip_rect()));
-                pane.viewport.draw_gizmo(vp_ui.painter(), gz_rect);
+                if !pane.perspective_enabled {
+                    // Clamp the gizmo box to the visible viewport so it tracks the pane and never overflows off-screen.
+                    let gz_rect = pane.viewport.gizmo_rect(response.rect.intersect(vp_ui.clip_rect()));
+                    pane.viewport.draw_gizmo(vp_ui.painter(), gz_rect);
+                }
             }
         } else {
             vp_ui.vertical_centered(|ui| {
@@ -4795,6 +4805,74 @@ fn dist_point_segment(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
     }
     let t = (((p.x - a.x) * abx + (p.y - a.y) * aby) / len2).clamp(0.0, 1.0);
     p.distance(egui::pos2(a.x + abx * t, a.y + aby * t))
+}
+
+/// Drive the perspective state from viewport drag/scroll. Returns true if any
+/// of yaw/pitch/zoom changed.
+fn handle_perspective_input(pane: &mut ArmorPane, response: &egui::Response, ui: &egui::Ui) -> bool {
+    const YAW_SENS: f32 = 0.005;
+    const PITCH_SENS: f32 = 0.005;
+    const ZOOM_SENS: f32 = 0.001;
+    let mut changed = false;
+    if response.dragged() {
+        let d = response.drag_delta();
+        if d.x != 0.0 {
+            pane.perspective.yaw -= d.x * YAW_SENS;
+            changed = true;
+        }
+        if d.y != 0.0 {
+            pane.perspective.pitch -= d.y * PITCH_SENS;
+            changed = true;
+        }
+    }
+    if response.hovered() {
+        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+        if scroll != 0.0 {
+            pane.perspective.zoom += scroll * ZOOM_SENS;
+            changed = true;
+        }
+    }
+    if changed {
+        pane.perspective.clamp();
+    }
+    changed
+}
+
+/// Recompute and apply the locked camera from the pane's current perspective
+/// state. Returns true if the resulting camera changed. No-op when perspective
+/// mode is off or no trajectory matches the selected mode.
+fn apply_perspective_to_viewport(pane: &mut ArmorPane) -> bool {
+    if !pane.perspective_enabled {
+        return false;
+    }
+    let (traj, waterline_dy, min, max) = {
+        let Some(armor) = pane.loaded_armor.as_ref() else {
+            return false;
+        };
+        let mode = pane.camera_ellipse_mode.as_str();
+        let Some((_, traj)) = armor.camera_trajectories.iter().find(|(name, _)| name == mode) else {
+            return false;
+        };
+        (traj.clone(), armor.waterline_dy, armor.bounds.0, armor.bounds.1)
+    };
+    let (eye_m, target_m) = pane.perspective.eye_and_target(&traj, pane.camera_fov, pane.camera_height, waterline_dy);
+    let eye = pane.viewport.pos_to_world_space(eye_m);
+    let target = pane.viewport.pos_to_world_space(target_m);
+    let fov = pane.perspective.fov_deg.to_radians();
+    let far = ((max - min).norm() * 8.0).max(10.0);
+
+    let cam = &mut pane.viewport.camera;
+    let changed = (cam.eye_position() - eye).norm() > 1e-4
+        || (cam.target - target).norm() > 1e-4
+        || (cam.fov - fov).abs() > 1e-5;
+    cam.set_eye_and_target(eye, target);
+    cam.fov = fov;
+    cam.near = 0.05;
+    cam.far = far;
+    if changed {
+        pane.viewport.mark_dirty();
+    }
+    changed
 }
 
 /// Label of the camera ring whose projected curve is nearest the cursor, if one
