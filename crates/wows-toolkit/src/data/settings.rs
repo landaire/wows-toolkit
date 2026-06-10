@@ -37,14 +37,6 @@ pub struct ReplaySettings {
     #[serde(default)]
     pub show_raw_xp: bool,
     #[serde(default = "default_bool::<true>")]
-    pub show_fires: bool,
-    #[serde(default = "default_bool::<true>")]
-    pub show_floods: bool,
-    #[serde(default = "default_bool::<true>")]
-    pub show_citadels: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub show_crits: bool,
-    #[serde(default = "default_bool::<true>")]
     pub show_heals: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_received_damage: bool,
@@ -66,10 +58,6 @@ impl Default for ReplaySettings {
             show_entity_id: false,
             show_observed_damage: false,
             show_raw_xp: false,
-            show_fires: true,
-            show_floods: true,
-            show_citadels: true,
-            show_crits: false,
             show_heals: true,
             show_received_damage: true,
             show_distance_traveled: true,

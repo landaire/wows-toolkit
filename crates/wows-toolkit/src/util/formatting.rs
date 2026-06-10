@@ -164,3 +164,24 @@ pub fn open_file_explorer(path: &Path) {
         }
     }
 }
+
+/// Open a directory in the OS file manager, showing its contents.
+pub fn open_directory(path: &Path) {
+    #[allow(clippy::zombie_processes)]
+    {
+        #[cfg(target_os = "linux")]
+        {
+            let _ = Command::new("xdg-open").arg(path).spawn();
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let _ = Command::new("open").arg(path).spawn();
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let _ = Command::new("explorer.exe").arg(path).spawn();
+        }
+    }
+}

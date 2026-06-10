@@ -94,6 +94,15 @@ impl ToolkitTabViewer<'_> {
                         }
                     });
                 });
+                if ui
+                    .button(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.settings.app.open_data_dir")))
+                    .on_hover_text(t!("ui.settings.app.open_data_dir_tooltip"))
+                    .clicked()
+                    && let Some(dir) = crate::storage_dir()
+                {
+                    let _ = std::fs::create_dir_all(&dir);
+                    crate::util::open_directory(&dir);
+                }
             });
 
             ui.add_space(12.0);
@@ -194,18 +203,7 @@ impl ToolkitTabViewer<'_> {
                                 count = version_count,
                             ));
                             if ui.button(t!("ui.settings.wows.cache.open_folder")).clicked() {
-                                #[cfg(target_os = "windows")]
-                                {
-                                    let _ = std::process::Command::new("explorer.exe").arg(&dump_base).spawn();
-                                }
-                                #[cfg(target_os = "linux")]
-                                {
-                                    let _ = std::process::Command::new("xdg-open").arg(&dump_base).spawn();
-                                }
-                                #[cfg(target_os = "macos")]
-                                {
-                                    let _ = std::process::Command::new("open").arg(&dump_base).spawn();
-                                }
+                                crate::util::open_directory(&dump_base);
                             }
                             if version_count > 1 && ui.button(t!("ui.settings.wows.cache.delete_old")).clicked() {
                                 delete_old_dump_versions(&dump_base);
@@ -280,14 +278,6 @@ impl ToolkitTabViewer<'_> {
                     ui.end_row();
 
                     ui.checkbox(&mut rs.show_observed_damage, t!("ui.settings.replay.show_observed_damage"));
-                    ui.checkbox(&mut rs.show_fires, t!("ui.settings.replay.show_fires"));
-                    ui.end_row();
-
-                    ui.checkbox(&mut rs.show_floods, t!("ui.settings.replay.show_floods"));
-                    ui.checkbox(&mut rs.show_citadels, t!("ui.settings.replay.show_citadels"));
-                    ui.end_row();
-
-                    ui.checkbox(&mut rs.show_crits, t!("ui.settings.replay.show_crits"));
                     ui.end_row();
                 });
 

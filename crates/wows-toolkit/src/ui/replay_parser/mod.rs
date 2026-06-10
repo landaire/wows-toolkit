@@ -1344,10 +1344,6 @@ impl UiReport {
                 ReplayColumn::PotentialDamage,
                 ReplayColumn::SpottingDamage,
                 ReplayColumn::TimeLived,
-                ReplayColumn::Fires,
-                ReplayColumn::Floods,
-                ReplayColumn::Citadels,
-                ReplayColumn::Crits,
                 ReplayColumn::DistanceTraveled,
                 ReplayColumn::Skills,
             ],
@@ -1446,10 +1442,6 @@ impl UiReport {
             (ReplayColumn::RawXp, settings.show_raw_xp),
             (ReplayColumn::ObservedDamage, settings.show_observed_damage),
             (ReplayColumn::Heals, settings.show_heals),
-            (ReplayColumn::Fires, settings.show_fires),
-            (ReplayColumn::Floods, settings.show_floods),
-            (ReplayColumn::Citadels, settings.show_citadels),
-            (ReplayColumn::Crits, settings.show_crits),
             (ReplayColumn::ReceivedDamage, settings.show_received_damage),
             (ReplayColumn::DistanceTraveled, settings.show_distance_traveled),
         ];
@@ -2126,50 +2118,6 @@ impl UiReport {
                             ui.label("-");
                         }
                     }
-                    ReplayColumn::Fires => {
-                        if let Some(fires) = report.fires {
-                            if report.should_hide_stats() && !self.debug_mode {
-                                ui.label(t!("ui.replay.nda"));
-                            } else {
-                                ui.label(fires.to_string());
-                            }
-                        } else {
-                            ui.label("-");
-                        }
-                    }
-                    ReplayColumn::Floods => {
-                        if let Some(floods) = report.floods {
-                            if report.should_hide_stats() && !self.debug_mode {
-                                ui.label(t!("ui.replay.nda"));
-                            } else {
-                                ui.label(floods.to_string());
-                            }
-                        } else {
-                            ui.label("-");
-                        }
-                    }
-                    ReplayColumn::Citadels => {
-                        if let Some(citadels) = report.citadels {
-                            if report.should_hide_stats() && !self.debug_mode {
-                                ui.label(t!("ui.replay.nda"));
-                            } else {
-                                ui.label(citadels.to_string());
-                            }
-                        } else {
-                            ui.label("-");
-                        }
-                    }
-                    ReplayColumn::Crits => {
-                        if let Some(crits) = report.crits {
-                            if report.should_hide_stats() && !self.debug_mode {
-                                ui.label(t!("ui.replay.nda"));
-                            } else {
-                                ui.label(crits.to_string());
-                            }
-                        } else {
-                            ui.label("-");
-                        }
-                    }
                     ReplayColumn::DistanceTraveled => {
                         if let Some(distance) = report.distance_traveled {
                             ui.label(format!("{distance:.2}km"));
@@ -2465,6 +2413,33 @@ impl UiReport {
                                         ui.label(format!("{} ({}x)", &ribbon.display_name, ribbon.count))
                                             .on_hover_text(&ribbon.description);
                                     });
+                                }
+                            }
+
+                            let has_damage_events = report.fires.is_some()
+                                || report.floods.is_some()
+                                || report.citadels.is_some()
+                                || report.crits.is_some();
+                            if has_damage_events {
+                                if !report.achievements.is_empty() || !report.ribbons.is_empty() {
+                                    ui.separator();
+                                }
+                                ui.strong(t!("ui.replay.sections.damage_events"));
+                                if report.should_hide_stats() && !self.debug_mode {
+                                    ui.label(t!("ui.replay.nda"));
+                                } else {
+                                    if let Some(fires) = report.fires {
+                                        ui.label(format!("{}: {fires}", t!("ui.replay.column.fires")));
+                                    }
+                                    if let Some(floods) = report.floods {
+                                        ui.label(format!("{}: {floods}", t!("ui.replay.column.floods")));
+                                    }
+                                    if let Some(citadels) = report.citadels {
+                                        ui.label(format!("{}: {citadels}", t!("ui.replay.column.citadels")));
+                                    }
+                                    if let Some(crits) = report.crits {
+                                        ui.label(format!("{}: {crits}", t!("ui.replay.column.crits")));
+                                    }
                                 }
                             }
                         });
@@ -2928,66 +2903,6 @@ impl egui_table::TableDelegate for UiReport {
                 }
                 ReplayColumn::TimeLived => {
                     ui.strong(t!("ui.replay.column.time_lived"));
-                }
-                ReplayColumn::Fires => {
-                    if ui
-                        .strong(column_name_with_sort_order(
-                            &t!("ui.replay.column.fires"),
-                            false,
-                            *self.replay_sort.lock(),
-                            SortColumn::Fires,
-                        ))
-                        .clicked()
-                    {
-                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Fires);
-
-                        self.sort_players(new_sort);
-                    };
-                }
-                ReplayColumn::Floods => {
-                    if ui
-                        .strong(column_name_with_sort_order(
-                            &t!("ui.replay.column.floods"),
-                            false,
-                            *self.replay_sort.lock(),
-                            SortColumn::Floods,
-                        ))
-                        .clicked()
-                    {
-                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Floods);
-
-                        self.sort_players(new_sort);
-                    };
-                }
-                ReplayColumn::Citadels => {
-                    if ui
-                        .strong(column_name_with_sort_order(
-                            &t!("ui.replay.column.citadels"),
-                            false,
-                            *self.replay_sort.lock(),
-                            SortColumn::Citadels,
-                        ))
-                        .clicked()
-                    {
-                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Citadels);
-
-                        self.sort_players(new_sort);
-                    };
-                }
-                ReplayColumn::Crits => {
-                    if ui
-                        .strong(column_name_with_sort_order(
-                            &t!("ui.replay.column.crits"),
-                            false,
-                            *self.replay_sort.lock(),
-                            SortColumn::Crits,
-                        ))
-                        .clicked()
-                    {
-                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Crits);
-
-                        self.sort_players(new_sort);
-                    };
                 }
                 ReplayColumn::ReceivedDamage => {
                     if ui
@@ -4258,10 +4173,6 @@ impl ToolkitTabViewer<'_> {
                     changed |=
                         ui.checkbox(&mut rs.show_observed_damage, t!("ui.replay.filter.observed_damage")).changed();
                     changed |= ui.checkbox(&mut rs.show_heals, t!("ui.replay.filter.heals")).changed();
-                    changed |= ui.checkbox(&mut rs.show_fires, t!("ui.replay.filter.fires")).changed();
-                    changed |= ui.checkbox(&mut rs.show_floods, t!("ui.replay.filter.floods")).changed();
-                    changed |= ui.checkbox(&mut rs.show_citadels, t!("ui.replay.filter.citadels")).changed();
-                    changed |= ui.checkbox(&mut rs.show_crits, t!("ui.replay.filter.crits")).changed();
                     if changed {
                         self.tab_state.persisted.write().settings.replay = rs;
                     }
@@ -4905,7 +4816,7 @@ impl ToolkitTabViewer<'_> {
                         .show_inside(ui, &mut viewer);
                     self.tab_state.replay_dock_state = dock_state;
                 } else {
-                    ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
+                    ui.centered_and_justified(|ui| {
                         ui.heading(t!("ui.replay.no_selection"));
                     });
                 }

@@ -114,10 +114,6 @@ pub enum ReplayColumn {
     PotentialDamage,
     Hits,
     Heals,
-    Fires,
-    Floods,
-    Citadels,
-    Crits,
     DistanceTraveled,
     TimeLived,
 }
@@ -138,6 +134,7 @@ pub enum SortColumn {
     Hits,
     Heals,
     TimeLived,
+    // Retained for persisted SortOrder deserialization; no dedicated column renders these.
     Fires,
     Floods,
     Citadels,
