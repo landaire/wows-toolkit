@@ -42,10 +42,13 @@ depends_post = ["fmt"]
 [tasks.bump]
 description = "Bump versions for published crates and sync workspace deps (usage: mise run bump -- minor)"
 run = [
+    "cargo set-version -p wows-core --bump {{arg(name=\"level\", i=0)}}",
     "cargo set-version -p wowsunpack --bump {{arg(name=\"level\", i=0)}}",
     "cargo set-version -p wows_replays --bump {{arg(name=\"level\", i=0)}}",
     "cargo set-version -p wows_minimap_renderer --bump {{arg(name=\"level\", i=0)}}",
+    "cargo set-version -p wows-battle-world --bump {{arg(name=\"level\", i=0)}}",
     "cargo set-version -p wows-data-mgr --bump {{arg(name=\"level\", i=0)}}",
+    "cargo set-version -p wows-replay-insights --bump {{arg(name=\"level\", i=0)}}",
     "cargo set-version -p wt-translations --bump {{arg(name=\"level\", i=0)}}",
-    "cargo upgrade -p wowsunpack -p wows_replays -p wows_minimap_renderer -p wows-data-mgr -p wt-translations --incompatible allow --pinned allow",
+    "cargo upgrade -p wows-core -p wowsunpack -p wows_replays -p wows_minimap_renderer -p wows-battle-world -p wows-data-mgr -p wows-replay-insights -p wt-translations --incompatible allow --pinned allow",
 ]

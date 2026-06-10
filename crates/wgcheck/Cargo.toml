@@ -2,6 +2,7 @@
 name = "wgcheck"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Parser for WGCheck (.gch) report archives: DES + GZip + .NET BinaryFormatter (NRBF)"
 
 [dependencies]
