@@ -2109,7 +2109,7 @@ impl WowsToolkitApp {
                         }
                         if ui.button(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.buttons.discord"))).clicked()
                         {
-                            ui.ctx().open_url(OpenUrl::new_tab("https://discord.gg/SpmXzfSdux"));
+                            ui.ctx().open_url(OpenUrl::new_tab(rot13("uggcf://qvfpbeq.tt/EWXjXHw7eu")));
                         }
                     });
                     ui.collapsing(t!("ui.buttons.more_options"), |ui| {
@@ -2838,7 +2838,7 @@ impl eframe::App for WowsToolkitApp {
                 }
 
                 if ui.button(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.buttons.discord"))).clicked() {
-                    ui.ctx().open_url(OpenUrl::new_tab("https://discord.gg/SpmXzfSdux"));
+                    ui.ctx().open_url(OpenUrl::new_tab(rot13("uggcf://qvfpbeq.tt/EWXjXHw7eu")));
                 }
             });
         });
@@ -3004,6 +3004,19 @@ fn add_system_font_fallbacks(_fonts: &mut egui::FontDefinitions) {
 
 /// If this returns true, the app should early return in the `update()` function
 /// or call `wgpu::Device::poll()`
+/// ROT13 transform (its own inverse). The community Discord invite is stored
+/// ROT13-encoded so scrapers can't harvest the raw `discord.gg/...` invite from the
+/// source or the compiled binary; it is decoded only when the user clicks to open it.
+fn rot13(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'A'..='Z' => (((c as u8 - b'A' + 13) % 26) + b'A') as char,
+            'a'..='z' => (((c as u8 - b'a' + 13) % 26) + b'a') as char,
+            _ => c,
+        })
+        .collect()
+}
+
 pub fn mitigate_wgpu_mem_leak(ctx: &egui::Context) -> bool {
     let mut is_minimized = false;
     ctx.input(|reader| {

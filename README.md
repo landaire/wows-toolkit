@@ -30,7 +30,7 @@ Reverse engineering notes and format specifications live in [`docs/`](docs/):
 
 ## Community Discussion
 
-If you'd like to discuss the toolkit features, bugs, or whatever, please feel free to open an issue here on GitHub or join the Discord server: https://discord.gg/SpmXzfSdux.
+If you'd like to discuss the toolkit features, bugs, or whatever, please feel free to open an issue here on GitHub or join the community Discord linked on the [project site](https://landaire.github.io/wows-toolkit/).
 
 ## Pre-Built Application Binaries
 

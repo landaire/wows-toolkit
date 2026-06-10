@@ -469,7 +469,7 @@
                     <a href="https://github.com/landaire/wows-toolkit"
                         >Source</a
                     >
-                    <a href="https://discord.gg/SpmXzfSdux">Discord</a>
+                    <a href="#" class="js-discord" data-h="uggcf://qvfpbeq.tt/EWXjXHw7eu">Discord</a>
                 </nav>
             </div>
         </header>
@@ -657,7 +657,7 @@
                         href="https://github.com/landaire/wows-toolkit/releases/latest"
                         >Releases</a
                     >
-                    <a href="https://discord.gg/SpmXzfSdux">Discord</a>
+                    <a href="#" class="js-discord" data-h="uggcf://qvfpbeq.tt/EWXjXHw7eu">Discord</a>
                 </nav>
                 <p class="legal">
                     Not affiliated with or endorsed by Wargaming.net. World of
@@ -711,6 +711,24 @@
                         document.getElementById("download-btn").href =
                             asset.browser_download_url;
                 } catch (e) {}
+            })();
+        </script>
+        <script>
+            // Discord invite is ROT13-encoded so scrapers can't harvest the raw
+            // invite from the page source; decoded only on user click.
+            (function () {
+                function rot13(s) {
+                    return s.replace(/[a-z]/gi, function (c) {
+                        var base = c <= "Z" ? 65 : 97;
+                        return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+                    });
+                }
+                document.querySelectorAll("a.js-discord").forEach(function (a) {
+                    a.addEventListener("click", function (e) {
+                        e.preventDefault();
+                        window.open(rot13(a.dataset.h), "_blank", "noopener,noreferrer");
+                    });
+                });
             })();
         </script>
     </body>
