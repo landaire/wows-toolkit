@@ -1552,7 +1552,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         .id(display_popup_id)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
-                            if ui.button(wt_translations::icon_t(icons::ARROW_SQUARE_OUT, "Pop out")).clicked() {
+                            if ui.button(wt_translations::icon_t(icons::ARROW_SQUARE_OUT, &t!("ui.armor.pop_out"))).clicked() {
                                 pane.display_window_open = true;
                                 ui.close();
                             }
@@ -4728,7 +4728,7 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
             }
         });
     }
-    if ui.checkbox(&mut pane.show_zero_mm, "0 mm Plates").changed() {
+    if ui.checkbox(&mut pane.show_zero_mm, t!("ui.armor.zero_mm_plates").as_ref()).changed() {
         zone_changed = true;
     }
     if ui.checkbox(&mut pane.show_ship_center, t!("ui.armor.ship_center").as_ref()).changed() {
@@ -4753,7 +4753,7 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
         }
     }
     ui.horizontal(|ui| {
-        ui.label("Armor Opacity");
+        ui.label(t!("ui.armor.armor_opacity").as_ref());
         if ui.add(egui::Slider::new(&mut pane.armor_opacity, 0.1..=1.0).fixed_decimals(2)).changed() {
             zone_changed = true;
         }
@@ -4880,33 +4880,33 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
         }
     }
     ui.separator();
-    ui.label("Hull Lighting");
+    ui.label(t!("ui.armor.lighting").as_ref());
     // Lighting is a per-frame uniform: changes only need a redraw, never a geometry
     // re-upload. `light_moved` additionally flags direction changes so the viewport
     // shows the light-source marker for a few seconds.
     let mut lighting_changed = false;
     let mut light_moved = false;
-    if ui.checkbox(&mut pane.lighting.enabled, "Enable lighting").changed() {
+    if ui.checkbox(&mut pane.lighting.enabled, t!("ui.armor.lighting_enabled").as_ref()).changed() {
         lighting_changed = true;
         light_moved = true;
     }
     ui.add_enabled_ui(pane.lighting.enabled, |ui| {
         ui.horizontal(|ui| {
-            if ui.button("In-Game").clicked() {
+            if ui.button(t!("ui.armor.lighting_preset_ingame").as_ref()).clicked() {
                 let keep = pane.lighting.enabled;
                 pane.lighting = crate::viewport_3d::LightingSettings::in_game();
                 pane.lighting.enabled = keep;
                 lighting_changed = true;
                 light_moved = true;
             }
-            if ui.button("Flat").clicked() {
+            if ui.button(t!("ui.armor.lighting_preset_flat").as_ref()).clicked() {
                 let keep = pane.lighting.enabled;
                 pane.lighting = crate::viewport_3d::LightingSettings::flat();
                 pane.lighting.enabled = keep;
                 lighting_changed = true;
                 light_moved = true;
             }
-            if ui.button("Studio").clicked() {
+            if ui.button(t!("ui.armor.lighting_preset_studio").as_ref()).clicked() {
                 let keep = pane.lighting.enabled;
                 pane.lighting = crate::viewport_3d::LightingSettings::studio();
                 pane.lighting.enabled = keep;
@@ -4915,35 +4915,35 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
             }
         });
         let l = &mut pane.lighting;
-        if ui.add(egui::Slider::new(&mut l.flat_intensity, 0.0..=1.5).text("Flat (ambient)")).changed() {
+        if ui.add(egui::Slider::new(&mut l.flat_intensity, 0.0..=1.5).text(t!("ui.armor.lighting_flat").as_ref())).changed() {
             lighting_changed = true;
         }
-        if ui.add(egui::Slider::new(&mut l.key_intensity, 0.0..=1.5).text("Light intensity")).changed() {
+        if ui.add(egui::Slider::new(&mut l.key_intensity, 0.0..=1.5).text(t!("ui.armor.lighting_intensity").as_ref())).changed() {
             lighting_changed = true;
         }
-        if ui.add(egui::Slider::new(&mut l.azimuth_deg, 0.0..=360.0).text("Light azimuth")).changed() {
-            lighting_changed = true;
-            light_moved = true;
-        }
-        if ui.add(egui::Slider::new(&mut l.elevation_deg, -90.0..=90.0).text("Light elevation")).changed() {
+        if ui.add(egui::Slider::new(&mut l.azimuth_deg, 0.0..=360.0).text(t!("ui.armor.lighting_azimuth").as_ref())).changed() {
             lighting_changed = true;
             light_moved = true;
         }
-        if ui.add(egui::Slider::new(&mut l.rim_strength, 0.0..=1.0).text("Rim")).changed() {
+        if ui.add(egui::Slider::new(&mut l.elevation_deg, -90.0..=90.0).text(t!("ui.armor.lighting_elevation").as_ref())).changed() {
+            lighting_changed = true;
+            light_moved = true;
+        }
+        if ui.add(egui::Slider::new(&mut l.rim_strength, 0.0..=1.0).text(t!("ui.armor.lighting_rim").as_ref())).changed() {
             lighting_changed = true;
         }
-        if ui.add(egui::Slider::new(&mut l.specular_strength, 0.0..=1.0).text("Specular")).changed() {
+        if ui.add(egui::Slider::new(&mut l.specular_strength, 0.0..=1.0).text(t!("ui.armor.lighting_specular").as_ref())).changed() {
             lighting_changed = true;
         }
-        if ui.add(egui::Slider::new(&mut l.shininess, 1.0..=128.0).text("Shininess")).changed() {
+        if ui.add(egui::Slider::new(&mut l.shininess, 1.0..=128.0).text(t!("ui.armor.lighting_shininess").as_ref())).changed() {
             lighting_changed = true;
         }
         ui.horizontal(|ui| {
-            ui.label("Key color");
+            ui.label(t!("ui.armor.lighting_key_color").as_ref());
             if ui.color_edit_button_rgb(&mut l.key_color).changed() {
                 lighting_changed = true;
             }
-            ui.label("Ambient color");
+            ui.label(t!("ui.armor.lighting_ambient_color").as_ref());
             if ui.color_edit_button_rgb(&mut l.flat_color).changed() {
                 lighting_changed = true;
             }
