@@ -2,6 +2,280 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.69] - 2026-06-11
+
+### 🚀 Features
+
+- Add support for WASM compilation
+- *(wows-data-mgr)* New command for updating derived assets, gc, and add compressed gameparams + english translations
+- *(replays)* Merge multiple per-player replays into a single rendered view
+- *(toolkit)* Propagate merged perspectives through the live replay renderer
+- *(data-mgr)* Backfill constants.json via refresh-derived; auto-gc
+- *(insights)* Add wows-replay-insights crate for build resolution
+- *(replays)* Consumable inventory tracking + team roster panels
+- *(replays)* Merged-replay roster polish, zoom decoupling, default tweaks
+- *(renderer)* Multi-codec video stack (gpu-video, rav1e AV1, muxide)
+- *(replays)* Seed Vehicle entities from onArenaStateReceived
+- *(replays)* Consumables/heals in skills expansion, disconnect highlight, terse perspective label
+- *(renderer)* Expose bitrate config; default to ~10 MiB file-size target
+- *(data)* Download old-version game data on demand
+- *(data)* Check for and update cached game data
+- *(wowsunpack)* Add `pkgs` command to resolve paths to required .pkg files
+- *(data-mgr)* Audit dump VFS coverage, hard-fail incomplete dumps
+- *(scripts)* Minimal cross-depot download in bulk_archive
+- *(wowsunpack)* Typed, version-aware GUI asset resolver
+- *(data-mgr)* Add verify, migrate-cas, and update commands
+- *(data-mgr)* Complete-build to add maps without re-downloading basecontent
+- *(bulk_archive)* Download via steamroom daemon to cut rate limiting
+- *(wowsunpack,toolkit)* Version-aware consumable id resolution
+- *(wowsunpack)* Extend consumable id layouts back to 0.7.0
+- *(toolkit)* Show the equipped module loadout in the build panel
+- *(toolkit)* Borrow current-build class icons for pre-12.0 replays
+- *(wgcheck)* Add WGCheck .gch report parser
+- *(toolkit)* Validate the game data cache against the remote repository
+- *(renderer)* Skip pre-battle by default and fix old-replay assets/ranges
+- *(battle-world)* Scaffold crate with bevy_ecs
+- *(battle-world)* Ingest option types
+- *(battle-world)* Entity components
+- *(battle-world)* Resources and entity index
+- *(battle-world)* World lifecycle and analyzer skeleton
+- *(battle-world)* Entity lifecycle and position ingestion with parity tests
+- *(battle-world)* Vehicle property and aim ingestion with parity tests
+- *(battle-world)* Kills, damage, and self-stat ingestion with parity tests
+- *(battle-world)* Player construction and chat ingestion with parity tests
+- *(battle-world)* Consumable ingestion with parity tests
+- *(battle-world)* Plane and ward ingestion with parity tests
+- *(battle-world)* Projectile and shot-hit ingestion with parity tests
+- *(battle-world)* Capture point, score, zone, and smoke ingestion with parity tests
+- *(battle-world)* Match state and finalization ingestion with parity tests
+- *(battle-world)* Score-card battle report with parity tests
+- *(battle-world)* ECS-native read API with cached query states
+- *(minimap-renderer)* Read battle state from BattleView (ECS-native)
+- *(battle-world)* Port MergedReplays to wrap BattleWorld
+- *(typedefs)* Preserve def semantic type names via ArgType::Named
+- *(typedefs)* Collect semantic names across the type tree
+- *(wowsunpack)* Def-name to newtype registry
+- *(replayshark)* Audit-types subcommand for def newtype coverage
+- *(packet2)* Non-fatal payload leftover diagnostics with semantic name
+- *(error)* Attach def semantic name to RpcValueParseFailed
+- *(minimap)* Dead-reckon visible ship positions during playback
+- *(skills)* Generated modern captain skill grid table
+- *(renderer)* Show full captain skill grid in build popover
+- *(skill-grid)* Add pre-rework grids and unified skill_grid API
+- *(wows-core)* Add NormalizedPos::lerp
+- *(battle-world)* Position timeline types and merge helper
+- *(battle-world)* Scan_replay driver and ScanCollector trait
+- *(battle-world)* MetadataCollector for self-team, duration, battle-start
+- *(battle-world)* PositionTimelineCollector (world + minimap samples)
+- *(minimap)* Interpolate ship positions from shared timeline; retire dead-reckon
+- *(minimap)* Per-frame render clock in advance_clock for smooth export
+- *(toolkit)* Install shared position timeline in export and playback
+- *(minimap)* Rename TurretDirection to CameraDirection and origin it from the ship icon position
+- *(battle-world)* World-aware scan_replay_world driver and WorldScanCollector trait
+- *(minimap)* Add shared ammo_type_color helper keyed on AmmoType
+- *(minimap)* Add ShotTracerTip draw command and render
+- *(minimap)* Emit ammo-colored tip per main-battery shot
+- *(renderer)* Plumb battle_end clock into shared renderer state
+- *(renderer)* Draw match start/end ticks on the playback timeline
+- *(constants)* Resolve constants build via repo manifest by friendly version
+- *(constants)* Fetch version-matched constants for cross-region replays
+- *(minimap)* Scale tracer length by caliber, size tip to line width, fade timeline ticks
+- *(core)* Add GunId/GunBits newtypes with bitmask expansion
+- *(decode)* Decode shootOnClient/shootATBAGuns into WeaponFired payload
+- *(merge)* Treat secondary fire methods as cross-perspective
+- *(params)* Collect secondary battery ammo names from atba mounts
+- *(params)* Add secondary_ammo_param resolver
+- *(battle-world)* Add SecondaryShotState component and order resource
+- *(ingest)* Record secondary shots from secondary fire events
+- *(view)* Expose active_secondary_shots
+- *(renderer)* Draw secondary battery dots from shooter to target
+- *(params)* Extract per-gun secondary ammo ordered by hardpoint
+- *(secondary)* Pace dots by per-gun shell via firing GunId
+- *(params)* Add CrewSkillType newtype, bump cache format to 5
+- *(params)* Add SkillPointCost newtype for captain skill tiers
+- *(params)* Add CrewSkillName newtype for skill string identity
+- *(skills)* Recognize IFHE/Dazzle by name, fix stale IFA id
+- *(assets)* Add CrewSkill GuiAsset and crew_skill_icon_slug
+- *(params)* Extract shared build_skill_grid for skill layout
+- *(data)* Add lazy crew-skill icon cache
+- *(replays)* Inspector build carries full captain skill grid
+- *(replays)* Render captain skill grid with icons in inspector
+- *(params)* Parse modernization slots + applicability; slot-count
+- *(data)* Add modernization + signal icon caches; fix mod icon path
+- *(replays)* Inspector build carries upgrade slots + signals
+- *(replays)* Render upgrade slots + signals as icons in inspector
+- *(replays)* Dedup abilities into consumables fallback
+- *(wowsunpack)* Read per-ship camera orbit trajectories
+- *(wowsunpack)* Expose camera trajectories on ship config
+- *(armor-viewer)* Camera orbit ellipse geometry builder
+- *(armor-viewer)* Hold camera trajectories and ellipse UI state
+- *(armor-viewer)* Upload camera orbit ellipse overlay
+- *(armor-viewer)* Camera orbit checkbox and mode selector
+- *(viewport)* Camera animation and orthographic view presets
+- *(viewport)* Navigation gizmo geometry and hit-test
+- *(viewport)* Navigation gizmo draw, interact, and Viewport3D API
+- *(armor-viewer)* Show navigation gizmo over the 3D viewport
+- *(params)* Codegen version-gated modifier settings table
+- *(params)* Format modifiers into description fragments
+- *(params)* Port common skill modifier value transforms
+- *(replays)* Generate captain skill descriptions from modifiers
+- *(params)* Expand KnownCrewSkill to full catalog; fix IFA mapping
+- *(replays)* Generate upgrade/signal descriptions from modifiers
+- *(armor-viewer)* Toggleable ship-center marker overlay
+- *(wowsunpack)* Camera trajectory carries inner/outer states + resolve(fov,height)
+- *(armor-viewer)* FOV + camera-height knobs with inner/outer envelope
+- *(armor-viewer)* Camera-rings section, slider resets, reorder ship-center
+- *(armor-viewer)* Move camera-rings group to the bottom of display settings
+- *(renderer)* Add EncoderWorker background encode thread
+- *(renderer)* Drive VideoEncoder through the async EncoderWorker
+- *(minimap-renderer)* Shared panel math helpers for stats/roster
+- *(minimap-renderer)* Load_ribbon_icons for stats-panel ribbons
+- *(minimap-renderer)* Ribbon icon keys, healable HP, stable ribbon order
+- *(renderer)* Plumb ribbon/subribbon icons to desktop + video backends
+- *(collab)* Transport ribbon/subribbon icons to web clients
+- *(renderer)* Compact stats header + white healable silhouette meter
+- *(renderer)* Wrapping ribbon icon grid in stats panel
+- *(renderer)* Team-roster top HP bar with current/max text
+- *(replays)* Decode and render modern-replay ribbons
+- *(armor)* Inner/outer camera orbit rings with per-ring hover
+- *(minimap)* Dim secondary fire and shell tips, retire ATBA dot path
+- *(ui)* Rework replay inspector stats and add open-data-dir button
+- *(armor)* Sidebar common settings popover and synced display overlays
+- *(wgpu)* Widen backends and bias DX12 on Windows
+- *(renderer)* Heal-state + regenerationHealth-based healable pool
+- *(renderer)* Pixmap heal-state coloring + charcoal silhouette
+- *(collab-egui)* Heal-state coloring + charcoal silhouette
+- *(renderer)* Per-consumable availability with reload cooldown
+- *(battle-world)* Add Division component with in-game labels
+- *(gameparams)* Extract Repair Party heal rate into AbilityCategory
+- *(insights)* Carry modifier-applied Repair Party heal rate to ConsumableInventory
+- *(renderer)* Split healable region into per-charge and remaining pool
+- Obfuscate Discord invite with ROT13
+- *(armor)* Add zoom-path spoke mesh builder
+- *(armor)* Add zoom-path toggle fields to ArmorPane
+- *(armor)* Upload zoom-path spokes in the camera overlay
+- *(armor)* Add zoom-path toggle UI and strings
+- *(viewport)* Add ArcballCamera::set_eye_and_target
+- *(armor)* Add camera_perspective geometry module
+- *(armor)* Add perspective state, enter/exit, and sync
+- *(armor)* Drive viewport camera from perspective lock
+- *(armor)* Add camera perspective UI controls and strings
+- *(armor)* Add water-aim geometry for perspective camera
+- *(armor)* Aim perspective camera at the water plane
+- *(armor)* Add perspective projection mode and far-side clamp
+- *(armor)* Add water aim-point marker mesh builder
+- *(armor)* Track perspective aim marker and sync look mode
+- *(armor)* Perspective aim marker, projection selector, rings-independent toggle
+- *(viewport_3d)* Add LightingSettings value type with presets
+- *(armor)* Store lighting and detach flag on pane and defaults
+- *(viewport_3d)* Half-Lambert hull lighting via per-mesh lit flag
+- *(armor)* Light hull meshes and feed pane lighting to the viewport
+- *(armor)* Hull lighting controls and presets in display settings
+- *(armor)* Detach display settings into a floating egui window
+- *(armor)* Persist hull lighting in armor viewer defaults
+- *(armor)* Relabel directional slider as Light intensity
+
+### 🐛 Bug Fixes
+
+- Wowsunpack extract permission denied on Linux/macOS (#35)
+- Use DirectX as default rendering backend instead of vulkan
+- Updates to symlinking / version detection for CAS
+- Update replayshark / replay parser to use updated manifest format
+- *(replays)* Parsing of legacy packets now uses correct legacy packet mapping
+- *(minimap-renderer)* Use full-precision world positions for smooth ship motion
+- *(minimap-renderer)* Wrap detected-teammate outline fully around ship tips
+- *(toolkit)* Move alt-perspective load button into the replay's own action row
+- *(toolkit)* Thread the tab's Replay Arc into build_replay_view; clear stale cancel signal on every step start
+- *(toolkit)* Coalesce slider-drag Seeks and skip frame publish on cancelled steps
+- *(replays)* Suppress enemy spotted outline in single-replay sessions
+- *(ui)* Species name fallback + drop redundant scroll wrappers
+- *(wowsunpack)* Parse pre-rework GameParams without dropping params
+- *(scripts)* Download per-build translation catalogs for the dump
+- *(scripts)* Get translations from the client depot, not localization depot
+- *(scripts)* Tolerate nix "Git tree is dirty" warnings in tool output
+- *(wowsunpack)* Reject out-of-bounds pkg ranges instead of panicking
+- *(wows-replays)* Parse old replays; tolerate sparse arena state, fail fast on missing roster
+- *(bulk_archive)* Tolerate dirty-tree nix warning in pkg resolution
+- *(bulk_archive)* Host Steam token auth + retry transient download failures
+- *(bulk_archive)* Use atomic downloads and tolerate cold nix start
+- *(bulk_archive)* Survive unicode errors, drop delta-removal, bind daemon account
+- *(replay)* Use team color when a replay has no clanColor
+- *(replay)* Only bridge versioned constants forward to newer builds
+- *(wows-replays)* Map full player FixedDict for pre-0.10.7 replays
+- *(wows-replays)* Complete player_key_map for 0.10.7-0.12.7
+- *(wowsunpack)* Tolerate truncated ship-config blobs from older clients
+- *(wows-replays)* Decode pre-rework captain skills (0.9.x bitmask)
+- *(minimap-renderer)* Fall back to a system font when the game has no TTF
+- *(bulk_archive)* Fetch translations from the localization depot (552994)
+- *(toolkit)* Don't panic on malformed achievement result entries
+- *(wows-replays)* Correct old-replay battle-state decoding
+- *(toolkit)* Render old replays with fallback assets and correct builds
+- *(wowsunpack)* Read consumable detection ranges from the category root for old clients
+- *(wowsunpack)* Gate game_assets on the vfs feature for wasm
+- *(wows-replays)* Resolve chat/voiceline sender names across versions
+- *(renderer)* Keep chat overlay inside the minimap
+- *(wows-replays)* Correct packet decoding flagged by game-script audit
+- *(battle-world)* Address M1 ECS review (plane/ward indices, reset inventory preservation, dead ships, shot-tracking default, entity lifetime)
+- *(battle-world)* Load test game data from dumped build archives with per-build caching
+- *(battle-world)* Model weapon type as enum and track selected ammo per weapon type
+- *(battle-world)* Close M2 parity gaps (arena health, spawned players, chat fallback) and remove buff-zone sentinel
+- *(battle-world)* Close M3 parity gaps (cap-point index gaps, weather ordering, connection info)
+- *(battle-world)* Resolve captain at entity-create time for report parity
+- Make explicit maxHealth updates authoritative over the highest-health fallback
+- *(nested-prop)* Peel ArgType::Named before structural match
+- *(packet2)* Drop false-positive method leftover diagnostic; wire property diagnostics to replayshark
+- *(game-params)* Make changePriorityTargetPenalty optional
+- *(minimap)* Pace shell tracers by server time-to-impact
+- *(renderer)* Borrow fonts from dump builds newest-first
+- *(playback)* Drive playback at display rate, not snapshot rate
+- *(renderer)* Load pre-rework crew skill icons from big/small subdirs
+- *(renderer)* Load crew skill icons from the replay's own build
+- *(minimap)* Per-variant position tracks so in-AOI motion lerps instead of snapping
+- *(minimap)* Pace shell tracers by learned per-salvo impact time
+- *(minimap)* Install learned salvo flight times in export, playback, and CLI
+- *(minimap)* Color salvos/torpedoes by owner relation, skip unknown instead of defaulting to enemy
+- *(decode)* Fall through to EntityMethod on malformed secondary fire args
+- *(params)* Pick secondary ammo deterministically for mixed-caliber ships
+- *(armor-viewer)* Waterline at model Y=0, drop dockYOffset shift
+- *(armor-viewer)* Inline camera mode selector to keep popover open
+- *(replays)* Restore SVG ship-class + ribbon icons (revert roster icons off PNG texture cache)
+- *(viewport)* Mark viewport dirty and mirror on gizmo and animation camera changes
+- *(viewport)* Foreshorten gizmo axis arms instead of normalizing
+- *(params)* Tag modifiers with unresolved values as label-only
+- *(params)* Modifier number sign follows the delta, not the value type
+- *(params)* Triggered skills use trigger modifiers + trigger-type sentence
+- *(armor-viewer)* Clamp navigation gizmo to the visible viewport
+- *(replays)* Load entity specs on the extracted-dir path and resolve EntityCreate bounds safely
+- *(minimap-renderer)* Group BULGE after main-caliber cluster in ribbon order
+- *(renderer)* Char-safe ribbon label truncation; trim const doc
+- *(net)* Honor the OS trust store for HTTPS instead of bundled roots
+- *(net)* Add HTTP timeouts, retries, and root-cause logging
+- *(net)* Validate wows-numbers data before caching it
+- *(net)* Build the GitHub client inside the network runtime
+- *(replays)* Populate regenerationHealth from entity props
+- *(render)* Prefer Vulkan over DX12 on Windows
+- *(renderer)* Hold heal per-charge target fixed while healing
+- *(armor)* Drop unused extern crate in camera_perspective
+- *(armor)* Refresh perspective saved camera on ship reload
+- *(armor)* Flip normal on back faces to remove double-sided hull lighting seam
+- *(armor)* Fade directional hull lighting with transparency to hide see-through seam
+- Add description to wows-battle-world
+
+### ⚡ Performance
+
+- *(replays)* Load replays off the UI thread
+- *(replays)* Resolve skill-grid icons in two passes
+- *(replays)* Cache decoded icon textures per build
+- *(renderer)* Tile rav1e AV1 encoding for multi-core parallelism
+- *(renderer)* AV1 speed preset 8 + 16-way tiling for ~30s render
+- *(collab)* Replace 100ms session-event poll with egui_inbox
+- *(armor)* Decouple lighting changes from mesh re-upload; add fading light-source marker
+- *(settings)* Cache game-data cache-dir stats instead of walking every frame
+
+### ◀️ Revert
+
+- *(scripts)* Drop fix_gui_holes.py -- nearest-build copy was unsound
+
 ## [0.1.68] - 2026-04-09
 
 ### 🚀 Features
@@ -28,10 +302,6 @@ All notable changes to this project will be documented in this file.
 
 - Windows would change size actively
 
-### ⚙️ Miscellaneous Tasks
-
-- Add 15.3 to `game_versions.toml` (#34)
-
 ## [0.1.65] - 2026-04-07
 
 ### 🚀 Features
@@ -52,10 +322,6 @@ All notable changes to this project will be documented in this file.
 - Updating the application language will update any parsed replays' text
 - Protocol tests were failing
 
-### Core
-
-- Update dependencies
-
 ## [0.1.64] - 2026-03-20
 
 ### 🚀 Features
@@ -75,28 +341,11 @@ All notable changes to this project will be documented in this file.
 
 - Some settings weren't being properly persisted (#30)
 
-### ⚙️ Miscellaneous Tasks
-
-- Get wt-translations ready for publish
-- Add 15.2 to `game_versions.toml`
-
 ## [0.1.62] - 2026-03-15
 
 ### 🐛 Bug Fixes
 
 - UI scaling was not being persisted
-
-### Minimap-renderer-cli
-
-- Use strict version matching and warn on mismatch for extracted data
-
-### Replays
-
-- Filter out removed captain skills
-
-### Replayshark
-
-- Make extracted dir behavior match minimap-renderer-cli
 
 ## [0.1.61] - 2026-03-14
 
@@ -112,68 +361,11 @@ All notable changes to this project will be documented in this file.
 - Settings were not properly persisted on change
 - Constants fallback sometimes was unreliable, which might break constants data updates
 
-### App
-
-- Update to main egui branch to fix crash plaguing people
-
-### Replays
-
-- Fix incorrect consumable packet decoding, showing wrong consumable icon
-
-## [0.1.59] - 2026-03-12
-
-### ⚙️ Miscellaneous Tasks
-
-- Distribute flatpak instead of appimage
-
-### App
-
-- Refactor to use SQLite database for app storage
-
-### Renderer
-
-- Add player/ship name
-- Add support for setting ship annotations as a particular ship
-- Fix duplicate players + players being added to wrong team in games with ships that spawn in/respawn (like operations)
-
-### Replays
-
-- Add spotting/potential damage breakdowns in inspector/renderer
-- Fix broken consumable packets
-
-### Web
-
-- Fix annotations not working and default name
-
 ## [0.1.58] - 2026-03-08
 
 ### 🚀 Features
 
 - Multi-language support
-
-### App
-
-- Possibly fix background thread crashing, failing to ipck up new replays
-- Reduce some inefficient checks in the hot path
-
-### Renderer
-
-- Fix operation building icons + improper ship icon states + crash for unsupported plane icons
-- Add stat panel and translate common messages
-- Fix zoom clipping canvas under stats panel
-- Fix some lingering issues with the stat panel in the renderer
-
-### Replay_inspector
-
-- Fix players missing from received damage (#27)
-
-### Replays
-
-- Fix self observed damage stats
-
-### Translations
-
-- Fix slightly improper Polish translation for spotting damage
 
 ## [0.1.57] - 2026-03-05
 
@@ -187,136 +379,11 @@ All notable changes to this project will be documented in this file.
 
 - Ensure native windows do not depend on each other for repainting
 
-### Armor_viewer
-
-- Fix armor checkboxes not working when in a partial state + fix splash zone labels
-
-### Collab
-
-- Change token format
-- Fix annotation syncing
-- Add cursor click effect + refactor channels
-- Ensure that annotation movements, clearing, etc. are properly synchronized
-- Improvements to session popover/joining
-- Add unit tests
-- Show IP address warning when a user starts a session
-- Add heartbeats to the protocol
-- Use name-derived color instead of fixed color palette
-- Ensure that pre-session annotations are synced properly
-- Improvements to freehand line smoothing / arrow heads
-- Fix pre-existing cap points not syncing
-- Rework forced window sharing/multiple tactics boards
-- Fix state synchronization issues
-- Refactor into separate crate
-
-### Minimap
-
-- Add arrow + measurement tools, add keyboard shortcuts and multiselect
-- Ensure arrow head scales with zoom
-
-### Networking
-
-- Fix rustls conflict
-
-### Player_tracker
-
-- Fix twitch timestamps showing 0 minutes
-
-### Renderer
-
-- Show centerpoint of shapes when moving them
-
-### Replay_inspector
-
-- Fix file listing not being resizable to smaller than default
-- Add context menu action to add replay to session stats
-- Fix depth charge damage not properly surfacing
-
-### Site
-
-- Add networking info
-- Update color palette
-
-### Stats
-
-- Fix dialog showing up on replay inspector tab
-
-### Web
-
-- De-dupe names
-
-### Wows_minimap_renderer
-
-- Add option to use extracted game assets
-
-## [0.1.56] - 2026-03-02
-
-### Stats
-
-- Fix issue with popover immediately closing when trying to change chart stat
-
 ## [0.1.55] - 2026-03-02
 
 ### 🚀 Features
 
 - Add utility function for parsing game version from its data + update tests
-
-### ⚙️ Miscellaneous Tasks
-
-- Use master instead of nightly
-
-### Armor_viewer
-
-- Add option to simulate past ricochets
-
-### Live_armor_viewer
-
-- Fix shell origin / ship rotation
-
-### Nix
-
-- Fix building on darwin?
-- Update targets
-
-### Player_tracker
-
-- Don't limit tracking to only ranked/randoms
-
-### Replays
-
-- File listing should auto-size + move game chat to separate window
-- Allow multiple replays to be loaded in different tabs
-- Fix issue when parsing some operation replays
-
-### Repo
-
-- Add a bunch of tests
-
-### Resource_unpacker
-
-- Massively improve UX/UI
-- Support viewing binary files from assets.bin as JSON
-- Perf improvements
-
-### Site
-
-- Change UI a bit
-- Include asterisk for linux/macos
-- Add session stats
-
-### Stats
-
-- Stats are no longer in a floating window and are instead a new tab
-- Allow multiple charts tabs
-- Add support for combined stat charts
-
-### Toolkit
-
-- Fix crash when no replays directory exists in game dir
-
-### Wows_replays
-
-- Fix packet 0x26 parsing
 
 ## [0.1.54] - 2026-02-26
 
@@ -324,14 +391,6 @@ All notable changes to this project will be documented in this file.
 
 - Refactoring from wows-replays
 - Ribbon icons were not properly loading
-
-### Models
-
-- Fix hover target when ship has roll applied
-
-### Updater
-
-- Ensure PDB is updated with app updates
 
 ## [0.1.53] - 2026-02-25
 
@@ -345,68 +404,6 @@ All notable changes to this project will be documented in this file.
 - Refactor child window repainting for perf / accuracy
 - Come very close to real turret positions -- TODO rework
 
-### App
-
-- Make sure errors about replays failing to parse and invalid WoWs dirs are more visible
-
-### Armor_viewer
-
-- Implement shader, MSAA, and double-sided panel edge for better quality
-- Basic implementation of penetration checks
-- Begin to implement ballistics checking/arcs/etc
-- Show simulated shells and where they explode
-- Ensure trajectory viewer uses correct camera path when clicking model
-- QoL updates to trajectory UI
-- Improve trajectory analysis for multiple simultaneous ships
-- Fix label for where shell exploded; ensure that we use multiple arcs for different ships
-- Implement splash box mechanics and refactor armor analysis window
-- Make checkboxes highlight bits of ship model they belong to + fix lighting
-- Refactor lighting / hull viewing and add intersection lines to all plates
-- Improvements to hull/splash box rendering + show salvo timeline in live renderer
-- Support extracting/viewing with turret/hull upgrades
-- Increase brightness of mesh
-- Lighting improvements + fix perf when trajectories are enabled
-- Splash boxes will carry override to new windows
-
-### Data_export
-
-- Exported data now has damage relationships, player relationships, ribbons, etc.
-
-### Live_armor_viewer
-
-- Add replay server ballistics comparison + fix waterline
-- Refactor to pre-populate salvos and show a timeline
-
-### Renderer
-
-- Use strongly typed clock types + parse ahead to collect salvos
-- Add option to prefer CPU decoder
-- Fix capture point icons for standard battle
-
-### Session_stats
-
-- Add division filters, game count limit appy per-ship (instead of globally), and persist sessions
-- Revamp per-ship display and add options to copy/delete ship info
-
-## [0.1.52] - 2026-02-19
-
-### Armor_viewer
-
-- Fix hidden panel display state
-
-## [0.1.51] - 2026-02-19
-
-### Armor_renderer
-
-- Show proper plate thickness according to the game + better describe multiple plates
-- Big improvements to armor viewer UX / accuracy
-- Turret rotation + opacity slider + reworked toggles
-- Classify hidden plates
-
-### Armor_viewer
-
-- Add 3d model export
-
 ## [0.1.50] - 2026-02-18
 
 ### 🚀 Features
@@ -416,20 +413,6 @@ All notable changes to this project will be documented in this file.
 ### 🐛 Bug Fixes
 
 - Make it so searching doesn't make all nodes expanded when not searching
-
-### Armor_renderer
-
-- Fix right-clicking to disable a zone/part name
-- Add waterline
-- Slow camera movement down
-
-### Armor_viewer
-
-- Fix searching for ship names with special characters
-
-### Replays
-
-- Adjust score timer position in live renderer
 
 ## [0.1.49] - 2026-02-18
 
@@ -452,13 +435,6 @@ All notable changes to this project will be documented in this file.
 - Operations now load
 - Game params are not reloaded when loading ShipAssets
 
-### Armor
-
-- Remove test / NDA ships
-- Load nation flags
-- Use egui_ltreeview
-- Refactor to use egui_dock
-
 ## [0.1.47] - 2026-02-16
 
 ### 🚀 Features
@@ -474,10 +450,6 @@ All notable changes to this project will be documented in this file.
 - Refactor updating WoWs game dir to ensure state is properly cleaned up
 - Ensure that unsupported game versions surface errors
 - *(renderer)* Make overlapping ship config labels rotate around their circle to avoid collisions
-
-### Resource_unpacker
-
-- Ensure builds are listed consistently and can load on-demand
 
 ## [0.1.47-beta2] - 2026-02-16
 
@@ -506,10 +478,6 @@ All notable changes to this project will be documented in this file.
 - Update bundled constants data
 - Mitigate against GPU mem leak when app is minimized
 
-### Renderer
-
-- Add advantage text, score timer, and improve event timeline
-
 ## [0.1.47-alpha6] - 2026-02-14
 
 ### 🚀 Features
@@ -537,11 +505,6 @@ All notable changes to this project will be documented in this file.
 
 - Players that were never spotted now show on the replay results
 
-### 🚜 Refactor
-
-- Use egui_notify instead of my own timed message system
-- Clean up UiReport mapping code
-
 ## [0.1.47-alpha2] - 2026-02-11
 
 ### 🚀 Features
@@ -558,13 +521,6 @@ All notable changes to this project will be documented in this file.
 
 - Add achievement icons
 - Add option to limit session stats
-
-### Renderer
-
-- Support zooming/panning
-- Support overlay controls
-- Add basic annotation support
-- Show ship aim direction
 
 ## [0.1.46] - 2026-02-06
 
@@ -617,10 +573,6 @@ All notable changes to this project will be documented in this file.
 - Re-parse replay on modification
 - PR colors match WoWs-Numbers (thanks janatan)
 
-### 📚 Documentation
-
-- Update screenshot of the replay tab
-
 ## [0.1.42] - 2026-01-21
 
 ### 🚀 Features
@@ -668,76 +620,11 @@ All notable changes to this project will be documented in this file.
 
 - Update embedded contants file
 
-### ⚙️ Miscellaneous Tasks
-
-- Update egui to v0.33.3
-
-## [0.1.38] - 2025-10-05
-
-### Core
-
-- Fix GameParams unpacking/conversion to JSON
-
-## [0.1.37] - 2025-10-02
-
-### ⚙️ Miscellaneous Tasks
-
-- Update changelog
-
-### Core
-
-- Bump wowsunpack + wowsreplay versions to fix replays in 14.9.0
-
-## [0.1.36] - 2025-10-02
-
-### Resource_unpacker
-
-- Fix slow conversion of GameParams
-- Fix base params unpacking
-
-## [0.1.35] - 2025-10-01
-
-### Resource_unpacker
-
-- Add button for dumping base GameParams
-
-## [0.1.34] - 2025-04-03
-
-### Play_tracker
-
-- Fix crash when using filter larger than hours
-
-### Replays
-
-- Fix regression with detecting replays stored in versioned folders
-
-## [0.1.33] - 2025-04-03
-
-### App
-
-- Increase zoom factor to 1.1 by default and fix UI issues when changing zoom factor
-- Only set zoom factor if no settings have been saved
-- Add panic handler and detect crashes
-- Ensure that the new update filename matches the old one
-
-### Replays
-
-- Format replay file listing with newlines for easier reading
-- Expose hit information (CV data is not currently exported)
-
 ## [0.1.32] - 2025-03-27
 
 ### 🐛 Bug Fixes
 
 - Application icon is now embedded in binary/shows when pinned to taskbar
-
-### App
-
-- Add Discord server link
-
-### Replays
-
-- Update builtin constants.json file for latest game version
 
 ## [0.1.31] - 2025-03-18
 
@@ -769,11 +656,6 @@ All notable changes to this project will be documented in this file.
 - *(replays)* Only make one attempt to parse historical replays
 - *(replays)* Fix inconsistencies between auto data export and manual export
 
-### Replays
-
-- Remove dead code
-- Only write results if server-provided data is available
-
 ## [0.1.29] - 2025-03-05
 
 ### 🐛 Bug Fixes
@@ -804,19 +686,6 @@ All notable changes to this project will be documented in this file.
 - *(replays)* Fixed long damage hover text
 - *(replays)* Get rid of hardcoded stats indices
 
-### ⚙️ Miscellaneous Tasks
-
-- Update dependencies
-
-### Ui
-
-- Refactor UI code into its own module
-
-### Wip
-
-- *(replays)* Download constants file on app launch
-- Mod manager
-
 ## [0.1.27] - 2024-11-24
 
 ### 🚀 Features
@@ -832,10 +701,6 @@ All notable changes to this project will be documented in this file.
 - Adjustments to stream sniper detection
 - *(player_tracker)* Fix filtering by player name
 
-### 🚜 Refactor
-
-- *(replays)* Large refactoring of the replay viewer to clean up code + make future features easier to implement
-
 ## [0.1.26] - 2024-11-20
 
 ### 🚀 Features
@@ -846,10 +711,6 @@ All notable changes to this project will be documented in this file.
 
 - *(replays)* Fix stream sniper detection in replay parser
 - Default settings were not properly applied
-
-### Internal
-
-- Use release tagged as latest for updates
 
 ## [0.1.25] - 2024-11-17
 
@@ -878,10 +739,6 @@ All notable changes to this project will be documented in this file.
 - *(player_tracker)* Colors stopped for high numbers
 - Dark mode did not work for system-wide light mode users
 
-### Player_tracker
-
-- Change default sort to be times encountered within the tim range
-
 ## [0.1.23] - 2024-11-15
 
 ### 🚀 Features
@@ -896,16 +753,6 @@ All notable changes to this project will be documented in this file.
 
 - *(replays)* Fixed total damage numbers reflecting incorrect teams
 - *(replays)* Fix operation replays failing to load
-
-### ⚙️ Miscellaneous Tasks
-
-- Update changelog
-- Update gui
-
-### Replays
-
-- Adjust some table column sizes
-- Enable auto loading of latest replay by default
 
 ## [0.1.21] - 2024-11-12
 
@@ -932,13 +779,6 @@ All notable changes to this project will be documented in this file.
 - Log file rotates hourly to reduce total log file size
 - *(replays)* Airstrike and plane potential damage are the same
 
-### ⚙️ Miscellaneous Tasks
-
-- Update replay screenshot
-- Use better screenshot
-- Add github discord workflow
-- Bump version to v0.1.20
-
 ## [0.1.19] - 2024-11-10
 
 ### 🚀 Features
@@ -946,11 +786,6 @@ All notable changes to this project will be documented in this file.
 - Show actual damage numbers
 - Add button for showing raw battle results
 - Add potential and spotting damage + fixed some labels
-
-### ⚙️ Miscellaneous Tasks
-
-- Add upgrade path for re-generating game params in v0.1.19
-- Bump version to v0.1.19
 
 ## [0.1.18] - 2024-09-14
 
@@ -1006,44 +841,17 @@ All notable changes to this project will be documented in this file.
 - *(resource_unpacker)* Add button for dumping GameParams.json
 - Automatically send builds to ShipBuilds.com
 
-### 🚜 Refactor
-
-- Use crates.io versions of wowsunpack and wows_replays
-
-### ⚙️ Miscellaneous Tasks
-
-- Cargo fix
-- Cargo fmt
-- Update changelog
-
-## [0.1.11] - 2024-06-12
-
-### ⚙️ Miscellaneous Tasks
-
-- Update changelog
-
 ## [0.1.10] - 2024-04-02
 
 ### 🐛 Bug Fixes
 
 - *(replays)* Fix incompatability with 13.2.0
 
-### ⚙️ Miscellaneous Tasks
-
-- Oops updated changelog before tagging
-- Bump version
-
 ## [0.1.9] - 2024-03-11
 
 ### 🐛 Bug Fixes
 
 - *(replays)* Replays in build-specific dirs should now work
-
-### ⚙️ Miscellaneous Tasks
-
-- Add changelog
-- Bump version
-- Update changelog
 
 ## [0.1.8] - 2024-03-10
 
@@ -1057,16 +865,6 @@ All notable changes to this project will be documented in this file.
 - Ensure replays dir is correctly reset if wows dir changes
 - Improve perf for file listing filter + regression from egui update
 - Ensure the found replays dir is used for loading replay files
-
-### 🚜 Refactor
-
-- Tab_name -> title
-
-### ⚙️ Miscellaneous Tasks
-
-- Update egui deps
-- Cargo fix
-- Bump version
 
 ## [0.1.0] - 2024-01-03
 
