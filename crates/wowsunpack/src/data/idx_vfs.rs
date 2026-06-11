@@ -9,6 +9,8 @@ use std::fmt::Debug;
 use std::io::Cursor;
 use std::ops::Range;
 
+use crate::Rc;
+
 use flate2::read::DeflateDecoder;
 use vfs::FileSystem;
 use vfs::VfsError;
@@ -36,7 +38,7 @@ pub trait AsyncPrime {
 /// File metadata stored in the VFS for each file entry.
 #[derive(Debug, Clone)]
 pub struct VfsFileEntry {
-    pub volume_filename: String,
+    pub volume_filename: Rc<str>,
     pub offset: u64,
     pub size: u32,
     pub unpacked_size: u32,
@@ -95,27 +97,38 @@ impl<T> IdxVfs<T> {
 fn build_vfs_entries(tree: &HashMap<String, VfsEntry>) -> HashMap<String, VfsEntryMeta> {
     let mut entries = HashMap::with_capacity(tree.len());
 
+    // Volume filenames repeat across hundreds of thousands of files but only a
+    // couple hundred are distinct; intern them so every file entry shares one
+    // refcounted handle instead of owning a duplicate String.
+    let mut volume_names: HashMap<&str, Rc<str>> = HashMap::new();
+
     // First pass: add all entries
     for (path, entry) in tree {
         let meta = match entry {
-            VfsEntry::File { file_info, volume } => VfsEntryMeta::File(VfsFileEntry {
-                volume_filename: volume.filename.clone(),
-                offset: file_info.offset,
-                size: file_info.size,
-                unpacked_size: file_info.unpacked_size,
-                compression_info: file_info.compression_info,
-                crc32: file_info.crc32,
-            }),
+            VfsEntry::File { file_info, volume } => {
+                let volume_filename = volume_names
+                    .entry(volume.filename.as_str())
+                    .or_insert_with(|| Rc::from(volume.filename.as_str()))
+                    .clone();
+                VfsEntryMeta::File(VfsFileEntry {
+                    volume_filename,
+                    offset: file_info.offset,
+                    size: file_info.size,
+                    unpacked_size: file_info.unpacked_size,
+                    compression_info: file_info.compression_info,
+                    crc32: file_info.crc32,
+                })
+            }
             VfsEntry::Directory => VfsEntryMeta::Directory { children: Vec::new() },
         };
 
         entries.insert(path.clone(), meta);
     }
 
-    // Second pass: populate directory children
-    // Collect all paths first to avoid borrow issues
-    let all_paths: Vec<String> = entries.keys().cloned().collect();
-    for path in &all_paths {
+    // Second pass: populate directory children. The tree keys are the same set
+    // as the entries just inserted, so iterate them directly instead of cloning
+    // every path into a temporary Vec.
+    for path in tree.keys() {
         let mut parent_path = match path.rfind('/') {
             Some(pos) => &path[..pos],
             None => "/", // top-level entry, parent is root
