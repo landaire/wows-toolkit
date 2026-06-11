@@ -188,7 +188,7 @@ fn normalize(cmd: &DrawCommand) -> String {
                 fmt_pos(*pos)
             )
         }
-        DrawCommand::ConsumableRadius { entity_id, pos, radius_px, color, alpha } => {
+        DrawCommand::ConsumableRadius { entity_id, pos, radius_px, color, alpha, pulse: _ } => {
             format!(
                 "ConsumableRadius eid={entity_id:?} pos={} r={radius_px} color={color:?} alpha={:.2}",
                 fmt_pos(*pos),
