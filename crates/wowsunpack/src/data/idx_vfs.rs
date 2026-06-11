@@ -156,11 +156,14 @@ fn build_vfs_entries(tree: &HashMap<String, VfsEntry>) -> HashMap<String, VfsEnt
         }
     }
 
-    // Deduplicate children (can happen with multiple IDX files)
+    // Deduplicate children (can happen with multiple IDX files). The lists are
+    // frozen after this, so release the doubling/dedup slack: ~34K directory
+    // Vecs each grown by amortized doubling and then shortened by dedup.
     for entry in entries.values_mut() {
         if let VfsEntryMeta::Directory { children } = entry {
             children.sort();
             children.dedup();
+            children.shrink_to_fit();
         }
     }
 
