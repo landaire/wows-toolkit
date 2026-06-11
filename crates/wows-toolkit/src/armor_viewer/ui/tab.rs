@@ -1792,6 +1792,11 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                 vp_ui.ctx().request_repaint();
             }
 
+            // Light-source direction marker (world space), fades out a few seconds after a move.
+            if update_light_marker(pane, &render_state.device) {
+                vp_ui.ctx().request_repaint();
+            }
+
             // Render to offscreen texture
             pane.viewport.lighting = pane.lighting.clone();
             if let Some(tex_id) = pane.viewport.render(render_state, gpu_pipeline, pixel_size) {
@@ -4876,10 +4881,15 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
     }
     ui.separator();
     ui.label("Hull Lighting");
-    if ui.checkbox(&mut pane.lighting.enabled, "Enable lighting").changed() {
-        zone_changed = true;
-    }
+    // Lighting is a per-frame uniform: changes only need a redraw, never a geometry
+    // re-upload. `light_moved` additionally flags direction changes so the viewport
+    // shows the light-source marker for a few seconds.
     let mut lighting_changed = false;
+    let mut light_moved = false;
+    if ui.checkbox(&mut pane.lighting.enabled, "Enable lighting").changed() {
+        lighting_changed = true;
+        light_moved = true;
+    }
     ui.add_enabled_ui(pane.lighting.enabled, |ui| {
         ui.horizontal(|ui| {
             if ui.button("In-Game").clicked() {
@@ -4887,18 +4897,21 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
                 pane.lighting = crate::viewport_3d::LightingSettings::in_game();
                 pane.lighting.enabled = keep;
                 lighting_changed = true;
+                light_moved = true;
             }
             if ui.button("Flat").clicked() {
                 let keep = pane.lighting.enabled;
                 pane.lighting = crate::viewport_3d::LightingSettings::flat();
                 pane.lighting.enabled = keep;
                 lighting_changed = true;
+                light_moved = true;
             }
             if ui.button("Studio").clicked() {
                 let keep = pane.lighting.enabled;
                 pane.lighting = crate::viewport_3d::LightingSettings::studio();
                 pane.lighting.enabled = keep;
                 lighting_changed = true;
+                light_moved = true;
             }
         });
         let l = &mut pane.lighting;
@@ -4910,9 +4923,11 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
         }
         if ui.add(egui::Slider::new(&mut l.azimuth_deg, 0.0..=360.0).text("Light azimuth")).changed() {
             lighting_changed = true;
+            light_moved = true;
         }
         if ui.add(egui::Slider::new(&mut l.elevation_deg, -90.0..=90.0).text("Light elevation")).changed() {
             lighting_changed = true;
+            light_moved = true;
         }
         if ui.add(egui::Slider::new(&mut l.rim_strength, 0.0..=1.0).text("Rim")).changed() {
             lighting_changed = true;
@@ -4935,12 +4950,45 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
         });
     });
     if lighting_changed {
-        zone_changed = true;
+        pane.viewport.mark_dirty();
+    }
+    if light_moved {
+        pane.light_changed_at = Some(std::time::Instant::now());
+        pane.viewport.mark_dirty();
     }
     if combo_changed {
         zone_changed = true;
     }
     zone_changed
+}
+
+/// Refresh the world-space light-source marker. The marker is drawn for a few seconds
+/// after the light direction last changed and fades out over that window. Returns true
+/// while still active so the caller keeps requesting repaints to animate the fade.
+fn update_light_marker(pane: &mut ArmorPane, device: &wgpu::Device) -> bool {
+    const LIGHT_MARKER_SECS: f32 = 5.0;
+    for id in pane.light_marker_mesh_ids.drain(..) {
+        pane.viewport.remove_mesh(id);
+    }
+    let Some(changed_at) = pane.light_changed_at else {
+        return false;
+    };
+    let elapsed = changed_at.elapsed().as_secs_f32();
+    if !pane.lighting.enabled || elapsed >= LIGHT_MARKER_SECS {
+        return false;
+    }
+    let fade = (1.0 - elapsed / LIGHT_MARKER_SECS).clamp(0.0, 1.0);
+    let radius = pane.loaded_armor.as_ref().map(|a| (a.max_extent_xz() * 0.65).max(5.0)).unwrap_or(20.0);
+    let dir = pane.lighting.light_dir_world();
+    let origin = crate::viewport_3d::types::Vec3::new(0.0, 0.0, 0.0);
+    let dir_v = crate::viewport_3d::types::Vec3::new(dir[0], dir[1], dir[2]);
+    let color = [1.0, 0.85, 0.25, fade];
+    let (verts, indices) = crate::armor_viewer::camera_ellipse::build_light_marker_mesh(origin, dir_v, radius, color);
+    if !indices.is_empty() {
+        let id = pane.viewport.add_world_space_mesh(device, &verts, &indices, LAYER_OVERLAY);
+        pane.light_marker_mesh_ids.push(id);
+    }
+    true
 }
 
 /// Distance in pixels from `p` to segment `a`-`b`.

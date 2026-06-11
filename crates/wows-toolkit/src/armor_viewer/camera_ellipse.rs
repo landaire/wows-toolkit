@@ -164,6 +164,31 @@ pub(crate) fn build_center_marker_mesh(center: Vec3, half: f32, color: [f32; 4])
     (verts, indices)
 }
 
+/// Build a light-source direction marker: a shaft from `origin` pointing toward
+/// `dir_world` (the direction the light comes from), capped with a small 3-axis
+/// "sun" glyph at the tip. `length` is the shaft length in world units.
+pub(crate) fn build_light_marker_mesh(
+    origin: Vec3,
+    dir_world: Vec3,
+    length: f32,
+    color: [f32; 4],
+) -> (Vec<Vertex>, Vec<u32>) {
+    let mut verts: Vec<Vertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    let len = dir_world.norm();
+    if len < 1e-6 || length < 1e-6 {
+        return (verts, indices);
+    }
+    let dir = dir_world / len;
+    let tip = origin + dir * length;
+    push_segment(&mut verts, &mut indices, origin, tip, color);
+    let r = (length * 0.12).max(0.5);
+    for axis in [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)] {
+        push_segment(&mut verts, &mut indices, tip - axis * r, tip + axis * r, color);
+    }
+    (verts, indices)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

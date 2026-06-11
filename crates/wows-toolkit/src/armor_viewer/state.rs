@@ -539,6 +539,12 @@ pub struct ArmorPane {
     /// When true, the display settings render in a floating egui window instead of
     /// the toolbar popover. Per-pane, ephemeral (not persisted).
     pub display_window_open: bool,
+    /// When the light direction was last moved. The light-source marker is drawn and
+    /// fades out for a few seconds after this. `None` = never moved. Uses a monotonic
+    /// `Instant` so clock adjustments can't skew the elapsed-time check.
+    pub light_changed_at: Option<std::time::Instant>,
+    /// Tracked world-space overlay meshes for the light-source direction marker.
+    pub light_marker_mesh_ids: Vec<crate::viewport_3d::MeshId>,
 }
 
 /// Snapshot of the per-pane settings that "Sync options" broadcasts from the active
@@ -721,6 +727,8 @@ impl ArmorPane {
             perspective_aim_mesh_ids: Vec::new(),
             lighting: defaults.lighting.clone(),
             display_window_open: false,
+            light_changed_at: None,
+            light_marker_mesh_ids: Vec::new(),
         }
     }
 
