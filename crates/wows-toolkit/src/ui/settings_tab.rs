@@ -9,6 +9,7 @@ use rust_i18n::t;
 
 use crate::app::ToolkitTabViewer;
 use crate::data::settings::AppPreferences;
+use crate::tab_state::GameDataCacheStats;
 use crate::icons;
 use crate::task::DataExportSettings;
 use crate::task::ReplayBackgroundParserThreadMessage;
@@ -181,12 +182,14 @@ impl ToolkitTabViewer<'_> {
                     );
                     if response.changed() {
                         self.tab_state.persisted.write().settings.game.game_data_cache_dir = cache_dir;
+                        self.tab_state.game_data_cache_stats = None;
                     }
                     if ui.button(t!("ui.settings.wows.cache.browse")).clicked()
                         && let Some(folder) = rfd::FileDialog::new().pick_folder()
                     {
                         self.tab_state.persisted.write().settings.game.game_data_cache_dir =
                             folder.to_string_lossy().into_owned();
+                        self.tab_state.game_data_cache_stats = None;
                     }
                 });
 
@@ -194,19 +197,27 @@ impl ToolkitTabViewer<'_> {
                 if let Some(dump_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir_setting)
                     && dump_base.exists()
                 {
-                    let (total_size, version_count) = compute_dump_cache_stats(&dump_base);
-                    if version_count > 0 {
+                    let stats = match self.tab_state.game_data_cache_stats {
+                        Some(stats) => stats,
+                        None => {
+                            let stats = compute_dump_cache_stats(&dump_base);
+                            self.tab_state.game_data_cache_stats = Some(stats);
+                            stats
+                        }
+                    };
+                    if stats.version_count > 0 {
                         ui.horizontal(|ui| {
                             ui.label(t!(
                                 "ui.settings.wows.cache.stats",
-                                size = humansize::format_size(total_size, humansize::BINARY),
-                                count = version_count,
+                                size = humansize::format_size(stats.total_bytes, humansize::BINARY),
+                                count = stats.version_count,
                             ));
                             if ui.button(t!("ui.settings.wows.cache.open_folder")).clicked() {
                                 crate::util::open_directory(&dump_base);
                             }
-                            if version_count > 1 && ui.button(t!("ui.settings.wows.cache.delete_old")).clicked() {
+                            if stats.version_count > 1 && ui.button(t!("ui.settings.wows.cache.delete_old")).clicked() {
                                 delete_old_dump_versions(&dump_base);
+                                self.tab_state.game_data_cache_stats = None;
                             }
                         });
 
@@ -464,31 +475,39 @@ impl ToolkitTabViewer<'_> {
     }
 }
 
-/// Compute total size and version count for the game data dump cache.
-fn compute_dump_cache_stats(dump_base: &std::path::Path) -> (u64, usize) {
-    let mut total_size = 0u64;
-    let mut count = 0usize;
+/// Compute the game-data cache's real disk usage and version count.
+///
+/// `total_bytes` sums every regular file under `dump_base`, skipping symlinks,
+/// so each content-addressed blob in `common/` is counted once and the per-build
+/// vfs symlinks that reference it are ignored. `version_count` is the number of
+/// build directories containing a `metadata.toml`.
+fn compute_dump_cache_stats(dump_base: &Path) -> GameDataCacheStats {
+    let mut version_count = 0usize;
     if let Ok(entries) = std::fs::read_dir(dump_base) {
         for entry in entries.flatten() {
             if entry.path().join("metadata.toml").exists() {
-                count += 1;
-                total_size += dir_size(&entry.path());
+                version_count += 1;
             }
         }
     }
-    (total_size, count)
+    GameDataCacheStats { total_bytes: dir_size_real(dump_base), version_count }
 }
 
-/// Recursively compute directory size in bytes.
-fn dir_size(path: &std::path::Path) -> u64 {
+/// Recursively sum regular-file sizes under `path`, ignoring symlinks. Symlinked
+/// files and directories are skipped, so symlinked content is never followed or
+/// double-counted.
+fn dir_size_real(path: &Path) -> u64 {
     let mut total = 0u64;
     if let Ok(entries) = std::fs::read_dir(path) {
         for entry in entries.flatten() {
-            let ft = entry.file_type().unwrap_or_else(|_| unreachable!());
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_symlink() {
+                continue;
+            }
             if ft.is_file() {
                 total += entry.metadata().map(|m| m.len()).unwrap_or(0);
             } else if ft.is_dir() {
-                total += dir_size(&entry.path());
+                total += dir_size_real(&entry.path());
             }
         }
     }

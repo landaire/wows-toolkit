@@ -105,6 +105,12 @@ impl TabViewer for ToolkitTabViewer<'_> {
 
     // Defines the contents of a given `tab`.
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
+        // The Settings tab caches its game-data cache-dir stats. The main dock
+        // shows one tab per frame, so clearing here whenever another tab is
+        // active makes reopening Settings recompute once instead of per frame.
+        if !matches!(tab, Tab::Settings) {
+            self.tab_state.game_data_cache_stats = None;
+        }
         match tab {
             Tab::Unpacker => self.build_unpacker_tab(ui),
             Tab::Settings => self.build_settings_tab(ui),

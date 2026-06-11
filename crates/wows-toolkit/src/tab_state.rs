@@ -364,6 +364,16 @@ impl ConfirmableAction {
     }
 }
 
+/// Real disk usage and version count for the game-data cache directory,
+/// cached so the Settings tab does not re-walk the directory every frame.
+#[derive(Debug, Clone, Copy)]
+pub struct GameDataCacheStats {
+    /// Total size of regular files (symlinks excluded), in bytes.
+    pub total_bytes: u64,
+    /// Number of build versions (directories containing a `metadata.toml`).
+    pub version_count: usize,
+}
+
 /// Main application state container.
 ///
 /// Persisted state lives in `self.persisted` (shared with background save task).
@@ -453,6 +463,11 @@ pub struct TabState {
     pub game_data_repair: Vec<wows_data_mgr::download_repo::BuildUpdateStatus>,
     /// Whether a game data cache validation is currently running.
     pub validating_game_data_cache: bool,
+    /// Cached real disk usage and version count for the game-data cache
+    /// directory. Computed lazily while the Settings tab is shown and reused
+    /// until another tab is shown, the cache dir changes, or a cache operation
+    /// runs. Never recomputed per frame (the size walk is expensive).
+    pub game_data_cache_stats: Option<GameDataCacheStats>,
     /// Cached result of WoWs directory validation. Updated by `revalidate_wows_dir()`
     /// on startup and whenever `settings.wows_dir` changes — NOT every frame.
     pub wows_dir_invalid: bool,
@@ -558,6 +573,7 @@ impl Default for TabState {
             checking_game_data_updates: false,
             game_data_repair: Vec::new(),
             validating_game_data_cache: false,
+            game_data_cache_stats: None,
             wows_dir_invalid: false,
             wgpu_render_state: None,
             armor_viewer: Default::default(),
