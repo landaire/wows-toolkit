@@ -2994,11 +2994,25 @@ fn add_system_font_fallbacks(fonts: &mut egui::FontDefinitions) {
         if fonts.font_data.contains_key(*name) {
             continue;
         }
-        if let Ok(data) = std::fs::read(path) {
-            fonts.font_data.insert(name.to_string(), egui::FontData::from_owned(data).into());
-            if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-                family.push(name.to_string());
-            }
+        // Memory-map the fallback fonts instead of reading them into the heap.
+        // These CJK/Thai files total ~65 MiB, but only the glyph pages actually
+        // rendered (a few player names) ever fault into RAM. skrifa borrows the
+        // bytes for rasterization, so from_static avoids a copy. The mapping is
+        // intentionally leaked: the fonts live for the whole process and egui
+        // requires a 'static slice.
+        let Ok(file) = std::fs::File::open(path) else {
+            continue;
+        };
+        // SAFETY: these are read-only system font files, not mutated while the
+        // app runs.
+        let Ok(mmap) = (unsafe { memmap2::Mmap::map(&file) }) else {
+            continue;
+        };
+        let leaked: &'static memmap2::Mmap = Box::leak(Box::new(mmap));
+        let bytes: &'static [u8] = &leaked[..];
+        fonts.font_data.insert(name.to_string(), egui::FontData::from_static(bytes).into());
+        if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+            family.push(name.to_string());
         }
     }
 }

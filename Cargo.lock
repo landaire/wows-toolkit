@@ -11283,6 +11283,7 @@ dependencies = [
  "jiff",
  "language-tags",
  "levenshtein",
+ "memmap2",
  "nalgebra",
  "notify",
  "octocrab",

@@ -103,6 +103,7 @@ rust-i18n = { workspace = true }
 sys-locale = { workspace = true }
 ron = "0.12.1"
 egui_inbox = "0.11.0"
+memmap2 = "0.9"
 
 [dev-dependencies]
 insta = { workspace = true }
