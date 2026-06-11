@@ -277,8 +277,7 @@ mod tests {
     #[test]
     fn zoom_path_non_empty_valid_indices() {
         let (inner, outer) = ring_pair();
-        let (verts, indices) =
-            build_zoom_path_mesh(&inner, &outer, 0.0, [0.0, 0.9, 1.0, 0.85], [1.0, 0.6, 0.1, 0.85]);
+        let (verts, indices) = build_zoom_path_mesh(&inner, &outer, 0.0, [0.0, 0.9, 1.0, 0.85], [1.0, 0.6, 0.1, 0.85]);
         assert!(!verts.is_empty());
         assert!(!indices.is_empty());
         assert_eq!(indices.len() % 3, 0);
@@ -290,8 +289,7 @@ mod tests {
     #[test]
     fn zoom_path_has_one_segment_per_spoke() {
         let (inner, outer) = ring_pair();
-        let (verts, _) =
-            build_zoom_path_mesh(&inner, &outer, 0.0, [0.0, 0.9, 1.0, 0.85], [1.0, 0.6, 0.1, 0.85]);
+        let (verts, _) = build_zoom_path_mesh(&inner, &outer, 0.0, [0.0, 0.9, 1.0, 0.85], [1.0, 0.6, 0.1, 0.85]);
         // Each spoke is one gradient segment = 2 quads = 8 vertices.
         assert_eq!(verts.len(), SPOKE_COUNT * 8);
     }
@@ -299,8 +297,7 @@ mod tests {
     #[test]
     fn zoom_path_endpoints_lie_on_both_ellipses() {
         let (inner, outer) = ring_pair();
-        let (verts, _) =
-            build_zoom_path_mesh(&inner, &outer, 0.0, [0.0, 0.9, 1.0, 0.85], [1.0, 0.6, 0.1, 0.85]);
+        let (verts, _) = build_zoom_path_mesh(&inner, &outer, 0.0, [0.0, 0.9, 1.0, 0.85], [1.0, 0.6, 0.1, 0.85]);
         let on_ellipse = |c: &CameraRing, p: &[f32; 3]| {
             let dx = (p[0] - c.pos_center.x) / c.semi_axes.x;
             let dz = (p[2] - c.pos_center.z) / c.semi_axes.y;
@@ -316,8 +313,7 @@ mod tests {
     fn zoom_path_endpoints_respect_waterline() {
         let (inner, outer) = ring_pair();
         let dy = 0.5_f32;
-        let (verts, _) =
-            build_zoom_path_mesh(&inner, &outer, dy, [0.0, 0.9, 1.0, 0.85], [1.0, 0.6, 0.1, 0.85]);
+        let (verts, _) = build_zoom_path_mesh(&inner, &outer, dy, [0.0, 0.9, 1.0, 0.85], [1.0, 0.6, 0.1, 0.85]);
         let on_ellipse = |c: &CameraRing, p: &[f32; 3]| {
             let dx = (p[0] - c.pos_center.x) / c.semi_axes.x;
             let dz = (p[2] - c.pos_center.z) / c.semi_axes.y;

@@ -66,7 +66,13 @@ impl CameraPerspective {
 
     /// Resolve the ring and return model-space eye, ring center, and the
     /// horizontal look unit `h` for the current projection mode.
-    fn eye_center_h(&self, traj: &CameraTrajectory, fov_blend: f32, height: f32, waterline_dy: f32) -> (Vec3, Vec3, Vec3) {
+    fn eye_center_h(
+        &self,
+        traj: &CameraTrajectory,
+        fov_blend: f32,
+        height: f32,
+        waterline_dy: f32,
+    ) -> (Vec3, Vec3, Vec3) {
         let inner = traj.resolve(fov_blend, height);
         let ring = match traj.resolve_outer(fov_blend, height) {
             Some(outer) => lerp_ring(&inner, &outer, self.zoom),
@@ -102,7 +108,13 @@ impl CameraPerspective {
     /// Cap `pitch` per frame so the water aim point can never come nearer than
     /// the ship centerline along the look direction (never onto the camera's
     /// side of the hull). `.max(PITCH_MIN)` guards an inverted clamp range.
-    pub(crate) fn clamp_pitch_to_far_side(&mut self, traj: &CameraTrajectory, fov_blend: f32, height: f32, waterline_dy: f32) {
+    pub(crate) fn clamp_pitch_to_far_side(
+        &mut self,
+        traj: &CameraTrajectory,
+        fov_blend: f32,
+        height: f32,
+        waterline_dy: f32,
+    ) {
         let (eye, center, h) = self.eye_center_h(traj, fov_blend, height, waterline_dy);
         let d_center = (center.x - eye.x) * h.x + (center.z - eye.z) * h.z;
         let pitch_max = if d_center > 1e-3 { (eye.y / d_center).atan() } else { PITCH_MAX };
@@ -169,7 +181,8 @@ mod tests {
 
     #[test]
     fn clamp_pitch_to_far_side_caps_high_pitch() {
-        let mut p = CameraPerspective { yaw: 0.0, pitch: 1.3, look_mode: LookMode::ThroughCenter, ..Default::default() };
+        let mut p =
+            CameraPerspective { yaw: 0.0, pitch: 1.3, look_mode: LookMode::ThroughCenter, ..Default::default() };
         p.clamp_pitch_to_far_side(&circular_traj(), 0.0, 0.0, 0.0);
         let expected = (2.0_f32 / 8.0).atan();
         assert!((p.pitch - expected).abs() < 1e-4, "pitch={} expected={}", p.pitch, expected);
@@ -184,7 +197,8 @@ mod tests {
             ignore_height_multiplier: true,
             outer: None,
         };
-        let mut p = CameraPerspective { yaw: 0.0, pitch: 0.5, look_mode: LookMode::ThroughCenter, ..Default::default() };
+        let mut p =
+            CameraPerspective { yaw: 0.0, pitch: 0.5, look_mode: LookMode::ThroughCenter, ..Default::default() };
         p.clamp_pitch_to_far_side(&traj, 0.0, 0.0, 0.0);
         assert!((p.pitch - 0.03).abs() < 1e-4, "pitch={}", p.pitch);
     }

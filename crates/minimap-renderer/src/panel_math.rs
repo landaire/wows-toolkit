@@ -16,7 +16,12 @@ pub struct SilhouetteRegions {
     pub healable_dim: f32,
 }
 
-pub fn silhouette_regions(hp_current: f32, hp_healable: f32, hp_healable_per_charge: f32, hp_max: f32) -> SilhouetteRegions {
+pub fn silhouette_regions(
+    hp_current: f32,
+    hp_healable: f32,
+    hp_healable_per_charge: f32,
+    hp_max: f32,
+) -> SilhouetteRegions {
     if hp_max <= 0.0 {
         return SilhouetteRegions { colored: 0.0, healable_bright: 0.0, healable_dim: 0.0 };
     }

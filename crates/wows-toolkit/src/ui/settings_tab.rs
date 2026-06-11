@@ -9,8 +9,8 @@ use rust_i18n::t;
 
 use crate::app::ToolkitTabViewer;
 use crate::data::settings::AppPreferences;
-use crate::tab_state::GameDataCacheStats;
 use crate::icons;
+use crate::tab_state::GameDataCacheStats;
 use crate::task::DataExportSettings;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::task::ReplayExportFormat;

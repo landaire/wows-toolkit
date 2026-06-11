@@ -119,7 +119,10 @@ impl NetworkingThread {
                     octocrab::initialise(client);
                 }
                 Err(e) => {
-                    tracing::warn!("failed to configure GitHub client timeouts: {}", crate::util::http::error_chain(&e));
+                    tracing::warn!(
+                        "failed to configure GitHub client timeouts: {}",
+                        crate::util::http::error_chain(&e)
+                    );
                 }
             }
         });
@@ -239,9 +242,7 @@ impl NetworkingThread {
 
                     Ok(Some((data, latest_commit)))
                 }
-                Err(e) => {
-                    Err(format!("failed to fetch constants from GitHub: {}", crate::util::http::error_chain(&e)))
-                }
+                Err(e) => Err(format!("failed to fetch constants from GitHub: {}", crate::util::http::error_chain(&e))),
             }
         });
 

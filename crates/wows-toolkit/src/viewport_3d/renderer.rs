@@ -932,16 +932,11 @@ impl Viewport3D {
             params,
         };
 
-        let model_unlit_uniforms = Uniforms {
-            light_dir: [light_dir[0], light_dir[1], light_dir[2], 0.0],
-            ..uniforms
-        };
+        let model_unlit_uniforms = Uniforms { light_dir: [light_dir[0], light_dir[1], light_dir[2], 0.0], ..uniforms };
 
-        if let (Some(ub), Some(wub), Some(mub)) = (
-            self.uniform_buffer.as_ref(),
-            self.world_uniform_buffer.as_ref(),
-            self.model_unlit_uniform_buffer.as_ref(),
-        ) {
+        if let (Some(ub), Some(wub), Some(mub)) =
+            (self.uniform_buffer.as_ref(), self.world_uniform_buffer.as_ref(), self.model_unlit_uniform_buffer.as_ref())
+        {
             queue.write_buffer(ub, 0, bytemuck::bytes_of(&uniforms));
             queue.write_buffer(wub, 0, bytemuck::bytes_of(&world_uniforms));
             queue.write_buffer(mub, 0, bytemuck::bytes_of(&model_unlit_uniforms));

@@ -1233,9 +1233,7 @@ pub(crate) fn upload_armor_to_viewport(
             // Zoom-path spokes: inner-to-outer connectors trace the camera's zoom path (outer-orbit modes only).
             if show_zoom_path {
                 use crate::armor_viewer::camera_ellipse::build_zoom_path_mesh;
-                for (enabled, f, alpha) in
-                    [(zoom_path_regular, fov, 0.85_f32), (zoom_path_max, 1.0_f32, 0.5_f32)]
-                {
+                for (enabled, f, alpha) in [(zoom_path_regular, fov, 0.85_f32), (zoom_path_max, 1.0_f32, 0.5_f32)] {
                     if !enabled {
                         continue;
                     }
@@ -1552,7 +1550,10 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         .id(display_popup_id)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
-                            if ui.button(wt_translations::icon_t(icons::ARROW_SQUARE_OUT, &t!("ui.armor.pop_out"))).clicked() {
+                            if ui
+                                .button(wt_translations::icon_t(icons::ARROW_SQUARE_OUT, &t!("ui.armor.pop_out")))
+                                .clicked()
+                            {
                                 pane.display_window_open = true;
                                 ui.close();
                             }
@@ -4810,10 +4811,7 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
             .iter()
             .any(|(name, traj)| *name == pane.camera_ellipse_mode && traj.outer.is_some())
         {
-            if ui
-                .checkbox(&mut pane.show_camera_zoom_path, t!("ui.armor.show_camera_zoom_path").as_ref())
-                .changed()
-            {
+            if ui.checkbox(&mut pane.show_camera_zoom_path, t!("ui.armor.show_camera_zoom_path").as_ref()).changed() {
                 combo_changed = true;
             }
             if pane.show_camera_zoom_path {
@@ -4824,10 +4822,7 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
                     {
                         combo_changed = true;
                     }
-                    if ui
-                        .checkbox(&mut pane.zoom_path_max_fov, t!("ui.armor.zoom_path_max_fov").as_ref())
-                        .changed()
-                    {
+                    if ui.checkbox(&mut pane.zoom_path_max_fov, t!("ui.armor.zoom_path_max_fov").as_ref()).changed() {
                         combo_changed = true;
                     }
                 });
@@ -4861,7 +4856,11 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
                 use crate::armor_viewer::camera_perspective::LookMode;
                 ui.label(t!("ui.armor.perspective_projection").as_ref());
                 if ui
-                    .selectable_value(&mut pane.perspective.look_mode, LookMode::Game, t!("ui.armor.perspective_proj_game").as_ref())
+                    .selectable_value(
+                        &mut pane.perspective.look_mode,
+                        LookMode::Game,
+                        t!("ui.armor.perspective_proj_game").as_ref(),
+                    )
                     .changed()
                 {
                     combo_changed = true;
@@ -4915,27 +4914,48 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
             }
         });
         let l = &mut pane.lighting;
-        if ui.add(egui::Slider::new(&mut l.flat_intensity, 0.0..=1.5).text(t!("ui.armor.lighting_flat").as_ref())).changed() {
+        if ui
+            .add(egui::Slider::new(&mut l.flat_intensity, 0.0..=1.5).text(t!("ui.armor.lighting_flat").as_ref()))
+            .changed()
+        {
             lighting_changed = true;
         }
-        if ui.add(egui::Slider::new(&mut l.key_intensity, 0.0..=1.5).text(t!("ui.armor.lighting_intensity").as_ref())).changed() {
+        if ui
+            .add(egui::Slider::new(&mut l.key_intensity, 0.0..=1.5).text(t!("ui.armor.lighting_intensity").as_ref()))
+            .changed()
+        {
             lighting_changed = true;
         }
-        if ui.add(egui::Slider::new(&mut l.azimuth_deg, 0.0..=360.0).text(t!("ui.armor.lighting_azimuth").as_ref())).changed() {
+        if ui
+            .add(egui::Slider::new(&mut l.azimuth_deg, 0.0..=360.0).text(t!("ui.armor.lighting_azimuth").as_ref()))
+            .changed()
+        {
             lighting_changed = true;
             light_moved = true;
         }
-        if ui.add(egui::Slider::new(&mut l.elevation_deg, -90.0..=90.0).text(t!("ui.armor.lighting_elevation").as_ref())).changed() {
+        if ui
+            .add(egui::Slider::new(&mut l.elevation_deg, -90.0..=90.0).text(t!("ui.armor.lighting_elevation").as_ref()))
+            .changed()
+        {
             lighting_changed = true;
             light_moved = true;
         }
-        if ui.add(egui::Slider::new(&mut l.rim_strength, 0.0..=1.0).text(t!("ui.armor.lighting_rim").as_ref())).changed() {
+        if ui
+            .add(egui::Slider::new(&mut l.rim_strength, 0.0..=1.0).text(t!("ui.armor.lighting_rim").as_ref()))
+            .changed()
+        {
             lighting_changed = true;
         }
-        if ui.add(egui::Slider::new(&mut l.specular_strength, 0.0..=1.0).text(t!("ui.armor.lighting_specular").as_ref())).changed() {
+        if ui
+            .add(egui::Slider::new(&mut l.specular_strength, 0.0..=1.0).text(t!("ui.armor.lighting_specular").as_ref()))
+            .changed()
+        {
             lighting_changed = true;
         }
-        if ui.add(egui::Slider::new(&mut l.shininess, 1.0..=128.0).text(t!("ui.armor.lighting_shininess").as_ref())).changed() {
+        if ui
+            .add(egui::Slider::new(&mut l.shininess, 1.0..=128.0).text(t!("ui.armor.lighting_shininess").as_ref()))
+            .changed()
+        {
             lighting_changed = true;
         }
         ui.horizontal(|ui| {
@@ -5060,9 +5080,8 @@ fn apply_perspective_to_viewport(pane: &mut ArmorPane, device: &wgpu::Device) ->
     let far = ((max - min).norm() * 8.0).max(10.0);
 
     let cam = &mut pane.viewport.camera;
-    let changed = (cam.eye_position() - eye).norm() > 1e-4
-        || (cam.target - target).norm() > 1e-4
-        || (cam.fov - fov).abs() > 1e-5;
+    let changed =
+        (cam.eye_position() - eye).norm() > 1e-4 || (cam.target - target).norm() > 1e-4 || (cam.fov - fov).abs() > 1e-5;
     cam.set_eye_and_target(eye, target);
     cam.fov = fov;
     cam.near = 0.05;

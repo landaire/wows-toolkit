@@ -1525,14 +1525,10 @@ pub fn draw_command_to_shapes(
 
                 // Charcoal silhouette base (unhealable lost HP shows through)
                 let mut base_mesh = egui::Mesh::with_texture(sil_tex.id());
-                base_mesh.add_rect_with_uv(
-                    sil_rect,
-                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    {
-                        let [r, g, b] = wows_minimap_renderer::draw_command::SILHOUETTE_BASE_RGB;
-                        Color32::from_rgb(r, g, b)
-                    },
-                );
+                base_mesh.add_rect_with_uv(sil_rect, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), {
+                    let [r, g, b] = wows_minimap_renderer::draw_command::SILHOUETTE_BASE_RGB;
+                    Color32::from_rgb(r, g, b)
+                });
                 shapes.push(Shape::Mesh(base_mesh.into()));
 
                 let regions = wows_minimap_renderer::panel_math::silhouette_regions(
@@ -1566,8 +1562,10 @@ pub fn draw_command_to_shapes(
                     let mut draw_region = |start: f32, w_frac: f32, color: Color32| {
                         let region_w = fit_w * w_frac;
                         if region_w > 0.0 {
-                            let clip_rect =
-                                Rect::from_min_size(Pos2::new(sil_x + fit_w * start, sil_y), Vec2::new(region_w, fit_h));
+                            let clip_rect = Rect::from_min_size(
+                                Pos2::new(sil_x + fit_w * start, sil_y),
+                                Vec2::new(region_w, fit_h),
+                            );
                             let mut region_mesh = egui::Mesh::with_texture(sil_tex.id());
                             region_mesh.add_rect_with_uv(
                                 clip_rect,
@@ -2266,7 +2264,10 @@ pub fn draw_command_to_shapes(
                             .clamp(0.0, hp_bar_w - fill_w);
                         if bright_w > 0.0 {
                             shapes.push(Shape::rect_filled(
-                                Rect::from_min_size(Pos2::new(inner_x + fill_w, hp_bar_y), Vec2::new(bright_w, hp_bar_h)),
+                                Rect::from_min_size(
+                                    Pos2::new(inner_x + fill_w, hp_bar_y),
+                                    Vec2::new(bright_w, hp_bar_h),
+                                ),
                                 CornerRadius::same(1),
                                 bright,
                             ));

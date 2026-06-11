@@ -141,12 +141,20 @@ impl LightingSettings {
 
     /// Flat color premultiplied by flat intensity (ready for the shader).
     pub fn flat_rgb(&self) -> [f32; 3] {
-        [self.flat_color[0] * self.flat_intensity, self.flat_color[1] * self.flat_intensity, self.flat_color[2] * self.flat_intensity]
+        [
+            self.flat_color[0] * self.flat_intensity,
+            self.flat_color[1] * self.flat_intensity,
+            self.flat_color[2] * self.flat_intensity,
+        ]
     }
 
     /// Key color premultiplied by key intensity (ready for the shader).
     pub fn key_rgb(&self) -> [f32; 3] {
-        [self.key_color[0] * self.key_intensity, self.key_color[1] * self.key_intensity, self.key_color[2] * self.key_intensity]
+        [
+            self.key_color[0] * self.key_intensity,
+            self.key_color[1] * self.key_intensity,
+            self.key_color[2] * self.key_intensity,
+        ]
     }
 }
 

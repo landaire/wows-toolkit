@@ -483,7 +483,8 @@ fn derive_divisions(world: &mut World) {
     // Snapshot (entity, team, prebattle_id) for every vehicle whose player is in a division.
     let mut members: Vec<(bevy_ecs::entity::Entity, i64, i64)> = Vec::new();
     {
-        let mut query = world.query_filtered::<(bevy_ecs::entity::Entity, &PlayerLink), bevy_ecs::query::With<Vehicle>>();
+        let mut query =
+            world.query_filtered::<(bevy_ecs::entity::Entity, &PlayerLink), bevy_ecs::query::With<Vehicle>>();
         for (entity, link) in query.iter(world) {
             let state = link.0.initial_state();
             let prebattle_id = state.division_id();
