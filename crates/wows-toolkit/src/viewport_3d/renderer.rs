@@ -60,7 +60,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 }
 
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     // Sample texture and multiply with vertex color.
     // Non-textured meshes bind a 1x1 white fallback, so this is a passthrough.
     let tex_color = textureSample(diffuse_texture, diffuse_sampler, in.uv);
@@ -70,7 +70,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (uniforms.light_dir.w > 0.5) {
         // Hull lighting: half-Lambert key over a flat ambient floor, plus rim and specular.
         // Half-Lambert keeps the far side lit (never fully black) so all angles stay visible.
-        let N = normalize(in.normal_vs);
+        // The hull is double-sided; flip the normal on back faces so both sides shade
+        // consistently and the see-through hull does not show a hard front/back seam.
+        var N = normalize(in.normal_vs);
+        if (!front_facing) {
+            N = -N;
+        }
         let V = normalize(-in.position_vs);
         let L = normalize(uniforms.light_dir.xyz);
         let half_lambert = dot(N, L) * 0.5 + 0.5;
