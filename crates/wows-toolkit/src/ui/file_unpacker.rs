@@ -1260,6 +1260,30 @@ fn build_folder_tree(vfs: &VfsPath, path_prefix: &str) -> Vec<FolderTreeNode> {
         .collect()
 }
 
+/// Build the flat (path, vfs_path) list the file browser renders, by walking the
+/// VFS. Done lazily on first browser open: for a full install this list is
+/// ~85 MiB / ~1.1M allocations and the file browser is its only consumer, so it
+/// is not worth holding from startup. Paths carry a leading slash to match the
+/// previous eager construction (idx::build_file_tree keys).
+fn build_file_list(vfs: &VfsPath) -> Vec<(Arc<PathBuf>, VfsPath)> {
+    fn collect(dir: &VfsPath, prefix: &str, out: &mut Vec<(Arc<PathBuf>, VfsPath)>) {
+        let Ok(entries) = dir.read_dir() else {
+            return;
+        };
+        for entry in entries {
+            let path = format!("{prefix}/{}", entry.filename());
+            match entry.is_dir() {
+                Ok(true) => collect(&entry, &path, out),
+                Ok(false) => out.push((Arc::new(PathBuf::from(&path)), entry)),
+                Err(_) => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    collect(vfs, "", &mut out);
+    out
+}
+
 /// Render the cached folder tree into the egui tree view builder.
 fn render_folder_tree(
     builder: &mut egui_ltreeview::TreeViewBuilder<'_, egui::Id>,
@@ -1675,7 +1699,7 @@ impl ToolkitTabViewer<'_> {
             {
                 browser.cached_folder_tree = Some(build_folder_tree(&wows_data.vfs, ""));
                 browser.vfs = Some(wows_data.vfs.clone());
-                browser.files = Some(wows_data.filtered_files.clone());
+                browser.files = Some(build_file_list(&wows_data.vfs));
             }
         }
     }

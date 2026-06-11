@@ -26,7 +26,6 @@ use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
 use wowsunpack::data::Version;
 use wowsunpack::data::idx;
-use wowsunpack::data::idx::VfsEntry;
 use wowsunpack::data::idx_vfs::IdxVfs;
 use wowsunpack::data::wrappers::mmap::MmapPkgSource;
 use wowsunpack::game_data;
@@ -225,17 +224,6 @@ pub fn load_wows_data_for_build(
     let idx_vfs = IdxVfs::new(pkg_source, &idx_files);
     let vfs = VfsPath::new(idx_vfs);
 
-    // Build flat file list for the file browser
-    let file_map = idx::build_file_tree(&idx_files);
-    let filtered_files: Vec<(Arc<PathBuf>, VfsPath)> = file_map
-        .iter()
-        .filter(|(_, entry)| matches!(entry, VfsEntry::File { .. }))
-        .filter_map(|(path_str, _)| {
-            let vfs_path = vfs.join(path_str).ok()?;
-            Some((Arc::new(PathBuf::from(path_str)), vfs_path))
-        })
-        .collect();
-
     // Load translations
     // WoWs locale codes use underscores (e.g. "zh_tw", "pt_br") but BCP 47
     // language tags use hyphens. Normalize before parsing.
@@ -294,7 +282,6 @@ pub fn load_wows_data_for_build(
     Ok(WorldOfWarshipsData {
         game_metadata: metadata_provider,
         vfs,
-        filtered_files,
         patch_version: game_patch,
         full_version,
         build_number: build,
@@ -576,7 +563,6 @@ pub fn load_wows_data_from_dump(
     Ok(WorldOfWarshipsData {
         game_metadata: metadata_provider,
         vfs,
-        filtered_files: Vec::new(), // No file browser for dump-based data
         patch_version: build as usize,
         full_version,
         build_number: build,

@@ -395,8 +395,6 @@ impl WoWsDataMap {
 pub struct WorldOfWarshipsData {
     pub vfs: VfsPath,
 
-    pub filtered_files: Vec<(Arc<PathBuf>, VfsPath)>,
-
     /// We may fail to load game params
     pub game_metadata: Option<Arc<GameMetadataProvider>>,
 
@@ -555,7 +553,7 @@ impl WorldOfWarshipsData {
     }
 
     /// Rebuild this data from scratch after constants have changed.
-    /// Retains: build_dir, replays_dir, game_metadata, pkg_loader, filtered_files, file_tree,
+    /// Retains: build_dir, replays_dir, game_metadata, pkg_loader, file_tree,
     /// full_version, patch_version, build_number.
     /// Regenerates everything else (icons, game_constants, replay_constants, etc.).
     /// Returns `false` if versioned constants could not be found on disk.
