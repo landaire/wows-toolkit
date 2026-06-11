@@ -4918,7 +4918,7 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
         if ui.add(egui::Slider::new(&mut l.flat_intensity, 0.0..=1.5).text("Flat (ambient)")).changed() {
             lighting_changed = true;
         }
-        if ui.add(egui::Slider::new(&mut l.key_intensity, 0.0..=1.5).text("Directional (key)")).changed() {
+        if ui.add(egui::Slider::new(&mut l.key_intensity, 0.0..=1.5).text("Light intensity")).changed() {
             lighting_changed = true;
         }
         if ui.add(egui::Slider::new(&mut l.azimuth_deg, 0.0..=360.0).text("Light azimuth")).changed() {
