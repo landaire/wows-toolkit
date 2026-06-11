@@ -82,8 +82,15 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @loca
         let H = normalize(L + V);
         let spec = pow(max(dot(N, H), 0.0), uniforms.params.w) * uniforms.params.z;
         let rim = pow(1.0 - max(dot(N, V), 0.0), uniforms.params.y) * uniforms.params.x;
-        let lighting = uniforms.flat_color.rgb + uniforms.key_color.rgb * half_lambert;
-        color = base_color.rgb * lighting + vec3<f32>(rim + spec, rim + spec, rim + spec);
+        // Fade the directional terms (key, rim, specular) as the surface becomes
+        // transparent. A see-through hull shows its near and far walls at once, and a
+        // directional light shades those two walls differently, forming a hard seam.
+        // Leaning on the seamless flat ambient term for transparent surfaces hides it;
+        // opaque geometry occludes its far wall via depth and keeps full directional.
+        let dir_factor = smoothstep(0.5, 1.0, base_color.a);
+        let directional = (rim + spec) * dir_factor;
+        let lighting = uniforms.flat_color.rgb + uniforms.key_color.rgb * half_lambert * dir_factor;
+        color = base_color.rgb * lighting + vec3<f32>(directional, directional, directional);
     }
 
     return vec4(color, base_color.a);
