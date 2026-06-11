@@ -1,9 +1,53 @@
 #![warn(clippy::all, rust_2018_idioms)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
+#[cfg(all(feature = "dhat-heap", not(target_arch = "wasm32")))]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
+#[cfg(feature = "dhat-heap")]
+static DHAT_PROFILER: std::sync::Mutex<Option<dhat::Profiler>> = std::sync::Mutex::new(None);
+
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
+    // Heap profiling. Controlled by env vars so shutdown strategy can be tuned
+    // without rebuilding:
+    //   DHAT_RUN_SECS   seconds before snapshotting (default 25)
+    //   DHAT_TRIM       backtrace depth to retain (default 16)
+    //   DHAT_EXIT       "1" => process::exit after drop; else idle so an external
+    //                   harness can confirm the file then kill the process
+    // Markers are appended to dhat-markers.log (the profiling build has no console
+    // on Windows) so we can see exactly how far shutdown gets.
+    #[cfg(feature = "dhat-heap")]
+    {
+        fn dhat_marker(msg: &str) {
+            use std::io::Write as _;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("dhat-markers.log") {
+                let _ = writeln!(f, "{msg}");
+            }
+        }
+        let trim = std::env::var("DHAT_TRIM").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(16);
+        let profiler = dhat::Profiler::builder().trim_backtraces(Some(trim)).build();
+        *DHAT_PROFILER.lock().unwrap() = Some(profiler);
+        dhat_marker("profiler_started");
+        let secs = std::env::var("DHAT_RUN_SECS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(25);
+        // Profiler::drop does not converge for this app (it allocates without
+        // bound while symbolizing a ~1 GiB live heap with other threads still
+        // running), so do not drop it. HeapStats::get gives the live/peak heap
+        // totals with no symbolization. Log periodically; the harness kills us.
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(secs));
+            for round in 0.. {
+                let s = dhat::HeapStats::get();
+                dhat_marker(&format!(
+                    "heapstats round={round} curr_bytes={} curr_blocks={} max_bytes={} max_blocks={} total_bytes={} total_blocks={}",
+                    s.curr_bytes, s.curr_blocks, s.max_bytes, s.max_blocks, s.total_bytes, s.total_blocks
+                ));
+                std::thread::sleep(std::time::Duration::from_secs(3));
+            }
+        });
+    }
     use std::backtrace::Backtrace;
     use std::env;
     use std::io::Write;

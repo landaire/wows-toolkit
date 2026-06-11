@@ -120,6 +120,7 @@ tracing-subscriber = { workspace = true, features = [
     "time",
     "env-filter",
 ], optional = true }
+dhat = { version = "0.3", optional = true }
 
 [features]
 default = ["logging"]
@@ -127,3 +128,4 @@ shipbuilds_debugging = []
 mod_manager = ["dep:tar", "dep:scopeguard"]
 logging = ["dep:tracing-subscriber", "dep:tracing-appender"]
 panic_handler = []
+dhat-heap = ["dep:dhat"]
