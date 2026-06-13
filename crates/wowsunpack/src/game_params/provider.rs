@@ -1191,6 +1191,18 @@ impl GameMetadataProvider {
         let mut game_params_data = Vec::new();
         vfs.join("content/GameParams.data")?.open_file()?.read_to_end(&mut game_params_data)?;
 
+        let params = Self::params_from_data(game_params_data)?;
+
+        Self::from_params_with_vfs(params, vfs)
+    }
+
+    /// Decode a raw `GameParams.data` blob (zlib-compressed pickle) into the
+    /// parsed `Param` list, without needing a VFS. This is the shared core of
+    /// `from_vfs`: it runs `game_params_to_pickle`, unwraps the params dict
+    /// across the modern/old/list/tuple root shapes, and parses each entry via
+    /// `parse_single_param`. The resulting `Vec<Param>` is exactly what callers
+    /// serialize to the min CBOR consumed by downstream tools.
+    pub fn params_from_data(game_params_data: Vec<u8>) -> Result<Vec<Param>, GameDataError> {
         let pickled_params: Value = game_params_to_pickle(game_params_data)?;
 
         let params_dict = if let Some(params_dict) = pickled_params.dict_or_object_dict() {
@@ -1227,9 +1239,7 @@ impl GameMetadataProvider {
             })
             .collect::<Vec<Param>>();
 
-        let params = new_params;
-
-        Self::from_params_with_vfs(params, vfs)
+        Ok(new_params)
     }
 
     /// Parse a single param from pickled dict data. Panics on missing fields are
@@ -1350,7 +1360,14 @@ impl GameMetadataProvider {
                     excludes,
                 )))
             }
-            ParamType::Unit => Some(ParamData::Unit),
+            ParamType::Unit => {
+                let uc_type = param_data
+                    .get(&pk(keys::UC_TYPE))
+                    .and_then(|v| v.string_ref())
+                    .map(|s| s.inner().to_string())
+                    .filter(|s| !s.is_empty());
+                Some(ParamData::Unit(super::types::Unit::new(uc_type)))
+            }
             ParamType::Drop => {
                 let marker_name_active = param_data
                     .get(&pk("markerNameActive"))

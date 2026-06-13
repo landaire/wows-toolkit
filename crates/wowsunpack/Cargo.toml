@@ -108,6 +108,7 @@ bin = [
     "dep:regex",
     "dep:indicatif",
     "dep:thread_local",
+    "cbor",
     "models",
     "arc",
     "json",

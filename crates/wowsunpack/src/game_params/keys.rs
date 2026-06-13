@@ -16,6 +16,11 @@ pub const COMPONENTS: &str = "components";
 pub const UC_TYPE_HULL: &str = "_Hull";
 pub const UC_TYPE_ARTILLERY: &str = "_Artillery";
 pub const UC_TYPE_TORPEDOES: &str = "_Torpedoes";
+pub const UC_TYPE_ATBA: &str = "_ATBA";
+pub const UC_TYPE_AIR_DEFENSE: &str = "_AirDefense";
+pub const UC_TYPE_DIRECTORS: &str = "_Directors";
+pub const UC_TYPE_FINDERS: &str = "_Finders";
+pub const UC_TYPE_RADARS: &str = "_Radars";
 
 // Component type keys (inside "components" dict)
 pub const COMP_HULL: &str = "hull";
@@ -76,6 +81,36 @@ impl ComponentType {
             Self::Radars => "radars",
             Self::Torpedoes => "torpedoes",
         }
+    }
+
+    /// The raw `ucType` string a unit reports for this component type (e.g.
+    /// `"_Hull"`, `"_Artillery"`). This is the value carried by a unit/module
+    /// param's `ucType` field, distinct from the `components`-dict `key()`.
+    /// Comparison is case-insensitive on the suffix because GameParams is not
+    /// consistent in casing across versions (`_ATBA` vs `_Atba`).
+    pub fn uc_type(&self) -> &'static str {
+        match self {
+            Self::Hull => UC_TYPE_HULL,
+            Self::Artillery => UC_TYPE_ARTILLERY,
+            Self::Atba => UC_TYPE_ATBA,
+            Self::AirDefense => UC_TYPE_AIR_DEFENSE,
+            Self::Directors => UC_TYPE_DIRECTORS,
+            Self::Finders => UC_TYPE_FINDERS,
+            Self::Radars => UC_TYPE_RADARS,
+            Self::Torpedoes => UC_TYPE_TORPEDOES,
+        }
+    }
+
+    /// Parse a raw unit `ucType` string (e.g. `"_Hull"`, `"_Artillery"`) into a
+    /// `ComponentType`. Returns `None` for ucType values that have no matching
+    /// component variant (e.g. `"_Suo"` fire control, `"_Engine"`), which is the
+    /// caller's signal that the unit is not one of the modelled components. The
+    /// match is case-insensitive to tolerate cross-version casing differences.
+    pub fn from_uc_type(uc_type: &str) -> Option<ComponentType> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|ct| ct.uc_type().eq_ignore_ascii_case(uc_type))
     }
 }
 

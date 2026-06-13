@@ -157,6 +157,18 @@ enum Commands {
         #[clap(long, default_value = "")]
         id: String,
 
+        /// Read a standalone `GameParams.data` (zlib-compressed pickle) from this
+        /// path instead of the VFS / pkg dir. Lets you convert a raw dump without
+        /// a full game install.
+        #[clap(short, long)]
+        input: Option<PathBuf>,
+
+        /// Emit the minimal normalized `Vec<Param>` as CBOR (the blob downstream
+        /// tools consume) instead of the raw pickle JSON. `--ugly`, `--full`,
+        /// `--id`, and `--print-ids` have no effect in this mode.
+        #[clap(long)]
+        min: bool,
+
         #[clap(default_value = "GameParams.json")]
         out_file: PathBuf,
     },
@@ -766,12 +778,32 @@ fn run() -> Result<(), Report> {
                 }
             };
         }
-        Commands::GameParams { out_file, ugly, id, print_ids: ids, full } => {
-            let Some(vfs) = &vfs else {
-                bail!("Package file loader is unavailable. Check that the pkg_dir exists.");
+        Commands::GameParams { out_file, ugly, id, print_ids: ids, full, input, min } => {
+            // Source bytes from a standalone GameParams.data on disk, or the VFS.
+            let game_params_data = match &input {
+                Some(path) => fs::read(path).context("Failed to read GameParams.data input")?,
+                None => {
+                    let Some(vfs) = &vfs else {
+                        bail!(
+                            "Package file loader is unavailable. Check that the pkg_dir exists, or pass --input <GameParams.data>."
+                        );
+                    };
+                    read_game_params_bytes(vfs)?
+                }
             };
 
-            let pickle = load_game_params(vfs)?;
+            // Normalized minimal output: the CBOR Vec<Param> downstream tools use.
+            if min {
+                let params =
+                    wowsunpack::game_params::provider::GameMetadataProvider::params_from_data(game_params_data)
+                        .context("Failed to normalize GameParams")?;
+                let writer = BufWriter::new(File::create(&out_file)?);
+                ciborium::into_writer(&params, writer).context("Failed to serialize CBOR")?;
+                println!("MinGameParams CBOR ({} params) written to {out_file:?}", params.len());
+                return Ok(());
+            }
+
+            let pickle = game_params_to_pickle(game_params_data).context("Failed to deserialize GameParams")?;
 
             fn print_ids(params_dict: &BTreeMap<pickled::HashableValue, pickled::Value>) {
                 for key in params_dict.keys() {
@@ -1176,7 +1208,7 @@ fn value_to_dict(value: pickled::Value) -> Option<std::collections::BTreeMap<pic
     }
 }
 
-fn load_game_params(vfs: &VfsPath) -> Result<pickled::Value, Report> {
+fn read_game_params_bytes(vfs: &VfsPath) -> Result<Vec<u8>, Report> {
     let mut game_params_data: Vec<u8> = Vec::new();
     vfs.join("content/GameParams.data")
         .context("VFS path error")?
@@ -1185,7 +1217,11 @@ fn load_game_params(vfs: &VfsPath) -> Result<pickled::Value, Report> {
         .read_to_end(&mut game_params_data)
         .context("Failed to read GameParams")?;
 
-    let pickle = game_params_to_pickle(game_params_data).context("Failed to deserialize GameParams")?;
+    Ok(game_params_data)
+}
+
+fn load_game_params(vfs: &VfsPath) -> Result<pickled::Value, Report> {
+    let pickle = game_params_to_pickle(read_game_params_bytes(vfs)?).context("Failed to deserialize GameParams")?;
 
     Ok(pickle)
 }

@@ -709,6 +709,14 @@ impl Param {
             _ => None,
         }
     }
+
+    /// Returns the Unit data if this param is a Unit (ship module) type.
+    pub fn unit(&self) -> Option<&Unit> {
+        match &self.data {
+            ParamData::Unit(u) => Some(u),
+            _ => None,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
@@ -2427,6 +2435,30 @@ impl Modernization {
     }
 }
 
+/// A ship module/component param (GameParams `Unit` type), e.g. a hull, main
+/// battery, torpedo, or fire-control module. Carries the raw `ucType` string the
+/// param reports, which names the concrete component slot the module occupies.
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct Unit {
+    /// Raw `ucType` string from GameParams (e.g. `"_Hull"`, `"_Torpedoes"`,
+    /// `"_Suo"`). `None` when the param carries no (or an empty) `ucType`.
+    uc_type: Option<String>,
+}
+
+impl Unit {
+    pub fn new(uc_type: Option<String>) -> Self {
+        Self { uc_type }
+    }
+
+    /// Raw `ucType` string from GameParams (e.g. `"_Hull"`, `"_Torpedoes"`,
+    /// `"_Suo"`). `None` when the unit has no `ucType` field.
+    pub fn uc_type(&self) -> Option<&str> {
+        self.uc_type.as_deref()
+    }
+}
+
 /// Number of modernization (upgrade) slots a ship has: max applicable `slot` + 1.
 /// Returns 0 when `ship` is not a vehicle or no slotted modernization applies.
 pub fn modernization_slot_count(params: &[crate::Rc<Param>], ship: &Param) -> usize {
@@ -2540,7 +2572,7 @@ pub enum ParamData {
     Achievement(Achievement),
     Modernization(Modernization),
     Exterior(Exterior),
-    Unit,
+    Unit(Unit),
     Aircraft(Aircraft),
     Projectile(Projectile),
     Drop(BuffDrop),
@@ -2558,7 +2590,7 @@ variant_accessors!(ParamData {
     tuple Projectile(Projectile) => projectile;
     tuple Drop(BuffDrop) => drop;
     tuple Building(Building) => building;
-    unit Unit => unit;
+    tuple Unit(Unit) => unit;
 });
 
 pub trait GameParamProvider {
@@ -2710,7 +2742,7 @@ mod tests {
             name: name.to_string(),
             species: None,
             nation: String::new(),
-            data: ParamData::Unit,
+            data: ParamData::Unit(Unit::new(None)),
         }
     }
 
