@@ -28,16 +28,16 @@ name = "wows-toolkit"
 
 [workspace.dependencies]
 # Internal crates (versions synced by scripts/bump-versions.sh)
-wows-core = { version = "0.3.0", path = "crates/wows-core", default-features = false }
-wowsunpack = { version = "0.35.0", path = "crates/wowsunpack", default-features = false }
-wows_replays = { version = "0.36.0", path = "crates/wows-replays", default-features = false }
-wows_minimap_renderer = { version = "0.29.0", path = "crates/minimap-renderer", default-features = false }
-wows-battle-world = { version = "0.3.0", path = "crates/wows-battle-world", default-features = false }
-wows-data-mgr = { version = "0.11.0", path = "crates/wows-data-mgr", default-features = false }
-wows-replay-insights = { version = "0.3.0", path = "crates/wows-replay-insights", default-features = false }
+wows-core = { version = "0.4.0", path = "crates/wows-core", default-features = false }
+wowsunpack = { version = "0.36.0", path = "crates/wowsunpack", default-features = false }
+wows_replays = { version = "0.37.0", path = "crates/wows-replays", default-features = false }
+wows_minimap_renderer = { version = "0.30.0", path = "crates/minimap-renderer", default-features = false }
+wows-battle-world = { version = "0.4.0", path = "crates/wows-battle-world", default-features = false }
+wows-data-mgr = { version = "0.12.0", path = "crates/wows-data-mgr", default-features = false }
+wows-replay-insights = { version = "0.4.0", path = "crates/wows-replay-insights", default-features = false }
 wt-collab-protocol = { path = "crates/wt-collab-protocol" }
 wt-collab-egui = { path = "crates/wt-collab-egui" }
-wt-translations = { version = "0.6.0", path = "crates/wt-translations" }
+wt-translations = { version = "0.7.0", path = "crates/wt-translations" }
 # Shared UI dependencies
 egui = "0.34.1"
 egui-phosphor = "0.12"
