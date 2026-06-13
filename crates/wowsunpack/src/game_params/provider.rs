@@ -40,7 +40,6 @@ use crate::Rc;
 use crate::data::DataFileWithCallback;
 use crate::data::ResourceLoader;
 use crate::error::GameDataError;
-#[cfg(feature = "vfs")]
 use crate::game_params::convert::game_params_to_pickle;
 use crate::game_types::GameParamId;
 use crate::game_types::Vec2;
