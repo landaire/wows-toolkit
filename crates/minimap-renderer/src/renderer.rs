@@ -48,6 +48,7 @@ use crate::draw_command::BuildingRelation;
 use crate::draw_command::ChatEntry;
 use crate::draw_command::ConsumableAvailability;
 use crate::draw_command::DamageBreakdownEntry;
+use crate::draw_command::DetectionPulse;
 use crate::draw_command::DrawCommand;
 use crate::draw_command::FontHint;
 use crate::draw_command::KillFeedEntry;
@@ -1722,9 +1723,21 @@ impl<'a> MinimapRenderer<'a> {
                 {
                     continue;
                 }
-                // Skip ships not currently visible on the minimap
+                // Keep an active radar/hydro bubble drawn for its full duration even
+                // after the ship blinks out, using its last known position. Other
+                // consumables still require the ship to be visible.
+                let has_active_detection = consumables.iter().any(|active| {
+                    let still_active = clock.seconds() < active.activated_at.seconds() + active.duration;
+                    let past_start = clock.seconds() >= active.activated_at.seconds();
+                    still_active
+                        && past_start
+                        && matches!(
+                            active.consumable.known(),
+                            Some(Consumable::Radar | Consumable::HydroacousticSearch | Consumable::Hydrophone)
+                        )
+                });
                 let visible = minimap_positions.get(entity_id).map(|m| m.visible).unwrap_or(false);
-                if !visible {
+                if !visible && !has_active_detection {
                     continue;
                 }
                 // Get ship position (prefer world position, fall back to minimap)
@@ -1767,12 +1780,21 @@ impl<'a> MinimapRenderer<'a> {
                             let space_size = map_info.space_size as f32;
                             let px_radius = (radius.value() / 30.0 / space_size * MINIMAP_SIZE as f32) as i32;
                             let color = consumable_radius_color(&active.consumable, is_friendly);
+                            // Flag detection consumables the instant they light up.
+                            let pulse = match active.consumable.known() {
+                                Some(Consumable::Radar) => Some(DetectionPulse::Radar),
+                                Some(Consumable::HydroacousticSearch | Consumable::Hydrophone) => {
+                                    Some(DetectionPulse::Hydro)
+                                }
+                                _ => None,
+                            };
                             commands.push(DrawCommand::ConsumableRadius {
                                 entity_id: *entity_id,
                                 pos,
                                 radius_px: px_radius,
                                 color,
                                 alpha: 0.15,
+                                pulse,
                             });
                         }
                     }
