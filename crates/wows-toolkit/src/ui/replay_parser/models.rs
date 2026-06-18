@@ -17,6 +17,23 @@ use wowsunpack::game_params::types::Species;
 use crate::data::wows_data::GameAsset;
 use crate::data::wows_data::WorldOfWarshipsData;
 
+/// Reproduce the old "static description, else generated-from-modifiers" rule
+/// against a `ParamDescription`. The generated fallback is built from
+/// `Formatted` lines only, matching `generated_param_description` (which drops
+/// modifiers with no settings-table entry). Unresolved lines are excluded.
+fn static_or_generated(d: &wowsunpack::game_params::describe::ParamDescription) -> Option<String> {
+    use wowsunpack::game_params::describe::ModifierResolution;
+    d.description.clone().or_else(|| {
+        let lines: Vec<&str> = d
+            .modifier_descriptions
+            .iter()
+            .filter(|m| m.resolution == ModifierResolution::Formatted)
+            .map(|m| m.text.as_str())
+            .collect();
+        (!lines.is_empty()).then(|| lines.join("\n"))
+    })
+}
+
 /// Returns the ship class icon for a given species.
 pub fn ship_class_icon_from_species(species: Species, wows_data: &WorldOfWarshipsData) -> Option<Arc<GameAsset>> {
     wows_data.ship_icons.get(&species).cloned()
@@ -121,17 +138,17 @@ impl TranslatedBuild {
                     else {
                         continue;
                     };
+                    use wowsunpack::game_params::describe::{Describable, DescribeContext};
                     let game_params_name = param.name().to_string();
-                    let (name, description) =
-                        wowsunpack::game_params::translations::translate_module(&game_params_name, metadata_provider);
-                    let description = description.or_else(|| {
-                        wowsunpack::game_params::translations::generated_param_description(
-                            &param,
-                            species,
-                            metadata_provider,
-                            version.build,
-                        )
-                    });
+                    let ctx = DescribeContext {
+                        resource_loader: metadata_provider,
+                        version,
+                        species: Some(species),
+                        param_name: None,
+                    };
+                    let described = param.describe(&ctx);
+                    let name = described.name.clone();
+                    let description = static_or_generated(&described);
                     let module = TranslatedModule { name, description, game_params_name };
                     match param.modernization().and_then(|m| m.slot()) {
                         Some(i) if (i as usize) < slots.len() => slots[i as usize] = Some(module),
@@ -151,17 +168,17 @@ impl TranslatedBuild {
                     )
                 })
                 .map(|param| {
+                    use wowsunpack::game_params::describe::{Describable, DescribeContext};
                     let game_params_name = param.name().to_string();
-                    let (name, description) =
-                        wowsunpack::game_params::translations::translate_exterior(&param, metadata_provider);
-                    let description = description.or_else(|| {
-                        wowsunpack::game_params::translations::generated_param_description(
-                            &param,
-                            species,
-                            metadata_provider,
-                            version.build,
-                        )
-                    });
+                    let ctx = DescribeContext {
+                        resource_loader: metadata_provider,
+                        version,
+                        species: Some(species),
+                        param_name: None,
+                    };
+                    let described = param.describe(&ctx);
+                    let name = described.name.clone();
+                    let description = static_or_generated(&described);
                     TranslatedModule { name, description, game_params_name }
                 })
                 .collect(),
@@ -170,12 +187,17 @@ impl TranslatedBuild {
                 .iter()
                 .filter(|id| id.raw() != 0)
                 .filter_map(|id| {
-                    let game_params_name =
-                        <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?
-                            .name()
-                            .to_string();
-                    let name =
-                        wowsunpack::game_params::translations::translate_unit(&game_params_name, metadata_provider);
+                    use wowsunpack::game_params::describe::{Describable, DescribeContext};
+                    let param =
+                        <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?;
+                    let game_params_name = param.name().to_string();
+                    let ctx = DescribeContext {
+                        resource_loader: metadata_provider,
+                        version,
+                        species: Some(species),
+                        param_name: None,
+                    };
+                    let name = param.display_name(&ctx);
 
                     Some(TranslatedModule { name, description: None, game_params_name })
                 })
@@ -184,15 +206,17 @@ impl TranslatedBuild {
                 .abilities()
                 .iter()
                 .filter_map(|id| {
-                    let game_params_name =
-                        <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?
-                            .name()
-                            .to_string();
-
-                    let name = wowsunpack::game_params::translations::translate_consumable(
-                        &game_params_name,
-                        metadata_provider,
-                    );
+                    use wowsunpack::game_params::describe::{Describable, DescribeContext};
+                    let param =
+                        <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?;
+                    let game_params_name = param.name().to_string();
+                    let ctx = DescribeContext {
+                        resource_loader: metadata_provider,
+                        version,
+                        species: Some(species),
+                        param_name: None,
+                    };
+                    let name = param.display_name(&ctx);
 
                     Some(TranslatedAbility { name, game_params_name })
                 })
