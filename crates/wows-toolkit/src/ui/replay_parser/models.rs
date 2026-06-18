@@ -138,7 +138,7 @@ impl TranslatedBuild {
                     else {
                         continue;
                     };
-                    use wowsunpack::game_params::describe::{Describable, DescribeContext};
+                    use wowsunpack::game_params::describe::DescribeContext;
                     let game_params_name = param.name().to_string();
                     let ctx = DescribeContext {
                         resource_loader: metadata_provider,
@@ -168,7 +168,7 @@ impl TranslatedBuild {
                     )
                 })
                 .map(|param| {
-                    use wowsunpack::game_params::describe::{Describable, DescribeContext};
+                    use wowsunpack::game_params::describe::DescribeContext;
                     let game_params_name = param.name().to_string();
                     let ctx = DescribeContext {
                         resource_loader: metadata_provider,
@@ -187,7 +187,7 @@ impl TranslatedBuild {
                 .iter()
                 .filter(|id| id.raw() != 0)
                 .filter_map(|id| {
-                    use wowsunpack::game_params::describe::{Describable, DescribeContext};
+                    use wowsunpack::game_params::describe::DescribeContext;
                     let param =
                         <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?;
                     let game_params_name = param.name().to_string();
@@ -206,7 +206,7 @@ impl TranslatedBuild {
                 .abilities()
                 .iter()
                 .filter_map(|id| {
-                    use wowsunpack::game_params::describe::{Describable, DescribeContext};
+                    use wowsunpack::game_params::describe::DescribeContext;
                     let param =
                         <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?;
                     let game_params_name = param.name().to_string();

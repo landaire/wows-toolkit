@@ -1214,7 +1214,7 @@ fn equipment_display_for_param(
     species: wowsunpack::game_params::types::Species,
     version: &Version,
 ) -> super::EquipmentDisplay {
-    use wowsunpack::game_params::describe::{Describable, DescribeContext, ModifierResolution};
+    use wowsunpack::game_params::describe::{DescribeContext, ModifierResolution};
     let ctx = DescribeContext {
         resource_loader: metadata,
         version,

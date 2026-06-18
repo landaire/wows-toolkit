@@ -71,7 +71,7 @@ pub struct DescribeContext<'a> {
     pub param_name: Option<&'a str>,
 }
 
-pub trait Describable {
+pub(crate) trait Describable {
     fn display_name(&self, ctx: &DescribeContext) -> Option<String>;
     fn plain_description(&self, ctx: &DescribeContext) -> Option<String>;
     fn modifiers(&self, ctx: &DescribeContext) -> Vec<Modifier>;
@@ -293,6 +293,17 @@ impl Describable for Param {
             return a.describe(&child);
         }
         ParamDescription::default()
+    }
+}
+
+/// Public entry point to the description API. External callers reach `Describable`
+/// only through `Param`, so a correct `param_name` is always threaded.
+impl Param {
+    pub fn describe(&self, ctx: &DescribeContext) -> ParamDescription {
+        <Self as Describable>::describe(self, ctx)
+    }
+    pub fn display_name(&self, ctx: &DescribeContext) -> Option<String> {
+        <Self as Describable>::display_name(self, ctx)
     }
 }
 
