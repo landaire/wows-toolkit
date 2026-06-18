@@ -4,7 +4,7 @@
 
 use crate::data::{ResourceLoader, Version};
 use crate::game_params::modifier_settings_data::{format_modifier, modifier_setting};
-use crate::game_params::types::Species;
+use crate::game_params::types::{CrewSkillModifier, Modernization, Species};
 
 /// Per-species modifier values (the fixed six ship species the game models).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -165,6 +165,37 @@ fn species_or_default(species: Option<Species>) -> Species {
     species.unwrap_or(Species::Battleship)
 }
 
+/// Map the game's per-species modifier records into unified `Modifier`s.
+pub(crate) fn modifiers_from_crew_skill(mods: &[CrewSkillModifier]) -> Vec<Modifier> {
+    mods.iter()
+        .map(|m| Modifier {
+            name: m.name().to_string(),
+            value: ModifierValue::PerSpecies(SpeciesValues {
+                aircraft_carrier: m.get_for_species(&Species::AirCarrier),
+                battleship: m.get_for_species(&Species::Battleship),
+                cruiser: m.get_for_species(&Species::Cruiser),
+                destroyer: m.get_for_species(&Species::Destroyer),
+                submarine: m.get_for_species(&Species::Submarine),
+                auxiliary: m.get_for_species(&Species::Auxiliary),
+            }),
+        })
+        .collect()
+}
+
+impl Describable for Modernization {
+    fn display_name(&self, ctx: &DescribeContext) -> Option<String> {
+        let name = ctx.param_name?;
+        crate::game_params::translations::translate_module(name, ctx.resource_loader).0
+    }
+    fn plain_description(&self, ctx: &DescribeContext) -> Option<String> {
+        let name = ctx.param_name?;
+        crate::game_params::translations::translate_module(name, ctx.resource_loader).1
+    }
+    fn modifiers(&self, _ctx: &DescribeContext) -> Vec<Modifier> {
+        modifiers_from_crew_skill(self.modifiers())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,6 +263,24 @@ mod tests {
         // Unresolved text is "name = value"; with no species it must render the
         // battleship slot, not any other slot's distinct value.
         assert!(out[0].text.contains("1.23"), "got {}", out[0].text);
+    }
+
+    #[test]
+    fn crew_skill_modifiers_map_to_per_species() {
+        use crate::game_params::types::CrewSkillModifier;
+        let m = CrewSkillModifier::builder()
+            .name("speedCoef".to_string())
+            .aircraft_carrier(1.0).auxiliary(1.0).battleship(1.05)
+            .cruiser(1.0).destroyer(1.0).submarine(1.0)
+            .excluded_consumables(vec![])
+            .build();
+        let mods = modifiers_from_crew_skill(&[m]);
+        assert_eq!(mods.len(), 1);
+        assert_eq!(mods[0].name, "speedCoef");
+        match mods[0].value {
+            ModifierValue::PerSpecies(s) => assert_eq!(s.battleship, 1.05),
+            _ => panic!("expected per-species"),
+        }
     }
 
     #[test]
