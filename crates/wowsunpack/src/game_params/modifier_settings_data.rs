@@ -40,6 +40,9 @@ pub struct ModifierSetting {
     pub measure_value_hidden: bool,
     pub positive: bool,
     pub transform: Transform,
+    /// Client `translations` map: when the modifier value equals a key, the
+    /// localized `IDS_*` label replaces the number entirely. Empty when absent.
+    pub translations: &'static [(f32, &'static str)],
 }
 
 impl Measure {
@@ -101,6 +104,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -116,6 +120,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -131,6 +136,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -146,6 +152,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -161,6 +168,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -176,6 +184,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -191,6 +200,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -206,6 +216,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -221,6 +232,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -236,6 +248,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -251,6 +264,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -266,6 +280,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -281,6 +296,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -296,6 +312,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -311,6 +328,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -326,6 +344,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -341,6 +360,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -356,6 +376,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -371,6 +392,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -386,6 +408,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -401,6 +424,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -416,6 +440,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -431,6 +456,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -446,6 +472,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -461,6 +488,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -476,6 +504,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -491,6 +520,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -506,6 +536,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -521,6 +552,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -536,6 +568,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -551,6 +584,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -566,6 +600,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -581,6 +616,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -596,6 +632,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -611,6 +648,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -626,6 +664,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -641,6 +680,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -656,6 +696,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -671,6 +712,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -686,6 +728,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -701,6 +744,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -716,6 +760,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -731,6 +776,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -746,6 +792,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -761,6 +808,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -776,6 +824,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -791,6 +840,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -806,6 +856,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -821,6 +872,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -836,6 +888,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -851,6 +904,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -866,6 +920,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -881,6 +936,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -896,6 +952,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -911,6 +968,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -926,6 +984,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -941,6 +1000,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -956,6 +1016,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -971,6 +1032,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -986,6 +1048,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1001,6 +1064,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1016,6 +1080,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1031,6 +1096,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1046,6 +1112,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1061,6 +1128,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1076,6 +1144,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1091,6 +1160,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1106,6 +1176,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1121,6 +1192,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1136,6 +1208,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: true,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1151,6 +1224,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: true,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1166,6 +1240,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: true,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1181,6 +1256,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1196,6 +1272,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1211,6 +1288,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1226,6 +1304,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1241,6 +1320,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1256,6 +1336,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1271,6 +1352,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1286,6 +1368,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1301,6 +1384,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1316,6 +1400,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1331,6 +1416,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1346,6 +1432,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1361,6 +1448,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1376,6 +1464,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1391,6 +1480,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1406,6 +1496,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1421,6 +1512,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1436,6 +1528,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1451,6 +1544,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1466,6 +1560,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1481,6 +1576,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1496,6 +1592,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1511,6 +1608,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1526,6 +1624,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1541,6 +1640,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1556,6 +1656,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1571,6 +1672,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1586,6 +1688,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1601,6 +1704,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1616,6 +1720,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1631,6 +1736,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1646,6 +1752,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1661,6 +1768,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1676,6 +1784,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1691,6 +1800,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1706,6 +1816,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1721,6 +1832,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1736,6 +1848,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1751,6 +1864,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1766,6 +1880,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1781,6 +1896,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1796,6 +1912,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1811,6 +1928,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1826,6 +1944,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1841,6 +1960,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1856,6 +1976,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1871,6 +1992,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1886,6 +2008,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1901,6 +2024,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1916,6 +2040,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1931,6 +2056,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1946,6 +2072,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -1961,6 +2088,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1976,6 +2104,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -1991,6 +2120,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2006,6 +2136,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2021,6 +2152,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2036,6 +2168,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2051,6 +2184,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2066,6 +2200,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2081,6 +2216,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2096,6 +2232,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2111,6 +2248,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2126,6 +2264,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2141,6 +2280,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2156,6 +2296,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2171,6 +2312,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2186,6 +2328,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2201,6 +2344,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2216,6 +2360,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2231,6 +2376,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2246,6 +2392,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2261,6 +2408,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2276,6 +2424,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2291,6 +2440,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2306,6 +2456,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2321,6 +2472,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2336,6 +2488,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2351,6 +2504,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2366,6 +2520,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2381,6 +2536,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2396,6 +2552,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2411,6 +2568,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2426,6 +2584,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2441,6 +2600,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2456,6 +2616,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2471,6 +2632,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2486,6 +2648,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2501,6 +2664,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2516,6 +2680,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2531,6 +2696,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2546,6 +2712,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2561,6 +2728,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2576,6 +2744,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2591,6 +2760,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2606,6 +2776,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2621,6 +2792,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2636,6 +2808,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2651,6 +2824,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2666,6 +2840,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2681,6 +2856,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2696,6 +2872,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2711,6 +2888,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2726,6 +2904,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2741,6 +2920,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2756,6 +2936,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: true,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -2771,6 +2952,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2786,6 +2968,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2801,6 +2984,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2816,6 +3000,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2831,6 +3016,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2846,6 +3032,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2861,6 +3048,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2876,6 +3064,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2891,6 +3080,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2906,6 +3096,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2921,6 +3112,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2936,6 +3128,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2951,6 +3144,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2966,6 +3160,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2981,6 +3176,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -2996,6 +3192,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3011,6 +3208,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3026,6 +3224,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3041,6 +3240,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3056,6 +3256,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3071,6 +3272,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3086,6 +3288,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3101,6 +3304,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3116,6 +3320,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3131,6 +3336,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3146,6 +3352,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3161,6 +3368,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3176,6 +3384,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3191,6 +3400,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3206,6 +3416,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3221,6 +3432,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3236,6 +3448,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3251,6 +3464,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3266,6 +3480,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3281,6 +3496,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3296,6 +3512,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3311,6 +3528,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3326,6 +3544,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3341,6 +3560,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3356,6 +3576,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3371,6 +3592,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3386,6 +3608,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3401,6 +3624,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3416,6 +3640,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3431,6 +3656,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3446,6 +3672,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3461,6 +3688,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3476,6 +3704,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3491,6 +3720,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3506,6 +3736,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3521,6 +3752,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3536,6 +3768,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3551,6 +3784,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3566,6 +3800,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3581,6 +3816,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3596,6 +3832,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3611,6 +3848,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3626,6 +3864,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3641,6 +3880,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3656,6 +3896,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3671,6 +3912,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3686,6 +3928,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3701,6 +3944,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3716,6 +3960,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3731,6 +3976,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3746,6 +3992,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3761,6 +4008,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3776,6 +4024,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3791,6 +4040,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: true,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -3806,6 +4056,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: true,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -3821,6 +4072,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3836,6 +4088,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3851,6 +4104,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3866,6 +4120,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3881,6 +4136,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3896,6 +4152,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3911,6 +4168,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3926,6 +4184,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3941,6 +4200,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3956,6 +4216,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3971,6 +4232,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -3986,6 +4248,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4001,6 +4264,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4016,6 +4280,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4031,6 +4296,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4046,6 +4312,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4061,6 +4328,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -4076,6 +4344,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -4091,6 +4360,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -4106,6 +4376,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -4121,6 +4392,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4136,6 +4408,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4151,6 +4424,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4166,6 +4440,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4181,6 +4456,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4196,6 +4472,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4211,6 +4488,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4226,6 +4504,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4241,6 +4520,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4256,6 +4536,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4271,6 +4552,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4286,6 +4568,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4301,6 +4584,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4316,6 +4600,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4331,6 +4616,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4346,6 +4632,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4361,6 +4648,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4376,6 +4664,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4391,6 +4680,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4406,6 +4696,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4421,6 +4712,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4436,6 +4728,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4451,6 +4744,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4466,6 +4760,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4481,6 +4776,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4496,6 +4792,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4511,6 +4808,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4526,6 +4824,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4541,6 +4840,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4556,6 +4856,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4571,6 +4872,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4586,6 +4888,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4601,6 +4904,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4616,6 +4920,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4631,6 +4936,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4646,6 +4952,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4661,6 +4968,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4676,6 +4984,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4691,6 +5000,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4706,6 +5016,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4721,6 +5032,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4736,6 +5048,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4751,6 +5064,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4766,6 +5080,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4781,6 +5096,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4796,6 +5112,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4811,6 +5128,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4826,6 +5144,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4841,6 +5160,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4856,6 +5176,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4871,6 +5192,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4886,6 +5208,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4901,6 +5224,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4916,6 +5240,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4931,6 +5256,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4946,6 +5272,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4961,6 +5288,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4976,6 +5304,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -4991,6 +5320,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5006,6 +5336,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5021,6 +5352,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5036,6 +5368,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5051,6 +5384,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5066,6 +5400,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5081,6 +5416,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5096,6 +5432,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5111,6 +5448,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5126,6 +5464,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5141,6 +5480,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5156,6 +5496,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5171,6 +5512,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5186,6 +5528,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5201,6 +5544,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5216,6 +5560,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5231,6 +5576,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5246,6 +5592,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5261,6 +5608,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5276,6 +5624,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5291,6 +5640,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5306,6 +5656,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5321,6 +5672,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5336,6 +5688,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5351,6 +5704,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5366,6 +5720,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5381,6 +5736,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5396,6 +5752,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5411,6 +5768,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5426,6 +5784,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5441,6 +5800,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5456,6 +5816,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5471,6 +5832,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5486,6 +5848,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5501,6 +5864,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5516,6 +5880,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5531,6 +5896,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5546,6 +5912,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5561,6 +5928,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5576,6 +5944,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5591,6 +5960,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5606,6 +5976,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5621,6 +5992,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5636,6 +6008,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5651,6 +6024,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5666,6 +6040,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5681,6 +6056,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5696,6 +6072,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5711,6 +6088,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5726,6 +6104,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5741,6 +6120,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5756,6 +6136,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5771,6 +6152,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5786,6 +6168,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5801,6 +6184,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5816,6 +6200,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5831,6 +6216,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5846,6 +6232,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5861,6 +6248,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5876,6 +6264,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5891,6 +6280,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5906,6 +6296,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5921,6 +6312,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5936,6 +6328,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5951,6 +6344,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5966,6 +6360,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5981,6 +6376,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -5996,6 +6392,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6011,6 +6408,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6026,6 +6424,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6041,6 +6440,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6056,6 +6456,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6071,6 +6472,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6086,6 +6488,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6101,6 +6504,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6116,6 +6520,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[(-1.0, "IDS_PARAMS_MODIFIER_CONSUMABLES_INFINITY_CAPACITY")],
             },
         ),
         (
@@ -6131,6 +6536,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6146,6 +6552,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6161,6 +6568,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6176,6 +6584,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6191,6 +6600,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6206,6 +6616,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6221,6 +6632,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6236,6 +6648,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6251,6 +6664,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6266,6 +6680,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6281,6 +6696,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6296,6 +6712,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[(-1.0, "IDS_PARAMS_MODIFIER_CONSUMABLES_INFINITY_NUM")],
             },
         ),
         (
@@ -6311,6 +6728,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6326,6 +6744,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6341,6 +6760,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6356,6 +6776,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6371,6 +6792,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6386,6 +6808,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6401,6 +6824,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6416,6 +6840,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6431,6 +6856,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6446,6 +6872,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6461,6 +6888,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6476,6 +6904,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6491,6 +6920,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6506,6 +6936,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6521,6 +6952,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6536,6 +6968,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -6551,6 +6984,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6566,6 +7000,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6581,6 +7016,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6596,6 +7032,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::Abs,
+                translations: &[],
             },
         ),
         (
@@ -6611,6 +7048,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6626,6 +7064,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6641,6 +7080,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6656,6 +7096,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6671,6 +7112,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6686,6 +7128,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6701,6 +7144,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6716,6 +7160,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6731,6 +7176,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6746,6 +7192,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: true,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6761,6 +7208,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6776,6 +7224,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6791,6 +7240,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6806,6 +7256,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6821,6 +7272,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6836,6 +7288,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6851,6 +7304,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6866,6 +7320,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6881,6 +7336,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6896,6 +7352,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6911,6 +7368,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6926,6 +7384,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6941,6 +7400,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6956,6 +7416,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6971,6 +7432,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -6986,6 +7448,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7001,6 +7464,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7016,6 +7480,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7031,6 +7496,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7046,6 +7512,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7061,6 +7528,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7076,6 +7544,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7091,6 +7560,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7106,6 +7576,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7121,6 +7592,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7136,6 +7608,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7151,6 +7624,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7166,6 +7640,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7181,6 +7656,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7196,6 +7672,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7211,6 +7688,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: true,
                 positive: false,
                 transform: Transform::LabelOnly,
+                translations: &[],
             },
         ),
         (
@@ -7226,6 +7704,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7241,6 +7720,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: true,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7256,6 +7736,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: true,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7271,6 +7752,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7286,6 +7768,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7301,6 +7784,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: true,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7316,6 +7800,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[(1.0, "IDS_PARAMS_MODIFIER_INVULNERABLE")],
             },
         ),
         (
@@ -7331,6 +7816,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7346,6 +7832,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7361,6 +7848,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7376,6 +7864,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7391,6 +7880,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7406,6 +7896,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7421,6 +7912,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7436,6 +7928,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7451,6 +7944,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7466,6 +7960,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7481,6 +7976,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7496,6 +7992,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7511,6 +8008,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7526,6 +8024,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7541,6 +8040,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7556,6 +8056,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7571,6 +8072,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7586,6 +8088,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7601,6 +8104,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7616,6 +8120,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7631,6 +8136,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7646,6 +8152,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7661,6 +8168,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7676,6 +8184,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7691,6 +8200,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7706,6 +8216,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7721,6 +8232,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7736,6 +8248,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7751,6 +8264,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7766,6 +8280,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7781,6 +8296,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7796,6 +8312,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7811,6 +8328,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7826,6 +8344,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7841,6 +8360,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7856,6 +8376,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7871,6 +8392,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7886,6 +8408,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7901,6 +8424,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7916,6 +8440,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7931,6 +8456,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7946,6 +8472,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7961,6 +8488,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7976,6 +8504,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -7991,6 +8520,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8006,6 +8536,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8021,6 +8552,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8036,6 +8568,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8051,6 +8584,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8066,6 +8600,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8081,6 +8616,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8096,6 +8632,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8111,6 +8648,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8126,6 +8664,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8141,6 +8680,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8156,6 +8696,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: true,
                 positive: true,
                 transform: Transform::None,
+                translations: &[(2.0, "IDS_PARAMS_MODIFIER_ARC_POSITIVE"), (0.0, "IDS_PARAMS_MODIFIER_ARC_NEGATIVE")],
             },
         ),
         (
@@ -8171,6 +8712,10 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: true,
                 positive: true,
                 transform: Transform::None,
+                translations: &[
+                    (2.0, "IDS_PARAMS_MODIFIER_LEADFIRE_POSITIVE"),
+                    (0.0, "IDS_PARAMS_MODIFIER_LEADFIRE_NEGATIVE"),
+                ],
             },
         ),
         (
@@ -8186,6 +8731,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8201,6 +8747,10 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: true,
                 positive: false,
                 transform: Transform::LabelOnly,
+                translations: &[
+                    (1.0, "IDS_PARAMS_MODIFIER_NOTAVAILABLE_PERISCOPESTATE"),
+                    (0.0, "IDS_PARAMS_MODIFIER_NOTAVAILABLE_DEPTHSTATE"),
+                ],
             },
         ),
         (
@@ -8216,6 +8766,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8231,6 +8782,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8246,6 +8798,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8261,6 +8814,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8276,6 +8830,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8291,6 +8846,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8306,6 +8862,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8321,6 +8878,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8336,6 +8894,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8351,6 +8910,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8366,6 +8926,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8381,6 +8942,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8396,6 +8958,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: true,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
         (
@@ -8411,6 +8974,7 @@ static TABLES: &[Table] = &[Table {
                 measure_value_hidden: false,
                 positive: false,
                 transform: Transform::None,
+                translations: &[],
             },
         ),
     ],
@@ -8467,6 +9031,12 @@ pub fn format_modifier(
     };
     if !label_only && value == s.base_value {
         return None;
+    }
+
+    // Client `translations`: when the value equals a key, the localized label
+    // replaces the number and unit entirely (ModifierSettings.localize).
+    if let Some((_, ids)) = s.translations.iter().find(|(k, _)| *k == value) {
+        return Some(metadata.localized_name_from_id(ids).unwrap_or_else(|| ids.to_string()));
     }
 
     let label = {
@@ -8632,8 +9202,33 @@ mod tests {
     fn consumable_effect_fields_have_settings() {
         // Consumable tooltips reuse MODIFIER_SETTINGS for these fields; the
         // Describable API for Ability depends on their presence at this build.
-        for field in ["regenerationHPSpeed", "regenerationHPSpeedUnits", "radius", "smokeGeneratorLifeTime", "workTime", "reloadTime", "preparationTime"] {
+        for field in [
+            "regenerationHPSpeed",
+            "regenerationHPSpeedUnits",
+            "radius",
+            "smokeGeneratorLifeTime",
+            "workTime",
+            "reloadTime",
+            "preparationTime",
+        ] {
             assert!(modifier_setting(BUILD, field).is_some(), "missing setting for {field}");
         }
+    }
+
+    #[test]
+    fn infinity_translation_replaces_negative_one() {
+        // numConsumables carries translations={-1.0: ..._INFINITY_NUM}: the -1
+        // "unlimited" sentinel renders the localized infinity label, not "-1".
+        let out = format_modifier(BUILD, "numConsumables", -1.0, Species::Battleship, &EchoLoader)
+            .expect("infinity sentinel should render the translated label");
+        assert_eq!(out, "IDS_PARAMS_MODIFIER_CONSUMABLES_INFINITY_NUM", "got {out}");
+        assert!(!out.contains("-1"), "got {out}");
+
+        // A normal count (!= base 0.0) still renders numerically, never the
+        // infinity label.
+        let normal = format_modifier(BUILD, "numConsumables", 3.0, Species::Battleship, &EchoLoader)
+            .expect("a normal count should render");
+        assert!(normal.contains('3'), "got {normal}");
+        assert!(!normal.contains("INFINITY"), "got {normal}");
     }
 }

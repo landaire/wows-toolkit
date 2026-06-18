@@ -151,6 +151,17 @@ def transform_fn_name(node):
     return None
 
 
+def unquote_disasm_arg(s):
+    """Strip a single layer of matching quotes from a disasm opcode arg.
+
+    Different xdis/pydisasm versions render a string operand as either
+    'isPositive' or "isPositive"; comparisons must be quote-style agnostic."""
+    s = s.strip()
+    if len(s) >= 2 and s[0] in "'\"" and s[-1] == s[0]:
+        return s[1:-1]
+    return s
+
+
 def parse_mvt_from_disasm(text):
     """Parse xdis disassembly of the deobfuscated ModifierValueType module.
 
@@ -169,7 +180,7 @@ def parse_mvt_from_disasm(text):
     i = 0
     while i < n:
         op, arg = ins[i]
-        if op == "LOAD_ATTR" and arg == "create":
+        if op == "LOAD_ATTR" and unquote_disasm_arg(arg) == "create":
             is_pos = True
             pending = None
             name = None
@@ -181,12 +192,12 @@ def parse_mvt_from_disasm(text):
                     while k < n and ins[k][0] not in ("STORE_ATTR", "LOAD_ATTR"):
                         k += 1
                     if k < n and ins[k][0] == "STORE_ATTR":
-                        name = ins[k][1]
+                        name = unquote_disasm_arg(ins[k][1])
                     break
-                if o2 == "LOAD_CONST" and a2 == "'isPositive'":
+                if o2 == "LOAD_CONST" and unquote_disasm_arg(a2) == "isPositive":
                     pending = "isPositive"
                 elif pending == "isPositive" and o2 in ("LOAD_NAME", "LOAD_GLOBAL", "LOAD_CONST"):
-                    is_pos = a2 in ("True", "1")
+                    is_pos = unquote_disasm_arg(a2) in ("True", "1")
                     pending = None
                 j += 1
             if name:
@@ -276,6 +287,29 @@ def literal_num(node):
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
         return float(node.value)
     return None
+
+
+def parse_translations(node):
+    """A `translations` arg (ast.Dict of float-literal keys -> string-literal
+    values, or None/absent) -> list of (float, str) pairs. Empty when absent or
+    unparseable. Negative keys (USub over a constant) are handled by literal_num.
+    """
+    if node is None:
+        return []
+    if isinstance(node, ast.Constant) and node.value is None:
+        return []
+    if not isinstance(node, ast.Dict):
+        warn("translations arg is not a dict literal; ignoring")
+        return []
+    pairs = []
+    for k, v in zip(node.keys, node.values):
+        kv = literal_num(k)
+        sv = literal_str(v)
+        if kv is None or sv is None:
+            warn("translations entry not (float -> str) literal; skipping")
+            continue
+        pairs.append((kv, sv))
+    return pairs
 
 
 def key_name(node):
@@ -384,6 +418,7 @@ def parse_ms_call(call, mvt_map, stats):
         "measure_value_hidden": False,
         "positive": True,
         "transform": "None",
+        "translations": [],
     }
 
     if "measure" in args:
@@ -430,6 +465,8 @@ def parse_ms_call(call, mvt_map, stats):
         out["measure_value_hidden"] = mvh
 
     out["positive"] = value_type_positive(args.get("valueType"), mvt_map, stats)
+
+    out["translations"] = parse_translations(args.get("translations"))
 
     # A getter or valueConverter means the displayed value is transformed. Pure
     # value math (no shipParams/GameParams/FieldParams) is ported to a Transform
@@ -534,6 +571,9 @@ pub struct ModifierSetting {{
     pub measure_value_hidden: bool,
     pub positive: bool,
     pub transform: Transform,
+    /// Client `translations` map: when the modifier value equals a key, the
+    /// localized `IDS_*` label replaces the number entirely. Empty when absent.
+    pub translations: &'static [(f32, &'static str)],
 }}
 
 impl Measure {{
@@ -616,7 +656,7 @@ def emit(entries, build, used_variants):
             'measure: Measure::%s, base_value: %s, display_sign: %s, '
             'multiplier: %s, round_digits: %d, round_percents: %s, '
             'hidden: %s, measure_value_hidden: %s, positive: %s, '
-            'transform: Transform::%s }),\n'
+            'transform: Transform::%s, translations: %s }),\n'
             % (
                 name,
                 f["measure"],
@@ -629,6 +669,7 @@ def emit(entries, build, used_variants):
                 rust_bool(f["measure_value_hidden"]),
                 rust_bool(f["positive"]),
                 f["transform"],
+                rust_translations(f["translations"]),
             )
         )
     out.write("        ],\n")
@@ -646,6 +687,13 @@ def rust_f32(x):
     if x == int(x):
         return "%d.0" % int(x)
     return repr(float(x))
+
+
+def rust_translations(pairs):
+    if not pairs:
+        return "&[]"
+    items = ", ".join('(%s, "%s")' % (rust_f32(k), ids) for k, ids in pairs)
+    return "&[%s]" % items
 
 
 FOOTER = r'''
@@ -704,6 +752,16 @@ pub fn format_modifier(
     };
     if !label_only && value == s.base_value {
         return None;
+    }
+
+    // Client `translations`: when the value equals a key, the localized label
+    // replaces the number and unit entirely (ModifierSettings.localize).
+    if let Some((_, ids)) = s.translations.iter().find(|(k, _)| *k == value) {
+        return Some(
+            metadata
+                .localized_name_from_id(ids)
+                .unwrap_or_else(|| ids.to_string()),
+        );
     }
 
     let label = {
@@ -898,6 +956,32 @@ mod tests {
         assert_eq!(Measure::Percent.unit_ids_key(), Some("IDS_PERCENT"));
         assert!(!Measure::Percent.space_before());
         assert_eq!(Measure::None.unit_ids_key(), None);
+    }
+
+    #[test]
+    fn consumable_effect_fields_have_settings() {
+        // Consumable tooltips reuse MODIFIER_SETTINGS for these fields; the
+        // Describable API for Ability depends on their presence at this build.
+        for field in ["regenerationHPSpeed", "regenerationHPSpeedUnits", "radius", "smokeGeneratorLifeTime", "workTime", "reloadTime", "preparationTime"] {
+            assert!(modifier_setting(BUILD, field).is_some(), "missing setting for {field}");
+        }
+    }
+
+    #[test]
+    fn infinity_translation_replaces_negative_one() {
+        // numConsumables carries translations={-1.0: ..._INFINITY_NUM}: the -1
+        // "unlimited" sentinel renders the localized infinity label, not "-1".
+        let out = format_modifier(BUILD, "numConsumables", -1.0, Species::Battleship, &EchoLoader)
+            .expect("infinity sentinel should render the translated label");
+        assert_eq!(out, "IDS_PARAMS_MODIFIER_CONSUMABLES_INFINITY_NUM", "got {out}");
+        assert!(!out.contains("-1"), "got {out}");
+
+        // A normal count (!= base 0.0) still renders numerically, never the
+        // infinity label.
+        let normal = format_modifier(BUILD, "numConsumables", 3.0, Species::Battleship, &EchoLoader)
+            .expect("a normal count should render");
+        assert!(normal.contains('3'), "got {normal}");
+        assert!(!normal.contains("INFINITY"), "got {normal}");
     }
 }
 '''
