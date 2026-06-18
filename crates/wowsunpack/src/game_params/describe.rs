@@ -5,7 +5,7 @@
 use crate::data::{ResourceLoader, Version};
 use crate::game_params::modifier_settings_data::{format_modifier, modifier_setting};
 use crate::game_params::translations::translate_exterior_by_name;
-use crate::game_params::types::{Ability, CrewSkill, CrewSkillModifier, Exterior, Modernization, Species, Unit};
+use crate::game_params::types::{Ability, CrewSkill, CrewSkillModifier, Exterior, Modernization, Param, Species, Unit};
 
 /// Per-species modifier values (the fixed six ship species the game models).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -259,10 +259,44 @@ impl Describable for Ability {
     }
 }
 
+impl Describable for Param {
+    fn display_name(&self, ctx: &DescribeContext) -> Option<String> {
+        self.describe(ctx).name
+    }
+    fn plain_description(&self, ctx: &DescribeContext) -> Option<String> {
+        self.describe(ctx).description
+    }
+    fn modifiers(&self, ctx: &DescribeContext) -> Vec<Modifier> {
+        self.describe(ctx).modifiers
+    }
+    fn describe(&self, ctx: &DescribeContext) -> ParamDescription {
+        // Thread this param's own name through, regardless of caller-supplied ctx.
+        let child = DescribeContext {
+            resource_loader: ctx.resource_loader,
+            version: ctx.version,
+            species: ctx.species,
+            param_name: Some(self.name()),
+        };
+        if let Some(m) = self.modernization() {
+            return m.describe(&child);
+        }
+        if let Some(e) = self.exterior() {
+            return e.describe(&child);
+        }
+        if let Some(u) = self.unit() {
+            return u.describe(&child);
+        }
+        if let Some(a) = self.ability() {
+            return a.describe(&child);
+        }
+        ParamDescription::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game_params::types::{Param, Species};
+    use crate::game_params::types::{Param, ParamData, Species};
 
     struct EchoLoader;
     impl ResourceLoader for EchoLoader {
@@ -467,6 +501,28 @@ mod tests {
             Some("IDS_DOCK_CONSUME_DESCRIPTION_PCY001_CRASHCREW")
         );
         assert!(Describable::modifiers(&ability, &c).is_empty());
+    }
+
+    #[test]
+    fn param_delegate_threads_own_name_when_ctx_name_absent() {
+        let loader = EchoLoader;
+        let v = version(11791718);
+        // Incoming ctx has param_name: None; the delegate must fill it from the
+        // param's own name so the Unit impl can build the IDS key.
+        let c = DescribeContext {
+            resource_loader: &loader,
+            version: &v,
+            species: Some(Species::Battleship),
+            param_name: None,
+        };
+        let param = Param::builder()
+            .id(crate::game_types::GameParamId::from(1u32))
+            .index("PXIH001".to_string())
+            .name("PXIH001".to_string())
+            .nation(String::new())
+            .data(ParamData::Unit(Unit::new(Some("PXIH001".into()))))
+            .build();
+        assert_eq!(param.describe(&c).name.as_deref(), Some("IDS_PXIH001"));
     }
 
     #[test]
