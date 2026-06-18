@@ -5,7 +5,7 @@
 use crate::data::{ResourceLoader, Version};
 use crate::game_params::modifier_settings_data::{format_modifier, modifier_setting};
 use crate::game_params::translations::translate_exterior_by_name;
-use crate::game_params::types::{CrewSkillModifier, Exterior, Modernization, Species};
+use crate::game_params::types::{CrewSkill, CrewSkillModifier, Exterior, Modernization, Species};
 
 /// Per-species modifier values (the fixed six ship species the game models).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -211,6 +211,27 @@ impl Describable for Exterior {
     }
 }
 
+impl Describable for CrewSkill {
+    fn display_name(&self, ctx: &DescribeContext) -> Option<String> {
+        let (primary, fallback) = self.skill_translation_keys_pub("IDS_SKILL", ctx.version);
+        ctx.resource_loader
+            .localized_name_from_id(&primary)
+            .or_else(|| ctx.resource_loader.localized_name_from_id(&fallback))
+    }
+    fn plain_description(&self, ctx: &DescribeContext) -> Option<String> {
+        self.description_with_pub(species_or_default(ctx.species), ctx.resource_loader, ctx.version)
+    }
+    fn modifiers(&self, _ctx: &DescribeContext) -> Vec<Modifier> {
+        let mut out = self.modifiers().map(|m| modifiers_from_crew_skill(m)).unwrap_or_default();
+        if let Some(trig) = self.logic_trigger() {
+            if let Some(tmods) = trig.modifiers() {
+                out.extend(modifiers_from_crew_skill(tmods));
+            }
+        }
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,6 +347,57 @@ mod tests {
         // EchoLoader echoes every id, so translate_module's IDS_TITLE_<NAME> wins.
         assert_eq!(ext.display_name(&c).as_deref(), Some("IDS_TITLE_PCEF005_SM_SIGNALFLAG"));
         assert_eq!(Describable::modifiers(&ext, &c).len(), 1);
+    }
+
+    #[test]
+    fn crew_skill_describes_name_and_modifiers() {
+        use crate::game_params::types::{CrewSkill, CrewSkillModifier, CrewSkillTiers, CrewSkillType, SkillPointCost};
+        let loader = EchoLoader;
+        let v = version(11791718);
+        let cost = SkillPointCost::new(1);
+        let tier = CrewSkillTiers::builder()
+            .aircraft_carrier(cost)
+            .auxiliary(cost)
+            .battleship(cost)
+            .cruiser(cost)
+            .destroyer(cost)
+            .submarine(cost)
+            .build();
+        let skill = CrewSkill::builder()
+            .internal_name("GreaseTheGears".into())
+            .can_be_learned(true)
+            .is_epic(false)
+            .modifiers(vec![
+                CrewSkillModifier::builder()
+                    .name("speedCoef".to_string())
+                    .aircraft_carrier(1.0)
+                    .auxiliary(1.0)
+                    .battleship(1.05)
+                    .cruiser(1.0)
+                    .destroyer(1.0)
+                    .submarine(1.0)
+                    .excluded_consumables(vec![])
+                    .build(),
+            ])
+            .skill_type(CrewSkillType::new(0))
+            .tier(tier)
+            .ui_treat_as_trigger(false)
+            .build();
+        let c = DescribeContext {
+            resource_loader: &loader,
+            version: &v,
+            species: Some(Species::Battleship),
+            param_name: None,
+        };
+        // EchoLoader echoes ids; rework-era build keys IDS_SKILL_<UPPER_SNAKE>.
+        assert_eq!(skill.display_name(&c).as_deref(), Some("IDS_SKILL_GREASE_THE_GEARS"));
+        let mods = Describable::modifiers(&skill, &c);
+        assert_eq!(mods.len(), 1);
+        assert_eq!(mods[0].name, "speedCoef");
+        match mods[0].value {
+            ModifierValue::PerSpecies(s) => assert_eq!(s.battleship, 1.05),
+            _ => panic!("expected per-species"),
+        }
     }
 
     #[test]

@@ -1891,6 +1891,23 @@ impl CrewSkill {
             .or_else(|| metadata_provider.localized_name_from_id(&fallback))
     }
 
+    /// Expose `skill_translation_keys` to the describe module via the trait
+    /// object boundary (it builds keys without the concrete provider).
+    pub(crate) fn skill_translation_keys_pub(&self, prefix: &str, version: &Version) -> (String, String) {
+        self.skill_translation_keys(prefix, version)
+    }
+
+    /// Expose `description_with` (static-or-generated) to the describe module
+    /// via `&dyn ResourceLoader`.
+    pub(crate) fn description_with_pub(
+        &self,
+        species: Species,
+        metadata: &dyn crate::data::ResourceLoader,
+        version: &Version,
+    ) -> Option<String> {
+        self.description_with(species, metadata, version)
+    }
+
     pub fn translated_description(
         &self,
         metadata_provider: &GameMetadataProvider,
