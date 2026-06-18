@@ -488,7 +488,25 @@ fn build_ability_category(category_data: &BTreeMap<HashableValue, Value>) -> Abi
     let hydrophone_wave_radius = read_f32("hydrophoneWaveRadius").map(Meters::from);
     let patrol_radius = read_f32("radius").map(BigWorldDistance::from);
 
+    // Generic numeric field map mirroring the client's consumable attribute
+    // extraction: category root merged with `logic`, logic winning collisions.
+    let num = |v: &Value| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32));
+    let mut effect_fields: BTreeMap<String, f32> = BTreeMap::new();
+    for (key, value) in category_data.iter() {
+        if let (Some(name), Some(n)) = (key.string_ref(), num(value)) {
+            effect_fields.insert(name.inner().to_owned(), n);
+        }
+    }
+    if let Some(logic) = logic.as_ref() {
+        for (key, value) in logic.inner().iter() {
+            if let (Some(name), Some(n)) = (key.string_ref(), num(value)) {
+                effect_fields.insert(name.inner().to_owned(), n);
+            }
+        }
+    }
+
     AbilityCategory::builder()
+        .effect_fields(effect_fields)
         .maybe_special_sound_id(game_param_to_type!(category_data, "SpecialSoundID", Option<String>))
         .consumable_type(game_param_to_type!(category_data, "consumableType", Option<String>).unwrap_or_default())
         .group(game_param_to_type!(category_data, "group", Option<String>).unwrap_or_default())
@@ -1773,5 +1791,34 @@ mod camera_tests {
         let result = read_camera_trajectories(&ship_data);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, "RealMode");
+    }
+
+    #[test]
+    fn build_ability_category_collects_effect_fields_logic_wins() {
+        let logic = dict(vec![
+            (pk("regenerationHPSpeed"), fv(0.005)),
+            // collides with the top-level reloadTime; logic must win.
+            (pk("reloadTime"), fv(99.0)),
+        ]);
+        let category_data: BTreeMap<HashableValue, Value> = vec![
+            (pk("reloadTime"), fv(40.0)),
+            (pk("workTime"), Value::I64(28)),
+            (pk("numConsumables"), Value::I64(3)),
+            (pk("consumableType"), sv("regenCrew")),
+            (pk("logic"), logic),
+        ]
+        .into_iter()
+        .collect();
+
+        let cat = build_ability_category(&category_data);
+        let fields = cat.effect_fields();
+
+        assert_eq!(fields.get("workTime"), Some(&28.0_f32));
+        assert_eq!(fields.get("numConsumables"), Some(&3.0_f32));
+        assert_eq!(fields.get("regenerationHPSpeed"), Some(&0.005_f32));
+        // logic value overrides the top-level on collision.
+        assert_eq!(fields.get("reloadTime"), Some(&99.0_f32));
+        // non-numeric string fields are skipped.
+        assert!(!fields.contains_key("consumableType"));
     }
 }

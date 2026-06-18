@@ -1537,6 +1537,12 @@ pub struct AbilityCategory {
     /// term). `None` for non-heal consumables.
     #[cfg_attr(feature = "serde", serde(default))]
     regeneration_hp_speed_units: Option<f32>,
+    /// Raw numeric fields merged from the category root and its `logic`
+    /// sub-dict (logic wins on collision), mirroring the client's generic
+    /// consumable attribute extraction. Fed to the modifier engine for display.
+    #[cfg_attr(feature = "serde", serde(default))]
+    #[builder(default)]
+    effect_fields: BTreeMap<String, f32>,
 }
 
 impl AbilityCategory {
@@ -1601,6 +1607,11 @@ impl AbilityCategory {
     /// Repair Party flat heal rate, HP per second (RegenCrew only).
     pub fn regeneration_hp_speed_units(&self) -> Option<f32> {
         self.regeneration_hp_speed_units
+    }
+
+    /// Raw numeric effect fields merged from the category root and `logic`.
+    pub fn effect_fields(&self) -> &BTreeMap<String, f32> {
+        &self.effect_fields
     }
 }
 
