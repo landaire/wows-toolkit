@@ -1,6 +1,7 @@
 #[cfg(all(feature = "parsing", feature = "rkyv"))]
 pub mod cache;
 pub mod convert;
+pub mod describe;
 pub mod keys;
 /// Generated modifier value-formatting table (MODIFIER_SETTINGS). See
 /// scripts/gen_modifier_settings.py.
