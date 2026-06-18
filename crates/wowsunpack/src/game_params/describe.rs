@@ -5,7 +5,9 @@
 use crate::data::{ResourceLoader, Version};
 use crate::game_params::modifier_settings_data::{format_modifier, modifier_setting};
 use crate::game_params::translations::translate_exterior_by_name;
-use crate::game_params::types::{Ability, CrewSkill, CrewSkillModifier, Exterior, Modernization, Param, Species, Unit};
+use crate::game_params::types::{
+    Ability, AbilityCategory, CrewSkill, CrewSkillModifier, Exterior, Modernization, Param, Species, Unit,
+};
 
 /// Per-species modifier values (the fixed six ship species the game models).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -258,7 +260,32 @@ impl Describable for Ability {
         crate::game_params::translations::translate_consumable_description(name, ctx.resource_loader)
     }
     fn modifiers(&self, _ctx: &DescribeContext) -> Vec<Modifier> {
-        Vec::new() // Phase 2: per-type consumable effects.
+        Vec::new() // Effects are per-flavor; see AbilityCategory::effect_modifiers.
+    }
+}
+
+impl AbilityCategory {
+    /// Raw effect fields as unified scalar modifiers. The render step filters to
+    /// the ones MODIFIER_SETTINGS recognizes (matching the client's generic
+    /// consumable attribute display); this returns the complete set.
+    pub fn effect_modifiers(&self) -> Vec<Modifier> {
+        self.effect_fields()
+            .iter()
+            .map(|(name, value)| Modifier { name: name.clone(), value: ModifierValue::Scalar(*value) })
+            .collect()
+    }
+
+    /// Rendered, translated effect lines for this resolved consumable flavor.
+    /// Consumable param dicts carry non-attribute fields (e.g. lifeCycleType) that
+    /// the client's getAttributesDict drops. Only fields known to MODIFIER_SETTINGS
+    /// are displayable attributes; the complete raw set stays on effect_modifiers().
+    pub fn describe_effects(&self, ctx: &DescribeContext) -> Vec<ModifierDescription> {
+        let known: Vec<Modifier> = self
+            .effect_modifiers()
+            .into_iter()
+            .filter(|m| modifier_setting(ctx.version.build, &m.name).is_some())
+            .collect();
+        render_modifier_descriptions(&known, ctx)
     }
 }
 
@@ -537,6 +564,44 @@ mod tests {
             .data(ParamData::Unit(Unit::new(Some("PXIH001".into()))))
             .build();
         assert_eq!(param.describe(&c).name.as_deref(), Some("IDS_PXIH001"));
+    }
+
+    #[test]
+    fn ability_category_describes_per_flavor_effects() {
+        use std::collections::BTreeMap;
+        let loader = EchoLoader;
+        let v = version(11791718);
+        let c = ctx(&v, &loader);
+        // reloadTime is in MODIFIER_SETTINGS (base 1.0); 5.0 differs -> Formatted.
+        // totally_not_a_field has no settings entry -> dropped from the display
+        // (matches the client's getAttributesDict), but kept in effect_modifiers().
+        let mut fields = BTreeMap::new();
+        fields.insert("reloadTime".to_string(), 5.0_f32);
+        fields.insert("totally_not_a_field".to_string(), 1.0_f32);
+        let cat = AbilityCategory::builder()
+            .consumable_type("foo".to_string())
+            .group("default".to_string())
+            .icon_id("icon".to_string())
+            .num_consumables(2)
+            .preparation_time(0.0)
+            .reload_time(5.0)
+            .work_time(10.0)
+            .effect_fields(fields)
+            .build();
+
+        let mods = cat.effect_modifiers();
+        assert_eq!(mods.len(), 2);
+        for m in &mods {
+            assert!(matches!(m.value, ModifierValue::Scalar(_)), "expected scalar for {}", m.name);
+        }
+
+        let out = cat.describe_effects(&c);
+        let reload = out.iter().find(|d| d.modifier == "reloadTime").expect("reloadTime line");
+        assert_eq!(reload.resolution, ModifierResolution::Formatted);
+        assert!(
+            out.iter().all(|d| d.modifier != "totally_not_a_field"),
+            "unknown field must be dropped from the display"
+        );
     }
 
     #[test]
