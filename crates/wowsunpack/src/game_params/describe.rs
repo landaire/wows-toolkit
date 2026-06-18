@@ -99,9 +99,24 @@ fn render_modifier_descriptions(mods: &[Modifier], ctx: &DescribeContext) -> Vec
     let build = ctx.version.build;
     let mut out = Vec::new();
     for m in mods {
-        let value = resolve_value(m.value, ctx.species);
+        // A per-species modifier with no ship context cannot be resolved to one
+        // display number; fabricating a species would be a confidently-wrong line.
+        let value = match m.value {
+            ModifierValue::Scalar(v) => Some(v),
+            ModifierValue::PerSpecies(s) => ctx.species.map(|sp| species_slot(&s, sp)),
+        };
+        let Some(value) = value else {
+            out.push(ModifierDescription {
+                modifier: m.name.clone(),
+                text: format!("{} (per-species; no ship context)", m.name),
+                resolution: ModifierResolution::Unresolved,
+            });
+            continue;
+        };
         match modifier_setting(build, &m.name) {
             Some(_) => {
+                // species_or_default only affects the rarely-used species-suffixed
+                // label fallback; the value here is already species-independent.
                 if let Some(text) = format_modifier(build, &m.name, value, species_or_default(ctx.species), ctx.resource_loader) {
                     out.push(ModifierDescription { modifier: m.name.clone(), text, resolution: ModifierResolution::Formatted });
                 }
@@ -117,20 +132,6 @@ fn render_modifier_descriptions(mods: &[Modifier], ctx: &DescribeContext) -> Vec
         }
     }
     out
-}
-
-/// Resolve a per-species value against the ship context. With no species, a
-/// per-species modifier collapses to its battleship slot only as the display
-/// value (the raw per-species set stays available on `Modifier`); a scalar is
-/// returned as-is.
-fn resolve_value(value: ModifierValue, species: Option<Species>) -> f32 {
-    match value {
-        ModifierValue::Scalar(v) => v,
-        ModifierValue::PerSpecies(s) => match species {
-            Some(sp) => species_slot(&s, sp),
-            None => s.battleship,
-        },
-    }
 }
 
 fn species_slot(s: &SpeciesValues, species: Species) -> f32 {
@@ -167,6 +168,8 @@ fn species_or_default(species: Option<Species>) -> Species {
 }
 
 /// Map the game's per-species modifier records into unified `Modifier`s.
+// `excluded_consumables` is deliberately dropped: the render layer does not use
+// it, so it stays off `Modifier` by decision, not oversight.
 pub(crate) fn modifiers_from_crew_skill(mods: &[CrewSkillModifier]) -> Vec<Modifier> {
     mods.iter()
         .map(|m| Modifier {
@@ -339,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn per_species_with_no_species_uses_battleship_slot() {
+    fn per_species_with_no_species_is_unresolved() {
         let loader = EchoLoader;
         let v = version(11791718);
         let c = DescribeContext { resource_loader: &loader, version: &v, species: None, param_name: None };
@@ -357,9 +360,9 @@ mod tests {
         let out = render_modifier_descriptions(&mods, &c);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].resolution, ModifierResolution::Unresolved);
-        // Unresolved text is "name = value"; with no species it must render the
-        // battleship slot, not any other slot's distinct value.
-        assert!(out[0].text.contains("1.23"), "got {}", out[0].text);
+        // A per-species modifier with no ship context must not fabricate a slot.
+        assert!(!out[0].text.contains("1.23"), "got {}", out[0].text);
+        assert!(out[0].text.contains("definitely_not_a_modifier"), "got {}", out[0].text);
     }
 
     #[test]
