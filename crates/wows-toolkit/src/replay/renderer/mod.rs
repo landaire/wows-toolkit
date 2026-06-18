@@ -203,11 +203,8 @@ fn newest_dump_source(dump_dir: Option<&std::path::Path>) -> Option<(VfsPath, Op
     let base = dump_dir.and_then(|d| d.parent())?;
     let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
     let entry = index.builds.iter().max_by_key(|e| e.build)?;
-    let vfs_root = base.join(&entry.dir).join("vfs");
-    if !vfs_root.exists() {
-        return None;
-    }
-    let vfs = VfsPath::new(wowsunpack::vfs::impls::physical::PhysicalFS::new(&vfs_root));
+    let build_dir = base.join(&entry.dir);
+    let vfs = wows_data_mgr::cas_vfs::BuildCas::open(&build_dir)?.vfs();
     let mut parts = entry.version.split('.').filter_map(|p| p.trim().parse::<u32>().ok());
     let version = parts.next().map(|major| Version {
         major,
@@ -230,10 +227,7 @@ fn dump_sources_newest_first(dump_dir: Option<&std::path::Path>) -> Vec<VfsPath>
     entries.sort_by(|a, b| b.build.cmp(&a.build));
     entries
         .into_iter()
-        .filter_map(|e| {
-            let vfs_root = base.join(&e.dir).join("vfs");
-            vfs_root.exists().then(|| VfsPath::new(wowsunpack::vfs::impls::physical::PhysicalFS::new(&vfs_root)))
-        })
+        .filter_map(|e| wows_data_mgr::cas_vfs::BuildCas::open(&base.join(&e.dir)).map(|cas| cas.vfs()))
         .collect()
 }
 

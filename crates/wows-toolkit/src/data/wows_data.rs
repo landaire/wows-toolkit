@@ -187,11 +187,8 @@ impl WoWsDataMap {
         let base = crate::task::replays::game_data_dump_base_with_override(&self.game_data_cache_dir)?;
         let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
         let entry = index.builds.iter().max_by_key(|e| e.build)?;
-        let vfs_root = base.join(&entry.dir).join("vfs");
-        if !vfs_root.exists() {
-            return None;
-        }
-        let vfs = VfsPath::new(wowsunpack::vfs::impls::physical::PhysicalFS::new(&vfs_root));
+        let build_dir = base.join(&entry.dir);
+        let vfs = wows_data_mgr::cas_vfs::BuildCas::open(&build_dir)?.vfs();
         let mut parts = entry.version.split('.').filter_map(|p| p.trim().parse::<u32>().ok());
         let version = parts.next().map(|major| Version {
             major,
