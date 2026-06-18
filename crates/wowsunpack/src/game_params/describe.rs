@@ -5,7 +5,7 @@
 use crate::data::{ResourceLoader, Version};
 use crate::game_params::modifier_settings_data::{format_modifier, modifier_setting};
 use crate::game_params::translations::translate_exterior_by_name;
-use crate::game_params::types::{CrewSkill, CrewSkillModifier, Exterior, Modernization, Species};
+use crate::game_params::types::{Ability, CrewSkill, CrewSkillModifier, Exterior, Modernization, Species, Unit};
 
 /// Per-species modifier values (the fixed six ship species the game models).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -232,6 +232,33 @@ impl Describable for CrewSkill {
     }
 }
 
+impl Describable for Unit {
+    fn display_name(&self, ctx: &DescribeContext) -> Option<String> {
+        let name = ctx.param_name?;
+        crate::game_params::translations::translate_unit(name, ctx.resource_loader)
+    }
+    fn plain_description(&self, _ctx: &DescribeContext) -> Option<String> {
+        None // Phase 3: resolve a module description key if the catalog has one.
+    }
+    fn modifiers(&self, _ctx: &DescribeContext) -> Vec<Modifier> {
+        Vec::new() // Phase 3: raw module stats.
+    }
+}
+
+impl Describable for Ability {
+    fn display_name(&self, ctx: &DescribeContext) -> Option<String> {
+        let name = ctx.param_name?;
+        crate::game_params::translations::translate_consumable(name, ctx.resource_loader)
+    }
+    fn plain_description(&self, ctx: &DescribeContext) -> Option<String> {
+        let name = ctx.param_name?;
+        crate::game_params::translations::translate_consumable_description(name, ctx.resource_loader)
+    }
+    fn modifiers(&self, _ctx: &DescribeContext) -> Vec<Modifier> {
+        Vec::new() // Phase 2: per-type consumable effects.
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,6 +425,48 @@ mod tests {
             ModifierValue::PerSpecies(s) => assert_eq!(s.battleship, 1.05),
             _ => panic!("expected per-species"),
         }
+    }
+
+    #[test]
+    fn unit_describes_name_only() {
+        let loader = EchoLoader;
+        let v = version(11791718);
+        let unit = Unit::new(Some("PXIH001".into()));
+        let c = DescribeContext {
+            resource_loader: &loader,
+            version: &v,
+            species: Some(Species::Battleship),
+            param_name: Some("PXIH001"),
+        };
+        assert_eq!(unit.display_name(&c).as_deref(), Some("IDS_PXIH001"));
+        assert_eq!(unit.plain_description(&c), None);
+        assert!(Describable::modifiers(&unit, &c).is_empty());
+    }
+
+    #[test]
+    fn ability_describes_name_and_description() {
+        use crate::game_params::types::Ability;
+        let loader = EchoLoader;
+        let v = version(11791718);
+        let ability = Ability::builder()
+            .can_buy(false)
+            .cost_credits(0)
+            .cost_gold(0)
+            .is_free(true)
+            .categories(Default::default())
+            .build();
+        let c = DescribeContext {
+            resource_loader: &loader,
+            version: &v,
+            species: Some(Species::Battleship),
+            param_name: Some("PCY001_CrashCrew"),
+        };
+        assert_eq!(ability.display_name(&c).as_deref(), Some("IDS_DOCK_CONSUME_TITLE_PCY001_CRASHCREW"));
+        assert_eq!(
+            ability.plain_description(&c).as_deref(),
+            Some("IDS_DOCK_CONSUME_DESCRIPTION_PCY001_CRASHCREW")
+        );
+        assert!(Describable::modifiers(&ability, &c).is_empty());
     }
 
     #[test]
