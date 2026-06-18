@@ -467,22 +467,18 @@ pub fn load_wows_data_from_dump(
     replay_version: Option<Version>,
 ) -> Result<WorldOfWarshipsData, Report> {
     use wowsunpack::game_params::provider::GameMetadataProvider;
-    use wowsunpack::vfs::impls::physical::PhysicalFS;
 
     debug!("Loading game data from dump: {}", dump_dir.display());
 
-    let vfs_root = dump_dir.join("vfs");
-    if !vfs_root.exists() {
-        bail!("VFS directory not found in dump: {}", vfs_root.display());
-    }
-    let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
+    let cas = wows_data_mgr::cas_vfs::BuildCas::open(dump_dir)
+        .ok_or_else(|| report!("metadata.toml not found in dump: {}", dump_dir.display()))?;
+    let vfs = cas.vfs();
 
     // Recover the semantic version from the dump's metadata so version-aware
     // asset resolution works. Build numbers differ across servers (e.g. the
     // China client) for the same major.minor.patch, so the version is the
     // server-independent key.
-    let full_version = wows_data_mgr::builds::BuildMetadata::load(&dump_dir.join("metadata.toml"))
-        .and_then(|meta| parse_dotted_version(&meta.version, build));
+    let full_version = parse_dotted_version(&cas.metadata().version, build);
 
     // Load translations from dump
     let bcp47 = locale.replace('_', "-");
@@ -493,10 +489,9 @@ pub fn load_wows_data_from_dump(
     let attempted_dirs = [locale, &primary_lang, "en"];
     let mut found_catalog = None;
     for dir in attempted_dirs {
-        let mo_path = dump_dir.join(format!("translations/{dir}/LC_MESSAGES/global.mo"));
-        if !mo_path.exists() {
+        let Some(mo_path) = cas.derived_path(&format!("translations/{dir}/LC_MESSAGES/global.mo")) else {
             continue;
-        }
+        };
         if let Ok(file) = File::open(&mo_path)
             && let Ok(catalog) = Catalog::parse(file)
         {
@@ -509,10 +504,11 @@ pub fn load_wows_data_from_dump(
     // header, otherwise fall back to re-parsing from the dump's VFS (this
     // happens for caches generated before the current cache format version,
     // including any pre-WUGP-magic dumps in wows-replay-data).
-    let rkyv_path = dump_dir.join("game_params.rkyv");
-    let metadata_provider = match wowsunpack::game_params::cache::load(&rkyv_path) {
+    let rkyv_path = cas.derived_path("game_params.rkyv");
+    let cached_params = rkyv_path.as_deref().and_then(wowsunpack::game_params::cache::load);
+    let metadata_provider = match cached_params {
         Some(params) => {
-            debug!("Loaded GameParams from rkyv: {}", rkyv_path.display());
+            debug!("Loaded GameParams from rkyv cache");
             // Pair the fast rkyv params with entity specs parsed from the dump's
             // VFS (`scripts/entity_defs`). The specs are required to parse replay
             // packets (BasePlayerCreate indexes them by entity type); without them
