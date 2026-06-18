@@ -8627,4 +8627,13 @@ mod tests {
         assert!(!Measure::Percent.space_before());
         assert_eq!(Measure::None.unit_ids_key(), None);
     }
+
+    #[test]
+    fn consumable_effect_fields_have_settings() {
+        // Consumable tooltips reuse MODIFIER_SETTINGS for these fields; the
+        // Describable API for Ability depends on their presence at this build.
+        for field in ["regenerationHPSpeed", "regenerationHPSpeedUnits", "radius", "smokeGeneratorLifeTime", "workTime", "reloadTime", "preparationTime"] {
+            assert!(modifier_setting(BUILD, field).is_some(), "missing setting for {field}");
+        }
+    }
 }
