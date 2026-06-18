@@ -107,10 +107,7 @@ impl ComponentType {
     /// caller's signal that the unit is not one of the modelled components. The
     /// match is case-insensitive to tolerate cross-version casing differences.
     pub fn from_uc_type(uc_type: &str) -> Option<ComponentType> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|ct| ct.uc_type().eq_ignore_ascii_case(uc_type))
+        Self::ALL.iter().copied().find(|ct| ct.uc_type().eq_ignore_ascii_case(uc_type))
     }
 }
 

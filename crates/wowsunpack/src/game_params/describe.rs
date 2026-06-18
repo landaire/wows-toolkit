@@ -119,8 +119,14 @@ fn render_modifier_descriptions(mods: &[Modifier], ctx: &DescribeContext) -> Vec
             Some(_) => {
                 // species_or_default only affects the rarely-used species-suffixed
                 // label fallback; the value here is already species-independent.
-                if let Some(text) = format_modifier(build, &m.name, value, species_or_default(ctx.species), ctx.resource_loader) {
-                    out.push(ModifierDescription { modifier: m.name.clone(), text, resolution: ModifierResolution::Formatted });
+                if let Some(text) =
+                    format_modifier(build, &m.name, value, species_or_default(ctx.species), ctx.resource_loader)
+                {
+                    out.push(ModifierDescription {
+                        modifier: m.name.clone(),
+                        text,
+                        resolution: ModifierResolution::Formatted,
+                    });
                 }
                 // None here means no-op or client-hidden: intentionally no line.
             }
@@ -341,10 +347,18 @@ mod tests {
 
     struct EchoLoader;
     impl ResourceLoader for EchoLoader {
-        fn localized_name_from_param(&self, _p: &Param) -> Option<String> { None }
-        fn localized_name_from_id(&self, id: &str) -> Option<String> { Some(id.to_string()) }
-        fn game_param_by_id(&self, _id: crate::game_types::GameParamId) -> Option<crate::Rc<Param>> { None }
-        fn entity_specs(&self) -> &[crate::rpc::entitydefs::EntitySpec] { &[] }
+        fn localized_name_from_param(&self, _p: &Param) -> Option<String> {
+            None
+        }
+        fn localized_name_from_id(&self, id: &str) -> Option<String> {
+            Some(id.to_string())
+        }
+        fn game_param_by_id(&self, _id: crate::game_types::GameParamId) -> Option<crate::Rc<Param>> {
+            None
+        }
+        fn entity_specs(&self) -> &[crate::rpc::entitydefs::EntitySpec] {
+            &[]
+        }
     }
 
     fn ctx<'a>(v: &'a Version, loader: &'a EchoLoader) -> DescribeContext<'a> {
@@ -408,8 +422,12 @@ mod tests {
         use crate::game_params::types::CrewSkillModifier;
         let m = CrewSkillModifier::builder()
             .name("speedCoef".to_string())
-            .aircraft_carrier(1.0).auxiliary(1.0).battleship(1.05)
-            .cruiser(1.0).destroyer(1.0).submarine(1.0)
+            .aircraft_carrier(1.0)
+            .auxiliary(1.0)
+            .battleship(1.05)
+            .cruiser(1.0)
+            .destroyer(1.0)
+            .submarine(1.0)
             .excluded_consumables(vec![])
             .build();
         let mods = modifiers_from_crew_skill(&[m]);
@@ -537,10 +555,7 @@ mod tests {
             param_name: Some("PCY001_CrashCrew"),
         };
         assert_eq!(ability.display_name(&c).as_deref(), Some("IDS_DOCK_CONSUME_TITLE_PCY001_CRASHCREW"));
-        assert_eq!(
-            ability.plain_description(&c).as_deref(),
-            Some("IDS_DOCK_CONSUME_DESCRIPTION_PCY001_CRASHCREW")
-        );
+        assert_eq!(ability.plain_description(&c).as_deref(), Some("IDS_DOCK_CONSUME_DESCRIPTION_PCY001_CRASHCREW"));
         assert!(Describable::modifiers(&ability, &c).is_empty());
     }
 
