@@ -504,6 +504,16 @@ fn build_ability_category(category_data: &BTreeMap<HashableValue, Value>) -> Abi
             }
         }
     }
+    // tacticalParams is part of the client's merged attribute dict (workRange/aimRange
+    // live here); merged after logic so it wins collisions, matching GPToParamsDict.
+    let tactical = category_data.get(&pk("tacticalParams")).and_then(|v| v.dict_or_object_dict());
+    if let Some(tactical) = tactical.as_ref() {
+        for (key, value) in tactical.inner().iter() {
+            if let (Some(name), Some(n)) = (key.string_ref(), num(value)) {
+                effect_fields.insert(name.inner().to_owned(), n);
+            }
+        }
+    }
 
     AbilityCategory::builder()
         .effect_fields(effect_fields)
@@ -1799,13 +1809,17 @@ mod camera_tests {
             (pk("regenerationHPSpeed"), fv(0.005)),
             // collides with the top-level reloadTime; logic must win.
             (pk("reloadTime"), fv(99.0)),
+            // collides with tacticalParams; tacticalParams must win.
+            (pk("workRange"), fv(7.0)),
         ]);
+        let tactical = dict(vec![(pk("workRange"), fv(1000.0)), (pk("aimRange"), fv(11.0))]);
         let category_data: BTreeMap<HashableValue, Value> = vec![
             (pk("reloadTime"), fv(40.0)),
             (pk("workTime"), Value::I64(28)),
             (pk("numConsumables"), Value::I64(3)),
             (pk("consumableType"), sv("regenCrew")),
             (pk("logic"), logic),
+            (pk("tacticalParams"), tactical),
         ]
         .into_iter()
         .collect();
@@ -1818,6 +1832,10 @@ mod camera_tests {
         assert_eq!(fields.get("regenerationHPSpeed"), Some(&0.005_f32));
         // logic value overrides the top-level on collision.
         assert_eq!(fields.get("reloadTime"), Some(&99.0_f32));
+        // tacticalParams numeric fields are merged in.
+        assert_eq!(fields.get("aimRange"), Some(&11.0_f32));
+        // tacticalParams overrides logic on collision.
+        assert_eq!(fields.get("workRange"), Some(&1000.0_f32));
         // non-numeric string fields are skipped.
         assert!(!fields.contains_key("consumableType"));
     }
