@@ -50,8 +50,6 @@ pub struct BuildIssues {
     pub missing_objects: usize,
     /// Local content objects whose bytes no longer hash to their name.
     pub corrupt_objects: usize,
-    /// Extracted files the metadata lists but that are absent from the build tree.
-    pub missing_files: usize,
     /// The local metadata references different content than the remote copy.
     pub stale_metadata: bool,
 }
@@ -59,7 +57,7 @@ pub struct BuildIssues {
 impl BuildIssues {
     /// Whether the build matches the remote repo with all content intact.
     pub fn is_clean(&self) -> bool {
-        self.missing_objects == 0 && self.corrupt_objects == 0 && self.missing_files == 0 && !self.stale_metadata
+        self.missing_objects == 0 && self.corrupt_objects == 0 && !self.stale_metadata
     }
 }
 
@@ -257,30 +255,26 @@ fn validate_build(
         ..Default::default()
     };
 
-    check_entries(cas_root, &output_dir.join("vfs"), &remote_md.files, &mut issues, verified, corrupt);
-    check_entries(cas_root, output_dir, &remote_md.derived, &mut issues, verified, corrupt);
+    check_entries(cas_root, &remote_md.files, &mut issues, verified, corrupt);
+    check_entries(cas_root, &remote_md.derived, &mut issues, verified, corrupt);
 
     issues
 }
 
-/// Check every `(relative path, hash)` pair in `entries`, accumulating any
-/// missing or corrupt objects and any absent files under `tree_root`.
+/// Check every content hash in `entries`, accumulating any missing or corrupt
+/// objects in the shared CAS store.
 fn check_entries(
     cas_root: &Path,
-    tree_root: &Path,
     entries: &BTreeMap<String, String>,
     issues: &mut BuildIssues,
     verified: &mut BTreeSet<String>,
     corrupt: &mut BTreeSet<String>,
 ) {
-    for (rel, hash) in entries {
+    for hash in entries.values() {
         match object_state(cas_root, hash, verified, corrupt) {
             ObjectState::Ok => {}
             ObjectState::Missing => issues.missing_objects += 1,
             ObjectState::Corrupt => issues.corrupt_objects += 1,
-        }
-        if !tree_root.join(rel).exists() {
-            issues.missing_files += 1;
         }
     }
 }
@@ -401,15 +395,9 @@ pub async fn download_build(
         on_progress(completed, total);
     }
 
-    // Recreate the extracted vfs tree and derived artifacts (rkyv blobs and the
-    // content-addressed per-locale translation catalogs) as symlinks into the CAS.
-    let vfs_dir = output_dir.join("vfs");
-    for (rel, hash) in &metadata.files {
-        cas::link_file(&cas_root, hash, &vfs_dir.join(rel))?;
-    }
-    for (rel, hash) in &metadata.derived {
-        cas::link_file(&cas_root, hash, &output_dir.join(rel))?;
-    }
+    // Builds are read through a CAS-backed VFS, so no symlinked vfs/ tree or
+    // derived links are materialized. The downloaded content objects plus
+    // metadata.toml are sufficient.
 
     // Versioned constants, when published for this build.
     let constants_url = format!("{base_url}/{}/constants.json", entry.dir);
@@ -489,9 +477,14 @@ mod tests {
 
         let build_dir = base.join("0.6.13_296659");
         assert!(build_dir.join("metadata.toml").exists());
-        // GameParams.data is symlinked into the CAS and reads back non-empty.
-        let gp = std::fs::read(build_dir.join("vfs/content/GameParams.data")).unwrap();
+        // No materialized vfs/ tree is created; GameParams.data reads back
+        // non-empty through the CAS-backed VFS.
+        use std::io::Read;
+        let cas = crate::cas_vfs::BuildCas::open(&build_dir).unwrap();
+        let mut gp = Vec::new();
+        cas.vfs().join("content/GameParams.data").unwrap().open_file().unwrap().read_to_end(&mut gp).unwrap();
         assert!(!gp.is_empty());
+        assert!(!build_dir.join("vfs").exists());
         // The build is registered locally.
         let index = BuildsIndex::load(&base.join("builds.toml"));
         assert!(index.find_by_build(296659).is_some());
