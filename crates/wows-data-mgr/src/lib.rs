@@ -24,6 +24,7 @@
 
 pub mod builds;
 pub mod cas;
+pub mod cas_vfs;
 #[cfg(feature = "constants")]
 pub mod constants;
 #[cfg(feature = "download")]
