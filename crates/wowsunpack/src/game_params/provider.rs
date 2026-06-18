@@ -514,6 +514,17 @@ fn build_ability_category(category_data: &BTreeMap<HashableValue, Value>) -> Abi
             }
         }
     }
+    // The client merges logic's nested `modifiers` dict last (GPToParamsDict lines 70-73),
+    // so its fields override on collision.
+    if let Some(logic) = logic.as_ref() {
+        if let Some(modifiers) = logic.inner().get(&pk("modifiers")).and_then(|v| v.dict_or_object_dict()) {
+            for (key, value) in modifiers.inner().iter() {
+                if let (Some(name), Some(n)) = (key.string_ref(), num(value)) {
+                    effect_fields.insert(name.inner().to_owned(), n);
+                }
+            }
+        }
+    }
 
     AbilityCategory::builder()
         .effect_fields(effect_fields)
@@ -1805,12 +1816,16 @@ mod camera_tests {
 
     #[test]
     fn build_ability_category_collects_effect_fields_logic_wins() {
+        // logic.modifiers carries displayable numeric fields and is merged last
+        // (after tacticalParams), so it wins collisions (GPToParamsDict lines 70-73).
+        let modifiers = dict(vec![(pk("shootShift"), fv(3.0)), (pk("workRange"), fv(5000.0))]);
         let logic = dict(vec![
             (pk("regenerationHPSpeed"), fv(0.005)),
             // collides with the top-level reloadTime; logic must win.
             (pk("reloadTime"), fv(99.0)),
             // collides with tacticalParams; tacticalParams must win.
             (pk("workRange"), fv(7.0)),
+            (pk("modifiers"), modifiers),
         ]);
         let tactical = dict(vec![(pk("workRange"), fv(1000.0)), (pk("aimRange"), fv(11.0))]);
         let category_data: BTreeMap<HashableValue, Value> = vec![
@@ -1834,8 +1849,10 @@ mod camera_tests {
         assert_eq!(fields.get("reloadTime"), Some(&99.0_f32));
         // tacticalParams numeric fields are merged in.
         assert_eq!(fields.get("aimRange"), Some(&11.0_f32));
-        // tacticalParams overrides logic on collision.
-        assert_eq!(fields.get("workRange"), Some(&1000.0_f32));
+        // logic.modifiers is merged last and overrides tacticalParams on collision.
+        assert_eq!(fields.get("workRange"), Some(&5000.0_f32));
+        // logic.modifiers numeric fields are folded in.
+        assert_eq!(fields.get("shootShift"), Some(&3.0_f32));
         // non-numeric string fields are skipped.
         assert!(!fields.contains_key("consumableType"));
     }
