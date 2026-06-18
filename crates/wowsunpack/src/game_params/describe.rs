@@ -4,7 +4,8 @@
 
 use crate::data::{ResourceLoader, Version};
 use crate::game_params::modifier_settings_data::{format_modifier, modifier_setting};
-use crate::game_params::types::{CrewSkillModifier, Modernization, Species};
+use crate::game_params::translations::translate_exterior_by_name;
+use crate::game_params::types::{CrewSkillModifier, Exterior, Modernization, Species};
 
 /// Per-species modifier values (the fixed six ship species the game models).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -196,6 +197,20 @@ impl Describable for Modernization {
     }
 }
 
+impl Describable for Exterior {
+    fn display_name(&self, ctx: &DescribeContext) -> Option<String> {
+        let name = ctx.param_name?;
+        translate_exterior_by_name(name, self.title(), ctx.resource_loader).0
+    }
+    fn plain_description(&self, ctx: &DescribeContext) -> Option<String> {
+        let name = ctx.param_name?;
+        translate_exterior_by_name(name, self.title(), ctx.resource_loader).1
+    }
+    fn modifiers(&self, _ctx: &DescribeContext) -> Vec<Modifier> {
+        modifiers_from_crew_skill(self.modifiers())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +296,36 @@ mod tests {
             ModifierValue::PerSpecies(s) => assert_eq!(s.battleship, 1.05),
             _ => panic!("expected per-species"),
         }
+    }
+
+    #[test]
+    fn exterior_name_falls_back_to_direct_key() {
+        use crate::game_params::types::CrewSkillModifier;
+        let loader = EchoLoader;
+        let v = version(11791718);
+        let ext = Exterior::builder()
+            .modifiers(vec![
+                CrewSkillModifier::builder()
+                    .name("speedCoef".to_string())
+                    .aircraft_carrier(1.0)
+                    .auxiliary(1.0)
+                    .battleship(1.05)
+                    .cruiser(1.0)
+                    .destroyer(1.0)
+                    .submarine(1.0)
+                    .excluded_consumables(vec![])
+                    .build(),
+            ])
+            .build();
+        let c = DescribeContext {
+            resource_loader: &loader,
+            version: &v,
+            species: Some(Species::Battleship),
+            param_name: Some("PCEF005_SM_SignalFlag"),
+        };
+        // EchoLoader echoes every id, so translate_module's IDS_TITLE_<NAME> wins.
+        assert_eq!(ext.display_name(&c).as_deref(), Some("IDS_TITLE_PCEF005_SM_SIGNALFLAG"));
+        assert_eq!(Describable::modifiers(&ext, &c).len(), 1);
     }
 
     #[test]

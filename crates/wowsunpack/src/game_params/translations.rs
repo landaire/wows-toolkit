@@ -100,13 +100,24 @@ pub fn translate_exterior(
     param: &crate::game_params::types::Param,
     resource_loader: &dyn ResourceLoader,
 ) -> (Option<String>, Option<String>) {
-    let (mod_name, mod_desc) = translate_module(param.name(), resource_loader);
-    let upper = param.name().to_ascii_uppercase();
+    translate_exterior_by_name(param.name(), param.exterior().and_then(|e| e.title()), resource_loader)
+}
+
+/// Resolve (name, description) for an exterior from its GameParams name and its
+/// own title key. Tries upgrade keys (`IDS_TITLE_<NAME>`/`IDS_DESC_<NAME>`), then
+/// bare signal keys (`IDS_<NAME>`/`IDS_<NAME>_DESCRIPTION`), then the exterior's
+/// own title key.
+pub fn translate_exterior_by_name(
+    name: &str,
+    own_title: Option<&str>,
+    resource_loader: &dyn ResourceLoader,
+) -> (Option<String>, Option<String>) {
+    let (mod_name, mod_desc) = translate_module(name, resource_loader);
+    let upper = name.to_ascii_uppercase();
     let direct_name = resource_loader.localized_name_from_id(&format!("IDS_{upper}"));
     let direct_desc = resource_loader.localized_name_from_id(&format!("IDS_{upper}_DESCRIPTION"));
-    let exterior_name =
-        param.exterior().and_then(|e| e.title()).and_then(|id| resource_loader.localized_name_from_id(id));
-    (mod_name.or(direct_name).or(exterior_name), mod_desc.or(direct_desc))
+    let own_name = own_title.and_then(|id| resource_loader.localized_name_from_id(id));
+    (mod_name.or(direct_name).or(own_name), mod_desc.or(direct_desc))
 }
 
 /// Generated description for a modifier-based param (modernization or exterior),
