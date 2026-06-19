@@ -2273,6 +2273,10 @@ pub struct Projectile {
     /// (FactoryArtillery.py:172). 0.0 on shells that cannot flood.
     #[cfg_attr(feature = "serde", serde(default))]
     uw_critical: Option<f32>,
+    /// Shell speed multiplier (`timeFactor`). `speed = bulletSpeed * timeFactor`
+    /// (PreprocessedAmmo.py:16); `maa3520d6.py:1151` defaults it to 1.0 when absent.
+    #[cfg_attr(feature = "serde", serde(default))]
+    time_factor: Option<f32>,
     /// Air drag coefficient.
     #[cfg_attr(feature = "serde", serde(default))]
     bullet_air_drag: Option<f32>,
@@ -2365,6 +2369,12 @@ impl Projectile {
     /// (PreprocessedAmmo.py:19, FactoryArtillery.py:172).
     pub fn uw_critical(&self) -> Option<f32> {
         self.uw_critical
+    }
+
+    /// Shell speed multiplier (`timeFactor`), `speed = bulletSpeed * timeFactor`
+    /// (PreprocessedAmmo.py:16). `None` when absent; the GameParams class default is 1.0.
+    pub fn time_factor(&self) -> Option<f32> {
+        self.time_factor
     }
 
     pub fn bullet_air_drag(&self) -> Option<f32> {

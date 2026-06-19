@@ -341,12 +341,6 @@ pub fn torpedoes(launchers: &[TorpedoLauncherStats], modifiers: &ModifierBundle,
 const HEAVY_CRUISER_SHELL_DIAMETER_M: f32 = 0.0;
 const SMALL_PROJECTILE_MAX_DIAMETER_M: f32 = 0.0;
 
-/// `timeFactor` default (`maa3520d6.py:1151`, GameParams class attribute `1.0`). The
-/// parsed [`Projectile`] does not carry `timeFactor`; real artillery shells use the
-/// `1.0` default (verified against Worcester `PAPA050`/`PAPA051`), so
-/// `speed = bulletSpeed * 1.0` (PreprocessedAmmo.py:16).
-const AMMO_TIME_FACTOR: f32 = 1.0;
-
 /// Per-shell stats from a resolved [`Projectile`] (`createAmmoTTX`,
 /// FactoryArtillery.py:147-190). Pure over the projectile + bundle so the formulas
 /// are testable without a provider. `level` is the ship tier (burn-chance branch,
@@ -363,8 +357,10 @@ pub fn shell_stats(name: String, projectile: &Projectile, modifiers: &ModifierBu
     let caliber_m = projectile.bullet_diametr();
     let caliber = caliber_m.map(|c| Millimeters::from(c * 1000.0));
 
-    // speed = bulletSpeed * timeFactor (PreprocessedAmmo.py:16).
-    let speed = projectile.bullet_speed().map(|s| s * AMMO_TIME_FACTOR);
+    // speed = bulletSpeed * timeFactor (PreprocessedAmmo.py:16). timeFactor defaults to
+    // 1.0 when absent (maa3520d6.py:1151, GameParams class attribute); most shells omit it,
+    // but PXPA* event shells carry 0.5/0.75/2.2.
+    let speed = projectile.bullet_speed().map(|s| s * projectile.time_factor().unwrap_or(1.0));
 
     // damage = alphaDamage * getAlphaDamageCoeff * controllableWeaponDamageCoeff
     //   * getArtilleryDamageCoeff * citadelCSAP(if weapon in WEAPONS_CSAP)
@@ -425,6 +421,8 @@ pub fn shell_stats(name: String, projectile: &Projectile, modifiers: &ModifierBu
         flood_chance,
         // Main battery pools are unlimited (INFINITE_AMMO_POOL_SIZE -> Infinite).
         max_ammo: Some(AmmoCount::Infinite),
+        // Deferred: FactoryArtillery.py:165 sets this from the hull's canBeUnderwater,
+        // which is not threaded into this projectile-only path.
         disabled_underwater: None,
     }
 }
@@ -438,7 +436,7 @@ pub fn shell_stats(name: String, projectile: &Projectile, modifiers: &ModifierBu
 /// `getDispersionValue(gun, range_km, GMIdealRadius)` over the FC-adjusted range
 /// (FactoryArtillery.py:47 passes the `* GMMaxDist`-scaled `unknown_12`).
 /// `ammo_switch_time` = `shotDelay * ammoSwitchCoeff * GMShotDelay * switchAmmoReloadCoef`
-/// (FactoryTorpedoes.py:67 main-gun analog).
+/// (Components/Artillery.py:311, `ammoSwitchCoeff * switchAmmoReloadCoef`).
 ///
 /// The gun (`MainGun`) mirrors `createMainGunTTX` (FactoryArtillery.py:70-76) +
 /// `initGunTTX` (PreprocessedGun.py:18-23):
@@ -996,14 +994,14 @@ mod tests {
     /// Worcester's real `ArtilleryDefault` component + `HP_AGM_*` gun fields
     /// (GameParams `PASC016_Worcester_1948`): maxDist 15320 (BW), 6 guns, each
     /// barrelDiameter 0.152, shotDelay 4.6, rotationSpeed[0] 25, numBarrels 2,
-    /// minRadius 1.1, idealRadius 8, idealDistance 1000, ammo HE+AP.
+    /// ammoSwitchCoeff 1.0, minRadius 1.1, idealRadius 8, idealDistance 1000, ammo HE+AP.
     fn worcester_artillery() -> ArtilleryComponentStats {
         let gun = || ArtilleryGunStats {
             shot_delay: Some(4.6),
             rotation_speed: Some(25.0),
             num_barrels: Some(2.0),
             barrel_diameter: Some(0.152),
-            ammo_switch_coeff: Some(1.5),
+            ammo_switch_coeff: Some(1.0),
             min_radius: Some(1.1),
             ideal_radius: Some(8.0),
             ideal_distance: Some(1000.0),
@@ -1076,9 +1074,9 @@ mod tests {
         assert_eq!(arty.range, Some(Km::from(15.32)));
         // reload: 4.6 * 1.0 (GMShotDelay) = 4.6.
         assert_eq!(arty.reload_time, Some(Seconds::from(4.6)));
-        // ammoSwitchTime: 4.6 * 1.5 * 1.0 * 1.0 = 6.9.
+        // ammoSwitchTime: 4.6 * 1.0 * 1.0 * 1.0 = 4.6.
         let st = arty.ammo_switch_time.expect("switch time").value();
-        assert!(approx(st, 6.9), "got {st}");
+        assert!(approx(st, 4.6), "got {st}");
 
         let gun = arty.gun.expect("gun");
         // caliber: 0.152 * 1000 = 152.
@@ -1190,5 +1188,28 @@ mod tests {
         assert!(stats.penetration.is_none());
         assert!(stats.burn_chance.is_none());
         assert!(stats.flood_chance.is_none());
+    }
+
+    #[test]
+    fn shell_speed_applies_time_factor() {
+        // PXPA005_305MM_HE_RASPUTIN (GameParams): timeFactor 0.5, bulletSpeed 762 ->
+        // displayed speed 762 * 0.5 = 381 (PreprocessedAmmo.py:16).
+        let shell = Projectile::builder()
+            .ammo_type("HE".to_string())
+            .bullet_diametr(0.305)
+            .bullet_speed(762.0)
+            .time_factor(0.5)
+            .build();
+        let stats = shell_stats("X".to_string(), &shell, &ModifierBundle::empty(Species::Cruiser), 10);
+        assert_eq!(stats.speed, Some(381.0));
+
+        // A shell without timeFactor defaults to 1.0 (maa3520d6.py:1151): speed == bulletSpeed.
+        let plain = Projectile::builder()
+            .ammo_type("HE".to_string())
+            .bullet_diametr(0.152)
+            .bullet_speed(812.0)
+            .build();
+        let plain_stats = shell_stats("Y".to_string(), &plain, &ModifierBundle::empty(Species::Cruiser), 10);
+        assert_eq!(plain_stats.speed, Some(812.0));
     }
 }
