@@ -679,6 +679,14 @@ fn read_submarine_battery(hull_data: &BTreeMap<HashableValue, Value>) -> (Option
     (read_float(&battery, keys::BATTERY_CAPACITY), read_float(&battery, keys::BATTERY_REGEN_RATE))
 }
 
+/// Read `visibilityFactorsBySubmarine['PERISCOPE']` (PreprocessedHull.py:13).
+/// `None` for hulls without the dict (non-subs) or a missing key.
+fn read_visibility_by_periscope(hull_data: &BTreeMap<HashableValue, Value>) -> Option<f32> {
+    let dict = hull_data.get(&pk(keys::VISIBILITY_FACTORS_BY_SUBMARINE)).and_then(|v| v.dict_or_object_dict())?;
+    let dict = dict.inner();
+    read_float(&dict, keys::VISIBILITY_PERISCOPE)
+}
+
 fn read_ignore_height(v: Option<&Value>) -> bool {
     v.map(|v| if let Some(b) = v.bool_ref() { *b } else { v.i64_ref().map(|i| *i != 0).unwrap_or(false) })
         .unwrap_or(false)
@@ -1156,6 +1164,12 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
                     turning_radius: read_float(&hull_data, keys::TURNING_RADIUS),
                     rudder_time: read_float(&hull_data, keys::RUDDER_TIME),
                     visibility_factor: read_float(&hull_data, keys::VISIBILITY_FACTOR),
+                    visibility_factor_by_plane: read_float(&hull_data, keys::VISIBILITY_FACTOR_BY_PLANE),
+                    visibility_coef_fire: read_float(&hull_data, keys::VISIBILITY_COEF_FIRE),
+                    visibility_coef_fire_by_plane: read_float(&hull_data, keys::VISIBILITY_COEF_FIRE_BY_PLANE),
+                    visibility_coef_gk: read_float(&hull_data, keys::VISIBILITY_COEF_GK),
+                    visibility_coef_gk_in_smoke: read_float(&hull_data, keys::VISIBILITY_COEF_GK_IN_SMOKE),
+                    visibility_factor_by_periscope: read_visibility_by_periscope(&hull_data),
                     flood_prob: read_flood_prob(&hull_data),
                     battery_capacity,
                     battery_regen_rate,
@@ -2205,6 +2219,16 @@ mod camera_tests {
             (pk("turningRadius"), fv(640.0)),
             (pk("rudderTime"), fv(4.25)),
             (pk("visibilityFactor"), fv(7.33)),
+            // Real Gearing PASD013_Gearing_1945.A_Hull visibility coefficients (jaq-verified).
+            (pk("visibilityFactorByPlane"), fv(3.41)),
+            (pk("visibilityCoefFire"), fv(2.0)),
+            (pk("visibilityCoefFireByPlane"), fv(2.0)),
+            (pk("visibilityCoefGK"), fv(1e-6)),
+            (pk("visibilityCoefGKInSmoke"), fv(2.83)),
+            (
+                pk("visibilityFactorsBySubmarine"),
+                dict(vec![(pk("PERISCOPE"), fv(3.41)), (pk("SURFACE"), fv(0.0)), (pk("DEEP_WATER"), fv(2.0))]),
+            ),
             (pk("model"), sv("A_Hull.model")),
             // Yamato-style floodNodes (list of triples) -> flood_prob (0.333-0.15)/0.333.
             (pk("floodNodes"), list(vec![list(vec![fv(0.15), fv(0.5), fv(40.0)])])),
@@ -2247,6 +2271,13 @@ mod camera_tests {
         assert_eq!(hull.turning_radius, Some(640.0));
         assert_eq!(hull.rudder_time, Some(4.25));
         assert_eq!(hull.visibility_factor, Some(7.33));
+        assert_eq!(hull.visibility_factor_by_plane, Some(3.41));
+        assert_eq!(hull.visibility_coef_fire, Some(2.0));
+        assert_eq!(hull.visibility_coef_fire_by_plane, Some(2.0));
+        assert_eq!(hull.visibility_coef_gk, Some(1e-6));
+        assert_eq!(hull.visibility_coef_gk_in_smoke, Some(2.83));
+        // visibilityFactorsBySubmarine['PERISCOPE'] (PreprocessedHull.py:13).
+        assert_eq!(hull.visibility_factor_by_periscope, Some(3.41));
         // flood_prob derived from floodNodes[0][0]=0.15 (PreprocessedHull.py:12).
         let flood = hull.flood_prob.expect("flood_prob derived");
         assert!((flood - (0.333 - 0.15) / 0.333).abs() < 1e-6, "got {flood}");

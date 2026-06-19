@@ -32,6 +32,27 @@ pub struct HullComponentStats {
     pub rudder_time: Option<f32>,
     /// Raw `visibilityFactor` field (sea detection coefficient).
     pub visibility_factor: Option<f32>,
+    /// Raw `visibilityFactorByPlane` field (air detection coefficient).
+    /// FactoryVisibility createVisibilityTTX@278: visibilityByPlane.normal.
+    pub visibility_factor_by_plane: Option<f32>,
+    /// Raw `visibilityCoefFire` field, added to sea detection while burning.
+    /// FactoryVisibility createVisibilityTTX@109: visibilityByShip.fire.
+    pub visibility_coef_fire: Option<f32>,
+    /// Raw `visibilityCoefFireByPlane` field, added to air detection while burning.
+    /// FactoryVisibility createVisibilityTTX@322: visibilityByPlane.fire.
+    pub visibility_coef_fire_by_plane: Option<f32>,
+    /// Raw `visibilityCoefGK` field (gun-fire detection coefficient; near-zero
+    /// sentinel `1e-6` when unset in GameParams). Copied by PreprocessedHull.
+    pub visibility_coef_gk: Option<f32>,
+    /// Raw `visibilityCoefGKInSmoke` field, the in-smoke detection range used when
+    /// it exceeds MINIMAL_VALID_VALUE (0.01). FactoryVisibility createVisibilityTTX@137:
+    /// visibilityByShip.smoke.
+    pub visibility_coef_gk_in_smoke: Option<f32>,
+    /// `visibilityFactorsBySubmarine['PERISCOPE']` (submarine periscope-depth detection
+    /// coefficient). PreprocessedHull.py:13; FactoryVisibility createVisibilityTTX@359
+    /// reads it as hull.visibilityByPeriscope for visibilityFromDepth.max. `None` for
+    /// non-subs (dict or key absent).
+    pub visibility_factor_by_periscope: Option<f32>,
     /// Hull flood probability, derived at parse time from `floodNodes[0][0]` per
     /// `PreprocessedHull.py:11-12` (`(DEFAULT_UW_DAMAGE_COEFF - floodNodes[0][0]) /
     /// DEFAULT_UW_DAMAGE_COEFF`, or 0.0 when equal to the constant). Derived here so
