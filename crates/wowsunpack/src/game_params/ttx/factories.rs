@@ -11,6 +11,7 @@ use crate::game_params::ttx::armor_materials::collision_material_name;
 use crate::game_params::ttx::components::ArtilleryComponentStats;
 use crate::game_params::ttx::components::EngineComponentStats;
 use crate::game_params::ttx::components::HullComponentStats;
+use crate::game_params::ttx::components::SecondaryComponentStats;
 use crate::game_params::ttx::components::TorpedoLauncherStats;
 use crate::game_params::ttx::constants;
 use crate::game_params::ttx::constants::BW_TO_BALLISTIC;
@@ -348,10 +349,20 @@ const SMALL_PROJECTILE_MAX_DIAMETER_M: f32 = 0.0;
 /// `getPreprocessedAmmoList` call passes no pool info, PreprocessedArtillery.py:33,
 /// so every pool is `INFINITE_AMMO_POOL_SIZE = -1`, PreprocessedAmmo.py:6).
 ///
+/// `is_atba` selects the secondary-battery path (FactoryArtillery.py:159-161): the
+/// resolved [`StatWeaponType`] is mapped through `to_atba()` so `getAlphaDamageCoeff`
+/// (ModifiersApply.py:459-463) and `getArtilleryDamageCoeff` (ModifiersApply.py:380-388)
+/// read the `GS*` coefficients, and HE penetration uses `GSPenetrationCoeffHE`
+/// (FactoryArtillery.py:175) rather than `GMPenetrationCoeffHE`.
+///
 /// Each field is `None` when its base projectile input is absent.
-pub fn shell_stats(name: String, projectile: &Projectile, modifiers: &ModifierBundle, level: u32) -> ShellStats {
+pub fn shell_stats(name: String, projectile: &Projectile, modifiers: &ModifierBundle, level: u32, is_atba: bool) -> ShellStats {
     let ammo_kind = projectile.ammo_type();
-    let weapon = ammo_to_stat_weapon_table(ammo_kind);
+    let mut weapon = ammo_to_stat_weapon_table(ammo_kind);
+    if is_atba {
+        // FactoryArtillery.py:159-161: map the main stat type to its ATBA equivalent.
+        weapon = weapon.to_atba();
+    }
 
     // caliber * 1000 (FactoryArtillery.py:155). caliber (m) = bulletDiametr.
     let caliber_m = projectile.bullet_diametr();
@@ -383,13 +394,22 @@ pub fn shell_stats(name: String, projectile: &Projectile, modifiers: &ModifierBu
         _ => None,
     };
 
-    // piercing: HE floor(alphaPiercingHE * GMPenetrationCoeffHE) (FactoryArtillery.py:182);
-    // CS floor(alphaPiercingCS) (line 185); AP is a ballistic sim (no closed form) -> None.
+    // piercing: HE floor(alphaPiercingHE * penetrationCoeffHE) (FactoryArtillery.py:182);
+    // the coef is GMPenetrationCoeffHE for main, GSPenetrationCoeffHE for ATBA
+    // (FactoryArtillery.py:175/180). CS floor(alphaPiercingCS) (line 185); AP is a
+    // ballistic sim (no closed form) -> None.
+    let he_pen_coef = if is_atba {
+        modifiers.coef("GSPenetrationCoeffHE")
+    } else {
+        modifiers.coef("GMPenetrationCoeffHE")
+    };
     let penetration = match weapon {
-        StatWeaponType::MainHe => projectile
+        StatWeaponType::MainHe | StatWeaponType::AtbaHe => projectile
             .alpha_piercing_he()
-            .map(|p| Millimeters::from((p * modifiers.coef("GMPenetrationCoeffHE")).floor())),
-        StatWeaponType::MainCs => projectile.alpha_piercing_cs().map(|p| Millimeters::from(p.floor())),
+            .map(|p| Millimeters::from((p * he_pen_coef).floor())),
+        StatWeaponType::MainCs | StatWeaponType::AtbaCs => {
+            projectile.alpha_piercing_cs().map(|p| Millimeters::from(p.floor()))
+        }
         _ => None,
     };
 
@@ -398,7 +418,7 @@ pub fn shell_stats(name: String, projectile: &Projectile, modifiers: &ModifierBu
     // Stored as a percent (burnProb 0.12 -> 12%).
     let is_small = caliber_m.map_or(false, |c| is_small_projectile(c, SMALL_PROJECTILE_MAX_DIAMETER_M));
     let burn_chance = match weapon {
-        StatWeaponType::MainHe | StatWeaponType::MainAp => projectile
+        StatWeaponType::MainHe | StatWeaponType::MainAp | StatWeaponType::AtbaHe | StatWeaponType::AtbaAp => projectile
             .burn_prob()
             .map(|bp| Percent::from(calculate_burn_chance(level, bp, modifiers, is_small) * 100.0)),
         _ => None,
@@ -406,7 +426,7 @@ pub fn shell_stats(name: String, projectile: &Projectile, modifiers: &ModifierBu
 
     // floodChance = uwCritical, HE only (FactoryArtillery.py:172). Stored as a percent.
     let flood_chance = match weapon {
-        StatWeaponType::MainHe => projectile.uw_critical().map(|f| Percent::from(f * 100.0)),
+        StatWeaponType::MainHe | StatWeaponType::AtbaHe => projectile.uw_critical().map(|f| Percent::from(f * 100.0)),
         _ => None,
     };
 
@@ -508,7 +528,7 @@ pub fn artillery(
         if let Some(param) = provider.game_param_by_name(ammo_name)
             && let Some(projectile) = param.projectile()
         {
-            shells.push(shell_stats(ammo_name.clone(), projectile, modifiers, level));
+            shells.push(shell_stats(ammo_name.clone(), projectile, modifiers, level, false));
         }
     }
 
@@ -517,6 +537,98 @@ pub fn artillery(
         range,
         dispersion,
         ammo_switch_time,
+        gun,
+        shells,
+    })
+}
+
+/// Secondary-battery (ATBA) armament section (`createATBAGunTTX`,
+/// FactoryArtillery.py:79-87). Mirrors [`artillery`] but reads the `GS*` modifier
+/// coefficients and resolves shells through the ATBA stat-weapon path.
+///
+/// `reload_time` = `gun.shotDelay * GSShotDelay` (FactoryArtillery.py:83).
+/// `range` = `atba.maxDist * GSMaxDist` (FactoryArtillery.py:84). The deob's
+/// `atba.maxDist` is in KM (PreprocessedATBA.py:30 stores `module.maxDist / KM_TO_M`);
+/// [`SecondaryComponentStats::max_dist`] keeps the raw BigWorld value, so this divides
+/// by `KM_TO_M` here. Secondaries have no fire-control `maxDistCoef`
+/// (FactoryArtillery.py:84 omits it, unlike the main-battery line 42).
+/// `dispersion` = `getDispersionValue(gun, range_km, GSIdealRadius)` over that range
+/// (FactoryArtillery.py:84). The gun `rotation_speed` =
+/// `rotationSpeed[0] * GSRotationSpeed + GSRotationSpeedBonus` (initGunTTX +
+/// createMainGunTTX analog, FactoryArtillery.py:74 with the GS coefficient names).
+///
+/// Secondaries mount mixed calibers (e.g. Bismarck's 150mm + 105mm guns), so the deob
+/// builds a per-gun-group `ATBAGunTTX` list (ArtilleryTTX.atba) sharing one
+/// component-level `atbaMaxDist`. This single-[`Artillery`] view takes the first gun
+/// group for `reload_time`/`gun` (as [`artillery`] does for main mounts) and lists a
+/// shell per distinct ATBA ammo name across all mounts; `range`/`dispersion` use the
+/// component `maxDist`. `None` when the component has no guns.
+pub fn secondaries(
+    atba: &SecondaryComponentStats,
+    modifiers: &ModifierBundle,
+    level: u32,
+    provider: &dyn GameParamProvider,
+) -> Option<Artillery> {
+    if atba.guns.is_empty() {
+        return None;
+    }
+
+    let shot_delay_coef = modifiers.coef("GSShotDelay");
+    let max_dist_coef = modifiers.coef("GSMaxDist");
+    let ideal_radius_coef = modifiers.coef("GSIdealRadius");
+    let yaw_coef = modifiers.coef("GSRotationSpeed");
+    let yaw_bonus = modifiers.bonus("GSRotationSpeedBonus");
+
+    // First gun group drives the displayed reload/gun (FactoryArtillery.py:83 is per gun).
+    let first = &atba.guns[0];
+
+    let reload_time = first.shot_delay.map(|d| Seconds::from(d * shot_delay_coef));
+
+    // range = (maxDist / KM_TO_M) * GSMaxDist (FactoryArtillery.py:84 over the KM
+    // maxDist of PreprocessedATBA.py:30). No fire-control coef for secondaries.
+    let range_km = atba.max_dist.map(|d| (d / KM_TO_M) * max_dist_coef);
+    let range = range_km.map(Km::from);
+
+    let dispersion = match (range_km, first.min_radius, first.ideal_radius, first.ideal_distance) {
+        (Some(rng), Some(min_r), Some(ideal_r), Some(ideal_d)) => {
+            Some(Meters::from(constants::dispersion(min_r, ideal_r, ideal_d, rng, ideal_radius_coef)))
+        }
+        _ => None,
+    };
+
+    let rotation_speed = first.rotation_speed.map(|r| r * yaw_coef + yaw_bonus);
+    let rotation_time = rotation_speed.filter(|&r| r != 0.0).map(|r| Seconds::from(180.0 / r));
+    let gun = Some(MainGun {
+        caliber: first.barrel_diameter.map(|b| Millimeters::from(b * 1000.0)),
+        num_barrels: first.num_barrels.map(|n| n as u32),
+        num_guns: Some(atba.guns.len() as u32),
+        rotation_speed: rotation_speed.map(DegreesPerSecond::from),
+        rotation_time,
+    });
+
+    // One shell per distinct ATBA ammo name across every mount (mixed calibers).
+    let mut shells = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    for gun_stats in &atba.guns {
+        for ammo_name in &gun_stats.ammo {
+            if seen.iter().any(|n| n == ammo_name) {
+                continue;
+            }
+            seen.push(ammo_name.clone());
+            if let Some(param) = provider.game_param_by_name(ammo_name)
+                && let Some(projectile) = param.projectile()
+            {
+                shells.push(shell_stats(ammo_name.clone(), projectile, modifiers, level, true));
+            }
+        }
+    }
+
+    Some(Artillery {
+        reload_time,
+        range,
+        dispersion,
+        // Secondaries have no ammo switch (single shell type per gun, FactoryArtillery.py omits it).
+        ammo_switch_time: None,
         gun,
         shells,
     })
@@ -1181,7 +1293,7 @@ mod tests {
     fn shell_stats_none_when_inputs_absent() {
         // A projectile with no shell fields -> stat fields None (no fabrication).
         let empty = Projectile::builder().ammo_type("HE".to_string()).build();
-        let stats = shell_stats("X".to_string(), &empty, &ModifierBundle::empty(Species::Cruiser), 10);
+        let stats = shell_stats("X".to_string(), &empty, &ModifierBundle::empty(Species::Cruiser), 10, false);
         assert!(stats.damage.is_none());
         assert!(stats.caliber.is_none());
         assert!(stats.speed.is_none());
@@ -1200,7 +1312,7 @@ mod tests {
             .bullet_speed(762.0)
             .time_factor(0.5)
             .build();
-        let stats = shell_stats("X".to_string(), &shell, &ModifierBundle::empty(Species::Cruiser), 10);
+        let stats = shell_stats("X".to_string(), &shell, &ModifierBundle::empty(Species::Cruiser), 10, false);
         assert_eq!(stats.speed, Some(381.0));
 
         // A shell without timeFactor defaults to 1.0 (maa3520d6.py:1151): speed == bulletSpeed.
@@ -1209,7 +1321,163 @@ mod tests {
             .bullet_diametr(0.152)
             .bullet_speed(812.0)
             .build();
-        let plain_stats = shell_stats("Y".to_string(), &plain, &ModifierBundle::empty(Species::Cruiser), 10);
+        let plain_stats = shell_stats("Y".to_string(), &plain, &ModifierBundle::empty(Species::Cruiser), 10, false);
         assert_eq!(plain_stats.speed, Some(812.0));
+    }
+
+    use crate::game_params::ttx::components::SecondaryComponentStats;
+
+    /// Bismarck's real 150mm secondary shell `PGPA003_150mm_HE_HE_N_F` (GameParams
+    /// `PGSB108_Bismarck`): ammoType "HE", alphaDamage 1700, alphaPiercingHE 38,
+    /// burnProb 0.08, bulletDiametr 0.15, bulletSpeed 875, uwCritical 0.0.
+    fn bismarck_150mm_he() -> Projectile {
+        Projectile::builder()
+            .ammo_type("HE".to_string())
+            .alpha_damage(1700.0)
+            .alpha_piercing_he(38.0)
+            .burn_prob(0.08)
+            .uw_critical(0.0)
+            .bullet_diametr(0.15)
+            .bullet_speed(875.0)
+            .build()
+    }
+
+    /// Bismarck's real 105mm secondary shell `PGPA085_105mm_HE_HE_33lbs`: ammoType "HE",
+    /// alphaDamage 1200, alphaPiercingHE 26, burnProb 0.05, bulletDiametr 0.105,
+    /// bulletSpeed 900, uwCritical 0.0.
+    fn bismarck_105mm_he() -> Projectile {
+        Projectile::builder()
+            .ammo_type("HE".to_string())
+            .alpha_damage(1200.0)
+            .alpha_piercing_he(26.0)
+            .burn_prob(0.05)
+            .uw_critical(0.0)
+            .bullet_diametr(0.105)
+            .bullet_speed(900.0)
+            .build()
+    }
+
+    /// Bismarck's `A_ATBA` component + `HP_GGS_*` mixed-caliber guns (GameParams
+    /// `PGSB108_Bismarck`): component maxDist 7600 (BigWorld, == 7.6 km in-game range).
+    /// The 150mm group (PGGS001) shotDelay 7.5, barrelDiameter 0.15, numBarrels 2,
+    /// rotationSpeed[0] 60, minRadius 1.0, idealRadius 15.5, idealDistance 333.333; the
+    /// 105mm group (PGGS003) shotDelay 3.35, barrelDiameter 0.105. The first gun group
+    /// (150mm) drives the displayed reload/gun.
+    fn bismarck_secondaries() -> SecondaryComponentStats {
+        let gun_150 = ArtilleryGunStats {
+            shot_delay: Some(7.5),
+            rotation_speed: Some(60.0),
+            num_barrels: Some(2.0),
+            barrel_diameter: Some(0.15),
+            ammo_switch_coeff: None,
+            min_radius: Some(1.0),
+            ideal_radius: Some(15.5),
+            ideal_distance: Some(333.333),
+            ammo: vec!["PGPA003_150mm_HE_HE_N_F".to_string()],
+        };
+        let gun_105 = ArtilleryGunStats {
+            shot_delay: Some(3.35),
+            rotation_speed: Some(60.0),
+            num_barrels: Some(2.0),
+            barrel_diameter: Some(0.105),
+            ammo_switch_coeff: None,
+            min_radius: Some(1.0),
+            ideal_radius: Some(15.5),
+            ideal_distance: Some(333.333),
+            ammo: vec!["PGPA085_105mm_HE_HE_33lbs".to_string()],
+        };
+        SecondaryComponentStats {
+            max_dist: Some(7600.0),
+            // 14 mounts total: 6 x 150mm groups + 8 x 105mm groups (calibers as 2 distinct ammo).
+            guns: vec![gun_150.clone(), gun_150, gun_105.clone(), gun_105],
+        }
+    }
+
+    fn bismarck_secondary_provider() -> MultiProvider {
+        MultiProvider::new(&[
+            ("PGPA003_150mm_HE_HE_N_F", bismarck_150mm_he()),
+            ("PGPA085_105mm_HE_HE_33lbs", bismarck_105mm_he()),
+        ])
+    }
+
+    #[test]
+    fn bismarck_stock_secondaries_gun_and_range() {
+        let provider = bismarck_secondary_provider();
+        let sec = secondaries(&bismarck_secondaries(), &ModifierBundle::empty(Species::Battleship), 8, &provider)
+            .expect("secondaries computed");
+
+        // range: (7600 / 1000) * 1.0 (GSMaxDist) = 7.6 (Bismarck's in-game stock range).
+        assert_eq!(sec.range, Some(Km::from(7.6)));
+        // reload: 7.5 * 1.0 (GSShotDelay) = 7.5 (first gun group, the 150mm mount).
+        assert_eq!(sec.reload_time, Some(Seconds::from(7.5)));
+        // secondaries have no ammo-switch time.
+        assert!(sec.ammo_switch_time.is_none());
+
+        let gun = sec.gun.expect("gun");
+        // caliber: 0.15 * 1000 = 150 (first gun group).
+        assert_eq!(gun.caliber, Some(Millimeters::from(150.0)));
+        // num_guns counts all mounts (mixed calibers).
+        assert_eq!(gun.num_guns, Some(4));
+        assert_eq!(gun.num_barrels, Some(2));
+        // rotation: 60 * 1.0 + 0 = 60; time 180/60 = 3.
+        assert_eq!(gun.rotation_speed, Some(DegreesPerSecond::from(60.0)));
+        let rt = gun.rotation_time.expect("rotation_time").value();
+        assert!(approx(rt, 3.0), "got {rt}");
+    }
+
+    #[test]
+    fn bismarck_stock_secondaries_shells() {
+        let provider = bismarck_secondary_provider();
+        let sec = secondaries(&bismarck_secondaries(), &ModifierBundle::empty(Species::Battleship), 8, &provider)
+            .expect("secondaries computed");
+
+        // One shell per distinct ATBA ammo across the mixed-caliber mounts.
+        assert_eq!(sec.shells.len(), 2);
+
+        let s150 = sec.shells.iter().find(|s| s.name == "PGPA003_150mm_HE_HE_N_F").expect("150mm shell");
+        // stock ATBA damage reduces to alphaDamage 1700 (GS coeffs all 1.0).
+        assert_eq!(s150.damage, Some(Hp::from(1700.0)));
+        // HE penetration: floor(38 * 1.0) = 38 (GSPenetrationCoeffHE stock 1.0).
+        assert_eq!(s150.penetration, Some(Millimeters::from(38.0)));
+        // burnChance: 0.08 * 100 = 8%.
+        assert_eq!(s150.burn_chance, Some(Percent::from(8.0)));
+        assert_eq!(s150.caliber, Some(Millimeters::from(150.0)));
+        assert_eq!(s150.speed, Some(875.0));
+        assert_eq!(s150.flood_chance, Some(Percent::from(0.0)));
+
+        let s105 = sec.shells.iter().find(|s| s.name == "PGPA085_105mm_HE_HE_33lbs").expect("105mm shell");
+        assert_eq!(s105.damage, Some(Hp::from(1200.0)));
+        assert_eq!(s105.penetration, Some(Millimeters::from(26.0)));
+        assert_eq!(s105.burn_chance, Some(Percent::from(5.0)));
+        assert_eq!(s105.caliber, Some(Millimeters::from(105.0)));
+    }
+
+    #[test]
+    fn bismarck_secondary_range_modifier_applies() {
+        // GSMaxDist 1.2 (secondary-range upgrade/AtbaRange): 7.6 * 1.2 = 9.12.
+        let mods = [modifier("GSMaxDist", 1.2)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, BUILD);
+        let provider = bismarck_secondary_provider();
+        let sec = secondaries(&bismarck_secondaries(), &bundle, 8, &provider).expect("secondaries computed");
+        let range = sec.range.expect("range").value();
+        assert!(approx(range, 9.12), "got {range}");
+    }
+
+    #[test]
+    fn bismarck_secondary_reload_modifier_applies() {
+        // GSShotDelay 0.85 (secondary reload upgrade): 7.5 * 0.85 = 6.375.
+        let mods = [modifier("GSShotDelay", 0.85)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, BUILD);
+        let provider = bismarck_secondary_provider();
+        let sec = secondaries(&bismarck_secondaries(), &bundle, 8, &provider).expect("secondaries computed");
+        let reload = sec.reload_time.expect("reload").value();
+        assert!(approx(reload, 6.375), "got {reload}");
+    }
+
+    #[test]
+    fn secondaries_none_when_no_guns() {
+        let provider = bismarck_secondary_provider();
+        let empty = SecondaryComponentStats::default();
+        assert!(secondaries(&empty, &ModifierBundle::empty(Species::Battleship), 8, &provider).is_none());
     }
 }

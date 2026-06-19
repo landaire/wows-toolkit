@@ -116,6 +116,22 @@ pub struct ArtilleryComponentStats {
     pub guns: Vec<ArtilleryGunStats>,
 }
 
+/// Base stats for one secondary-battery (ATBA) component, raw from the ship's
+/// `*_ATBA` component sub-object. `max_dist` is the component-level base secondary
+/// range (BigWorld units, before `/ KM_TO_M`); `guns` are its `HP_GGS_*` gun
+/// sub-objects. Reuses [`ArtilleryGunStats`] for the gun fields. Unlike the main
+/// battery, ATBA mounts can carry mixed calibers (e.g. 150mm + 105mm), so `guns`
+/// may hold several distinct gun groups.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct SecondaryComponentStats {
+    /// Raw component-level `maxDist` field (base secondary range, BigWorld units).
+    pub max_dist: Option<f32>,
+    /// Secondary guns (`HP_GGS_*`) on this component.
+    pub guns: Vec<ArtilleryGunStats>,
+}
+
 /// Per-ship TTX component base stats, keyed by upgrade selection.
 ///
 /// Hull stats are keyed by the `_Hull` upgrade name (mirroring
@@ -140,12 +156,21 @@ pub struct ShipTtxComponents {
     /// Main-battery base stats per `_Artillery` upgrade name.
     #[cfg_attr(feature = "serde", serde(default))]
     pub artillery: HashMap<String, ArtilleryComponentStats>,
+    /// Secondary-battery (ATBA) base stats per `_Hull` upgrade name. The ATBA
+    /// component is referenced by hull upgrades (e.g. Bismarck's `A_ATBA` from its
+    /// A-hull, `B_ATBA` from its B-hull), so it is keyed like [`Self::hulls`].
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub secondaries: HashMap<String, SecondaryComponentStats>,
 }
 
 impl ShipTtxComponents {
-    /// True when no hull, engine, torpedo, or artillery stats were extracted.
+    /// True when no hull, engine, torpedo, artillery, or secondary stats were extracted.
     pub fn is_empty(&self) -> bool {
-        self.hulls.is_empty() && self.engines.is_empty() && self.torpedoes.is_empty() && self.artillery.is_empty()
+        self.hulls.is_empty()
+            && self.engines.is_empty()
+            && self.torpedoes.is_empty()
+            && self.artillery.is_empty()
+            && self.secondaries.is_empty()
     }
 
     /// Look up hull stats for a given `_Hull` upgrade name.
@@ -166,5 +191,10 @@ impl ShipTtxComponents {
     /// Look up artillery (main battery) stats for a given `_Artillery` upgrade name.
     pub fn artillery(&self, upgrade_name: &str) -> Option<&ArtilleryComponentStats> {
         self.artillery.get(upgrade_name)
+    }
+
+    /// Look up secondary-battery (ATBA) stats for a given `_Hull` upgrade name.
+    pub fn secondaries(&self, upgrade_name: &str) -> Option<&SecondaryComponentStats> {
+        self.secondaries.get(upgrade_name)
     }
 }

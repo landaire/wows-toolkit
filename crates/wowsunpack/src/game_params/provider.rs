@@ -1038,6 +1038,61 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             }
         }
 
+        // Secondaries (ATBA) are referenced by _Hull upgrades via the `atba` component
+        // slot; the component carries a component-level maxDist and HP_GGS_* gun
+        // sub-objects (mixed calibers). Read the range plus each gun's base stats and
+        // ammo names, keyed by hull upgrade name (PreprocessedATBA.py:12-30).
+        if uc_type == keys::UC_TYPE_HULL
+            && let Some(atba_comp) = upgrade_dict
+                .get(&pk(keys::COMPONENTS))
+                .and_then(|v| v.dict_or_object_dict())
+                .and_then(|c| c.inner().get(&pk(keys::COMP_ATBA)).and_then(read_first_string))
+            && let Some(atba_data) = ship_data.get(&pk(&atba_comp)).and_then(|v| v.dict_or_object_dict())
+        {
+            let atba_data = atba_data.inner();
+            let mut guns = Vec::new();
+            for (key, val) in atba_data.iter() {
+                let is_gun = key.string_ref().is_some_and(|s| s.inner().starts_with(keys::HP_GGS_PREFIX));
+                if !is_gun {
+                    continue;
+                }
+                let Some(gun) = val.dict_or_object_dict() else {
+                    continue;
+                };
+                let gun = gun.inner();
+                // ammoList can be pickled as a List or a Tuple.
+                let ammo = match gun.get(&pk(keys::AMMO_LIST)) {
+                    Some(Value::Tuple(t)) => {
+                        t.inner().iter().filter_map(|v| v.string_ref().map(|s| s.inner().clone())).collect()
+                    }
+                    Some(val) => read_all_strings(val),
+                    None => Vec::new(),
+                };
+                guns.push(crate::game_params::ttx::components::ArtilleryGunStats {
+                    shot_delay: read_float(&gun, keys::SHOT_DELAY),
+                    rotation_speed: gun.get(&pk(keys::ROTATION_SPEED)).and_then(read_first_float),
+                    num_barrels: read_float(&gun, keys::NUM_BARRELS),
+                    barrel_diameter: read_float(&gun, keys::BARREL_DIAMETER),
+                    ammo_switch_coeff: read_float(&gun, keys::AMMO_SWITCH_COEFF),
+                    min_radius: read_float(&gun, keys::MIN_RADIUS),
+                    ideal_radius: read_float(&gun, keys::IDEAL_RADIUS),
+                    ideal_distance: read_float(&gun, keys::IDEAL_DISTANCE),
+                    ammo,
+                });
+            }
+            if !guns.is_empty() {
+                ttx_components.secondaries.insert(
+                    upgrade_name.clone(),
+                    crate::game_params::ttx::components::SecondaryComponentStats {
+                        // maxDist is stored in KM downstream (PreprocessedATBA.py:30);
+                        // keep the raw BigWorld value here and divide at the factory.
+                        max_dist: read_float(&atba_data, keys::MAX_DIST),
+                        guns,
+                    },
+                );
+            }
+        }
+
         // Only process _Hull upgrades -- they define the complete config for a hull loadout
         if uc_type != keys::UC_TYPE_HULL {
             continue;

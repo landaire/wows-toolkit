@@ -188,6 +188,8 @@ pub const IDEAL_DISTANCE: &str = "idealDistance";
 pub const HP_AGT_PREFIX: &str = "HP_AGT";
 // Main-battery gun sub-object key prefix (HP_AGM_1, HP_AGM_2, ...).
 pub const HP_AGM_PREFIX: &str = "HP_AGM";
+// Secondary-battery (ATBA) gun sub-object key prefix (HP_GGS_1, HP_GGS_2, ...).
+pub const HP_GGS_PREFIX: &str = "HP_GGS";
 pub const CAMOUFLAGE: &str = "camouflage";
 pub const PERMOFLAGES: &str = "permoflages";
 pub const TITLE: &str = "title";
