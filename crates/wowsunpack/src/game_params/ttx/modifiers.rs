@@ -25,6 +25,14 @@ use std::collections::HashMap;
 use crate::game_params::modifier_settings_data::modifier_setting;
 use crate::game_params::types::{CrewSkillModifier, Species};
 
+/// Additive modifier names the generated `MODIFIER_SETTINGS` table does not cover,
+/// transcribed from their client apply sites where they are summed (`+`) onto a
+/// base stat: `yawSpeedBonus` (FactoryArtillery.py:74, FactoryTorpedoes.py:78, used
+/// as `* yawSpeedCoef + yawSpeedBonus`) and `buffsStartPool` (ModifiersApply.py:521,
+/// `specialParams.buffsStartPool + modifier.buffsStartPool`). Without this allowlist
+/// `classify` would fall through to the multiplicative default for these names.
+const KNOWN_ADDITIVE: &[&str] = &["yawSpeedBonus", "buffsStartPool"];
+
 /// How same-name modifier values fold, keyed off the modifier's `MODIFIER_SETTINGS`
 /// `base_value` (1.0 -> coefficient, 0.0 -> bonus).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,14 +44,26 @@ enum Combine {
 }
 
 impl Combine {
-    /// Classify a modifier name by its transcribed `base_value`. Names absent from
-    /// the settings table, or with a base value that is neither identity, default
-    /// to multiplicative: a coefficient's 1.0 identity is the safe no-op and is the
-    /// dominant case in the client.
+    /// Classify a modifier name. A name is `Add` if its settings `base_value` is 0.0
+    /// or it is in `KNOWN_ADDITIVE`; `Multiply` if its settings `base_value` is 1.0.
+    /// A name absent from both the table and `KNOWN_ADDITIVE` falls back to
+    /// multiplicative (a coefficient's 1.0 identity is the safe no-op and the dominant
+    /// case), but trips a `debug_assert` so an unrecognized name surfaces in tests
+    /// rather than silently defaulting.
     fn classify(build: u32, name: &str) -> Combine {
+        if KNOWN_ADDITIVE.contains(&name) {
+            return Combine::Add;
+        }
         match modifier_setting(build, name) {
             Some(s) if s.base_value == 0.0 => Combine::Add,
-            _ => Combine::Multiply,
+            Some(_) => Combine::Multiply,
+            None => {
+                debug_assert!(
+                    false,
+                    "modifier name {name:?} is absent from MODIFIER_SETTINGS and KNOWN_ADDITIVE; defaulting to Multiply (add it to KNOWN_ADDITIVE if it is a bonus)"
+                );
+                Combine::Multiply
+            }
         }
     }
 
@@ -72,6 +92,9 @@ impl Combine {
 pub struct ModifierBundle {
     species: Species,
     values: HashMap<String, f32>,
+    /// Per-name combine rule used to fold the value, kept so the accessors can
+    /// `debug_assert` a caller reads each name with the matching identity.
+    rules: HashMap<String, Combine>,
 }
 
 impl ModifierBundle {
@@ -79,23 +102,23 @@ impl ModifierBundle {
     /// combine rule classified from `build`'s `MODIFIER_SETTINGS` base value:
     /// coefficients multiply, bonuses add.
     pub fn from_modifiers(mods: &[CrewSkillModifier], species: Species, build: u32) -> ModifierBundle {
-        let mut combines: HashMap<&str, Combine> = HashMap::new();
         let mut values: HashMap<String, f32> = HashMap::new();
+        let mut rules: HashMap<String, Combine> = HashMap::new();
 
         for m in mods {
             let name = m.name();
-            let combine = *combines.entry(name).or_insert_with(|| Combine::classify(build, name));
+            let combine = *rules.entry(name.to_string()).or_insert_with(|| Combine::classify(build, name));
             let entry = values.entry(name.to_string()).or_insert_with(|| combine.identity());
             *entry = combine.fold(*entry, m.get_for_species(&species));
         }
 
-        ModifierBundle { species, values }
+        ModifierBundle { species, values, rules }
     }
 
     /// The stock (no-upgrade) bundle: no modifiers equipped, every name reads back
     /// its identity.
     pub fn empty(species: Species) -> ModifierBundle {
-        ModifierBundle { species, values: HashMap::new() }
+        ModifierBundle { species, values: HashMap::new(), rules: HashMap::new() }
     }
 
     /// The species this bundle was resolved for.
@@ -103,19 +126,42 @@ impl ModifierBundle {
         self.species
     }
 
-    /// The aggregated coefficient for `name`. Returns the multiplicative identity
-    /// `1.0` when `name` is absent, which is the one legitimate default here: it
-    /// means "no such modifier equipped" and leaves the base stat unchanged when
-    /// multiplied.
+    /// The aggregated coefficient for `name`. A present name must have folded
+    /// multiplicatively (`debug_assert`ed): reading an additively-folded bonus as a
+    /// coefficient is a caller bug. Returns the multiplicative identity `1.0` when
+    /// `name` is absent, the one legitimate default here: it means "no such modifier
+    /// equipped" and leaves the base stat unchanged when multiplied.
     pub fn coef(&self, name: &str) -> f32 {
-        self.values.get(name).copied().unwrap_or(1.0)
+        match self.values.get(name).copied() {
+            Some(v) => {
+                debug_assert_eq!(
+                    self.rules.get(name),
+                    Some(&Combine::Multiply),
+                    "coef({name:?}) reads an additively-folded modifier; use bonus() instead"
+                );
+                v
+            }
+            None => 1.0,
+        }
     }
 
-    /// The aggregated bonus for `name`. Returns the additive identity `0.0` when
-    /// `name` is absent, which is the one legitimate default here: it means "no
-    /// such modifier equipped" and leaves the base stat unchanged when added.
+    /// The aggregated bonus for `name`. A present name must have folded additively
+    /// (`debug_assert`ed): reading a multiplicatively-folded coefficient as a bonus is
+    /// a caller bug. Returns the additive identity `0.0` when `name` is absent, the one
+    /// legitimate default here: it means "no such modifier equipped" and leaves the
+    /// base stat unchanged when added.
     pub fn bonus(&self, name: &str) -> f32 {
-        self.values.get(name).copied().unwrap_or(0.0)
+        match self.values.get(name).copied() {
+            Some(v) => {
+                debug_assert_eq!(
+                    self.rules.get(name),
+                    Some(&Combine::Add),
+                    "bonus({name:?}) reads a multiplicatively-folded modifier; use coef() instead"
+                );
+                v
+            }
+            None => 0.0,
+        }
     }
 }
 
@@ -207,5 +253,36 @@ mod tests {
         assert_eq!(bundle.coef("speedCoef"), 1.0);
         assert_eq!(bundle.coef("torpedoSpeedMultiplier"), 1.0);
         assert_eq!(bundle.bonus("torpedoSpeedBonus"), 0.0);
+    }
+
+    /// `yawSpeedBonus` is absent from MODIFIER_SETTINGS but is additive in the client
+    /// (FactoryArtillery.py:74 `* yawSpeedCoef + yawSpeedBonus`); the KNOWN_ADDITIVE
+    /// allowlist makes two instances add (4.0 + 2.0 = 6.0), readable via `bonus()`.
+    #[test]
+    fn known_additive_absent_name_adds() {
+        let mods = [modifier("yawSpeedBonus", 4.0), modifier("yawSpeedBonus", 2.0)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, BUILD);
+        assert!((bundle.bonus("yawSpeedBonus") - 6.0).abs() < 1e-6, "got {}", bundle.bonus("yawSpeedBonus"));
+    }
+
+    /// Absent accessors return identities regardless of which accessor is used.
+    #[test]
+    fn absent_name_returns_identity_per_accessor() {
+        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, BUILD);
+        assert_eq!(bundle.coef("yawSpeedBonus"), 1.0);
+        assert_eq!(bundle.bonus("speedCoef"), 0.0);
+        assert_eq!(bundle.coef("nonexistentName"), 1.0);
+        assert_eq!(bundle.bonus("nonexistentName"), 0.0);
+    }
+
+    /// Reading a present additive name (`yawSpeedBonus`) through `coef()` trips the
+    /// classification-mismatch debug_assert in a debug build.
+    #[test]
+    #[should_panic(expected = "additively-folded")]
+    #[cfg(debug_assertions)]
+    fn coef_on_additive_name_trips_assert() {
+        let mods = [modifier("yawSpeedBonus", 4.0)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, BUILD);
+        let _ = bundle.coef("yawSpeedBonus");
     }
 }
