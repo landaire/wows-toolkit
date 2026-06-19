@@ -1093,6 +1093,21 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             }
         }
 
+        // Fire control is a standalone _Suo upgrade naming an FC component whose
+        // only displayed stat is maxDistCoef (PreprocessedFireControl.py:7); store
+        // the coef keyed by upgrade name. The artillery factory multiplies it into
+        // main-battery range.
+        if uc_type == keys::UC_TYPE_SUO
+            && let Some(fc_comp) = upgrade_dict
+                .get(&pk(keys::COMPONENTS))
+                .and_then(|v| v.dict_or_object_dict())
+                .and_then(|c| c.inner().get(&pk(keys::COMP_FIRE_CONTROL)).and_then(read_first_string))
+            && let Some(fc_data) = ship_data.get(&pk(&fc_comp)).and_then(|v| v.dict_or_object_dict())
+            && let Some(coef) = read_float(&fc_data.inner(), keys::MAX_DIST_COEF)
+        {
+            ttx_components.fire_controls.insert(upgrade_name.clone(), coef);
+        }
+
         // Only process _Hull upgrades -- they define the complete config for a hull loadout
         if uc_type != keys::UC_TYPE_HULL {
             continue;
@@ -2415,5 +2430,72 @@ mod camera_tests {
         let ttx = vehicle.ttx_components().expect("ttx components extracted");
         assert!(ttx.artillery.is_empty());
         assert!(ttx.artillery("PAUH001_Hull").is_none());
+    }
+
+    /// Build a ship mirroring Iowa's (`PASB018_Iowa_1944`) real fire-control shape:
+    /// two `_Suo` upgrades, each naming an FC component carrying `maxDistCoef`. The
+    /// stock FC (`AB1_FireControl`) has coef 1.0; the range-extender FC
+    /// (`AB2_FireControl`) has coef 1.1.
+    #[test]
+    fn build_ship_extracts_fire_control_max_dist_coef() {
+        let ab1_fc = dict(vec![(pk("maxDistCoef"), fv(1.0)), (pk("sigmaCountCoef"), fv(1.0))]);
+        let ab2_fc = dict(vec![(pk("maxDistCoef"), fv(1.1)), (pk("sigmaCountCoef"), fv(1.0))]);
+
+        let suo1_components = dict(vec![(pk("fireControl"), list(vec![sv("AB1_FireControl")]))]);
+        let suo1_upgrade = dict(vec![(pk("ucType"), sv("_Suo")), (pk("components"), suo1_components)]);
+        let suo2_components = dict(vec![(pk("fireControl"), list(vec![sv("AB2_FireControl")]))]);
+        let suo2_upgrade = dict(vec![(pk("ucType"), sv("_Suo")), (pk("components"), suo2_components)]);
+
+        // Minimal hull upgrade so build_ship has a hull component.
+        let hull_components = dict(vec![(pk("hull"), list(vec![sv("A_Hull")]))]);
+        let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
+        let a_hull = dict(vec![(pk("health"), fv(76600.0)), (pk("model"), sv("A_Hull.model"))]);
+
+        let upgrade_info = dict(vec![
+            (pk("PAUH018_Iowa_1944"), hull_upgrade),
+            (pk("PAUS821_Suo"), suo1_upgrade),
+            (pk("PAUS822_Suo"), suo2_upgrade),
+        ]);
+
+        let ship_data: BTreeMap<HashableValue, Value> = vec![
+            (pk("level"), Value::I64(9)),
+            (pk("group"), sv("special")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+            (pk("AB1_FireControl"), ab1_fc),
+            (pk("AB2_FireControl"), ab2_fc),
+        ]
+        .into_iter()
+        .collect();
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+
+        assert_eq!(ttx.fire_control_max_dist_coef("PAUS821_Suo"), Some(1.0));
+        assert_eq!(ttx.fire_control_max_dist_coef("PAUS822_Suo"), Some(1.1));
+        assert_eq!(ttx.fire_control_max_dist_coef("NoSuchUpgrade"), None);
+    }
+
+    /// A ship with no `_Suo` upgrade extracts no fire-control entries.
+    #[test]
+    fn build_ship_no_fire_control_yields_no_fc_entry() {
+        let hull_components = dict(vec![(pk("hull"), list(vec![sv("A_Hull")]))]);
+        let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
+        let a_hull = dict(vec![(pk("health"), fv(10000.0)), (pk("model"), sv("A_Hull.model"))]);
+        let upgrade_info = dict(vec![(pk("PAUH001_Hull"), hull_upgrade)]);
+
+        let ship_data: BTreeMap<HashableValue, Value> = vec![
+            (pk("level"), Value::I64(5)),
+            (pk("group"), sv("special")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+        ]
+        .into_iter()
+        .collect();
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+        assert!(ttx.fire_controls.is_empty());
+        assert!(ttx.fire_control_max_dist_coef("PAUH001_Hull").is_none());
     }
 }

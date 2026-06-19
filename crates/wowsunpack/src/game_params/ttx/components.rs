@@ -161,16 +161,23 @@ pub struct ShipTtxComponents {
     /// A-hull, `B_ATBA` from its B-hull), so it is keyed like [`Self::hulls`].
     #[cfg_attr(feature = "serde", serde(default))]
     pub secondaries: HashMap<String, SecondaryComponentStats>,
+    /// Fire-control `maxDistCoef` per `_Suo` upgrade name. The FC component
+    /// contributes only this coefficient (PreprocessedFireControl.py:7), which the
+    /// `artillery` factory multiplies into main-battery range. Stock is 1.0;
+    /// range-extender FC options carry > 1.0.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub fire_controls: HashMap<String, f32>,
 }
 
 impl ShipTtxComponents {
-    /// True when no hull, engine, torpedo, artillery, or secondary stats were extracted.
+    /// True when no hull, engine, torpedo, artillery, secondary, or fire-control stats were extracted.
     pub fn is_empty(&self) -> bool {
         self.hulls.is_empty()
             && self.engines.is_empty()
             && self.torpedoes.is_empty()
             && self.artillery.is_empty()
             && self.secondaries.is_empty()
+            && self.fire_controls.is_empty()
     }
 
     /// Look up hull stats for a given `_Hull` upgrade name.
@@ -196,5 +203,10 @@ impl ShipTtxComponents {
     /// Look up secondary-battery (ATBA) stats for a given `_Hull` upgrade name.
     pub fn secondaries(&self, upgrade_name: &str) -> Option<&SecondaryComponentStats> {
         self.secondaries.get(upgrade_name)
+    }
+
+    /// Look up the fire-control `maxDistCoef` for a given `_Suo` upgrade name.
+    pub fn fire_control_max_dist_coef(&self, upgrade_name: &str) -> Option<f32> {
+        self.fire_controls.get(upgrade_name).copied()
     }
 }

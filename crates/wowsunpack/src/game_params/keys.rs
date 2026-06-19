@@ -22,6 +22,7 @@ pub const UC_TYPE_AIR_DEFENSE: &str = "_AirDefense";
 pub const UC_TYPE_DIRECTORS: &str = "_Directors";
 pub const UC_TYPE_FINDERS: &str = "_Finders";
 pub const UC_TYPE_RADARS: &str = "_Radars";
+pub const UC_TYPE_SUO: &str = "_Suo";
 
 // Component type keys (inside "components" dict)
 pub const COMP_HULL: &str = "hull";
@@ -33,6 +34,7 @@ pub const COMP_FINDERS: &str = "finders";
 pub const COMP_RADARS: &str = "radars";
 pub const COMP_TORPEDOES: &str = "torpedoes";
 pub const COMP_ENGINE: &str = "engine";
+pub const COMP_FIRE_CONTROL: &str = "fireControl";
 
 /// Typed representation of component type keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -175,6 +177,8 @@ pub const BATTERY_CAPACITY: &str = "capacity";
 pub const BATTERY_REGEN_RATE: &str = "regenRate";
 pub const VISIBILITY_FACTOR_BY_PLANE: &str = "visibilityFactorByPlane";
 pub const MAX_DIST: &str = "maxDist";
+// Fire-control range coefficient (PreprocessedFireControl.py:7; stock 1.0).
+pub const MAX_DIST_COEF: &str = "maxDistCoef";
 pub const AMMO_LIST: &str = "ammoList";
 pub const SHOT_DELAY: &str = "shotDelay";
 pub const ROTATION_SPEED: &str = "rotationSpeed";
