@@ -285,6 +285,20 @@ pub fn torpedo_stats(name: String, projectile: &Projectile, modifiers: &Modifier
 /// FactoryTorpedoes.py:40). Per-ammo stats are resolved by NAME from `provider`
 /// (`createTorpedoTTX`, FactoryTorpedoes.py:88-89).
 ///
+/// Warn once per ammo name that an `ammoList` entry did not resolve to a
+/// projectile, so the dropped shell/torpedo row is debuggable. Mirrors the
+/// warn-once pattern in `armor_materials::collision_material_name`.
+fn warn_unresolved_ammo(name: &str) {
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+    static WARNED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+    let mut warned = WARNED.lock().unwrap();
+    if warned.get_or_insert_with(HashSet::new).insert(name.to_string()) {
+        eprintln!("TTX: ammo '{name}' did not resolve to a projectile; shell/torpedo row dropped");
+    }
+}
+
 /// `None` when `launchers` is empty (no torpedo armament).
 pub fn torpedoes(launchers: &[TorpedoLauncherStats], modifiers: &ModifierBundle, provider: &dyn GameParamProvider) -> Option<Torpedoes> {
     if launchers.is_empty() {
@@ -327,6 +341,8 @@ pub fn torpedoes(launchers: &[TorpedoLauncherStats], modifiers: &ModifierBundle,
                 && let Some(projectile) = param.projectile()
             {
                 torpedoes.push(torpedo_stats(ammo_name.clone(), projectile, modifiers));
+            } else {
+                warn_unresolved_ammo(ammo_name);
             }
         }
     }
@@ -530,6 +546,8 @@ pub fn artillery(
             && let Some(projectile) = param.projectile()
         {
             shells.push(shell_stats(ammo_name.clone(), projectile, modifiers, level, false));
+        } else {
+            warn_unresolved_ammo(ammo_name);
         }
     }
 
@@ -620,6 +638,8 @@ pub fn secondaries(
                 && let Some(projectile) = param.projectile()
             {
                 shells.push(shell_stats(ammo_name.clone(), projectile, modifiers, level, true));
+            } else {
+                warn_unresolved_ammo(ammo_name);
             }
         }
     }
@@ -1384,6 +1404,19 @@ mod tests {
         let provider = worcester_provider();
         let empty = ArtilleryComponentStats::default();
         assert!(artillery(&empty, &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider).is_none());
+    }
+
+    #[test]
+    fn artillery_drops_unresolvable_ammo_row() {
+        // Provider knows only the HE shell; the AP ammo name does not resolve. The
+        // section is still produced with the resolvable HE row, and the AP row is
+        // silently dropped (a warn-once diagnostic fires; no fabrication).
+        let provider = MultiProvider::new(&[("PAPA051_152mm_HE_HC_Mark_39_Mod_0", worcester_he())]);
+        let arty = artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
+            .expect("artillery computed");
+        assert_eq!(arty.shells.len(), 1);
+        assert!(arty.shells.iter().any(|s| s.ammo_kind.as_deref() == Some("HE")));
+        assert!(!arty.shells.iter().any(|s| s.ammo_kind.as_deref() == Some("AP")));
     }
 
     #[test]

@@ -13,7 +13,6 @@ use crate::game_params::ttx::selection::ShipUpgradeSelection;
 use crate::game_params::types::ArmorMap;
 use crate::game_params::types::GameParamProvider;
 use crate::game_params::types::Param;
-use crate::game_params::types::Species;
 
 /// Stock fire-control range coefficient when no `_Suo` upgrade is selected
 /// (PreprocessedFireControl.py:7 identity; FactoryArtillery.py:42 default 1.0).
@@ -145,7 +144,9 @@ pub fn ship_stats(
 pub fn ship_stats_stock(ship: &Param, provider: &dyn GameParamProvider) -> ShipStats {
     let selection = ShipUpgradeSelection::stock(ship);
     let level = ship.vehicle().map(|v| v.level()).unwrap_or(0);
-    let species = ship.species().and_then(|s| s.known().copied()).unwrap_or(Species::Auxiliary);
+    let Some(species) = ship.species().and_then(|s| s.known().copied()) else {
+        return ShipStats::default();
+    };
     ship_stats(ship, &selection, &ModifierBundle::empty(species), level, provider)
 }
 
@@ -183,6 +184,7 @@ mod tests {
     use crate::game_params::types::Param;
     use crate::game_params::types::ParamData;
     use crate::game_params::types::Projectile;
+    use crate::game_params::types::Species;
     use crate::game_params::types::Vehicle;
     use crate::game_types::GameParamId;
 
@@ -486,5 +488,44 @@ mod tests {
         let stats = ship_stats(&proj, &ShipUpgradeSelection::default(), &ModifierBundle::empty(Species::Destroyer), 10, &provider);
         assert!(stats.durability.is_none());
         assert!(stats.artillery.is_none());
+    }
+
+    #[test]
+    fn stock_stats_default_when_species_unknown() {
+        // A vehicle whose species is Unknown has no modifier context; ship_stats_stock
+        // returns the default stat card rather than guessing a species.
+        let mut components = ShipTtxComponents::default();
+        components.hulls.insert("PAUH911_Gearing_1945".to_string(), gearing_hull());
+        components.stock_selection =
+            ShipUpgradeSelection::new(Some("PAUH911_Gearing_1945".to_string()), None, None, None, None);
+        let vehicle = Vehicle::builder()
+            .level(10)
+            .group("g".to_string())
+            .maybe_abilities(None)
+            .upgrades(Vec::new())
+            .maybe_config_data(None)
+            .maybe_model_path(None)
+            .maybe_armor(None)
+            .maybe_hit_locations(None)
+            .permoflages(Vec::new())
+            .camera_trajectories(Vec::new())
+            .ttx_components(components)
+            .build();
+        let ship = Param::builder()
+            .id(GameParamId::from(901u32))
+            .index("IDX".to_string())
+            .name("UnknownSpecies".to_string())
+            .nation("USA".to_string())
+            .species(crate::recognized::Recognized::Unknown("MadeUpSpecies".to_string()))
+            .data(ParamData::Vehicle(vehicle))
+            .build();
+        let provider = StubProvider::new(&[]);
+        let stats = ship_stats_stock(&ship, &provider);
+        // Default card: even though a hull is present, the unknown species short-circuits
+        // before any factory runs, so every section is None.
+        assert!(stats.durability.is_none());
+        assert!(stats.mobility.is_none());
+        assert!(stats.artillery.is_none());
+        assert!(stats.visibility.is_none());
     }
 }
