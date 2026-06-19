@@ -1665,6 +1665,7 @@ impl GameMetadataProvider {
                 let alpha_piercing_cs = read_opt_f32("alphaPiercingCS");
                 let alpha_damage = read_opt_f32("alphaDamage");
                 let burn_prob = read_opt_f32("burnProb");
+                let uw_critical = read_opt_f32("uwCritical");
                 let bullet_air_drag = read_opt_f32("bulletAirDrag");
                 let speed = read_opt_f32("speed");
                 let damage = read_opt_f32("damage");
@@ -1709,6 +1710,7 @@ impl GameMetadataProvider {
                         .maybe_alpha_piercing_cs(alpha_piercing_cs)
                         .maybe_alpha_damage(alpha_damage)
                         .maybe_burn_prob(burn_prob)
+                        .maybe_uw_critical(uw_critical)
                         .maybe_bullet_air_drag(bullet_air_drag)
                         .maybe_speed(speed)
                         .maybe_damage(damage)

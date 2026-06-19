@@ -2268,6 +2268,11 @@ pub struct Projectile {
     /// Fire chance (-0.5 means N/A).
     #[cfg_attr(feature = "serde", serde(default))]
     burn_prob: Option<f32>,
+    /// Flood chance (`uwCritical`). Read by `PreprocessedAmmo.floodChance`
+    /// (PreprocessedAmmo.py:19) and surfaced as the HE shell's `floodChance`
+    /// (FactoryArtillery.py:172). 0.0 on shells that cannot flood.
+    #[cfg_attr(feature = "serde", serde(default))]
+    uw_critical: Option<f32>,
     /// Air drag coefficient.
     #[cfg_attr(feature = "serde", serde(default))]
     bullet_air_drag: Option<f32>,
@@ -2354,6 +2359,12 @@ impl Projectile {
 
     pub fn burn_prob(&self) -> Option<f32> {
         self.burn_prob
+    }
+
+    /// Flood chance (`uwCritical`), the HE shell's `floodChance`
+    /// (PreprocessedAmmo.py:19, FactoryArtillery.py:172).
+    pub fn uw_critical(&self) -> Option<f32> {
+        self.uw_critical
     }
 
     pub fn bullet_air_drag(&self) -> Option<f32> {
@@ -2812,6 +2823,57 @@ mod tests {
         // renderer can color the dot.
         assert_eq!(AmmoType::from_game_str("HE"), AmmoType::HE);
         assert_eq!(AmmoType::from_game_str("CS"), AmmoType::SAP);
+    }
+
+    /// Worcester HE shell `PAPA051_152mm_HE_HC_Mark_39_Mod_0` (GameParams.json, build
+    /// 14.6 stable): the fields `createAmmoTTX`/`PreprocessedAmmo` read off a shell
+    /// (FactoryArtillery.py:147-190, PreprocessedAmmo.py:11-21) round-trip through the
+    /// parsed `Projectile`. `uw_critical` is the newly added flood-chance field.
+    #[test]
+    fn worcester_he_shell_fields() {
+        let p = Projectile::builder()
+            .ammo_type("HE".to_string())
+            .alpha_damage(2200.0)
+            .alpha_piercing_he(30.0)
+            .burn_prob(0.12)
+            .uw_critical(0.0)
+            .bullet_diametr(0.152)
+            .bullet_speed(812.0)
+            .bullet_mass(47.6)
+            .bullet_krupp(1150.0)
+            .build();
+        assert_eq!(p.ammo_type(), "HE");
+        assert_eq!(p.alpha_damage(), Some(2200.0));
+        assert_eq!(p.alpha_piercing_he(), Some(30.0));
+        assert_eq!(p.burn_prob(), Some(0.12));
+        assert_eq!(p.uw_critical(), Some(0.0));
+        assert_eq!(p.bullet_diametr(), Some(0.152));
+        assert_eq!(p.bullet_speed(), Some(812.0));
+    }
+
+    /// Worcester AP shell `PAPA050_152mm_AP_130lbs_Mk35` (GameParams.json): AP carries
+    /// `burnProb -0.5` (the "N/A" sentinel) and `uwCritical 0.0`; the AP-relevant
+    /// ballistic fields (mass/krupp/speed/caliber) are present for a later sim.
+    #[test]
+    fn worcester_ap_shell_fields() {
+        let p = Projectile::builder()
+            .ammo_type("AP".to_string())
+            .alpha_damage(3200.0)
+            .alpha_piercing_he(0.0)
+            .burn_prob(-0.5)
+            .uw_critical(0.0)
+            .bullet_diametr(0.152)
+            .bullet_speed(762.0)
+            .bullet_mass(59.0)
+            .bullet_krupp(2692.0)
+            .build();
+        assert_eq!(p.ammo_type(), "AP");
+        assert_eq!(p.alpha_damage(), Some(3200.0));
+        assert_eq!(p.burn_prob(), Some(-0.5));
+        assert_eq!(p.uw_critical(), Some(0.0));
+        assert_eq!(p.bullet_mass(), Some(59.0));
+        assert_eq!(p.bullet_krupp(), Some(2692.0));
+        assert_eq!(p.bullet_speed(), Some(762.0));
     }
 
     fn shell_param(id: u32, name: &str) -> Param {

@@ -35,10 +35,17 @@ const KNOWN_ADDITIVE: &[&str] = &["yawSpeedBonus", "buffsStartPool"];
 
 /// Multiplicative modifier names the generated `MODIFIER_SETTINGS` table does not
 /// cover, transcribed from their client apply sites where they multiply (`*`) a base
-/// stat: `uwCoeffMultiplier` (FactoryDurability.py:8, `floodProb * uwCoeffMultiplier`).
+/// stat: `uwCoeffMultiplier` (FactoryDurability.py:8, `floodProb * uwCoeffMultiplier`);
+/// the burn-chance factors `burnChanceFactorHighLevel`, `burnChanceGMGSMultiplier` and
+/// `burnChanceMultiplier` (ModifiersApply.py:44/48/57, each used as `initialBurnProb *=`).
 /// Without this allowlist `classify` would `debug_assert` on the unknown name even
 /// though it is a coefficient with the 1.0 identity.
-const KNOWN_MULTIPLICATIVE: &[&str] = &["uwCoeffMultiplier"];
+const KNOWN_MULTIPLICATIVE: &[&str] = &[
+    "uwCoeffMultiplier",
+    "burnChanceFactorHighLevel",
+    "burnChanceGMGSMultiplier",
+    "burnChanceMultiplier",
+];
 
 /// How same-name modifier values fold, keyed off the modifier's `MODIFIER_SETTINGS`
 /// `base_value` (1.0 -> coefficient, 0.0 -> bonus).

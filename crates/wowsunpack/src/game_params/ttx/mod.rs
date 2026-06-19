@@ -7,3 +7,4 @@ pub mod constants;
 pub mod factories;
 pub mod model;
 pub mod modifiers;
+pub mod weapon_tables;
