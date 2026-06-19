@@ -603,6 +603,17 @@ fn value_f32(v: &Value) -> Option<f32> {
     v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32))
 }
 
+/// Read the first numeric element of a list-or-tuple value (e.g. `rotationSpeed[0]`).
+fn read_first_float(v: &Value) -> Option<f32> {
+    if let Some(l) = v.list_ref() {
+        l.inner().first().and_then(value_f32)
+    } else if let Some(t) = v.tuple_ref() {
+        t.inner().first().and_then(value_f32)
+    } else {
+        None
+    }
+}
+
 /// Read both numeric elements from a list-or-tuple `[inner, outer]` pair.
 fn read_pair_both(v: &Value) -> Option<[f32; 2]> {
     if let Some(l) = v.list_ref() {
@@ -932,6 +943,47 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
                     speed_coef: read_float(&eng_data.inner(), keys::SPEED_COEF),
                 },
             );
+        }
+
+        // Torpedoes are a standalone _Torpedoes upgrade naming a torpedo component
+        // whose HP_AGT_* gun sub-objects are the launchers; read each launcher's
+        // base stats and ammo names into the TTX torpedo map.
+        if uc_type == keys::UC_TYPE_TORPEDOES
+            && let Some(torp_comp) = upgrade_dict
+                .get(&pk(keys::COMPONENTS))
+                .and_then(|v| v.dict_or_object_dict())
+                .and_then(|c| c.inner().get(&pk(keys::COMP_TORPEDOES)).and_then(read_first_string))
+            && let Some(torp_data) = ship_data.get(&pk(&torp_comp)).and_then(|v| v.dict_or_object_dict())
+        {
+            let mut launchers = Vec::new();
+            for (key, val) in torp_data.inner().iter() {
+                let is_launcher = key.string_ref().is_some_and(|s| s.inner().starts_with(keys::HP_AGT_PREFIX));
+                if !is_launcher {
+                    continue;
+                }
+                let Some(gun) = val.dict_or_object_dict() else {
+                    continue;
+                };
+                let gun = gun.inner();
+                // ammoList can be pickled as a List or a Tuple.
+                let ammo = match gun.get(&pk(keys::AMMO_LIST)) {
+                    Some(Value::Tuple(t)) => {
+                        t.inner().iter().filter_map(|v| v.string_ref().map(|s| s.inner().clone())).collect()
+                    }
+                    Some(val) => read_all_strings(val),
+                    None => Vec::new(),
+                };
+                launchers.push(crate::game_params::ttx::components::TorpedoLauncherStats {
+                    shot_delay: read_float(&gun, keys::SHOT_DELAY),
+                    rotation_speed: gun.get(&pk(keys::ROTATION_SPEED)).and_then(read_first_float),
+                    num_barrels: read_float(&gun, keys::NUM_BARRELS),
+                    ammo_switch_coeff: read_float(&gun, keys::AMMO_SWITCH_COEFF),
+                    ammo,
+                });
+            }
+            if !launchers.is_empty() {
+                ttx_components.torpedoes.insert(upgrade_name.clone(), launchers);
+            }
         }
 
         // Only process _Hull upgrades -- they define the complete config for a hull loadout
@@ -2077,5 +2129,84 @@ mod camera_tests {
 
         let engine = ttx.engine("PAUE903_D10_ENG_STOCK").expect("engine stats present");
         assert_eq!(engine.speed_coef, Some(0.0));
+    }
+
+    /// Build a ship dict mirroring Gearing's (`PASD013_Gearing_1945`) real
+    /// `A_Torpedoes` shape: a `_Torpedoes` upgrade naming an `A_Torpedoes`
+    /// component with two `HP_AGT_*` launchers (real GameParams values).
+    #[test]
+    fn build_ship_extracts_torpedo_launcher_base_stats() {
+        let hp_agt = |barrels: f64| {
+            dict(vec![
+                (pk("shotDelay"), fv(103.0)),
+                (pk("rotationSpeed"), list(vec![fv(25.0), fv(25.0)])),
+                (pk("numBarrels"), fv(barrels)),
+                (pk("ammoSwitchCoeff"), fv(0.2)),
+                (pk("ammoList"), list(vec![sv("PAPT027_Mk_16_mod_1")])),
+            ])
+        };
+        let a_torpedoes = dict(vec![(pk("HP_AGT_1"), hp_agt(5.0)), (pk("HP_AGT_2"), hp_agt(5.0))]);
+
+        let torp_components = dict(vec![(pk("torpedoes"), list(vec![sv("A_Torpedoes")]))]);
+        let torp_upgrade = dict(vec![(pk("ucType"), sv("_Torpedoes")), (pk("components"), torp_components)]);
+
+        // Minimal hull upgrade so build_ship has a hull component.
+        let hull_components = dict(vec![(pk("hull"), list(vec![sv("A_Hull")]))]);
+        let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
+        let a_hull = dict(vec![(pk("health"), fv(19400.0)), (pk("model"), sv("A_Hull.model"))]);
+
+        let upgrade_info = dict(vec![
+            (pk("PAUH911_Gearing_1945"), hull_upgrade),
+            (pk("PAUT901_D10_TORP_STOCK"), torp_upgrade),
+        ]);
+
+        let ship_data: BTreeMap<HashableValue, Value> = vec![
+            (pk("level"), Value::I64(10)),
+            (pk("group"), sv("special")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+            (pk("A_Torpedoes"), a_torpedoes),
+        ]
+        .into_iter()
+        .collect();
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+
+        let launchers = ttx.torpedoes("PAUT901_D10_TORP_STOCK").expect("torpedo stats present");
+        assert_eq!(launchers.len(), 2);
+        let l = &launchers[0];
+        assert_eq!(l.shot_delay, Some(103.0));
+        assert_eq!(l.rotation_speed, Some(25.0));
+        assert_eq!(l.num_barrels, Some(5.0));
+        assert_eq!(l.ammo_switch_coeff, Some(0.2));
+        assert_eq!(l.ammo, vec!["PAPT027_Mk_16_mod_1".to_string()]);
+
+        // A ship without torpedoes yields no torpedo entry.
+        assert!(ttx.torpedoes("PAUT901_D10_TORP_STOCK").is_some());
+        assert!(ttx.torpedoes("NoSuchUpgrade").is_none());
+    }
+
+    /// A ship with no `_Torpedoes` upgrade extracts no torpedo entries.
+    #[test]
+    fn build_ship_no_torpedoes_yields_no_torpedo_entry() {
+        let hull_components = dict(vec![(pk("hull"), list(vec![sv("A_Hull")]))]);
+        let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
+        let a_hull = dict(vec![(pk("health"), fv(10000.0)), (pk("model"), sv("A_Hull.model"))]);
+        let upgrade_info = dict(vec![(pk("PAUH001_Hull"), hull_upgrade)]);
+
+        let ship_data: BTreeMap<HashableValue, Value> = vec![
+            (pk("level"), Value::I64(5)),
+            (pk("group"), sv("special")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+        ]
+        .into_iter()
+        .collect();
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+        assert!(ttx.torpedoes.is_empty());
+        assert!(ttx.torpedoes("PAUH001_Hull").is_none());
     }
 }

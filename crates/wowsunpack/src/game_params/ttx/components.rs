@@ -55,6 +55,26 @@ pub struct EngineComponentStats {
     pub speed_coef: Option<f32>,
 }
 
+/// Base stats for a single torpedo launcher, raw from an `HP_AGT_*` gun
+/// sub-object of the torpedo component. Ammo PROJECTILE stats live on the
+/// parsed `Projectile` (resolved by name); only the launcher fields and the
+/// ammo NAME list are retained here.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct TorpedoLauncherStats {
+    /// Raw `shotDelay` field (reload, seconds).
+    pub shot_delay: Option<f32>,
+    /// Raw `rotationSpeed[0]` field (traverse, deg/s).
+    pub rotation_speed: Option<f32>,
+    /// Raw `numBarrels` field.
+    pub num_barrels: Option<f32>,
+    /// Raw `ammoSwitchCoeff` field.
+    pub ammo_switch_coeff: Option<f32>,
+    /// Projectile names from `ammoList`; resolved to `Projectile` stats at query time.
+    pub ammo: Vec<String>,
+}
+
 /// Per-ship TTX component base stats, keyed by upgrade selection.
 ///
 /// Hull stats are keyed by the `_Hull` upgrade name (mirroring
@@ -72,12 +92,16 @@ pub struct ShipTtxComponents {
     /// Engine base stats per `_Engine` upgrade name.
     #[cfg_attr(feature = "serde", serde(default))]
     pub engines: HashMap<String, EngineComponentStats>,
+    /// Torpedo launcher base stats per `_Torpedoes` upgrade name; the `Vec` is
+    /// the launchers (`HP_AGT_*` guns) on that mount.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub torpedoes: HashMap<String, Vec<TorpedoLauncherStats>>,
 }
 
 impl ShipTtxComponents {
-    /// True when no hull or engine stats were extracted.
+    /// True when no hull, engine, or torpedo stats were extracted.
     pub fn is_empty(&self) -> bool {
-        self.hulls.is_empty() && self.engines.is_empty()
+        self.hulls.is_empty() && self.engines.is_empty() && self.torpedoes.is_empty()
     }
 
     /// Look up hull stats for a given `_Hull` upgrade name.
@@ -88,5 +112,10 @@ impl ShipTtxComponents {
     /// Look up engine stats for a given `_Engine` upgrade name.
     pub fn engine(&self, upgrade_name: &str) -> Option<&EngineComponentStats> {
         self.engines.get(upgrade_name)
+    }
+
+    /// Look up torpedo launcher stats for a given `_Torpedoes` upgrade name.
+    pub fn torpedoes(&self, upgrade_name: &str) -> Option<&[TorpedoLauncherStats]> {
+        self.torpedoes.get(upgrade_name).map(|v| v.as_slice())
     }
 }

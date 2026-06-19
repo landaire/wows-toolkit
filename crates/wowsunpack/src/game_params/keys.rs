@@ -176,6 +176,12 @@ pub const BATTERY_REGEN_RATE: &str = "regenRate";
 pub const VISIBILITY_FACTOR_BY_PLANE: &str = "visibilityFactorByPlane";
 pub const MAX_DIST: &str = "maxDist";
 pub const AMMO_LIST: &str = "ammoList";
+pub const SHOT_DELAY: &str = "shotDelay";
+pub const ROTATION_SPEED: &str = "rotationSpeed";
+pub const NUM_BARRELS: &str = "numBarrels";
+pub const AMMO_SWITCH_COEFF: &str = "ammoSwitchCoeff";
+// Torpedo launcher gun sub-object key prefix (HP_AGT_1, HP_AGT_2, ...).
+pub const HP_AGT_PREFIX: &str = "HP_AGT";
 pub const CAMOUFLAGE: &str = "camouflage";
 pub const PERMOFLAGES: &str = "permoflages";
 pub const TITLE: &str = "title";
