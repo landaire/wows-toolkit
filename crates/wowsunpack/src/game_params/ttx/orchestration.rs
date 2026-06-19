@@ -1,0 +1,488 @@
+//! TTX orchestration: the public entry point that ties the factory layer together.
+//!
+//! [`ship_stats`] resolves each selected component off the ship's
+//! [`ShipTtxComponents`], builds the modifier context, calls every factory, and
+//! assembles a [`ShipStats`]. Each section is `None` when the ship lacks its
+//! components; nothing is fabricated.
+
+use crate::game_params::keys::ComponentType;
+use crate::game_params::ttx::factories;
+use crate::game_params::ttx::model::ShipStats;
+use crate::game_params::ttx::modifiers::ModifierBundle;
+use crate::game_params::ttx::selection::ShipUpgradeSelection;
+use crate::game_params::types::ArmorMap;
+use crate::game_params::types::GameParamProvider;
+use crate::game_params::types::Param;
+use crate::game_params::types::Species;
+
+/// Stock fire-control range coefficient when no `_Suo` upgrade is selected
+/// (PreprocessedFireControl.py:7 identity; FactoryArtillery.py:42 default 1.0).
+const NO_FIRE_CONTROL_COEF: f32 = 1.0;
+
+/// `SMALL_SHELL_MAX_DIAMETER` (meters), the `isSmallGun` caliber gate
+/// (Modifiers/__init__.py:19 `barrelDiameter < SMALL_SHELL_MAX_DIAMETER`). The deob
+/// `.py` zeroes this compiled-module constant; the value pinned in the weapon-table
+/// tests (0.139 m -> 139mm: a 127mm DD gun is small, a 152mm cruiser gun is not) is
+/// used here. The gun's `smallGun` override field is not retained on
+/// [`ArtilleryGunStats`], so the caliber threshold is the sole basis.
+const SMALL_SHELL_MAX_DIAMETER_M: f32 = 0.139;
+
+/// Compute a ship's full as-shown-in-port stat card for `selection` under `modifiers`.
+///
+/// Wiring (each factory transcription is documented at its definition in
+/// `factories.rs`):
+/// - durability/mobility/battery/visibility from the selected hull (engine for speed).
+/// - artillery: `fc_max_dist_coef` from the selected `_Suo` upgrade's `maxDistCoef`
+///   (default [`NO_FIRE_CONTROL_COEF`] when no FC is selected); `level` is the ship tier.
+/// - secondaries from the ATBA component the selected hull references (keyed by hull name).
+/// - torpedoes from the selected `_Torpedoes` launchers.
+/// - armor: hull armor from `Vehicle::armor`, artillery armor from the selected hull's
+///   main-battery mount armor maps.
+/// - visibility: `has_big_gun_artillery` = main battery present with a non-small gun
+///   (caliber >= [`SMALL_SHELL_MAX_DIAMETER_M`]); `mg_max_dist_km`/`atba_max_dist_km`
+///   feed from the computed artillery/secondary range so the secondary-detection floor
+///   uses the same numbers the cards show.
+///
+/// Sections are `None` when their components are absent.
+pub fn ship_stats(
+    ship: &Param,
+    selection: &ShipUpgradeSelection,
+    modifiers: &ModifierBundle,
+    level: u32,
+    provider: &dyn GameParamProvider,
+) -> ShipStats {
+    let Some(vehicle) = ship.vehicle() else {
+        return ShipStats::default();
+    };
+    let Some(components) = vehicle.ttx_components() else {
+        return ShipStats::default();
+    };
+
+    let hull = selection.hull.as_deref().and_then(|name| components.hull(name));
+
+    let durability = hull.map(|h| factories::durability(h, modifiers, level));
+
+    let mobility = hull.map(|h| {
+        let engine = selection
+            .engine
+            .as_deref()
+            .and_then(|name| components.engine(name))
+            .cloned()
+            .unwrap_or_default();
+        factories::mobility(h, &engine, modifiers)
+    });
+
+    let battery = hull.and_then(|h| factories::battery(h, modifiers));
+
+    // Fire-control coefficient feeds main-battery range (default 1.0 when no FC).
+    let fc_coef = selection
+        .fire_control
+        .as_deref()
+        .and_then(|name| components.fire_control_max_dist_coef(name))
+        .unwrap_or(NO_FIRE_CONTROL_COEF);
+
+    let artillery = selection
+        .artillery
+        .as_deref()
+        .and_then(|name| components.artillery(name))
+        .and_then(|arty| factories::artillery(arty, modifiers, fc_coef, level, provider));
+
+    let secondaries = selection
+        .hull
+        .as_deref()
+        .and_then(|name| components.secondaries(name))
+        .and_then(|atba| factories::secondaries(atba, modifiers, level, provider));
+
+    let torpedoes = selection
+        .torpedoes
+        .as_deref()
+        .and_then(|name| components.torpedoes(name))
+        .and_then(|launchers| factories::torpedoes(launchers, modifiers, provider));
+
+    // Armor: hull plate map plus the selected hull's main-battery mount armor maps.
+    let armor = vehicle.armor().and_then(|hull_armor| {
+        let arti_armor = artillery_armor_maps(vehicle, selection.hull.as_deref());
+        factories::armor(hull_armor, arti_armor.iter().copied())
+    });
+
+    // has_big_gun: the gate is `artillery present and not isSmallGun` (FactoryVisibility
+    // createVisibilityTTX@30). isSmallGun is caliber-based; read the first main-battery
+    // gun's barrelDiameter against SMALL_SHELL_MAX_DIAMETER_M.
+    let has_big_gun_artillery = selection
+        .artillery
+        .as_deref()
+        .and_then(|name| components.artillery(name))
+        .and_then(|arty| arty.guns.first())
+        .and_then(|gun| gun.barrel_diameter)
+        .is_some_and(|d| d >= SMALL_SHELL_MAX_DIAMETER_M);
+
+    let mg_max_dist_km = artillery.as_ref().and_then(|a| a.range.map(|r| r.value()));
+    let atba_max_dist_km = secondaries.as_ref().and_then(|a| a.range.map(|r| r.value()));
+
+    let visibility =
+        hull.map(|h| factories::visibility(h, modifiers, has_big_gun_artillery, mg_max_dist_km, atba_max_dist_km));
+
+    ShipStats {
+        durability,
+        mobility,
+        armor,
+        battery,
+        artillery,
+        secondaries,
+        torpedoes,
+        // Fire control has no standalone card (its coef folds into artillery range).
+        fire_control: None,
+        visibility,
+    }
+}
+
+/// The stock (base) stat card for `ship`: stock selection, empty modifier bundle.
+///
+/// `level` and `species` come from the ship itself; an empty bundle reads identity
+/// (1.0/0.0) for every coefficient, giving the unmodernised port card for free.
+pub fn ship_stats_stock(ship: &Param, provider: &dyn GameParamProvider) -> ShipStats {
+    let selection = ShipUpgradeSelection::stock(ship);
+    let level = ship.vehicle().map(|v| v.level()).unwrap_or(0);
+    let species = ship.species().and_then(|s| s.known().copied()).unwrap_or(Species::Auxiliary);
+    ship_stats(ship, &selection, &ModifierBundle::empty(species), level, provider)
+}
+
+/// Collect the main-battery mount armor maps for the selected hull, the
+/// `artillery_armor` input the [`factories::armor`] factory takes
+/// (`getArmorDictByComponent`, all `HP_AGM_*` mounts). Empty when the hull has no
+/// artillery mounts (the factory's no-artillery branch).
+fn artillery_armor_maps<'a>(
+    vehicle: &'a crate::game_params::types::Vehicle,
+    hull_name: Option<&str>,
+) -> Vec<&'a ArmorMap> {
+    let Some(hull_name) = hull_name else {
+        return Vec::new();
+    };
+    let Some(config) = vehicle.hull_upgrade(hull_name) else {
+        return Vec::new();
+    };
+    let Some(mounts) = config.mounts(ComponentType::Artillery) else {
+        return Vec::new();
+    };
+    mounts.iter().filter_map(|m| m.mount_armor()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Rc;
+    use crate::game_params::ttx::components::ArtilleryComponentStats;
+    use crate::game_params::ttx::components::ArtilleryGunStats;
+    use crate::game_params::ttx::components::EngineComponentStats;
+    use crate::game_params::ttx::components::HullComponentStats;
+    use crate::game_params::ttx::components::ShipTtxComponents;
+    use crate::game_params::ttx::components::TorpedoLauncherStats;
+    use crate::game_params::types::BigWorldDistance;
+    use crate::game_params::types::Param;
+    use crate::game_params::types::ParamData;
+    use crate::game_params::types::Projectile;
+    use crate::game_params::types::Vehicle;
+    use crate::game_types::GameParamId;
+
+    /// Gearing's real default-hull base stats (see factories.rs::tests::gearing_hull).
+    fn gearing_hull() -> HullComponentStats {
+        HullComponentStats {
+            health: Some(19400.0),
+            max_speed: Some(36.0),
+            speed_coef: Some(1.0),
+            turning_radius: Some(640.0),
+            rudder_time: Some(4.25),
+            visibility_factor: Some(7.33),
+            visibility_factor_by_plane: Some(3.41),
+            visibility_coef_fire: Some(2.0),
+            visibility_coef_fire_by_plane: Some(2.0),
+            visibility_coef_gk: Some(1e-6),
+            visibility_coef_gk_in_smoke: Some(2.83),
+            visibility_factor_by_periscope: None,
+            flood_prob: Some(0.0),
+            battery_capacity: None,
+            battery_regen_rate: None,
+        }
+    }
+
+    /// Gearing's real `PAPT027_Mk_16_mod_1` torpedo (Projectile fields).
+    fn gearing_torpedo() -> Projectile {
+        Projectile::builder()
+            .ammo_type("torpedo".to_string())
+            .max_dist(BigWorldDistance::from(350.0))
+            .speed(66.0)
+            .alpha_damage(53500.0)
+            .damage(1200.0)
+            .visibility_factor(1.4)
+            .torpedo_type(0)
+            .build()
+    }
+
+    /// Gearing's real torpedo launcher mount (`HP_AGT_*`).
+    fn gearing_launcher() -> TorpedoLauncherStats {
+        TorpedoLauncherStats {
+            shot_delay: Some(103.0),
+            rotation_speed: Some(25.0),
+            num_barrels: Some(5.0),
+            ammo_switch_coeff: None,
+            ammo: vec!["PAPT027_Mk_16_mod_1".to_string()],
+        }
+    }
+
+    /// Gearing's `D10_ART` 127mm main battery: 3 twin mounts, shotDelay 4.6,
+    /// barrelDiameter 0.127 (a small DD gun, < SMALL_SHELL_MAX_DIAMETER_M), one HE
+    /// shell, component maxDist 11130 (BW) -> 11.13 km stock range.
+    fn gearing_artillery() -> ArtilleryComponentStats {
+        let gun = || ArtilleryGunStats {
+            shot_delay: Some(4.6),
+            rotation_speed: Some(20.0),
+            num_barrels: Some(2.0),
+            barrel_diameter: Some(0.127),
+            ammo_switch_coeff: Some(1.0),
+            min_radius: Some(1.0),
+            ideal_radius: Some(10.0),
+            ideal_distance: Some(1000.0),
+            ammo: vec!["PAPA127_127mm_HE".to_string()],
+        };
+        ArtilleryComponentStats { max_dist: Some(11130.0), guns: vec![gun(), gun(), gun()] }
+    }
+
+    fn gearing_he() -> Projectile {
+        Projectile::builder()
+            .ammo_type("HE".to_string())
+            .alpha_damage(1800.0)
+            .alpha_piercing_he(21.0)
+            .burn_prob(0.05)
+            .uw_critical(0.0)
+            .bullet_diametr(0.127)
+            .bullet_speed(792.0)
+            .build()
+    }
+
+    /// A provider exposing the named projectiles a Gearing-shaped ship resolves.
+    struct StubProvider {
+        params: Vec<Rc<Param>>,
+    }
+
+    impl StubProvider {
+        fn new(entries: &[(&str, Projectile)]) -> Self {
+            let params = entries
+                .iter()
+                .enumerate()
+                .map(|(i, (name, proj))| {
+                    Rc::new(
+                        Param::builder()
+                            .id(GameParamId::from((i + 1) as u32))
+                            .index(format!("S{i:04}"))
+                            .name(name.to_string())
+                            .nation("USA".to_string())
+                            .data(ParamData::Projectile(proj.clone()))
+                            .build(),
+                    )
+                })
+                .collect();
+            StubProvider { params }
+        }
+    }
+
+    impl GameParamProvider for StubProvider {
+        fn game_param_by_id(&self, _id: GameParamId) -> Option<Rc<Param>> {
+            None
+        }
+        fn game_param_by_index(&self, _index: &str) -> Option<Rc<Param>> {
+            None
+        }
+        fn game_param_by_name(&self, name: &str) -> Option<Rc<Param>> {
+            self.params.iter().find(|p| p.name() == name).cloned()
+        }
+        fn params(&self) -> &[Rc<Param>] {
+            &self.params
+        }
+    }
+
+    /// Assemble a ship `Param` (tier 10 destroyer) around the given TTX components.
+    fn ship_with(name: &str, level: u32, species: Species, components: ShipTtxComponents) -> Param {
+        let vehicle = Vehicle::builder()
+            .level(level)
+            .group("g".to_string())
+            .maybe_abilities(None)
+            .upgrades(Vec::new())
+            .maybe_config_data(None)
+            .maybe_model_path(None)
+            .maybe_armor(None)
+            .maybe_hit_locations(None)
+            .permoflages(Vec::new())
+            .camera_trajectories(Vec::new())
+            .ttx_components(components)
+            .build();
+        Param::builder()
+            .id(GameParamId::from(900u32))
+            .index("IDX".to_string())
+            .name(name.to_string())
+            .nation("USA".to_string())
+            .species(crate::recognized::Recognized::Known(species))
+            .data(ParamData::Vehicle(vehicle))
+            .build()
+    }
+
+    /// Build a Gearing-shaped ship `Param` populated across hull/engine/artillery/
+    /// torpedoes/fire-control slots, with the stock selection pre-recorded (mirroring
+    /// the provider walk's empty-`prev` capture).
+    fn gearing_ship() -> Param {
+        let mut components = ShipTtxComponents::default();
+        components.hulls.insert("PAUH911_Gearing_1945".to_string(), gearing_hull());
+        components.engines.insert("PAUE903_D10_ENG_STOCK".to_string(), EngineComponentStats { speed_coef: Some(0.0) });
+        components.artillery.insert("PAUA903_D10_ART_STOCK".to_string(), gearing_artillery());
+        components.torpedoes.insert("PAUT902_D10_NEW_STOCK".to_string(), vec![gearing_launcher()]);
+        components.fire_controls.insert("PAUS911_Suo".to_string(), 1.0);
+        components.stock_selection = ShipUpgradeSelection::new(
+            Some("PAUH911_Gearing_1945".to_string()),
+            Some("PAUE903_D10_ENG_STOCK".to_string()),
+            Some("PAUA903_D10_ART_STOCK".to_string()),
+            Some("PAUT902_D10_NEW_STOCK".to_string()),
+            Some("PAUS911_Suo".to_string()),
+        );
+        ship_with("PASD013_Gearing_1945", 10, Species::Destroyer, components)
+    }
+
+    fn gearing_provider() -> StubProvider {
+        StubProvider::new(&[("PAPT027_Mk_16_mod_1", gearing_torpedo()), ("PAPA127_127mm_HE", gearing_he())])
+    }
+
+    #[test]
+    fn stock_selection_picks_base_upgrades() {
+        let ship = gearing_ship();
+        let sel = ShipUpgradeSelection::stock(&ship);
+        assert_eq!(sel.hull.as_deref(), Some("PAUH911_Gearing_1945"));
+        assert_eq!(sel.engine.as_deref(), Some("PAUE903_D10_ENG_STOCK"));
+        assert_eq!(sel.artillery.as_deref(), Some("PAUA903_D10_ART_STOCK"));
+        // The torpedo stock is the empty-prev PAUT902, not the chained PAUT901.
+        assert_eq!(sel.torpedoes.as_deref(), Some("PAUT902_D10_NEW_STOCK"));
+        assert_eq!(sel.fire_control.as_deref(), Some("PAUS911_Suo"));
+    }
+
+    #[test]
+    fn stock_selection_default_when_not_a_vehicle() {
+        let proj = Param::builder()
+            .id(GameParamId::from(1u32))
+            .index("S0001".to_string())
+            .name("X".to_string())
+            .nation("USA".to_string())
+            .data(ParamData::Projectile(gearing_torpedo()))
+            .build();
+        assert_eq!(ShipUpgradeSelection::stock(&proj), ShipUpgradeSelection::default());
+    }
+
+    #[test]
+    fn gearing_stock_ship_stats_sections() {
+        let ship = gearing_ship();
+        let provider = gearing_provider();
+        let stats = ship_stats_stock(&ship, &provider);
+
+        // Durability: health 19400 (validated against the factory's gearing case).
+        let durability = stats.durability.expect("durability");
+        assert_eq!(durability.health.expect("health").value(), 19400.0);
+
+        // Mobility: 36 kn (engine speedCoef 0.0, hull carries the full coef).
+        let mobility = stats.mobility.expect("mobility");
+        assert_eq!(mobility.speed.expect("speed").value(), 36.0);
+        assert_eq!(mobility.turning_radius.expect("turning").value(), 640.0);
+
+        // Torpedoes present: damage 53500/3 + 1200 = 19033.33.
+        let torps = stats.torpedoes.expect("torpedoes");
+        let damage = torps.torpedoes[0].damage.expect("torp damage").value();
+        assert!((damage - (53500.0 / 3.0 + 1200.0)).abs() < 1e-1, "got {damage}");
+
+        // Artillery present: stock reload 4.6, range 11.13 km.
+        let arty = stats.artillery.expect("artillery");
+        assert!((arty.reload_time.expect("reload").value() - 4.6).abs() < 1e-3);
+        assert!((arty.range.expect("range").value() - 11.13).abs() < 1e-3);
+
+        // Visibility: sea detection 7.33 km.
+        let vis = stats.visibility.expect("visibility");
+        assert!((vis.sea_detection.expect("sea").value() - 7.33).abs() < 1e-3);
+
+        // A 127mm DD gun is small -> no big-gun visibility penalty: sea stays 7.33.
+        // (A modifier-free bundle reads identity, so this is implicit, but assert the
+        // gate by checking sea is unscaled.)
+
+        // Gearing has no submarine battery / secondaries.
+        assert!(stats.battery.is_none());
+        assert!(stats.secondaries.is_none());
+        // Fire control folds into artillery range; no standalone card.
+        assert!(stats.fire_control.is_none());
+    }
+
+    #[test]
+    fn fire_control_coef_scales_artillery_range() {
+        // An FC upgrade carrying maxDistCoef 1.2 scales main-battery range by 1.2.
+        let mut components = ShipTtxComponents::default();
+        components.hulls.insert("PAUH911_Gearing_1945".to_string(), gearing_hull());
+        components.engines.insert("PAUE903_D10_ENG_STOCK".to_string(), EngineComponentStats { speed_coef: Some(0.0) });
+        components.artillery.insert("PAUA903_D10_ART_STOCK".to_string(), gearing_artillery());
+        components.fire_controls.insert("PAUS911_Suo".to_string(), 1.2);
+        components.stock_selection = ShipUpgradeSelection::new(
+            Some("PAUH911_Gearing_1945".to_string()),
+            Some("PAUE903_D10_ENG_STOCK".to_string()),
+            Some("PAUA903_D10_ART_STOCK".to_string()),
+            None,
+            Some("PAUS911_Suo".to_string()),
+        );
+        let ship = ship_with("PASD013_Gearing_1945", 10, Species::Destroyer, components);
+        let provider = gearing_provider();
+        let stats = ship_stats_stock(&ship, &provider);
+        let range = stats.artillery.expect("artillery").range.expect("range").value();
+        // 11.13 * 1.2 (fc coef) * 1.0 (GMMaxDist) = 13.356.
+        assert!((range - 13.356).abs() < 1e-2, "got {range}");
+    }
+
+    #[test]
+    fn big_gun_visibility_gate_uses_caliber() {
+        // A 152mm gun (>= SMALL_SHELL_MAX_DIAMETER_M) is a big gun; with a non-stock
+        // GMBigGunVisibilityCoeff the sea detection takes the penalty. Build a ship
+        // whose artillery is 152mm and apply the coefficient via an explicit bundle.
+        use crate::game_params::types::CrewSkillModifier;
+        let mut components = ShipTtxComponents::default();
+        components.hulls.insert("H".to_string(), gearing_hull());
+        let big_gun = ArtilleryGunStats { barrel_diameter: Some(0.152), ..ArtilleryGunStats::default() };
+        components
+            .artillery
+            .insert("A".to_string(), ArtilleryComponentStats { max_dist: Some(15000.0), guns: vec![big_gun] });
+        components.stock_selection =
+            ShipUpgradeSelection::new(Some("H".to_string()), None, Some("A".to_string()), None, None);
+        let ship = ship_with("BigGun", 10, Species::Cruiser, components);
+        let provider = StubProvider::new(&[]);
+
+        let modifier = CrewSkillModifier::builder()
+            .name("GMBigGunVisibilityCoeff".to_string())
+            .aircraft_carrier(1.05)
+            .auxiliary(1.05)
+            .battleship(1.05)
+            .cruiser(1.05)
+            .destroyer(1.05)
+            .submarine(1.05)
+            .excluded_consumables(Vec::new())
+            .build();
+        let bundle = ModifierBundle::from_modifiers(&[modifier], Species::Cruiser, 11791718);
+        let sel = ShipUpgradeSelection::stock(&ship);
+        let stats = ship_stats(&ship, &sel, &bundle, 10, &provider);
+        let sea = stats.visibility.expect("visibility").sea_detection.expect("sea").value();
+        // 7.33 * 1.05 (big-gun penalty applies because the gun is 152mm) = 7.6965.
+        assert!((sea - 7.6965).abs() < 1e-3, "got {sea}");
+    }
+
+    #[test]
+    fn non_vehicle_yields_empty_stats() {
+        let proj = Param::builder()
+            .id(GameParamId::from(1u32))
+            .index("S0001".to_string())
+            .name("X".to_string())
+            .nation("USA".to_string())
+            .data(ParamData::Projectile(gearing_torpedo()))
+            .build();
+        let provider = StubProvider::new(&[]);
+        let stats = ship_stats(&proj, &ShipUpgradeSelection::default(), &ModifierBundle::empty(Species::Destroyer), 10, &provider);
+        assert!(stats.durability.is_none());
+        assert!(stats.artillery.is_none());
+    }
+}

@@ -936,6 +936,26 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             continue;
         };
 
+        // Stock selection: the chain root in each slot is the empty-`prev` upgrade.
+        // An absent `prev` key (single-option slots) is treated as the root too.
+        let is_stock = match upgrade_dict.get(&pk(keys::PREV)) {
+            Some(v) => v.string_ref().map(|s| s.inner().is_empty()).unwrap_or(true),
+            None => true,
+        };
+        if is_stock {
+            let slot = match uc_type.as_str() {
+                keys::UC_TYPE_HULL => Some(&mut ttx_components.stock_selection.hull),
+                keys::UC_TYPE_ENGINE => Some(&mut ttx_components.stock_selection.engine),
+                keys::UC_TYPE_ARTILLERY => Some(&mut ttx_components.stock_selection.artillery),
+                keys::UC_TYPE_TORPEDOES => Some(&mut ttx_components.stock_selection.torpedoes),
+                keys::UC_TYPE_SUO => Some(&mut ttx_components.stock_selection.fire_control),
+                _ => None,
+            };
+            if let Some(slot) = slot {
+                slot.get_or_insert_with(|| upgrade_name.clone());
+            }
+        }
+
         // Engine is a standalone _Engine upgrade (not nested in the hull upgrade's
         // components); read its speedCoef into the TTX engine map.
         if uc_type == keys::UC_TYPE_ENGINE

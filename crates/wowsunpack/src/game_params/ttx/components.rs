@@ -188,6 +188,11 @@ pub struct ShipTtxComponents {
     /// range-extender FC options carry > 1.0.
     #[cfg_attr(feature = "serde", serde(default))]
     pub fire_controls: HashMap<String, f32>,
+    /// Stock (base) upgrade selection per slot: the empty-`prev` upgrade in each
+    /// `ShipUpgradeInfo` chain, captured during the same walk that fills the maps
+    /// above (the raw `ShipUpgradeInfo` pickle is dropped after parsing).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub stock_selection: super::selection::ShipUpgradeSelection,
 }
 
 impl ShipTtxComponents {
@@ -229,5 +234,10 @@ impl ShipTtxComponents {
     /// Look up the fire-control `maxDistCoef` for a given `_Suo` upgrade name.
     pub fn fire_control_max_dist_coef(&self, upgrade_name: &str) -> Option<f32> {
         self.fire_controls.get(upgrade_name).copied()
+    }
+
+    /// The stock (base) upgrade selection per slot.
+    pub fn stock_selection(&self) -> &super::selection::ShipUpgradeSelection {
+        &self.stock_selection
     }
 }

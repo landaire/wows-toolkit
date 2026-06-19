@@ -11,6 +11,9 @@ pub const A_HULL: &str = "A_Hull";
 // Upgrade dict keys
 pub const UC_TYPE: &str = "ucType";
 pub const COMPONENTS: &str = "components";
+/// Names the upgrade this one follows in its slot's research chain; the chain root
+/// (stock module) has an empty `prev`.
+pub const PREV: &str = "prev";
 
 // ucType values
 pub const UC_TYPE_ENGINE: &str = "_Engine";
