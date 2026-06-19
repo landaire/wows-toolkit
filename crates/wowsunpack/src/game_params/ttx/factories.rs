@@ -72,7 +72,7 @@ const TORPEDO_TYPE_COMMON: i64 = 0;
 /// MODIFIER_SETTINGS base_value 0.0). `None` when `flood_prob` is absent.
 pub fn durability(hull: &HullComponentStats, modifiers: &ModifierBundle, level: u32) -> Durability {
     let health = hull.health.map(|base| {
-        let raw = (base + modifiers.bonus("healthPerLevel") * level as f32) * modifiers.coef("healthHullCoeff");
+        let raw = (base.value() + modifiers.bonus("healthPerLevel") * level as f32) * modifiers.coef("healthHullCoeff");
         // ceil(raw / round) * round (ModifiersApply.py:143).
         let rounded = (raw / HULL_HEALTH_ROUND).ceil() * HULL_HEALTH_ROUND;
         Hp::from(rounded)
@@ -101,14 +101,14 @@ pub fn mobility(hull: &HullComponentStats, engine: &EngineComponentStats, modifi
         (Some(max_speed), Some(hull_speed_coef)) => {
             let engine_speed_coef = engine.speed_coef.unwrap_or(0.0);
             let coef = (hull_speed_coef + engine_speed_coef).clamp(0.0, 1.0);
-            Some(Knots::from(max_speed * coef * modifiers.coef("speedCoef")))
+            Some(Knots::from(max_speed.value() * coef * modifiers.coef("speedCoef")))
         }
         _ => None,
     };
 
-    let turning_radius = hull.turning_radius.map(Meters::from);
+    let turning_radius = hull.turning_radius;
 
-    let rudder_time = hull.rudder_time.map(|t| Seconds::from(t * modifiers.coef("SGRudderTime")));
+    let rudder_time = hull.rudder_time.map(|t| Seconds::from(t.value() * modifiers.coef("SGRudderTime")));
 
     Mobility { speed, turning_radius, rudder_time }
 }
@@ -317,7 +317,7 @@ pub fn torpedoes(launchers: &[TorpedoLauncherStats], modifiers: &ModifierBundle,
     let mut torpedoes = Vec::new();
 
     for launcher in launchers {
-        let rotation_speed = launcher.rotation_speed.map(|r| r * yaw_coef + yaw_bonus);
+        let rotation_speed = launcher.rotation_speed.map(|r| r.value() * yaw_coef + yaw_bonus);
         let rotation_time = rotation_speed.filter(|&r| r != 0.0).map(|r| Seconds::from(180.0 / r));
         result_launchers.push(Launcher {
             rotation_speed: rotation_speed.map(DegreesPerSecond::from),
@@ -326,7 +326,7 @@ pub fn torpedoes(launchers: &[TorpedoLauncherStats], modifiers: &ModifierBundle,
         });
 
         if let Some(delay) = launcher.shot_delay {
-            let reload = delay * shot_delay_coef;
+            let reload = delay.value() * shot_delay_coef;
             if reload != 0.0 {
                 reload_times.push(reload);
             }
@@ -504,11 +504,11 @@ pub fn artillery(
     // All main-battery mounts share the same reload; take the first gun's shotDelay.
     let first = &arty.guns[0];
 
-    let reload_time = first.shot_delay.map(|d| Seconds::from(d * shot_delay_coef));
+    let reload_time = first.shot_delay.map(|d| Seconds::from(d.value() * shot_delay_coef));
 
     let range_km = arty
         .max_dist
-        .map(|d| (d / KM_TO_M) * fc_max_dist_coef * max_dist_coef);
+        .map(|d| (d.value() / KM_TO_M) * fc_max_dist_coef * max_dist_coef);
     let range = range_km.map(Km::from);
 
     // dispersion over the FC-adjusted range (FactoryArtillery.py:47 uses `unknown_12`).
@@ -520,14 +520,14 @@ pub fn artillery(
     };
 
     let ammo_switch_time = match (first.shot_delay, first.ammo_switch_coeff) {
-        (Some(delay), Some(coeff)) => Some(Seconds::from(delay * coeff * shot_delay_coef * switch_coef)),
+        (Some(delay), Some(coeff)) => Some(Seconds::from(delay.value() * coeff * shot_delay_coef * switch_coef)),
         _ => None,
     };
 
-    let rotation_speed = first.rotation_speed.map(|r| r * yaw_coef + yaw_bonus);
+    let rotation_speed = first.rotation_speed.map(|r| r.value() * yaw_coef + yaw_bonus);
     let rotation_time = rotation_speed.filter(|&r| r != 0.0).map(|r| Seconds::from(180.0 / r));
     let gun = Some(MainGun {
-        caliber: first.barrel_diameter.map(|b| Millimeters::from(b * 1000.0)),
+        caliber: first.barrel_diameter.map(|b| b.to_mm()),
         num_barrels: first.num_barrels.map(|n| n as u32),
         num_guns: Some(arty.guns.len() as u32),
         rotation_speed: rotation_speed.map(DegreesPerSecond::from),
@@ -601,11 +601,11 @@ pub fn secondaries(
     // First gun group drives the displayed reload/gun (FactoryArtillery.py:83 is per gun).
     let first = &atba.guns[0];
 
-    let reload_time = first.shot_delay.map(|d| Seconds::from(d * shot_delay_coef));
+    let reload_time = first.shot_delay.map(|d| Seconds::from(d.value() * shot_delay_coef));
 
     // range = (maxDist / KM_TO_M) * GSMaxDist (FactoryArtillery.py:84 over the KM
     // maxDist of PreprocessedATBA.py:30). No fire-control coef for secondaries.
-    let range_km = atba.max_dist.map(|d| (d / KM_TO_M) * max_dist_coef);
+    let range_km = atba.max_dist.map(|d| (d.value() / KM_TO_M) * max_dist_coef);
     let range = range_km.map(Km::from);
 
     let dispersion = match (range_km, first.min_radius, first.ideal_radius, first.ideal_distance) {
@@ -615,10 +615,10 @@ pub fn secondaries(
         _ => None,
     };
 
-    let rotation_speed = first.rotation_speed.map(|r| r * yaw_coef + yaw_bonus);
+    let rotation_speed = first.rotation_speed.map(|r| r.value() * yaw_coef + yaw_bonus);
     let rotation_time = rotation_speed.filter(|&r| r != 0.0).map(|r| Seconds::from(180.0 / r));
     let gun = Some(MainGun {
-        caliber: first.barrel_diameter.map(|b| Millimeters::from(b * 1000.0)),
+        caliber: first.barrel_diameter.map(|b| b.to_mm()),
         num_barrels: first.num_barrels.map(|n| n as u32),
         num_guns: Some(atba.guns.len() as u32),
         rotation_speed: rotation_speed.map(DegreesPerSecond::from),
@@ -697,18 +697,18 @@ pub fn visibility(
 
     let sea = hull
         .visibility_factor
-        .map(|v| v * modifiers.coef("visibilityFactor") * coeff);
+        .map(|v| v.value() * modifiers.coef("visibilityFactor") * coeff);
     let sea_detection = sea.map(Km::from);
 
     let sea_detection_on_fire = match (sea, hull.visibility_coef_fire) {
-        (Some(s), Some(fire)) => Some(Km::from(s + fire)),
+        (Some(s), Some(fire)) => Some(Km::from(s + fire.value())),
         _ => None,
     };
 
     let detection_in_smoke = hull
         .visibility_coef_gk_in_smoke
-        .filter(|&v| v > MINIMAL_VALID_VALUE)
-        .map(Km::from);
+        .filter(|&v| v.value() > MINIMAL_VALID_VALUE)
+        .map(|v| Km::from(v.value()));
 
     // mgMaxDist and atbaMaxDist both write the same secondary-detection floor; take the
     // max over whichever ranges are supplied, floored by `sea` (@188-272).
@@ -722,17 +722,17 @@ pub fn visibility(
 
     let air = hull
         .visibility_factor_by_plane
-        .map(|v| v * modifiers.coef("visibilityFactorByPlane") * coeff);
+        .map(|v| v.value() * modifiers.coef("visibilityFactorByPlane") * coeff);
     let air_detection = air.map(Km::from);
 
     let air_detection_on_fire = match (air, hull.visibility_coef_fire_by_plane) {
-        (Some(a), Some(fire)) => Some(Km::from(a + fire)),
+        (Some(a), Some(fire)) => Some(Km::from(a + fire.value())),
         _ => None,
     };
 
     let periscope_depth_detection = hull
         .visibility_factor_by_periscope
-        .map(|v| Km::from(v * modifiers.coef("visibilityForSubmarineCoeff")));
+        .map(|v| Km::from(v.value() * modifiers.coef("visibilityForSubmarineCoeff")));
 
     Visibility {
         sea_detection,
@@ -762,17 +762,17 @@ mod tests {
     /// DEFAULT_UW_DAMAGE_COEFF), so flood_prob is 0.0; no SubmarineBattery (DD).
     fn gearing_hull() -> HullComponentStats {
         HullComponentStats {
-            health: Some(19400.0),
-            max_speed: Some(36.0),
+            health: Some(Hp::from(19400.0)),
+            max_speed: Some(Knots::from(36.0)),
             speed_coef: Some(1.0),
-            turning_radius: Some(640.0),
-            rudder_time: Some(4.25),
-            visibility_factor: Some(7.33),
-            visibility_factor_by_plane: Some(3.41),
-            visibility_coef_fire: Some(2.0),
-            visibility_coef_fire_by_plane: Some(2.0),
-            visibility_coef_gk: Some(1e-6),
-            visibility_coef_gk_in_smoke: Some(2.83),
+            turning_radius: Some(Meters::from(640.0)),
+            rudder_time: Some(Seconds::from(4.25)),
+            visibility_factor: Some(Km::from(7.33)),
+            visibility_factor_by_plane: Some(Km::from(3.41)),
+            visibility_coef_fire: Some(Km::from(2.0)),
+            visibility_coef_fire_by_plane: Some(Km::from(2.0)),
+            visibility_coef_gk: Some(Km::from(1e-6)),
+            visibility_coef_gk_in_smoke: Some(Km::from(2.83)),
             visibility_factor_by_periscope: None,
             flood_prob: Some(0.0),
             battery_capacity: None,
@@ -1028,8 +1028,8 @@ mod tests {
     /// rotationSpeed[0] 25, numBarrels 5, one ammo PAPT027_Mk_16_mod_1.
     fn gearing_launcher() -> TorpedoLauncherStats {
         TorpedoLauncherStats {
-            shot_delay: Some(103.0),
-            rotation_speed: Some(25.0),
+            shot_delay: Some(Seconds::from(103.0)),
+            rotation_speed: Some(DegreesPerSecond::from(25.0)),
             num_barrels: Some(5.0),
             ammo_switch_coeff: None,
             ammo: vec!["PAPT027_Mk_16_mod_1".to_string()],
@@ -1226,10 +1226,10 @@ mod tests {
     /// ammoSwitchCoeff 1.0, minRadius 1.1, idealRadius 8, idealDistance 1000, ammo HE+AP.
     fn worcester_artillery() -> ArtilleryComponentStats {
         let gun = || ArtilleryGunStats {
-            shot_delay: Some(4.6),
-            rotation_speed: Some(25.0),
+            shot_delay: Some(Seconds::from(4.6)),
+            rotation_speed: Some(DegreesPerSecond::from(25.0)),
             num_barrels: Some(2.0),
-            barrel_diameter: Some(0.152),
+            barrel_diameter: Some(Meters::from(0.152)),
             ammo_switch_coeff: Some(1.0),
             min_radius: Some(1.1),
             ideal_radius: Some(8.0),
@@ -1240,7 +1240,7 @@ mod tests {
             ],
         };
         ArtilleryComponentStats {
-            max_dist: Some(15320.0),
+            max_dist: Some(Meters::from(15320.0)),
             guns: vec![gun(), gun(), gun(), gun(), gun(), gun()],
         }
     }
@@ -1495,10 +1495,10 @@ mod tests {
     /// (150mm) drives the displayed reload/gun.
     fn bismarck_secondaries() -> SecondaryComponentStats {
         let gun_150 = ArtilleryGunStats {
-            shot_delay: Some(7.5),
-            rotation_speed: Some(60.0),
+            shot_delay: Some(Seconds::from(7.5)),
+            rotation_speed: Some(DegreesPerSecond::from(60.0)),
             num_barrels: Some(2.0),
-            barrel_diameter: Some(0.15),
+            barrel_diameter: Some(Meters::from(0.15)),
             ammo_switch_coeff: None,
             min_radius: Some(1.0),
             ideal_radius: Some(15.5),
@@ -1506,10 +1506,10 @@ mod tests {
             ammo: vec!["PGPA003_150mm_HE_HE_N_F".to_string()],
         };
         let gun_105 = ArtilleryGunStats {
-            shot_delay: Some(3.35),
-            rotation_speed: Some(60.0),
+            shot_delay: Some(Seconds::from(3.35)),
+            rotation_speed: Some(DegreesPerSecond::from(60.0)),
             num_barrels: Some(2.0),
-            barrel_diameter: Some(0.105),
+            barrel_diameter: Some(Meters::from(0.105)),
             ammo_switch_coeff: None,
             min_radius: Some(1.0),
             ideal_radius: Some(15.5),
@@ -1517,7 +1517,7 @@ mod tests {
             ammo: vec!["PGPA085_105mm_HE_HE_33lbs".to_string()],
         };
         SecondaryComponentStats {
-            max_dist: Some(7600.0),
+            max_dist: Some(Meters::from(7600.0)),
             // 14 mounts total: 6 x 150mm groups + 8 x 105mm groups (calibers as 2 distinct ammo).
             guns: vec![gun_150.clone(), gun_150, gun_105.clone(), gun_105],
         }
@@ -1679,14 +1679,14 @@ mod tests {
     #[test]
     fn secondary_range_detection_floors_at_atba_range() {
         // BB-like sea detection below the secondary range -> max(sea, 7.6) = 7.6.
-        let hull = HullComponentStats { visibility_factor: Some(6.0), ..gearing_hull() };
+        let hull = HullComponentStats { visibility_factor: Some(Km::from(6.0)), ..gearing_hull() };
         let vis = visibility(&hull, &ModifierBundle::empty(Species::Battleship), false, None, Some(7.6));
         // sea = 6.0; secondary floor = max(6.0, 7.6) = 7.6.
         assert_eq!(vis.sea_detection, Some(Km::from(6.0)));
         assert_eq!(vis.secondary_range_detection, Some(Km::from(7.6)));
 
         // When sea exceeds the secondary range, the floor stays at sea.
-        let hull_far = HullComponentStats { visibility_factor: Some(9.0), ..gearing_hull() };
+        let hull_far = HullComponentStats { visibility_factor: Some(Km::from(9.0)), ..gearing_hull() };
         let vis_far = visibility(&hull_far, &ModifierBundle::empty(Species::Battleship), false, None, Some(7.6));
         assert_eq!(vis_far.secondary_range_detection, Some(Km::from(9.0)));
     }
@@ -1694,12 +1694,12 @@ mod tests {
     #[test]
     fn near_zero_smoke_coef_yields_no_smoke_detection() {
         // visibilityCoefGKInSmoke == MINIMAL_VALID_VALUE (0.01) is not > the gate -> None.
-        let hull = HullComponentStats { visibility_coef_gk_in_smoke: Some(0.01), ..gearing_hull() };
+        let hull = HullComponentStats { visibility_coef_gk_in_smoke: Some(Km::from(0.01)), ..gearing_hull() };
         let vis = visibility(&hull, &ModifierBundle::empty(Species::Destroyer), false, None, None);
         assert!(vis.detection_in_smoke.is_none());
 
         // Below the gate -> None.
-        let hull_zero = HullComponentStats { visibility_coef_gk_in_smoke: Some(0.0), ..gearing_hull() };
+        let hull_zero = HullComponentStats { visibility_coef_gk_in_smoke: Some(Km::from(0.0)), ..gearing_hull() };
         let vis_zero = visibility(&hull_zero, &ModifierBundle::empty(Species::Destroyer), false, None, None);
         assert!(vis_zero.detection_in_smoke.is_none());
     }
@@ -1708,7 +1708,7 @@ mod tests {
     fn submarine_periscope_detection_applies_coeff() {
         // Periscope-depth detection only when the field is present:
         // visibilityByPeriscope 5.0 * visibilityForSubmarineCoeff 1.0 (stock) = 5.0.
-        let hull = HullComponentStats { visibility_factor_by_periscope: Some(5.0), ..gearing_hull() };
+        let hull = HullComponentStats { visibility_factor_by_periscope: Some(Km::from(5.0)), ..gearing_hull() };
         let vis = visibility(&hull, &ModifierBundle::empty(Species::Submarine), false, None, None);
         assert_eq!(vis.periscope_depth_detection, Some(Km::from(5.0)));
     }

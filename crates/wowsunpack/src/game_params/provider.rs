@@ -1002,8 +1002,11 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
                     None => Vec::new(),
                 };
                 launchers.push(crate::game_params::ttx::components::TorpedoLauncherStats {
-                    shot_delay: read_float(&gun, keys::SHOT_DELAY),
-                    rotation_speed: gun.get(&pk(keys::ROTATION_SPEED)).and_then(read_first_float),
+                    shot_delay: read_float(&gun, keys::SHOT_DELAY).map(crate::game_params::ttx::model::Seconds::from),
+                    rotation_speed: gun
+                        .get(&pk(keys::ROTATION_SPEED))
+                        .and_then(read_first_float)
+                        .map(crate::game_params::ttx::model::DegreesPerSecond::from),
                     num_barrels: read_float(&gun, keys::NUM_BARRELS),
                     ammo_switch_coeff: read_float(&gun, keys::AMMO_SWITCH_COEFF),
                     ammo,
@@ -1044,10 +1047,13 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
                     None => Vec::new(),
                 };
                 guns.push(crate::game_params::ttx::components::ArtilleryGunStats {
-                    shot_delay: read_float(&gun, keys::SHOT_DELAY),
-                    rotation_speed: gun.get(&pk(keys::ROTATION_SPEED)).and_then(read_first_float),
+                    shot_delay: read_float(&gun, keys::SHOT_DELAY).map(crate::game_params::ttx::model::Seconds::from),
+                    rotation_speed: gun
+                        .get(&pk(keys::ROTATION_SPEED))
+                        .and_then(read_first_float)
+                        .map(crate::game_params::ttx::model::DegreesPerSecond::from),
                     num_barrels: read_float(&gun, keys::NUM_BARRELS),
-                    barrel_diameter: read_float(&gun, keys::BARREL_DIAMETER),
+                    barrel_diameter: read_float(&gun, keys::BARREL_DIAMETER).map(Meters::from),
                     ammo_switch_coeff: read_float(&gun, keys::AMMO_SWITCH_COEFF),
                     min_radius: read_float(&gun, keys::MIN_RADIUS),
                     ideal_radius: read_float(&gun, keys::IDEAL_RADIUS),
@@ -1059,7 +1065,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
                 ttx_components.artillery.insert(
                     upgrade_name.clone(),
                     crate::game_params::ttx::components::ArtilleryComponentStats {
-                        max_dist: read_float(&arty_data, keys::MAX_DIST),
+                        max_dist: read_float(&arty_data, keys::MAX_DIST).map(Meters::from),
                         guns,
                     },
                 );
@@ -1097,10 +1103,13 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
                     None => Vec::new(),
                 };
                 guns.push(crate::game_params::ttx::components::ArtilleryGunStats {
-                    shot_delay: read_float(&gun, keys::SHOT_DELAY),
-                    rotation_speed: gun.get(&pk(keys::ROTATION_SPEED)).and_then(read_first_float),
+                    shot_delay: read_float(&gun, keys::SHOT_DELAY).map(crate::game_params::ttx::model::Seconds::from),
+                    rotation_speed: gun
+                        .get(&pk(keys::ROTATION_SPEED))
+                        .and_then(read_first_float)
+                        .map(crate::game_params::ttx::model::DegreesPerSecond::from),
                     num_barrels: read_float(&gun, keys::NUM_BARRELS),
-                    barrel_diameter: read_float(&gun, keys::BARREL_DIAMETER),
+                    barrel_diameter: read_float(&gun, keys::BARREL_DIAMETER).map(Meters::from),
                     ammo_switch_coeff: read_float(&gun, keys::AMMO_SWITCH_COEFF),
                     min_radius: read_float(&gun, keys::MIN_RADIUS),
                     ideal_radius: read_float(&gun, keys::IDEAL_RADIUS),
@@ -1113,8 +1122,8 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
                     upgrade_name.clone(),
                     crate::game_params::ttx::components::SecondaryComponentStats {
                         // maxDist is stored in KM downstream (PreprocessedATBA.py:30);
-                        // keep the raw BigWorld value here and divide at the factory.
-                        max_dist: read_float(&atba_data, keys::MAX_DIST),
+                        // keep the raw meters value here and divide at the factory.
+                        max_dist: read_float(&atba_data, keys::MAX_DIST).map(Meters::from),
                         guns,
                     },
                 );
@@ -1178,18 +1187,18 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             ttx_components.hulls.insert(
                 upgrade_name.clone(),
                 crate::game_params::ttx::components::HullComponentStats {
-                    health: read_float(&hull_data, keys::HEALTH),
-                    max_speed: read_float(&hull_data, keys::MAX_SPEED),
+                    health: read_float(&hull_data, keys::HEALTH).map(crate::game_params::ttx::model::Hp::from),
+                    max_speed: read_float(&hull_data, keys::MAX_SPEED).map(crate::game_params::ttx::model::Knots::from),
                     speed_coef: read_float(&hull_data, keys::SPEED_COEF),
-                    turning_radius: read_float(&hull_data, keys::TURNING_RADIUS),
-                    rudder_time: read_float(&hull_data, keys::RUDDER_TIME),
-                    visibility_factor: read_float(&hull_data, keys::VISIBILITY_FACTOR),
-                    visibility_factor_by_plane: read_float(&hull_data, keys::VISIBILITY_FACTOR_BY_PLANE),
-                    visibility_coef_fire: read_float(&hull_data, keys::VISIBILITY_COEF_FIRE),
-                    visibility_coef_fire_by_plane: read_float(&hull_data, keys::VISIBILITY_COEF_FIRE_BY_PLANE),
-                    visibility_coef_gk: read_float(&hull_data, keys::VISIBILITY_COEF_GK),
-                    visibility_coef_gk_in_smoke: read_float(&hull_data, keys::VISIBILITY_COEF_GK_IN_SMOKE),
-                    visibility_factor_by_periscope: read_visibility_by_periscope(&hull_data),
+                    turning_radius: read_float(&hull_data, keys::TURNING_RADIUS).map(Meters::from),
+                    rudder_time: read_float(&hull_data, keys::RUDDER_TIME).map(crate::game_params::ttx::model::Seconds::from),
+                    visibility_factor: read_float(&hull_data, keys::VISIBILITY_FACTOR).map(Km::from),
+                    visibility_factor_by_plane: read_float(&hull_data, keys::VISIBILITY_FACTOR_BY_PLANE).map(Km::from),
+                    visibility_coef_fire: read_float(&hull_data, keys::VISIBILITY_COEF_FIRE).map(Km::from),
+                    visibility_coef_fire_by_plane: read_float(&hull_data, keys::VISIBILITY_COEF_FIRE_BY_PLANE).map(Km::from),
+                    visibility_coef_gk: read_float(&hull_data, keys::VISIBILITY_COEF_GK).map(Km::from),
+                    visibility_coef_gk_in_smoke: read_float(&hull_data, keys::VISIBILITY_COEF_GK_IN_SMOKE).map(Km::from),
+                    visibility_factor_by_periscope: read_visibility_by_periscope(&hull_data).map(Km::from),
                     flood_prob: read_flood_prob(&hull_data),
                     battery_capacity,
                     battery_regen_rate,
@@ -2285,19 +2294,19 @@ mod camera_tests {
         let ttx = vehicle.ttx_components().expect("ttx components extracted");
 
         let hull = ttx.hull("PAUH911_Gearing_1945").expect("hull stats present");
-        assert_eq!(hull.health, Some(19400.0));
-        assert_eq!(hull.max_speed, Some(36.0));
+        assert_eq!(hull.health, Some(crate::game_params::ttx::model::Hp::from(19400.0)));
+        assert_eq!(hull.max_speed, Some(crate::game_params::ttx::model::Knots::from(36.0)));
         assert_eq!(hull.speed_coef, Some(1.0));
-        assert_eq!(hull.turning_radius, Some(640.0));
-        assert_eq!(hull.rudder_time, Some(4.25));
-        assert_eq!(hull.visibility_factor, Some(7.33));
-        assert_eq!(hull.visibility_factor_by_plane, Some(3.41));
-        assert_eq!(hull.visibility_coef_fire, Some(2.0));
-        assert_eq!(hull.visibility_coef_fire_by_plane, Some(2.0));
-        assert_eq!(hull.visibility_coef_gk, Some(1e-6));
-        assert_eq!(hull.visibility_coef_gk_in_smoke, Some(2.83));
+        assert_eq!(hull.turning_radius, Some(Meters::from(640.0)));
+        assert_eq!(hull.rudder_time, Some(crate::game_params::ttx::model::Seconds::from(4.25)));
+        assert_eq!(hull.visibility_factor, Some(Km::from(7.33)));
+        assert_eq!(hull.visibility_factor_by_plane, Some(Km::from(3.41)));
+        assert_eq!(hull.visibility_coef_fire, Some(Km::from(2.0)));
+        assert_eq!(hull.visibility_coef_fire_by_plane, Some(Km::from(2.0)));
+        assert_eq!(hull.visibility_coef_gk, Some(Km::from(1e-6)));
+        assert_eq!(hull.visibility_coef_gk_in_smoke, Some(Km::from(2.83)));
         // visibilityFactorsBySubmarine['PERISCOPE'] (PreprocessedHull.py:13).
-        assert_eq!(hull.visibility_factor_by_periscope, Some(3.41));
+        assert_eq!(hull.visibility_factor_by_periscope, Some(Km::from(3.41)));
         // flood_prob derived from floodNodes[0][0]=0.15 (PreprocessedHull.py:12).
         let flood = hull.flood_prob.expect("flood_prob derived");
         assert!((flood - (0.333 - 0.15) / 0.333).abs() < 1e-6, "got {flood}");
@@ -2353,8 +2362,8 @@ mod camera_tests {
         let launchers = ttx.torpedoes("PAUT901_D10_TORP_STOCK").expect("torpedo stats present");
         assert_eq!(launchers.len(), 2);
         let l = &launchers[0];
-        assert_eq!(l.shot_delay, Some(103.0));
-        assert_eq!(l.rotation_speed, Some(25.0));
+        assert_eq!(l.shot_delay, Some(crate::game_params::ttx::model::Seconds::from(103.0)));
+        assert_eq!(l.rotation_speed, Some(crate::game_params::ttx::model::DegreesPerSecond::from(25.0)));
         assert_eq!(l.num_barrels, Some(5.0));
         assert_eq!(l.ammo_switch_coeff, Some(0.2));
         assert_eq!(l.ammo, vec!["PAPT027_Mk_16_mod_1".to_string()]);
@@ -2441,13 +2450,13 @@ mod camera_tests {
         let ttx = vehicle.ttx_components().expect("ttx components extracted");
 
         let arty = ttx.artillery("PAUA901_Worcester_ART_STOCK").expect("artillery stats present");
-        assert_eq!(arty.max_dist, Some(15320.0));
+        assert_eq!(arty.max_dist, Some(Meters::from(15320.0)));
         assert_eq!(arty.guns.len(), 2);
         let g = &arty.guns[0];
-        assert_eq!(g.shot_delay, Some(4.6));
-        assert_eq!(g.rotation_speed, Some(25.0));
+        assert_eq!(g.shot_delay, Some(crate::game_params::ttx::model::Seconds::from(4.6)));
+        assert_eq!(g.rotation_speed, Some(crate::game_params::ttx::model::DegreesPerSecond::from(25.0)));
         assert_eq!(g.num_barrels, Some(2.0));
-        assert_eq!(g.barrel_diameter, Some(0.152));
+        assert_eq!(g.barrel_diameter, Some(Meters::from(0.152)));
         assert_eq!(g.ammo_switch_coeff, Some(1.0));
         assert_eq!(g.min_radius, Some(1.1));
         assert_eq!(g.ideal_radius, Some(8.0));

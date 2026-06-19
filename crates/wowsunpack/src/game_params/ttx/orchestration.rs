@@ -115,7 +115,7 @@ pub fn ship_stats(
         .and_then(|name| components.artillery(name))
         .and_then(|arty| arty.guns.first())
         .and_then(|gun| gun.barrel_diameter)
-        .is_some_and(|d| d >= SMALL_SHELL_MAX_DIAMETER_M);
+        .is_some_and(|d| d.value() >= SMALL_SHELL_MAX_DIAMETER_M);
 
     let mg_max_dist_km = artillery.as_ref().and_then(|a| a.range.map(|r| r.value()));
     let atba_max_dist_km = secondaries.as_ref().and_then(|a| a.range.map(|r| r.value()));
@@ -180,7 +180,13 @@ mod tests {
     use crate::game_params::ttx::components::HullComponentStats;
     use crate::game_params::ttx::components::ShipTtxComponents;
     use crate::game_params::ttx::components::TorpedoLauncherStats;
+    use crate::game_params::ttx::model::DegreesPerSecond;
+    use crate::game_params::ttx::model::Hp;
+    use crate::game_params::ttx::model::Knots;
+    use crate::game_params::ttx::model::Seconds;
     use crate::game_params::types::BigWorldDistance;
+    use crate::game_params::types::Km;
+    use crate::game_params::types::Meters;
     use crate::game_params::types::Param;
     use crate::game_params::types::ParamData;
     use crate::game_params::types::Projectile;
@@ -191,17 +197,17 @@ mod tests {
     /// Gearing's real default-hull base stats (see factories.rs::tests::gearing_hull).
     fn gearing_hull() -> HullComponentStats {
         HullComponentStats {
-            health: Some(19400.0),
-            max_speed: Some(36.0),
+            health: Some(Hp::from(19400.0)),
+            max_speed: Some(Knots::from(36.0)),
             speed_coef: Some(1.0),
-            turning_radius: Some(640.0),
-            rudder_time: Some(4.25),
-            visibility_factor: Some(7.33),
-            visibility_factor_by_plane: Some(3.41),
-            visibility_coef_fire: Some(2.0),
-            visibility_coef_fire_by_plane: Some(2.0),
-            visibility_coef_gk: Some(1e-6),
-            visibility_coef_gk_in_smoke: Some(2.83),
+            turning_radius: Some(Meters::from(640.0)),
+            rudder_time: Some(Seconds::from(4.25)),
+            visibility_factor: Some(Km::from(7.33)),
+            visibility_factor_by_plane: Some(Km::from(3.41)),
+            visibility_coef_fire: Some(Km::from(2.0)),
+            visibility_coef_fire_by_plane: Some(Km::from(2.0)),
+            visibility_coef_gk: Some(Km::from(1e-6)),
+            visibility_coef_gk_in_smoke: Some(Km::from(2.83)),
             visibility_factor_by_periscope: None,
             flood_prob: Some(0.0),
             battery_capacity: None,
@@ -225,8 +231,8 @@ mod tests {
     /// Gearing's real torpedo launcher mount (`HP_AGT_*`).
     fn gearing_launcher() -> TorpedoLauncherStats {
         TorpedoLauncherStats {
-            shot_delay: Some(103.0),
-            rotation_speed: Some(25.0),
+            shot_delay: Some(Seconds::from(103.0)),
+            rotation_speed: Some(DegreesPerSecond::from(25.0)),
             num_barrels: Some(5.0),
             ammo_switch_coeff: None,
             ammo: vec!["PAPT027_Mk_16_mod_1".to_string()],
@@ -238,17 +244,17 @@ mod tests {
     /// shell, component maxDist 11130 (BW) -> 11.13 km stock range.
     fn gearing_artillery() -> ArtilleryComponentStats {
         let gun = || ArtilleryGunStats {
-            shot_delay: Some(4.6),
-            rotation_speed: Some(20.0),
+            shot_delay: Some(Seconds::from(4.6)),
+            rotation_speed: Some(DegreesPerSecond::from(20.0)),
             num_barrels: Some(2.0),
-            barrel_diameter: Some(0.127),
+            barrel_diameter: Some(Meters::from(0.127)),
             ammo_switch_coeff: Some(1.0),
             min_radius: Some(1.0),
             ideal_radius: Some(10.0),
             ideal_distance: Some(1000.0),
             ammo: vec!["PAPA127_127mm_HE".to_string()],
         };
-        ArtilleryComponentStats { max_dist: Some(11130.0), guns: vec![gun(), gun(), gun()] }
+        ArtilleryComponentStats { max_dist: Some(Meters::from(11130.0)), guns: vec![gun(), gun(), gun()] }
     }
 
     fn gearing_he() -> Projectile {
@@ -448,10 +454,10 @@ mod tests {
         use crate::game_params::types::CrewSkillModifier;
         let mut components = ShipTtxComponents::default();
         components.hulls.insert("H".to_string(), gearing_hull());
-        let big_gun = ArtilleryGunStats { barrel_diameter: Some(0.152), ..ArtilleryGunStats::default() };
+        let big_gun = ArtilleryGunStats { barrel_diameter: Some(Meters::from(0.152)), ..ArtilleryGunStats::default() };
         components
             .artillery
-            .insert("A".to_string(), ArtilleryComponentStats { max_dist: Some(15000.0), guns: vec![big_gun] });
+            .insert("A".to_string(), ArtilleryComponentStats { max_dist: Some(Meters::from(15000.0)), guns: vec![big_gun] });
         components.stock_selection =
             ShipUpgradeSelection::new(Some("H".to_string()), None, Some("A".to_string()), None, None);
         let ship = ship_with("BigGun", 10, Species::Cruiser, components);

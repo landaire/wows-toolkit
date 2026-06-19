@@ -12,6 +12,13 @@
 
 use std::collections::HashMap;
 
+use crate::game_params::ttx::model::DegreesPerSecond;
+use crate::game_params::ttx::model::Hp;
+use crate::game_params::ttx::model::Knots;
+use crate::game_params::ttx::model::Seconds;
+use crate::game_params::types::Km;
+use crate::game_params::types::Meters;
+
 /// Base hull-component stats, raw from the `*_Hull` component sub-object.
 /// Fields are `Option` and left `None` when the source field is absent; nothing
 /// is defaulted. Values are unconverted GameParams units (the factory layer
@@ -21,38 +28,38 @@ use std::collections::HashMap;
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct HullComponentStats {
     /// Raw `health` field (hit points before rounding/modifiers).
-    pub health: Option<f32>,
+    pub health: Option<Hp>,
     /// Raw `maxSpeed` field.
-    pub max_speed: Option<f32>,
-    /// Raw hull `speedCoef` field.
+    pub max_speed: Option<Knots>,
+    /// Raw hull `speedCoef` field (dimensionless ratio).
     pub speed_coef: Option<f32>,
     /// Raw `turningRadius` field.
-    pub turning_radius: Option<f32>,
+    pub turning_radius: Option<Meters>,
     /// Raw `rudderTime` field.
-    pub rudder_time: Option<f32>,
-    /// Raw `visibilityFactor` field (sea detection coefficient).
-    pub visibility_factor: Option<f32>,
-    /// Raw `visibilityFactorByPlane` field (air detection coefficient).
+    pub rudder_time: Option<Seconds>,
+    /// Raw `visibilityFactor` field (sea detection range, km).
+    pub visibility_factor: Option<Km>,
+    /// Raw `visibilityFactorByPlane` field (air detection range, km).
     /// FactoryVisibility createVisibilityTTX@278: visibilityByPlane.normal.
-    pub visibility_factor_by_plane: Option<f32>,
+    pub visibility_factor_by_plane: Option<Km>,
     /// Raw `visibilityCoefFire` field, added to sea detection while burning.
     /// FactoryVisibility createVisibilityTTX@109: visibilityByShip.fire.
-    pub visibility_coef_fire: Option<f32>,
+    pub visibility_coef_fire: Option<Km>,
     /// Raw `visibilityCoefFireByPlane` field, added to air detection while burning.
     /// FactoryVisibility createVisibilityTTX@322: visibilityByPlane.fire.
-    pub visibility_coef_fire_by_plane: Option<f32>,
-    /// Raw `visibilityCoefGK` field (gun-fire detection coefficient; near-zero
+    pub visibility_coef_fire_by_plane: Option<Km>,
+    /// Raw `visibilityCoefGK` field (gun-fire detection range, km; near-zero
     /// sentinel `1e-6` when unset in GameParams). Copied by PreprocessedHull.
-    pub visibility_coef_gk: Option<f32>,
+    pub visibility_coef_gk: Option<Km>,
     /// Raw `visibilityCoefGKInSmoke` field, the in-smoke detection range used when
     /// it exceeds MINIMAL_VALID_VALUE (0.01). FactoryVisibility createVisibilityTTX@137:
     /// visibilityByShip.smoke.
-    pub visibility_coef_gk_in_smoke: Option<f32>,
+    pub visibility_coef_gk_in_smoke: Option<Km>,
     /// `visibilityFactorsBySubmarine['PERISCOPE']` (submarine periscope-depth detection
-    /// coefficient). PreprocessedHull.py:13; FactoryVisibility createVisibilityTTX@359
+    /// range, km). PreprocessedHull.py:13; FactoryVisibility createVisibilityTTX@359
     /// reads it as hull.visibilityByPeriscope for visibilityFromDepth.max. `None` for
     /// non-subs (dict or key absent).
-    pub visibility_factor_by_periscope: Option<f32>,
+    pub visibility_factor_by_periscope: Option<Km>,
     /// Hull flood probability, derived at parse time from `floodNodes[0][0]` per
     /// `PreprocessedHull.py:11-12` (`(DEFAULT_UW_DAMAGE_COEFF - floodNodes[0][0]) /
     /// DEFAULT_UW_DAMAGE_COEFF`, or 0.0 when equal to the constant). Derived here so
@@ -85,12 +92,12 @@ pub struct EngineComponentStats {
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct TorpedoLauncherStats {
     /// Raw `shotDelay` field (reload, seconds).
-    pub shot_delay: Option<f32>,
+    pub shot_delay: Option<Seconds>,
     /// Raw `rotationSpeed[0]` field (traverse, deg/s).
-    pub rotation_speed: Option<f32>,
-    /// Raw `numBarrels` field.
+    pub rotation_speed: Option<DegreesPerSecond>,
+    /// Raw `numBarrels` field (count).
     pub num_barrels: Option<f32>,
-    /// Raw `ammoSwitchCoeff` field.
+    /// Raw `ammoSwitchCoeff` field (ratio).
     pub ammo_switch_coeff: Option<f32>,
     /// Projectile names from `ammoList`; resolved to `Projectile` stats at query time.
     pub ammo: Vec<String>,
@@ -105,14 +112,14 @@ pub struct TorpedoLauncherStats {
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct ArtilleryGunStats {
     /// Raw `shotDelay` field (reload, seconds).
-    pub shot_delay: Option<f32>,
+    pub shot_delay: Option<Seconds>,
     /// Raw `rotationSpeed[0]` field (traverse, deg/s).
-    pub rotation_speed: Option<f32>,
-    /// Raw `numBarrels` field.
+    pub rotation_speed: Option<DegreesPerSecond>,
+    /// Raw `numBarrels` field (count).
     pub num_barrels: Option<f32>,
     /// Raw `barrelDiameter` field (meters; caliber in mm is this * 1000).
-    pub barrel_diameter: Option<f32>,
-    /// Raw `ammoSwitchCoeff` field.
+    pub barrel_diameter: Option<Meters>,
+    /// Raw `ammoSwitchCoeff` field (ratio).
     pub ammo_switch_coeff: Option<f32>,
     /// Raw gun `minRadius` dispersion field.
     pub min_radius: Option<f32>,
@@ -125,21 +132,22 @@ pub struct ArtilleryGunStats {
 }
 
 /// Base stats for one artillery component, raw from the `*_Artillery` component
-/// sub-object. `max_dist` is the component-level base gun range (BigWorld units,
-/// before FC coef); `guns` are its `HP_AGM_*` gun sub-objects.
+/// sub-object. `max_dist` is the component-level base gun range (meters, before
+/// FC coef); `guns` are its `HP_AGM_*` gun sub-objects.
 #[derive(Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct ArtilleryComponentStats {
-    /// Raw component-level `maxDist` field (base gun range, BigWorld units).
-    pub max_dist: Option<f32>,
+    /// Raw component-level `maxDist` field (base gun range, meters; the factory
+    /// divides by KM_TO_M to get km).
+    pub max_dist: Option<Meters>,
     /// Main-battery guns (`HP_AGM_*`) on this component.
     pub guns: Vec<ArtilleryGunStats>,
 }
 
 /// Base stats for one secondary-battery (ATBA) component, raw from the ship's
 /// `*_ATBA` component sub-object. `max_dist` is the component-level base secondary
-/// range (BigWorld units, before `/ KM_TO_M`); `guns` are its `HP_GGS_*` gun
+/// range (meters, before `/ KM_TO_M`); `guns` are its `HP_GGS_*` gun
 /// sub-objects. Reuses [`ArtilleryGunStats`] for the gun fields. Unlike the main
 /// battery, ATBA mounts can carry mixed calibers (e.g. 150mm + 105mm), so `guns`
 /// may hold several distinct gun groups.
@@ -147,8 +155,9 @@ pub struct ArtilleryComponentStats {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct SecondaryComponentStats {
-    /// Raw component-level `maxDist` field (base secondary range, BigWorld units).
-    pub max_dist: Option<f32>,
+    /// Raw component-level `maxDist` field (base secondary range, meters; the
+    /// factory divides by KM_TO_M to get km).
+    pub max_dist: Option<Meters>,
     /// Secondary guns (`HP_GGS_*`) on this component.
     pub guns: Vec<ArtilleryGunStats>,
 }
