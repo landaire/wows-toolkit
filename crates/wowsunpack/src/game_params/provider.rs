@@ -985,7 +985,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
         {
             let mut launchers = Vec::new();
             for (key, val) in torp_data.inner().iter() {
-                let is_launcher = key.string_ref().is_some_and(|s| s.inner().starts_with(keys::HP_AGT_PREFIX));
+                let is_launcher = key.string_ref().is_some_and(|s| keys::is_torpedo_hardpoint(s.inner()));
                 if !is_launcher {
                     continue;
                 }
@@ -1027,7 +1027,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             let arty_data = arty_data.inner();
             let mut guns = Vec::new();
             for (key, val) in arty_data.iter() {
-                let is_gun = key.string_ref().is_some_and(|s| s.inner().starts_with(keys::HP_AGM_PREFIX));
+                let is_gun = key.string_ref().is_some_and(|s| keys::is_main_gun_hardpoint(s.inner()));
                 if !is_gun {
                     continue;
                 }
@@ -1067,7 +1067,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
         }
 
         // Secondaries (ATBA) are referenced by _Hull upgrades via the `atba` component
-        // slot; the component carries a component-level maxDist and HP_GGS_* gun
+        // slot; the component carries a component-level maxDist and HP_<nation>GS_* gun
         // sub-objects (mixed calibers). Read the range plus each gun's base stats and
         // ammo names, keyed by hull upgrade name (PreprocessedATBA.py:12-30).
         if uc_type == keys::UC_TYPE_HULL
@@ -1080,7 +1080,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             let atba_data = atba_data.inner();
             let mut guns = Vec::new();
             for (key, val) in atba_data.iter() {
-                let is_gun = key.string_ref().is_some_and(|s| s.inner().starts_with(keys::HP_GGS_PREFIX));
+                let is_gun = key.string_ref().is_some_and(|s| keys::is_secondary_gun_hardpoint(s.inner()));
                 if !is_gun {
                     continue;
                 }

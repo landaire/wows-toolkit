@@ -199,12 +199,35 @@ pub const BARREL_DIAMETER: &str = "barrelDiameter";
 pub const MIN_RADIUS: &str = "minRadius";
 pub const IDEAL_RADIUS: &str = "idealRadius";
 pub const IDEAL_DISTANCE: &str = "idealDistance";
-// Torpedo launcher gun sub-object key prefix (HP_AGT_1, HP_AGT_2, ...).
-pub const HP_AGT_PREFIX: &str = "HP_AGT";
-// Main-battery gun sub-object key prefix (HP_AGM_1, HP_AGM_2, ...).
-pub const HP_AGM_PREFIX: &str = "HP_AGM";
-// Secondary-battery (ATBA) gun sub-object key prefix (HP_GGS_1, HP_GGS_2, ...).
-pub const HP_GGS_PREFIX: &str = "HP_GGS";
+// Weapon hardpoint sub-object keys are `HP_<nation><kind>_<index>`, where
+// `<nation>` is a single nation letter (A=USA, J=Japan, G=Germany, ...) and
+// `<kind>` is GM (main battery), GS (secondary/ATBA), or GT (torpedoes). The
+// nation letter varies per ship, so matching a single nation's literal prefix
+// (e.g. HP_AGM) silently drops every other nation's mounts. Match the kind
+// suffix nation-agnostically instead.
+fn hardpoint_kind_matches(key: &str, kind: &str) -> bool {
+    let Some(rest) = key.strip_prefix(HP_PREFIX) else {
+        return false;
+    };
+    // One nation char, then the two-letter kind, then `_<index>`.
+    let mut chars = rest.chars();
+    chars.next().is_some() && chars.as_str().starts_with(kind) && rest[1 + kind.len()..].starts_with('_')
+}
+
+/// Main-battery gun sub-object key (HP_AGM_1, HP_JGM_1, HP_GGM_1, ...).
+pub fn is_main_gun_hardpoint(key: &str) -> bool {
+    hardpoint_kind_matches(key, "GM")
+}
+
+/// Secondary-battery (ATBA) gun sub-object key (HP_AGS_1, HP_JGS_1, HP_GGS_1, ...).
+pub fn is_secondary_gun_hardpoint(key: &str) -> bool {
+    hardpoint_kind_matches(key, "GS")
+}
+
+/// Torpedo launcher gun sub-object key (HP_AGT_1, HP_JGT_1, HP_GGT_1, ...).
+pub fn is_torpedo_hardpoint(key: &str) -> bool {
+    hardpoint_kind_matches(key, "GT")
+}
 pub const CAMOUFLAGE: &str = "camouflage";
 pub const PERMOFLAGES: &str = "permoflages";
 pub const TITLE: &str = "title";
@@ -222,3 +245,35 @@ pub const TYPEINFO_SPECIES: &str = "species";
 pub const PARAM_ID: &str = "id";
 pub const PARAM_INDEX: &str = "index";
 pub const PARAM_NAME: &str = "name";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hardpoint_matchers_are_nation_agnostic() {
+        // Each nation letter (A=USA, J=Japan, G=Germany) keys the same kind.
+        for nation in ['A', 'J', 'G', 'F', 'I', 'R', 'U', 'B'] {
+            assert!(is_main_gun_hardpoint(&format!("HP_{nation}GM_1")), "GM {nation}");
+            assert!(is_secondary_gun_hardpoint(&format!("HP_{nation}GS_3")), "GS {nation}");
+            assert!(is_torpedo_hardpoint(&format!("HP_{nation}GT_2")), "GT {nation}");
+        }
+    }
+
+    #[test]
+    fn hardpoint_matchers_reject_other_kinds_and_shapes() {
+        // A main-gun matcher must not catch secondary/torpedo or aux mounts.
+        assert!(!is_main_gun_hardpoint("HP_AGS_1"));
+        assert!(!is_main_gun_hardpoint("HP_AGT_1"));
+        assert!(!is_secondary_gun_hardpoint("HP_AGM_1"));
+        assert!(!is_torpedo_hardpoint("HP_AGM_1"));
+        // HP_RGA is a non-weapon mount: matches none of the three kinds.
+        assert!(!is_main_gun_hardpoint("HP_RGA_1"));
+        assert!(!is_secondary_gun_hardpoint("HP_RGA_1"));
+        // Missing index separator, missing prefix, or extra nation chars are rejected.
+        assert!(!is_main_gun_hardpoint("HP_AGM1"));
+        assert!(!is_main_gun_hardpoint("AGM_1"));
+        assert!(!is_main_gun_hardpoint("HP_AAGM_1"));
+        assert!(!is_main_gun_hardpoint("HP_GM_1"));
+    }
+}

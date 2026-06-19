@@ -20,12 +20,14 @@ use crate::game_params::types::Species;
 const NO_FIRE_CONTROL_COEF: f32 = 1.0;
 
 /// `SMALL_SHELL_MAX_DIAMETER` (meters), the `isSmallGun` caliber gate
-/// (Modifiers/__init__.py:19 `barrelDiameter < SMALL_SHELL_MAX_DIAMETER`). The deob
-/// `.py` zeroes this compiled-module constant; the value pinned in the weapon-table
-/// tests (0.139 m -> 139mm: a 127mm DD gun is small, a 152mm cruiser gun is not) is
-/// used here. The gun's `smallGun` override field is not retained on
-/// [`ArtilleryGunStats`], so the caliber threshold is the sole basis.
-const SMALL_SHELL_MAX_DIAMETER_M: f32 = 0.139;
+/// (Modifiers/__init__.py:19 `barrelDiameter < SMALL_SHELL_MAX_DIAMETER`). The
+/// straight `.py` decompile zeroes this compiled-module float; the real value
+/// recovered via wowsdeob from `ConstantsShip` bytecode is 0.149 (the body does
+/// `LOAD_CONST 0.149 / STORE_NAME SMALL_SHELL_MAX_DIAMETER`). At 0.149 m a 127mm
+/// DD gun is small and a 152mm cruiser gun is big. The gun's `smallGun` override
+/// field is not retained on [`ArtilleryGunStats`], so the caliber threshold is
+/// the sole basis.
+const SMALL_SHELL_MAX_DIAMETER_M: f32 = 0.149;
 
 /// Compute a ship's full as-shown-in-port stat card for `selection` under `modifiers`.
 ///

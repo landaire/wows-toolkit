@@ -389,7 +389,8 @@ mod tests {
 
     #[test]
     fn small_projectile_threshold() {
-        assert!(is_small_projectile(0.1, 0.139));
-        assert!(!is_small_projectile(0.152, 0.139));
+        // Threshold 0.149 is the wowsdeob-recovered SMALL_SHELL_MAX_DIAMETER.
+        assert!(is_small_projectile(0.1, 0.149));
+        assert!(!is_small_projectile(0.152, 0.149));
     }
 }
