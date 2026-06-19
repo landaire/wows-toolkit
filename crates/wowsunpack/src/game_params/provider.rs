@@ -1562,6 +1562,31 @@ impl GameMetadataProvider {
                 let alpha_damage = read_opt_f32("alphaDamage");
                 let burn_prob = read_opt_f32("burnProb");
                 let bullet_air_drag = read_opt_f32("bulletAirDrag");
+                let speed = read_opt_f32("speed");
+                let damage = read_opt_f32("damage");
+                let visibility_factor = read_opt_f32("visibilityFactor");
+                let torpedo_type = param_data.get(&pk("torpedoType")).and_then(|v| v.i64_ref().copied());
+                let read_pairs = |key: &str| -> Option<Vec<(f32, f32)>> {
+                    param_data.get(&pk(key)).and_then(|v| v.list_ref()).map(|list| {
+                        list.inner()
+                            .iter()
+                            .filter_map(|item| {
+                                let pair = item.list_ref()?;
+                                let pair = pair.inner();
+                                let coeff = pair.first().and_then(|v| v.f64_ref().map(|f| *f as f32))?;
+                                let dist = pair.get(1).and_then(|v| v.f64_ref().map(|f| *f as f32))?;
+                                Some((coeff, dist))
+                            })
+                            .collect()
+                    })
+                };
+                let distance_of_damage = read_pairs("distanceOfDamage");
+                let ignore_classes = param_data.get(&pk("ignoreClasses")).and_then(|v| v.list_ref()).map(|list| {
+                    list.inner()
+                        .iter()
+                        .filter_map(|item| item.string_ref().map(|s| s.inner().to_string()))
+                        .collect::<Vec<_>>()
+                });
                 Some(ParamData::Projectile(
                     Projectile::builder()
                         .ammo_type(ammo_type)
@@ -1581,6 +1606,12 @@ impl GameMetadataProvider {
                         .maybe_alpha_damage(alpha_damage)
                         .maybe_burn_prob(burn_prob)
                         .maybe_bullet_air_drag(bullet_air_drag)
+                        .maybe_speed(speed)
+                        .maybe_damage(damage)
+                        .maybe_visibility_factor(visibility_factor)
+                        .maybe_distance_of_damage(distance_of_damage)
+                        .maybe_torpedo_type(torpedo_type)
+                        .maybe_ignore_classes(ignore_classes)
                         .build(),
                 ))
             }
@@ -1759,6 +1790,67 @@ mod camera_tests {
 
     fn dict(entries: Vec<(HashableValue, Value)>) -> Value {
         Value::Dict(Shared::new(entries.into_iter().collect()))
+    }
+
+    fn iv(i: i64) -> Value {
+        Value::I64(i)
+    }
+
+    fn typeinfo(nation: &str, species: &str, ty: &str) -> Value {
+        dict(vec![(pk("nation"), sv(nation)), (pk("species"), sv(species)), (pk("type"), sv(ty))])
+    }
+
+    #[test]
+    fn parse_single_param_retains_torpedo_fields() {
+        // Real PAPT027_Mk_16_mod_1 (Gearing Mk16) values, plus a synthetic
+        // distanceOfDamage/ignoreClasses to exercise the array readers.
+        let proj = dict(vec![
+            (pk("id"), iv(4242)),
+            (pk("index"), sv("PAPT027")),
+            (pk("name"), sv("PAPT027_Mk_16_mod_1")),
+            (pk("typeinfo"), typeinfo("USA", "Torpedo", "Projectile")),
+            (pk("ammoType"), sv("torpedo")),
+            (pk("maxDist"), fv(350.0)),
+            (pk("alphaDamage"), fv(53500.0)),
+            (pk("damage"), fv(1200.0)),
+            (pk("speed"), fv(66.0)),
+            (pk("visibilityFactor"), fv(1.4)),
+            (pk("torpedoType"), iv(1)),
+            (pk("distanceOfDamage"), list(vec![list(vec![fv(83.33), fv(0.1)]), list(vec![fv(86.66), fv(1.0)])])),
+            (pk("ignoreClasses"), list(vec![sv("Cruiser"), sv("Destroyer")])),
+        ]);
+        let params_dict: Shared<BTreeMap<HashableValue, Value>> = Shared::new(BTreeMap::new());
+        let param = GameMetadataProvider::parse_single_param(&proj, &params_dict).expect("param parsed");
+        let projectile = param.projectile().expect("projectile data");
+
+        assert_eq!(projectile.alpha_damage(), Some(53500.0));
+        assert_eq!(projectile.max_dist().map(|d| d.value()), Some(350.0));
+        assert_eq!(projectile.speed(), Some(66.0));
+        assert_eq!(projectile.damage(), Some(1200.0));
+        assert_eq!(projectile.visibility_factor(), Some(1.4));
+        assert_eq!(projectile.torpedo_type(), Some(1));
+        assert_eq!(projectile.distance_of_damage(), Some(&[(83.33, 0.1), (86.66, 1.0)][..]));
+        assert_eq!(projectile.ignore_classes(), Some(&["Cruiser".to_string(), "Destroyer".to_string()][..]));
+    }
+
+    #[test]
+    fn parse_single_param_torpedo_fields_absent_are_none() {
+        let proj = dict(vec![
+            (pk("id"), iv(7)),
+            (pk("index"), sv("PAPT099")),
+            (pk("name"), sv("PAPT099_NoTorp")),
+            (pk("typeinfo"), typeinfo("USA", "Torpedo", "Projectile")),
+            (pk("ammoType"), sv("torpedo")),
+        ]);
+        let params_dict: Shared<BTreeMap<HashableValue, Value>> = Shared::new(BTreeMap::new());
+        let param = GameMetadataProvider::parse_single_param(&proj, &params_dict).expect("param parsed");
+        let projectile = param.projectile().expect("projectile data");
+        assert_eq!(projectile.speed(), None);
+        assert_eq!(projectile.damage(), None);
+        assert_eq!(projectile.visibility_factor(), None);
+        assert_eq!(projectile.torpedo_type(), None);
+        assert_eq!(projectile.distance_of_damage(), None);
+        assert_eq!(projectile.ignore_classes(), None);
     }
 
     #[test]

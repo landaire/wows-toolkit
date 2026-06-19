@@ -2271,6 +2271,24 @@ pub struct Projectile {
     /// Air drag coefficient.
     #[cfg_attr(feature = "serde", serde(default))]
     bullet_air_drag: Option<f32>,
+    /// Torpedo travel speed in knots.
+    #[cfg_attr(feature = "serde", serde(default))]
+    speed: Option<f32>,
+    /// Secondary (flood) damage component, distinct from `alpha_damage`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    damage: Option<f32>,
+    /// Detectability factor (km-scaled visibility coefficient).
+    #[cfg_attr(feature = "serde", serde(default))]
+    visibility_factor: Option<f32>,
+    /// Distance-keyed damage falloff pairs `(coeff, distBW)`. Empty on most torpedoes.
+    #[cfg_attr(feature = "serde", serde(default))]
+    distance_of_damage: Option<Vec<(f32, f32)>>,
+    /// Torpedo type discriminant (e.g. 0 = normal, 1 = deep-water).
+    #[cfg_attr(feature = "serde", serde(default))]
+    torpedo_type: Option<i64>,
+    /// Ship classes this torpedo passes under (deep-water torpedoes).
+    #[cfg_attr(feature = "serde", serde(default))]
+    ignore_classes: Option<Vec<String>>,
 }
 
 impl Projectile {
@@ -2340,6 +2358,30 @@ impl Projectile {
 
     pub fn bullet_air_drag(&self) -> Option<f32> {
         self.bullet_air_drag
+    }
+
+    pub fn speed(&self) -> Option<f32> {
+        self.speed
+    }
+
+    pub fn damage(&self) -> Option<f32> {
+        self.damage
+    }
+
+    pub fn visibility_factor(&self) -> Option<f32> {
+        self.visibility_factor
+    }
+
+    pub fn distance_of_damage(&self) -> Option<&[(f32, f32)]> {
+        self.distance_of_damage.as_deref()
+    }
+
+    pub fn torpedo_type(&self) -> Option<i64> {
+        self.torpedo_type
+    }
+
+    pub fn ignore_classes(&self) -> Option<&[String]> {
+        self.ignore_classes.as_deref()
     }
 
     /// Convert this projectile to a [`ShellInfo`] with the given name.
