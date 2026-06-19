@@ -75,6 +75,47 @@ pub struct TorpedoLauncherStats {
     pub ammo: Vec<String>,
 }
 
+/// Base stats for a single main-battery gun, raw from an `HP_AGM_*` gun
+/// sub-object of the artillery component. Shell PROJECTILE stats live on the
+/// parsed `Projectile` (resolved by name); only the gun fields and the ammo
+/// NAME list are retained here.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct ArtilleryGunStats {
+    /// Raw `shotDelay` field (reload, seconds).
+    pub shot_delay: Option<f32>,
+    /// Raw `rotationSpeed[0]` field (traverse, deg/s).
+    pub rotation_speed: Option<f32>,
+    /// Raw `numBarrels` field.
+    pub num_barrels: Option<f32>,
+    /// Raw `barrelDiameter` field (meters; caliber in mm is this * 1000).
+    pub barrel_diameter: Option<f32>,
+    /// Raw `ammoSwitchCoeff` field.
+    pub ammo_switch_coeff: Option<f32>,
+    /// Raw gun `minRadius` dispersion field.
+    pub min_radius: Option<f32>,
+    /// Raw gun `idealRadius` dispersion field.
+    pub ideal_radius: Option<f32>,
+    /// Raw gun `idealDistance` dispersion field.
+    pub ideal_distance: Option<f32>,
+    /// Shell projectile names from `ammoList`; resolved to `Projectile` stats at query time.
+    pub ammo: Vec<String>,
+}
+
+/// Base stats for one artillery component, raw from the `*_Artillery` component
+/// sub-object. `max_dist` is the component-level base gun range (BigWorld units,
+/// before FC coef); `guns` are its `HP_AGM_*` gun sub-objects.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct ArtilleryComponentStats {
+    /// Raw component-level `maxDist` field (base gun range, BigWorld units).
+    pub max_dist: Option<f32>,
+    /// Main-battery guns (`HP_AGM_*`) on this component.
+    pub guns: Vec<ArtilleryGunStats>,
+}
+
 /// Per-ship TTX component base stats, keyed by upgrade selection.
 ///
 /// Hull stats are keyed by the `_Hull` upgrade name (mirroring
@@ -96,12 +137,15 @@ pub struct ShipTtxComponents {
     /// the launchers (`HP_AGT_*` guns) on that mount.
     #[cfg_attr(feature = "serde", serde(default))]
     pub torpedoes: HashMap<String, Vec<TorpedoLauncherStats>>,
+    /// Main-battery base stats per `_Artillery` upgrade name.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub artillery: HashMap<String, ArtilleryComponentStats>,
 }
 
 impl ShipTtxComponents {
-    /// True when no hull, engine, or torpedo stats were extracted.
+    /// True when no hull, engine, torpedo, or artillery stats were extracted.
     pub fn is_empty(&self) -> bool {
-        self.hulls.is_empty() && self.engines.is_empty() && self.torpedoes.is_empty()
+        self.hulls.is_empty() && self.engines.is_empty() && self.torpedoes.is_empty() && self.artillery.is_empty()
     }
 
     /// Look up hull stats for a given `_Hull` upgrade name.
@@ -117,5 +161,10 @@ impl ShipTtxComponents {
     /// Look up torpedo launcher stats for a given `_Torpedoes` upgrade name.
     pub fn torpedoes(&self, upgrade_name: &str) -> Option<&[TorpedoLauncherStats]> {
         self.torpedoes.get(upgrade_name).map(|v| v.as_slice())
+    }
+
+    /// Look up artillery (main battery) stats for a given `_Artillery` upgrade name.
+    pub fn artillery(&self, upgrade_name: &str) -> Option<&ArtilleryComponentStats> {
+        self.artillery.get(upgrade_name)
     }
 }

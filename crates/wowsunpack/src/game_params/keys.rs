@@ -180,8 +180,14 @@ pub const SHOT_DELAY: &str = "shotDelay";
 pub const ROTATION_SPEED: &str = "rotationSpeed";
 pub const NUM_BARRELS: &str = "numBarrels";
 pub const AMMO_SWITCH_COEFF: &str = "ammoSwitchCoeff";
+pub const BARREL_DIAMETER: &str = "barrelDiameter";
+pub const MIN_RADIUS: &str = "minRadius";
+pub const IDEAL_RADIUS: &str = "idealRadius";
+pub const IDEAL_DISTANCE: &str = "idealDistance";
 // Torpedo launcher gun sub-object key prefix (HP_AGT_1, HP_AGT_2, ...).
 pub const HP_AGT_PREFIX: &str = "HP_AGT";
+// Main-battery gun sub-object key prefix (HP_AGM_1, HP_AGM_2, ...).
+pub const HP_AGM_PREFIX: &str = "HP_AGM";
 pub const CAMOUFLAGE: &str = "camouflage";
 pub const PERMOFLAGES: &str = "permoflages";
 pub const TITLE: &str = "title";

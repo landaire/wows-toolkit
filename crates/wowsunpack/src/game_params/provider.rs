@@ -986,6 +986,58 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             }
         }
 
+        // Main battery is a standalone _Artillery upgrade naming an artillery
+        // component with a component-level maxDist and HP_AGM_* gun sub-objects;
+        // read the range plus each gun's base stats and ammo names.
+        if uc_type == keys::UC_TYPE_ARTILLERY
+            && let Some(arty_comp) = upgrade_dict
+                .get(&pk(keys::COMPONENTS))
+                .and_then(|v| v.dict_or_object_dict())
+                .and_then(|c| c.inner().get(&pk(keys::COMP_ARTILLERY)).and_then(read_first_string))
+            && let Some(arty_data) = ship_data.get(&pk(&arty_comp)).and_then(|v| v.dict_or_object_dict())
+        {
+            let arty_data = arty_data.inner();
+            let mut guns = Vec::new();
+            for (key, val) in arty_data.iter() {
+                let is_gun = key.string_ref().is_some_and(|s| s.inner().starts_with(keys::HP_AGM_PREFIX));
+                if !is_gun {
+                    continue;
+                }
+                let Some(gun) = val.dict_or_object_dict() else {
+                    continue;
+                };
+                let gun = gun.inner();
+                // ammoList can be pickled as a List or a Tuple.
+                let ammo = match gun.get(&pk(keys::AMMO_LIST)) {
+                    Some(Value::Tuple(t)) => {
+                        t.inner().iter().filter_map(|v| v.string_ref().map(|s| s.inner().clone())).collect()
+                    }
+                    Some(val) => read_all_strings(val),
+                    None => Vec::new(),
+                };
+                guns.push(crate::game_params::ttx::components::ArtilleryGunStats {
+                    shot_delay: read_float(&gun, keys::SHOT_DELAY),
+                    rotation_speed: gun.get(&pk(keys::ROTATION_SPEED)).and_then(read_first_float),
+                    num_barrels: read_float(&gun, keys::NUM_BARRELS),
+                    barrel_diameter: read_float(&gun, keys::BARREL_DIAMETER),
+                    ammo_switch_coeff: read_float(&gun, keys::AMMO_SWITCH_COEFF),
+                    min_radius: read_float(&gun, keys::MIN_RADIUS),
+                    ideal_radius: read_float(&gun, keys::IDEAL_RADIUS),
+                    ideal_distance: read_float(&gun, keys::IDEAL_DISTANCE),
+                    ammo,
+                });
+            }
+            if !guns.is_empty() {
+                ttx_components.artillery.insert(
+                    upgrade_name.clone(),
+                    crate::game_params::ttx::components::ArtilleryComponentStats {
+                        max_dist: read_float(&arty_data, keys::MAX_DIST),
+                        guns,
+                    },
+                );
+            }
+        }
+
         // Only process _Hull upgrades -- they define the complete config for a hull loadout
         if uc_type != keys::UC_TYPE_HULL {
             continue;
@@ -2208,5 +2260,101 @@ mod camera_tests {
         let ttx = vehicle.ttx_components().expect("ttx components extracted");
         assert!(ttx.torpedoes.is_empty());
         assert!(ttx.torpedoes("PAUH001_Hull").is_none());
+    }
+
+    /// Build a ship dict mirroring Worcester's (`PASC016_Worcester_1948`) real
+    /// `ArtilleryDefault` shape: an `_Artillery` upgrade naming an `ArtilleryDefault`
+    /// component with a component-level `maxDist` and `HP_AGM_*` guns (real values).
+    #[test]
+    fn build_ship_extracts_artillery_gun_base_stats() {
+        let hp_agm = || {
+            dict(vec![
+                (pk("shotDelay"), fv(4.6)),
+                (pk("rotationSpeed"), list(vec![fv(25.0), fv(50.0)])),
+                (pk("numBarrels"), fv(2.0)),
+                (pk("barrelDiameter"), fv(0.152)),
+                (pk("ammoSwitchCoeff"), fv(1.0)),
+                (pk("minRadius"), fv(1.1)),
+                (pk("idealRadius"), fv(8.0)),
+                (pk("idealDistance"), fv(1000.0)),
+                (
+                    pk("ammoList"),
+                    list(vec![sv("PAPA051_152mm_HE_HC_Mark_39_Mod_0"), sv("PAPA050_152mm_AP_130lbs_Mk35")]),
+                ),
+            ])
+        };
+        let arty_default = dict(vec![
+            (pk("maxDist"), fv(15320.0)),
+            (pk("HP_AGM_1"), hp_agm()),
+            (pk("HP_AGM_2"), hp_agm()),
+        ]);
+
+        let arty_components = dict(vec![(pk("artillery"), list(vec![sv("ArtilleryDefault")]))]);
+        let arty_upgrade = dict(vec![(pk("ucType"), sv("_Artillery")), (pk("components"), arty_components)]);
+
+        // Minimal hull upgrade so build_ship has a hull component.
+        let hull_components = dict(vec![(pk("hull"), list(vec![sv("A_Hull")]))]);
+        let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
+        let a_hull = dict(vec![(pk("health"), fv(40300.0)), (pk("model"), sv("A_Hull.model"))]);
+
+        let upgrade_info = dict(vec![
+            (pk("PAUH911_Worcester_1948"), hull_upgrade),
+            (pk("PAUA901_Worcester_ART_STOCK"), arty_upgrade),
+        ]);
+
+        let ship_data: BTreeMap<HashableValue, Value> = vec![
+            (pk("level"), Value::I64(10)),
+            (pk("group"), sv("special")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+            (pk("ArtilleryDefault"), arty_default),
+        ]
+        .into_iter()
+        .collect();
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+
+        let arty = ttx.artillery("PAUA901_Worcester_ART_STOCK").expect("artillery stats present");
+        assert_eq!(arty.max_dist, Some(15320.0));
+        assert_eq!(arty.guns.len(), 2);
+        let g = &arty.guns[0];
+        assert_eq!(g.shot_delay, Some(4.6));
+        assert_eq!(g.rotation_speed, Some(25.0));
+        assert_eq!(g.num_barrels, Some(2.0));
+        assert_eq!(g.barrel_diameter, Some(0.152));
+        assert_eq!(g.ammo_switch_coeff, Some(1.0));
+        assert_eq!(g.min_radius, Some(1.1));
+        assert_eq!(g.ideal_radius, Some(8.0));
+        assert_eq!(g.ideal_distance, Some(1000.0));
+        assert_eq!(
+            g.ammo,
+            vec!["PAPA051_152mm_HE_HC_Mark_39_Mod_0".to_string(), "PAPA050_152mm_AP_130lbs_Mk35".to_string()]
+        );
+
+        assert!(ttx.artillery("NoSuchUpgrade").is_none());
+    }
+
+    /// A ship with no `_Artillery` upgrade extracts no artillery entries.
+    #[test]
+    fn build_ship_no_artillery_yields_no_artillery_entry() {
+        let hull_components = dict(vec![(pk("hull"), list(vec![sv("A_Hull")]))]);
+        let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
+        let a_hull = dict(vec![(pk("health"), fv(10000.0)), (pk("model"), sv("A_Hull.model"))]);
+        let upgrade_info = dict(vec![(pk("PAUH001_Hull"), hull_upgrade)]);
+
+        let ship_data: BTreeMap<HashableValue, Value> = vec![
+            (pk("level"), Value::I64(5)),
+            (pk("group"), sv("special")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+        ]
+        .into_iter()
+        .collect();
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+        assert!(ttx.artillery.is_empty());
+        assert!(ttx.artillery("PAUH001_Hull").is_none());
     }
 }
