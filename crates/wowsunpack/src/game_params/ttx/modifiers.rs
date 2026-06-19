@@ -23,7 +23,8 @@
 use std::collections::HashMap;
 
 use crate::game_params::modifier_settings_data::modifier_setting;
-use crate::game_params::types::{CrewSkillModifier, Species};
+use crate::game_params::types::CrewSkillModifier;
+use crate::game_params::types::Species;
 
 /// Additive modifier names the generated `MODIFIER_SETTINGS` table does not cover,
 /// transcribed from their client apply sites where they are summed (`+`) onto a
@@ -40,12 +41,8 @@ const KNOWN_ADDITIVE: &[&str] = &["yawSpeedBonus", "buffsStartPool"];
 /// `burnChanceMultiplier` (ModifiersApply.py:44/48/57, each used as `initialBurnProb *=`).
 /// Without this allowlist `classify` would `debug_assert` on the unknown name even
 /// though it is a coefficient with the 1.0 identity.
-const KNOWN_MULTIPLICATIVE: &[&str] = &[
-    "uwCoeffMultiplier",
-    "burnChanceFactorHighLevel",
-    "burnChanceGMGSMultiplier",
-    "burnChanceMultiplier",
-];
+const KNOWN_MULTIPLICATIVE: &[&str] =
+    &["uwCoeffMultiplier", "burnChanceFactorHighLevel", "burnChanceGMGSMultiplier", "burnChanceMultiplier"];
 
 /// How same-name modifier values fold, keyed off the modifier's `MODIFIER_SETTINGS`
 /// `base_value` (1.0 -> coefficient, 0.0 -> bonus).

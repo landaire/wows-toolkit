@@ -43,10 +43,7 @@ impl ShipUpgradeSelection {
     /// Returns the default (all-`None`) selection when `ship` is not a vehicle or has
     /// no extracted TTX components.
     pub fn stock(ship: &crate::game_params::types::Param) -> ShipUpgradeSelection {
-        ship.vehicle()
-            .and_then(|v| v.ttx_components())
-            .map(|c| c.stock_selection().clone())
-            .unwrap_or_default()
+        ship.vehicle().and_then(|v| v.ttx_components()).map(|c| c.stock_selection().clone()).unwrap_or_default()
     }
 
     /// Build an explicit selection (e.g. from a replay's known equipped modules).

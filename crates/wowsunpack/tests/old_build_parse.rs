@@ -66,14 +66,8 @@ fn ttx_across_historical_builds() {
 
     // A spread across eras: pre-rework (0.6/0.7), the 10.x renumbering, and the
     // 11.x subs era. Each must have a dumped `<name>\vfs` tree under the root.
-    const BUILDS: &[&str] = &[
-        "0.6.13_296659",
-        "0.7.6_346043",
-        "10.0.0_3343484",
-        "10.6.0_4181350",
-        "0.11.8_6223574",
-        "0.11.11_6623042",
-    ];
+    const BUILDS: &[&str] =
+        &["0.6.13_296659", "0.7.6_346043", "10.0.0_3343484", "10.6.0_4181350", "0.11.8_6223574", "0.11.11_6623042"];
 
     let root = std::env::var("WOWS_BUILDS_ROOT").unwrap_or_else(|_| r"G:\wows_builds".to_string());
 

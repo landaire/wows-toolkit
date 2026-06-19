@@ -220,11 +220,7 @@ pub fn calculate_burn_chance(
     prob *= modifier.coef("burnChanceMultiplier");
     prob += modifier.bonus("burnChanceBonus");
 
-    prob += if is_small {
-        modifier.bonus("burnChanceFactorSmall")
-    } else {
-        modifier.bonus("burnChanceFactorBig")
-    };
+    prob += if is_small { modifier.bonus("burnChanceFactorSmall") } else { modifier.bonus("burnChanceFactorBig") };
 
     prob.max(0.0)
 }
@@ -232,7 +228,8 @@ pub fn calculate_burn_chance(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game_params::types::{CrewSkillModifier, Species};
+    use crate::game_params::types::CrewSkillModifier;
+    use crate::game_params::types::Species;
 
     /// Build whose `MODIFIER_SETTINGS` table is transcribed in the toolkit (matches
     /// modifiers.rs tests).
@@ -323,10 +320,7 @@ mod tests {
     /// only; main AP at/above it additionally multiplies GMHeavyCruiserCaliberDamageCoeff.
     #[test]
     fn artillery_damage_coeff_ap_heavy_cruiser_gate() {
-        let mods = [
-            modifier("GMAPDamageCoeff", 1.5),
-            modifier("GMHeavyCruiserCaliberDamageCoeff", 2.0),
-        ];
+        let mods = [modifier("GMAPDamageCoeff", 1.5), modifier("GMHeavyCruiserCaliberDamageCoeff", 2.0)];
         let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, BUILD);
         // caliber 0.152 < threshold 0.190 -> heavy-cruiser coeff NOT applied: 1.5.
         let below = artillery_damage_coeff(0.152, StatWeaponType::MainAp, &bundle, 0.190);

@@ -59,11 +59,7 @@ impl BuildCas {
     pub fn open(dump_dir: &Path) -> Option<Self> {
         let metadata = BuildMetadata::load(&dump_dir.join("metadata.toml"))?;
         let dump_base = dump_dir.parent()?;
-        Some(Self {
-            cas_root: cas::cas_root(dump_base),
-            dump_dir: dump_dir.to_path_buf(),
-            metadata,
-        })
+        Some(Self { cas_root: cas::cas_root(dump_base), dump_dir: dump_dir.to_path_buf(), metadata })
     }
 
     /// The build's parsed metadata.
@@ -199,9 +195,8 @@ fn build_entries(files: &BTreeMap<String, String>) -> HashMap<String, CasEntry> 
                 Some(pos) => (&cur[..pos], &cur[pos + 1..]),
                 None => break,
             };
-            let parent_entry = entries
-                .entry(parent.to_string())
-                .or_insert_with(|| CasEntry::Directory { children: Vec::new() });
+            let parent_entry =
+                entries.entry(parent.to_string()).or_insert_with(|| CasEntry::Directory { children: Vec::new() });
             if let CasEntry::Directory { children } = parent_entry {
                 children.push(name.to_string());
             }
@@ -264,7 +259,13 @@ impl FileSystem for CasVfs {
                 let len = std::fs::metadata(cas::cas_path(&self.cas_root, hash))
                     .map_err(|e| VfsError::from(VfsErrorKind::IoError(e)))?
                     .len();
-                Ok(VfsMetadata { file_type: wowsunpack::vfs::VfsFileType::File, len, created: None, modified: None, accessed: None })
+                Ok(VfsMetadata {
+                    file_type: wowsunpack::vfs::VfsFileType::File,
+                    len,
+                    created: None,
+                    modified: None,
+                    accessed: None,
+                })
             }
         }
     }
@@ -338,8 +339,7 @@ mod tests {
 
     #[test]
     fn read_dir_lists_children() {
-        let (_d, cas_root, manifest) =
-            fixture(&[("gui/a.png", b"a"), ("gui/b.png", b"b"), ("content/x.dat", b"x")]);
+        let (_d, cas_root, manifest) = fixture(&[("gui/a.png", b"a"), ("gui/b.png", b"b"), ("content/x.dat", b"x")]);
         let vfs = VfsPath::new(CasVfs::new(cas_root, &manifest));
         let mut root: Vec<String> = vfs.read_dir().unwrap().map(|p| p.filename()).collect();
         root.sort();
@@ -354,10 +354,7 @@ mod tests {
         let (_d, cas_root, manifest) = fixture(&[("content/x.dat", b"twelve bytes")]);
         let vfs = VfsPath::new(CasVfs::new(cas_root, &manifest));
         assert_eq!(vfs.join("content/x.dat").unwrap().metadata().unwrap().len, 12);
-        assert_eq!(
-            vfs.join("content").unwrap().metadata().unwrap().file_type,
-            wowsunpack::vfs::VfsFileType::Directory
-        );
+        assert_eq!(vfs.join("content").unwrap().metadata().unwrap().file_type, wowsunpack::vfs::VfsFileType::Directory);
     }
 
     #[test]

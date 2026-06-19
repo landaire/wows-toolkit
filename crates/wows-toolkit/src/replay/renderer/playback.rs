@@ -1214,13 +1214,9 @@ fn equipment_display_for_param(
     species: wowsunpack::game_params::types::Species,
     version: &Version,
 ) -> super::EquipmentDisplay {
-    use wowsunpack::game_params::describe::{DescribeContext, ModifierResolution};
-    let ctx = DescribeContext {
-        resource_loader: metadata,
-        version,
-        species: Some(species),
-        param_name: None,
-    };
+    use wowsunpack::game_params::describe::DescribeContext;
+    use wowsunpack::game_params::describe::ModifierResolution;
+    let ctx = DescribeContext { resource_loader: metadata, version, species: Some(species), param_name: None };
     let described = param.describe(&ctx);
     // Static description, else generated from Formatted modifier lines only
     // (matches the old generated_param_description, which drops table-less mods).

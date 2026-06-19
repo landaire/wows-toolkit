@@ -2,12 +2,20 @@
 //! modifier/stat set, and best-effort translated modifier text, for every
 //! describable game entity. See docs spec 2026-06-18-describable-game-params.
 
-use crate::data::{ResourceLoader, Version};
-use crate::game_params::modifier_settings_data::{format_modifier, modifier_setting};
+use crate::data::ResourceLoader;
+use crate::data::Version;
+use crate::game_params::modifier_settings_data::format_modifier;
+use crate::game_params::modifier_settings_data::modifier_setting;
 use crate::game_params::translations::translate_exterior_by_name;
-use crate::game_params::types::{
-    Ability, AbilityCategory, CrewSkill, CrewSkillModifier, Exterior, Modernization, Param, Species, Unit,
-};
+use crate::game_params::types::Ability;
+use crate::game_params::types::AbilityCategory;
+use crate::game_params::types::CrewSkill;
+use crate::game_params::types::CrewSkillModifier;
+use crate::game_params::types::Exterior;
+use crate::game_params::types::Modernization;
+use crate::game_params::types::Param;
+use crate::game_params::types::Species;
+use crate::game_params::types::Unit;
 
 /// Per-species modifier values (the fixed six ship species the game models).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -234,10 +242,10 @@ impl Describable for CrewSkill {
     }
     fn modifiers(&self, _ctx: &DescribeContext) -> Vec<Modifier> {
         let mut out = self.modifiers().map(|m| modifiers_from_crew_skill(m)).unwrap_or_default();
-        if let Some(trig) = self.logic_trigger() {
-            if let Some(tmods) = trig.modifiers() {
-                out.extend(modifiers_from_crew_skill(tmods));
-            }
+        if let Some(trig) = self.logic_trigger()
+            && let Some(tmods) = trig.modifiers()
+        {
+            out.extend(modifiers_from_crew_skill(tmods));
         }
         out
     }
@@ -343,7 +351,9 @@ impl Param {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game_params::types::{Param, ParamData, Species};
+    use crate::game_params::types::Param;
+    use crate::game_params::types::ParamData;
+    use crate::game_params::types::Species;
 
     struct EchoLoader;
     impl ResourceLoader for EchoLoader {
@@ -471,7 +481,11 @@ mod tests {
 
     #[test]
     fn crew_skill_describes_name_and_modifiers() {
-        use crate::game_params::types::{CrewSkill, CrewSkillModifier, CrewSkillTiers, CrewSkillType, SkillPointCost};
+        use crate::game_params::types::CrewSkill;
+        use crate::game_params::types::CrewSkillModifier;
+        use crate::game_params::types::CrewSkillTiers;
+        use crate::game_params::types::CrewSkillType;
+        use crate::game_params::types::SkillPointCost;
         let loader = EchoLoader;
         let v = version(11791718);
         let cost = SkillPointCost::new(1);

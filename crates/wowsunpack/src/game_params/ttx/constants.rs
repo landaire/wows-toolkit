@@ -75,7 +75,13 @@ pub const SHIP_TO_BW: f32 = 1.0 / BW_TO_SHIP;
 /// field; `maxDist` is the battery range in KM (PreprocessedArtillery.py:32 stores
 /// `module.maxDist / KM_TO_M`); `ideal_radius_coef` is the `GMIdealRadius` modifier
 /// (stock 1.0).
-pub fn dispersion(min_radius: f32, ideal_radius: f32, ideal_distance: f32, max_dist_km: f32, ideal_radius_coef: f32) -> f32 {
+pub fn dispersion(
+    min_radius: f32,
+    ideal_radius: f32,
+    ideal_distance: f32,
+    max_dist_km: f32,
+    ideal_radius_coef: f32,
+) -> f32 {
     let min_r = min_radius * ideal_radius_coef;
     let ideal_r = ideal_radius * ideal_radius_coef;
     (min_r + max_dist_km * BALLISTIC_TO_BW * KM_TO_M * (ideal_r - min_r) / ideal_distance) * BW_TO_SHIP * 2.0

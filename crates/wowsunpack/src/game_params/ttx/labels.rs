@@ -447,8 +447,7 @@ mod tests {
     /// visible.
     #[test]
     fn unmatched_stats_are_exactly_the_known_gap() {
-        let mut unmatched: Vec<TtxStat> =
-            TtxStat::ALL.iter().copied().filter(|s| s.label_key().is_none()).collect();
+        let mut unmatched: Vec<TtxStat> = TtxStat::ALL.iter().copied().filter(|s| s.label_key().is_none()).collect();
         unmatched.sort_by_key(|s| s.field_key());
 
         let mut expected = vec![

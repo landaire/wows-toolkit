@@ -64,12 +64,7 @@ pub fn ship_stats(
     let durability = hull.map(|h| factories::durability(h, modifiers, level));
 
     let mobility = hull.map(|h| {
-        let engine = selection
-            .engine
-            .as_deref()
-            .and_then(|name| components.engine(name))
-            .cloned()
-            .unwrap_or_default();
+        let engine = selection.engine.as_deref().and_then(|name| components.engine(name)).cloned().unwrap_or_default();
         factories::mobility(h, &engine, modifiers)
     });
 
@@ -455,9 +450,10 @@ mod tests {
         let mut components = ShipTtxComponents::default();
         components.hulls.insert("H".to_string(), gearing_hull());
         let big_gun = ArtilleryGunStats { barrel_diameter: Some(Meters::from(0.152)), ..ArtilleryGunStats::default() };
-        components
-            .artillery
-            .insert("A".to_string(), ArtilleryComponentStats { max_dist: Some(Meters::from(15000.0)), guns: vec![big_gun] });
+        components.artillery.insert(
+            "A".to_string(),
+            ArtilleryComponentStats { max_dist: Some(Meters::from(15000.0)), guns: vec![big_gun] },
+        );
         components.stock_selection =
             ShipUpgradeSelection::new(Some("H".to_string()), None, Some("A".to_string()), None, None);
         let ship = ship_with("BigGun", 10, Species::Cruiser, components);
@@ -491,7 +487,13 @@ mod tests {
             .data(ParamData::Projectile(gearing_torpedo()))
             .build();
         let provider = StubProvider::new(&[]);
-        let stats = ship_stats(&proj, &ShipUpgradeSelection::default(), &ModifierBundle::empty(Species::Destroyer), 10, &provider);
+        let stats = ship_stats(
+            &proj,
+            &ShipUpgradeSelection::default(),
+            &ModifierBundle::empty(Species::Destroyer),
+            10,
+            &provider,
+        );
         assert!(stats.durability.is_none());
         assert!(stats.artillery.is_none());
     }

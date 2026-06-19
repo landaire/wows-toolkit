@@ -516,12 +516,12 @@ fn build_ability_category(category_data: &BTreeMap<HashableValue, Value>) -> Abi
     }
     // The client merges logic's nested `modifiers` dict last (GPToParamsDict lines 70-73),
     // so its fields override on collision.
-    if let Some(logic) = logic.as_ref() {
-        if let Some(modifiers) = logic.inner().get(&pk("modifiers")).and_then(|v| v.dict_or_object_dict()) {
-            for (key, value) in modifiers.inner().iter() {
-                if let (Some(name), Some(n)) = (key.string_ref(), num(value)) {
-                    effect_fields.insert(name.inner().to_owned(), n);
-                }
+    if let Some(logic) = logic.as_ref()
+        && let Some(modifiers) = logic.inner().get(&pk("modifiers")).and_then(|v| v.dict_or_object_dict())
+    {
+        for (key, value) in modifiers.inner().iter() {
+            if let (Some(name), Some(n)) = (key.string_ref(), num(value)) {
+                effect_fields.insert(name.inner().to_owned(), n);
             }
         }
     }
@@ -1191,13 +1191,16 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
                     max_speed: read_float(&hull_data, keys::MAX_SPEED).map(crate::game_params::ttx::model::Knots::from),
                     speed_coef: read_float(&hull_data, keys::SPEED_COEF),
                     turning_radius: read_float(&hull_data, keys::TURNING_RADIUS).map(Meters::from),
-                    rudder_time: read_float(&hull_data, keys::RUDDER_TIME).map(crate::game_params::ttx::model::Seconds::from),
+                    rudder_time: read_float(&hull_data, keys::RUDDER_TIME)
+                        .map(crate::game_params::ttx::model::Seconds::from),
                     visibility_factor: read_float(&hull_data, keys::VISIBILITY_FACTOR).map(Km::from),
                     visibility_factor_by_plane: read_float(&hull_data, keys::VISIBILITY_FACTOR_BY_PLANE).map(Km::from),
                     visibility_coef_fire: read_float(&hull_data, keys::VISIBILITY_COEF_FIRE).map(Km::from),
-                    visibility_coef_fire_by_plane: read_float(&hull_data, keys::VISIBILITY_COEF_FIRE_BY_PLANE).map(Km::from),
+                    visibility_coef_fire_by_plane: read_float(&hull_data, keys::VISIBILITY_COEF_FIRE_BY_PLANE)
+                        .map(Km::from),
                     visibility_coef_gk: read_float(&hull_data, keys::VISIBILITY_COEF_GK).map(Km::from),
-                    visibility_coef_gk_in_smoke: read_float(&hull_data, keys::VISIBILITY_COEF_GK_IN_SMOKE).map(Km::from),
+                    visibility_coef_gk_in_smoke: read_float(&hull_data, keys::VISIBILITY_COEF_GK_IN_SMOKE)
+                        .map(Km::from),
                     visibility_factor_by_periscope: read_visibility_by_periscope(&hull_data).map(Km::from),
                     flood_prob: read_flood_prob(&hull_data),
                     battery_capacity,
@@ -2266,19 +2269,15 @@ mod camera_tests {
         ]);
         let a_engine = dict(vec![(pk("speedCoef"), fv(0.0))]);
 
-        let hull_components = dict(vec![
-            (pk("hull"), list(vec![sv("A_Hull")])),
-            (pk("artillery"), list(vec![sv("A_Artillery")])),
-        ]);
+        let hull_components =
+            dict(vec![(pk("hull"), list(vec![sv("A_Hull")])), (pk("artillery"), list(vec![sv("A_Artillery")]))]);
         let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
 
         let engine_components = dict(vec![(pk("engine"), list(vec![sv("A_Engine")]))]);
         let engine_upgrade = dict(vec![(pk("ucType"), sv("_Engine")), (pk("components"), engine_components)]);
 
-        let upgrade_info = dict(vec![
-            (pk("PAUH911_Gearing_1945"), hull_upgrade),
-            (pk("PAUE903_D10_ENG_STOCK"), engine_upgrade),
-        ]);
+        let upgrade_info =
+            dict(vec![(pk("PAUH911_Gearing_1945"), hull_upgrade), (pk("PAUE903_D10_ENG_STOCK"), engine_upgrade)]);
 
         let ship_data: BTreeMap<HashableValue, Value> = vec![
             (pk("level"), Value::I64(10)),
@@ -2341,10 +2340,8 @@ mod camera_tests {
         let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
         let a_hull = dict(vec![(pk("health"), fv(19400.0)), (pk("model"), sv("A_Hull.model"))]);
 
-        let upgrade_info = dict(vec![
-            (pk("PAUH911_Gearing_1945"), hull_upgrade),
-            (pk("PAUT901_D10_TORP_STOCK"), torp_upgrade),
-        ]);
+        let upgrade_info =
+            dict(vec![(pk("PAUH911_Gearing_1945"), hull_upgrade), (pk("PAUT901_D10_TORP_STOCK"), torp_upgrade)]);
 
         let ship_data: BTreeMap<HashableValue, Value> = vec![
             (pk("level"), Value::I64(10)),
@@ -2417,11 +2414,8 @@ mod camera_tests {
                 ),
             ])
         };
-        let arty_default = dict(vec![
-            (pk("maxDist"), fv(15320.0)),
-            (pk("HP_AGM_1"), hp_agm()),
-            (pk("HP_AGM_2"), hp_agm()),
-        ]);
+        let arty_default =
+            dict(vec![(pk("maxDist"), fv(15320.0)), (pk("HP_AGM_1"), hp_agm()), (pk("HP_AGM_2"), hp_agm())]);
 
         let arty_components = dict(vec![(pk("artillery"), list(vec![sv("ArtilleryDefault")]))]);
         let arty_upgrade = dict(vec![(pk("ucType"), sv("_Artillery")), (pk("components"), arty_components)]);
@@ -2431,10 +2425,8 @@ mod camera_tests {
         let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
         let a_hull = dict(vec![(pk("health"), fv(40300.0)), (pk("model"), sv("A_Hull.model"))]);
 
-        let upgrade_info = dict(vec![
-            (pk("PAUH911_Worcester_1948"), hull_upgrade),
-            (pk("PAUA901_Worcester_ART_STOCK"), arty_upgrade),
-        ]);
+        let upgrade_info =
+            dict(vec![(pk("PAUH911_Worcester_1948"), hull_upgrade), (pk("PAUA901_Worcester_ART_STOCK"), arty_upgrade)]);
 
         let ship_data: BTreeMap<HashableValue, Value> = vec![
             (pk("level"), Value::I64(10)),

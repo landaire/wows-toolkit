@@ -37,7 +37,18 @@ const ARMOR_TYPE_PREFIXES: &[&[&str]] = &[
     // SUB_OUTER (9) - no prefixes
     &[],
     // BOW_ST (6)
-    &["Bow", "SideBow", "DeckBow", "TransBow", "InclinBow", "St", "SideStern", "DeckStern", "TransStern", "InclinStern"],
+    &[
+        "Bow",
+        "SideBow",
+        "DeckBow",
+        "TransBow",
+        "InclinBow",
+        "St",
+        "SideStern",
+        "DeckStern",
+        "TransStern",
+        "InclinStern",
+    ],
     // SUB_BOW_ST (10) - no prefixes
     &[],
 ];

@@ -18,8 +18,8 @@ use crate::game_params::ttx::constants::BW_TO_BALLISTIC;
 use crate::game_params::ttx::constants::HULL_HEALTH_ROUND;
 use crate::game_params::ttx::constants::KM_TO_M;
 use crate::game_params::ttx::constants::TORPEDO_DAMAGE_CONSTANT;
-use crate::game_params::ttx::model::Armor;
 use crate::game_params::ttx::model::AmmoCount;
+use crate::game_params::ttx::model::Armor;
 use crate::game_params::ttx::model::Artillery;
 use crate::game_params::ttx::model::Battery;
 use crate::game_params::ttx::model::DegreesPerSecond;
@@ -36,12 +36,12 @@ use crate::game_params::ttx::model::TorpedoStats;
 use crate::game_params::ttx::model::Torpedoes;
 use crate::game_params::ttx::model::Visibility;
 use crate::game_params::ttx::modifiers::ModifierBundle;
-use crate::game_params::ttx::weapon_tables::ammo_to_stat_weapon_table;
+use crate::game_params::ttx::weapon_tables::StatWeaponType;
 use crate::game_params::ttx::weapon_tables::alpha_damage_coeff;
+use crate::game_params::ttx::weapon_tables::ammo_to_stat_weapon_table;
 use crate::game_params::ttx::weapon_tables::artillery_damage_coeff;
 use crate::game_params::ttx::weapon_tables::calculate_burn_chance;
 use crate::game_params::ttx::weapon_tables::is_small_projectile;
-use crate::game_params::ttx::weapon_tables::StatWeaponType;
 use crate::game_params::types::ArmorMap;
 use crate::game_params::types::GameParamProvider;
 use crate::game_params::types::Km;
@@ -78,9 +78,9 @@ pub fn durability(hull: &HullComponentStats, modifiers: &ModifierBundle, level: 
         Hp::from(rounded)
     });
 
-    let torpedo_protection = hull
-        .flood_prob
-        .map(|prob| Percent::from(prob * modifiers.coef("uwCoeffMultiplier") * 100.0 + modifiers.bonus("uwCoeffBonus")));
+    let torpedo_protection = hull.flood_prob.map(|prob| {
+        Percent::from(prob * modifiers.coef("uwCoeffMultiplier") * 100.0 + modifiers.bonus("uwCoeffBonus"))
+    });
 
     Durability { health, torpedo_protection }
 }
@@ -224,7 +224,9 @@ pub fn torpedo_stats(name: String, projectile: &Projectile, modifiers: &Modifier
     let damage = match (projectile.alpha_damage(), projectile.damage()) {
         (Some(alpha), Some(flood)) => {
             let base = alpha / TORPEDO_DAMAGE_CONSTANT + flood;
-            Some(Hp::from(base * modifiers.coef("torpedoDamageCoeff") * modifiers.coef("controllableWeaponDamageCoeff")))
+            Some(Hp::from(
+                base * modifiers.coef("torpedoDamageCoeff") * modifiers.coef("controllableWeaponDamageCoeff"),
+            ))
         }
         _ => None,
     };
@@ -300,7 +302,11 @@ fn warn_unresolved_ammo(name: &str) {
 }
 
 /// `None` when `launchers` is empty (no torpedo armament).
-pub fn torpedoes(launchers: &[TorpedoLauncherStats], modifiers: &ModifierBundle, provider: &dyn GameParamProvider) -> Option<Torpedoes> {
+pub fn torpedoes(
+    launchers: &[TorpedoLauncherStats],
+    modifiers: &ModifierBundle,
+    provider: &dyn GameParamProvider,
+) -> Option<Torpedoes> {
     if launchers.is_empty() {
         return None;
     }
@@ -373,7 +379,13 @@ const SMALL_PROJECTILE_MAX_DIAMETER_M: f32 = 0.0;
 /// (FactoryArtillery.py:175) rather than `GMPenetrationCoeffHE`.
 ///
 /// Each field is `None` when its base projectile input is absent.
-pub fn shell_stats(name: String, projectile: &Projectile, modifiers: &ModifierBundle, level: u32, is_atba: bool) -> ShellStats {
+pub fn shell_stats(
+    name: String,
+    projectile: &Projectile,
+    modifiers: &ModifierBundle,
+    level: u32,
+    is_atba: bool,
+) -> ShellStats {
     let ammo_kind = projectile.ammo_type();
     let mut weapon = ammo_to_stat_weapon_table(ammo_kind);
     if is_atba {
@@ -396,11 +408,7 @@ pub fn shell_stats(name: String, projectile: &Projectile, modifiers: &ModifierBu
     // on the main path. Stock coeffs are 1.0, so damage reduces to alphaDamage.
     let damage = match (projectile.alpha_damage(), caliber_m) {
         (Some(alpha), Some(cal_m)) => {
-            let csap = if weapon.is_csap() {
-                modifiers.coef("citadelDamageMultiplierCSAP")
-            } else {
-                1.0
-            };
+            let csap = if weapon.is_csap() { modifiers.coef("citadelDamageMultiplierCSAP") } else { 1.0 };
             let value = alpha
                 * alpha_damage_coeff(weapon, modifiers, false)
                 * modifiers.coef("controllableWeaponDamageCoeff")
@@ -415,15 +423,12 @@ pub fn shell_stats(name: String, projectile: &Projectile, modifiers: &ModifierBu
     // the coef is GMPenetrationCoeffHE for main, GSPenetrationCoeffHE for ATBA
     // (FactoryArtillery.py:175/180). CS floor(alphaPiercingCS) (line 185); AP is a
     // ballistic sim (no closed form) -> None.
-    let he_pen_coef = if is_atba {
-        modifiers.coef("GSPenetrationCoeffHE")
-    } else {
-        modifiers.coef("GMPenetrationCoeffHE")
-    };
+    let he_pen_coef =
+        if is_atba { modifiers.coef("GSPenetrationCoeffHE") } else { modifiers.coef("GMPenetrationCoeffHE") };
     let penetration = match weapon {
-        StatWeaponType::MainHe | StatWeaponType::AtbaHe => projectile
-            .alpha_piercing_he()
-            .map(|p| Millimeters::from((p * he_pen_coef).floor())),
+        StatWeaponType::MainHe | StatWeaponType::AtbaHe => {
+            projectile.alpha_piercing_he().map(|p| Millimeters::from((p * he_pen_coef).floor()))
+        }
         StatWeaponType::MainCs | StatWeaponType::AtbaCs => {
             projectile.alpha_piercing_cs().map(|p| Millimeters::from(p.floor()))
         }
@@ -433,7 +438,7 @@ pub fn shell_stats(name: String, projectile: &Projectile, modifiers: &ModifierBu
     // burnChance: calculateBurnChance(level, burnProb) for HE (line 171) and AP (line 188);
     // CS sets no burnChance. burnProb -0.5 (AP "N/A") clamps to 0 in calculate_burn_chance.
     // Stored as a percent (burnProb 0.12 -> 12%).
-    let is_small = caliber_m.map_or(false, |c| is_small_projectile(c, SMALL_PROJECTILE_MAX_DIAMETER_M));
+    let is_small = caliber_m.is_some_and(|c| is_small_projectile(c, SMALL_PROJECTILE_MAX_DIAMETER_M));
     let burn_chance = match weapon {
         StatWeaponType::MainHe | StatWeaponType::MainAp | StatWeaponType::AtbaHe | StatWeaponType::AtbaAp => projectile
             .burn_prob()
@@ -506,9 +511,7 @@ pub fn artillery(
 
     let reload_time = first.shot_delay.map(|d| Seconds::from(d.value() * shot_delay_coef));
 
-    let range_km = arty
-        .max_dist
-        .map(|d| (d.value() / KM_TO_M) * fc_max_dist_coef * max_dist_coef);
+    let range_km = arty.max_dist.map(|d| (d.value() / KM_TO_M) * fc_max_dist_coef * max_dist_coef);
     let range = range_km.map(Km::from);
 
     // dispersion over the FC-adjusted range (FactoryArtillery.py:47 uses `unknown_12`).
@@ -551,14 +554,7 @@ pub fn artillery(
         }
     }
 
-    Some(Artillery {
-        reload_time,
-        range,
-        dispersion,
-        ammo_switch_time,
-        gun,
-        shells,
-    })
+    Some(Artillery { reload_time, range, dispersion, ammo_switch_time, gun, shells })
 }
 
 /// Secondary-battery (ATBA) armament section (`createATBAGunTTX`,
@@ -695,9 +691,7 @@ pub fn visibility(
         coeff *= modifiers.coef("GMBigGunVisibilityCoeff");
     }
 
-    let sea = hull
-        .visibility_factor
-        .map(|v| v.value() * modifiers.coef("visibilityFactor") * coeff);
+    let sea = hull.visibility_factor.map(|v| v.value() * modifiers.coef("visibilityFactor") * coeff);
     let sea_detection = sea.map(Km::from);
 
     let sea_detection_on_fire = match (sea, hull.visibility_coef_fire) {
@@ -705,10 +699,8 @@ pub fn visibility(
         _ => None,
     };
 
-    let detection_in_smoke = hull
-        .visibility_coef_gk_in_smoke
-        .filter(|&v| v.value() > MINIMAL_VALID_VALUE)
-        .map(|v| Km::from(v.value()));
+    let detection_in_smoke =
+        hull.visibility_coef_gk_in_smoke.filter(|&v| v.value() > MINIMAL_VALID_VALUE).map(|v| Km::from(v.value()));
 
     // mgMaxDist and atbaMaxDist both write the same secondary-detection floor; take the
     // max over whichever ranges are supplied, floored by `sea` (@188-272).
@@ -720,9 +712,7 @@ pub fn visibility(
         _ => None,
     };
 
-    let air = hull
-        .visibility_factor_by_plane
-        .map(|v| v.value() * modifiers.coef("visibilityFactorByPlane") * coeff);
+    let air = hull.visibility_factor_by_plane.map(|v| v.value() * modifiers.coef("visibilityFactorByPlane") * coeff);
     let air_detection = air.map(Km::from);
 
     let air_detection_on_fire = match (air, hull.visibility_coef_fire_by_plane) {
@@ -892,7 +882,8 @@ mod tests {
         let durability = durability(&empty_hull, &ModifierBundle::empty(Species::Destroyer), 10);
         assert!(durability.health.is_none());
 
-        let mobility = mobility(&empty_hull, &EngineComponentStats::default(), &ModifierBundle::empty(Species::Destroyer));
+        let mobility =
+            mobility(&empty_hull, &EngineComponentStats::default(), &ModifierBundle::empty(Species::Destroyer));
         assert!(mobility.speed.is_none());
         assert!(mobility.turning_radius.is_none());
         assert!(mobility.rudder_time.is_none());
@@ -935,7 +926,7 @@ mod tests {
         for &(raw, thk) in entries {
             let model_index = raw >> 16;
             let material_id = raw & 0xFFFF;
-            m.entry(material_id).or_insert_with(BTreeMap::new).insert(model_index, thk);
+            m.entry(material_id).or_default().insert(model_index, thk);
         }
         m
     }
@@ -1004,9 +995,9 @@ mod tests {
         assert_eq!(armor.max, Some(Millimeters::from(6.0)));
     }
 
+    use crate::Rc;
     use crate::game_params::types::Param;
     use crate::game_params::types::ParamData;
-    use crate::Rc;
     use crate::game_types::GameParamId;
 
     /// Gearing's real `PAPT027_Mk_16_mod_1` torpedo (GameParams Projectile):
@@ -1077,7 +1068,11 @@ mod tests {
 
     #[test]
     fn gearing_stock_torpedo_stats() {
-        let stats = torpedo_stats("PAPT027_Mk_16_mod_1".to_string(), &gearing_torpedo(), &ModifierBundle::empty(Species::Destroyer));
+        let stats = torpedo_stats(
+            "PAPT027_Mk_16_mod_1".to_string(),
+            &gearing_torpedo(),
+            &ModifierBundle::empty(Species::Destroyer),
+        );
         // damage: 53500/3 + 1200 = 19033.33 (alphaDamage/3 + flood, stock coeffs 1.0).
         let damage = stats.damage.expect("damage").value();
         assert!(approx(damage, 53500.0 / 3.0 + 1200.0), "got {damage}");
@@ -1100,7 +1095,8 @@ mod tests {
     fn gearing_stock_torpedoes_via_provider() {
         let launchers = [gearing_launcher()];
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
-        let torps = torpedoes(&launchers, &ModifierBundle::empty(Species::Destroyer), &provider).expect("torpedoes computed");
+        let torps =
+            torpedoes(&launchers, &ModifierBundle::empty(Species::Destroyer), &provider).expect("torpedoes computed");
 
         // reload_time: shotDelay 103 * GTShotDelay 1.0 = 103 (min over one mount).
         assert_eq!(torps.reload_time, Some(Seconds::from(103.0)));
@@ -1234,10 +1230,7 @@ mod tests {
             min_radius: Some(1.1),
             ideal_radius: Some(8.0),
             ideal_distance: Some(1000.0),
-            ammo: vec![
-                "PAPA051_152mm_HE_HC_Mark_39_Mod_0".to_string(),
-                "PAPA050_152mm_AP_130lbs_Mk35".to_string(),
-            ],
+            ammo: vec!["PAPA051_152mm_HE_HC_Mark_39_Mod_0".to_string(), "PAPA050_152mm_AP_130lbs_Mk35".to_string()],
         };
         ArtilleryComponentStats {
             max_dist: Some(Meters::from(15320.0)),
@@ -1446,11 +1439,7 @@ mod tests {
         assert_eq!(stats.speed, Some(381.0));
 
         // A shell without timeFactor defaults to 1.0 (maa3520d6.py:1151): speed == bulletSpeed.
-        let plain = Projectile::builder()
-            .ammo_type("HE".to_string())
-            .bullet_diametr(0.152)
-            .bullet_speed(812.0)
-            .build();
+        let plain = Projectile::builder().ammo_type("HE".to_string()).bullet_diametr(0.152).bullet_speed(812.0).build();
         let plain_stats = shell_stats("Y".to_string(), &plain, &ModifierBundle::empty(Species::Cruiser), 10, false);
         assert_eq!(plain_stats.speed, Some(812.0));
     }
