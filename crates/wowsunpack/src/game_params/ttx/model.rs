@@ -9,6 +9,8 @@ use crate::game_params::types::Km;
 use crate::game_params::types::Meters;
 use crate::game_params::types::Millimeters;
 
+// `Knots`, `Seconds`, `Hp`, `DegreesPerSecond` are defined below in this module.
+
 /// Speed in knots.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -93,6 +95,12 @@ impl DegreesPerSecond {
     }
 }
 
+impl From<f32> for DegreesPerSecond {
+    fn from(v: f32) -> Self {
+        Self(v)
+    }
+}
+
 /// Ammunition pool size. The game uses `-1` to mean an unlimited pool; that
 /// sentinel is modeled as `Infinite` rather than a magic number.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -159,10 +167,55 @@ pub struct Battery {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Artillery {}
 
-/// Torpedo launcher + ammo stats (`FactoryTorpedoes`). Fields added in milestone M3.
+/// Torpedo launcher + ammo stats (`FactoryTorpedoes.py` `createTorpedoesTTX`).
+///
+/// `reload_time` is the aggregated launcher reload (`initAmmoReloadParams`,
+/// FactoryTorpedoes.py:27-42: `min` of the non-zero per-mount reload times).
+/// `launchers` is one [`Launcher`] per torpedo tube (`createLauncherTTX`).
+/// `torpedoes` is the per-ammo stat list (`createTorpedoTTX`).
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Torpedoes {}
+pub struct Torpedoes {
+    pub reload_time: Option<Seconds>,
+    pub launchers: Vec<Launcher>,
+    pub torpedoes: Vec<TorpedoStats>,
+}
+
+/// One torpedo launcher's traverse stats (`TorpedoLauncherTTX`,
+/// FactoryTorpedoes.py:74-80).
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Launcher {
+    /// `rotationSpeed[0] * yawSpeedCoef + yawSpeedBonus` (FactoryTorpedoes.py:78).
+    pub rotation_speed: Option<DegreesPerSecond>,
+    /// `180 / rotationSpeed` (FactoryTorpedoes.py:79).
+    pub rotation_time: Option<Seconds>,
+    /// `gp.numBarrels` (PreprocessedTorpedoes.py:72, surfaced for group display).
+    pub num_barrels: Option<u32>,
+}
+
+/// Per-ammo torpedo stats (`TorpedoTTX`, FactoryTorpedoes.py:82-122).
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TorpedoStats {
+    /// Projectile GameParams name (`ammoParams.name`, FactoryTorpedoes.py:89).
+    pub name: String,
+    /// `getTorpedoDamage` (ModifiersApply.py:477-488).
+    pub damage: Option<Hp>,
+    /// `getTorpedoSpeed` (ModifiersApply.py:491-499).
+    pub speed: Option<Knots>,
+    /// `maxDist * torpedoRangeCoefficient * BW_TO_BALLISTIC / KM_TO_M` (FactoryTorpedoes.py:93).
+    pub range: Option<Km>,
+    /// `visibilityFactor * torpedoVisibilityFactor` (FactoryTorpedoes.py:92).
+    pub visibility: Option<Km>,
+    /// `distanceOfMaxDamage` (FactoryTorpedoes.py:119); arming-distance piece needs
+    /// data absent here (`armingTime`/`maneuverDist`), so left `None` (see factory note).
+    pub distance_of_max_damage: Option<Km>,
+    /// `isDamageIncreasing` (FactoryTorpedoes.py:120).
+    pub is_damage_increasing: Option<bool>,
+    /// `disabledUnderwater` (FactoryTorpedoes.py:101); submarine-only.
+    pub disabled_underwater: Option<bool>,
+}
 
 /// Fire-control stats (`PreprocessedFireControl`).
 #[derive(Debug, Clone, Default)]
