@@ -11,4 +11,5 @@ pub mod provider;
 /// scripts/gen_skill_grid_rs.py.
 pub mod skill_grid_data;
 pub mod translations;
+pub mod ttx;
 pub mod types;
