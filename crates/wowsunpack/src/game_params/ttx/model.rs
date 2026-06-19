@@ -283,10 +283,25 @@ pub struct FireControl {
     pub max_dist: Option<Km>,
 }
 
-/// Detectability stats (`FactoryVisibility`). Fields added in milestone M6.
+/// Detectability stats (`FactoryVisibility` createVisibilityTTX).
+///
+/// Ranges are in km. `sea_detection`/`air_detection` are the `visibilityByShip.normal`
+/// / `visibilityByPlane.normal` slots; the `_on_fire` variants are the `.fire` slots;
+/// `detection_in_smoke` is `visibilityByShip.smoke`; `secondary_range_detection` is the
+/// `visibilityByShip.atba` (secondary/MG floor); `periscope_depth_detection` is
+/// `visibilityFromDepth.max`. Per-depth submarine ranges (`byDepth`,
+/// createVisibilityTTX@387-513) are a runtime entity calc and deferred.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Visibility {}
+pub struct Visibility {
+    pub sea_detection: Option<Km>,
+    pub sea_detection_on_fire: Option<Km>,
+    pub air_detection: Option<Km>,
+    pub air_detection_on_fire: Option<Km>,
+    pub detection_in_smoke: Option<Km>,
+    pub secondary_range_detection: Option<Km>,
+    pub periscope_depth_detection: Option<Km>,
+}
 
 #[cfg(test)]
 mod tests {

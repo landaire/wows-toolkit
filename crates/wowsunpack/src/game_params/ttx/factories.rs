@@ -34,6 +34,7 @@ use crate::game_params::ttx::model::Seconds;
 use crate::game_params::ttx::model::ShellStats;
 use crate::game_params::ttx::model::TorpedoStats;
 use crate::game_params::ttx::model::Torpedoes;
+use crate::game_params::ttx::model::Visibility;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::weapon_tables::ammo_to_stat_weapon_table;
 use crate::game_params::ttx::weapon_tables::alpha_damage_coeff;
@@ -632,6 +633,96 @@ pub fn secondaries(
         gun,
         shells,
     })
+}
+
+/// `MINIMAL_VALID_VALUE` smoke-detection gate (createVisibilityTTX@140): the in-smoke
+/// range is shown only when `visibilityCoefGKInSmoke` exceeds it. The compiled module
+/// that defines the constant carries 0.01; below it the field is a zeroed placeholder.
+const MINIMAL_VALID_VALUE: f32 = 0.01;
+
+/// Detectability section (`ma6320f36/ttx/FactoryVisibility.pyc` createVisibilityTTX,
+/// offsets from the bytecode disassembly).
+///
+/// `coeff` (@21,@49-58) = `mod.visibilityDistCoeff`, multiplied by
+/// `mod.GMBigGunVisibilityCoeff` when the ship has non-small artillery
+/// (`artillery and not artillery.isSmall`, @30-58); `has_big_gun_artillery` is that
+/// gate. Both modifiers are coefficients (MODIFIER_SETTINGS base_value 1.0).
+///
+/// `sea_detection` (@65-94) = `hull.visibilityFactor * mod.visibilityFactor * coeff`.
+/// `sea_detection_on_fire` (@97-128) = `sea + hull.visibilityCoefFire`.
+/// `detection_in_smoke` (@131-167) = `hull.visibilityCoefGKInSmoke`, only when it
+/// exceeds `MINIMAL_VALID_VALUE`. `air_detection` (@278-307) =
+/// `hull.visibilityFactorByPlane * mod.visibilityFactorByPlane * coeff`;
+/// `air_detection_on_fire` (@310-341) = `air + hull.visibilityCoefFireByPlane`.
+/// `secondary_range_detection` (@227-272) = `max(sea, atbaMaxDist)` when the secondary
+/// range is supplied; the MG floor (`max(sea, mgMaxDist)`, @173-224) folds into the same
+/// field via `mg_max_dist_km`. `periscope_depth_detection` (@359-384) =
+/// `hull.visibilityByPeriscope * mod.visibilityForSubmarineCoeff`, present only for subs.
+///
+/// Per-depth submarine ranges (`byDepth`, @387-513) are a runtime entity calc
+/// (`ShipParams.getVehicleParams` + `getPerDepthRangeVisiblity`) and are deferred.
+///
+/// Each field is `None` when its base hull input is absent.
+pub fn visibility(
+    hull: &HullComponentStats,
+    modifiers: &ModifierBundle,
+    has_big_gun_artillery: bool,
+    mg_max_dist_km: Option<f32>,
+    atba_max_dist_km: Option<f32>,
+) -> Visibility {
+    let mut coeff = modifiers.coef("visibilityDistCoeff");
+    if has_big_gun_artillery {
+        coeff *= modifiers.coef("GMBigGunVisibilityCoeff");
+    }
+
+    let sea = hull
+        .visibility_factor
+        .map(|v| v * modifiers.coef("visibilityFactor") * coeff);
+    let sea_detection = sea.map(Km::from);
+
+    let sea_detection_on_fire = match (sea, hull.visibility_coef_fire) {
+        (Some(s), Some(fire)) => Some(Km::from(s + fire)),
+        _ => None,
+    };
+
+    let detection_in_smoke = hull
+        .visibility_coef_gk_in_smoke
+        .filter(|&v| v > MINIMAL_VALID_VALUE)
+        .map(Km::from);
+
+    // mgMaxDist and atbaMaxDist both write the same secondary-detection floor; take the
+    // max over whichever ranges are supplied, floored by `sea` (@188-272).
+    let secondary_range_detection = match (sea, mg_max_dist_km, atba_max_dist_km) {
+        (Some(s), mg, atba) if mg.is_some() || atba.is_some() => {
+            let floor = mg.unwrap_or(s).max(atba.unwrap_or(s));
+            Some(Km::from(s.max(floor)))
+        }
+        _ => None,
+    };
+
+    let air = hull
+        .visibility_factor_by_plane
+        .map(|v| v * modifiers.coef("visibilityFactorByPlane") * coeff);
+    let air_detection = air.map(Km::from);
+
+    let air_detection_on_fire = match (air, hull.visibility_coef_fire_by_plane) {
+        (Some(a), Some(fire)) => Some(Km::from(a + fire)),
+        _ => None,
+    };
+
+    let periscope_depth_detection = hull
+        .visibility_factor_by_periscope
+        .map(|v| Km::from(v * modifiers.coef("visibilityForSubmarineCoeff")));
+
+    Visibility {
+        sea_detection,
+        sea_detection_on_fire,
+        air_detection,
+        air_detection_on_fire,
+        detection_in_smoke,
+        secondary_range_detection,
+        periscope_depth_detection,
+    }
 }
 
 #[cfg(test)]
@@ -1485,5 +1576,121 @@ mod tests {
         let provider = bismarck_secondary_provider();
         let empty = SecondaryComponentStats::default();
         assert!(secondaries(&empty, &ModifierBundle::empty(Species::Battleship), 8, &provider).is_none());
+    }
+
+    #[test]
+    fn gearing_stock_visibility() {
+        // Gearing hull: visibilityFactor 7.33, visibilityFactorByPlane 3.41,
+        // visibilityCoefFire 2.0, visibilityCoefFireByPlane 2.0, visibilityCoefGKInSmoke 2.83.
+        // Stock = empty bundle, no big-gun penalty, no secondary range.
+        let vis = visibility(&gearing_hull(), &ModifierBundle::empty(Species::Destroyer), false, None, None);
+        // sea = 7.33 * 1.0 * 1.0 = 7.33.
+        assert_eq!(vis.sea_detection, Some(Km::from(7.33)));
+        // sea on fire = 7.33 + 2.0 = 9.33.
+        let on_fire = vis.sea_detection_on_fire.expect("sea on fire").value();
+        assert!(approx(on_fire, 9.33), "got {on_fire}");
+        // air = 3.41 * 1.0 * 1.0 = 3.41.
+        assert_eq!(vis.air_detection, Some(Km::from(3.41)));
+        // air on fire = 3.41 + 2.0 = 5.41.
+        let air_fire = vis.air_detection_on_fire.expect("air on fire").value();
+        assert!(approx(air_fire, 5.41), "got {air_fire}");
+        // smoke = visibilityCoefGKInSmoke 2.83 (> MINIMAL_VALID_VALUE).
+        assert_eq!(vis.detection_in_smoke, Some(Km::from(2.83)));
+        // No secondary range supplied, DD has no periscope.
+        assert!(vis.secondary_range_detection.is_none());
+        assert!(vis.periscope_depth_detection.is_none());
+    }
+
+    #[test]
+    fn concealment_modifier_reduces_sea_detection() {
+        // Concealment System Mod 1: visibilityFactor 0.9 (-10%) -> 7.33 * 0.9 = 6.597.
+        let mods = [modifier("visibilityFactor", 0.9)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, BUILD);
+        let vis = visibility(&gearing_hull(), &bundle, false, None, None);
+        let sea = vis.sea_detection.expect("sea").value();
+        assert!(approx(sea, 6.597), "got {sea}");
+        // on fire shifts by the same base: 6.597 + 2.0 = 8.597.
+        let on_fire = vis.sea_detection_on_fire.expect("sea on fire").value();
+        assert!(approx(on_fire, 8.597), "got {on_fire}");
+    }
+
+    #[test]
+    fn camouflage_dist_coeff_reduces_sea_detection() {
+        // visibilityDistCoeff 0.97 (camouflage concealment coef) folds into `coeff`:
+        // 7.33 * 1.0 * 0.97 = 7.1101.
+        let mods = [modifier("visibilityDistCoeff", 0.97)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, BUILD);
+        let vis = visibility(&gearing_hull(), &bundle, false, None, None);
+        let sea = vis.sea_detection.expect("sea").value();
+        assert!(approx(sea, 7.1101), "got {sea}");
+        // air also scaled by coeff: 3.41 * 0.97 = 3.3077.
+        let air = vis.air_detection.expect("air").value();
+        assert!(approx(air, 3.3077), "got {air}");
+    }
+
+    #[test]
+    fn big_gun_visibility_penalty_applies_only_with_non_small_artillery() {
+        // GMBigGunVisibilityCoeff 1.05 multiplies coeff only when has_big_gun_artillery.
+        let mods = [modifier("GMBigGunVisibilityCoeff", 1.05)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, BUILD);
+        // BB-like hull (reuse Gearing's factor for the arithmetic): with big guns the
+        // penalty applies: 7.33 * 1.05 = 7.6965.
+        let with_guns = visibility(&gearing_hull(), &bundle, true, None, None);
+        let sea = with_guns.sea_detection.expect("sea").value();
+        assert!(approx(sea, 7.6965), "got {sea}");
+        // Without big guns the coeff is untouched: 7.33.
+        let without = visibility(&gearing_hull(), &bundle, false, None, None);
+        assert_eq!(without.sea_detection, Some(Km::from(7.33)));
+    }
+
+    #[test]
+    fn secondary_range_detection_floors_at_atba_range() {
+        // BB-like sea detection below the secondary range -> max(sea, 7.6) = 7.6.
+        let hull = HullComponentStats { visibility_factor: Some(6.0), ..gearing_hull() };
+        let vis = visibility(&hull, &ModifierBundle::empty(Species::Battleship), false, None, Some(7.6));
+        // sea = 6.0; secondary floor = max(6.0, 7.6) = 7.6.
+        assert_eq!(vis.sea_detection, Some(Km::from(6.0)));
+        assert_eq!(vis.secondary_range_detection, Some(Km::from(7.6)));
+
+        // When sea exceeds the secondary range, the floor stays at sea.
+        let hull_far = HullComponentStats { visibility_factor: Some(9.0), ..gearing_hull() };
+        let vis_far = visibility(&hull_far, &ModifierBundle::empty(Species::Battleship), false, None, Some(7.6));
+        assert_eq!(vis_far.secondary_range_detection, Some(Km::from(9.0)));
+    }
+
+    #[test]
+    fn near_zero_smoke_coef_yields_no_smoke_detection() {
+        // visibilityCoefGKInSmoke == MINIMAL_VALID_VALUE (0.01) is not > the gate -> None.
+        let hull = HullComponentStats { visibility_coef_gk_in_smoke: Some(0.01), ..gearing_hull() };
+        let vis = visibility(&hull, &ModifierBundle::empty(Species::Destroyer), false, None, None);
+        assert!(vis.detection_in_smoke.is_none());
+
+        // Below the gate -> None.
+        let hull_zero = HullComponentStats { visibility_coef_gk_in_smoke: Some(0.0), ..gearing_hull() };
+        let vis_zero = visibility(&hull_zero, &ModifierBundle::empty(Species::Destroyer), false, None, None);
+        assert!(vis_zero.detection_in_smoke.is_none());
+    }
+
+    #[test]
+    fn submarine_periscope_detection_applies_coeff() {
+        // Periscope-depth detection only when the field is present:
+        // visibilityByPeriscope 5.0 * visibilityForSubmarineCoeff 1.0 (stock) = 5.0.
+        let hull = HullComponentStats { visibility_factor_by_periscope: Some(5.0), ..gearing_hull() };
+        let vis = visibility(&hull, &ModifierBundle::empty(Species::Submarine), false, None, None);
+        assert_eq!(vis.periscope_depth_detection, Some(Km::from(5.0)));
+    }
+
+    #[test]
+    fn visibility_none_when_inputs_absent() {
+        // Empty hull -> every field None (no fabrication, per-depth sub deferred).
+        let empty = HullComponentStats::default();
+        let vis = visibility(&empty, &ModifierBundle::empty(Species::Destroyer), false, None, None);
+        assert!(vis.sea_detection.is_none());
+        assert!(vis.sea_detection_on_fire.is_none());
+        assert!(vis.air_detection.is_none());
+        assert!(vis.air_detection_on_fire.is_none());
+        assert!(vis.detection_in_smoke.is_none());
+        assert!(vis.secondary_range_detection.is_none());
+        assert!(vis.periscope_depth_detection.is_none());
     }
 }
