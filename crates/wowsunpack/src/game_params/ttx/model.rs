@@ -21,6 +21,12 @@ impl Knots {
     }
 }
 
+impl From<f32> for Knots {
+    fn from(v: f32) -> Self {
+        Self(v)
+    }
+}
+
 /// Duration in seconds.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -33,6 +39,12 @@ impl Seconds {
     }
 }
 
+impl From<f32> for Seconds {
+    fn from(v: f32) -> Self {
+        Self(v)
+    }
+}
+
 /// Hit points.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -42,6 +54,12 @@ pub struct Hp(f32);
 impl Hp {
     pub fn value(&self) -> f32 {
         self.0
+    }
+}
+
+impl From<f32> for Hp {
+    fn from(v: f32) -> Self {
+        Self(v)
     }
 }
 

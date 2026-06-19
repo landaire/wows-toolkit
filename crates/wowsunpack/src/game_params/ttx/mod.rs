@@ -3,5 +3,6 @@
 
 pub mod components;
 pub mod constants;
+pub mod factories;
 pub mod model;
 pub mod modifiers;
