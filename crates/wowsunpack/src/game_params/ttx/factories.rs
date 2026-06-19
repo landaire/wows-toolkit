@@ -8,26 +8,38 @@
 
 use crate::game_params::ttx::armor_materials::armor_type_classifies;
 use crate::game_params::ttx::armor_materials::collision_material_name;
+use crate::game_params::ttx::components::ArtilleryComponentStats;
 use crate::game_params::ttx::components::EngineComponentStats;
 use crate::game_params::ttx::components::HullComponentStats;
 use crate::game_params::ttx::components::TorpedoLauncherStats;
+use crate::game_params::ttx::constants;
 use crate::game_params::ttx::constants::BW_TO_BALLISTIC;
 use crate::game_params::ttx::constants::HULL_HEALTH_ROUND;
 use crate::game_params::ttx::constants::KM_TO_M;
 use crate::game_params::ttx::constants::TORPEDO_DAMAGE_CONSTANT;
 use crate::game_params::ttx::model::Armor;
+use crate::game_params::ttx::model::AmmoCount;
+use crate::game_params::ttx::model::Artillery;
 use crate::game_params::ttx::model::Battery;
 use crate::game_params::ttx::model::DegreesPerSecond;
 use crate::game_params::ttx::model::Durability;
 use crate::game_params::ttx::model::Hp;
 use crate::game_params::ttx::model::Knots;
 use crate::game_params::ttx::model::Launcher;
+use crate::game_params::ttx::model::MainGun;
 use crate::game_params::ttx::model::Mobility;
 use crate::game_params::ttx::model::Percent;
 use crate::game_params::ttx::model::Seconds;
+use crate::game_params::ttx::model::ShellStats;
 use crate::game_params::ttx::model::TorpedoStats;
 use crate::game_params::ttx::model::Torpedoes;
 use crate::game_params::ttx::modifiers::ModifierBundle;
+use crate::game_params::ttx::weapon_tables::ammo_to_stat_weapon_table;
+use crate::game_params::ttx::weapon_tables::alpha_damage_coeff;
+use crate::game_params::ttx::weapon_tables::artillery_damage_coeff;
+use crate::game_params::ttx::weapon_tables::calculate_burn_chance;
+use crate::game_params::ttx::weapon_tables::is_small_projectile;
+use crate::game_params::ttx::weapon_tables::StatWeaponType;
 use crate::game_params::types::ArmorMap;
 use crate::game_params::types::GameParamProvider;
 use crate::game_params::types::Km;
@@ -322,9 +334,200 @@ pub fn torpedoes(launchers: &[TorpedoLauncherStats], modifiers: &ModifierBundle,
     Some(Torpedoes { reload_time, launchers: result_launchers, torpedoes })
 }
 
+/// Caliber threshold constants (`me658a8e4.py:13,15`) are zeroed placeholders in
+/// every deob source; the real values live in a compiled C++ module. Stock results
+/// are unaffected (the gated coeffs read identity 1.0/0.0 from an empty bundle).
+/// Passed as `0.0` here, matching the weapon_tables test convention.
+const HEAVY_CRUISER_SHELL_DIAMETER_M: f32 = 0.0;
+const SMALL_PROJECTILE_MAX_DIAMETER_M: f32 = 0.0;
+
+/// `timeFactor` default (`maa3520d6.py:1151`, GameParams class attribute `1.0`). The
+/// parsed [`Projectile`] does not carry `timeFactor`; real artillery shells use the
+/// `1.0` default (verified against Worcester `PAPA050`/`PAPA051`), so
+/// `speed = bulletSpeed * 1.0` (PreprocessedAmmo.py:16).
+const AMMO_TIME_FACTOR: f32 = 1.0;
+
+/// Per-shell stats from a resolved [`Projectile`] (`createAmmoTTX`,
+/// FactoryArtillery.py:147-190). Pure over the projectile + bundle so the formulas
+/// are testable without a provider. `level` is the ship tier (burn-chance branch,
+/// ModifiersApply.py:43); main-battery shells take `max_ammo = Infinite` (the main
+/// `getPreprocessedAmmoList` call passes no pool info, PreprocessedArtillery.py:33,
+/// so every pool is `INFINITE_AMMO_POOL_SIZE = -1`, PreprocessedAmmo.py:6).
+///
+/// Each field is `None` when its base projectile input is absent.
+pub fn shell_stats(name: String, projectile: &Projectile, modifiers: &ModifierBundle, level: u32) -> ShellStats {
+    let ammo_kind = projectile.ammo_type();
+    let weapon = ammo_to_stat_weapon_table(ammo_kind);
+
+    // caliber * 1000 (FactoryArtillery.py:155). caliber (m) = bulletDiametr.
+    let caliber_m = projectile.bullet_diametr();
+    let caliber = caliber_m.map(|c| Millimeters::from(c * 1000.0));
+
+    // speed = bulletSpeed * timeFactor (PreprocessedAmmo.py:16).
+    let speed = projectile.bullet_speed().map(|s| s * AMMO_TIME_FACTOR);
+
+    // damage = alphaDamage * getAlphaDamageCoeff * controllableWeaponDamageCoeff
+    //   * getArtilleryDamageCoeff * citadelCSAP(if weapon in WEAPONS_CSAP)
+    // (FactoryArtillery.py:164). isManualATBA factor (line 156/164 `unknown_42`) is 1.0
+    // on the main path. Stock coeffs are 1.0, so damage reduces to alphaDamage.
+    let damage = match (projectile.alpha_damage(), caliber_m) {
+        (Some(alpha), Some(cal_m)) => {
+            let csap = if weapon.is_csap() {
+                modifiers.coef("citadelDamageMultiplierCSAP")
+            } else {
+                1.0
+            };
+            let value = alpha
+                * alpha_damage_coeff(weapon, modifiers, false)
+                * modifiers.coef("controllableWeaponDamageCoeff")
+                * artillery_damage_coeff(cal_m, weapon, modifiers, HEAVY_CRUISER_SHELL_DIAMETER_M)
+                * csap;
+            Some(Hp::from(value))
+        }
+        _ => None,
+    };
+
+    // piercing: HE floor(alphaPiercingHE * GMPenetrationCoeffHE) (FactoryArtillery.py:182);
+    // CS floor(alphaPiercingCS) (line 185); AP is a ballistic sim (no closed form) -> None.
+    let penetration = match weapon {
+        StatWeaponType::MainHe => projectile
+            .alpha_piercing_he()
+            .map(|p| Millimeters::from((p * modifiers.coef("GMPenetrationCoeffHE")).floor())),
+        StatWeaponType::MainCs => projectile.alpha_piercing_cs().map(|p| Millimeters::from(p.floor())),
+        _ => None,
+    };
+
+    // burnChance: calculateBurnChance(level, burnProb) for HE (line 171) and AP (line 188);
+    // CS sets no burnChance. burnProb -0.5 (AP "N/A") clamps to 0 in calculate_burn_chance.
+    // Stored as a percent (burnProb 0.12 -> 12%).
+    let is_small = caliber_m.map_or(false, |c| is_small_projectile(c, SMALL_PROJECTILE_MAX_DIAMETER_M));
+    let burn_chance = match weapon {
+        StatWeaponType::MainHe | StatWeaponType::MainAp => projectile
+            .burn_prob()
+            .map(|bp| Percent::from(calculate_burn_chance(level, bp, modifiers, is_small) * 100.0)),
+        _ => None,
+    };
+
+    // floodChance = uwCritical, HE only (FactoryArtillery.py:172). Stored as a percent.
+    let flood_chance = match weapon {
+        StatWeaponType::MainHe => projectile.uw_critical().map(|f| Percent::from(f * 100.0)),
+        _ => None,
+    };
+
+    ShellStats {
+        name,
+        ammo_kind: Some(ammo_kind.to_string()),
+        damage,
+        caliber,
+        speed,
+        penetration,
+        burn_chance,
+        flood_chance,
+        // Main battery pools are unlimited (INFINITE_AMMO_POOL_SIZE -> Infinite).
+        max_ammo: Some(AmmoCount::Infinite),
+        disabled_underwater: None,
+    }
+}
+
+/// Main-battery armament section (`ArtilleryTTX`, FactoryArtillery.py + TTXFactory.py).
+///
+/// `reload_time` = `gun.shotDelay * GMShotDelay` (FactoryArtillery.py:32 alt-fire analog;
+/// the per-gun reload). `range` = `(maxDist / KM_TO_M) * fcMaxDistCoef * GMMaxDist`
+/// (FactoryArtillery.py:42; `maxDist` is the component BigWorld range,
+/// PreprocessedArtillery.py:32 divides by `KM_TO_M`). `dispersion` =
+/// `getDispersionValue(gun, range_km, GMIdealRadius)` over the FC-adjusted range
+/// (FactoryArtillery.py:47 passes the `* GMMaxDist`-scaled `unknown_12`).
+/// `ammo_switch_time` = `shotDelay * ammoSwitchCoeff * GMShotDelay * switchAmmoReloadCoef`
+/// (FactoryTorpedoes.py:67 main-gun analog).
+///
+/// The gun (`MainGun`) mirrors `createMainGunTTX` (FactoryArtillery.py:70-76) +
+/// `initGunTTX` (PreprocessedGun.py:18-23):
+/// `rotation_speed = rotationSpeed[0] * GMRotationSpeed + GMRotationSpeedBonus`,
+/// `rotation_time = 180 / rotation_speed`, `caliber = barrelDiameter * 1000`,
+/// `num_barrels = gp.numBarrels`, `num_guns = HP_AGM mount count`.
+///
+/// `fc_max_dist_coef` is the fire-control `maxDistCoef` (FactoryArtillery.py:42, default
+/// 1.0; M5 supplies the real value). `None` when the component has no guns.
+pub fn artillery(
+    arty: &ArtilleryComponentStats,
+    modifiers: &ModifierBundle,
+    fc_max_dist_coef: f32,
+    level: u32,
+    provider: &dyn GameParamProvider,
+) -> Option<Artillery> {
+    if arty.guns.is_empty() {
+        return None;
+    }
+
+    let shot_delay_coef = modifiers.coef("GMShotDelay");
+    let max_dist_coef = modifiers.coef("GMMaxDist");
+    let ideal_radius_coef = modifiers.coef("GMIdealRadius");
+    let switch_coef = modifiers.coef("switchAmmoReloadCoef");
+    let yaw_coef = modifiers.coef("GMRotationSpeed");
+    let yaw_bonus = modifiers.bonus("GMRotationSpeedBonus");
+
+    // All main-battery mounts share the same reload; take the first gun's shotDelay.
+    let first = &arty.guns[0];
+
+    let reload_time = first.shot_delay.map(|d| Seconds::from(d * shot_delay_coef));
+
+    let range_km = arty
+        .max_dist
+        .map(|d| (d / KM_TO_M) * fc_max_dist_coef * max_dist_coef);
+    let range = range_km.map(Km::from);
+
+    // dispersion over the FC-adjusted range (FactoryArtillery.py:47 uses `unknown_12`).
+    let dispersion = match (range_km, first.min_radius, first.ideal_radius, first.ideal_distance) {
+        (Some(rng), Some(min_r), Some(ideal_r), Some(ideal_d)) => {
+            Some(Meters::from(constants::dispersion(min_r, ideal_r, ideal_d, rng, ideal_radius_coef)))
+        }
+        _ => None,
+    };
+
+    let ammo_switch_time = match (first.shot_delay, first.ammo_switch_coeff) {
+        (Some(delay), Some(coeff)) => Some(Seconds::from(delay * coeff * shot_delay_coef * switch_coef)),
+        _ => None,
+    };
+
+    let rotation_speed = first.rotation_speed.map(|r| r * yaw_coef + yaw_bonus);
+    let rotation_time = rotation_speed.filter(|&r| r != 0.0).map(|r| Seconds::from(180.0 / r));
+    let gun = Some(MainGun {
+        caliber: first.barrel_diameter.map(|b| Millimeters::from(b * 1000.0)),
+        num_barrels: first.num_barrels.map(|n| n as u32),
+        num_guns: Some(arty.guns.len() as u32),
+        rotation_speed: rotation_speed.map(DegreesPerSecond::from),
+        rotation_time,
+    });
+
+    // Shell stats resolved by NAME from the first gun's ammoList (all mounts share ammo).
+    let mut shells = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    for ammo_name in &first.ammo {
+        if seen.iter().any(|n| n == ammo_name) {
+            continue;
+        }
+        seen.push(ammo_name.clone());
+        if let Some(param) = provider.game_param_by_name(ammo_name)
+            && let Some(projectile) = param.projectile()
+        {
+            shells.push(shell_stats(ammo_name.clone(), projectile, modifiers, level));
+        }
+    }
+
+    Some(Artillery {
+        reload_time,
+        range,
+        dispersion,
+        ammo_switch_time,
+        gun,
+        shells,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game_params::ttx::components::ArtilleryGunStats;
     use crate::game_params::ttx::constants::DEFAULT_UW_DAMAGE_COEFF;
     use crate::game_params::types::CrewSkillModifier;
     use crate::game_params::types::Species;
@@ -759,5 +962,233 @@ mod tests {
         assert!(stats.speed.is_none());
         assert!(stats.range.is_none());
         assert!(stats.visibility.is_none());
+    }
+
+    /// Worcester's real HE shell `PAPA051_152mm_HE_HC_Mark_39_Mod_0` (GameParams):
+    /// ammoType "HE", alphaDamage 2200, alphaPiercingHE 30, burnProb 0.12,
+    /// uwCritical 0.0, bulletDiametr 0.152, bulletSpeed 812, timeFactor 1.0.
+    fn worcester_he() -> Projectile {
+        Projectile::builder()
+            .ammo_type("HE".to_string())
+            .alpha_damage(2200.0)
+            .alpha_piercing_he(30.0)
+            .burn_prob(0.12)
+            .uw_critical(0.0)
+            .bullet_diametr(0.152)
+            .bullet_speed(812.0)
+            .build()
+    }
+
+    /// Worcester's real AP shell `PAPA050_152mm_AP_130lbs_Mk35` (GameParams):
+    /// ammoType "AP", alphaDamage 3200, burnProb -0.5 (N/A), uwCritical 0.0,
+    /// bulletDiametr 0.152, bulletSpeed 762, timeFactor 1.0.
+    fn worcester_ap() -> Projectile {
+        Projectile::builder()
+            .ammo_type("AP".to_string())
+            .alpha_damage(3200.0)
+            .burn_prob(-0.5)
+            .uw_critical(0.0)
+            .bullet_diametr(0.152)
+            .bullet_speed(762.0)
+            .build()
+    }
+
+    /// Worcester's real `ArtilleryDefault` component + `HP_AGM_*` gun fields
+    /// (GameParams `PASC016_Worcester_1948`): maxDist 15320 (BW), 6 guns, each
+    /// barrelDiameter 0.152, shotDelay 4.6, rotationSpeed[0] 25, numBarrels 2,
+    /// minRadius 1.1, idealRadius 8, idealDistance 1000, ammo HE+AP.
+    fn worcester_artillery() -> ArtilleryComponentStats {
+        let gun = || ArtilleryGunStats {
+            shot_delay: Some(4.6),
+            rotation_speed: Some(25.0),
+            num_barrels: Some(2.0),
+            barrel_diameter: Some(0.152),
+            ammo_switch_coeff: Some(1.5),
+            min_radius: Some(1.1),
+            ideal_radius: Some(8.0),
+            ideal_distance: Some(1000.0),
+            ammo: vec![
+                "PAPA051_152mm_HE_HC_Mark_39_Mod_0".to_string(),
+                "PAPA050_152mm_AP_130lbs_Mk35".to_string(),
+            ],
+        };
+        ArtilleryComponentStats {
+            max_dist: Some(15320.0),
+            guns: vec![gun(), gun(), gun(), gun(), gun(), gun()],
+        }
+    }
+
+    /// A multi-param provider exposing both Worcester shells by name.
+    struct MultiProvider {
+        params: Vec<Rc<Param>>,
+    }
+
+    impl MultiProvider {
+        fn new(entries: &[(&str, Projectile)]) -> Self {
+            let params = entries
+                .iter()
+                .enumerate()
+                .map(|(i, (name, proj))| {
+                    Rc::new(
+                        Param::builder()
+                            .id(GameParamId::from((i + 1) as u32))
+                            .index(format!("S{i:04}"))
+                            .name(name.to_string())
+                            .nation("USA".to_string())
+                            .data(ParamData::Projectile(proj.clone()))
+                            .build(),
+                    )
+                })
+                .collect();
+            MultiProvider { params }
+        }
+    }
+
+    impl GameParamProvider for MultiProvider {
+        fn game_param_by_id(&self, _id: GameParamId) -> Option<Rc<Param>> {
+            None
+        }
+        fn game_param_by_index(&self, _index: &str) -> Option<Rc<Param>> {
+            None
+        }
+        fn game_param_by_name(&self, name: &str) -> Option<Rc<Param>> {
+            self.params.iter().find(|p| p.name() == name).cloned()
+        }
+        fn params(&self) -> &[Rc<Param>] {
+            &self.params
+        }
+    }
+
+    fn worcester_provider() -> MultiProvider {
+        MultiProvider::new(&[
+            ("PAPA051_152mm_HE_HC_Mark_39_Mod_0", worcester_he()),
+            ("PAPA050_152mm_AP_130lbs_Mk35", worcester_ap()),
+        ])
+    }
+
+    #[test]
+    fn worcester_stock_artillery_gun_and_range() {
+        let provider = worcester_provider();
+        let arty = artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
+            .expect("artillery computed");
+
+        // range: (15320 / 1000) * 1.0 (fc) * 1.0 (GMMaxDist) = 15.32.
+        assert_eq!(arty.range, Some(Km::from(15.32)));
+        // reload: 4.6 * 1.0 (GMShotDelay) = 4.6.
+        assert_eq!(arty.reload_time, Some(Seconds::from(4.6)));
+        // ammoSwitchTime: 4.6 * 1.5 * 1.0 * 1.0 = 6.9.
+        let st = arty.ammo_switch_time.expect("switch time").value();
+        assert!(approx(st, 6.9), "got {st}");
+
+        let gun = arty.gun.expect("gun");
+        // caliber: 0.152 * 1000 = 152.
+        assert_eq!(gun.caliber, Some(Millimeters::from(152.0)));
+        assert_eq!(gun.num_guns, Some(6));
+        assert_eq!(gun.num_barrels, Some(2));
+        // rotation: 25 * 1.0 + 0 = 25; time 180/25 = 7.2.
+        assert_eq!(gun.rotation_speed, Some(DegreesPerSecond::from(25.0)));
+        let rt = gun.rotation_time.expect("rotation_time").value();
+        assert!(approx(rt, 7.2), "got {rt}");
+    }
+
+    #[test]
+    fn worcester_stock_dispersion_matches_helper() {
+        let provider = worcester_provider();
+        let arty = artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
+            .expect("artillery computed");
+        // dispersion over the FC-adjusted range 15.32 km, stock GMIdealRadius 1.0.
+        let expected = constants::dispersion(1.1, 8.0, 1000.0, 15.32, 1.0);
+        let got = arty.dispersion.expect("dispersion").value();
+        assert!((got - expected).abs() < 1e-3, "got {got} expected {expected}");
+        // The transcribed formula yields ~138.7 m at 15.32 km for Worcester's gun
+        // (minRadius 1.1 / idealRadius 8 / idealDistance 1000); same BW_TO_SHIP=15
+        // scale that recovers NC's 271 m and Yamato's 273 m in constants.rs.
+        assert!((got - 138.7).abs() < 1.0, "got {got}");
+    }
+
+    #[test]
+    fn worcester_stock_he_shell() {
+        let provider = worcester_provider();
+        let arty = artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
+            .expect("artillery computed");
+        let he = arty.shells.iter().find(|s| s.ammo_kind.as_deref() == Some("HE")).expect("HE shell");
+        // stock damage reduces to alphaDamage 2200.
+        assert_eq!(he.damage, Some(Hp::from(2200.0)));
+        // penetration: floor(30 * 1.0) = 30.
+        assert_eq!(he.penetration, Some(Millimeters::from(30.0)));
+        // burnChance: 0.12 * 100 = 12%.
+        assert_eq!(he.burn_chance, Some(Percent::from(12.0)));
+        assert_eq!(he.caliber, Some(Millimeters::from(152.0)));
+        // speed: 812 * 1.0 (timeFactor) = 812.
+        assert_eq!(he.speed, Some(812.0));
+        // floodChance: uwCritical 0.0 * 100 = 0.
+        assert_eq!(he.flood_chance, Some(Percent::from(0.0)));
+        // Main battery -> unlimited pool.
+        assert_eq!(he.max_ammo, Some(AmmoCount::Infinite));
+    }
+
+    #[test]
+    fn worcester_stock_ap_shell() {
+        let provider = worcester_provider();
+        let arty = artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
+            .expect("artillery computed");
+        let ap = arty.shells.iter().find(|s| s.ammo_kind.as_deref() == Some("AP")).expect("AP shell");
+        // stock damage reduces to alphaDamage 3200.
+        assert_eq!(ap.damage, Some(Hp::from(3200.0)));
+        // AP penetration is a ballistic sim -> None (deferred).
+        assert!(ap.penetration.is_none());
+        // AP burnProb -0.5 (N/A) -> calculate_burn_chance clamps to 0%.
+        assert_eq!(ap.burn_chance, Some(Percent::from(0.0)));
+        // AP has no floodChance.
+        assert!(ap.flood_chance.is_none());
+        // speed: 762 * 1.0 = 762.
+        assert_eq!(ap.speed, Some(762.0));
+    }
+
+    #[test]
+    fn worcester_modified_reload_and_range() {
+        // GMShotDelay 0.9 -> reload 4.6 * 0.9 = 4.14; GMMaxDist 1.1 -> range 15.32 * 1.1 = 16.852.
+        let mods = [modifier("GMShotDelay", 0.9), modifier("GMMaxDist", 1.1)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, BUILD);
+        let provider = worcester_provider();
+        let arty = artillery(&worcester_artillery(), &bundle, 1.0, 10, &provider).expect("artillery computed");
+        let reload = arty.reload_time.expect("reload").value();
+        assert!(approx(reload, 4.14), "got {reload}");
+        let range = arty.range.expect("range").value();
+        assert!(approx(range, 16.852), "got {range}");
+    }
+
+    #[test]
+    fn worcester_traverse_modifier_applies() {
+        // GMRotationSpeed 1.2 (+20% traverse): 25 -> 30, rotation_time 180/30 = 6.
+        let mods = [modifier("GMRotationSpeed", 1.2)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, BUILD);
+        let provider = worcester_provider();
+        let arty = artillery(&worcester_artillery(), &bundle, 1.0, 10, &provider).expect("artillery computed");
+        let gun = arty.gun.expect("gun");
+        let rs = gun.rotation_speed.expect("rotation_speed").value();
+        assert!(approx(rs, 30.0), "got {rs}");
+        let rt = gun.rotation_time.expect("rotation_time").value();
+        assert!(approx(rt, 6.0), "got {rt}");
+    }
+
+    #[test]
+    fn artillery_none_when_no_guns() {
+        let provider = worcester_provider();
+        let empty = ArtilleryComponentStats::default();
+        assert!(artillery(&empty, &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider).is_none());
+    }
+
+    #[test]
+    fn shell_stats_none_when_inputs_absent() {
+        // A projectile with no shell fields -> stat fields None (no fabrication).
+        let empty = Projectile::builder().ammo_type("HE".to_string()).build();
+        let stats = shell_stats("X".to_string(), &empty, &ModifierBundle::empty(Species::Cruiser), 10);
+        assert!(stats.damage.is_none());
+        assert!(stats.caliber.is_none());
+        assert!(stats.speed.is_none());
+        assert!(stats.penetration.is_none());
+        assert!(stats.burn_chance.is_none());
+        assert!(stats.flood_chance.is_none());
     }
 }

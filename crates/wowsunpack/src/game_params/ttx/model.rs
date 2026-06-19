@@ -162,10 +162,69 @@ pub struct Battery {
     pub regeneration: Option<f32>,
 }
 
-/// Gun battery stats (`FactoryArtillery`). Fields added in milestone M4.
+/// Main-battery gun mount stats (`MainGunTTX`, FactoryArtillery.py:70-76 +
+/// PreprocessedGun.initGunTTX, PreprocessedGun.py:18-23).
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Artillery {}
+pub struct MainGun {
+    /// `barrelDiameter * 1000` (PreprocessedGun.py:22).
+    pub caliber: Option<Millimeters>,
+    /// `gp.numBarrels` (PreprocessedGun.py:21).
+    pub num_barrels: Option<u32>,
+    /// Count of `HP_AGM_*` mounts (`gunsCount`, PreprocessedArtillery.py:29).
+    pub num_guns: Option<u32>,
+    /// `rotationSpeed[0] * GMRotationSpeed + GMRotationSpeedBonus` (FactoryArtillery.py:74).
+    pub rotation_speed: Option<DegreesPerSecond>,
+    /// `180 / rotationSpeed` (FactoryArtillery.py:75).
+    pub rotation_time: Option<Seconds>,
+}
+
+/// Per-shell stats (`ArtilleryAmmoTTX`, createAmmoTTX, FactoryArtillery.py:147-190).
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ShellStats {
+    /// Projectile GameParams name (`ammoParams.name`, FactoryArtillery.py:152).
+    pub name: String,
+    /// `ammoType` string ("HE"/"AP"/"CS") off the projectile (PreprocessedAmmo.py:13).
+    pub ammo_kind: Option<String>,
+    /// `damage` (FactoryArtillery.py:164, full coefficient product).
+    pub damage: Option<Hp>,
+    /// `caliber * 1000` (FactoryArtillery.py:155).
+    pub caliber: Option<Millimeters>,
+    /// `bulletSpeed * timeFactor` in m/s (PreprocessedAmmo.py:16).
+    pub speed: Option<f32>,
+    /// HE `floor(alphaPiercingHE * GMPenetrationCoeffHE)` (FactoryArtillery.py:182),
+    /// CS `floor(alphaPiercingCS)` (FactoryArtillery.py:185). AP is a ballistic sim
+    /// (no closed-form `piercing` in the deob), left `None`.
+    pub penetration: Option<Millimeters>,
+    /// HE/AP `calculateBurnChance(...)` as a percent (FactoryArtillery.py:171/188).
+    pub burn_chance: Option<Percent>,
+    /// HE `floodChance` (`uwCritical`) as a percent (FactoryArtillery.py:172).
+    pub flood_chance: Option<Percent>,
+    /// `maxAmmoCount` from `poolSize` (FactoryArtillery.py:167-168); `-1` -> `Infinite`.
+    pub max_ammo: Option<AmmoCount>,
+    /// `disabledUnderwater` (`hull.canBeUnderwater`, FactoryArtillery.py:165).
+    pub disabled_underwater: Option<bool>,
+}
+
+/// Gun battery stats (`ArtilleryTTX`, FactoryArtillery.py + TTXFactory.py).
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Artillery {
+    /// `mgReloadTime`: `gun.shotDelay * GMShotDelay`.
+    pub reload_time: Option<Seconds>,
+    /// `mgMaxDist`: `(maxDist / KM_TO_M) * fcMaxDistCoef * GMMaxDist` (FactoryArtillery.py:42).
+    pub range: Option<Km>,
+    /// `mgDispersion`: `getDispersionValue(gun, range_km, GMIdealRadius)` (FactoryArtillery.py:47).
+    pub dispersion: Option<Meters>,
+    /// `ammoSwitchTime`: `shotDelay * ammoSwitchCoeff * GMShotDelay * switchAmmoReloadCoef`
+    /// (FactoryTorpedoes.py:67 main-gun analog).
+    pub ammo_switch_time: Option<Seconds>,
+    /// The main-battery gun mount.
+    pub gun: Option<MainGun>,
+    /// Per-shell stats, one per resolved ammo name.
+    pub shells: Vec<ShellStats>,
+}
 
 /// Torpedo launcher + ammo stats (`FactoryTorpedoes.py` `createTorpedoesTTX`).
 ///
