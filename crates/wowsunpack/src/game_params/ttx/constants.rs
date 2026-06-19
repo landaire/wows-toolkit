@@ -49,11 +49,37 @@ pub const BW_TO_BALLISTIC: f32 = 30.0;
 /// `BALLISTIC_TO_BW = 1 / BW_TO_BALLISTIC`. Inverse of the recovered scale above.
 pub const BALLISTIC_TO_BW: f32 = 1.0 / BW_TO_BALLISTIC;
 
-// BW_TO_SHIP / SHIP_TO_BW are also C++ engine constants and cannot be recovered from
-// torpedo range alone (they enter `BW_KNOTS_TO_MPS = KNOTS_TO_MPS * SHIP_TO_BW *
-// SHIP_TIME_SCALE` and the dispersion formula). They are recovered in the artillery
-// milestone (dispersion), so `BW_TO_SHIP`, `SHIP_TO_BW`, and `BW_KNOTS_TO_MPS` are
-// omitted here rather than faked.
+/// BigWorld -> ship-distance scale. Not in any deob source: imported from the C++
+/// `BigWorld` engine module (`from BigWorld import ... BW_TO_SHIP, SHIP_TO_BW`,
+/// me658a8e4.py:3), so recovered by solving the main-battery dispersion formula
+/// (FactoryArtillery.py:109) against two ships' stock port "Maximum Dispersion":
+///   - North Carolina (PASB012): gun minRadius=2.0 idealRadius=12.0 idealDistance=1000.0,
+///     A_Artillery.maxDist=21143 -> 21.143 km; port dispersion 271 m.
+///     base = (2 + 21.143 * BALLISTIC_TO_BW * KM_TO_M * (12-2)/1000) * 2 = 18.0953;
+///     271 / 18.0953 = 14.976.
+///   - Yamato (PJSB018): gun minRadius=2.8 idealRadius=10.0 idealDistance=1000.0,
+///     A_Artillery.maxDist=26630 -> 26.63 km; port dispersion 273 m.
+///     base = (2.8 + 26.63 * BALLISTIC_TO_BW * KM_TO_M * (10-2.8)/1000) * 2 = 18.3824;
+///     273 / 18.3824 = 14.851.
+/// Both (different gun fields) recover ~15 within ~0.8%; at BW_TO_SHIP=15.0 the formula
+/// yields NC=271.4 m and Yamato=275.7 m (published values rounded to whole meters).
+pub const BW_TO_SHIP: f32 = 15.0;
+
+/// `SHIP_TO_BW = 1 / BW_TO_SHIP`. Inverse of the recovered scale above.
+pub const SHIP_TO_BW: f32 = 1.0 / BW_TO_SHIP;
+
+/// Main-battery horizontal dispersion in meters (FactoryArtillery.py:105-110
+/// `getDispersionValue`, identical to the alt-fire inline at line 46).
+///
+/// `componentParams.minRadius/idealRadius` are gun fields; `idealDistance` is a gun
+/// field; `maxDist` is the battery range in KM (PreprocessedArtillery.py:32 stores
+/// `module.maxDist / KM_TO_M`); `ideal_radius_coef` is the `GMIdealRadius` modifier
+/// (stock 1.0).
+pub fn dispersion(min_radius: f32, ideal_radius: f32, ideal_distance: f32, max_dist_km: f32, ideal_radius_coef: f32) -> f32 {
+    let min_r = min_radius * ideal_radius_coef;
+    let ideal_r = ideal_radius * ideal_radius_coef;
+    (min_r + max_dist_km * BALLISTIC_TO_BW * KM_TO_M * (ideal_r - min_r) / ideal_distance) * BW_TO_SHIP * 2.0
+}
 
 #[cfg(test)]
 mod tests {
@@ -88,5 +114,26 @@ mod tests {
         // PJPT001_Sea_Torpedo_Type93 maxDist=667 -> Shimakaze in-game range 20.0 km.
         let range_km = 667.0 * BW_TO_BALLISTIC / KM_TO_M;
         assert!((range_km - 20.0).abs() < 0.1, "got {range_km}");
+    }
+
+    #[test]
+    fn bw_to_ship_inverse() {
+        assert!((SHIP_TO_BW - 1.0 / 15.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn north_carolina_dispersion() {
+        // PASB012 gun 2.0/12.0/1000.0, A_Artillery.maxDist=21143 (21.143 km), stock c=1.0.
+        // Port "Maximum Dispersion" 271 m.
+        let d = dispersion(2.0, 12.0, 1000.0, 21143.0 / 1000.0, 1.0);
+        assert!((d - 271.0).abs() < 1.0, "got {d}");
+    }
+
+    #[test]
+    fn yamato_dispersion() {
+        // PJSB018 gun 2.8/10.0/1000.0, A_Artillery.maxDist=26630 (26.63 km), stock c=1.0.
+        // Port "Maximum Dispersion" 273 m; formula yields ~275.7 (published rounded).
+        let d = dispersion(2.8, 10.0, 1000.0, 26630.0 / 1000.0, 1.0);
+        assert!((d - 273.0).abs() < 3.0, "got {d}");
     }
 }
