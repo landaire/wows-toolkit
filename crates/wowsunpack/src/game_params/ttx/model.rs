@@ -75,6 +75,12 @@ impl Percent {
     }
 }
 
+impl From<f32> for Percent {
+    fn from(v: f32) -> Self {
+        Self(v)
+    }
+}
+
 /// Angular speed in degrees per second.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

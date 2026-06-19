@@ -33,6 +33,13 @@ use crate::game_params::types::{CrewSkillModifier, Species};
 /// `classify` would fall through to the multiplicative default for these names.
 const KNOWN_ADDITIVE: &[&str] = &["yawSpeedBonus", "buffsStartPool"];
 
+/// Multiplicative modifier names the generated `MODIFIER_SETTINGS` table does not
+/// cover, transcribed from their client apply sites where they multiply (`*`) a base
+/// stat: `uwCoeffMultiplier` (FactoryDurability.py:8, `floodProb * uwCoeffMultiplier`).
+/// Without this allowlist `classify` would `debug_assert` on the unknown name even
+/// though it is a coefficient with the 1.0 identity.
+const KNOWN_MULTIPLICATIVE: &[&str] = &["uwCoeffMultiplier"];
+
 /// How same-name modifier values fold, keyed off the modifier's `MODIFIER_SETTINGS`
 /// `base_value` (1.0 -> coefficient, 0.0 -> bonus).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,6 +60,9 @@ impl Combine {
     fn classify(build: u32, name: &str) -> Combine {
         if KNOWN_ADDITIVE.contains(&name) {
             return Combine::Add;
+        }
+        if KNOWN_MULTIPLICATIVE.contains(&name) {
+            return Combine::Multiply;
         }
         match modifier_setting(build, name) {
             Some(s) if s.base_value == 0.0 => Combine::Add,

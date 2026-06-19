@@ -9,10 +9,12 @@
 use crate::game_params::ttx::components::EngineComponentStats;
 use crate::game_params::ttx::components::HullComponentStats;
 use crate::game_params::ttx::constants::HULL_HEALTH_ROUND;
+use crate::game_params::ttx::model::Battery;
 use crate::game_params::ttx::model::Durability;
 use crate::game_params::ttx::model::Hp;
 use crate::game_params::ttx::model::Knots;
 use crate::game_params::ttx::model::Mobility;
+use crate::game_params::ttx::model::Percent;
 use crate::game_params::ttx::model::Seconds;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::types::Meters;
@@ -25,9 +27,11 @@ use crate::game_params::types::Meters;
 /// (base_value 0.0 -> `bonus`); `healthHullCoeff` is multiplicative (base_value 1.0
 /// -> `coef`).
 ///
-/// `torpedo_protection` (ptz, FactoryDurability.py:8) needs the hull `floodProb`
-/// derived from `floodNodes`, which M1 deferred and `HullComponentStats` does not
-/// carry; it is `None` here rather than fabricated.
+/// `torpedo_protection` (ptz, FactoryDurability.py:8) is
+/// `hull.floodProb * uwCoeffMultiplier * 100 + uwCoeffBonus`. `floodProb` is derived
+/// at parse time from `floodNodes` (HullComponentStats::flood_prob, PreprocessedHull.py:12);
+/// `uwCoeffMultiplier` is a coefficient (`*`) and `uwCoeffBonus` an additive bonus (`+`,
+/// MODIFIER_SETTINGS base_value 0.0). `None` when `flood_prob` is absent.
 pub fn durability(hull: &HullComponentStats, modifiers: &ModifierBundle, level: u32) -> Durability {
     let health = hull.health.map(|base| {
         let raw = (base + modifiers.bonus("healthPerLevel") * level as f32) * modifiers.coef("healthHullCoeff");
@@ -36,7 +40,11 @@ pub fn durability(hull: &HullComponentStats, modifiers: &ModifierBundle, level: 
         Hp::from(rounded)
     });
 
-    Durability { health, torpedo_protection: None }
+    let torpedo_protection = hull
+        .flood_prob
+        .map(|prob| Percent::from(prob * modifiers.coef("uwCoeffMultiplier") * 100.0 + modifiers.bonus("uwCoeffBonus")));
+
+    Durability { health, torpedo_protection }
 }
 
 /// Maneuverability section (`ma6320f36/ttx/FactoryMobility.py:6`).
@@ -67,9 +75,28 @@ pub fn mobility(hull: &HullComponentStats, engine: &EngineComponentStats, modifi
     Mobility { speed, turning_radius, rudder_time }
 }
 
+/// Submarine battery section (`ma6320f36/ttx/FactoryBattery.py:4`).
+///
+/// `capacity = hull.batteryCapacity * batteryCapacityCoeff` (FactoryBattery.py:10),
+/// `regeneration = hull.batteryRegenRate * batteryRegenCoeff` (FactoryBattery.py:11).
+/// Both coeffs are multiplicative (MODIFIER_SETTINGS base_value 1.0). The deob returns
+/// `None` when `batteryCapacity == 0` (FactoryBattery.py:5); here the hull carries
+/// battery fields only for submarines, so `None` when they are absent.
+pub fn battery(hull: &HullComponentStats, modifiers: &ModifierBundle) -> Option<Battery> {
+    let (capacity, regen) = (hull.battery_capacity?, hull.battery_regen_rate?);
+    if capacity == 0.0 {
+        return None;
+    }
+    Some(Battery {
+        capacity: Some(capacity * modifiers.coef("batteryCapacityCoeff")),
+        regeneration: Some(regen * modifiers.coef("batteryRegenCoeff")),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game_params::ttx::constants::DEFAULT_UW_DAMAGE_COEFF;
     use crate::game_params::types::CrewSkillModifier;
     use crate::game_params::types::Species;
 
@@ -78,7 +105,8 @@ mod tests {
 
     /// Gearing's real default-hull base stats (GameParams `PASD013_Gearing_1945`
     /// `A_Hull`): health 19400, maxSpeed 36, speedCoef 1.0, turningRadius 640,
-    /// rudderTime 4.25, visibilityFactor 7.33.
+    /// rudderTime 4.25, visibilityFactor 7.33. `floodNodes[0][0]` is 0.333 (==
+    /// DEFAULT_UW_DAMAGE_COEFF), so flood_prob is 0.0; no SubmarineBattery (DD).
     fn gearing_hull() -> HullComponentStats {
         HullComponentStats {
             health: Some(19400.0),
@@ -87,7 +115,23 @@ mod tests {
             turning_radius: Some(640.0),
             rudder_time: Some(4.25),
             visibility_factor: Some(7.33),
+            flood_prob: Some(0.0),
+            battery_capacity: None,
+            battery_regen_rate: None,
         }
+    }
+
+    /// Yamato's real default-hull `floodNodes[0][0]` is 0.15 (GameParams
+    /// `PJSB018_Yamato_1944` `A_Hull`); flood_prob = (0.333 - 0.15) / 0.333.
+    fn yamato_hull() -> HullComponentStats {
+        let flood_prob = (DEFAULT_UW_DAMAGE_COEFF - 0.15) / DEFAULT_UW_DAMAGE_COEFF;
+        HullComponentStats { flood_prob: Some(flood_prob), ..Default::default() }
+    }
+
+    /// Balao's real submarine battery (GameParams `PASS110_Balao` `A_Hull`
+    /// `SubmarineBattery`): capacity 240, regenRate 1.2.
+    fn balao_hull() -> HullComponentStats {
+        HullComponentStats { battery_capacity: Some(240.0), battery_regen_rate: Some(1.2), ..Default::default() }
     }
 
     /// Gearing's engine `speedCoef` is 0.0 (hull carries the full coef).
@@ -116,9 +160,39 @@ mod tests {
     }
 
     #[test]
-    fn gearing_stock_durability_ptz_deferred() {
-        // floodNodes/floodProb deferred in M1 -> ptz not computable.
+    fn gearing_stock_durability_ptz_zero() {
+        // Gearing floodNodes[0][0] == DEFAULT_UW_DAMAGE_COEFF -> flood_prob 0 -> ptz 0.
         let durability = durability(&gearing_hull(), &ModifierBundle::empty(Species::Destroyer), 10);
+        assert_eq!(durability.torpedo_protection, Some(Percent::from(0.0)));
+    }
+
+    #[test]
+    fn yamato_stock_durability_ptz() {
+        // flood_prob * 1.0 (stock uwCoeffMultiplier) * 100 + 0 (stock uwCoeffBonus).
+        // (0.333 - 0.15) / 0.333 * 100 = 54.9549... (Yamato in-game ptz ~55%).
+        let durability = durability(&yamato_hull(), &ModifierBundle::empty(Species::Battleship), 10);
+        let ptz = durability.torpedo_protection.expect("ptz computed").value();
+        let expected = (DEFAULT_UW_DAMAGE_COEFF - 0.15) / DEFAULT_UW_DAMAGE_COEFF * 100.0;
+        assert!((ptz - expected).abs() < 1e-4, "got {ptz}, expected {expected}");
+        assert!((ptz - 54.954956).abs() < 1e-3, "got {ptz}");
+    }
+
+    #[test]
+    fn yamato_ptz_modifier_applies() {
+        // uwCoeffBonus +25 (additive) shifts ptz by +25: 54.9549... + 25 = 79.9549...
+        let mods = [modifier("uwCoeffBonus", 25.0)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, BUILD);
+        let durability = durability(&yamato_hull(), &bundle, 10);
+        let ptz = durability.torpedo_protection.expect("ptz computed").value();
+        let expected = (DEFAULT_UW_DAMAGE_COEFF - 0.15) / DEFAULT_UW_DAMAGE_COEFF * 100.0 + 25.0;
+        assert!((ptz - expected).abs() < 1e-4, "got {ptz}, expected {expected}");
+    }
+
+    #[test]
+    fn ptz_none_when_flood_absent() {
+        // No floodNodes -> flood_prob None -> ptz None (not fabricated).
+        let hull = HullComponentStats::default();
+        let durability = durability(&hull, &ModifierBundle::empty(Species::Destroyer), 10);
         assert!(durability.torpedo_protection.is_none());
     }
 
@@ -163,5 +237,34 @@ mod tests {
         assert!(mobility.speed.is_none());
         assert!(mobility.turning_radius.is_none());
         assert!(mobility.rudder_time.is_none());
+
+        // No SubmarineBattery -> battery None.
+        assert!(battery(&empty_hull, &ModifierBundle::empty(Species::Submarine)).is_none());
+    }
+
+    #[test]
+    fn balao_stock_battery() {
+        // capacity 240 * 1.0, regenRate 1.2 * 1.0 (stock battery coeffs).
+        let battery = battery(&balao_hull(), &ModifierBundle::empty(Species::Submarine)).expect("battery computed");
+        assert_eq!(battery.capacity, Some(240.0));
+        assert_eq!(battery.regeneration, Some(1.2));
+    }
+
+    #[test]
+    fn balao_battery_modifiers_apply() {
+        // batteryCapacityCoeff 1.1 (coef) -> 240*1.1=264; batteryRegenCoeff 1.25 -> 1.2*1.25=1.5.
+        let mods = [modifier("batteryCapacityCoeff", 1.1), modifier("batteryRegenCoeff", 1.25)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Submarine, BUILD);
+        let battery = battery(&balao_hull(), &bundle).expect("battery computed");
+        let capacity = battery.capacity.expect("capacity");
+        let regen = battery.regeneration.expect("regen");
+        assert!((capacity - 264.0).abs() < 1e-4, "got {capacity}");
+        assert!((regen - 1.5).abs() < 1e-4, "got {regen}");
+    }
+
+    #[test]
+    fn battery_none_for_non_sub() {
+        // Gearing has no SubmarineBattery -> battery None.
+        assert!(battery(&gearing_hull(), &ModifierBundle::empty(Species::Destroyer)).is_none());
     }
 }

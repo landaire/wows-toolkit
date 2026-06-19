@@ -32,6 +32,18 @@ pub struct HullComponentStats {
     pub rudder_time: Option<f32>,
     /// Raw `visibilityFactor` field (sea detection coefficient).
     pub visibility_factor: Option<f32>,
+    /// Hull flood probability, derived at parse time from `floodNodes[0][0]` per
+    /// `PreprocessedHull.py:11-12` (`(DEFAULT_UW_DAMAGE_COEFF - floodNodes[0][0]) /
+    /// DEFAULT_UW_DAMAGE_COEFF`, or 0.0 when equal to the constant). Derived here so
+    /// `FactoryDurability`'s `hull.floodProb` reference stays a direct field read.
+    /// `None` when `floodNodes` is absent or empty.
+    pub flood_prob: Option<f32>,
+    /// Submarine `SubmarineBattery.capacity` (charge units). `None` for non-subs
+    /// (hulls without a `SubmarineBattery` sub-object).
+    pub battery_capacity: Option<f32>,
+    /// Submarine `SubmarineBattery.regenRate` (charge units per second). `None` for
+    /// non-subs.
+    pub battery_regen_rate: Option<f32>,
 }
 
 /// Base engine-component stats, raw from the `*_Engine` component sub-object.

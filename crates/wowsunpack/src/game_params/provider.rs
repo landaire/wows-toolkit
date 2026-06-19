@@ -644,6 +644,30 @@ fn read_vec3_at(v: &Value, idx: usize) -> Option<[f32; 3]> {
     }
 }
 
+/// Derive hull `floodProb` from `floodNodes` per `PreprocessedHull.py:11-12`:
+/// `(DEFAULT_UW_DAMAGE_COEFF - floodNodes[0][0]) / DEFAULT_UW_DAMAGE_COEFF`, or 0.0
+/// when `floodNodes[0][0] == DEFAULT_UW_DAMAGE_COEFF`. `floodNodes` is a list of
+/// triples; reads `floodNodes[0][0]` defensively, `None` if absent/empty.
+fn read_flood_prob(hull_data: &BTreeMap<HashableValue, Value>) -> Option<f32> {
+    use crate::game_params::ttx::constants::DEFAULT_UW_DAMAGE_COEFF;
+    let node0 = read_vec3_at(hull_data.get(&pk(keys::FLOOD_NODES))?, 0)?[0];
+    if node0 == DEFAULT_UW_DAMAGE_COEFF {
+        Some(0.0)
+    } else {
+        Some((DEFAULT_UW_DAMAGE_COEFF - node0) / DEFAULT_UW_DAMAGE_COEFF)
+    }
+}
+
+/// Read the submarine `SubmarineBattery` sub-object's `capacity` and `regenRate`
+/// (PreprocessedHull.py:23-30). `None` for hulls without the sub-object (non-subs).
+fn read_submarine_battery(hull_data: &BTreeMap<HashableValue, Value>) -> (Option<f32>, Option<f32>) {
+    let Some(battery) = hull_data.get(&pk(keys::SUBMARINE_BATTERY)).and_then(|v| v.dict_or_object_dict()) else {
+        return (None, None);
+    };
+    let battery = battery.inner();
+    (read_float(&battery, keys::BATTERY_CAPACITY), read_float(&battery, keys::BATTERY_REGEN_RATE))
+}
+
 fn read_ignore_height(v: Option<&Value>) -> bool {
     v.map(|v| if let Some(b) = v.bool_ref() { *b } else { v.i64_ref().map(|i| *i != 0).unwrap_or(false) })
         .unwrap_or(false)
@@ -948,6 +972,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             config.dock_y_offset = read_float(&hull_data, keys::DOCK_Y_OFFSET);
 
             // TTX hull base stats from the same resolved hull component sub-object.
+            let (battery_capacity, battery_regen_rate) = read_submarine_battery(&hull_data);
             ttx_components.hulls.insert(
                 upgrade_name.clone(),
                 crate::game_params::ttx::components::HullComponentStats {
@@ -957,6 +982,9 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
                     turning_radius: read_float(&hull_data, keys::TURNING_RADIUS),
                     rudder_time: read_float(&hull_data, keys::RUDDER_TIME),
                     visibility_factor: read_float(&hull_data, keys::VISIBILITY_FACTOR),
+                    flood_prob: read_flood_prob(&hull_data),
+                    battery_capacity,
+                    battery_regen_rate,
                 },
             );
         }
@@ -1908,6 +1936,10 @@ mod camera_tests {
             (pk("rudderTime"), fv(4.25)),
             (pk("visibilityFactor"), fv(7.33)),
             (pk("model"), sv("A_Hull.model")),
+            // Yamato-style floodNodes (list of triples) -> flood_prob (0.333-0.15)/0.333.
+            (pk("floodNodes"), list(vec![list(vec![fv(0.15), fv(0.5), fv(40.0)])])),
+            // SubmarineBattery sub-object (Balao-style) -> battery fields.
+            (pk("SubmarineBattery"), dict(vec![(pk("capacity"), fv(240.0)), (pk("regenRate"), fv(1.2))])),
         ]);
         let a_engine = dict(vec![(pk("speedCoef"), fv(0.0))]);
 
@@ -1945,6 +1977,11 @@ mod camera_tests {
         assert_eq!(hull.turning_radius, Some(640.0));
         assert_eq!(hull.rudder_time, Some(4.25));
         assert_eq!(hull.visibility_factor, Some(7.33));
+        // flood_prob derived from floodNodes[0][0]=0.15 (PreprocessedHull.py:12).
+        let flood = hull.flood_prob.expect("flood_prob derived");
+        assert!((flood - (0.333 - 0.15) / 0.333).abs() < 1e-6, "got {flood}");
+        assert_eq!(hull.battery_capacity, Some(240.0));
+        assert_eq!(hull.battery_regen_rate, Some(1.2));
 
         let engine = ttx.engine("PAUE903_D10_ENG_STOCK").expect("engine stats present");
         assert_eq!(engine.speed_coef, Some(0.0));

@@ -27,6 +27,12 @@ pub const TORPEDO_DAMAGE_CONSTANT: f32 = 3.0;
 /// `HULL_HEALTH_ROUND = 50` (me658a8e4.py:50). Hull health rounds up to a multiple of 50.
 pub const HULL_HEALTH_ROUND: f32 = 50.0;
 
+/// `DEFAULT_UW_DAMAGE_COEFF = 0.333` (ma779114d.py constant; binary-float value
+/// recovered from the compiled module). Used in `PreprocessedHull.py:12` to derive
+/// hull `floodProb` from `floodNodes[0][0]`; a hull whose `floodNodes[0][0]` equals
+/// this constant has no torpedo protection (floodProb 0.0).
+pub const DEFAULT_UW_DAMAGE_COEFF: f32 = 0.333;
+
 /// BigWorld -> ballistic-distance scale. Not in any deob source (C++ engine constant).
 ///
 /// Recovered by solving the torpedo-range formula `range_km = maxDist * BW_TO_BALLISTIC
@@ -62,6 +68,7 @@ mod tests {
         assert_eq!(SHIP_TIME_SCALE_INV, 0.5);
         assert_eq!(TORPEDO_DAMAGE_CONSTANT, 3.0);
         assert_eq!(HULL_HEALTH_ROUND, 50.0);
+        assert_eq!(DEFAULT_UW_DAMAGE_COEFF, 0.333);
     }
 
     #[test]
