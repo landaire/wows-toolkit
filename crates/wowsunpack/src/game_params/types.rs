@@ -1001,7 +1001,7 @@ pub struct HullUpgradeConfig {
     pub detection_km: Km,
     /// Air detection range in km.
     pub air_detection_km: Km,
-    /// Component type key → component name (e.g. "artillery" → "AB1_Artillery").
+    /// Component type key to component name (e.g. "artillery" -> "AB1_Artillery").
     #[cfg_attr(feature = "serde", serde(default))]
     pub component_names: HashMap<super::keys::ComponentType, String>,
     /// Model path from the hull component for this upgrade.
@@ -2132,8 +2132,6 @@ impl Aircraft {
         self.category.clone()
     }
 }
-
-// ─── Shell / Ammo Types ─────────────────────────────────────────────────────────────
 
 /// Strongly-typed ammunition type for projectiles.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
