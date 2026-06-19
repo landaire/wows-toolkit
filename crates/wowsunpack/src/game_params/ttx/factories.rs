@@ -6,9 +6,12 @@
 //! This module currently covers the direct-field species `durability` and
 //! `mobility`; armor/battery/hull-summary land in later M2 tasks.
 
+use crate::game_params::ttx::armor_materials::armor_type_classifies;
+use crate::game_params::ttx::armor_materials::collision_material_name;
 use crate::game_params::ttx::components::EngineComponentStats;
 use crate::game_params::ttx::components::HullComponentStats;
 use crate::game_params::ttx::constants::HULL_HEALTH_ROUND;
+use crate::game_params::ttx::model::Armor;
 use crate::game_params::ttx::model::Battery;
 use crate::game_params::ttx::model::Durability;
 use crate::game_params::ttx::model::Hp;
@@ -17,7 +20,9 @@ use crate::game_params::ttx::model::Mobility;
 use crate::game_params::ttx::model::Percent;
 use crate::game_params::ttx::model::Seconds;
 use crate::game_params::ttx::modifiers::ModifierBundle;
+use crate::game_params::types::ArmorMap;
 use crate::game_params::types::Meters;
+use crate::game_params::types::Millimeters;
 
 /// Survivability section (`ma6320f36/ttx/FactoryDurability.py:5`).
 ///
@@ -91,6 +96,84 @@ pub fn battery(hull: &HullComponentStats, modifiers: &ModifierBundle) -> Option<
         capacity: Some(capacity * modifiers.coef("batteryCapacityCoeff")),
         regeneration: Some(regen * modifiers.coef("batteryRegenCoeff")),
     })
+}
+
+/// Default lowest armor thickness when an `armorList` yields no classified plate
+/// (`PreprocessedArmor.py:8`'s `armorMin`/`armorMax` seed, `ArmorConstants.py`
+/// `DEFAULT_LOWEST_ARMOR_THICKNESS`).
+const DEFAULT_LOWEST_ARMOR_THICKNESS: f32 = 6.0;
+
+/// Reduce one `armorList` (an [`ArmorMap`]) to its `(min, max)` over the plates
+/// `getArmorType` classifies, transcribing `PreprocessedArmor.__init__`
+/// (`PreprocessedArmor.py:7-15`).
+///
+/// The deob filter is `[thk for matId, thk in armorList.items()
+/// if getArmorType(collisionMaterialName(matId)) if thk > 0]`. The collision
+/// material id is the low byte of the outer key (`Avatar.py:1386` masks `& 255`;
+/// `getGunArmorBits`/`gunArmorMask` reserve the other bits for gun/model
+/// indices). When no plate is classified, both extremes are
+/// `DEFAULT_LOWEST_ARMOR_THICKNESS`.
+fn armor_list_min_max(armor: &ArmorMap) -> (f32, f32) {
+    let mut min = DEFAULT_LOWEST_ARMOR_THICKNESS;
+    let mut max = DEFAULT_LOWEST_ARMOR_THICKNESS;
+    let mut found = false;
+
+    for (&material_key, layers) in armor {
+        let material_id = (material_key & 0xFF) as u8;
+        if !armor_type_classifies(collision_material_name(material_id)) {
+            continue;
+        }
+        for &thickness in layers.values() {
+            if thickness <= 0.0 {
+                continue;
+            }
+            if found {
+                min = min.min(thickness);
+                max = max.max(thickness);
+            } else {
+                min = thickness;
+                max = thickness;
+                found = true;
+            }
+        }
+    }
+
+    (min, max)
+}
+
+/// Armor section (`ma6320f36/ttx/FactoryArmor.py:5` `createArmorTTX`).
+///
+/// `min`/`max` are the extremes of classified plate thicknesses across the hull
+/// `armorList` and, when the ship has artillery, the combined artillery
+/// `armorList` (`getArmorDictByComponent`, all gun mounts). Per
+/// `FactoryArmor.py:7-12`: with artillery, `min = min(arti.min, hull.min)` and
+/// `max = max(arti.max, hull.max)`; otherwise hull-only.
+///
+/// `hull_armor` is the selected hull's `module.armor` (= `Vehicle.armor`).
+/// `artillery_armor` yields each main-battery mount's armor map
+/// (`MountPoint::mount_armor`); an empty iterator is the no-artillery branch.
+/// `None` when the hull carries no armor data.
+pub fn armor<'a>(hull_armor: &ArmorMap, artillery_armor: impl IntoIterator<Item = &'a ArmorMap>) -> Option<Armor> {
+    if hull_armor.is_empty() {
+        return None;
+    }
+
+    let (hull_min, hull_max) = armor_list_min_max(hull_armor);
+
+    let mut arti_min: Option<f32> = None;
+    let mut arti_max: Option<f32> = None;
+    for map in artillery_armor {
+        let (m, x) = armor_list_min_max(map);
+        arti_min = Some(arti_min.map_or(m, |cur: f32| cur.min(m)));
+        arti_max = Some(arti_max.map_or(x, |cur: f32| cur.max(x)));
+    }
+
+    let (min, max) = match (arti_min, arti_max) {
+        (Some(amin), Some(amax)) => (amin.min(hull_min), amax.max(hull_max)),
+        _ => (hull_min, hull_max),
+    };
+
+    Some(Armor { min: Some(Millimeters::from(min)), max: Some(Millimeters::from(max)) })
 }
 
 #[cfg(test)]
@@ -266,5 +349,82 @@ mod tests {
     fn battery_none_for_non_sub() {
         // Gearing has no SubmarineBattery -> battery None.
         assert!(battery(&gearing_hull(), &ModifierBundle::empty(Species::Destroyer)).is_none());
+    }
+
+    /// Build an [`ArmorMap`] from `(raw_key, thickness)` pairs, mirroring
+    /// `parse_armor_dict`'s `(model_index << 16) | material_id` keying.
+    fn armor_map(entries: &[(u32, f32)]) -> ArmorMap {
+        use std::collections::BTreeMap;
+        let mut m: ArmorMap = std::collections::HashMap::new();
+        for &(raw, thk) in entries {
+            let model_index = raw >> 16;
+            let material_id = raw & 0xFFFF;
+            m.entry(material_id).or_insert_with(BTreeMap::new).insert(model_index, thk);
+        }
+        m
+    }
+
+    /// Subset of Yamato's `PJSB018_Yamato_1944 A_Hull.armor`: a Cit_Belt plate
+    /// (mat 61, 410mm), a Tur1GkBar barbette (mat 134, 560mm), an unclassified
+    /// RudderSide plate (mat 82, 350mm, must be excluded), and a thin SS_Side
+    /// (mat 89, 19mm). Raw keys use model_index 2 (131072) like the real data.
+    fn yamato_hull_armor() -> ArmorMap {
+        armor_map(&[
+            (131072 | 61, 410.0),  // Cit_Belt
+            (131072 | 134, 560.0), // Tur1GkBar (barbette, classifies as ARTI)
+            (131072 | 82, 350.0),  // RudderSide (NOT an armor type -> excluded)
+            (131072 | 89, 19.0),   // SS_Side
+            (1, 0.0),              // common, thickness 0 -> excluded
+        ])
+    }
+
+    /// Yamato's `A_Artillery.HP_JGM_*.armor`: TurretFwd (mat 100, 650mm face),
+    /// TurretSide (mat 32, 250mm), TurretDown (mat 99, 135mm). Gun bits live in
+    /// the high byte (model_index 1 here); only the low byte selects the material.
+    fn yamato_turret_armor() -> ArmorMap {
+        armor_map(&[
+            (65536 | 100, 650.0), // TurretFwd (turret face)
+            (65536 | 32, 250.0),  // TurretSide
+            (65536 | 99, 135.0),  // TurretDown
+        ])
+    }
+
+    #[test]
+    fn yamato_armor_min_max_with_artillery() {
+        // hull classified: {410, 560, 19}; arti classified: {650, 250, 135}.
+        // max = max(650, 560) = 650 (Yamato's in-game turret armor).
+        // min = min(135, 19)  = 19.
+        let hull = yamato_hull_armor();
+        let arti = [yamato_turret_armor()];
+        let armor = armor(&hull, arti.iter()).expect("armor computed");
+        assert_eq!(armor.max, Some(Millimeters::from(650.0)));
+        assert_eq!(armor.min, Some(Millimeters::from(19.0)));
+    }
+
+    #[test]
+    fn hull_only_armor_excludes_unclassified() {
+        // No artillery branch: extremes over classified hull plates only.
+        // RudderSide (350) is excluded, so max = 560 (Tur1GkBar), min = 19.
+        let hull = yamato_hull_armor();
+        let armor = armor(&hull, std::iter::empty()).expect("armor computed");
+        assert_eq!(armor.max, Some(Millimeters::from(560.0)));
+        assert_eq!(armor.min, Some(Millimeters::from(19.0)));
+    }
+
+    #[test]
+    fn armor_none_when_hull_armor_absent() {
+        // No armor data at all -> None (not fabricated as the default 6mm).
+        let empty: ArmorMap = std::collections::HashMap::new();
+        assert!(armor(&empty, std::iter::empty()).is_none());
+    }
+
+    #[test]
+    fn armor_defaults_when_no_classified_plate() {
+        // Hull with only unclassified plates -> default 6mm extremes
+        // (PreprocessedArmor.py:8 seed), not None: the hull map is non-empty.
+        let hull = armor_map(&[(131072 | 82, 350.0), (131072 | 80, 200.0)]); // Rudder*
+        let armor = armor(&hull, std::iter::empty()).expect("armor computed");
+        assert_eq!(armor.min, Some(Millimeters::from(6.0)));
+        assert_eq!(armor.max, Some(Millimeters::from(6.0)));
     }
 }
