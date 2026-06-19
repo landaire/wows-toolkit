@@ -10,10 +10,11 @@
 //! loader cannot resolve, yields `None`, and the caller (UI) decides on a
 //! field-name fallback. Labels are never invented; an unverified stat is `None`.
 //!
-//! The keys are reused across the main-battery and secondary artillery sections
-//! in the client; the values transcribed in the comments are the main-battery
-//! ("Main Battery ...") strings, so a secondary-battery caller may want a
-//! secondary-specific label for the shared [`TtxStat::Artillery*`] / gun stats.
+//! The secondary battery reuses the [`super::model::Artillery`] type, but the
+//! client labels its rows with `IDS_SHIP_PARAM_ATBA_*` keys. The `Secondary*`
+//! variants here carry those ATBA labels; the en `global.mo` only defines a
+//! distinct ATBA key for range and gun count, so the remaining secondary stats
+//! yield `None` rather than borrowing a main-battery label.
 
 use crate::data::ResourceLoader;
 
@@ -55,6 +56,25 @@ pub enum TtxStat {
     ShellFloodChance,
     ShellMaxAmmo,
     ShellDisabledUnderwater,
+    // Secondaries (ATBA): same Artillery model as the main battery, but the
+    // client labels secondary rows with IDS_SHIP_PARAM_ATBA_* keys. Only range
+    // and gun-count have distinct catalog keys; the rest have no ATBA label.
+    SecondaryRange,
+    SecondaryReloadTime,
+    SecondaryDispersion,
+    SecondaryAmmoSwitchTime,
+    SecondaryGunCaliber,
+    SecondaryGunNumBarrels,
+    SecondaryGunNumGuns,
+    SecondaryGunRotationSpeed,
+    SecondaryGunRotationTime,
+    SecondaryShellDamage,
+    SecondaryShellCaliber,
+    SecondaryShellSpeed,
+    SecondaryShellPenetration,
+    SecondaryShellBurnChance,
+    SecondaryShellFloodChance,
+    SecondaryShellMaxAmmo,
     // Torpedoes
     TorpedoReloadTime,
     // Launcher
@@ -110,6 +130,22 @@ impl TtxStat {
         TtxStat::ShellFloodChance,
         TtxStat::ShellMaxAmmo,
         TtxStat::ShellDisabledUnderwater,
+        TtxStat::SecondaryRange,
+        TtxStat::SecondaryReloadTime,
+        TtxStat::SecondaryDispersion,
+        TtxStat::SecondaryAmmoSwitchTime,
+        TtxStat::SecondaryGunCaliber,
+        TtxStat::SecondaryGunNumBarrels,
+        TtxStat::SecondaryGunNumGuns,
+        TtxStat::SecondaryGunRotationSpeed,
+        TtxStat::SecondaryGunRotationTime,
+        TtxStat::SecondaryShellDamage,
+        TtxStat::SecondaryShellCaliber,
+        TtxStat::SecondaryShellSpeed,
+        TtxStat::SecondaryShellPenetration,
+        TtxStat::SecondaryShellBurnChance,
+        TtxStat::SecondaryShellFloodChance,
+        TtxStat::SecondaryShellMaxAmmo,
         TtxStat::TorpedoReloadTime,
         TtxStat::LauncherRotationSpeed,
         TtxStat::LauncherRotationTime,
@@ -161,6 +197,22 @@ impl TtxStat {
             TtxStat::ShellFloodChance => "artillery.shells.flood_chance",
             TtxStat::ShellMaxAmmo => "artillery.shells.max_ammo",
             TtxStat::ShellDisabledUnderwater => "artillery.shells.disabled_underwater",
+            TtxStat::SecondaryRange => "secondary.range",
+            TtxStat::SecondaryReloadTime => "secondary.reload_time",
+            TtxStat::SecondaryDispersion => "secondary.dispersion",
+            TtxStat::SecondaryAmmoSwitchTime => "secondary.ammo_switch_time",
+            TtxStat::SecondaryGunCaliber => "secondary.gun.caliber",
+            TtxStat::SecondaryGunNumBarrels => "secondary.gun.num_barrels",
+            TtxStat::SecondaryGunNumGuns => "secondary.gun.num_guns",
+            TtxStat::SecondaryGunRotationSpeed => "secondary.gun.rotation_speed",
+            TtxStat::SecondaryGunRotationTime => "secondary.gun.rotation_time",
+            TtxStat::SecondaryShellDamage => "secondary.shells.damage",
+            TtxStat::SecondaryShellCaliber => "secondary.shells.caliber",
+            TtxStat::SecondaryShellSpeed => "secondary.shells.speed",
+            TtxStat::SecondaryShellPenetration => "secondary.shells.penetration",
+            TtxStat::SecondaryShellBurnChance => "secondary.shells.burn_chance",
+            TtxStat::SecondaryShellFloodChance => "secondary.shells.flood_chance",
+            TtxStat::SecondaryShellMaxAmmo => "secondary.shells.max_ammo",
             TtxStat::TorpedoReloadTime => "torpedoes.reload_time",
             TtxStat::LauncherRotationSpeed => "torpedoes.launchers.rotation_speed",
             TtxStat::LauncherRotationTime => "torpedoes.launchers.rotation_time",
@@ -232,6 +284,10 @@ impl TtxStat {
             TtxStat::ShellFloodChance => "IDS_SHIP_PARAM_ARTILLERY_FLOOD_GENERATION",
             // "Number of Shells"
             TtxStat::ShellMaxAmmo => "IDS_SHIP_PARAM_ARTILLERY_MAX_AMMO_COUNT",
+            // "Firing Range" (secondary-battery range)
+            TtxStat::SecondaryRange => "IDS_SHIP_PARAM_ATBA_MAX_DIST",
+            // "Secondary Gun Turrets" (secondary mount count)
+            TtxStat::SecondaryGunNumGuns => "IDS_SHIP_PARAM_ATBA_GUNS_COUNT",
             // "Torpedo Tube Reload Time"
             TtxStat::TorpedoReloadTime => "IDS_SHIP_PARAM_TORPEDOES_TIME_RELOAD",
             // "Torpedo Tube Traverse Speed"
@@ -279,6 +335,27 @@ impl TtxStat {
             // Smoke catalog keys all describe detection after firing in smoke,
             // not the baseline visibilityByShip.smoke slot this field models.
             TtxStat::DetectionInSmoke => return None,
+
+            // Secondaries: the en global.mo only defines IDS_SHIP_PARAM_ATBA_*
+            // for range ("Firing Range") and gun count ("Secondary Gun Turrets").
+            // No distinct ATBA key exists for reload, dispersion, ammo-switch,
+            // gun caliber/barrels/rotation, or any shell stat (damage, caliber,
+            // speed, penetration, burn, flood, ammo), so each is None rather than
+            // reusing a main-battery IDS_SHIP_PARAM_ARTILLERY_* label.
+            TtxStat::SecondaryReloadTime
+            | TtxStat::SecondaryDispersion
+            | TtxStat::SecondaryAmmoSwitchTime
+            | TtxStat::SecondaryGunCaliber
+            | TtxStat::SecondaryGunNumBarrels
+            | TtxStat::SecondaryGunRotationSpeed
+            | TtxStat::SecondaryGunRotationTime
+            | TtxStat::SecondaryShellDamage
+            | TtxStat::SecondaryShellCaliber
+            | TtxStat::SecondaryShellSpeed
+            | TtxStat::SecondaryShellPenetration
+            | TtxStat::SecondaryShellBurnChance
+            | TtxStat::SecondaryShellFloodChance
+            | TtxStat::SecondaryShellMaxAmmo => return None,
         })
     }
 }
@@ -322,6 +399,26 @@ mod tests {
     }
 
     #[test]
+    fn secondary_range_resolves_to_atba_key() {
+        let label = stat_label(TtxStat::SecondaryRange, &EchoLoader);
+        assert_eq!(label.as_deref(), Some("IDS_SHIP_PARAM_ATBA_MAX_DIST"));
+    }
+
+    #[test]
+    fn secondary_gun_count_resolves_to_atba_key() {
+        let label = stat_label(TtxStat::SecondaryGunNumGuns, &EchoLoader);
+        assert_eq!(label.as_deref(), Some("IDS_SHIP_PARAM_ATBA_GUNS_COUNT"));
+    }
+
+    #[test]
+    fn secondary_without_atba_key_returns_none() {
+        // No distinct IDS_SHIP_PARAM_ATBA_* key exists for these.
+        assert!(TtxStat::SecondaryReloadTime.label_key().is_none());
+        assert!(TtxStat::SecondaryShellDamage.label_key().is_none());
+        assert!(stat_label(TtxStat::SecondaryReloadTime, &EchoLoader).is_none());
+    }
+
+    #[test]
     fn stat_without_key_returns_none() {
         assert!(TtxStat::ArmorMin.label_key().is_none());
         assert!(stat_label(TtxStat::ArmorMin, &EchoLoader).is_none());
@@ -362,6 +459,21 @@ mod tests {
             TtxStat::TorpedoIsDamageIncreasing,
             TtxStat::AirDetectionOnFire,
             TtxStat::DetectionInSmoke,
+            // Secondaries: only ATBA range and gun-count have distinct keys.
+            TtxStat::SecondaryReloadTime,
+            TtxStat::SecondaryDispersion,
+            TtxStat::SecondaryAmmoSwitchTime,
+            TtxStat::SecondaryGunCaliber,
+            TtxStat::SecondaryGunNumBarrels,
+            TtxStat::SecondaryGunRotationSpeed,
+            TtxStat::SecondaryGunRotationTime,
+            TtxStat::SecondaryShellDamage,
+            TtxStat::SecondaryShellCaliber,
+            TtxStat::SecondaryShellSpeed,
+            TtxStat::SecondaryShellPenetration,
+            TtxStat::SecondaryShellBurnChance,
+            TtxStat::SecondaryShellFloodChance,
+            TtxStat::SecondaryShellMaxAmmo,
         ];
         expected.sort_by_key(|s| s.field_key());
 
