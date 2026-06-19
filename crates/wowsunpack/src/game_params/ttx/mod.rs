@@ -2,3 +2,4 @@
 //! as-shown-in-port module characteristics card from GameParams.
 
 pub mod constants;
+pub mod model;
