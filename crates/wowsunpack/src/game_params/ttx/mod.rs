@@ -5,6 +5,7 @@ pub mod armor_materials;
 pub mod components;
 pub mod constants;
 pub mod factories;
+pub mod labels;
 pub mod model;
 pub mod modifiers;
 pub mod orchestration;
