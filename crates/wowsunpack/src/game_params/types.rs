@@ -1364,6 +1364,10 @@ pub struct Vehicle {
     /// Camera orbit trajectories (per mode) from the ship `Cameras` component.
     #[cfg_attr(feature = "serde", serde(default))]
     camera_trajectories: Vec<(String, CameraTrajectory)>,
+    /// Typed TTX component base stats (hull/engine) extracted at parse time.
+    /// Query-time factories apply formulas + modifiers without the raw pickle.
+    #[cfg_attr(feature = "serde", serde(default))]
+    ttx_components: Option<super::ttx::components::ShipTtxComponents>,
 }
 
 impl Vehicle {
@@ -1405,6 +1409,11 @@ impl Vehicle {
 
     pub fn camera_trajectories(&self) -> &[(String, CameraTrajectory)] {
         &self.camera_trajectories
+    }
+
+    /// Typed TTX hull/engine base stats, if any component sub-objects resolved.
+    pub fn ttx_components(&self) -> Option<&super::ttx::components::ShipTtxComponents> {
+        self.ttx_components.as_ref()
     }
 
     /// Look up a specific hull upgrade config by name.
@@ -2795,6 +2804,7 @@ mod tests {
             hit_locations: None,
             permoflages: Vec::new(),
             camera_trajectories: Vec::new(),
+            ttx_components: None,
         };
         let ship = Param {
             id: ship_id,

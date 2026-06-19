@@ -13,6 +13,7 @@ pub const UC_TYPE: &str = "ucType";
 pub const COMPONENTS: &str = "components";
 
 // ucType values
+pub const UC_TYPE_ENGINE: &str = "_Engine";
 pub const UC_TYPE_HULL: &str = "_Hull";
 pub const UC_TYPE_ARTILLERY: &str = "_Artillery";
 pub const UC_TYPE_TORPEDOES: &str = "_Torpedoes";
@@ -31,6 +32,7 @@ pub const COMP_DIRECTORS: &str = "directors";
 pub const COMP_FINDERS: &str = "finders";
 pub const COMP_RADARS: &str = "radars";
 pub const COMP_TORPEDOES: &str = "torpedoes";
+pub const COMP_ENGINE: &str = "engine";
 
 /// Typed representation of component type keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -161,6 +163,11 @@ pub const SPLASH_BOXES: &str = "splashBoxes";
 pub const THICKNESS: &str = "thickness";
 pub const DRAFT: &str = "draft";
 pub const DOCK_Y_OFFSET: &str = "dockYOffset";
+pub const HEALTH: &str = "health";
+pub const MAX_SPEED: &str = "maxSpeed";
+pub const SPEED_COEF: &str = "speedCoef";
+pub const TURNING_RADIUS: &str = "turningRadius";
+pub const RUDDER_TIME: &str = "rudderTime";
 pub const VISIBILITY_FACTOR: &str = "visibilityFactor";
 pub const VISIBILITY_FACTOR_BY_PLANE: &str = "visibilityFactorByPlane";
 pub const MAX_DIST: &str = "maxDist";

@@ -873,6 +873,11 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
     // components. We build a HullUpgradeConfig for each, keyed by upgrade name.
     let mut hull_upgrades = HashMap::new();
 
+    // TTX base stats (hull + engine), keyed by upgrade selection. Populated from
+    // the same ShipUpgradeInfo walk: hull stats inside the _Hull branch below,
+    // engine stats from the separate _Engine upgrade entries.
+    let mut ttx_components = crate::game_params::ttx::components::ShipTtxComponents::default();
+
     for (upgrade_name_val, upgrade_value) in upgrade_data.inner().iter() {
         let Some(upgrade_name) = upgrade_name_val.string_ref().map(|s| s.inner().clone()) else {
             continue;
@@ -882,12 +887,30 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
         };
         let upgrade_dict = upgrade_dict.inner();
 
-        // Only process _Hull upgrades -- they define the complete config for a hull loadout
         let Some(uc_type) =
             upgrade_dict.get(&pk(keys::UC_TYPE)).and_then(|v| v.string_ref().map(|s| s.inner().clone()))
         else {
             continue;
         };
+
+        // Engine is a standalone _Engine upgrade (not nested in the hull upgrade's
+        // components); read its speedCoef into the TTX engine map.
+        if uc_type == keys::UC_TYPE_ENGINE
+            && let Some(eng_comp) = upgrade_dict
+                .get(&pk(keys::COMPONENTS))
+                .and_then(|v| v.dict_or_object_dict())
+                .and_then(|c| c.inner().get(&pk(keys::COMP_ENGINE)).and_then(read_first_string))
+            && let Some(eng_data) = ship_data.get(&pk(&eng_comp)).and_then(|v| v.dict_or_object_dict())
+        {
+            ttx_components.engines.insert(
+                upgrade_name.clone(),
+                crate::game_params::ttx::components::EngineComponentStats {
+                    speed_coef: read_float(&eng_data.inner(), keys::SPEED_COEF),
+                },
+            );
+        }
+
+        // Only process _Hull upgrades -- they define the complete config for a hull loadout
         if uc_type != keys::UC_TYPE_HULL {
             continue;
         }
@@ -923,6 +946,19 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             config.hull_model_path = read_string(&hull_data, keys::MODEL);
             config.draft = read_float(&hull_data, keys::DRAFT).map(Meters::from);
             config.dock_y_offset = read_float(&hull_data, keys::DOCK_Y_OFFSET);
+
+            // TTX hull base stats from the same resolved hull component sub-object.
+            ttx_components.hulls.insert(
+                upgrade_name.clone(),
+                crate::game_params::ttx::components::HullComponentStats {
+                    health: read_float(&hull_data, keys::HEALTH),
+                    max_speed: read_float(&hull_data, keys::MAX_SPEED),
+                    speed_coef: read_float(&hull_data, keys::SPEED_COEF),
+                    turning_radius: read_float(&hull_data, keys::TURNING_RADIUS),
+                    rudder_time: read_float(&hull_data, keys::RUDDER_TIME),
+                    visibility_factor: read_float(&hull_data, keys::VISIBILITY_FACTOR),
+                },
+            );
         }
 
         // Extract mount points for all model component types.
@@ -1213,6 +1249,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
         .maybe_hit_locations(hit_locations)
         .permoflages(permoflages)
         .camera_trajectories(camera_trajectories)
+        .maybe_ttx_components((!ttx_components.is_empty()).then_some(ttx_components))
         .build()
 }
 
@@ -1855,5 +1892,61 @@ mod camera_tests {
         assert_eq!(fields.get("shootShift"), Some(&3.0_f32));
         // non-numeric string fields are skipped.
         assert!(!fields.contains_key("consumableType"));
+    }
+
+    /// Build a ship dict mirroring Gearing's (`PASD013_Gearing_1945`) real shape:
+    /// a `_Hull` upgrade naming an `A_Hull` component and a separate `_Engine`
+    /// upgrade naming an `A_Engine` component, with the real GameParams values.
+    /// `build_ship` should extract typed TTX hull/engine base stats from these.
+    #[test]
+    fn build_ship_extracts_ttx_hull_and_engine_base_stats() {
+        let a_hull = dict(vec![
+            (pk("health"), fv(19400.0)),
+            (pk("maxSpeed"), fv(36.0)),
+            (pk("speedCoef"), fv(1.0)),
+            (pk("turningRadius"), fv(640.0)),
+            (pk("rudderTime"), fv(4.25)),
+            (pk("visibilityFactor"), fv(7.33)),
+            (pk("model"), sv("A_Hull.model")),
+        ]);
+        let a_engine = dict(vec![(pk("speedCoef"), fv(0.0))]);
+
+        let hull_components = dict(vec![
+            (pk("hull"), list(vec![sv("A_Hull")])),
+            (pk("artillery"), list(vec![sv("A_Artillery")])),
+        ]);
+        let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
+
+        let engine_components = dict(vec![(pk("engine"), list(vec![sv("A_Engine")]))]);
+        let engine_upgrade = dict(vec![(pk("ucType"), sv("_Engine")), (pk("components"), engine_components)]);
+
+        let upgrade_info = dict(vec![
+            (pk("PAUH911_Gearing_1945"), hull_upgrade),
+            (pk("PAUE903_D10_ENG_STOCK"), engine_upgrade),
+        ]);
+
+        let ship_data: BTreeMap<HashableValue, Value> = vec![
+            (pk("level"), Value::I64(10)),
+            (pk("group"), sv("special")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+            (pk("A_Engine"), a_engine),
+        ]
+        .into_iter()
+        .collect();
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+
+        let hull = ttx.hull("PAUH911_Gearing_1945").expect("hull stats present");
+        assert_eq!(hull.health, Some(19400.0));
+        assert_eq!(hull.max_speed, Some(36.0));
+        assert_eq!(hull.speed_coef, Some(1.0));
+        assert_eq!(hull.turning_radius, Some(640.0));
+        assert_eq!(hull.rudder_time, Some(4.25));
+        assert_eq!(hull.visibility_factor, Some(7.33));
+
+        let engine = ttx.engine("PAUE903_D10_ENG_STOCK").expect("engine stats present");
+        assert_eq!(engine.speed_coef, Some(0.0));
     }
 }
