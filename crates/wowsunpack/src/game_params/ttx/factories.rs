@@ -239,9 +239,9 @@ pub fn torpedo_stats(name: String, projectile: &Projectile, modifiers: &Modifier
     // distanceOfMaxDamage (line 119) also needs ammoParams.armingTime/maneuverDist,
     // which are not on the parsed Projectile, so it stays None (no fabrication).
     let is_damage_increasing = projectile.distance_of_damage().filter(|d| !d.is_empty()).map(|pairs| {
-        let min_dist = pairs.iter().min_by(|a, b| a.1.total_cmp(&b.1)).map(|p| p.0).unwrap_or(0.0);
-        let max_dist = pairs.iter().max_by(|a, b| a.1.total_cmp(&b.1)).map(|p| p.0).unwrap_or(0.0);
-        max_dist > min_dist
+        let coeff_at_min_dist = pairs.iter().min_by(|a, b| a.1.total_cmp(&b.1)).map(|p| p.0).unwrap_or(0.0);
+        let coeff_at_max_dist = pairs.iter().max_by(|a, b| a.1.total_cmp(&b.1)).map(|p| p.0).unwrap_or(0.0);
+        coeff_at_max_dist > coeff_at_min_dist
     });
 
     TorpedoStats {
@@ -259,8 +259,13 @@ pub fn torpedo_stats(name: String, projectile: &Projectile, modifiers: &Modifier
 /// Torpedo armament section (`createTorpedoesTTX`, FactoryTorpedoes.py:12-24).
 ///
 /// `launchers` mirror `createLauncherTTX` (FactoryTorpedoes.py:74-80):
-/// `rotation_speed = rotationSpeed[0] * yawSpeedCoef + yawSpeedBonus`,
-/// `rotation_time = 180 / rotation_speed`. `reload_time` is the launcher reload
+/// `rotation_speed = rotationSpeed[0] * GTRotationSpeed + GTRotationSpeedBonus`,
+/// `rotation_time = 180 / rotation_speed`. FactoryTorpedoes.py:78 reads the
+/// `GunRotationSpeedModifiersStruct` fields `yawSpeedCoef`/`yawSpeedBonus`, which
+/// ModifiersApply.py:123 builds from `modifier.GTRotationSpeed`/`GTRotationSpeedBonus`
+/// (GunRotationSpeed.py:10-13 positional->field map); the bundle is keyed by the
+/// real modifier names, so we look up `GTRotationSpeed`/`GTRotationSpeedBonus`.
+/// `reload_time` is the launcher reload
 /// `shotDelay * GTShotDelay` (createUngroupedLaunchersTTX, FactoryTorpedoes.py:49)
 /// aggregated as the `min` non-zero across mounts (initAmmoReloadParams,
 /// FactoryTorpedoes.py:40). Per-ammo stats are resolved by NAME from `provider`
@@ -272,8 +277,10 @@ pub fn torpedoes(launchers: &[TorpedoLauncherStats], modifiers: &ModifierBundle,
         return None;
     }
 
-    let yaw_coef = modifiers.coef("yawSpeedCoef");
-    let yaw_bonus = modifiers.bonus("yawSpeedBonus");
+    // Real modifier names behind GunRotationSpeedModifiersStruct.yawSpeedCoef/yawSpeedBonus
+    // (GunRotationSpeed.py:10-13, ModifiersApply.py:123).
+    let yaw_coef = modifiers.coef("GTRotationSpeed");
+    let yaw_bonus = modifiers.bonus("GTRotationSpeedBonus");
     let shot_delay_coef = modifiers.coef("GTShotDelay");
 
     let mut result_launchers = Vec::with_capacity(launchers.len());
@@ -704,6 +711,37 @@ mod tests {
         let stats = torpedo_stats("PAPT027_Mk_16_mod_1".to_string(), &gearing_torpedo(), &bundle);
         let damage = stats.damage.expect("damage").value();
         assert!(approx(damage, (53500.0 / 3.0 + 1200.0) * 1.2), "got {damage}");
+    }
+
+    #[test]
+    fn torpedo_launcher_traverse_coef_applies() {
+        // GTRotationSpeed 1.2 (Torpedo_Mod_II, +20% traverse), real modifier name
+        // mapped from GunRotationSpeedModifiersStruct.yawSpeedCoef
+        // (GunRotationSpeed.py:10-13, ModifiersApply.py:123). base 25 -> 30, time 180/30 = 6.
+        let mods = [modifier("GTRotationSpeed", 1.2)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, BUILD);
+        let launchers = [gearing_launcher()];
+        let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
+        let torps = torpedoes(&launchers, &bundle, &provider).expect("torpedoes computed");
+        let launcher = &torps.launchers[0];
+        let rs = launcher.rotation_speed.expect("rotation_speed").value();
+        assert!(approx(rs, 30.0), "got {rs}");
+        let rt = launcher.rotation_time.expect("rotation_time").value();
+        assert!(approx(rt, 6.0), "got {rt}");
+    }
+
+    #[test]
+    fn torpedo_launcher_traverse_bonus_applies() {
+        // GTRotationSpeedBonus +5 (additive, base 0.0): 25 + 5 = 30, time 180/30 = 6.
+        let mods = [modifier("GTRotationSpeedBonus", 5.0)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, BUILD);
+        let launchers = [gearing_launcher()];
+        let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
+        let torps = torpedoes(&launchers, &bundle, &provider).expect("torpedoes computed");
+        let launcher = &torps.launchers[0];
+        assert_eq!(launcher.rotation_speed, Some(DegreesPerSecond::from(30.0)));
+        let rt = launcher.rotation_time.expect("rotation_time").value();
+        assert!(approx(rt, 6.0), "got {rt}");
     }
 
     #[test]
