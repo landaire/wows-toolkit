@@ -109,6 +109,14 @@ impl Version {
         Version { major, minor, patch, build: None }
     }
 
+    /// Whether the base `major.minor.patch` versions are equal, ignoring the build
+    /// entirely. Unlike [`Self::matches`], two *different* concrete builds of the same
+    /// base version compare equal here. Pairs with [`Self::base`]; use it to test
+    /// friendly-version equality when the builds may legitimately differ.
+    pub fn base_eq(&self, other: &Version) -> bool {
+        (self.major, self.minor, self.patch) == (other.major, other.minor, other.patch)
+    }
+
     /// Whether this version matches `other` for relaxed version-gating, where the build
     /// is an optional refinement of the friendly `major.minor.patch`. The friendly parts
     /// must be equal; the build narrows the match only when BOTH sides specify one:
@@ -116,7 +124,7 @@ impl Version {
     /// concrete builds of the same friendly version do not match. Not transitive - use `==`
     /// for strict equality.
     pub fn matches(&self, other: &Version) -> bool {
-        (self.major, self.minor, self.patch) == (other.major, other.minor, other.patch)
+        self.base_eq(other)
             && match (self.build, other.build) {
                 (Some(a), Some(b)) => a == b,
                 _ => true,
@@ -191,6 +199,19 @@ mod test {
         assert!(!build_a.matches(&other_friendly));
         assert!(!other_friendly.matches(&build_a));
         assert!(!no_build.matches(&Version::base(15, 3, 0)));
+    }
+
+    #[test]
+    fn base_eq_ignores_build() {
+        let build_a = Version { major: 15, minor: 4, patch: 0, build: NonZeroU32::new(100) };
+        let build_b = Version { major: 15, minor: 4, patch: 0, build: NonZeroU32::new(200) };
+        // Same friendly, different builds -> base_eq true (where matches would be false).
+        assert!(build_a.base_eq(&build_b));
+        assert!(!build_a.matches(&build_b));
+        // Same friendly, one build None -> still equal.
+        assert!(build_a.base_eq(&Version::base(15, 4, 0)));
+        // Different friendly -> not equal.
+        assert!(!build_a.base_eq(&Version::base(15, 3, 0)));
     }
 
     #[cfg(feature = "parsing")]
