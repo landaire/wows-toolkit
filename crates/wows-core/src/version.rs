@@ -75,8 +75,11 @@ impl Version {
                     5 => 4,
                     _ => continue,
                 };
-                let (major, minor, patch) =
-                    Self::friendly_from_account_def_parts(parts[0].parse().ok()?, parts[1].parse().ok()?, parts[2].parse().ok()?);
+                let (major, minor, patch) = Self::friendly_from_account_def_parts(
+                    parts[0].parse().ok()?,
+                    parts[1].parse().ok()?,
+                    parts[2].parse().ok()?,
+                );
                 return Some(Version { major, minor, patch, build: NonZeroU32::new(parts[build_idx].parse().ok()?) });
             }
         }
