@@ -2688,6 +2688,10 @@ impl Building {
     }
 }
 
+// Boxing the larger variants would change the rkyv archived layout (forcing a
+// FORMAT_VERSION bump and a full re-derive) and add heap indirection to every
+// param access; the size spread is inherent to the domain model.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]

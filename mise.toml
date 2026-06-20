@@ -32,9 +32,13 @@ run = "cargo clippy --fix --all-features --all-targets --allow-dirty"
 depends_post = ["fmt"]
 
 [tasks.fix-all]
-description = "Runs clippy fix, fmt, and checks WASM target"
+description = "Runs clippy fix, fmt, lints the publish (default-feature) config, and checks WASM target"
 run = [
     "cargo clippy --fix --all-features --all-targets --allow-dirty",
+    # Lint the default-feature config the published crates build with: --all-features
+    # hides feature-gated dead code (e.g. a helper used only by a parsing-gated fn).
+    # wows_minimap_renderer is omitted (native rav1e build dep); the all-features pass covers it.
+    "cargo clippy --all-targets -p wows-core -p wowsunpack -p wows_replays -p wows-battle-world -p wows-data-mgr -p wows-replay-insights -p wt-translations -- -D warnings",
     "cargo check -p wt-web --target wasm32-unknown-unknown",
 ]
 depends_post = ["fmt"]

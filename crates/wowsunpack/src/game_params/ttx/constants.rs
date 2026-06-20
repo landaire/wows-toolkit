@@ -41,6 +41,7 @@ pub const DEFAULT_UW_DAMAGE_COEFF: f32 = 0.333;
 ///     => BW_TO_BALLISTIC = 10500 / 350 = 30.0.
 ///   - Shimakaze `PJPT001_Sea_Torpedo_Type93` maxDist=667 -> 20.0 km port range:
 ///     667 * 30.0 / 1000 = 20.01 km (matches).
+///
 /// The deob independently encodes this: `VisibilityDistance.SHIP_BY_SHIP = 100.0/3`
 /// and `bwToBallisticKilometers = 1.0 / SHIP_BY_SHIP` (me658a8e4.py:143,233), so
 /// `BW_TO_BALLISTIC = KM_TO_M / SHIP_BY_SHIP = 1000 / (100/3) = 30.0`.
@@ -61,6 +62,7 @@ pub const BALLISTIC_TO_BW: f32 = 1.0 / BW_TO_BALLISTIC;
 ///     A_Artillery.maxDist=26630 -> 26.63 km; port dispersion 273 m.
 ///     base = (2.8 + 26.63 * BALLISTIC_TO_BW * KM_TO_M * (10-2.8)/1000) * 2 = 18.3824;
 ///     273 / 18.3824 = 14.851.
+///
 /// Both (different gun fields) recover ~15 within ~0.8%; at BW_TO_SHIP=15.0 the formula
 /// yields NC=271.4 m and Yamato=275.7 m (published values rounded to whole meters).
 pub const BW_TO_SHIP: f32 = 15.0;
