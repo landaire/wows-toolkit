@@ -16,10 +16,13 @@
 
 use std::collections::BTreeMap;
 
+use crate::game_params::ttx::constants::BW_TO_BALLISTIC;
+use crate::game_params::ttx::constants::KM_TO_M;
 use crate::game_params::ttx::model::AmmoCount;
 use crate::game_params::ttx::model::Seconds;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::types::AbilityCategory;
+use crate::game_params::types::Km;
 use crate::game_params::types::Meters;
 
 /// Consumable group strings, `ConsumableConstants.py` `ConsumableGroup`.
@@ -32,6 +35,19 @@ const LIFECYCLE_TIME_BASED: f32 = 1.0;
 
 /// `ConsumableNames.REGEN_CREW`, the Repair Party consumable type string.
 const TYPE_REGEN_CREW: &str = "regenCrew";
+
+/// `ConsumableNames.SMOKE_GENERATOR` (`ConsumableConstants.py:162`).
+const TYPE_SMOKE_GENERATOR: &str = "smokeGenerator";
+/// `ConsumableNames.PLANE_SMOKE_GENERATOR` (`ConsumableConstants.py:205`).
+const TYPE_PLANE_SMOKE_GENERATOR: &str = "planeSmokeGenerator";
+/// `ConsumableNames.FIGHTER` (`ConsumableConstants.py:164`).
+const TYPE_FIGHTER: &str = "fighter";
+/// `ConsumableNames.REGENERATE_HEALTH` (`ConsumableConstants.py:188`).
+const TYPE_REGENERATE_HEALTH: &str = "regenerateHealth";
+
+/// `CallFightersConsumables` (`ConsumableConstants.py:226`), the set whose members
+/// take the `callFighters*` per-type effect modifiers (ConsumableUtils.py:149-152).
+const CALL_FIGHTERS_CONSUMABLES: &[&str] = &["callFighters", "planeTacticalFighters"];
 
 /// `ConsumablesWithReloadCoefficients` (`ConsumableConstants.py`). Membership gates
 /// the per-type `<typeName>ReloadCoeff` multiplier in `getConsumableReloadTime`
@@ -143,6 +159,36 @@ pub struct EffectiveConsumable {
     /// `regenerationHPSpeed * regenerationHPSpeed` modifier (ConsumableUtils.py:140).
     /// `None` for non-heal consumables.
     pub regeneration_hp_speed: Option<f32>,
+    /// Smoke screen radius, `logic.radius *= smokeScreenRadiusCoefficient`
+    /// (ConsumableUtils.py:134). KILOMETER measure with `BW_TO_BALLISTIC / KM_TO_M`
+    /// scale (MODIFIER_SETTINGS `radius`). `Some` only for smoke generators with a base
+    /// `radius`.
+    pub smoke_radius: Option<Km>,
+    /// Smoke screen lifetime, `logic.lifeTime *= smokeGeneratorLifeTime` (ship) /
+    /// `planeSmokeGeneratorLifeTime` (plane) (ConsumableUtils.py:133/137). SECOND
+    /// measure, multiplier 1.0 (MODIFIER_SETTINGS `lifeTime`). `Some` only for smoke
+    /// generators with a base `lifeTime`.
+    pub smoke_lifetime: Option<Seconds>,
+    /// Fighter count, `logic.fightersNum += extraFighterCount` (ConsumableUtils.py:147,
+    /// additive). NONE measure (a raw count). `Some` only for the `fighter` type with a
+    /// base `fightersNum`.
+    pub fighters_count: Option<f32>,
+    /// Call-fighters patrol radius, `logic.radius *= callFightersRadiusCoeff`
+    /// (ConsumableUtils.py:150). KILOMETER measure with `BW_TO_BALLISTIC / KM_TO_M`
+    /// scale. `Some` only for `CallFightersConsumables` types with a base `radius`.
+    pub call_fighters_radius: Option<Km>,
+    /// Call-fighters attack delay, `logic.timeDelayAttack *= callFightersTimeDelayAttack`
+    /// (ConsumableUtils.py:151). Seconds, multiplier 1.0 (no MODIFIER_SETTINGS display
+    /// override). `Some` only for `CallFightersConsumables` types with a base value.
+    pub call_fighters_time_delay: Option<Seconds>,
+    /// Call-fighters appearance delay, `logic.timeFromHeaven *= callFightersAppearDelay`
+    /// (ConsumableUtils.py:152). Seconds, multiplier 1.0. `Some` only for
+    /// `CallFightersConsumables` types with a base value.
+    pub call_fighters_time_from_heaven: Option<Seconds>,
+    /// Plane heal rate, `logic.regenerationRate *= planeRegenerationRate`
+    /// (ConsumableUtils.py:144). Raw rate (PERCENT measure, multiplier 1.0). `Some` only
+    /// for the `regenerateHealth` type with a base `regenerationRate`.
+    pub plane_regeneration_rate: Option<f32>,
 }
 
 /// Multiply `base` by `bundle.coef(name)` only when the consumable `type_name` is in
@@ -229,6 +275,14 @@ fn field(fields: &BTreeMap<String, f32>, name: &str) -> Option<f32> {
     fields.get(name).copied()
 }
 
+/// Convert a BigWorld ballistic `radius` into kilometers, MODIFIER_SETTINGS `radius`
+/// uses `Measures.KILOMETER` with scale `BW_TO_BALLISTIC / KM_TO_M`
+/// (`mbf4783af/ModifierSettings.py`). The multiplicative effect modifier commutes with
+/// this scale, so the conversion order is irrelevant.
+fn km_from_ballistic(radius: f32) -> Km {
+    Km::from(radius * (BW_TO_BALLISTIC / KM_TO_M))
+}
+
 /// Compute the final, modifier-applied stats for `category` under `modifiers`.
 ///
 /// This is the consumable analog of the TTX weapon factories: it returns FINAL
@@ -294,6 +348,43 @@ pub fn effective_consumable(category: &AbilityCategory, modifiers: &ModifierBund
     // final.
     let detection_radius = category.detection_radius();
 
+    // Per-type effect fields (ConsumableUtils.py:132-152, identical in both the
+    // COUNT_BASED and TIME_BASED branches). Each reads its base off effect_fields() and
+    // applies the per-type modifier via bundle.apply (operator picked by the modifier's
+    // own classification); an absent base field yields None.
+    let mut smoke_radius = None;
+    let mut smoke_lifetime = None;
+    let mut fighters_count = None;
+    let mut call_fighters_radius = None;
+    let mut call_fighters_time_delay = None;
+    let mut call_fighters_time_from_heaven = None;
+    let mut plane_regeneration_rate = None;
+
+    if type_name == TYPE_SMOKE_GENERATOR {
+        // :133 lifeTime *= smokeGeneratorLifeTime; :134 radius *= smokeScreenRadiusCoefficient
+        smoke_lifetime = field(fields, "lifeTime").map(|v| Seconds::from(modifiers.apply(v, "smokeGeneratorLifeTime")));
+        smoke_radius = field(fields, "radius").map(|v| km_from_ballistic(modifiers.apply(v, "smokeScreenRadiusCoefficient")));
+    } else if type_name == TYPE_PLANE_SMOKE_GENERATOR {
+        // :137 lifeTime *= planeSmokeGeneratorLifeTime (plane smoke has no radius modifier)
+        smoke_lifetime =
+            field(fields, "lifeTime").map(|v| Seconds::from(modifiers.apply(v, "planeSmokeGeneratorLifeTime")));
+    } else if type_name == TYPE_REGENERATE_HEALTH {
+        // :144 regenerationRate *= planeRegenerationRate
+        plane_regeneration_rate = field(fields, "regenerationRate").map(|v| modifiers.apply(v, "planeRegenerationRate"));
+    } else if type_name == TYPE_FIGHTER {
+        // :147 fightersNum += extraFighterCount (additive, base 0.0)
+        fighters_count = field(fields, "fightersNum").map(|v| modifiers.apply(v, "extraFighterCount"));
+    } else if CALL_FIGHTERS_CONSUMABLES.contains(&type_name) {
+        // :150 radius *= callFightersRadiusCoeff
+        call_fighters_radius = field(fields, "radius").map(|v| km_from_ballistic(modifiers.apply(v, "callFightersRadiusCoeff")));
+        // :151 timeDelayAttack *= callFightersTimeDelayAttack
+        call_fighters_time_delay =
+            field(fields, "timeDelayAttack").map(|v| Seconds::from(modifiers.apply(v, "callFightersTimeDelayAttack")));
+        // :152 timeFromHeaven *= callFightersAppearDelay
+        call_fighters_time_from_heaven =
+            field(fields, "timeFromHeaven").map(|v| Seconds::from(modifiers.apply(v, "callFightersAppearDelay")));
+    }
+
     EffectiveConsumable {
         reload_time,
         work_time,
@@ -302,6 +393,13 @@ pub fn effective_consumable(category: &AbilityCategory, modifiers: &ModifierBund
         max_capacity,
         detection_radius,
         regeneration_hp_speed,
+        smoke_radius,
+        smoke_lifetime,
+        fighters_count,
+        call_fighters_radius,
+        call_fighters_time_delay,
+        call_fighters_time_from_heaven,
+        plane_regeneration_rate,
     }
 }
 
@@ -349,6 +447,81 @@ mod tests {
             .preparation_time(0.0)
             .reload_time(90.0)
             .work_time(100.0)
+            .effect_fields(fields)
+            .build()
+    }
+
+    /// A Smoke Generator (`smokeGenerator`, COUNT_BASED) with the real
+    /// `PCY007_SmokeGenerator` logic values (jaq-verified on GameParams.json): logic
+    /// `radius` 15.0, `lifeTime` 77.0.
+    fn smoke_generator() -> AbilityCategory {
+        let mut fields = BTreeMap::new();
+        fields.insert("lifeCycleType".to_string(), LIFECYCLE_COUNT_BASED);
+        fields.insert("radius".to_string(), 15.0);
+        fields.insert("lifeTime".to_string(), 77.0);
+        AbilityCategory::builder()
+            .consumable_type("smokeGenerator".to_string())
+            .group("ship".to_string())
+            .icon_id(String::new())
+            .num_consumables(2)
+            .preparation_time(0.0)
+            .reload_time(240.0)
+            .work_time(20.0)
+            .effect_fields(fields)
+            .build()
+    }
+
+    /// A Call Fighters (`callFighters`, SQUADRON) with the real logic values: `radius`
+    /// 116.667, `timeDelayAttack` 5.0, `timeFromHeaven` 3.0.
+    fn call_fighters() -> AbilityCategory {
+        let mut fields = BTreeMap::new();
+        fields.insert("lifeCycleType".to_string(), LIFECYCLE_COUNT_BASED);
+        fields.insert("radius".to_string(), 116.667);
+        fields.insert("timeDelayAttack".to_string(), 5.0);
+        fields.insert("timeFromHeaven".to_string(), 3.0);
+        AbilityCategory::builder()
+            .consumable_type("callFighters".to_string())
+            .group("squadron".to_string())
+            .icon_id(String::new())
+            .num_consumables(-1)
+            .preparation_time(0.0)
+            .reload_time(60.0)
+            .work_time(60.0)
+            .effect_fields(fields)
+            .build()
+    }
+
+    /// A Fighter (`fighter`, COUNT_BASED) with the real `fightersNum` 1.
+    fn fighter() -> AbilityCategory {
+        let mut fields = BTreeMap::new();
+        fields.insert("lifeCycleType".to_string(), LIFECYCLE_COUNT_BASED);
+        fields.insert("fightersNum".to_string(), 1.0);
+        AbilityCategory::builder()
+            .consumable_type("fighter".to_string())
+            .group("ship".to_string())
+            .icon_id(String::new())
+            .num_consumables(3)
+            .preparation_time(0.0)
+            .reload_time(90.0)
+            .work_time(60.0)
+            .effect_fields(fields)
+            .build()
+    }
+
+    /// A plane Regenerate Health (`regenerateHealth`, SQUADRON) with the real
+    /// `regenerationRate` 0.1.
+    fn regenerate_health() -> AbilityCategory {
+        let mut fields = BTreeMap::new();
+        fields.insert("lifeCycleType".to_string(), LIFECYCLE_COUNT_BASED);
+        fields.insert("regenerationRate".to_string(), 0.1);
+        AbilityCategory::builder()
+            .consumable_type("regenerateHealth".to_string())
+            .group("squadron".to_string())
+            .icon_id(String::new())
+            .num_consumables(-1)
+            .preparation_time(0.0)
+            .reload_time(60.0)
+            .work_time(60.0)
             .effect_fields(fields)
             .build()
     }
@@ -441,5 +614,111 @@ mod tests {
         let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, BUILD);
         let eff = effective_consumable(&cat, &bundle);
         assert_eq!(eff.work_time, Some(Seconds::from(80.0)));
+    }
+
+    /// Smoke generator base: radius 15 -> 0.45 km (15 * 30/1000), lifeTime 77 -> 77 s,
+    /// empty bundle leaves both at the converted base. Other per-type fields are None.
+    #[test]
+    fn smoke_effects_base() {
+        let cat = smoke_generator();
+        let eff = effective_consumable(&cat, &ModifierBundle::empty(Species::Cruiser));
+        assert_eq!(eff.smoke_radius, Some(Km::from(0.45)));
+        assert_eq!(eff.smoke_lifetime, Some(Seconds::from(77.0)));
+        assert_eq!(eff.call_fighters_radius, None);
+        assert_eq!(eff.fighters_count, None);
+        assert_eq!(eff.plane_regeneration_rate, None);
+    }
+
+    /// `smokeScreenRadiusCoefficient` 1.2 (real modifier, base 1.0, multiplicative)
+    /// scales radius: 15 * 1.2 * 30/1000 = 0.54 km.
+    #[test]
+    fn smoke_radius_modifier_applies() {
+        let cat = smoke_generator();
+        let mods = [modifier("smokeScreenRadiusCoefficient", 1.2)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, BUILD);
+        let eff = effective_consumable(&cat, &bundle);
+        assert!(
+            (eff.smoke_radius.unwrap().value() - 0.54).abs() < 1e-4,
+            "got {}",
+            eff.smoke_radius.unwrap().value()
+        );
+    }
+
+    /// Call fighters base: radius 116.667 -> 3.5 km (116.667 * 30/1000), timeDelayAttack
+    /// 5 s, timeFromHeaven 3 s, empty bundle. Smoke/fighter/regen fields are None.
+    #[test]
+    fn call_fighters_effects_base() {
+        let cat = call_fighters();
+        let eff = effective_consumable(&cat, &ModifierBundle::empty(Species::AirCarrier));
+        assert!(
+            (eff.call_fighters_radius.unwrap().value() - 3.5).abs() < 1e-3,
+            "got {}",
+            eff.call_fighters_radius.unwrap().value()
+        );
+        assert_eq!(eff.call_fighters_time_delay, Some(Seconds::from(5.0)));
+        assert_eq!(eff.call_fighters_time_from_heaven, Some(Seconds::from(3.0)));
+        assert_eq!(eff.smoke_radius, None);
+        assert_eq!(eff.fighters_count, None);
+    }
+
+    /// `callFightersTimeDelayAttack` 0.8 (real modifier, base 1.0, multiplicative)
+    /// scales timeDelayAttack: 5 * 0.8 = 4 s.
+    #[test]
+    fn call_fighters_time_modifier_applies() {
+        let cat = call_fighters();
+        let mods = [modifier("callFightersTimeDelayAttack", 0.8)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::AirCarrier, BUILD);
+        let eff = effective_consumable(&cat, &bundle);
+        assert_eq!(eff.call_fighters_time_delay, Some(Seconds::from(4.0)));
+    }
+
+    /// `extraFighterCount` 1 (real modifier, base 0.0, ADDITIVE) adds to fightersNum:
+    /// 1 + 1 = 2.
+    #[test]
+    fn fighter_count_additive_modifier() {
+        let cat = fighter();
+        let mods = [modifier("extraFighterCount", 1.0)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, BUILD);
+        let eff = effective_consumable(&cat, &bundle);
+        assert_eq!(eff.fighters_count, Some(2.0));
+        assert_eq!(eff.smoke_radius, None);
+    }
+
+    /// Fighter base with no modifiers leaves fightersNum at 1.
+    #[test]
+    fn fighter_count_base() {
+        let cat = fighter();
+        let eff = effective_consumable(&cat, &ModifierBundle::empty(Species::Cruiser));
+        assert_eq!(eff.fighters_count, Some(1.0));
+    }
+
+    /// `planeRegenerationRate` 1.5 (real modifier, base 1.0, multiplicative) scales
+    /// regenerationRate: 0.1 * 1.5 = 0.15.
+    #[test]
+    fn plane_regen_rate_modifier_applies() {
+        let cat = regenerate_health();
+        let mods = [modifier("planeRegenerationRate", 1.5)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::AirCarrier, BUILD);
+        let eff = effective_consumable(&cat, &bundle);
+        assert!(
+            (eff.plane_regeneration_rate.unwrap() - 0.15).abs() < 1e-6,
+            "got {}",
+            eff.plane_regeneration_rate.unwrap()
+        );
+    }
+
+    /// A non-matching consumable (`crashCrew`) has all the new per-type effect fields
+    /// None (no base fields, no matching type gate).
+    #[test]
+    fn non_matching_consumable_has_no_effect_fields() {
+        let cat = crash_crew();
+        let eff = effective_consumable(&cat, &ModifierBundle::empty(Species::Battleship));
+        assert_eq!(eff.smoke_radius, None);
+        assert_eq!(eff.smoke_lifetime, None);
+        assert_eq!(eff.fighters_count, None);
+        assert_eq!(eff.call_fighters_radius, None);
+        assert_eq!(eff.call_fighters_time_delay, None);
+        assert_eq!(eff.call_fighters_time_from_heaven, None);
+        assert_eq!(eff.plane_regeneration_rate, None);
     }
 }
