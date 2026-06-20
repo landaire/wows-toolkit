@@ -1681,6 +1681,26 @@ pub struct CrewPersonality {
     tags: Vec<String>,
 }
 
+impl CrewPersonality {
+    /// True for named, one-off commanders (Halsey, Yamamoto, ...) versus the
+    /// generic nation crews. Absent in the data means not unique.
+    pub fn is_unique(&self) -> bool {
+        self.is_unique.unwrap_or(false)
+    }
+
+    /// True when the commander is a real person (portrait + name) rather than a
+    /// generic crew. Absent means false.
+    pub fn is_person(&self) -> bool {
+        self.is_person.unwrap_or(false)
+    }
+
+    /// The person-name token (e.g. "Halsey"). The localized display name is
+    /// looked up as `IDS_<NAME>` with the token uppercased.
+    pub fn name(&self) -> &str {
+        &self.person_name
+    }
+}
+
 #[derive(Clone, Builder, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -2050,6 +2070,10 @@ impl Crew {
 
     pub fn skills(&self) -> Option<&[CrewSkill]> {
         self.skills.as_deref()
+    }
+
+    pub fn personality(&self) -> &CrewPersonality {
+        &self.personality
     }
 }
 
