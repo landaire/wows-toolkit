@@ -353,20 +353,27 @@ pub fn load_wows_files(
         && version_str.contains(',')
     {
         let full_build_info = Version::from_client_exe(&version_str);
-        let full_build = full_build_info.build_number().expect("client version carries a build");
-        if available_builds.contains(&full_build) {
-            latest_build = full_build;
-        }
-
-        let friendly_build = format!("{}.{}.{}.0", full_build_info.major, full_build_info.minor, full_build_info.patch);
-        full_version = Some(full_build_info);
-
-        for temp_replays_dir in [replays_dir.join(&friendly_build), replays_dir.join(friendly_build)] {
-            debug!("Looking for build-specific replays dir at {:?}", temp_replays_dir);
-            if temp_replays_dir.exists() {
-                replays_dir = temp_replays_dir;
-                break;
+        if let Some(full_build) = full_build_info.build_number() {
+            if available_builds.contains(&full_build) {
+                latest_build = full_build;
             }
+
+            let friendly_build =
+                format!("{}.{}.{}.0", full_build_info.major, full_build_info.minor, full_build_info.patch);
+            full_version = Some(full_build_info);
+
+            for temp_replays_dir in [replays_dir.join(&friendly_build), replays_dir.join(friendly_build)] {
+                debug!("Looking for build-specific replays dir at {:?}", temp_replays_dir);
+                if temp_replays_dir.exists() {
+                    replays_dir = temp_replays_dir;
+                    break;
+                }
+            }
+        } else {
+            tracing::warn!(
+                "preferences version {:?} lacks a build number; using highest installed build and default replays dir",
+                version_str
+            );
         }
     }
 
@@ -407,25 +414,32 @@ pub fn load_wows_files(
         && let Some(dump_base) = game_data_dump_base_with_override(&game_data_cache_dir)
     {
         let version_str = format!("{}.{}.{}", fv.major, fv.minor, fv.patch);
-        let fv_build = fv.build_number().expect("client version carries a build");
-        if !wows_data_mgr::dump::dump_exists(&dump_base, &version_str, fv_build) {
-            let game_dir = wows_directory.clone();
-            let build = fv_build;
-            let vs = version_str.clone();
-            crate::util::thread::spawn_logged("auto-dump-game-data", move || {
-                if let Err(e) = wows_data_mgr::dump::dump_renderer_data(&game_dir, build, &vs, &dump_base, None, true) {
-                    tracing::warn!("Auto-dump failed for {vs}_{build}: {e}");
-                } else {
-                    // Copy constants.json into the dump if available on disk
-                    if let Some(constants) = load_versioned_constants_from_disk(build) {
-                        let dump_dir = wows_data_mgr::dump::dump_dir(&dump_base, &vs, build);
-                        let dest = dump_dir.join("constants.json");
-                        if let Ok(bytes) = serde_json::to_vec_pretty(&constants) {
-                            let _ = std::fs::write(&dest, bytes);
+        if let Some(fv_build) = fv.build_number() {
+            if !wows_data_mgr::dump::dump_exists(&dump_base, &version_str, fv_build) {
+                let game_dir = wows_directory.clone();
+                let build = fv_build;
+                let vs = version_str.clone();
+                crate::util::thread::spawn_logged("auto-dump-game-data", move || {
+                    if let Err(e) =
+                        wows_data_mgr::dump::dump_renderer_data(&game_dir, build, &vs, &dump_base, None, true)
+                    {
+                        tracing::warn!("Auto-dump failed for {vs}_{build}: {e}");
+                    } else {
+                        // Copy constants.json into the dump if available on disk
+                        if let Some(constants) = load_versioned_constants_from_disk(build) {
+                            let dump_dir = wows_data_mgr::dump::dump_dir(&dump_base, &vs, build);
+                            let dest = dump_dir.join("constants.json");
+                            if let Ok(bytes) = serde_json::to_vec_pretty(&constants) {
+                                let _ = std::fs::write(&dest, bytes);
+                            }
                         }
                     }
-                }
-            });
+                });
+            }
+        } else {
+            tracing::warn!(
+                "preferences version {version_str} lacks a build number; skipping auto-dump of game data"
+            );
         }
     }
 

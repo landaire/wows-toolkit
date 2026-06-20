@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::num::NonZeroU32;
 
 use super::provider::GameMetadataProvider;
 use super::types::Crew;
@@ -37,7 +38,7 @@ pub struct GridSlot {
 }
 
 struct Layout {
-    min_build: u32,
+    min_build: NonZeroU32,
     air_carrier: &'static [GridSlot],
     battleship: &'static [GridSlot],
     cruiser: &'static [GridSlot],
@@ -60,13 +61,13 @@ impl Layout {
     }
 }
 
-/// The captain skill grid for a ship `species` at game build `build`, as rows of
+/// The captain skill grid for a ship `species` at game `version`, as rows of
 /// `GridSlot` ordered by tier then column. Returns the modern per-species layout
-/// for >=0.10 builds and the shared pre-rework layout for older ones. `None` when
-/// no grid is known: `species` has no captain grid, or `build` predates the
+/// for >=0.10 versions and the shared pre-rework layout for older ones. `None` when
+/// no grid is known: `species` has no captain grid, or `version` predates the
 /// oldest extracted layout.
-pub fn skill_grid(build: u32, species: Species) -> Option<&'static [GridSlot]> {
-    modern_grid(build, species).or_else(|| old_grid(build))
+pub fn skill_grid(version: &Version, species: Species) -> Option<&'static [GridSlot]> {
+    modern_grid(version, species).or_else(|| old_grid(version))
 }
 
 /// One skill in a SkillGridRow, translated and flagged learned. Carries the
@@ -130,7 +131,6 @@ pub fn build_skill_grid(
     crew: Option<&Crew>,
     learned: &HashSet<CrewSkillType>,
     species: Species,
-    build: u32,
     metadata: &GameMetadataProvider,
     version: &Version,
 ) -> Vec<SkillGridRow> {
@@ -138,7 +138,7 @@ pub fn build_skill_grid(
         return Vec::new();
     };
 
-    let grid = skill_grid(build, species);
+    let grid = skill_grid(version, species);
 
     if let Some(grid) = grid {
         let by_name: HashMap<&str, &CrewSkill> =
@@ -178,16 +178,30 @@ pub fn build_skill_grid(
 }
 
 /// Modern (>=0.10) per-species layout. Picks the layout with the largest
-/// `min_build <= build`; `None` if no layout applies or the species is gridless.
-fn modern_grid(build: u32, species: Species) -> Option<&'static [GridSlot]> {
-    let mut chosen: Option<&Layout> = None;
-    for layout in LAYOUTS {
-        if layout.min_build <= build {
-            chosen = Some(layout);
-        } else {
-            break;
+/// `min_build <= version.build_number()`; `None` if no layout applies or the
+/// species is gridless.
+///
+/// Gating is by build, not major.minor.patch, because the friendly versions are
+/// not monotonic with build: 11.0.0..11.7.0 (builds 5045210..6081105) precede
+/// 0.11.8..0.11.11 (builds 6223574..6623042), whose stored version major is 0.
+/// `Version::is_at_least` would therefore order 11.0.0 above 0.11.9 and pick the
+/// wrong layout. Build precision is required to preserve the threshold ordering.
+/// When the build is unknown, fail open to the newest layout.
+fn modern_grid(version: &Version, species: Species) -> Option<&'static [GridSlot]> {
+    let chosen = match version.build_number() {
+        Some(build) => {
+            let mut chosen: Option<&Layout> = None;
+            for layout in LAYOUTS {
+                if layout.min_build.get() <= build {
+                    chosen = Some(layout);
+                } else {
+                    break;
+                }
+            }
+            chosen
         }
-    }
+        None => LAYOUTS.last(),
+    };
     match chosen?.species(species) {
         [] => None,
         slots => Some(slots),
@@ -196,23 +210,30 @@ fn modern_grid(build: u32, species: Species) -> Option<&'static [GridSlot]> {
 
 /// Pre-rework (<0.10) shared grid from GameParams (tier+column per skill).
 /// `group` is unset (Attack) -- pre-rework skills carry no group and the UI
-/// orders by tier+column only. `None` if `build` predates the oldest layout.
-fn old_grid(build: u32) -> Option<&'static [GridSlot]> {
-    let mut chosen: Option<&'static [GridSlot]> = None;
-    for (min_build, slots) in OLD_LAYOUTS {
-        if *min_build <= build {
-            chosen = Some(slots);
-        } else {
-            break;
+/// orders by tier+column only. Picks the largest `min_build <= build`. `None` if
+/// the build predates the oldest layout. Build precision matches `modern_grid`;
+/// when the build is unknown, fail open to the newest layout.
+fn old_grid(version: &Version) -> Option<&'static [GridSlot]> {
+    match version.build_number() {
+        Some(build) => {
+            let mut chosen: Option<&'static [GridSlot]> = None;
+            for (min_build, slots) in OLD_LAYOUTS {
+                if min_build.get() <= build {
+                    chosen = Some(slots);
+                } else {
+                    break;
+                }
+            }
+            chosen
         }
+        None => OLD_LAYOUTS.last().map(|(_, slots)| *slots),
     }
-    chosen
 }
 
 static LAYOUTS: &[Layout] = &[
     // 10.0.0
     Layout {
-        min_build: 3343484,
+        min_build: NonZeroU32::new(3343484).unwrap(),
         air_carrier: &[
             GridSlot { skill: "PlanesForsageRenewal", tier: 0, column: 1, group: SkillGroup::Attack },
             GridSlot { skill: "PlanesForsageDuration", tier: 0, column: 2, group: SkillGroup::Attack },
@@ -387,7 +408,7 @@ static LAYOUTS: &[Layout] = &[
     },
     // 10.4.0
     Layout {
-        min_build: 3912232,
+        min_build: NonZeroU32::new(3912232).unwrap(),
         air_carrier: &[
             GridSlot { skill: "PlanesForsageRenewal", tier: 0, column: 1, group: SkillGroup::Attack },
             GridSlot { skill: "PlanesForsageDuration", tier: 0, column: 2, group: SkillGroup::Attack },
@@ -562,7 +583,7 @@ static LAYOUTS: &[Layout] = &[
     },
     // 10.7.2
     Layout {
-        min_build: 4365481,
+        min_build: NonZeroU32::new(4365481).unwrap(),
         air_carrier: &[
             GridSlot { skill: "PlanesForsageRenewal", tier: 0, column: 1, group: SkillGroup::Attack },
             GridSlot { skill: "PlanesForsageDuration", tier: 0, column: 2, group: SkillGroup::Attack },
@@ -733,7 +754,7 @@ static LAYOUTS: &[Layout] = &[
     },
     // 0.11.9
     Layout {
-        min_build: 6359964,
+        min_build: NonZeroU32::new(6359964).unwrap(),
         air_carrier: &[
             GridSlot { skill: "PlanesForsageRenewal", tier: 0, column: 1, group: SkillGroup::Attack },
             GridSlot { skill: "PlanesForsageDuration", tier: 0, column: 2, group: SkillGroup::Attack },
@@ -904,7 +925,7 @@ static LAYOUTS: &[Layout] = &[
     },
     // 15.2.0
     Layout {
-        min_build: 12116141,
+        min_build: NonZeroU32::new(12116141).unwrap(),
         air_carrier: &[
             GridSlot { skill: "PlanesForsageRenewal", tier: 0, column: 1, group: SkillGroup::Attack },
             GridSlot { skill: "PlanesForsageDuration", tier: 0, column: 2, group: SkillGroup::Attack },
@@ -1075,10 +1096,10 @@ static LAYOUTS: &[Layout] = &[
     },
 ];
 
-static OLD_LAYOUTS: &[(u32, &[GridSlot])] = &[
+static OLD_LAYOUTS: &[(NonZeroU32, &[GridSlot])] = &[
     // 0.6.13
     (
-        296659,
+        NonZeroU32::new(296659).unwrap(),
         &[
             GridSlot { skill: "PriorityTargetModifier", tier: 0, column: 0, group: SkillGroup::Attack },
             GridSlot { skill: "MeticulousPreventionModifier", tier: 0, column: 1, group: SkillGroup::Attack },
@@ -1116,7 +1137,7 @@ static OLD_LAYOUTS: &[(u32, &[GridSlot])] = &[
     ),
     // 8.0.2
     (
-        1325581,
+        NonZeroU32::new(1325581).unwrap(),
         &[
             GridSlot { skill: "PriorityTargetModifier", tier: 0, column: 0, group: SkillGroup::Attack },
             GridSlot { skill: "MeticulousPreventionModifier", tier: 0, column: 1, group: SkillGroup::Attack },
@@ -1178,6 +1199,67 @@ mod build_skill_grid_tests {
         assert_eq!(rows[0].skills.len(), 2);
         assert_eq!(rows[1].point_cost, Some(SkillPointCost::new(2)));
         assert_eq!(rows[1].skills.len(), 1);
+    }
+
+    fn version_with_build(major: u32, minor: u32, patch: u32, build: u32) -> Version {
+        Version { major, minor, patch, build: NonZeroU32::new(build) }
+    }
+
+    #[test]
+    fn modern_grid_selects_previous_layout_just_below_threshold() {
+        // One build below the 10.4.0 threshold (3912232) must still get the 10.0.0 layout.
+        let below = version_with_build(10, 3, 0, 3912231);
+        let at = version_with_build(10, 4, 0, 3912232);
+        assert_eq!(
+            modern_grid(&below, Species::Battleship).map(|s| s.as_ptr()),
+            modern_grid(&version_with_build(10, 0, 0, 3343484), Species::Battleship).map(|s| s.as_ptr())
+        );
+        assert_ne!(
+            modern_grid(&below, Species::Battleship).map(|s| s.as_ptr()),
+            modern_grid(&at, Species::Battleship).map(|s| s.as_ptr())
+        );
+    }
+
+    #[test]
+    fn modern_grid_at_or_above_threshold_picks_that_layout() {
+        // 10.7.2 threshold is build 4365481.
+        let at = version_with_build(10, 7, 2, 4365481);
+        let above = version_with_build(11, 0, 0, 5045210);
+        assert_eq!(
+            modern_grid(&at, Species::Battleship).map(|s| s.as_ptr()),
+            modern_grid(&above, Species::Battleship).map(|s| s.as_ptr())
+        );
+    }
+
+    #[test]
+    fn modern_grid_newer_than_newest_threshold_fails_open_to_latest() {
+        // A build past the newest threshold (15.2.0 / 12116141) gets the latest layout.
+        let future = version_with_build(16, 0, 0, 99_999_999);
+        let newest = LAYOUTS.last().unwrap().species(Species::Battleship);
+        assert_eq!(modern_grid(&future, Species::Battleship).unwrap().as_ptr(), newest.as_ptr());
+    }
+
+    #[test]
+    fn modern_grid_unknown_build_fails_open_to_latest() {
+        let no_build = Version::base(16, 0, 0);
+        let newest = LAYOUTS.last().unwrap().species(Species::Battleship);
+        assert_eq!(modern_grid(&no_build, Species::Battleship).unwrap().as_ptr(), newest.as_ptr());
+    }
+
+    #[test]
+    fn old_grid_selected_for_pre_rework_build() {
+        // A pre-10.0 build resolves to the shared pre-rework grid (no modern layout).
+        let old = version_with_build(8, 0, 2, 1325581);
+        assert!(modern_grid(&old, Species::Battleship).is_none());
+        assert!(old_grid(&old).is_some());
+        assert!(skill_grid(&old, Species::Battleship).is_some());
+    }
+
+    #[test]
+    fn skill_grid_none_before_oldest_layout() {
+        // Older than the oldest extracted layout (0.6.13 / 296659): no grid.
+        let ancient = version_with_build(0, 6, 12, 200000);
+        assert!(skill_grid(&ancient, Species::Battleship).is_none());
     }
 
     #[test]

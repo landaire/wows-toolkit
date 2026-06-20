@@ -229,7 +229,6 @@ impl TranslatedBuild {
                     Some(crew),
                     &learned,
                     species,
-                    version.build_number().expect("replay version carries a build"),
                     metadata_provider,
                     version,
                 )

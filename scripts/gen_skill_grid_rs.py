@@ -38,7 +38,10 @@ HEADER = """\
 //! instead and are not covered here. Regenerate after adding game versions.
 #![allow(dead_code)]
 
+use std::num::NonZeroU32;
+
 use super::types::Species;
+use crate::data::Version;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SkillGroup {
@@ -60,7 +63,7 @@ pub struct GridSlot {
 }
 
 struct Layout {
-    min_build: u32,
+    min_build: NonZeroU32,
     air_carrier: &'static [GridSlot],
     battleship: &'static [GridSlot],
     cruiser: &'static [GridSlot],
@@ -83,26 +86,40 @@ impl Layout {
     }
 }
 
-/// The captain skill grid for a ship `species` at game build `build`, as rows of
+/// The captain skill grid for a ship `species` at game `version`, as rows of
 /// `GridSlot` ordered by tier then column. Returns the modern per-species layout
-/// for >=0.10 builds and the shared pre-rework layout for older ones. `None` when
-/// no grid is known: `species` has no captain grid, or `build` predates the
+/// for >=0.10 versions and the shared pre-rework layout for older ones. `None` when
+/// no grid is known: `species` has no captain grid, or `version` predates the
 /// oldest extracted layout.
-pub fn skill_grid(build: u32, species: Species) -> Option<&'static [GridSlot]> {
-    modern_grid(build, species).or_else(|| old_grid(build))
+pub fn skill_grid(version: &Version, species: Species) -> Option<&'static [GridSlot]> {
+    modern_grid(version, species).or_else(|| old_grid(version))
 }
 
 /// Modern (>=0.10) per-species layout. Picks the layout with the largest
-/// `min_build <= build`; `None` if no layout applies or the species is gridless.
-fn modern_grid(build: u32, species: Species) -> Option<&'static [GridSlot]> {
-    let mut chosen: Option<&Layout> = None;
-    for layout in LAYOUTS {
-        if layout.min_build <= build {
-            chosen = Some(layout);
-        } else {
-            break;
+/// `min_build <= version.build_number()`; `None` if no layout applies or the
+/// species is gridless.
+///
+/// Gating is by build, not major.minor.patch, because the friendly versions are
+/// not monotonic with build: 11.0.0..11.7.0 (builds 5045210..6081105) precede
+/// 0.11.8..0.11.11 (builds 6223574..6623042), whose stored version major is 0.
+/// `Version::is_at_least` would therefore order 11.0.0 above 0.11.9 and pick the
+/// wrong layout. Build precision is required to preserve the threshold ordering.
+/// When the build is unknown, fail open to the newest layout.
+fn modern_grid(version: &Version, species: Species) -> Option<&'static [GridSlot]> {
+    let chosen = match version.build_number() {
+        Some(build) => {
+            let mut chosen: Option<&Layout> = None;
+            for layout in LAYOUTS {
+                if layout.min_build.get() <= build {
+                    chosen = Some(layout);
+                } else {
+                    break;
+                }
+            }
+            chosen
         }
-    }
+        None => LAYOUTS.last(),
+    };
     match chosen?.species(species) {
         [] => None,
         slots => Some(slots),
@@ -111,17 +128,24 @@ fn modern_grid(build: u32, species: Species) -> Option<&'static [GridSlot]> {
 
 /// Pre-rework (<0.10) shared grid from GameParams (tier+column per skill).
 /// `group` is unset (Attack) -- pre-rework skills carry no group and the UI
-/// orders by tier+column only. `None` if `build` predates the oldest layout.
-fn old_grid(build: u32) -> Option<&'static [GridSlot]> {
-    let mut chosen: Option<&'static [GridSlot]> = None;
-    for (min_build, slots) in OLD_LAYOUTS {
-        if *min_build <= build {
-            chosen = Some(slots);
-        } else {
-            break;
+/// orders by tier+column only. Picks the largest `min_build <= build`. `None` if
+/// the build predates the oldest layout. Build precision matches `modern_grid`;
+/// when the build is unknown, fail open to the newest layout.
+fn old_grid(version: &Version) -> Option<&'static [GridSlot]> {
+    match version.build_number() {
+        Some(build) => {
+            let mut chosen: Option<&'static [GridSlot]> = None;
+            for (min_build, slots) in OLD_LAYOUTS {
+                if min_build.get() <= build {
+                    chosen = Some(slots);
+                } else {
+                    break;
+                }
+            }
+            chosen
         }
+        None => OLD_LAYOUTS.last().map(|(_, slots)| *slots),
     }
-    chosen
 }
 
 """
@@ -148,7 +172,7 @@ def main():
     for entry in data:
         out.write(u"    // %s\n" % entry["version"])
         out.write(u"    Layout {\n")
-        out.write(u"        min_build: %d,\n" % entry["min_build"])
+        out.write(u"        min_build: NonZeroU32::new(%d).unwrap(),\n" % entry["min_build"])
         for json_key, field in SHIP_FIELDS:
             slots = entry["grid"].get(json_key, [])
             slots = sorted(slots, key=lambda s: (s["tier"], s["column"]))
@@ -163,7 +187,7 @@ def main():
     out.write(u"];\n")
 
     # Old (pre-rework) per-build grid (flat, shared across species), deduped.
-    out.write(u"\nstatic OLD_LAYOUTS: &[(u32, &[GridSlot])] = &[\n")
+    out.write(u"\nstatic OLD_LAYOUTS: &[(NonZeroU32, &[GridSlot])] = &[\n")
     if os.path.exists(OLD_JSON_IN):
         old = json.load(io.open(OLD_JSON_IN, encoding="utf-8"))
         last = None
@@ -174,7 +198,7 @@ def main():
                 continue
             last = key
             out.write(u"    // %s\n" % v["version"])
-            out.write(u"    (%d, &[\n" % v["build"])
+            out.write(u"    (NonZeroU32::new(%d).unwrap(), &[\n" % v["build"])
             for s in grid:
                 out.write(slot_lit(s) + u"\n")
             out.write(u"    ]),\n")

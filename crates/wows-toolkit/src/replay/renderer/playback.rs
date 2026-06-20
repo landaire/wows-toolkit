@@ -1119,7 +1119,6 @@ fn build_display_from_resolved(
         crew,
         &learned,
         build.species,
-        version.build_number().expect("replay version carries a build"),
         metadata,
         version,
     )
