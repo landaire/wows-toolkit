@@ -469,7 +469,8 @@ mod tests {
             .submarine(1.05)
             .excluded_consumables(Vec::new())
             .build();
-        let bundle = ModifierBundle::from_modifiers(&[modifier], Species::Cruiser, 11791718);
+        let bundle =
+            ModifierBundle::from_modifiers(&[modifier], Species::Cruiser, crate::data::Version::base(15, 0, 0));
         let sel = ShipUpgradeSelection::stock(&ship);
         let stats = ship_stats(&ship, &sel, &bundle, 10, &provider);
         let sea = stats.visibility.expect("visibility").sea_detection.expect("sea").value();

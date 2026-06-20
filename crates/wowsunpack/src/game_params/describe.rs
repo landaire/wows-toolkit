@@ -106,7 +106,7 @@ pub(crate) trait Describable {
 /// `Unresolved` (raw `name = value`) when no table entry exists for the build.
 /// No-op (value == base) and client-hidden modifiers produce no line.
 fn render_modifier_descriptions(mods: &[Modifier], ctx: &DescribeContext) -> Vec<ModifierDescription> {
-    let build = ctx.version.build;
+    let version = *ctx.version;
     let mut out = Vec::new();
     for m in mods {
         // A per-species modifier with no ship context cannot be resolved to one
@@ -123,12 +123,12 @@ fn render_modifier_descriptions(mods: &[Modifier], ctx: &DescribeContext) -> Vec
             });
             continue;
         };
-        match modifier_setting(build, &m.name) {
+        match modifier_setting(version, &m.name) {
             Some(_) => {
                 // species_or_default only affects the rarely-used species-suffixed
                 // label fallback; the value here is already species-independent.
                 if let Some(text) =
-                    format_modifier(build, &m.name, value, species_or_default(ctx.species), ctx.resource_loader)
+                    format_modifier(version, &m.name, value, species_or_default(ctx.species), ctx.resource_loader)
                 {
                     out.push(ModifierDescription {
                         modifier: m.name.clone(),
@@ -297,7 +297,7 @@ impl AbilityCategory {
         let known: Vec<Modifier> = self
             .effect_modifiers()
             .into_iter()
-            .filter(|m| modifier_setting(ctx.version.build, &m.name).is_some())
+            .filter(|m| modifier_setting(*ctx.version, &m.name).is_some())
             .collect();
         render_modifier_descriptions(&known, ctx)
     }

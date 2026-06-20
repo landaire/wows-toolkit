@@ -122,16 +122,16 @@ pub fn translate_exterior_by_name(
 
 /// Generated description for a modifier-based param (modernization or exterior),
 /// from its modifiers for the given ship species. `None` when the param has no
-/// modifiers or none format for this build.
+/// modifiers or none format for this version.
 pub fn generated_param_description(
     param: &crate::game_params::types::Param,
     species: crate::game_params::types::Species,
     resource_loader: &dyn ResourceLoader,
-    build: u32,
+    version: crate::data::Version,
 ) -> Option<String> {
     let mods = param.modernization().map(|m| m.modifiers()).or_else(|| param.exterior().map(|e| e.modifiers()))?;
     let lines = crate::game_params::modifier_settings_data::describe_modifiers(
-        build,
+        version,
         mods.iter().map(|m| (m.name(), m.get_for_species(&species))),
         species,
         resource_loader,

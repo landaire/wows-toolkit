@@ -1990,11 +1990,10 @@ impl CrewSkill {
         if let Some(d) = self.translated_description_with(metadata, version) {
             return Some(d);
         }
-        let build = version.build;
         let mut lines: Vec<String> = Vec::new();
         if let Some(mods) = self.modifiers() {
             lines.extend(crate::game_params::modifier_settings_data::describe_modifiers(
-                build,
+                *version,
                 mods.iter().map(|m| (m.name(), m.get_for_species(&species))),
                 species,
                 metadata,
@@ -2013,7 +2012,7 @@ impl CrewSkill {
             }
             if let Some(tmods) = trig.modifiers() {
                 for line in crate::game_params::modifier_settings_data::describe_modifiers(
-                    build,
+                    *version,
                     tmods.iter().map(|m| (m.name(), m.get_for_species(&species))),
                     species,
                     metadata,
@@ -3065,10 +3064,8 @@ mod crew_skill_description_tests {
         }
     }
 
-    const BUILD: u32 = 11791718;
-
     fn version() -> Version {
-        Version { major: 13, minor: 0, patch: 0, build: BUILD }
+        Version::base(15, 0, 0)
     }
 
     fn tiers() -> CrewSkillTiers {
