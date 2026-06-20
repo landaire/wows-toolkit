@@ -153,7 +153,7 @@ fn parse_dotted_version(version: &str, build: u32) -> Option<Version> {
     let major = parts.next()??;
     let minor = parts.next().flatten().unwrap_or(0);
     let patch = parts.next().flatten().unwrap_or(0);
-    Some(Version { major, minor, patch, build })
+    Some(Version { major, minor, patch, build: std::num::NonZeroU32::new(build) })
 }
 
 fn current_build_from_preferences(path: &Path) -> Option<String> {
@@ -353,8 +353,9 @@ pub fn load_wows_files(
         && version_str.contains(',')
     {
         let full_build_info = Version::from_client_exe(&version_str);
-        if available_builds.contains(&full_build_info.build) {
-            latest_build = full_build_info.build;
+        let full_build = full_build_info.build_number().expect("client version carries a build");
+        if available_builds.contains(&full_build) {
+            latest_build = full_build;
         }
 
         let friendly_build = format!("{}.{}.{}.0", full_build_info.major, full_build_info.minor, full_build_info.patch);
@@ -406,9 +407,10 @@ pub fn load_wows_files(
         && let Some(dump_base) = game_data_dump_base_with_override(&game_data_cache_dir)
     {
         let version_str = format!("{}.{}.{}", fv.major, fv.minor, fv.patch);
-        if !wows_data_mgr::dump::dump_exists(&dump_base, &version_str, fv.build) {
+        let fv_build = fv.build_number().expect("client version carries a build");
+        if !wows_data_mgr::dump::dump_exists(&dump_base, &version_str, fv_build) {
             let game_dir = wows_directory.clone();
-            let build = fv.build;
+            let build = fv_build;
             let vs = version_str.clone();
             crate::util::thread::spawn_logged("auto-dump-game-data", move || {
                 if let Err(e) = wows_data_mgr::dump::dump_renderer_data(&game_dir, build, &vs, &dump_base, None, true) {
@@ -603,7 +605,11 @@ fn parse_replay_data_in_background(
                 // Resolve version-matched data for this replay's build
                 let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
                 let Some(wows_data_for_build) = data.wows_data_map.resolve(&replay_version) else {
-                    warn!("Skipping replay {:?}: no data for build {}", path, replay_version.build);
+                    warn!(
+                        "Skipping replay {:?}: no data for build {}",
+                        path,
+                        replay_version.build_number().map_or_else(|| "unknown".to_string(), |b| b.to_string())
+                    );
                     return Ok(());
                 };
 
@@ -967,7 +973,11 @@ pub fn start_populating_player_inspector(
                 Ok(replay_file) => {
                     let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
                     let Some(wows_data_for_build) = wows_data_map.resolve(&replay_version) else {
-                        warn!("Skipping replay {:?}: no data for build {}", path, replay_version.build);
+                        warn!(
+                            "Skipping replay {:?}: no data for build {}",
+                            path,
+                            replay_version.build_number().map_or_else(|| "unknown".to_string(), |b| b.to_string())
+                        );
                         continue;
                     };
 

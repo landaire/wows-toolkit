@@ -1628,7 +1628,7 @@ impl UiReport {
     /// egui texture name include the build so icons from different game versions
     /// stay distinct. Returns None if the bytes fail to decode.
     fn icon_texture(&self, ctx: &egui::Context, asset: &GameAsset) -> Option<egui::TextureHandle> {
-        let key = format!("{}:{}", self.version.build, asset.path);
+        let key = format!("{:?}:{}", self.version.build, asset.path);
         if let Some(tex) = self.icon_textures.lock().get(&key) {
             return Some(tex.clone());
         }
@@ -3162,7 +3162,10 @@ impl Replay {
 
             // Resolve version-matched data so the UI report uses the correct constants
             let Some(wows_data) = deps.resolve_versioned_deps(&replay_version) else {
-                tracing::warn!("Could not resolve versioned data for build {}", replay_version.build);
+                tracing::warn!(
+                    "Could not resolve versioned data for build {}",
+                    replay_version.build_number().map_or_else(|| "unknown".to_string(), |b| b.to_string())
+                );
                 return;
             };
 
@@ -3592,7 +3595,10 @@ impl ToolkitTabViewer<'_> {
                     let Some(wows_data) =
                         self.tab_state.wows_data_map.as_ref().and_then(|map| map.resolve(&replay_version))
                     else {
-                        tracing::warn!("No data for build {}", replay_version.build);
+                        tracing::warn!(
+                            "No data for build {}",
+                            replay_version.build_number().map_or_else(|| "unknown".to_string(), |b| b.to_string())
+                        );
                         return;
                     };
                     let asset_cache = self.tab_state.renderer_asset_cache.clone();
@@ -4963,7 +4969,10 @@ impl ToolkitTabViewer<'_> {
 
             let Some(wows_data) = self.tab_state.wows_data_map.as_ref().and_then(|map| map.resolve(&replay_version))
             else {
-                tracing::warn!("No data for build {}", replay_version.build);
+                tracing::warn!(
+                    "No data for build {}",
+                    replay_version.build_number().map_or_else(|| "unknown".to_string(), |b| b.to_string())
+                );
                 return;
             };
             let asset_cache = self.tab_state.renderer_asset_cache.clone();
@@ -5014,7 +5023,11 @@ impl ToolkitTabViewer<'_> {
 
             let Some(wows_data) = self.tab_state.wows_data_map.as_ref().and_then(|map| map.resolve(&replay_version))
             else {
-                tracing::warn!("No data for build {} - skipping replay '{}'", replay_version.build, replay_name);
+                tracing::warn!(
+                    "No data for build {} - skipping replay '{}'",
+                    replay_version.build_number().map_or_else(|| "unknown".to_string(), |b| b.to_string()),
+                    replay_name
+                );
                 continue;
             };
 

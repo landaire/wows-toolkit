@@ -55,8 +55,9 @@ fn snapshot_first_n_packets(replay_filename: &str, n: usize) {
     let replay = ReplayFile::from_file(&path).expect("should parse replay");
     let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
 
-    let game_dir = wows_data_mgr::game_dir_for_build(version.build)
-        .unwrap_or_else(|| panic!("game data for build {} not available", version.build));
+    let build = version.build_number().expect("replay version carries a build");
+    let game_dir = wows_data_mgr::game_dir_for_build(build)
+        .unwrap_or_else(|| panic!("game data for build {build} not available"));
 
     let resources = game_data::load_game_resources(&game_dir, &version).expect("should load game resources");
 

@@ -255,7 +255,7 @@ mod tests {
     use super::*;
     use crate::game_params::types::CrewSkillName;
 
-    const VERSION: Version = Version { major: 15, minor: 0, patch: 0, build: 11791718 };
+    const VERSION: Version = Version { major: 15, minor: 0, patch: 0, build: std::num::NonZeroU32::new(11791718) };
 
     #[test]
     fn crew_skill_icon_slug_is_snake_case() {

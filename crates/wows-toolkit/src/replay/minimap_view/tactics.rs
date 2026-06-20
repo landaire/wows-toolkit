@@ -2658,7 +2658,7 @@ fn render_annotation_range_circles(
         Some(v) => v,
         None => return,
     };
-    let version = wdata.full_version.unwrap_or(wowsunpack::data::Version { major: 99, minor: 0, patch: 0, build: 0 });
+    let version = wdata.full_version.unwrap_or(wowsunpack::data::Version::base(99, 0, 0));
     let hull_name = if cfg.hull_name.is_empty() { None } else { Some(cfg.hull_name.as_str()) };
     let ranges = vehicle.resolve_ranges(Some(metadata.as_ref()), hull_name, version);
     drop(wdata);

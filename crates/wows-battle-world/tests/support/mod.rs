@@ -54,12 +54,13 @@ fn build_cache() -> &'static Mutex<HashMap<u32, BuildResources>> {
 }
 
 fn resources_for_build(version: &Version) -> BuildResources {
-    if let Some(res) = build_cache().lock().unwrap().get(&version.build) {
+    let build = version.build_number().expect("replay version carries a build");
+    if let Some(res) = build_cache().lock().unwrap().get(&build) {
         return *res;
     }
 
-    let dir = wows_data_mgr::game_dir_for_build(version.build)
-        .unwrap_or_else(|| panic!("game data for build {} not available", version.build));
+    let dir = wows_data_mgr::game_dir_for_build(build)
+        .unwrap_or_else(|| panic!("game data for build {} not available", build));
     let vfs_root = dir.join("vfs");
     assert!(vfs_root.exists(), "vfs dir not found at {}", vfs_root.display());
     let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
@@ -67,14 +68,14 @@ fn resources_for_build(version: &Version) -> BuildResources {
     let rkyv_path = dir.join("game_params.rkyv");
     let provider = match wowsunpack::game_params::cache::load(&rkyv_path) {
         Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs)
-            .unwrap_or_else(|e| panic!("failed to build game metadata for build {}: {e:?}", version.build)),
+            .unwrap_or_else(|e| panic!("failed to build game metadata for build {build}: {e:?}")),
         None => GameMetadataProvider::from_vfs(&vfs)
-            .unwrap_or_else(|e| panic!("failed to load GameParams for build {}: {e:?}", version.build)),
+            .unwrap_or_else(|e| panic!("failed to load GameParams for build {build}: {e:?}")),
     };
     let constants = GameConstants::from_vfs(&vfs);
 
     let res = BuildResources { provider: Box::leak(Box::new(provider)), constants: Box::leak(Box::new(constants)) };
-    build_cache().lock().unwrap().insert(version.build, res);
+    build_cache().lock().unwrap().insert(build, res);
     res
 }
 

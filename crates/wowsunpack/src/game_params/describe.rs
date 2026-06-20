@@ -376,7 +376,7 @@ mod tests {
     }
 
     fn version(build: u32) -> Version {
-        Version { major: 99, minor: 0, patch: 0, build }
+        Version { major: 99, minor: 0, patch: 0, build: std::num::NonZeroU32::new(build) }
     }
 
     #[test]

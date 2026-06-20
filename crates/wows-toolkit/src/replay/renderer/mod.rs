@@ -186,8 +186,8 @@ fn resolve_icon_source(vfs: &VfsPath, version: Option<&Version>, dump_dir: Optio
     match newest_dump_source(dump_dir) {
         Some((vfs, dump_version)) => {
             tracing::info!(
-                own_build = version.map(|v| v.build),
-                borrowed_build = dump_version.map(|v| v.build),
+                own_build = version.map(|v| v.build_number()),
+                borrowed_build = dump_version.map(|v| v.build_number()),
                 "renderer build ships no GUI icons; borrowing icons from newest dump",
             );
             IconSource { vfs, version: dump_version }
@@ -210,7 +210,7 @@ fn newest_dump_source(dump_dir: Option<&std::path::Path>) -> Option<(VfsPath, Op
         major,
         minor: parts.next().unwrap_or(0),
         patch: parts.next().unwrap_or(0),
-        build: entry.build,
+        build: std::num::NonZeroU32::new(entry.build),
     });
     Some((vfs, version))
 }

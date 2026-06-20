@@ -30,7 +30,7 @@ fn try_load(filename: &str) -> Option<(ReplayFile, &'static GameMetadataProvider
     let replay = ReplayFile::from_file(&path).ok()?;
     let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
 
-    let game_dir = wows_data_mgr::game_dir_for_build(version.build)?;
+    let game_dir = wows_data_mgr::game_dir_for_build(version.build_number()?)?;
     let resources = game_data::load_game_resources(&game_dir, &version).ok()?;
 
     let game_params = GameMetadataProvider::from_vfs(&resources.vfs).ok()?;
@@ -52,8 +52,11 @@ fn recording_player_inventory_is_non_empty() {
         return;
     };
 
-    let resources =
-        game_data::load_game_resources(&wows_data_mgr::game_dir_for_build(version.build).unwrap(), &version).unwrap();
+    let resources = game_data::load_game_resources(
+        &wows_data_mgr::game_dir_for_build(version.build_number().unwrap()).unwrap(),
+        &version,
+    )
+    .unwrap();
 
     let facts = gather_replay_facts(game_constants, version, &resources.specs, &[&replay]);
 

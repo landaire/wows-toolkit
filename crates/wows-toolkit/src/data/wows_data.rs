@@ -166,7 +166,7 @@ impl WoWsDataMap {
     /// Returns None if the version's build data is unavailable.
     #[instrument(skip(self))]
     pub fn resolve(&self, version: &Version) -> Option<SharedWoWsData> {
-        self.resolve_build_with_version(version.build, Some(*version))
+        self.resolve_build_with_version(version.build_number()?, Some(*version))
     }
 
     /// Resolve game data for a specific build number.
@@ -194,7 +194,7 @@ impl WoWsDataMap {
             major,
             minor: parts.next().unwrap_or(0),
             patch: parts.next().unwrap_or(0),
-            build: entry.build,
+            build: std::num::NonZeroU32::new(entry.build),
         });
         Some((vfs, version))
     }
@@ -698,7 +698,7 @@ impl ReplayLoader {
                 let r = replay.read();
                 Version::from_client_exe(&r.replay_file.meta.clientVersionFromExe)
             };
-            let build = replay_version.build;
+            let build = replay_version.build_number().expect("replay version carries a build");
 
             let Some(wows_data_for_build) = deps.wows_data_map.resolve(&replay_version) else {
                 error!("Failed to load game data for build {}", build);
@@ -773,7 +773,7 @@ impl ReplayLoader {
 
         let Some(wows_data_for_build) = deps.wows_data_map.resolve(&replay_version) else {
             let report: rootcause::Report = ToolkitError::ReplayBuildUnavailable {
-                build: replay_version.build,
+                build: replay_version.build_number().expect("replay version carries a build"),
                 version: replay_version.to_path(),
                 replay_path: Some(path),
             }
@@ -784,7 +784,10 @@ impl ReplayLoader {
         let (game_metadata, game_constants) = {
             let data = wows_data_for_build.read();
             let Some(metadata) = data.game_metadata.clone() else {
-                return Err(rootcause::report!("game metadata unavailable for build {}", replay_version.build));
+                return Err(rootcause::report!(
+                    "game metadata unavailable for build {}",
+                    replay_version.build_number().expect("replay version carries a build")
+                ));
             };
             (metadata, Arc::clone(&data.game_constants))
         };

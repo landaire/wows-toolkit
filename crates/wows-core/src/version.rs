@@ -1,4 +1,6 @@
-//! Game version: a `major.minor.patch` triple plus a monotonic `build` number.
+//! Game version: a `major.minor.patch` triple plus an optional `build` number.
+
+use std::num::NonZeroU32;
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -7,7 +9,9 @@ pub struct Version {
     pub major: u32,
     pub minor: u32,
     pub patch: u32,
-    pub build: u32,
+    /// The monotonic build number, if known. `None` for a base version that
+    /// only carries `major.minor.patch`.
+    pub build: Option<NonZeroU32>,
 }
 
 impl Version {
@@ -18,7 +22,7 @@ impl Version {
             major: parts[0].trim().parse::<u32>().unwrap(),
             minor: parts[1].trim().parse::<u32>().unwrap(),
             patch: parts[2].trim().parse::<u32>().unwrap(),
-            build: parts[3].trim().parse::<u32>().unwrap(),
+            build: NonZeroU32::new(parts[3].trim().parse::<u32>().unwrap()),
         }
     }
 
@@ -34,8 +38,13 @@ impl Version {
             major: parts[0].trim().parse::<u32>().ok()?,
             minor: parts[1].trim().parse::<u32>().ok()?,
             patch: parts[2].trim().parse::<u32>().ok()?,
-            build: parts[3].trim().parse::<u32>().ok()?,
+            build: NonZeroU32::new(parts[3].trim().parse::<u32>().ok()?),
         })
+    }
+
+    /// The numeric build, if known.
+    pub fn build_number(&self) -> Option<u32> {
+        self.build.map(NonZeroU32::get)
     }
 
     /// Extract the game version from the `Account.def` entity definition XML.
@@ -61,7 +70,7 @@ impl Version {
                             major: parts[0].parse().ok()?,
                             minor: parts[1].parse().ok()?,
                             patch: parts[2].parse().ok()?,
-                            build: parts[3].parse().ok()?,
+                            build: NonZeroU32::new(parts[3].parse().ok()?),
                         });
                     }
                     // Legacy: major_minor_patch_subpatch_build (subpatch folded into patch)
@@ -70,7 +79,7 @@ impl Version {
                             major: parts[0].parse().ok()?,
                             minor: parts[1].parse().ok()?,
                             patch: parts[2].parse().ok()?,
-                            build: parts[4].parse().ok()?,
+                            build: NonZeroU32::new(parts[4].parse().ok()?),
                         });
                     }
                     _ => {}
@@ -84,12 +93,12 @@ impl Version {
         format!("{}.{}.{}", self.major, self.minor, self.patch)
     }
 
-    /// A base version `(major, minor, patch)` with no build component. Useful for
-    /// keying version-gated tables, where entries take effect at a friendly
-    /// version regardless of build. Compare against a full version with
-    /// [`Self::is_at_least`], which ignores the build field.
+    /// A base version `(major, minor, patch)` with no build component (`build`
+    /// is `None`). Useful for keying version-gated tables, where entries take
+    /// effect at a friendly version regardless of build. Compare against a full
+    /// version with [`Self::is_at_least`], which ignores the build field.
     pub const fn base(major: u32, minor: u32, patch: u32) -> Version {
-        Version { major, minor, patch, build: 0 }
+        Version { major, minor, patch, build: None }
     }
 
     pub fn is_at_least(&self, other: &Version) -> bool {
@@ -146,7 +155,7 @@ mod test {
         assert_eq!(v.major, 15);
         assert_eq!(v.minor, 1);
         assert_eq!(v.patch, 0);
-        assert_eq!(v.build, 11965230);
+        assert_eq!(v.build, NonZeroU32::new(11965230));
     }
 
     #[cfg(feature = "parsing")]
@@ -157,7 +166,7 @@ mod test {
         assert_eq!(v.major, 11);
         assert_eq!(v.minor, 4);
         assert_eq!(v.patch, 0);
-        assert_eq!(v.build, 5624555);
+        assert_eq!(v.build, NonZeroU32::new(5624555));
     }
 
     #[cfg(feature = "parsing")]
@@ -168,7 +177,7 @@ mod test {
         assert_eq!(v.major, 0);
         assert_eq!(v.minor, 6);
         assert_eq!(v.patch, 13);
-        assert_eq!(v.build, 296659);
+        assert_eq!(v.build, NonZeroU32::new(296659));
     }
 
     #[cfg(feature = "parsing")]

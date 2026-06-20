@@ -15,6 +15,8 @@ pub enum GameDataError {
     FileTree(#[from] crate::data::idx::IdxError),
     #[error("Build {build} not found in game directory")]
     BuildNotFound { build: u32 },
+    #[error("replay version carries no build number")]
+    BuildUnknown,
     #[error("res_packages directory not found")]
     ResPackagesNotFound,
     #[cfg(feature = "json")]

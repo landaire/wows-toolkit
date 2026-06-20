@@ -1424,7 +1424,7 @@ mod tests {
     use super::*;
 
     fn version(major: u32, minor: u32, patch: u32) -> Version {
-        Version { major, minor, patch, build: 0 }
+        Version::base(major, minor, patch)
     }
 
     /// The layout boundary is at 12.6.0: 12.5.0 and earlier use the legacy

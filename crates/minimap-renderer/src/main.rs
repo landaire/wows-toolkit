@@ -313,7 +313,7 @@ fn main() -> Result<(), Report> {
             && let Ok(data) = std::fs::read_to_string(&auto_constants)
             && let Ok(json) = serde_json::from_str::<serde_json::Value>(&data)
         {
-            game_constants.merge_replay_constants(&json, replay_version.build);
+            game_constants.merge_replay_constants(&json, replay_version.build_number().expect("replay version carries a build"));
             info!("Merged constants from dump: {}", auto_constants.display());
         }
     }
@@ -324,7 +324,7 @@ fn main() -> Result<(), Report> {
             .unwrap_or_else(|e| panic!("Failed to read constants file {}: {e}", constants_path.display()));
         let json: serde_json::Value =
             serde_json::from_str(&data).unwrap_or_else(|e| panic!("Failed to parse constants JSON: {e}"));
-        game_constants.merge_replay_constants(&json, replay_version.build);
+        game_constants.merge_replay_constants(&json, replay_version.build_number().expect("replay version carries a build"));
         info!("Merged replay constants from {}", constants_path.display());
     }
 
@@ -618,7 +618,8 @@ type LoadedGameData =
 
 /// Load game data from a full WoWS game installation.
 fn load_from_game_dir(game_dir: &std::path::Path, replay_version: &Version) -> Result<LoadedGameData, Report> {
-    info!(build = %replay_version.build, "Loading game data");
+    let replay_build = replay_version.build_number().ok_or_else(|| report!("replay version carries no build number"))?;
+    info!(build = replay_build, "Loading game data");
     let resources = game_data::load_game_resources(game_dir, replay_version).map_err(|e| report!("{e}"))?;
     let vfs = resources.vfs;
     let specs = resources.specs;
@@ -629,7 +630,7 @@ fn load_from_game_dir(game_dir: &std::path::Path, replay_version: &Version) -> R
     let mut controller_game_params =
         GameMetadataProvider::from_vfs(&vfs).map_err(|e| report!("Failed to load GameParams for controller: {e:?}"))?;
 
-    let mo_path = game_data::translations_path(game_dir, replay_version.build);
+    let mo_path = game_data::translations_path(game_dir, replay_build);
     load_translations(&mo_path, &mut game_params, &mut controller_game_params);
 
     Ok((vfs, specs, game_params, controller_game_params))
@@ -657,15 +658,17 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
         bail!("Extracted data directory does not exist: {}", path.display());
     }
 
+    let replay_build = replay_version.build_number().ok_or_else(|| report!("replay version carries no build number"))?;
+
     // If the path itself contains metadata.toml, it's already the version dir
     if let Some(meta) = read_metadata(path) {
-        if meta.build != replay_version.build {
+        if meta.build != replay_build {
             bail!(
                 "Extracted data is build {} ({}) but replay is build {}. \
                  Entity definitions will not match. Use extracted data for the correct build.",
                 meta.build,
                 meta.version,
-                replay_version.build
+                replay_build
             );
         }
         return Ok(path.to_path_buf());
@@ -692,8 +695,8 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
     }
 
     // Try to match by build number first
-    if let Some(matched) = candidates.iter().find(|(_, m)| m.build == replay_version.build) {
-        info!("Matched extracted data for build {}: {}", replay_version.build, matched.0.display());
+    if let Some(matched) = candidates.iter().find(|(_, m)| m.build == replay_build) {
+        info!("Matched extracted data for build {}: {}", replay_build, matched.0.display());
         return Ok(matched.0.clone());
     }
 
@@ -702,9 +705,9 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
     if builds_path.exists() {
         let version_str = format!("{}.{}.{}", replay_version.major, replay_version.minor, replay_version.patch);
         let index = wows_data_mgr::builds::BuildsIndex::load(&builds_path);
-        if let Some((entry, _exact)) = index.resolve_build(replay_version.build, Some(&version_str)) {
+        if let Some((entry, _exact)) = index.resolve_build(replay_build, Some(&version_str)) {
             let resolved = path.join(&entry.dir);
-            warn!("No exact data for build {}; using {} (build {})", replay_version.build, entry.version, entry.build);
+            warn!("No exact data for build {}; using {} (build {})", replay_build, entry.version, entry.build);
             return Ok(resolved);
         }
     }
@@ -714,7 +717,7 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
     if let Some(matched) = candidates.iter().find(|(_, m)| m.version == version_str) {
         warn!(
             "No exact data for build {}; using {} (build {})",
-            replay_version.build, matched.1.version, matched.1.build
+            replay_build, matched.1.version, matched.1.build
         );
         return Ok(matched.0.clone());
     }
@@ -722,7 +725,7 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
     let available: Vec<String> = candidates.iter().map(|(_, m)| format!("{} (build {})", m.version, m.build)).collect();
     bail!(
         "No extracted data matches replay build {}. Available versions in {}: {}",
-        replay_version.build,
+        replay_build,
         path.display(),
         available.join(", ")
     );

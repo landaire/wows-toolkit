@@ -1921,12 +1921,7 @@ impl CrewSkill {
         use convert_case::Casing;
         let snake = format!("{prefix}_{}", self.internal_name().as_str().to_case(Case::UpperSnake));
         let plain = format!("{prefix}_{}", self.internal_name().as_str().to_uppercase());
-        let rework = Version {
-            major: CAPTAIN_SKILL_REWORK_VERSION.0,
-            minor: CAPTAIN_SKILL_REWORK_VERSION.1,
-            patch: CAPTAIN_SKILL_REWORK_VERSION.2,
-            build: 0,
-        };
+        let rework = Version::base(CAPTAIN_SKILL_REWORK_VERSION.0, CAPTAIN_SKILL_REWORK_VERSION.1, CAPTAIN_SKILL_REWORK_VERSION.2);
         if version.is_at_least(&rework) { (snake, plain) } else { (plain, snake) }
     }
 

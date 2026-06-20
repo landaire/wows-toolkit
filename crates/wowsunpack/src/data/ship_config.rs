@@ -89,7 +89,7 @@ pub fn parse_ship_config(blob: &[u8], version: &Version) -> WResult<ShipConfig> 
     let unit_count = le_u32.parse_next(i)?;
     let units: Vec<u32> = repeat(unit_count as usize, le_u32).parse_next(i)?;
 
-    if version.is_at_least(&Version { major: 13, minor: 2, patch: 0, build: 0 }) {
+    if version.is_at_least(&Version::base(13, 2, 0)) {
         let _unk = le_u32.parse_next(i)?;
     }
 
@@ -242,11 +242,11 @@ mod tests {
     }
 
     fn version_15_1() -> Version {
-        Version { major: 15, minor: 1, patch: 0, build: 0 }
+        Version::base(15, 1, 0)
     }
 
     fn version_12_3() -> Version {
-        Version { major: 12, minor: 3, patch: 0, build: 0 }
+        Version::base(12, 3, 0)
     }
 
     #[test]

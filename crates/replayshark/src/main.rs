@@ -345,15 +345,17 @@ fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> anyhow::Resul
         return Err(anyhow!("Extracted data directory does not exist: {}", path.display()));
     }
 
+    let replay_build = replay_version.build_number().ok_or_else(|| anyhow!("replay version carries no build number"))?;
+
     // If the path itself contains metadata.toml, it's already the version dir
     if let Some(meta) = read_metadata(path) {
-        if meta.build != replay_version.build {
+        if meta.build != replay_build {
             return Err(anyhow!(
                 "Extracted data is build {} ({}) but replay is build {}. \
                  Entity definitions will not match. Use extracted data for the correct build.",
                 meta.build,
                 meta.version,
-                replay_version.build
+                replay_build
             ));
         }
         return Ok(path.to_path_buf());
@@ -372,7 +374,7 @@ fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> anyhow::Resul
 
     if !candidates.is_empty() {
         // Try to match by build number
-        if let Some(matched) = candidates.iter().find(|(_, m)| m.build == replay_version.build) {
+        if let Some(matched) = candidates.iter().find(|(_, m)| m.build == replay_build) {
             return Ok(matched.0.clone());
         }
 
@@ -381,10 +383,10 @@ fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> anyhow::Resul
         if builds_path.exists() {
             let version_str = format!("{}.{}.{}", replay_version.major, replay_version.minor, replay_version.patch);
             let index = wows_data_mgr::builds::BuildsIndex::load(&builds_path);
-            if let Some((entry, _exact)) = index.resolve_build(replay_version.build, Some(&version_str)) {
+            if let Some((entry, _exact)) = index.resolve_build(replay_build, Some(&version_str)) {
                 eprintln!(
                     "No exact data for build {}; using {} (build {})",
-                    replay_version.build, entry.version, entry.build
+                    replay_build, entry.version, entry.build
                 );
                 return Ok(path.join(&entry.dir));
             }
@@ -395,7 +397,7 @@ fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> anyhow::Resul
         if let Some(matched) = candidates.iter().find(|(_, m)| m.version == version_str) {
             eprintln!(
                 "No exact data for build {}; using {} (build {})",
-                replay_version.build, matched.1.version, matched.1.build
+                replay_build, matched.1.version, matched.1.build
             );
             return Ok(matched.0.clone());
         }
@@ -405,7 +407,7 @@ fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> anyhow::Resul
             return Err(anyhow!(
                 "No exact build match for replay (build {}). Only available: {} (build {}). \
                  Download or extract the correct build.",
-                replay_version.build,
+                replay_build,
                 meta.version,
                 meta.build
             ));
@@ -415,7 +417,7 @@ fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> anyhow::Resul
             candidates.iter().map(|(_, m)| format!("{} (build {})", m.version, m.build)).collect();
         return Err(anyhow!(
             "No extracted data matches replay build {}. Available versions in {}: {}",
-            replay_version.build,
+            replay_build,
             path.display(),
             available.join(", ")
         ));
@@ -747,7 +749,10 @@ fn load_metadata_provider_and_constants(
             let mut provider = GameMetadataProvider::from_vfs(&resources.vfs)
                 .map_err(|e| anyhow!("failed to load game params: {e:?}"))?;
             let constants = GameConstants::from_vfs(&resources.vfs);
-            let mo_path = game_data::translations_path(Path::new(game_dir), version.build);
+            let mo_path = game_data::translations_path(
+                Path::new(game_dir),
+                version.build_number().expect("replay version carries a build"),
+            );
             apply_translations(&mo_path, &mut provider);
             Ok((provider, constants))
         }
@@ -933,7 +938,7 @@ fn main() {
         Commands::Dump { output, no_meta, replay } => {
             let replay_file = ReplayFile::from_file(&replay).unwrap();
             let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-            let gc = load_game_constants(constants_path, version.build);
+            let gc = load_game_constants(constants_path, version.build_number().expect("replay version carries a build"));
             parse_replay(&replay, game_dir, extracted, |meta| {
                 wows_replays::analyzer::decoder::DecoderBuilder::new(false, no_meta, output.as_deref())
                     .game_constants(gc)
@@ -944,7 +949,7 @@ fn main() {
         Commands::Investigate { meta, timestamp, filter_packet, filter_method, entity_id, replay } => {
             let replay_file = ReplayFile::from_file(&replay).unwrap();
             let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-            let gc = load_game_constants(constants_path, version.build);
+            let gc = load_game_constants(constants_path, version.build_number().expect("replay version carries a build"));
             let no_meta = !meta;
             parse_replay(&replay, game_dir, extracted, |meta| {
                 build_investigative_printer(
@@ -1099,7 +1104,15 @@ fn main() {
                         let path = entry.path();
                         let version = match ReplayFile::meta_from_file(path) {
                             Ok(meta) => Version::try_from_client_exe(&meta.clientVersionFromExe)
-                                .map(|v| format!("{}.{}.{}.{}", v.major, v.minor, v.patch, v.build))
+                                .map(|v| {
+                                    format!(
+                                        "{}.{}.{}.{}",
+                                        v.major,
+                                        v.minor,
+                                        v.patch,
+                                        v.build_number().map_or_else(|| "unknown".to_string(), |b| b.to_string())
+                                    )
+                                })
                                 .unwrap_or_else(|| "-".to_string()),
                             Err(e) => {
                                 eprintln!("# {} (parse: {:?})", path.display(), e);

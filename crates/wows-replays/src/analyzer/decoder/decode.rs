@@ -2068,7 +2068,7 @@ where
             // CONSUMABLE_USAGE_PARAMS (a packed struct serialized as a Blob).
             // b[0] = ConsumableUsageType: 0=None, 1=Default (<BB>), 2=Position (<BBff>), 3=Entity (<BBbQ>).
             // b[1] = consumable type ID in all variants (except None).
-            let is_new_format = version.is_at_least(&Version { major: 15, minor: 2, patch: 0, build: 0 });
+            let is_new_format = version.is_at_least(&Version::base(15, 2, 0));
             let (raw_consumable, usage_params): (i32, Option<ConsumableUsageParams>) = if is_new_format {
                 match &args[0] {
                     ArgValue::Blob(b) => {
@@ -2687,7 +2687,7 @@ mod player_key_map_tests {
     use super::*;
 
     fn v(major: u32, minor: u32, patch: u32) -> Version {
-        Version { major, minor, patch, build: 0 }
+        Version::base(major, minor, patch)
     }
 
     /// Pre-0.10.7 clients (e.g. the 0.9.10 Smaland replay) carry a 34-field player

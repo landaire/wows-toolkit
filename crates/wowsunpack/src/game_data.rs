@@ -43,10 +43,11 @@ pub fn list_available_builds(game_dir: &Path) -> Result<Vec<u32>, GameDataError>
 pub fn find_matching_build(game_dir: &Path, replay_version: &Version) -> Result<u32, GameDataError> {
     let available_builds = list_available_builds(game_dir)?;
 
-    if available_builds.contains(&replay_version.build) {
-        Ok(replay_version.build)
+    let build = replay_version.build_number().ok_or(GameDataError::BuildUnknown)?;
+    if available_builds.contains(&build) {
+        Ok(build)
     } else {
-        Err(GameDataError::BuildNotFound { build: replay_version.build })
+        Err(GameDataError::BuildNotFound { build })
     }
 }
 

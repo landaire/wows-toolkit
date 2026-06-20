@@ -90,7 +90,7 @@ mod version_consumable_tests {
     use crate::data::Version;
 
     fn v(major: u32, minor: u32, patch: u32, build: u32) -> Version {
-        Version { major, minor, patch, build }
+        Version { major, minor, patch, build: std::num::NonZeroU32::new(build) }
     }
 
     #[test]
