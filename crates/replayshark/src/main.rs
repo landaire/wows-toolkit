@@ -720,14 +720,14 @@ fn survey_file(
 
 /// Load a constants JSON file and merge it into a `GameConstants`, returning a
 /// `&'static` reference (leaked, since the CLI is short-lived).
-fn load_game_constants(constants_path: Option<&Path>, build: u32) -> &'static GameConstants {
+fn load_game_constants(constants_path: Option<&Path>, version: Version) -> &'static GameConstants {
     let mut gc = GameConstants::defaults();
     if let Some(path) = constants_path {
         let data = std::fs::read_to_string(path)
             .unwrap_or_else(|e| panic!("Failed to read constants file {}: {e}", path.display()));
         let json: serde_json::Value =
             serde_json::from_str(&data).unwrap_or_else(|e| panic!("Failed to parse constants JSON: {e}"));
-        gc.merge_replay_constants(&json, build);
+        gc.merge_replay_constants(&json, version);
     }
     Box::leak(Box::new(gc))
 }
@@ -936,8 +936,7 @@ fn main() {
         Commands::Dump { output, no_meta, replay } => {
             let replay_file = ReplayFile::from_file(&replay).unwrap();
             let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-            let gc =
-                load_game_constants(constants_path, version.build_number().expect("replay version carries a build"));
+            let gc = load_game_constants(constants_path, version);
             parse_replay(&replay, game_dir, extracted, |meta| {
                 wows_replays::analyzer::decoder::DecoderBuilder::new(false, no_meta, output.as_deref())
                     .game_constants(gc)
@@ -948,8 +947,7 @@ fn main() {
         Commands::Investigate { meta, timestamp, filter_packet, filter_method, entity_id, replay } => {
             let replay_file = ReplayFile::from_file(&replay).unwrap();
             let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-            let gc =
-                load_game_constants(constants_path, version.build_number().expect("replay version carries a build"));
+            let gc = load_game_constants(constants_path, version);
             let no_meta = !meta;
             parse_replay(&replay, game_dir, extracted, |meta| {
                 build_investigative_printer(
@@ -997,7 +995,7 @@ fn main() {
         Commands::Survey { skip_decode, replays } => {
             // For survey, we use build 0 since we don't know the build ahead of time.
             // The constants override is still useful for consumable ID mapping.
-            let gc = load_game_constants(constants_path, 0);
+            let gc = load_game_constants(constants_path, Version::default());
             let mut survey_result = SurveyResults::empty();
             for replay_path in &replays {
                 for entry in walkdir::WalkDir::new(replay_path) {

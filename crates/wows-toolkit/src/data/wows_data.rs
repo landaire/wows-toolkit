@@ -577,7 +577,7 @@ impl WorldOfWarshipsData {
 
         // Rebuild game constants from VFS + new replay constants
         let new_game_constants =
-            build_game_constants(&self.vfs, &new_replay_constants, self.build_number, self.full_version);
+            build_game_constants(&self.vfs, &new_replay_constants, self.full_version);
 
         // Reload all icons from game files
         let version = self.full_version.as_ref();

@@ -109,6 +109,20 @@ impl Version {
         Version { major, minor, patch, build: None }
     }
 
+    /// Whether this version matches `other` for relaxed version-gating, where the build
+    /// is an optional refinement of the friendly `major.minor.patch`. The friendly parts
+    /// must be equal; the build narrows the match only when BOTH sides specify one:
+    /// `15.4.0` build N matches `15.4.0` with no build (and vice versa), but two different
+    /// concrete builds of the same friendly version do not match. Not transitive - use `==`
+    /// for strict equality.
+    pub fn matches(&self, other: &Version) -> bool {
+        (self.major, self.minor, self.patch) == (other.major, other.minor, other.patch)
+            && match (self.build, other.build) {
+                (Some(a), Some(b)) => a == b,
+                _ => true,
+            }
+    }
+
     pub fn is_at_least(&self, other: &Version) -> bool {
         if self.major > other.major {
             true
@@ -153,6 +167,30 @@ mod test {
         let older = Version::from_client_exe("0,11,5,0");
         let newer = Version::from_client_exe("1,0,0,0");
         assert_older_newer(older, newer);
+    }
+
+    #[test]
+    fn matches_build_optional_refinement() {
+        let no_build = Version::base(15, 4, 0);
+        let build_a = Version { major: 15, minor: 4, patch: 0, build: NonZeroU32::new(100) };
+        let build_b = Version { major: 15, minor: 4, patch: 0, build: NonZeroU32::new(200) };
+
+        // Same friendly + one side has no build -> matches (both directions).
+        assert!(no_build.matches(&build_a));
+        assert!(build_a.matches(&no_build));
+
+        // Same friendly + both builds equal -> matches.
+        assert!(build_a.matches(&build_a));
+
+        // Same friendly + both builds differ -> does NOT match.
+        assert!(!build_a.matches(&build_b));
+        assert!(!build_b.matches(&build_a));
+
+        // Different friendly -> does NOT match regardless of build.
+        let other_friendly = Version { major: 15, minor: 3, patch: 0, build: NonZeroU32::new(100) };
+        assert!(!build_a.matches(&other_friendly));
+        assert!(!other_friendly.matches(&build_a));
+        assert!(!no_build.matches(&Version::base(15, 3, 0)));
     }
 
     #[cfg(feature = "parsing")]

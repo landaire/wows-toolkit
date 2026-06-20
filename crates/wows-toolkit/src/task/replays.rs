@@ -170,11 +170,10 @@ fn current_build_from_preferences(path: &Path) -> Option<String> {
 pub fn build_game_constants(
     vfs: &VfsPath,
     replay_constants: &serde_json::Value,
-    build: u32,
     version: Option<Version>,
 ) -> GameConstants {
     let mut game_constants = GameConstants::from_vfs(vfs);
-    game_constants.merge_replay_constants(replay_constants, build);
+    game_constants.merge_replay_constants(replay_constants, version.unwrap_or_default());
     // The replay's own client version is authoritative for consumable ids: their
     // ordering shifts across versions, so resolve them against the static per-version
     // table rather than the latest layout. Applied last so it wins over any bridged
@@ -273,7 +272,7 @@ pub fn load_wows_data_for_build(
         None => (fallback_constants.clone(), false),
     };
 
-    let game_constants = build_game_constants(&vfs, &replay_constants, build, version);
+    let game_constants = build_game_constants(&vfs, &replay_constants, version);
     let game_constants = Arc::new(game_constants);
 
     // Try to determine full version from preferences or leave as None for non-latest builds
@@ -568,7 +567,7 @@ pub fn load_wows_data_from_dump(
     };
     // Prefer the replay's own version; fall back to the version recovered from the dump.
     let constants_version = replay_version.or(full_version);
-    let game_constants = build_game_constants(&vfs, &replay_constants, build, constants_version);
+    let game_constants = build_game_constants(&vfs, &replay_constants, constants_version);
 
     Ok(WorldOfWarshipsData {
         game_metadata: metadata_provider,

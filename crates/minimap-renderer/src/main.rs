@@ -314,7 +314,7 @@ fn main() -> Result<(), Report> {
             && let Ok(json) = serde_json::from_str::<serde_json::Value>(&data)
         {
             game_constants
-                .merge_replay_constants(&json, replay_version.build_number().expect("replay version carries a build"));
+                .merge_replay_constants(&json, replay_version);
             info!("Merged constants from dump: {}", auto_constants.display());
         }
     }
@@ -325,8 +325,7 @@ fn main() -> Result<(), Report> {
             .unwrap_or_else(|e| panic!("Failed to read constants file {}: {e}", constants_path.display()));
         let json: serde_json::Value =
             serde_json::from_str(&data).unwrap_or_else(|e| panic!("Failed to parse constants JSON: {e}"));
-        game_constants
-            .merge_replay_constants(&json, replay_version.build_number().expect("replay version carries a build"));
+        game_constants.merge_replay_constants(&json, replay_version);
         info!("Merged replay constants from {}", constants_path.display());
     }
 
