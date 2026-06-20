@@ -921,7 +921,6 @@ mod tests {
     /// Build an [`ArmorMap`] from `(raw_key, thickness)` pairs, mirroring
     /// `parse_armor_dict`'s `(model_index << 16) | material_id` keying.
     fn armor_map(entries: &[(u32, f32)]) -> ArmorMap {
-        use std::collections::BTreeMap;
         let mut m: ArmorMap = std::collections::HashMap::new();
         for &(raw, thk) in entries {
             let model_index = raw >> 16;

@@ -149,11 +149,7 @@ pub struct EffectiveConsumable {
 /// `gate`; otherwise return `base` unchanged. Mirrors the client's
 /// `if type in <Set>: coeff *= getattr(modifier, type + '<Suffix>')`.
 fn gated_type_coef(bundle: &ModifierBundle, base: f32, type_name: &str, gate: &[&str], suffix: &str) -> f32 {
-    if gate.contains(&type_name) {
-        base * bundle.coef(&format!("{type_name}{suffix}"))
-    } else {
-        base
-    }
+    if gate.contains(&type_name) { base * bundle.coef(&format!("{type_name}{suffix}")) } else { base }
 }
 
 /// `getConsumableReloadTime` (ModifiersApply.py:190-214), `slotID=None`.
@@ -267,7 +263,8 @@ pub fn effective_consumable(category: &AbilityCategory, modifiers: &ModifierBund
     let charges = if base_count < 0 {
         AmmoCount::Infinite
     } else if lifecycle == LIFECYCLE_COUNT_BASED {
-        let added = additional_consumables_count(modifiers, type_name) + additional_consumables_for_group(modifiers, group);
+        let added =
+            additional_consumables_count(modifiers, type_name) + additional_consumables_for_group(modifiers, group);
         // ConsumableUtils.py:128 `max(0, numConsumables + added)`
         let total = (base_count as f32 + added).max(0.0);
         AmmoCount::Finite(total.round() as u32)
@@ -278,7 +275,9 @@ pub fn effective_consumable(category: &AbilityCategory, modifiers: &ModifierBund
     // maxCapacity for TIME_BASED consumables (ConsumableUtils.py:166-167). Absent for
     // COUNT_BASED.
     let max_capacity = if lifecycle == LIFECYCLE_TIME_BASED {
-        field(fields, "maxCapacity").filter(|&c| c >= 0.0).map(|c| c * consumable_capacity_coeff(modifiers, type_name, group))
+        field(fields, "maxCapacity")
+            .filter(|&c| c >= 0.0)
+            .map(|c| c * consumable_capacity_coeff(modifiers, type_name, group))
     } else {
         None
     };

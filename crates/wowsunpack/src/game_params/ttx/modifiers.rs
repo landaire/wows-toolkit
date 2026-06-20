@@ -204,7 +204,7 @@ impl ModifierBundle {
     /// Apply several modifiers in sequence (left-to-right), each chosen multiply vs
     /// add by its own classification.
     pub fn apply_all(&self, base: f32, names: &[&str]) -> f32 {
-        names.iter().fold(base, |b, n| self.apply(b, *n))
+        names.iter().fold(base, |b, n| self.apply(b, n))
     }
 }
 
