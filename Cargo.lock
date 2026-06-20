@@ -11116,7 +11116,7 @@ dependencies = [
 
 [[package]]
 name = "wows-battle-world"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "bevy_ecs",
  "insta",
@@ -11134,7 +11134,7 @@ dependencies = [
 
 [[package]]
 name = "wows-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "rkyv",
  "roxmltree 0.21.1",
@@ -11143,7 +11143,7 @@ dependencies = [
 
 [[package]]
 name = "wows-data-mgr"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "clap",
  "http-body-util",
@@ -11166,7 +11166,7 @@ dependencies = [
 
 [[package]]
 name = "wows-replay-insights"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "data-encoding",
  "flate2",
@@ -11181,7 +11181,7 @@ dependencies = [
 
 [[package]]
 name = "wows_minimap_renderer"
-version = "0.31.0"
+version = "0.31.1"
 dependencies = [
  "ab_glyph",
  "clap",
@@ -11222,7 +11222,7 @@ dependencies = [
 
 [[package]]
 name = "wows_replays"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "blowfish",
  "bon",
@@ -11333,7 +11333,7 @@ dependencies = [
 
 [[package]]
 name = "wowsunpack"
-version = "0.37.0"
+version = "0.37.1"
 dependencies = [
  "async-std",
  "async-trait",
@@ -11430,7 +11430,7 @@ dependencies = [
 
 [[package]]
 name = "wt-translations"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "wows-core",
 ]
