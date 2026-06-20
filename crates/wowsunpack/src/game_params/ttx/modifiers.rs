@@ -31,9 +31,10 @@ use crate::game_params::types::Species;
 /// transcribed from their client apply sites where they are summed (`+`) onto a
 /// base stat: `yawSpeedBonus` (FactoryArtillery.py:74, FactoryTorpedoes.py:78, used
 /// as `* yawSpeedCoef + yawSpeedBonus`) and `buffsStartPool` (ModifiersApply.py:521,
-/// `specialParams.buffsStartPool + modifier.buffsStartPool`). Without this allowlist
-/// `classify` would reject these names as unknown.
-const KNOWN_ADDITIVE: &[&str] = &["yawSpeedBonus", "buffsStartPool"];
+/// `specialParams.buffsStartPool + modifier.buffsStartPool`). `healthRegenPercent` is a
+/// captain-skill bonus whose GameParams values carry the 0.0 additive identity
+/// (0.0/0.006/../0.06). Without this allowlist `classify` would reject these names as unknown.
+const KNOWN_ADDITIVE: &[&str] = &["yawSpeedBonus", "buffsStartPool", "healthRegenPercent"];
 
 /// A modifier name that is neither in `MODIFIER_SETTINGS` nor either allowlist, so
 /// its fold operator (multiply vs add) cannot be classified.
@@ -81,10 +82,22 @@ impl std::error::Error for ModifierError {}
 /// stat: `uwCoeffMultiplier` (FactoryDurability.py:8, `floodProb * uwCoeffMultiplier`);
 /// the burn-chance factors `burnChanceFactorHighLevel`, `burnChanceGMGSMultiplier` and
 /// `burnChanceMultiplier` (ModifiersApply.py:44/48/57, each used as `initialBurnProb *=`).
-/// Without this allowlist `classify` would reject the unknown name even though it is a
-/// coefficient with the 1.0 identity.
-const KNOWN_MULTIPLICATIVE: &[&str] =
-    &["uwCoeffMultiplier", "burnChanceFactorHighLevel", "burnChanceGMGSMultiplier", "burnChanceMultiplier"];
+/// The remaining names are captain-skill coefficients whose GameParams values carry the
+/// 1.0 multiplicative identity: `reloadFactor` (0.9/0.925), `engineForwardForsagePower` /
+/// `engineBackwardForsagePower` (1.0..1.3), `hydrophoneWaveSpeedCoeff` (1.0) and
+/// `planeEmptyReturnSpeed` (0.5/1.0/1.2). Without this allowlist `classify` would reject
+/// the unknown name even though it is a coefficient with the 1.0 identity.
+const KNOWN_MULTIPLICATIVE: &[&str] = &[
+    "uwCoeffMultiplier",
+    "burnChanceFactorHighLevel",
+    "burnChanceGMGSMultiplier",
+    "burnChanceMultiplier",
+    "reloadFactor",
+    "engineForwardForsagePower",
+    "engineBackwardForsagePower",
+    "hydrophoneWaveSpeedCoeff",
+    "planeEmptyReturnSpeed",
+];
 
 /// How same-name modifier values fold, keyed off the modifier's `MODIFIER_SETTINGS`
 /// `base_value` (1.0 -> coefficient, 0.0 -> bonus).
@@ -354,6 +367,26 @@ mod tests {
             ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         assert!((bb.coef("speedCoef") - 0.9).abs() < 1e-6);
         assert!((ca.coef("speedCoef") - 1.2).abs() < 1e-6);
+    }
+
+    /// Captain-skill modifier names absent from the generated table classify via the
+    /// allowlists by their GameParams identity value (1.0 -> mult, 0.0 -> add) instead
+    /// of erroring as unknown.
+    #[test]
+    fn captain_skill_table_gaps_classify() {
+        let mods = [
+            modifier("reloadFactor", 0.9),
+            modifier("engineForwardForsagePower", 1.2),
+            modifier("hydrophoneWaveSpeedCoeff", 1.0),
+            modifier("planeEmptyReturnSpeed", 0.5),
+            modifier("healthRegenPercent", 0.05),
+        ];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION)
+            .expect("captain-skill table-gap modifiers must classify, not error");
+        assert!((bundle.coef("reloadFactor") - 0.9).abs() < 1e-6);
+        assert!((bundle.coef("engineForwardForsagePower") - 1.2).abs() < 1e-6);
+        assert!((bundle.coef("planeEmptyReturnSpeed") - 0.5).abs() < 1e-6);
+        assert!((bundle.bonus("healthRegenPercent") - 0.05).abs() < 1e-6);
     }
 
     /// The stock bundle is all identities.
