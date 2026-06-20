@@ -313,8 +313,7 @@ fn main() -> Result<(), Report> {
             && let Ok(data) = std::fs::read_to_string(&auto_constants)
             && let Ok(json) = serde_json::from_str::<serde_json::Value>(&data)
         {
-            game_constants
-                .merge_replay_constants(&json, replay_version);
+            game_constants.merge_replay_constants(&json, replay_version);
             info!("Merged constants from dump: {}", auto_constants.display());
         }
     }
