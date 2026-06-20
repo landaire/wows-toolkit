@@ -92,6 +92,7 @@ impl Version {
     /// WG wrote for the 0.7.8-0.11.7 builds; the friendly version is `0.{major}.{minor}`
     /// (the stripped patch is a hotfix marker the friendly version does not carry).
     /// `major` of 0 (older `0.x`) and >= 12 (the post-rename scheme) are already friendly.
+    #[cfg(feature = "parsing")]
     fn friendly_from_account_def_parts(major: u32, minor: u32, patch: u32) -> (u32, u32, u32) {
         if (1..=11).contains(&major) { (0, major, minor) } else { (major, minor, patch) }
     }
