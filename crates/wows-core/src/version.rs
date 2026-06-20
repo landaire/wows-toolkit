@@ -55,6 +55,12 @@ impl Version {
     /// Older versions use different formats:
     /// - `curVersion_release_{major}_{minor}_{patch}_{build}` (~v11-v12)
     /// - `curVersion_Release_{major}_{minor}_{patch}_{subpatch}_{build}` (v0.x era)
+    ///
+    /// The friendly version is normalized to match the replay header
+    /// (`clientVersionFromExe`), which is the source of truth: for the 0.7.8-0.11.7
+    /// era WG's `Account.def` wrote the version with the leading `0.` stripped and
+    /// shifted (`release_11_0_0` for 0.11.0, `release_7_11_0` for 0.7.11), while the
+    /// exe and replays report `0.X.Y`. See [`Self::friendly_from_account_def_parts`].
     #[cfg(feature = "parsing")]
     pub fn from_account_def(xml: &str) -> Option<Version> {
         let doc = roxmltree::Document::parse(xml).ok()?;
@@ -63,30 +69,28 @@ impl Version {
                 // Strip optional "Release_" or "release_" prefix (used in older versions)
                 let rest = rest.strip_prefix("Release_").or_else(|| rest.strip_prefix("release_")).unwrap_or(rest);
                 let parts: Vec<&str> = rest.split('_').collect();
-                match parts.len() {
-                    // Modern: major_minor_patch_build
-                    4 => {
-                        return Some(Version {
-                            major: parts[0].parse().ok()?,
-                            minor: parts[1].parse().ok()?,
-                            patch: parts[2].parse().ok()?,
-                            build: NonZeroU32::new(parts[3].parse().ok()?),
-                        });
-                    }
-                    // Legacy: major_minor_patch_subpatch_build (subpatch folded into patch)
-                    5 => {
-                        return Some(Version {
-                            major: parts[0].parse().ok()?,
-                            minor: parts[1].parse().ok()?,
-                            patch: parts[2].parse().ok()?,
-                            build: NonZeroU32::new(parts[4].parse().ok()?),
-                        });
-                    }
-                    _ => {}
-                }
+                // Modern: major_minor_patch_build. Legacy: major_minor_patch_subpatch_build.
+                let build_idx = match parts.len() {
+                    4 => 3,
+                    5 => 4,
+                    _ => continue,
+                };
+                let (major, minor, patch) =
+                    Self::friendly_from_account_def_parts(parts[0].parse().ok()?, parts[1].parse().ok()?, parts[2].parse().ok()?);
+                return Some(Version { major, minor, patch, build: NonZeroU32::new(parts[build_idx].parse().ok()?) });
             }
         }
         None
+    }
+
+    /// Map an `Account.def` `curVersion` triple to the friendly version the replay
+    /// header reports. A `major` of 1..=11 never existed as a real WoWS version
+    /// (the game was `0.x` until 12.0.0), so it is unambiguously the stripped form
+    /// WG wrote for the 0.7.8-0.11.7 builds; the friendly version is `0.{major}.{minor}`
+    /// (the stripped patch is a hotfix marker the friendly version does not carry).
+    /// `major` of 0 (older `0.x`) and >= 12 (the post-rename scheme) are already friendly.
+    fn friendly_from_account_def_parts(major: u32, minor: u32, patch: u32) -> (u32, u32, u32) {
+        if (1..=11).contains(&major) { (0, major, minor) } else { (major, minor, patch) }
     }
 
     pub fn to_path(&self) -> String {
@@ -160,13 +164,43 @@ mod test {
 
     #[cfg(feature = "parsing")]
     #[test]
-    fn from_account_def_with_release_prefix() {
+    fn from_account_def_release_prefix_normalizes_stripped_version() {
+        // WG's Account.def wrote `release_11_4_0` for friendly version 0.11.4
+        // (build 5624555); the exe and replay clientVersionFromExe both report
+        // `0,11,4`, so the detector must normalize to match.
         let xml = r#"<root><Properties><curVersion_release_11_4_0_5624555></curVersion_release_11_4_0_5624555></Properties></root>"#;
         let v = Version::from_account_def(xml).unwrap();
-        assert_eq!(v.major, 11);
-        assert_eq!(v.minor, 4);
-        assert_eq!(v.patch, 0);
+        assert_eq!((v.major, v.minor, v.patch), (0, 11, 4));
         assert_eq!(v.build, NonZeroU32::new(5624555));
+    }
+
+    #[cfg(feature = "parsing")]
+    #[test]
+    fn from_account_def_stripped_versions_match_replay_header() {
+        // Each case is (Account.def stripped triple, friendly version the replay reports).
+        for (tag, build, want) in [
+            ("curVersion_release_11_0_0_5045210", 5045210u32, (0, 11, 0)),
+            ("curVersion_release_7_11_0_1167524", 1167524, (0, 7, 11)),
+            ("curVersion_release_10_0_0_3343484", 3343484, (0, 10, 0)),
+        ] {
+            let xml = format!("<root><{tag}></{tag}></root>");
+            let v = Version::from_account_def(&xml).unwrap();
+            assert_eq!((v.major, v.minor, v.patch), want, "tag {tag}");
+            assert_eq!(v.build, NonZeroU32::new(build), "tag {tag}");
+        }
+    }
+
+    #[cfg(feature = "parsing")]
+    #[test]
+    fn from_account_def_friendly_versions_untouched() {
+        // major 0 (older 0.x, here the 5-part `0_11_8_0` format) and major >= 12
+        // (post-rename scheme) are already friendly and must not be shifted.
+        let xml = r#"<root><curVersion_0_11_8_0_6223574></curVersion_0_11_8_0_6223574></root>"#;
+        let v = Version::from_account_def(xml).unwrap();
+        assert_eq!((v.major, v.minor, v.patch), (0, 11, 8));
+        let xml = r#"<root><curVersion_12_0_0_6775398></curVersion_12_0_0_6775398></root>"#;
+        let v = Version::from_account_def(xml).unwrap();
+        assert_eq!((v.major, v.minor, v.patch), (12, 0, 0));
     }
 
     #[cfg(feature = "parsing")]
