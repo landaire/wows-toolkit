@@ -313,7 +313,8 @@ fn main() -> Result<(), Report> {
             && let Ok(data) = std::fs::read_to_string(&auto_constants)
             && let Ok(json) = serde_json::from_str::<serde_json::Value>(&data)
         {
-            game_constants.merge_replay_constants(&json, replay_version.build_number().expect("replay version carries a build"));
+            game_constants
+                .merge_replay_constants(&json, replay_version.build_number().expect("replay version carries a build"));
             info!("Merged constants from dump: {}", auto_constants.display());
         }
     }
@@ -324,7 +325,8 @@ fn main() -> Result<(), Report> {
             .unwrap_or_else(|e| panic!("Failed to read constants file {}: {e}", constants_path.display()));
         let json: serde_json::Value =
             serde_json::from_str(&data).unwrap_or_else(|e| panic!("Failed to parse constants JSON: {e}"));
-        game_constants.merge_replay_constants(&json, replay_version.build_number().expect("replay version carries a build"));
+        game_constants
+            .merge_replay_constants(&json, replay_version.build_number().expect("replay version carries a build"));
         info!("Merged replay constants from {}", constants_path.display());
     }
 
@@ -618,7 +620,8 @@ type LoadedGameData =
 
 /// Load game data from a full WoWS game installation.
 fn load_from_game_dir(game_dir: &std::path::Path, replay_version: &Version) -> Result<LoadedGameData, Report> {
-    let replay_build = replay_version.build_number().ok_or_else(|| report!("replay version carries no build number"))?;
+    let replay_build =
+        replay_version.build_number().ok_or_else(|| report!("replay version carries no build number"))?;
     info!(build = replay_build, "Loading game data");
     let resources = game_data::load_game_resources(game_dir, replay_version).map_err(|e| report!("{e}"))?;
     let vfs = resources.vfs;
@@ -658,7 +661,8 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
         bail!("Extracted data directory does not exist: {}", path.display());
     }
 
-    let replay_build = replay_version.build_number().ok_or_else(|| report!("replay version carries no build number"))?;
+    let replay_build =
+        replay_version.build_number().ok_or_else(|| report!("replay version carries no build number"))?;
 
     // If the path itself contains metadata.toml, it's already the version dir
     if let Some(meta) = read_metadata(path) {
@@ -715,10 +719,7 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
     // Also try version prefix match on candidates (legacy dumps without builds.toml)
     let version_str = format!("{}.{}.{}", replay_version.major, replay_version.minor, replay_version.patch);
     if let Some(matched) = candidates.iter().find(|(_, m)| m.version == version_str) {
-        warn!(
-            "No exact data for build {}; using {} (build {})",
-            replay_build, matched.1.version, matched.1.build
-        );
+        warn!("No exact data for build {}; using {} (build {})", replay_build, matched.1.version, matched.1.build);
         return Ok(matched.0.clone());
     }
 

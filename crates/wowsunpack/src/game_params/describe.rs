@@ -294,11 +294,8 @@ impl AbilityCategory {
     /// the client's getAttributesDict drops. Only fields known to MODIFIER_SETTINGS
     /// are displayable attributes; the complete raw set stays on effect_modifiers().
     pub fn describe_effects(&self, ctx: &DescribeContext) -> Vec<ModifierDescription> {
-        let known: Vec<Modifier> = self
-            .effect_modifiers()
-            .into_iter()
-            .filter(|m| modifier_setting(*ctx.version, &m.name).is_some())
-            .collect();
+        let known: Vec<Modifier> =
+            self.effect_modifiers().into_iter().filter(|m| modifier_setting(*ctx.version, &m.name).is_some()).collect();
         render_modifier_descriptions(&known, ctx)
     }
 }

@@ -437,9 +437,7 @@ pub fn load_wows_files(
                 });
             }
         } else {
-            tracing::warn!(
-                "preferences version {version_str} lacks a build number; skipping auto-dump of game data"
-            );
+            tracing::warn!("preferences version {version_str} lacks a build number; skipping auto-dump of game data");
         }
     }
 

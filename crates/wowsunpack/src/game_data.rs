@@ -44,11 +44,7 @@ pub fn find_matching_build(game_dir: &Path, replay_version: &Version) -> Result<
     let available_builds = list_available_builds(game_dir)?;
 
     let build = replay_version.build_number().ok_or(GameDataError::BuildUnknown)?;
-    if available_builds.contains(&build) {
-        Ok(build)
-    } else {
-        Err(GameDataError::BuildNotFound { build })
-    }
+    if available_builds.contains(&build) { Ok(build) } else { Err(GameDataError::BuildNotFound { build }) }
 }
 
 /// Loaded game resources from a WoWS installation.

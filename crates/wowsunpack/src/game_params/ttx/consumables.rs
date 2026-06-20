@@ -363,20 +363,23 @@ pub fn effective_consumable(category: &AbilityCategory, modifiers: &ModifierBund
     if type_name == TYPE_SMOKE_GENERATOR {
         // :133 lifeTime *= smokeGeneratorLifeTime; :134 radius *= smokeScreenRadiusCoefficient
         smoke_lifetime = field(fields, "lifeTime").map(|v| Seconds::from(modifiers.apply(v, "smokeGeneratorLifeTime")));
-        smoke_radius = field(fields, "radius").map(|v| km_from_ballistic(modifiers.apply(v, "smokeScreenRadiusCoefficient")));
+        smoke_radius =
+            field(fields, "radius").map(|v| km_from_ballistic(modifiers.apply(v, "smokeScreenRadiusCoefficient")));
     } else if type_name == TYPE_PLANE_SMOKE_GENERATOR {
         // :137 lifeTime *= planeSmokeGeneratorLifeTime (plane smoke has no radius modifier)
         smoke_lifetime =
             field(fields, "lifeTime").map(|v| Seconds::from(modifiers.apply(v, "planeSmokeGeneratorLifeTime")));
     } else if type_name == TYPE_REGENERATE_HEALTH {
         // :144 regenerationRate *= planeRegenerationRate
-        plane_regeneration_rate = field(fields, "regenerationRate").map(|v| modifiers.apply(v, "planeRegenerationRate"));
+        plane_regeneration_rate =
+            field(fields, "regenerationRate").map(|v| modifiers.apply(v, "planeRegenerationRate"));
     } else if type_name == TYPE_FIGHTER {
         // :147 fightersNum += extraFighterCount (additive, base 0.0)
         fighters_count = field(fields, "fightersNum").map(|v| modifiers.apply(v, "extraFighterCount"));
     } else if CALL_FIGHTERS_CONSUMABLES.contains(&type_name) {
         // :150 radius *= callFightersRadiusCoeff
-        call_fighters_radius = field(fields, "radius").map(|v| km_from_ballistic(modifiers.apply(v, "callFightersRadiusCoeff")));
+        call_fighters_radius =
+            field(fields, "radius").map(|v| km_from_ballistic(modifiers.apply(v, "callFightersRadiusCoeff")));
         // :151 timeDelayAttack *= callFightersTimeDelayAttack
         call_fighters_time_delay =
             field(fields, "timeDelayAttack").map(|v| Seconds::from(modifiers.apply(v, "callFightersTimeDelayAttack")));
@@ -557,7 +560,8 @@ mod tests {
     fn reload_modifier_scales_reload_time() {
         let cat = crash_crew();
         let mods = [modifier("ConsumableReloadTime", 0.9)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let eff = effective_consumable(&cat, &bundle);
         assert!((eff.reload_time.value() - 108.0).abs() < 1e-3, "got {}", eff.reload_time.value());
     }
@@ -568,7 +572,8 @@ mod tests {
     fn reload_coefficients_compound() {
         let cat = crash_crew();
         let mods = [modifier("ConsumableReloadTime", 0.9), modifier("allConsumableReloadTime", 0.95)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let eff = effective_consumable(&cat, &bundle);
         assert!((eff.reload_time.value() - 102.6).abs() < 1e-3, "got {}", eff.reload_time.value());
     }
@@ -579,7 +584,8 @@ mod tests {
     fn infinite_charges_stay_infinite() {
         let cat = crash_crew();
         let mods = [modifier("crashCrewAdditionalConsumables", 1.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let eff = effective_consumable(&cat, &bundle);
         assert_eq!(eff.charges, AmmoCount::Infinite);
     }
@@ -591,7 +597,8 @@ mod tests {
     fn finite_charges_add_group_bonus() {
         let cat = finite_sonar();
         let mods = [modifier("additionalConsumables", 1.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let eff = effective_consumable(&cat, &bundle);
         assert_eq!(eff.charges, AmmoCount::Finite(4));
     }
@@ -611,7 +618,8 @@ mod tests {
     fn per_type_work_time_coeff_applies() {
         let cat = finite_sonar();
         let mods = [modifier("sonarWorkTimeCoeff", 0.8)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let eff = effective_consumable(&cat, &bundle);
         assert_eq!(eff.work_time, Some(Seconds::from(80.0)));
     }
@@ -635,13 +643,10 @@ mod tests {
     fn smoke_radius_modifier_applies() {
         let cat = smoke_generator();
         let mods = [modifier("smokeScreenRadiusCoefficient", 1.2)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         let eff = effective_consumable(&cat, &bundle);
-        assert!(
-            (eff.smoke_radius.unwrap().value() - 0.54).abs() < 1e-4,
-            "got {}",
-            eff.smoke_radius.unwrap().value()
-        );
+        assert!((eff.smoke_radius.unwrap().value() - 0.54).abs() < 1e-4, "got {}", eff.smoke_radius.unwrap().value());
     }
 
     /// Call fighters base: radius 116.667 -> 3.5 km (116.667 * 30/1000), timeDelayAttack
@@ -667,7 +672,8 @@ mod tests {
     fn call_fighters_time_modifier_applies() {
         let cat = call_fighters();
         let mods = [modifier("callFightersTimeDelayAttack", 0.8)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::AirCarrier, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::AirCarrier, VERSION).expect("test modifiers are all known");
         let eff = effective_consumable(&cat, &bundle);
         assert_eq!(eff.call_fighters_time_delay, Some(Seconds::from(4.0)));
     }
@@ -678,7 +684,8 @@ mod tests {
     fn fighter_count_additive_modifier() {
         let cat = fighter();
         let mods = [modifier("extraFighterCount", 1.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         let eff = effective_consumable(&cat, &bundle);
         assert_eq!(eff.fighters_count, Some(2.0));
         assert_eq!(eff.smoke_radius, None);
@@ -698,7 +705,8 @@ mod tests {
     fn plane_regen_rate_modifier_applies() {
         let cat = regenerate_health();
         let mods = [modifier("planeRegenerationRate", 1.5)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::AirCarrier, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::AirCarrier, VERSION).expect("test modifiers are all known");
         let eff = effective_consumable(&cat, &bundle);
         assert!(
             (eff.plane_regeneration_rate.unwrap() - 0.15).abs() < 1e-6,

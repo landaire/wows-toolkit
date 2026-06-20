@@ -9147,7 +9147,8 @@ mod tests {
     fn percent_negative_delta_follows_value_not_positive_flag() {
         // GMShotDelay: percent, base 1.0, positive=false. delta -10 => "-10",
         // not "+10": the sign follows the delta, not the value-type flag.
-        let out = format_modifier(VERSION, "GMShotDelay", 0.9, Species::Battleship, &EchoLoader).expect("should render");
+        let out =
+            format_modifier(VERSION, "GMShotDelay", 0.9, Species::Battleship, &EchoLoader).expect("should render");
         assert!(out.starts_with("-10IDS_PERCENT "), "got {out}");
     }
 

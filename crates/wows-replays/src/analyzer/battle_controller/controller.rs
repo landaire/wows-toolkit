@@ -583,7 +583,11 @@ impl UpdateFromReplayArgs for CrewModifiersCompactParams {
         // version (the boundary is exact -- 0.9.x is always a bitmask, 0.10.0+ is
         // always per-species arrays) and still type-check inside each branch so a
         // malformed/missing value yields an empty skill set rather than a panic.
-        let rework = Version::base(CAPTAIN_SKILL_REWORK_VERSION.0, CAPTAIN_SKILL_REWORK_VERSION.1, CAPTAIN_SKILL_REWORK_VERSION.2);
+        let rework = Version::base(
+            CAPTAIN_SKILL_REWORK_VERSION.0,
+            CAPTAIN_SKILL_REWORK_VERSION.1,
+            CAPTAIN_SKILL_REWORK_VERSION.2,
+        );
         if version.is_at_least(&rework) {
             // Post-rework: per-species arrays of skill-type ids.
             if let Some(learned_skills) = args.get(LEARNED_SKILLS_KEY).and_then(|v| v.array_ref()) {

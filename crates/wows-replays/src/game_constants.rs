@@ -119,7 +119,8 @@ impl GameConstants {
         }
         if let Some(battle_stages) = replay_constants.pointer("/BATTLE_STAGES").and_then(|s| s.as_object()) {
             let stages = self.common.battle_stages_mut();
-            let version = wowsunpack::data::Version { major: 0, minor: 0, patch: 0, build: std::num::NonZeroU32::new(build) };
+            let version =
+                wowsunpack::data::Version { major: 0, minor: 0, patch: 0, build: std::num::NonZeroU32::new(build) };
             for (key, value) in battle_stages {
                 if let Some(id) = value.as_i64()
                     && let Some(stage) = wowsunpack::game_types::BattleStage::from_name(key, version).into_known()

@@ -310,7 +310,8 @@ mod tests {
     #[test]
     fn same_multiplicative_name_multiplies() {
         let mods = [modifier("speedCoef", 0.9), modifier("speedCoef", 1.05)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         assert!((bundle.coef("speedCoef") - 0.945).abs() < 1e-6, "got {}", bundle.coef("speedCoef"));
     }
 
@@ -319,7 +320,8 @@ mod tests {
     #[test]
     fn same_additive_name_adds() {
         let mods = [modifier("torpedoSpeedBonus", 5.0), modifier("torpedoSpeedBonus", 3.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         assert!((bundle.bonus("torpedoSpeedBonus") - 8.0).abs() < 1e-6, "got {}", bundle.bonus("torpedoSpeedBonus"));
     }
 
@@ -328,14 +330,16 @@ mod tests {
     #[test]
     fn second_additive_name_adds() {
         let mods = [modifier("buffsShiftMaxLevel", 2.0), modifier("buffsShiftMaxLevel", 1.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         assert!((bundle.bonus("buffsShiftMaxLevel") - 3.0).abs() < 1e-6);
     }
 
     /// Absent names read back their identity: coef 1.0, bonus 0.0.
     #[test]
     fn absent_name_is_identity() {
-        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION).expect("test modifiers are all known");
         assert_eq!(bundle.coef("speedCoef"), 1.0);
         assert_eq!(bundle.bonus("torpedoSpeedBonus"), 0.0);
     }
@@ -344,8 +348,10 @@ mod tests {
     #[test]
     fn per_species_resolution() {
         let mods = [modifier_per_species("speedCoef", 0.9, 1.2)];
-        let bb = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
-        let ca = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
+        let bb =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let ca =
+            ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         assert!((bb.coef("speedCoef") - 0.9).abs() < 1e-6);
         assert!((ca.coef("speedCoef") - 1.2).abs() < 1e-6);
     }
@@ -366,14 +372,16 @@ mod tests {
     #[test]
     fn known_additive_absent_name_adds() {
         let mods = [modifier("yawSpeedBonus", 4.0), modifier("yawSpeedBonus", 2.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         assert!((bundle.bonus("yawSpeedBonus") - 6.0).abs() < 1e-6, "got {}", bundle.bonus("yawSpeedBonus"));
     }
 
     /// Absent accessors return identities regardless of which accessor is used.
     #[test]
     fn absent_name_returns_identity_per_accessor() {
-        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION).expect("test modifiers are all known");
         assert_eq!(bundle.coef("yawSpeedBonus"), 1.0);
         assert_eq!(bundle.bonus("speedCoef"), 0.0);
         assert_eq!(bundle.coef("nonexistentName"), 1.0);
@@ -385,7 +393,8 @@ mod tests {
     #[test]
     fn apply_multiplies_a_coefficient_name() {
         let mods = [modifier("speedCoef", 0.9)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         assert!((bundle.apply(100.0, "speedCoef") - 90.0).abs() < 1e-4, "got {}", bundle.apply(100.0, "speedCoef"));
     }
 
@@ -394,14 +403,16 @@ mod tests {
     #[test]
     fn apply_adds_a_bonus_name() {
         let mods = [modifier("torpedoSpeedBonus", 5.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         assert!((bundle.apply(60.0, "torpedoSpeedBonus") - 65.0).abs() < 1e-4);
     }
 
     /// An absent name is a no-op regardless of kind: `apply` returns the base.
     #[test]
     fn apply_absent_name_is_identity() {
-        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION).expect("test modifiers are all known");
         assert_eq!(bundle.apply(42.0, "speedCoef"), 42.0);
         assert_eq!(bundle.apply(42.0, "torpedoSpeedBonus"), 42.0);
         assert_eq!(bundle.apply(42.0, "nonexistentName"), 42.0);
@@ -412,7 +423,8 @@ mod tests {
     #[test]
     fn apply_all_chains_left_to_right() {
         let mods = [modifier("speedCoef", 0.9), modifier("torpedoSpeedBonus", 5.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let out = bundle.apply_all(100.0, &["speedCoef", "torpedoSpeedBonus"]);
         assert!((out - 95.0).abs() < 1e-4, "got {out}");
     }
@@ -420,7 +432,8 @@ mod tests {
     /// `apply_all` over no names returns the base unchanged.
     #[test]
     fn apply_all_empty_is_identity() {
-        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION).expect("test modifiers are all known");
         assert_eq!(bundle.apply_all(7.0, &[]), 7.0);
     }
 
@@ -431,7 +444,8 @@ mod tests {
     #[cfg(debug_assertions)]
     fn coef_on_additive_name_trips_assert() {
         let mods = [modifier("yawSpeedBonus", 4.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let _ = bundle.coef("yawSpeedBonus");
     }
 

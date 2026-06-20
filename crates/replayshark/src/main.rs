@@ -345,7 +345,8 @@ fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> anyhow::Resul
         return Err(anyhow!("Extracted data directory does not exist: {}", path.display()));
     }
 
-    let replay_build = replay_version.build_number().ok_or_else(|| anyhow!("replay version carries no build number"))?;
+    let replay_build =
+        replay_version.build_number().ok_or_else(|| anyhow!("replay version carries no build number"))?;
 
     // If the path itself contains metadata.toml, it's already the version dir
     if let Some(meta) = read_metadata(path) {
@@ -384,10 +385,7 @@ fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> anyhow::Resul
             let version_str = format!("{}.{}.{}", replay_version.major, replay_version.minor, replay_version.patch);
             let index = wows_data_mgr::builds::BuildsIndex::load(&builds_path);
             if let Some((entry, _exact)) = index.resolve_build(replay_build, Some(&version_str)) {
-                eprintln!(
-                    "No exact data for build {}; using {} (build {})",
-                    replay_build, entry.version, entry.build
-                );
+                eprintln!("No exact data for build {}; using {} (build {})", replay_build, entry.version, entry.build);
                 return Ok(path.join(&entry.dir));
             }
         }
@@ -938,7 +936,8 @@ fn main() {
         Commands::Dump { output, no_meta, replay } => {
             let replay_file = ReplayFile::from_file(&replay).unwrap();
             let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-            let gc = load_game_constants(constants_path, version.build_number().expect("replay version carries a build"));
+            let gc =
+                load_game_constants(constants_path, version.build_number().expect("replay version carries a build"));
             parse_replay(&replay, game_dir, extracted, |meta| {
                 wows_replays::analyzer::decoder::DecoderBuilder::new(false, no_meta, output.as_deref())
                     .game_constants(gc)
@@ -949,7 +948,8 @@ fn main() {
         Commands::Investigate { meta, timestamp, filter_packet, filter_method, entity_id, replay } => {
             let replay_file = ReplayFile::from_file(&replay).unwrap();
             let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-            let gc = load_game_constants(constants_path, version.build_number().expect("replay version carries a build"));
+            let gc =
+                load_game_constants(constants_path, version.build_number().expect("replay version carries a build"));
             let no_meta = !meta;
             parse_replay(&replay, game_dir, extracted, |meta| {
                 build_investigative_printer(
