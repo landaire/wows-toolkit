@@ -1559,6 +1559,12 @@ impl AbilityCategory {
         &self.consumable_type
     }
 
+    /// The consumable group string, `"ship"` or `"squadron"` (client
+    /// `ConsumableGroup`). Empty when absent.
+    pub fn group(&self) -> &str {
+        &self.group
+    }
+
     pub fn consumable_type(
         &self,
         version: crate::data::Version,

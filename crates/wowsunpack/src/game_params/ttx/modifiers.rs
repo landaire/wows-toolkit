@@ -88,6 +88,14 @@ impl Combine {
         }
     }
 
+    /// Apply this rule's operator to a base value with `amount`.
+    fn apply(self, base: f32, amount: f32) -> f32 {
+        match self {
+            Combine::Multiply => base * amount,
+            Combine::Add => base + amount,
+        }
+    }
+
     fn fold(self, acc: f32, value: f32) -> f32 {
         match self {
             Combine::Multiply => acc * value,
@@ -176,6 +184,27 @@ impl ModifierBundle {
             }
             None => 0.0,
         }
+    }
+
+    /// Apply a single named modifier to a base value, choosing multiply vs add by
+    /// the modifier's own classification. Callers never need to know which it is.
+    ///
+    /// When `name` is absent (no such modifier equipped) the call is a no-op: the
+    /// folded value is the rule's identity (coefficient 1.0, bonus 0.0), so
+    /// `base * 1.0` or `base + 0.0` both return `base` unchanged. This identity
+    /// default is the one legitimate default here and matches the `coef`/`bonus`
+    /// accessors.
+    pub fn apply(&self, base: f32, name: &str) -> f32 {
+        match (self.values.get(name).copied(), self.rules.get(name).copied()) {
+            (Some(value), Some(rule)) => rule.apply(base, value),
+            _ => base,
+        }
+    }
+
+    /// Apply several modifiers in sequence (left-to-right), each chosen multiply vs
+    /// add by its own classification.
+    pub fn apply_all(&self, base: f32, names: &[&str]) -> f32 {
+        names.iter().fold(base, |b, n| self.apply(b, *n))
     }
 }
 
@@ -287,6 +316,50 @@ mod tests {
         assert_eq!(bundle.bonus("speedCoef"), 0.0);
         assert_eq!(bundle.coef("nonexistentName"), 1.0);
         assert_eq!(bundle.bonus("nonexistentName"), 0.0);
+    }
+
+    /// `apply` uses the multiplicative operator for a coefficient name (`speedCoef`,
+    /// base 1.0): base 100 * 0.9 = 90.
+    #[test]
+    fn apply_multiplies_a_coefficient_name() {
+        let mods = [modifier("speedCoef", 0.9)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, BUILD);
+        assert!((bundle.apply(100.0, "speedCoef") - 90.0).abs() < 1e-4, "got {}", bundle.apply(100.0, "speedCoef"));
+    }
+
+    /// `apply` uses the additive operator for a bonus name (`torpedoSpeedBonus`,
+    /// base 0.0): base 60 + 5 = 65.
+    #[test]
+    fn apply_adds_a_bonus_name() {
+        let mods = [modifier("torpedoSpeedBonus", 5.0)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, BUILD);
+        assert!((bundle.apply(60.0, "torpedoSpeedBonus") - 65.0).abs() < 1e-4);
+    }
+
+    /// An absent name is a no-op regardless of kind: `apply` returns the base.
+    #[test]
+    fn apply_absent_name_is_identity() {
+        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, BUILD);
+        assert_eq!(bundle.apply(42.0, "speedCoef"), 42.0);
+        assert_eq!(bundle.apply(42.0, "torpedoSpeedBonus"), 42.0);
+        assert_eq!(bundle.apply(42.0, "nonexistentName"), 42.0);
+    }
+
+    /// `apply_all` chains left-to-right, mixing operators per name: base 100,
+    /// then * 0.9 (speedCoef) = 90, then + 5 (torpedoSpeedBonus) = 95.
+    #[test]
+    fn apply_all_chains_left_to_right() {
+        let mods = [modifier("speedCoef", 0.9), modifier("torpedoSpeedBonus", 5.0)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, BUILD);
+        let out = bundle.apply_all(100.0, &["speedCoef", "torpedoSpeedBonus"]);
+        assert!((out - 95.0).abs() < 1e-4, "got {out}");
+    }
+
+    /// `apply_all` over no names returns the base unchanged.
+    #[test]
+    fn apply_all_empty_is_identity() {
+        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, BUILD);
+        assert_eq!(bundle.apply_all(7.0, &[]), 7.0);
     }
 
     /// Reading a present additive name (`yawSpeedBonus`) through `coef()` trips the
