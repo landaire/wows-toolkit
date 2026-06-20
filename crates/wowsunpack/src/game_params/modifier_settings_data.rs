@@ -72,27 +72,42 @@ impl Measure {
 }
 
 struct Table {
-    min_version: Version,
     entries: &'static [(&'static str, ModifierSetting)],
 }
 
-/// The formatting settings for `name` at game `version`: the newest table whose
-/// `min_version` `version` is at least, then the entry for `name`. `None` if no
-/// table covers the version or the modifier is absent. Order-independent over
-/// TABLES.
-pub fn modifier_setting(version: Version, name: &str) -> Option<&'static ModifierSetting> {
-    let mut chosen: Option<&Table> = None;
-    for table in TABLES {
-        if version.is_at_least(&table.min_version) && chosen.is_none_or(|c| table.min_version > c.min_version) {
-            chosen = Some(table);
-        }
-    }
-    let table = chosen?;
-    table.entries.iter().find(|(n, _)| *n == name).map(|(_, s)| s)
+/// An older-behavior override that applies only to versions strictly below
+/// `max_version`. When a setting changes at build X, transcribe the pre-X
+/// behavior here gated `version < X`.
+struct OverrideTable {
+    max_version: Version,
+    entries: &'static [(&'static str, ModifierSetting)],
 }
 
-static TABLES: &[Table] = &[Table {
-    min_version: Version::base(15, 0, 0),
+/// The formatting settings for `name` at game `version`.
+///
+/// Fail open to the latest build's settings; older behavior is gated behind
+/// `version < X`. `DEFAULT_TABLE` is the latest build and applies to every
+/// version as the fallback. `OVERRIDE_TABLES` carry exclusive upper bounds and
+/// apply only when `version` is strictly below them. Most-specific (lowest
+/// `max_version`) override that applies and contains `name` wins; otherwise the
+/// default table is consulted. `None` only when `name` is genuinely absent.
+pub fn modifier_setting(version: Version, name: &str) -> Option<&'static ModifierSetting> {
+    let mut applicable: Vec<&OverrideTable> =
+        OVERRIDE_TABLES.iter().filter(|ovr| !version.is_at_least(&ovr.max_version)).collect();
+    applicable.sort_by(|a, b| a.max_version.cmp(&b.max_version));
+    for ovr in applicable {
+        if let Some((_, s)) = ovr.entries.iter().find(|(n, _)| *n == name) {
+            return Some(s);
+        }
+    }
+    DEFAULT_TABLE.entries.iter().find(|(n, _)| *n == name).map(|(_, s)| s)
+}
+
+/// Older-behavior overrides, each gated `version < max_version`. Currently empty:
+/// the default table covers all versions.
+static OVERRIDE_TABLES: &[OverrideTable] = &[];
+
+static DEFAULT_TABLE: Table = Table {
     entries: &[
         (
             "visibilityFactor",
@@ -8981,7 +8996,7 @@ static TABLES: &[Table] = &[Table {
             },
         ),
     ],
-}];
+};
 
 /// Format the signed delta `val` for display: round to `round_digits` decimals,
 /// but use 2 decimals when `abs(val) < 2.0` (the client's
@@ -9188,19 +9203,20 @@ mod tests {
     }
 
     #[test]
-    fn lookup_is_version_gated() {
+    fn lookup_finds_default_table_for_all_versions() {
         assert!(modifier_setting(Version::base(15, 0, 0), "shootShift").is_some());
-        assert!(modifier_setting(Version::base(14, 0, 0), "shootShift").is_none());
+        assert!(modifier_setting(Version::base(14, 0, 0), "shootShift").is_some());
         assert!(modifier_setting(Version::base(15, 0, 0), "definitely_not_a_modifier").is_none());
     }
 
     #[test]
-    fn version_gate_selects_table_at_or_above_min_version() {
-        // The single table takes effect at 15.0.0; 15.0.0 and any newer version
-        // select it, older versions do not.
-        assert!(modifier_setting(Version::base(15, 0, 0), "shootShift").is_some());
-        assert!(modifier_setting(Version::base(15, 4, 0), "shootShift").is_some());
-        assert!(modifier_setting(Version::base(14, 11, 0), "shootShift").is_none());
+    fn lookup_fails_open_to_default_for_old_and_unset_versions() {
+        // The default table applies to every version (fail open to latest);
+        // there are no older-behavior overrides yet.
+        assert!(modifier_setting(Version::base(14, 11, 0), "GMCritProb").is_some());
+        assert!(modifier_setting(Version::base(15, 4, 0), "GMCritProb").is_some());
+        assert!(modifier_setting(Version::default(), "GMCritProb").is_some());
+        assert!(modifier_setting(Version::base(14, 11, 0), "definitely_not_a_modifier").is_none());
     }
 
     #[test]

@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn alpha_damage_coeff_folds_main_factors() {
         let mods = [modifier("allAlphaMultiplier", 1.1), modifier("GMAlphaFactor", 1.2)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         let got = alpha_damage_coeff(StatWeaponType::MainAp, &bundle, false);
         assert!((got - 1.32).abs() < 1e-5, "got {got}");
     }
@@ -321,7 +321,7 @@ mod tests {
     #[test]
     fn artillery_damage_coeff_ap_heavy_cruiser_gate() {
         let mods = [modifier("GMAPDamageCoeff", 1.5), modifier("GMHeavyCruiserCaliberDamageCoeff", 2.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         // caliber 0.152 < threshold 0.190 -> heavy-cruiser coeff NOT applied: 1.5.
         let below = artillery_damage_coeff(0.152, StatWeaponType::MainAp, &bundle, 0.190);
         assert!((below - 1.5).abs() < 1e-5, "got {below}");
@@ -358,7 +358,7 @@ mod tests {
             modifier("burnChanceBonus", 0.01),
             modifier("burnChanceFactorBig", -0.03),
         ];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         let got = calculate_burn_chance(10, 0.12, &bundle, false);
         // ((0.12*0.9)*0.95 + 0.02)*1.1 + 0.01 - 0.03
         let expected = ((0.12f32 * 0.9 * 0.95) + 0.02) * 1.1 + 0.01 - 0.03;
@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn burn_chance_clamps_to_zero() {
         let mods = [modifier("burnChanceBonus", -1.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         let got = calculate_burn_chance(10, 0.12, &bundle, false);
         assert_eq!(got, 0.0);
     }

@@ -32,16 +32,57 @@ use crate::game_params::types::Species;
 /// base stat: `yawSpeedBonus` (FactoryArtillery.py:74, FactoryTorpedoes.py:78, used
 /// as `* yawSpeedCoef + yawSpeedBonus`) and `buffsStartPool` (ModifiersApply.py:521,
 /// `specialParams.buffsStartPool + modifier.buffsStartPool`). Without this allowlist
-/// `classify` would fall through to the multiplicative default for these names.
+/// `classify` would reject these names as unknown.
 const KNOWN_ADDITIVE: &[&str] = &["yawSpeedBonus", "buffsStartPool"];
+
+/// A modifier name that is neither in `MODIFIER_SETTINGS` nor either allowlist, so
+/// its fold operator (multiply vs add) cannot be classified.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnknownModifier {
+    pub name: String,
+}
+
+impl std::fmt::Display for UnknownModifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "unrecognized modifier {}: not in MODIFIER_SETTINGS or the additive/multiplicative allowlists",
+            self.name
+        )
+    }
+}
+
+impl std::error::Error for UnknownModifier {}
+
+/// Failure aggregating modifiers into a bundle.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ModifierError {
+    /// One or more names could not be classified. Sorted and deduplicated so the
+    /// caller sees the complete set.
+    Unknown(Vec<String>),
+}
+
+impl std::fmt::Display for ModifierError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ModifierError::Unknown(names) => write!(
+                f,
+                "unrecognized modifiers (not in MODIFIER_SETTINGS or the additive/multiplicative allowlists): {}",
+                names.join(", ")
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ModifierError {}
 
 /// Multiplicative modifier names the generated `MODIFIER_SETTINGS` table does not
 /// cover, transcribed from their client apply sites where they multiply (`*`) a base
 /// stat: `uwCoeffMultiplier` (FactoryDurability.py:8, `floodProb * uwCoeffMultiplier`);
 /// the burn-chance factors `burnChanceFactorHighLevel`, `burnChanceGMGSMultiplier` and
 /// `burnChanceMultiplier` (ModifiersApply.py:44/48/57, each used as `initialBurnProb *=`).
-/// Without this allowlist `classify` would `debug_assert` on the unknown name even
-/// though it is a coefficient with the 1.0 identity.
+/// Without this allowlist `classify` would reject the unknown name even though it is a
+/// coefficient with the 1.0 identity.
 const KNOWN_MULTIPLICATIVE: &[&str] =
     &["uwCoeffMultiplier", "burnChanceFactorHighLevel", "burnChanceGMGSMultiplier", "burnChanceMultiplier"];
 
@@ -57,28 +98,21 @@ enum Combine {
 
 impl Combine {
     /// Classify a modifier name. A name is `Add` if its settings `base_value` is 0.0
-    /// or it is in `KNOWN_ADDITIVE`; `Multiply` if its settings `base_value` is 1.0.
-    /// A name absent from both the table and `KNOWN_ADDITIVE` falls back to
-    /// multiplicative (a coefficient's 1.0 identity is the safe no-op and the dominant
-    /// case), but trips a `debug_assert` so an unrecognized name surfaces in tests
-    /// rather than silently defaulting.
-    fn classify(version: Version, name: &str) -> Combine {
+    /// or it is in `KNOWN_ADDITIVE`; `Multiply` if its settings `base_value` is 1.0 or
+    /// it is in `KNOWN_MULTIPLICATIVE`. A name absent from both the table and the
+    /// allowlists is an `UnknownModifier` error: there is no defensible fold for it,
+    /// so we never guess.
+    fn classify(version: Version, name: &str) -> Result<Combine, UnknownModifier> {
         if KNOWN_ADDITIVE.contains(&name) {
-            return Combine::Add;
+            return Ok(Combine::Add);
         }
         if KNOWN_MULTIPLICATIVE.contains(&name) {
-            return Combine::Multiply;
+            return Ok(Combine::Multiply);
         }
         match modifier_setting(version, name) {
-            Some(s) if s.base_value == 0.0 => Combine::Add,
-            Some(_) => Combine::Multiply,
-            None => {
-                debug_assert!(
-                    false,
-                    "modifier name {name:?} is absent from MODIFIER_SETTINGS and KNOWN_ADDITIVE; defaulting to Multiply (add it to KNOWN_ADDITIVE if it is a bonus)"
-                );
-                Combine::Multiply
-            }
+            Some(s) if s.base_value == 0.0 => Ok(Combine::Add),
+            Some(_) => Ok(Combine::Multiply),
+            None => Err(UnknownModifier { name: name.to_string() }),
         }
     }
 
@@ -124,18 +158,45 @@ impl ModifierBundle {
     /// Aggregate `mods` for `species`. Values sharing a name fold together with the
     /// combine rule classified from `version`'s `MODIFIER_SETTINGS` base value:
     /// coefficients multiply, bonuses add.
-    pub fn from_modifiers(mods: &[CrewSkillModifier], species: Species, version: Version) -> ModifierBundle {
+    ///
+    /// Every distinct name must classify. Names that cannot be classified are
+    /// collected (sorted, deduplicated) and returned as `ModifierError::Unknown`; the
+    /// bundle is not partially built and no unknown is silently folded.
+    pub fn from_modifiers(
+        mods: &[CrewSkillModifier],
+        species: Species,
+        version: Version,
+    ) -> Result<ModifierBundle, ModifierError> {
         let mut values: HashMap<String, f32> = HashMap::new();
         let mut rules: HashMap<String, Combine> = HashMap::new();
+        let mut unknown: Vec<String> = Vec::new();
 
         for m in mods {
             let name = m.name();
-            let combine = *rules.entry(name.to_string()).or_insert_with(|| Combine::classify(version, name));
+            let combine = match rules.get(name) {
+                Some(c) => *c,
+                None => match Combine::classify(version, name) {
+                    Ok(c) => {
+                        rules.insert(name.to_string(), c);
+                        c
+                    }
+                    Err(e) => {
+                        unknown.push(e.name);
+                        continue;
+                    }
+                },
+            };
             let entry = values.entry(name.to_string()).or_insert_with(|| combine.identity());
             *entry = combine.fold(*entry, m.get_for_species(&species));
         }
 
-        ModifierBundle { species, values, rules }
+        if !unknown.is_empty() {
+            unknown.sort();
+            unknown.dedup();
+            return Err(ModifierError::Unknown(unknown));
+        }
+
+        Ok(ModifierBundle { species, values, rules })
     }
 
     /// The stock (no-upgrade) bundle: no modifiers equipped, every name reads back
@@ -249,7 +310,7 @@ mod tests {
     #[test]
     fn same_multiplicative_name_multiplies() {
         let mods = [modifier("speedCoef", 0.9), modifier("speedCoef", 1.05)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         assert!((bundle.coef("speedCoef") - 0.945).abs() < 1e-6, "got {}", bundle.coef("speedCoef"));
     }
 
@@ -258,7 +319,7 @@ mod tests {
     #[test]
     fn same_additive_name_adds() {
         let mods = [modifier("torpedoSpeedBonus", 5.0), modifier("torpedoSpeedBonus", 3.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         assert!((bundle.bonus("torpedoSpeedBonus") - 8.0).abs() < 1e-6, "got {}", bundle.bonus("torpedoSpeedBonus"));
     }
 
@@ -267,14 +328,14 @@ mod tests {
     #[test]
     fn second_additive_name_adds() {
         let mods = [modifier("buffsShiftMaxLevel", 2.0), modifier("buffsShiftMaxLevel", 1.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         assert!((bundle.bonus("buffsShiftMaxLevel") - 3.0).abs() < 1e-6);
     }
 
     /// Absent names read back their identity: coef 1.0, bonus 0.0.
     #[test]
     fn absent_name_is_identity() {
-        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION).expect("test modifiers are all known");
         assert_eq!(bundle.coef("speedCoef"), 1.0);
         assert_eq!(bundle.bonus("torpedoSpeedBonus"), 0.0);
     }
@@ -283,8 +344,8 @@ mod tests {
     #[test]
     fn per_species_resolution() {
         let mods = [modifier_per_species("speedCoef", 0.9, 1.2)];
-        let bb = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION);
-        let ca = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION);
+        let bb = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let ca = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         assert!((bb.coef("speedCoef") - 0.9).abs() < 1e-6);
         assert!((ca.coef("speedCoef") - 1.2).abs() < 1e-6);
     }
@@ -305,14 +366,14 @@ mod tests {
     #[test]
     fn known_additive_absent_name_adds() {
         let mods = [modifier("yawSpeedBonus", 4.0), modifier("yawSpeedBonus", 2.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         assert!((bundle.bonus("yawSpeedBonus") - 6.0).abs() < 1e-6, "got {}", bundle.bonus("yawSpeedBonus"));
     }
 
     /// Absent accessors return identities regardless of which accessor is used.
     #[test]
     fn absent_name_returns_identity_per_accessor() {
-        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION).expect("test modifiers are all known");
         assert_eq!(bundle.coef("yawSpeedBonus"), 1.0);
         assert_eq!(bundle.bonus("speedCoef"), 0.0);
         assert_eq!(bundle.coef("nonexistentName"), 1.0);
@@ -324,7 +385,7 @@ mod tests {
     #[test]
     fn apply_multiplies_a_coefficient_name() {
         let mods = [modifier("speedCoef", 0.9)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         assert!((bundle.apply(100.0, "speedCoef") - 90.0).abs() < 1e-4, "got {}", bundle.apply(100.0, "speedCoef"));
     }
 
@@ -333,14 +394,14 @@ mod tests {
     #[test]
     fn apply_adds_a_bonus_name() {
         let mods = [modifier("torpedoSpeedBonus", 5.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         assert!((bundle.apply(60.0, "torpedoSpeedBonus") - 65.0).abs() < 1e-4);
     }
 
     /// An absent name is a no-op regardless of kind: `apply` returns the base.
     #[test]
     fn apply_absent_name_is_identity() {
-        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION).expect("test modifiers are all known");
         assert_eq!(bundle.apply(42.0, "speedCoef"), 42.0);
         assert_eq!(bundle.apply(42.0, "torpedoSpeedBonus"), 42.0);
         assert_eq!(bundle.apply(42.0, "nonexistentName"), 42.0);
@@ -351,7 +412,7 @@ mod tests {
     #[test]
     fn apply_all_chains_left_to_right() {
         let mods = [modifier("speedCoef", 0.9), modifier("torpedoSpeedBonus", 5.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let out = bundle.apply_all(100.0, &["speedCoef", "torpedoSpeedBonus"]);
         assert!((out - 95.0).abs() < 1e-4, "got {out}");
     }
@@ -359,7 +420,7 @@ mod tests {
     /// `apply_all` over no names returns the base unchanged.
     #[test]
     fn apply_all_empty_is_identity() {
-        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&[], Species::Battleship, VERSION).expect("test modifiers are all known");
         assert_eq!(bundle.apply_all(7.0, &[]), 7.0);
     }
 
@@ -370,7 +431,36 @@ mod tests {
     #[cfg(debug_assertions)]
     fn coef_on_additive_name_trips_assert() {
         let mods = [modifier("yawSpeedBonus", 4.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let _ = bundle.coef("yawSpeedBonus");
+    }
+
+    /// Fail-open: at an OLD version (pre-15.0.0) the default table still classifies
+    /// known modifiers, so old replays still get stats. `GMShotDelay` (base 1.0,
+    /// coefficient) folds multiplicatively: 0.9 * 0.8 = 0.72.
+    #[test]
+    fn from_modifiers_classifies_known_names_at_old_version() {
+        let old = Version::base(11, 0, 0);
+        let mods = [modifier("GMShotDelay", 0.9), modifier("GMShotDelay", 0.8)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, old)
+            .expect("known modifiers classify even at an old version");
+        assert!((bundle.coef("GMShotDelay") - 0.72).abs() < 1e-6, "got {}", bundle.coef("GMShotDelay"));
+    }
+
+    /// An unrecognized name (not in the table or either allowlist) is an error whose
+    /// payload names the offending modifier. It is never silently folded.
+    #[test]
+    fn from_modifiers_unknown_name_errors_with_name() {
+        let mods = [modifier("totallyNotARealModifier", 0.5)];
+        let err = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION)
+            .expect_err("an unknown modifier must error, not silently multiply");
+        assert_eq!(err, ModifierError::Unknown(vec!["totallyNotARealModifier".to_string()]), "got {err:?}");
+    }
+
+    /// `classify` at the unset version (0.0.0) fails open to the default table and
+    /// reads `GMCritProb`'s base 1.0 as a coefficient.
+    #[test]
+    fn classify_gmcritprob_at_default_version_is_multiply() {
+        assert_eq!(Combine::classify(Version::default(), "GMCritProb"), Ok(Combine::Multiply));
     }
 }

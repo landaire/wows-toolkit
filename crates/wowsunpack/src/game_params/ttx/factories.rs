@@ -830,7 +830,7 @@ mod tests {
     fn yamato_ptz_modifier_applies() {
         // uwCoeffBonus +25 (additive) shifts ptz by +25: 54.9549... + 25 = 79.9549...
         let mods = [modifier("uwCoeffBonus", 25.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let durability = durability(&yamato_hull(), &bundle, 10);
         let ptz = durability.torpedo_protection.expect("ptz computed").value();
         let expected = (DEFAULT_UW_DAMAGE_COEFF - 0.15) / DEFAULT_UW_DAMAGE_COEFF * 100.0 + 25.0;
@@ -860,7 +860,7 @@ mod tests {
     fn speed_coef_modifier_applies() {
         // speedCoef 1.05 -> 36 * 1.0 * 1.05 = 37.8.
         let mods = [modifier("speedCoef", 1.05)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let mobility = mobility(&gearing_hull(), &gearing_engine(), &bundle);
         let speed = mobility.speed.expect("speed computed").value();
         assert!((speed - 37.8).abs() < 1e-4, "got {speed}");
@@ -871,7 +871,7 @@ mod tests {
         // healthPerLevel 350 (bonus, +) and healthHullCoeff 1.05 (coef, *):
         // (19400 + 350*10) * 1.05 = 22900*1.05 = 24045 -> ceil(24045/50)*50 = 24050.
         let mods = [modifier("healthPerLevel", 350.0), modifier("healthHullCoeff", 1.05)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let durability = durability(&gearing_hull(), &bundle, 10);
         assert_eq!(durability.health, Some(Hp::from(24050.0)));
     }
@@ -904,7 +904,7 @@ mod tests {
     fn balao_battery_modifiers_apply() {
         // batteryCapacityCoeff 1.1 (coef) -> 240*1.1=264; batteryRegenCoeff 1.25 -> 1.2*1.25=1.5.
         let mods = [modifier("batteryCapacityCoeff", 1.1), modifier("batteryRegenCoeff", 1.25)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Submarine, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Submarine, VERSION).expect("test modifiers are all known");
         let battery = battery(&balao_hull(), &bundle).expect("battery computed");
         let capacity = battery.capacity.expect("capacity");
         let regen = battery.regeneration.expect("regen");
@@ -1122,7 +1122,7 @@ mod tests {
     fn torpedo_speed_bonus_applies() {
         // torpedoSpeedBonus +5 (additive): 66 + 5 = 71.
         let mods = [modifier("torpedoSpeedBonus", 5.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let stats = torpedo_stats("PAPT027_Mk_16_mod_1".to_string(), &gearing_torpedo(), &bundle);
         let speed = stats.speed.expect("speed").value();
         assert!(approx(speed, 71.0), "got {speed}");
@@ -1132,7 +1132,7 @@ mod tests {
     fn torpedo_damage_coeff_applies() {
         // torpedoDamageCoeff 1.2 (coef): (53500/3 + 1200) * 1.2.
         let mods = [modifier("torpedoDamageCoeff", 1.2)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let stats = torpedo_stats("PAPT027_Mk_16_mod_1".to_string(), &gearing_torpedo(), &bundle);
         let damage = stats.damage.expect("damage").value();
         assert!(approx(damage, (53500.0 / 3.0 + 1200.0) * 1.2), "got {damage}");
@@ -1144,7 +1144,7 @@ mod tests {
         // mapped from GunRotationSpeedModifiersStruct.yawSpeedCoef
         // (GunRotationSpeed.py:10-13, ModifiersApply.py:123). base 25 -> 30, time 180/30 = 6.
         let mods = [modifier("GTRotationSpeed", 1.2)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let launchers = [gearing_launcher()];
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
         let torps = torpedoes(&launchers, &bundle, &provider).expect("torpedoes computed");
@@ -1159,7 +1159,7 @@ mod tests {
     fn torpedo_launcher_traverse_bonus_applies() {
         // GTRotationSpeedBonus +5 (additive, base 0.0): 25 + 5 = 30, time 180/30 = 6.
         let mods = [modifier("GTRotationSpeedBonus", 5.0)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let launchers = [gearing_launcher()];
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
         let torps = torpedoes(&launchers, &bundle, &provider).expect("torpedoes computed");
@@ -1368,7 +1368,7 @@ mod tests {
     fn worcester_modified_reload_and_range() {
         // GMShotDelay 0.9 -> reload 4.6 * 0.9 = 4.14; GMMaxDist 1.1 -> range 15.32 * 1.1 = 16.852.
         let mods = [modifier("GMShotDelay", 0.9), modifier("GMMaxDist", 1.1)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         let provider = worcester_provider();
         let arty = artillery(&worcester_artillery(), &bundle, 1.0, 10, &provider).expect("artillery computed");
         let reload = arty.reload_time.expect("reload").value();
@@ -1381,7 +1381,7 @@ mod tests {
     fn worcester_traverse_modifier_applies() {
         // GMRotationSpeed 1.2 (+20% traverse): 25 -> 30, rotation_time 180/30 = 6.
         let mods = [modifier("GMRotationSpeed", 1.2)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         let provider = worcester_provider();
         let arty = artillery(&worcester_artillery(), &bundle, 1.0, 10, &provider).expect("artillery computed");
         let gun = arty.gun.expect("gun");
@@ -1574,7 +1574,7 @@ mod tests {
     fn bismarck_secondary_range_modifier_applies() {
         // GSMaxDist 1.2 (secondary-range upgrade/AtbaRange): 7.6 * 1.2 = 9.12.
         let mods = [modifier("GSMaxDist", 1.2)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let provider = bismarck_secondary_provider();
         let sec = secondaries(&bismarck_secondaries(), &bundle, 8, &provider).expect("secondaries computed");
         let range = sec.range.expect("range").value();
@@ -1585,7 +1585,7 @@ mod tests {
     fn bismarck_secondary_reload_modifier_applies() {
         // GSShotDelay 0.85 (secondary reload upgrade): 7.5 * 0.85 = 6.375.
         let mods = [modifier("GSShotDelay", 0.85)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let provider = bismarck_secondary_provider();
         let sec = secondaries(&bismarck_secondaries(), &bundle, 8, &provider).expect("secondaries computed");
         let reload = sec.reload_time.expect("reload").value();
@@ -1626,7 +1626,7 @@ mod tests {
     fn concealment_modifier_reduces_sea_detection() {
         // Concealment System Mod 1: visibilityFactor 0.9 (-10%) -> 7.33 * 0.9 = 6.597.
         let mods = [modifier("visibilityFactor", 0.9)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let vis = visibility(&gearing_hull(), &bundle, false, None, None);
         let sea = vis.sea_detection.expect("sea").value();
         assert!(approx(sea, 6.597), "got {sea}");
@@ -1640,7 +1640,7 @@ mod tests {
         // visibilityDistCoeff 0.97 (camouflage concealment coef) folds into `coeff`:
         // 7.33 * 1.0 * 0.97 = 7.1101.
         let mods = [modifier("visibilityDistCoeff", 0.97)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let vis = visibility(&gearing_hull(), &bundle, false, None, None);
         let sea = vis.sea_detection.expect("sea").value();
         assert!(approx(sea, 7.1101), "got {sea}");
@@ -1653,7 +1653,7 @@ mod tests {
     fn big_gun_visibility_penalty_applies_only_with_non_small_artillery() {
         // GMBigGunVisibilityCoeff 1.05 multiplies coeff only when has_big_gun_artillery.
         let mods = [modifier("GMBigGunVisibilityCoeff", 1.05)];
-        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION);
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         // BB-like hull (reuse Gearing's factor for the arithmetic): with big guns the
         // penalty applies: 7.33 * 1.05 = 7.6965.
         let with_guns = visibility(&gearing_hull(), &bundle, true, None, None);
