@@ -6648,9 +6648,9 @@ dependencies = [
 
 [[package]]
 name = "pickled"
-version = "2.0.0-alpha8"
+version = "2.0.0-alpha9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d17d516b19eb47dccba3ec79505508953ba21524f5621660fc4d898936f2b58e"
+checksum = "7e5ffbea63b79a77a3a358a52f7ee90445120aa09ebc4716f7198b0630c12f35"
 dependencies = [
  "byteorder",
  "iter-read",
@@ -11342,6 +11342,7 @@ dependencies = [
  "clap",
  "convert_case 0.11.0",
  "csv",
+ "dhat",
  "flate2",
  "futures",
  "gettext",
