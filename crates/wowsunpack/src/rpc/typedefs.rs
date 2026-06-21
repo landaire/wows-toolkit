@@ -357,8 +357,12 @@ impl<'argtype> serde::Serialize for ArgValue<'argtype> {
                 obj.end()
             }
             Self::NullableFixedDict(None) => serializer.serialize_none(),
-            Self::Tuple(_t) => {
-                unimplemented!();
+            Self::Tuple(elements) => {
+                let mut seq = serializer.serialize_seq(Some(elements.len()))?;
+                for element in elements.iter() {
+                    seq.serialize_element(element)?;
+                }
+                seq.end()
             }
         }
     }
@@ -453,8 +457,15 @@ impl ArgType {
                 }
                 if *allow_none { Ok(ArgValue::NullableFixedDict(Some(dict))) } else { Ok(ArgValue::FixedDict(dict)) }
             }
-            Self::Tuple((_t, _count)) => {
-                panic!("Tuple parsing is unsupported");
+            Self::Tuple((t, count)) => {
+                // A TUPLE is a fixed-size sequence: `count` elements back to back
+                // with no length prefix (the size is fixed in the schema), the
+                // same wire layout as a sized array.
+                let mut values = Vec::with_capacity(*count);
+                for _ in 0..*count {
+                    values.push(t.parse_value(input)?);
+                }
+                Ok(ArgValue::Tuple(values))
             }
             Self::Named { inner, .. } => inner.parse_value(input),
         }
@@ -512,8 +523,17 @@ pub fn parse_type(arg: &roxmltree::Node, aliases: &HashMap<String, ArgType>) -> 
         ArgType::Primitive(PrimitiveType::Vector3)
     } else if t == "BLOB" {
         ArgType::Primitive(PrimitiveType::Blob)
-    } else if t == "USER_TYPE" || t == "MAILBOX" || t == "PYTHON" {
-        // TODO: This is a HACKY HACKY workaround for things we don't recognize
+    } else if t == "USER_TYPE" {
+        // A USER_TYPE streams as the network type declared by its inner <Type>
+        // (e.g. FLAT_VECTOR streams as VECTOR2, GUN_DIRECTIONS as UINT16). Honor
+        // it; without an inner <Type> the type is converter-defined and opaque,
+        // streamed as a length-prefixed blob.
+        match child_by_name(arg, "Type") {
+            Some(inner) => parse_type(&inner, aliases),
+            None => ArgType::Primitive(PrimitiveType::Blob),
+        }
+    } else if t == "MAILBOX" || t == "PYTHON" {
+        // Engine-internal references with no stable on-wire schema we model.
         ArgType::Primitive(PrimitiveType::Blob)
     } else if t == "ARRAY" {
         let subtype = parse_type(&child_by_name(arg, "of").unwrap(), aliases);
@@ -765,6 +785,24 @@ mod test {
             _ => panic!(),
         };
         assert_eq!(*m.get("modifier").unwrap(), ArgValue::Uint32(5));
+    }
+
+    #[test]
+    fn test_tuple_parses_fixed_count_without_prefix() {
+        // A TUPLE is `count` elements back to back with no length prefix.
+        let t = ArgType::Tuple((Box::new(ArgType::Primitive(PrimitiveType::Uint8)), 3));
+        let data = [7u8, 8, 9];
+        let mut input = &data[..];
+        let result = t.parse_value(&mut input).unwrap();
+        assert!(input.is_empty(), "all bytes consumed, no length prefix");
+        assert_eq!(
+            result,
+            ArgValue::Tuple(vec![ArgValue::Uint8(7), ArgValue::Uint8(8), ArgValue::Uint8(9)])
+        );
+
+        // It serializes as a JSON array.
+        let json = serde_json::to_string(&result).unwrap();
+        assert_eq!(json, "[7,8,9]");
     }
 
     #[test]

@@ -2,6 +2,9 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 use wowsunpack::rpc::typedefs::ArgType;
+use crate::error::PResult;
+use crate::error::ParseError;
+use crate::error::failure;
 use wowsunpack::rpc::typedefs::ArgValue;
 use wowsunpack::rpc::typedefs::PrimitiveType;
 
@@ -134,38 +137,36 @@ fn nested_update_command<'argtype>(
     t: &'argtype ArgType,
     mut prop_value: &mut ArgValue<'argtype>,
     mut reader: BitReader,
-) -> PropertyNesting<'argtype> {
+) -> PResult<PropertyNesting<'argtype>> {
     let t = t.peeled();
     match (t, &mut prop_value) {
         (ArgType::FixedDict((_, entries)), _) => {
-            let entry_idx = reader.read_u8(entries.len().next_power_of_two().trailing_zeros() as u8);
+            let entry = entries
+                .get(reader.read_u8(entries.len().next_power_of_two().trailing_zeros() as u8) as usize)
+                .ok_or_else(|| failure(ParseError::InvalidPacketData))?;
             while !reader.remaining().is_multiple_of(8) {
                 reader.read_u8(1);
             }
             let mut remaining = vec![0; reader.remaining() / 8];
             reader.read_u8_slice(&mut remaining[..]);
-            assert!(reader.remaining() == 0);
-            let value = entries[entry_idx as usize].prop_type.parse_value(&mut &remaining[..]).unwrap();
+            let value =
+                entry.prop_type.parse_value(&mut &remaining[..]).map_err(|_| failure(ParseError::InvalidPacketData))?;
             match prop_value {
                 ArgValue::FixedDict(d) => {
-                    d.insert(&entries[entry_idx as usize].name, value.clone());
+                    d.insert(&entry.name, value.clone());
                 }
                 ArgValue::NullableFixedDict(Some(d)) => {
-                    d.insert(&entries[entry_idx as usize].name, value.clone());
+                    d.insert(&entry.name, value.clone());
                 }
-                ArgValue::NullableFixedDict(None) => unimplemented!(),
-                _ => panic!("FixedDict type caused unexpected value {:?}", prop_value),
+                _ => return Err(failure(ParseError::InvalidPacketData)),
             }
-            PropertyNesting {
-                levels: vec![],
-                action: UpdateAction::SetKey { key: &entries[entry_idx as usize].name, value },
-            }
+            Ok(PropertyNesting { levels: vec![], action: UpdateAction::SetKey { key: &entry.name, value } })
         }
         (ArgType::Array((_size, element_type)), ArgValue::Array(elements)) => {
             let idx_bits =
                 if is_slice { elements.len() + 1 } else { elements.len() }.next_power_of_two().trailing_zeros();
-            let idx1 = reader.read_u8(idx_bits as u8);
-            let idx2 = if is_slice { Some(reader.read_u8(idx_bits as u8)) } else { None };
+            let idx1 = reader.read_u8(idx_bits as u8) as usize;
+            let idx2 = if is_slice { Some(reader.read_u8(idx_bits as u8) as usize) } else { None };
 
             while !reader.remaining().is_multiple_of(8) {
                 reader.read_u8(1);
@@ -174,48 +175,56 @@ fn nested_update_command<'argtype>(
             reader.read_u8_slice(&mut remaining[..]);
 
             if remaining.is_empty() {
-                // Remove elements
-                if is_slice {
-                    slice_insert(idx1 as usize, idx2.unwrap() as usize, elements, vec![]);
-                    return PropertyNesting {
-                        levels: vec![],
-                        action: UpdateAction::RemoveRange { start: idx1 as usize, stop: idx2.unwrap() as usize },
-                    };
-                } else {
-                    unimplemented!();
-                }
+                // An empty payload removes the [idx1, idx2) range (slice form only).
+                let stop = idx2.ok_or_else(|| failure(ParseError::InvalidPacketData))?;
+                slice_insert(idx1, stop, elements, vec![]);
+                return Ok(PropertyNesting { levels: vec![], action: UpdateAction::RemoveRange { start: idx1, stop } });
             }
 
+            // A clean payload is exactly N whole elements. A leftover or non-
+            // advancing parse means the bytes are misaligned, not benign padding,
+            // so fail rather than fabricate a half-decoded element.
             let mut new_elements = vec![];
             let mut i = &remaining[..];
             while !i.is_empty() {
-                let element = element_type.parse_value(&mut i).unwrap();
-                new_elements.push(element);
+                let before = i.len();
+                match element_type.parse_value(&mut i) {
+                    Ok(element) if i.len() < before => new_elements.push(element),
+                    _ => return Err(failure(ParseError::InvalidPacketData)),
+                }
             }
 
-            if is_slice {
-                slice_insert(idx1 as usize, idx2.unwrap() as usize, elements, new_elements.clone());
-                PropertyNesting {
-                    levels: vec![],
-                    action: UpdateAction::SetRange {
-                        start: idx1 as usize,
-                        stop: idx2.unwrap() as usize,
-                        values: new_elements,
-                    },
-                }
+            if let Some(stop) = idx2 {
+                slice_insert(idx1, stop, elements, new_elements.clone());
+                Ok(PropertyNesting { levels: vec![], action: UpdateAction::SetRange { start: idx1, stop, values: new_elements } })
             } else {
-                elements[idx1 as usize] = new_elements.remove(0);
-                PropertyNesting {
-                    levels: vec![],
-                    action: UpdateAction::SetElement { index: idx1 as usize, value: elements[idx1 as usize].clone() },
+                let value = if new_elements.is_empty() { return Err(failure(ParseError::InvalidPacketData)) } else { new_elements.remove(0) };
+                // A non-slice element set can target one past the end (append) or
+                // an array left empty at entity create; grow with defaults so the
+                // assignment lands instead of indexing out of bounds.
+                if idx1 >= elements.len() {
+                    elements.resize_with(idx1 + 1, || default_arg_value(element_type));
                 }
+                elements[idx1] = value;
+                Ok(PropertyNesting { levels: vec![], action: UpdateAction::SetElement { index: idx1, value: elements[idx1].clone() } })
             }
         }
-        x => {
-            println!("{:#?}", x);
-            panic!();
-        }
+        (_, _) => Err(failure(ParseError::InvalidPacketData)),
     }
+}
+
+/// Read a byte-aligned scalar value at the reader's current position. A scalar
+/// leaf in a nested-property path carries no `cont` bit (only containers do), so
+/// the parent navigation arm reads the value directly via this helper instead of
+/// recursing into [`get_nested_prop_path_helper`], which would consume the
+/// value's leading bits as a spurious continuation flag.
+fn read_aligned_scalar<'argtype>(t: &'argtype ArgType, reader: &mut BitReader) -> PResult<ArgValue<'argtype>> {
+    while !reader.remaining().is_multiple_of(8) {
+        reader.read_u8(1);
+    }
+    let mut buf = vec![0; reader.remaining() / 8];
+    reader.read_u8_slice(&mut buf[..]);
+    t.parse_value(&mut &buf[..]).map_err(|_| failure(ParseError::InvalidPacketData))
 }
 
 pub(crate) fn get_nested_prop_path_helper<'argtype>(
@@ -223,7 +232,7 @@ pub(crate) fn get_nested_prop_path_helper<'argtype>(
     t: &'argtype ArgType,
     prop_value: &mut ArgValue<'argtype>,
     mut reader: BitReader,
-) -> PropertyNesting<'argtype> {
+) -> PResult<PropertyNesting<'argtype>> {
     let t = t.peeled();
     let cont = reader.read_u8(1);
     if cont == 0 {
@@ -231,46 +240,56 @@ pub(crate) fn get_nested_prop_path_helper<'argtype>(
     }
     match (t, prop_value) {
         (ArgType::FixedDict((_, propspec)), ArgValue::FixedDict(propvalue)) => {
-            let prop_idx = reader.read_u8(propspec.len().next_power_of_two().trailing_zeros() as u8);
-            let prop_id = &propspec[prop_idx as usize].name;
-            let mut nesting = get_nested_prop_path_helper(
-                is_slice,
-                &propspec[prop_idx as usize].prop_type,
-                propvalue.get_mut(prop_id.as_str()).unwrap(),
-                reader,
-            );
-            nesting.levels.insert(0, PropertyNestLevel::DictKey(&propspec[prop_idx as usize].name));
-            nesting
+            let prop = propspec
+                .get(reader.read_u8(propspec.len().next_power_of_two().trailing_zeros() as u8) as usize)
+                .ok_or_else(|| failure(ParseError::InvalidPacketData))?;
+            // A scalar child is a leaf with no further `cont` bit: set it here and
+            // surface it as a SetKey at this dict, the same shape the `cont == 0`
+            // path produces, rather than recursing (which would misread the value).
+            if matches!(prop.prop_type.peeled(), ArgType::Primitive(_)) {
+                let value = read_aligned_scalar(&prop.prop_type, &mut reader)?;
+                propvalue.insert(prop.name.as_str(), value.clone());
+                return Ok(PropertyNesting { levels: vec![], action: UpdateAction::SetKey { key: &prop.name, value } });
+            }
+            let child = propvalue.get_mut(prop.name.as_str()).ok_or_else(|| failure(ParseError::InvalidPacketData))?;
+            let mut nesting = get_nested_prop_path_helper(is_slice, &prop.prop_type, child, reader)?;
+            nesting.levels.insert(0, PropertyNestLevel::DictKey(&prop.name));
+            Ok(nesting)
         }
         (ArgType::FixedDict((_, propspec)), ArgValue::NullableFixedDict(Some(propvalue))) => {
-            let prop_idx = reader.read_u8(propspec.len().next_power_of_two().trailing_zeros() as u8);
-            let prop_id = &propspec[prop_idx as usize].name;
-            let mut nesting = get_nested_prop_path_helper(
-                is_slice,
-                &propspec[prop_idx as usize].prop_type,
-                propvalue.get_mut(prop_id.as_str()).unwrap(),
-                reader,
-            );
-            nesting.levels.insert(0, PropertyNestLevel::DictKey(&propspec[prop_idx as usize].name));
-            nesting
+            let prop = propspec
+                .get(reader.read_u8(propspec.len().next_power_of_two().trailing_zeros() as u8) as usize)
+                .ok_or_else(|| failure(ParseError::InvalidPacketData))?;
+            if matches!(prop.prop_type.peeled(), ArgType::Primitive(_)) {
+                let value = read_aligned_scalar(&prop.prop_type, &mut reader)?;
+                propvalue.insert(prop.name.as_str(), value.clone());
+                return Ok(PropertyNesting { levels: vec![], action: UpdateAction::SetKey { key: &prop.name, value } });
+            }
+            let child = propvalue.get_mut(prop.name.as_str()).ok_or_else(|| failure(ParseError::InvalidPacketData))?;
+            let mut nesting = get_nested_prop_path_helper(is_slice, &prop.prop_type, child, reader)?;
+            nesting.levels.insert(0, PropertyNestLevel::DictKey(&prop.name));
+            Ok(nesting)
         }
         (ArgType::Array((_size, element_type)), ArgValue::Array(arr)) => {
             let idx = reader.read_u8(arr.len().next_power_of_two().trailing_zeros() as u8) as usize;
             // A property that was default-constructed (uninitialized at entity
             // create, materialized lazily) can have an empty array here; grow it
             // with defaults so navigating to element `idx` applies the update
-            // instead of panicking on an out-of-bounds index.
+            // instead of indexing out of bounds.
             if idx >= arr.len() {
                 arr.resize_with(idx + 1, || default_arg_value(element_type));
             }
-            let mut nesting = get_nested_prop_path_helper(is_slice, element_type, &mut arr[idx], reader);
+            // A scalar element is a leaf with no `cont` bit (see the dict arm).
+            if matches!(element_type.peeled(), ArgType::Primitive(_)) {
+                let value = read_aligned_scalar(element_type, &mut reader)?;
+                arr[idx] = value.clone();
+                return Ok(PropertyNesting { levels: vec![], action: UpdateAction::SetElement { index: idx, value } });
+            }
+            let mut nesting = get_nested_prop_path_helper(is_slice, element_type, &mut arr[idx], reader)?;
             nesting.levels.insert(0, PropertyNestLevel::ArrayIndex(idx));
-            nesting
+            Ok(nesting)
         }
-        x => {
-            println!("{:#?}", x);
-            panic!()
-        }
+        (_, _) => Err(failure(ParseError::InvalidPacketData)),
     }
 }
 
@@ -355,7 +374,7 @@ mod test {
 
         // 1-entry dict => 0 index bits; the single payload byte is the new u8.
         let data = [5u8];
-        let nesting = nested_update_command(false, &t, &mut value, BitReader::new(&data));
+        let nesting = nested_update_command(false, &t, &mut value, BitReader::new(&data)).expect("parse");
 
         match nesting.action {
             UpdateAction::SetKey { key, value } => {
@@ -364,5 +383,151 @@ mod test {
             }
             other => panic!("unexpected action: {other:?}"),
         }
+    }
+
+    use std::collections::HashMap;
+    use wowsunpack::rpc::typedefs::FixedDictProperty;
+    use wowsunpack::rpc::typedefs::PrimitiveType;
+
+    fn named(name: &str, inner: ArgType) -> ArgType {
+        ArgType::Named { name: name.to_string(), inner: Box::new(inner) }
+    }
+
+    fn prop(name: &str, prop_type: ArgType) -> FixedDictProperty {
+        FixedDictProperty { name: name.to_string(), prop_type }
+    }
+
+    /// A nested update that descends into a scalar dict field carries no `cont`
+    /// bit at the scalar; the value bytes follow directly. The leaf must surface
+    /// as a SetKey at the owning dict, never panic on a spurious continuation.
+    #[test]
+    fn descend_into_scalar_dict_field_sets_key() {
+        let t = ArgType::FixedDict((false, vec![prop("x", named("X", ArgType::Primitive(PrimitiveType::Int8)))]));
+        let mut value = ArgValue::FixedDict(HashMap::from([("x", ArgValue::Int8(0))]));
+
+        // cont=1 (descend), 0 prop-index bits (1 field), 7 align bits, then the i8.
+        let data = [0b1000_0000u8, 7];
+        let nesting = get_nested_prop_path_helper(false, &t, &mut value, BitReader::new(&data)).expect("parse");
+
+        assert!(nesting.levels.is_empty(), "scalar leaf is a SetKey at its dict, not a nested level");
+        match nesting.action {
+            UpdateAction::SetKey { key, value } => {
+                assert_eq!(key, "x");
+                assert_eq!(value, ArgValue::Int8(7));
+            }
+            other => panic!("unexpected action: {other:?}"),
+        }
+    }
+
+    /// The real modern-replay shape: `ribbons[0].ribbonId` arrives by descending
+    /// dict -> array -> dict -> scalar. Expect the documented convention:
+    /// levels stop at the array element, action is a SetKey for `ribbonId`.
+    #[test]
+    fn descend_ribbons_ribbon_id_matches_convention() {
+        let ribbon_state = named(
+            "RIBBON_STATE",
+            ArgType::FixedDict((
+                false,
+                vec![
+                    prop("ribbonId", named("RIBBON_ID", ArgType::Primitive(PrimitiveType::Int8))),
+                    prop("count", ArgType::Primitive(PrimitiveType::Uint16)),
+                ],
+            )),
+        );
+        let t = ArgType::FixedDict((
+            false,
+            vec![prop("ribbons", named("RIBBONS_STATE", ArgType::Array((None, Box::new(ribbon_state)))))],
+        ));
+        let mut value = ArgValue::FixedDict(HashMap::from([(
+            "ribbons",
+            ArgValue::Array(vec![ArgValue::FixedDict(HashMap::from([
+                ("ribbonId", ArgValue::Int8(0)),
+                ("count", ArgValue::Uint16(0)),
+            ]))]),
+        )]));
+
+        // cont(top)=1, cont(array)=1, cont(dict)=1, dict-prop-idx=0 (ribbonId),
+        // 4 align bits, then the i8 value 3.  => 0b1110_0000, 0x03
+        let data = [0b1110_0000u8, 3];
+        let nesting = get_nested_prop_path_helper(false, &t, &mut value, BitReader::new(&data)).expect("parse");
+
+        assert_eq!(nesting.levels.len(), 2);
+        assert!(matches!(nesting.levels[0], PropertyNestLevel::DictKey("ribbons")));
+        assert!(matches!(nesting.levels[1], PropertyNestLevel::ArrayIndex(0)));
+        match nesting.action {
+            UpdateAction::SetKey { key, value } => {
+                assert_eq!(key, "ribbonId");
+                assert_eq!(value, ArgValue::Int8(3));
+            }
+            other => panic!("unexpected action: {other:?}"),
+        }
+    }
+
+    /// Descending into a scalar array element surfaces as a SetElement.
+    #[test]
+    fn descend_into_scalar_array_element_sets_element() {
+        let t = ArgType::Array((None, Box::new(ArgType::Primitive(PrimitiveType::Int8))));
+        let mut value = ArgValue::Array(vec![ArgValue::Int8(0), ArgValue::Int8(0)]);
+
+        // cont=1 (descend), idx=1 (1 bit for len 2), 6 align bits, then the i8.
+        let data = [0b1100_0000u8, 5];
+        let nesting = get_nested_prop_path_helper(false, &t, &mut value, BitReader::new(&data)).expect("parse");
+
+        assert!(nesting.levels.is_empty());
+        match nesting.action {
+            UpdateAction::SetElement { index, value } => {
+                assert_eq!(index, 1);
+                assert_eq!(value, ArgValue::Int8(5));
+            }
+            other => panic!("unexpected action: {other:?}"),
+        }
+    }
+
+    /// A clean slice payload is exactly N whole elements with no leftover.
+    #[test]
+    fn slice_insert_parses_whole_elements() {
+        let element = ArgType::FixedDict((
+            false,
+            vec![
+                prop("ribbonId", ArgType::Primitive(PrimitiveType::Int8)),
+                prop("count", ArgType::Primitive(PrimitiveType::Uint16)),
+            ],
+        ));
+        let t = ArgType::Array((None, Box::new(element)));
+        let mut value = ArgValue::Array(vec![]);
+
+        // Empty array slice => 0 index bits; exactly one 3-byte element {id=4, count=1}.
+        let data = [4u8, 1, 0];
+        let nesting = nested_update_command(true, &t, &mut value, BitReader::new(&data)).expect("parse");
+
+        match nesting.action {
+            UpdateAction::SetRange { start, stop, values } => {
+                assert_eq!((start, stop), (0, 0));
+                assert_eq!(values.len(), 1);
+                let ArgValue::FixedDict(map) = &values[0] else { panic!("expected a dict element") };
+                assert_eq!(map.get("ribbonId"), Some(&ArgValue::Int8(4)));
+                assert_eq!(map.get("count"), Some(&ArgValue::Uint16(1)));
+            }
+            other => panic!("unexpected action: {other:?}"),
+        }
+    }
+
+    /// A leftover tail (misaligned bytes, not whole elements) fails fast rather
+    /// than fabricating a half-decoded element.
+    #[test]
+    fn slice_insert_rejects_misaligned_tail() {
+        let element = ArgType::FixedDict((
+            false,
+            vec![
+                prop("ribbonId", ArgType::Primitive(PrimitiveType::Int8)),
+                prop("count", ArgType::Primitive(PrimitiveType::Uint16)),
+            ],
+        ));
+        let t = ArgType::Array((None, Box::new(element)));
+        let mut value = ArgValue::Array(vec![]);
+
+        // One 3-byte element plus a stray byte: 4 bytes for a 3-byte element.
+        let data = [4u8, 1, 0, 0];
+        assert!(nested_update_command(true, &t, &mut value, BitReader::new(&data)).is_err());
     }
 }

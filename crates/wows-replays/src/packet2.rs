@@ -890,6 +890,12 @@ impl<'argtype> Parser<'argtype> {
             return Err(failure(ParseError::InvalidPacketData));
         }
         let prop_idx = reader.read_u8(spec.properties.len().next_power_of_two().trailing_zeros() as u8);
+        // `prop_idx` is read with `next_power_of_two` bits, so it can name an index
+        // past the spec's real property count on a corrupt or mis-specced packet;
+        // bail gracefully instead of indexing `spec.properties` out of bounds.
+        if prop_idx as usize >= spec.properties.len() {
+            return Err(failure(ParseError::InvalidPacketData));
+        }
         if prop_idx as usize >= entity.properties.len() {
             // Properties are not always materialized at entity-create: some stay
             // uninitialized and are created only by a later nested update (e.g.
@@ -908,7 +914,7 @@ impl<'argtype> Parser<'argtype> {
             &spec.properties[prop_idx as usize].prop_type,
             &mut entity.properties[prop_idx as usize],
             reader,
-        );
+        )?;
 
         Ok(PacketType::PropertyUpdate(PropertyUpdatePacket {
             entity_id: entity_id.into(),
