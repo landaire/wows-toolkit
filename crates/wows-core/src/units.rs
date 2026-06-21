@@ -5,6 +5,7 @@
 //! kilometers and millimeters. These newtypes keep units honest at the type
 //! level; cross-unit arithmetic and comparison convert to a common unit.
 
+use std::fmt;
 use std::ops::Add;
 use std::ops::Mul;
 use std::ops::Sub;
@@ -175,6 +176,27 @@ impl Millimeters {
     }
     pub fn to_bigworld(self) -> BigWorldDistance {
         self.to_meters().to_bigworld()
+    }
+}
+
+/// Conventional English-port rounding: whole meters.
+impl fmt::Display for Meters {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:.0} m", self.0)
+    }
+}
+
+/// Conventional English-port rounding: one decimal place.
+impl fmt::Display for Km {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:.1} km", self.0)
+    }
+}
+
+/// Conventional English-port rounding: whole millimeters.
+impl fmt::Display for Millimeters {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:.0} mm", self.0)
     }
 }
 
@@ -381,5 +403,25 @@ impl PartialEq<Meters> for BigWorldDistance {
 impl PartialOrd<Meters> for BigWorldDistance {
     fn partial_cmp(&self, other: &Meters) -> Option<std::cmp::Ordering> {
         self.0.partial_cmp(&other.to_bigworld().0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn meters_display_rounds_to_whole() {
+        assert_eq!(Meters::from(740.6).to_string(), "741 m");
+    }
+
+    #[test]
+    fn km_display_one_decimal() {
+        assert_eq!(Km::from(10.5).to_string(), "10.5 km");
+    }
+
+    #[test]
+    fn millimeters_display_rounds_to_whole() {
+        assert_eq!(Millimeters::from(406.0).to_string(), "406 mm");
     }
 }
