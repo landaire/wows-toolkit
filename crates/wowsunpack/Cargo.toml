@@ -18,6 +18,11 @@ name = "wowsunpack"
 path = "src/main.rs"
 required-features = ["bin"]
 
+[[bin]]
+name = "dhat_parse"
+path = "src/bin/dhat_parse.rs"
+required-features = ["dhat-heap"]
+
 [dependencies]
 wows-core = { workspace = true }
 clap = { workspace = true, optional = true }
@@ -55,6 +60,7 @@ async-trait = { version = "0.1", optional = true }
 async-std = { version = "1.13", optional = true }
 futures = { version = "0.3", optional = true }
 ciborium = { workspace = true, optional = true }
+dhat = { version = "0.3", optional = true }
 
 [build-dependencies]
 serde = { workspace = true }
@@ -116,3 +122,6 @@ bin = [
 ]
 default = ["bin"]
 cbor = ["dep:ciborium", "serde"]
+# Heap-profile the GameParams parse path with dhat. Enables the `dhat_parse`
+# binary; pair with the `profiling` cargo profile. Off by default.
+dhat-heap = ["dep:dhat", "vfs-mmap", "rkyv"]

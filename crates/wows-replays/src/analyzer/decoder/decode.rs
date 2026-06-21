@@ -1376,7 +1376,7 @@ fn try_convert_pickle_to_string(value: pickled::value::Value) -> pickled::value:
                 .map(|(k, v)| {
                     (try_convert_hashable_pickle_to_string(k.clone()), try_convert_pickle_to_string(v.clone()))
                 })
-                .collect::<std::collections::BTreeMap<_, _>>()
+                .collect::<pickled::Dict>()
                 .into(),
         ),
         value => value,

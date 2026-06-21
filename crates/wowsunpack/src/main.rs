@@ -3,7 +3,6 @@ use rootcause::prelude::*;
 use pickled::HashableValue;
 use serde::Serialize;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -805,7 +804,7 @@ fn run() -> Result<(), Report> {
 
             let pickle = game_params_to_pickle(game_params_data).context("Failed to deserialize GameParams")?;
 
-            fn print_ids(params_dict: &BTreeMap<pickled::HashableValue, pickled::Value>) {
+            fn print_ids(params_dict: &pickled::Dict) {
                 for key in params_dict.keys() {
                     if let HashableValue::String(s) = key {
                         let s = s.inner();
@@ -1196,7 +1195,7 @@ fn dump_param(file_stem: &str, value: &pickled::Value, mut out_path: PathBuf) ->
     None
 }
 
-fn value_to_dict(value: pickled::Value) -> Option<std::collections::BTreeMap<pickled::HashableValue, pickled::Value>> {
+fn value_to_dict(value: pickled::Value) -> Option<pickled::Dict> {
     match value {
         pickled::Value::Dict(d) => Some(d.into_raw_or_cloned()),
         pickled::Value::Object(o) => {

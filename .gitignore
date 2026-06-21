@@ -20,3 +20,5 @@ strings.csv
 /55299*.txt
 # Superpowers planning docs (local only, not source-controlled)
 docs/superpowers/
+
+dhat-heap.json

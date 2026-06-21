@@ -18,11 +18,11 @@ use tracing::debug;
 
 /// Extension trait that provides dict extraction for both `Value::Dict` and `Value::Object`.
 trait ValueDictExt {
-    fn dict_or_object_dict(&self) -> Option<Shared<BTreeMap<HashableValue, Value>>>;
+    fn dict_or_object_dict(&self) -> Option<Shared<pickled::Dict>>;
 }
 
 impl ValueDictExt for Value {
-    fn dict_or_object_dict(&self) -> Option<Shared<BTreeMap<HashableValue, Value>>> {
+    fn dict_or_object_dict(&self) -> Option<Shared<pickled::Dict>> {
         match self {
             Value::Dict(d) => Some(d.clone()),
             Value::Object(o) => {
@@ -200,7 +200,7 @@ macro_rules! game_param_to_type {
 /// The dict may contain a sibling `excludedConsumables` array (e.g. on the
 /// Survival Expert skill: `{"reloadFactor": 0.925, "excludedConsumables": ["crashCrew", "regenCrew"]}`).
 /// When present, that list scopes every other entry in the same dict.
-fn build_skill_modifiers(modifiers: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkillModifier> {
+fn build_skill_modifiers(modifiers: &pickled::Dict) -> Vec<CrewSkillModifier> {
     let excluded_consumables: Vec<String> = modifiers
         .get(&HashableValue::String("excludedConsumables".to_owned().into()))
         .and_then(|v| v.list_ref())
@@ -282,7 +282,7 @@ const SKILL_STRUCTURAL_KEYS: &[&str] = &[
     "uiTreatAsTrigger",
 ];
 
-fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> {
+fn build_crew_skills(skills: &pickled::Dict) -> Vec<CrewSkill> {
     skills
         .iter()
         .filter_map(|(hashable_skill_name, skill_data)| {
@@ -333,7 +333,7 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> 
             let modifiers = match skill_data.get(&pk("modifiers")).and_then(|v| v.dict_or_object_dict()) {
                 Some(modifiers) => Some(build_skill_modifiers(&modifiers.inner())),
                 None => {
-                    let flat: BTreeMap<HashableValue, Value> = skill_data
+                    let flat: pickled::Dict = skill_data
                         .iter()
                         .filter(|(key, _)| {
                             key.string_ref()
@@ -398,14 +398,14 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> 
 
 /// Extract a list-of-strings field, returning empty when the field is absent or
 /// not a string list. Older builds omit some of these list fields entirely.
-fn string_list_field(dict: &BTreeMap<HashableValue, Value>, key: &str) -> Vec<String> {
+fn string_list_field(dict: &pickled::Dict, key: &str) -> Vec<String> {
     dict.get(&HashableValue::String(key.to_owned().into()))
         .and_then(|value| value.list_ref())
         .map(|list| list.inner().iter().filter_map(|v| v.string_ref().map(|s| s.inner().to_owned())).collect())
         .unwrap_or_default()
 }
 
-fn build_crew_personality(personality: &BTreeMap<HashableValue, Value>) -> CrewPersonality {
+fn build_crew_personality(personality: &pickled::Dict) -> CrewPersonality {
     let ships = game_param_to_type!(personality, "ships", HashMap<(), ()>);
     let ships = ships.inner();
     let ships = CrewPersonalityShips::builder()
@@ -450,7 +450,7 @@ fn build_crew_personality(personality: &BTreeMap<HashableValue, Value>) -> CrewP
         .build()
 }
 
-fn build_ability_category(category_data: &BTreeMap<HashableValue, Value>) -> AbilityCategory {
+fn build_ability_category(category_data: &pickled::Dict) -> AbilityCategory {
     let reload_time =
         if let Some(reload_time) = category_data.get(&HashableValue::String("reloadTime".to_owned().into())) {
             if let Some(reload_time) = reload_time.i64_ref() {
@@ -545,7 +545,7 @@ fn build_ability_category(category_data: &BTreeMap<HashableValue, Value>) -> Abi
         .build()
 }
 
-fn build_ability(ability_data: &BTreeMap<HashableValue, Value>) -> Ability {
+fn build_ability(ability_data: &pickled::Dict) -> Ability {
     let test_key = HashableValue::String("numConsumables".to_string().into());
     let categories: HashMap<String, AbilityCategory> =
         HashMap::from_iter(ability_data.iter().filter_map(|(key, value)| {
@@ -576,7 +576,7 @@ fn pk(key: &str) -> HashableValue {
 }
 
 /// Helper: read a float from a pickled dict, accepting both f64 and i64.
-fn read_float(dict: &BTreeMap<HashableValue, Value>, key: &str) -> Option<f32> {
+fn read_float(dict: &pickled::Dict, key: &str) -> Option<f32> {
     dict.get(&pk(key)).and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
 }
 
@@ -595,7 +595,7 @@ fn read_all_strings(val: &Value) -> Vec<String> {
 }
 
 /// Helper: read a string value from a pickled dict.
-fn read_string(dict: &BTreeMap<HashableValue, Value>, key: &str) -> Option<String> {
+fn read_string(dict: &pickled::Dict, key: &str) -> Option<String> {
     dict.get(&pk(key)).and_then(|v| v.string_ref()).map(|s| s.inner().to_string())
 }
 
@@ -659,7 +659,7 @@ fn read_vec3_at(v: &Value, idx: usize) -> Option<[f32; 3]> {
 /// `(DEFAULT_UW_DAMAGE_COEFF - floodNodes[0][0]) / DEFAULT_UW_DAMAGE_COEFF`, or 0.0
 /// when `floodNodes[0][0] == DEFAULT_UW_DAMAGE_COEFF`. `floodNodes` is a list of
 /// triples; reads `floodNodes[0][0]` defensively, `None` if absent/empty.
-fn read_flood_prob(hull_data: &BTreeMap<HashableValue, Value>) -> Option<f32> {
+fn read_flood_prob(hull_data: &pickled::Dict) -> Option<f32> {
     use crate::game_params::ttx::constants::DEFAULT_UW_DAMAGE_COEFF;
     let node0 = read_vec3_at(hull_data.get(&pk(keys::FLOOD_NODES))?, 0)?[0];
     if node0 == DEFAULT_UW_DAMAGE_COEFF {
@@ -671,7 +671,7 @@ fn read_flood_prob(hull_data: &BTreeMap<HashableValue, Value>) -> Option<f32> {
 
 /// Read the submarine `SubmarineBattery` sub-object's `capacity` and `regenRate`
 /// (PreprocessedHull.py:23-30). `None` for hulls without the sub-object (non-subs).
-fn read_submarine_battery(hull_data: &BTreeMap<HashableValue, Value>) -> (Option<f32>, Option<f32>) {
+fn read_submarine_battery(hull_data: &pickled::Dict) -> (Option<f32>, Option<f32>) {
     let Some(battery) = hull_data.get(&pk(keys::SUBMARINE_BATTERY)).and_then(|v| v.dict_or_object_dict()) else {
         return (None, None);
     };
@@ -681,7 +681,7 @@ fn read_submarine_battery(hull_data: &BTreeMap<HashableValue, Value>) -> (Option
 
 /// Read `visibilityFactorsBySubmarine['PERISCOPE']` (PreprocessedHull.py:13).
 /// `None` for hulls without the dict (non-subs) or a missing key.
-fn read_visibility_by_periscope(hull_data: &BTreeMap<HashableValue, Value>) -> Option<f32> {
+fn read_visibility_by_periscope(hull_data: &pickled::Dict) -> Option<f32> {
     let dict = hull_data.get(&pk(keys::VISIBILITY_FACTORS_BY_SUBMARINE)).and_then(|v| v.dict_or_object_dict())?;
     let dict = dict.inner();
     read_float(&dict, keys::VISIBILITY_PERISCOPE)
@@ -714,7 +714,7 @@ fn read_trajectory_geometry(traj: &Value) -> Option<TrajectoryGeometry> {
 /// Returns `(mode_name, trajectory)` per mode with a readable `InnerTrajectory`,
 /// sorted by mode name; missing/malformed entries are skipped. A mode's
 /// `OuterTrajectory` is read into `outer` when present.
-pub fn read_camera_trajectories(ship_data: &BTreeMap<HashableValue, Value>) -> Vec<(String, CameraTrajectory)> {
+pub fn read_camera_trajectories(ship_data: &pickled::Dict) -> Vec<(String, CameraTrajectory)> {
     let Some(cameras) = ship_data.get(&pk("Cameras")).and_then(|v| v.dict_or_object_dict()) else {
         return Vec::new();
     };
@@ -751,7 +751,7 @@ pub fn read_camera_trajectories(ship_data: &BTreeMap<HashableValue, Value>) -> V
 
 /// Extract `pitchDeadZones` from a mount dict.
 /// Each entry is `[yaw_min, yaw_max, pitch_min, pitch_max]` in degrees.
-fn parse_pitch_dead_zones(mount_dict: &BTreeMap<HashableValue, Value>) -> Vec<[f32; 4]> {
+fn parse_pitch_dead_zones(mount_dict: &pickled::Dict) -> Vec<[f32; 4]> {
     fn as_f32(v: &Value) -> Option<f32> {
         v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32))
     }
@@ -786,7 +786,7 @@ fn parse_pitch_dead_zones(mount_dict: &BTreeMap<HashableValue, Value>) -> Vec<[f
 ///
 /// Raw keys are `(model_index << 16) | material_id`.  We group by `material_id`
 /// and collect per-layer thicknesses ordered by ascending `model_index`.
-fn parse_armor_dict(dict: &BTreeMap<HashableValue, Value>) -> ArmorMap {
+fn parse_armor_dict(dict: &pickled::Dict) -> ArmorMap {
     use std::collections::BTreeMap;
 
     // First pass: collect (model_index, material_id) → thickness.
@@ -810,7 +810,7 @@ fn parse_armor_dict(dict: &BTreeMap<HashableValue, Value>) -> ArmorMap {
 }
 
 /// Extract mount points (HP_* entries with model paths) from a component dict.
-fn extract_mounts(ship_data: &BTreeMap<HashableValue, Value>, component_name: &str) -> Vec<MountPoint> {
+fn extract_mounts(ship_data: &pickled::Dict, component_name: &str) -> Vec<MountPoint> {
     let Some(comp_data) = ship_data.get(&pk(component_name)).and_then(|v| v.dict_or_object_dict()) else {
         return Vec::new();
     };
@@ -859,7 +859,7 @@ fn hardpoint_number(key: &str) -> u32 {
     reversed.parse().unwrap_or(u32::MAX)
 }
 
-fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
+fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
     let ability_data = game_param_to_type!(ship_data, keys::SHIP_ABILITIES, Option<HashMap<(), ()>>);
     let abilities: Option<Vec<Vec<(String, String)>>> = ability_data.map(|abilities_data| {
         abilities_data
@@ -1567,7 +1567,7 @@ impl GameMetadataProvider {
 
     /// Parse a single param from pickled dict data. Panics on missing fields are
     /// caught by the caller's `catch_unwind`.
-    fn parse_single_param(param: &Value, params_dict: &Shared<BTreeMap<HashableValue, Value>>) -> Option<Param> {
+    fn parse_single_param(param: &Value, params_dict: &Shared<pickled::Dict>) -> Option<Param> {
         if param.is_none() {
             return None;
         }
@@ -2043,7 +2043,7 @@ mod camera_tests {
             (pk("distanceOfDamage"), list(vec![list(vec![fv(83.33), fv(0.1)]), list(vec![fv(86.66), fv(1.0)])])),
             (pk("ignoreClasses"), list(vec![sv("Cruiser"), sv("Destroyer")])),
         ]);
-        let params_dict: Shared<BTreeMap<HashableValue, Value>> = Shared::new(BTreeMap::new());
+        let params_dict: Shared<pickled::Dict> = Shared::new(pickled::Dict::new());
         let param = GameMetadataProvider::parse_single_param(&proj, &params_dict).expect("param parsed");
         let projectile = param.projectile().expect("projectile data");
 
@@ -2066,7 +2066,7 @@ mod camera_tests {
             (pk("typeinfo"), typeinfo("USA", "Torpedo", "Projectile")),
             (pk("ammoType"), sv("torpedo")),
         ]);
-        let params_dict: Shared<BTreeMap<HashableValue, Value>> = Shared::new(BTreeMap::new());
+        let params_dict: Shared<pickled::Dict> = Shared::new(pickled::Dict::new());
         let param = GameMetadataProvider::parse_single_param(&proj, &params_dict).expect("param parsed");
         let projectile = param.projectile().expect("projectile data");
         assert_eq!(projectile.speed(), None);
@@ -2079,7 +2079,7 @@ mod camera_tests {
 
     #[test]
     fn read_camera_trajectories_empty_dict_returns_empty() {
-        let ship_data: BTreeMap<HashableValue, Value> = BTreeMap::new();
+        let ship_data: pickled::Dict = pickled::Dict::new();
         let result = read_camera_trajectories(&ship_data);
         assert!(result.is_empty());
     }
@@ -2104,7 +2104,7 @@ mod camera_tests {
         let inner_traj = build_inner_traj(vec![]);
         let mode = dict(vec![(pk("InnerTrajectory"), inner_traj)]);
         let cameras = dict(vec![(pk("TestMode"), mode)]);
-        let ship_data: BTreeMap<HashableValue, Value> = [(pk("Cameras"), cameras)].into_iter().collect();
+        let ship_data: pickled::Dict = [(pk("Cameras"), cameras)].into_iter().collect();
         let result = read_camera_trajectories(&ship_data);
         assert_eq!(result.len(), 1);
         let (name, traj) = &result[0];
@@ -2125,7 +2125,7 @@ mod camera_tests {
         let inner_traj = build_inner_traj(vec![(pk("ignoreHeightMultiplier"), Value::Bool(true))]);
         let mode = dict(vec![(pk("InnerTrajectory"), inner_traj), (pk("tags"), sv("AT"))]);
         let cameras = dict(vec![(pk("TagMode"), mode)]);
-        let ship_data: BTreeMap<HashableValue, Value> = [(pk("Cameras"), cameras)].into_iter().collect();
+        let ship_data: pickled::Dict = [(pk("Cameras"), cameras)].into_iter().collect();
         let result = read_camera_trajectories(&ship_data);
         assert_eq!(result.len(), 1);
         let (name, traj) = &result[0];
@@ -2139,7 +2139,7 @@ mod camera_tests {
         let inner_traj = build_inner_traj(vec![(pk("ignoreHeightMultiplier"), Value::I64(1))]);
         let mode = dict(vec![(pk("InnerTrajectory"), inner_traj)]);
         let cameras = dict(vec![(pk("IntMode"), mode)]);
-        let ship_data: BTreeMap<HashableValue, Value> = [(pk("Cameras"), cameras)].into_iter().collect();
+        let ship_data: pickled::Dict = [(pk("Cameras"), cameras)].into_iter().collect();
         let result = read_camera_trajectories(&ship_data);
         assert_eq!(result.len(), 1);
         assert!(result[0].1.ignore_height_multiplier);
@@ -2159,7 +2159,7 @@ mod camera_tests {
         let mode =
             dict(vec![(pk("InnerTrajectory"), build_inner_traj(vec![])), (pk("OuterTrajectory"), build_outer_traj())]);
         let cameras = dict(vec![(pk("PairMode"), mode)]);
-        let ship_data: BTreeMap<HashableValue, Value> = [(pk("Cameras"), cameras)].into_iter().collect();
+        let ship_data: pickled::Dict = [(pk("Cameras"), cameras)].into_iter().collect();
         let result = read_camera_trajectories(&ship_data);
         assert_eq!(result.len(), 1);
         let outer = result[0].1.outer.as_ref().expect("outer parsed");
@@ -2174,7 +2174,7 @@ mod camera_tests {
     fn read_camera_trajectories_outer_absent_is_none() {
         let mode = dict(vec![(pk("InnerTrajectory"), build_inner_traj(vec![]))]);
         let cameras = dict(vec![(pk("NoOuter"), mode)]);
-        let ship_data: BTreeMap<HashableValue, Value> = [(pk("Cameras"), cameras)].into_iter().collect();
+        let ship_data: pickled::Dict = [(pk("Cameras"), cameras)].into_iter().collect();
         let result = read_camera_trajectories(&ship_data);
         assert!(result[0].1.outer.is_none());
     }
@@ -2189,7 +2189,7 @@ mod camera_tests {
         ]);
         let mode = dict(vec![(pk("InnerTrajectory"), inner_traj)]);
         let cameras = dict(vec![(pk("RealMode"), mode), (pk("inertialRollCoef"), Value::F64(0.5))]);
-        let ship_data: BTreeMap<HashableValue, Value> = [(pk("Cameras"), cameras)].into_iter().collect();
+        let ship_data: pickled::Dict = [(pk("Cameras"), cameras)].into_iter().collect();
         let result = read_camera_trajectories(&ship_data);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, "RealMode");
@@ -2209,7 +2209,7 @@ mod camera_tests {
             (pk("modifiers"), modifiers),
         ]);
         let tactical = dict(vec![(pk("workRange"), fv(1000.0)), (pk("aimRange"), fv(11.0))]);
-        let category_data: BTreeMap<HashableValue, Value> = vec![
+        let category_data: pickled::Dict = vec![
             (pk("reloadTime"), fv(40.0)),
             (pk("workTime"), Value::I64(28)),
             (pk("numConsumables"), Value::I64(3)),
@@ -2279,7 +2279,7 @@ mod camera_tests {
         let upgrade_info =
             dict(vec![(pk("PAUH911_Gearing_1945"), hull_upgrade), (pk("PAUE903_D10_ENG_STOCK"), engine_upgrade)]);
 
-        let ship_data: BTreeMap<HashableValue, Value> = vec![
+        let ship_data: pickled::Dict = vec![
             (pk("level"), Value::I64(10)),
             (pk("group"), sv("special")),
             (pk("ShipUpgradeInfo"), upgrade_info),
@@ -2343,7 +2343,7 @@ mod camera_tests {
         let upgrade_info =
             dict(vec![(pk("PAUH911_Gearing_1945"), hull_upgrade), (pk("PAUT901_D10_TORP_STOCK"), torp_upgrade)]);
 
-        let ship_data: BTreeMap<HashableValue, Value> = vec![
+        let ship_data: pickled::Dict = vec![
             (pk("level"), Value::I64(10)),
             (pk("group"), sv("special")),
             (pk("ShipUpgradeInfo"), upgrade_info),
@@ -2378,7 +2378,7 @@ mod camera_tests {
         let a_hull = dict(vec![(pk("health"), fv(10000.0)), (pk("model"), sv("A_Hull.model"))]);
         let upgrade_info = dict(vec![(pk("PAUH001_Hull"), hull_upgrade)]);
 
-        let ship_data: BTreeMap<HashableValue, Value> = vec![
+        let ship_data: pickled::Dict = vec![
             (pk("level"), Value::I64(5)),
             (pk("group"), sv("special")),
             (pk("ShipUpgradeInfo"), upgrade_info),
@@ -2428,7 +2428,7 @@ mod camera_tests {
         let upgrade_info =
             dict(vec![(pk("PAUH911_Worcester_1948"), hull_upgrade), (pk("PAUA901_Worcester_ART_STOCK"), arty_upgrade)]);
 
-        let ship_data: BTreeMap<HashableValue, Value> = vec![
+        let ship_data: pickled::Dict = vec![
             (pk("level"), Value::I64(10)),
             (pk("group"), sv("special")),
             (pk("ShipUpgradeInfo"), upgrade_info),
@@ -2469,7 +2469,7 @@ mod camera_tests {
         let a_hull = dict(vec![(pk("health"), fv(10000.0)), (pk("model"), sv("A_Hull.model"))]);
         let upgrade_info = dict(vec![(pk("PAUH001_Hull"), hull_upgrade)]);
 
-        let ship_data: BTreeMap<HashableValue, Value> = vec![
+        let ship_data: pickled::Dict = vec![
             (pk("level"), Value::I64(5)),
             (pk("group"), sv("special")),
             (pk("ShipUpgradeInfo"), upgrade_info),
@@ -2509,7 +2509,7 @@ mod camera_tests {
             (pk("PAUS822_Suo"), suo2_upgrade),
         ]);
 
-        let ship_data: BTreeMap<HashableValue, Value> = vec![
+        let ship_data: pickled::Dict = vec![
             (pk("level"), Value::I64(9)),
             (pk("group"), sv("special")),
             (pk("ShipUpgradeInfo"), upgrade_info),
@@ -2536,7 +2536,7 @@ mod camera_tests {
         let a_hull = dict(vec![(pk("health"), fv(10000.0)), (pk("model"), sv("A_Hull.model"))]);
         let upgrade_info = dict(vec![(pk("PAUH001_Hull"), hull_upgrade)]);
 
-        let ship_data: BTreeMap<HashableValue, Value> = vec![
+        let ship_data: pickled::Dict = vec![
             (pk("level"), Value::I64(5)),
             (pk("group"), sv("special")),
             (pk("ShipUpgradeInfo"), upgrade_info),
