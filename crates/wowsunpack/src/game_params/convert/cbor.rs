@@ -71,6 +71,8 @@ pub fn pickle_to_cbor(pickled: pickled::Value) -> CborValue {
             CborValue::Map(map.into_iter().map(|(k, value)| (CborValue::Text(k), value)).collect())
         }
         pickled::Value::Object(ref o) => pickle_to_cbor(o.inner().__reduce__().state_or_none()),
+        // Recursive back-edge: no finite serialization, emit null.
+        pickled::Value::Weak(_) => CborValue::Null,
     }
 }
 

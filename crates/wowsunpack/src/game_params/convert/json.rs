@@ -84,6 +84,8 @@ pub fn pickle_to_json(pickled: pickled::Value) -> serde_json::Value {
             serde_json::Value::Object(map)
         }
         pickled::Value::Object(ref o) => pickle_to_json(o.inner().__reduce__().state_or_none()),
+        // Recursive back-edge: no finite serialization, emit null.
+        pickled::Value::Weak(_) => serde_json::Value::Null,
     }
 }
 
