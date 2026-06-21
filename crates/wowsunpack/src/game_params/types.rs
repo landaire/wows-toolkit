@@ -33,6 +33,9 @@ pub use wows_core::units::Km;
 pub use wows_core::units::Meters;
 /// Distance newtypes. Defined in `wows-core`; re-exported so existing
 /// `wowsunpack::game_params::types::{Meters, ...}` paths keep working.
+pub use wows_core::units::MetersPerSecond;
+/// Distance newtypes. Defined in `wows-core`; re-exported so existing
+/// `wowsunpack::game_params::types::{Meters, ...}` paths keep working.
 pub use wows_core::units::Millimeters;
 /// Distance newtypes. Defined in `wows-core`; re-exported so existing
 /// `wowsunpack::game_params::types::{Meters, ...}` paths keep working.

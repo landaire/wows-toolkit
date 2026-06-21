@@ -46,6 +46,7 @@ use crate::game_params::types::ArmorMap;
 use crate::game_params::types::GameParamProvider;
 use crate::game_params::types::Km;
 use crate::game_params::types::Meters;
+use crate::game_params::types::MetersPerSecond;
 use crate::game_params::types::Millimeters;
 use crate::game_params::types::Projectile;
 
@@ -400,7 +401,7 @@ pub fn shell_stats(
     // speed = bulletSpeed * timeFactor (PreprocessedAmmo.py:16). timeFactor defaults to
     // 1.0 when absent (maa3520d6.py:1151, GameParams class attribute); most shells omit it,
     // but PXPA* event shells carry 0.5/0.75/2.2.
-    let speed = projectile.bullet_speed().map(|s| s * projectile.time_factor().unwrap_or(1.0));
+    let speed = projectile.bullet_speed().map(|s| MetersPerSecond::from(s * projectile.time_factor().unwrap_or(1.0)));
 
     // damage = alphaDamage * getAlphaDamageCoeff * controllableWeaponDamageCoeff
     //   * getArtilleryDamageCoeff * citadelCSAP(if weapon in WEAPONS_CSAP)
@@ -1347,7 +1348,7 @@ mod tests {
         assert_eq!(he.burn_chance, Some(Percent::from(12.0)));
         assert_eq!(he.caliber, Some(Millimeters::from(152.0)));
         // speed: 812 * 1.0 (timeFactor) = 812.
-        assert_eq!(he.speed, Some(812.0));
+        assert_eq!(he.speed, Some(MetersPerSecond::from(812.0)));
         // floodChance: uwCritical 0.0 * 100 = 0.
         assert_eq!(he.flood_chance, Some(Percent::from(0.0)));
         // Main battery -> unlimited pool.
@@ -1369,7 +1370,7 @@ mod tests {
         // AP has no floodChance.
         assert!(ap.flood_chance.is_none());
         // speed: 762 * 1.0 = 762.
-        assert_eq!(ap.speed, Some(762.0));
+        assert_eq!(ap.speed, Some(MetersPerSecond::from(762.0)));
     }
 
     #[test]
@@ -1445,12 +1446,12 @@ mod tests {
             .time_factor(0.5)
             .build();
         let stats = shell_stats("X".to_string(), &shell, &ModifierBundle::empty(Species::Cruiser), 10, false);
-        assert_eq!(stats.speed, Some(381.0));
+        assert_eq!(stats.speed, Some(MetersPerSecond::from(381.0)));
 
         // A shell without timeFactor defaults to 1.0 (maa3520d6.py:1151): speed == bulletSpeed.
         let plain = Projectile::builder().ammo_type("HE".to_string()).bullet_diametr(0.152).bullet_speed(812.0).build();
         let plain_stats = shell_stats("Y".to_string(), &plain, &ModifierBundle::empty(Species::Cruiser), 10, false);
-        assert_eq!(plain_stats.speed, Some(812.0));
+        assert_eq!(plain_stats.speed, Some(MetersPerSecond::from(812.0)));
     }
 
     use crate::game_params::ttx::components::SecondaryComponentStats;
@@ -1570,7 +1571,7 @@ mod tests {
         // burnChance: 0.08 * 100 = 8%.
         assert_eq!(s150.burn_chance, Some(Percent::from(8.0)));
         assert_eq!(s150.caliber, Some(Millimeters::from(150.0)));
-        assert_eq!(s150.speed, Some(875.0));
+        assert_eq!(s150.speed, Some(MetersPerSecond::from(875.0)));
         assert_eq!(s150.flood_chance, Some(Percent::from(0.0)));
 
         let s105 = sec.shells.iter().find(|s| s.name == "PGPA085_105mm_HE_HE_33lbs").expect("105mm shell");

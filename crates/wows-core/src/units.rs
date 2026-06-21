@@ -51,6 +51,12 @@ pub struct Km(f32);
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct Millimeters(f32);
 
+/// Speed in meters per second (shell muzzle velocity).
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct MetersPerSecond(f32);
+
 impl From<f32> for Meters {
     fn from(v: f32) -> Self {
         Self(v)
@@ -90,6 +96,17 @@ impl From<f32> for Millimeters {
     }
 }
 impl From<i32> for Millimeters {
+    fn from(v: i32) -> Self {
+        Self(v as f32)
+    }
+}
+
+impl From<f32> for MetersPerSecond {
+    fn from(v: f32) -> Self {
+        Self(v)
+    }
+}
+impl From<i32> for MetersPerSecond {
     fn from(v: i32) -> Self {
         Self(v as f32)
     }
@@ -179,6 +196,17 @@ impl Millimeters {
     }
 }
 
+impl MetersPerSecond {
+    /// Const constructor for use in static/const contexts.
+    pub const fn new(v: f32) -> Self {
+        Self(v)
+    }
+
+    pub fn value(self) -> f32 {
+        self.0
+    }
+}
+
 /// Conventional English-port rounding: whole meters.
 impl fmt::Display for Meters {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -197,6 +225,13 @@ impl fmt::Display for Km {
 impl fmt::Display for Millimeters {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:.0} mm", self.0)
+    }
+}
+
+/// Conventional English-port rounding: whole meters per second.
+impl fmt::Display for MetersPerSecond {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:.0} m/s", self.0)
     }
 }
 
@@ -423,5 +458,10 @@ mod tests {
     #[test]
     fn millimeters_display_rounds_to_whole() {
         assert_eq!(Millimeters::from(406.0).to_string(), "406 mm");
+    }
+
+    #[test]
+    fn meters_per_second_display_rounds_to_whole() {
+        assert_eq!(MetersPerSecond::from(820.0).to_string(), "820 m/s");
     }
 }

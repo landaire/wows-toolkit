@@ -8,6 +8,7 @@
 use crate::game_params::ttx::labels::TtxStat;
 use crate::game_params::types::Km;
 use crate::game_params::types::Meters;
+use crate::game_params::types::MetersPerSecond;
 use crate::game_params::types::Millimeters;
 
 // `Knots`, `Seconds`, `Hp`, `DegreesPerSecond` are defined below in this module.
@@ -160,19 +161,22 @@ impl std::fmt::Display for AmmoCount {
 }
 
 /// A kind-tagged stat value: the displayed quantity plus the unit it carries.
-/// `Count` is a dimensionless integer (gun/barrel counts); `Bool` is a yes/no
-/// flag.
+/// `Count` is a dimensionless integer (gun/barrel counts); `Float` is a
+/// dimensionless real (submarine dive pool/rate, no real-world unit); `Bool` is
+/// a yes/no flag.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum StatValue {
     Hp(Hp),
     Knots(Knots),
     Seconds(Seconds),
     Meters(Meters),
+    MetersPerSecond(MetersPerSecond),
     Km(Km),
     Millimeters(Millimeters),
     Percent(Percent),
     DegreesPerSecond(DegreesPerSecond),
     Count(u32),
+    Float(f32),
     Ammo(AmmoCount),
     Bool(bool),
 }
@@ -186,11 +190,13 @@ impl std::fmt::Display for StatValue {
             StatValue::Knots(v) => write!(f, "{v}"),
             StatValue::Seconds(v) => write!(f, "{v}"),
             StatValue::Meters(v) => write!(f, "{v}"),
+            StatValue::MetersPerSecond(v) => write!(f, "{v}"),
             StatValue::Km(v) => write!(f, "{v}"),
             StatValue::Millimeters(v) => write!(f, "{v}"),
             StatValue::Percent(v) => write!(f, "{v}"),
             StatValue::DegreesPerSecond(v) => write!(f, "{v}"),
             StatValue::Count(n) => write!(f, "{n}"),
+            StatValue::Float(v) => write!(f, "{v:.1}"),
             StatValue::Ammo(v) => write!(f, "{v}"),
             StatValue::Bool(b) => write!(f, "{}", if *b { "yes" } else { "no" }),
         }
@@ -207,11 +213,13 @@ impl StatValue {
             StatValue::Knots(v) => Some(v.value()),
             StatValue::Seconds(v) => Some(v.value()),
             StatValue::Meters(v) => Some(v.value()),
+            StatValue::MetersPerSecond(v) => Some(v.value()),
             StatValue::Km(v) => Some(v.value()),
             StatValue::Millimeters(v) => Some(v.value()),
             StatValue::Percent(v) => Some(v.value()),
             StatValue::DegreesPerSecond(v) => Some(v.value()),
             StatValue::Count(n) => Some(*n as f32),
+            StatValue::Float(v) => Some(*v),
             StatValue::Ammo(AmmoCount::Finite(n)) => Some(*n as f32),
             StatValue::Ammo(AmmoCount::Infinite) => None,
             StatValue::Bool(_) => None,
@@ -237,6 +245,16 @@ impl From<Seconds> for StatValue {
 impl From<Meters> for StatValue {
     fn from(v: Meters) -> Self {
         StatValue::Meters(v)
+    }
+}
+impl From<MetersPerSecond> for StatValue {
+    fn from(v: MetersPerSecond) -> Self {
+        StatValue::MetersPerSecond(v)
+    }
+}
+impl From<f32> for StatValue {
+    fn from(v: f32) -> Self {
+        StatValue::Float(v)
     }
 }
 impl From<Km> for StatValue {
@@ -299,12 +317,9 @@ impl ShipStats {
     /// [`TtxStat::ALL`] order (collections expand item-major: item order, then
     /// field order). Absent fields are skipped.
     ///
-    /// Two bare-`f32` model fields carry no unit newtype and have no fitting
-    /// [`StatValue`] variant, so they are intentionally NOT emitted:
-    /// `battery.capacity` / `battery.regeneration` (dive capacity, dimensionless)
-    /// and `*.shells[*].speed` (shell muzzle velocity, m/s). The matching
-    /// [`TtxStat`] variants (`BatteryCapacity`, `BatteryRegeneration`,
-    /// `ShellSpeed`, `SecondaryShellSpeed`) therefore never produce a row.
+    /// Every [`TtxStat`] variant is reachable: shell muzzle speed maps to
+    /// [`StatValue::MetersPerSecond`], the submarine dive pool/rate to the
+    /// dimensionless [`StatValue::Float`].
     pub fn rows(&self) -> Vec<StatRow> {
         let mut rows = Vec::new();
 
@@ -336,7 +351,10 @@ impl ShipStats {
             scalar(&mut rows, TtxStat::ArmorMin, a.min.map(StatValue::Millimeters));
             scalar(&mut rows, TtxStat::ArmorMax, a.max.map(StatValue::Millimeters));
         }
-        // BatteryCapacity / BatteryRegeneration intentionally unmapped (bare f32, no unit).
+        if let Some(b) = &self.battery {
+            scalar(&mut rows, TtxStat::BatteryCapacity, b.capacity.map(StatValue::Float));
+            scalar(&mut rows, TtxStat::BatteryRegeneration, b.regeneration.map(StatValue::Float));
+        }
 
         push_artillery_rows(&mut rows, self.artillery.as_ref(), ArtilleryKind::Main, &scalar, &item);
         push_artillery_rows(&mut rows, self.secondaries.as_ref(), ArtilleryKind::Secondary, &scalar, &item);
@@ -433,7 +451,7 @@ fn push_artillery_rows(
         let q = shell_qualifier(shell, idx);
         item(rows, s.shell_damage, &q, shell.damage.map(StatValue::Hp));
         item(rows, s.shell_caliber, &q, shell.caliber.map(StatValue::Millimeters));
-        // shell.speed (m/s, bare f32) intentionally unmapped: no fitting unit.
+        item(rows, s.shell_speed, &q, shell.speed.map(StatValue::MetersPerSecond));
         item(rows, s.shell_penetration, &q, shell.penetration.map(StatValue::Millimeters));
         item(rows, s.shell_burn_chance, &q, shell.burn_chance.map(StatValue::Percent));
         item(rows, s.shell_flood_chance, &q, shell.flood_chance.map(StatValue::Percent));
@@ -444,9 +462,9 @@ fn push_artillery_rows(
     }
 }
 
-/// The per-kind [`TtxStat`] variant set for an [`Artillery`] block. `shell_speed`
-/// is omitted (no fitting unit); `shell_disabled_underwater` is `None` for the
-/// secondary battery, which has no such variant.
+/// The per-kind [`TtxStat`] variant set for an [`Artillery`] block.
+/// `shell_disabled_underwater` is `None` for the secondary battery, which has no
+/// such variant.
 struct ArtilleryStats {
     reload_time: TtxStat,
     range: TtxStat,
@@ -459,6 +477,7 @@ struct ArtilleryStats {
     gun_rotation_time: TtxStat,
     shell_damage: TtxStat,
     shell_caliber: TtxStat,
+    shell_speed: TtxStat,
     shell_penetration: TtxStat,
     shell_burn_chance: TtxStat,
     shell_flood_chance: TtxStat,
@@ -481,6 +500,7 @@ impl ArtilleryStats {
                 gun_rotation_time: TtxStat::GunRotationTime,
                 shell_damage: TtxStat::ShellDamage,
                 shell_caliber: TtxStat::ShellCaliber,
+                shell_speed: TtxStat::ShellSpeed,
                 shell_penetration: TtxStat::ShellPenetration,
                 shell_burn_chance: TtxStat::ShellBurnChance,
                 shell_flood_chance: TtxStat::ShellFloodChance,
@@ -499,6 +519,7 @@ impl ArtilleryStats {
                 gun_rotation_time: TtxStat::SecondaryGunRotationTime,
                 shell_damage: TtxStat::SecondaryShellDamage,
                 shell_caliber: TtxStat::SecondaryShellCaliber,
+                shell_speed: TtxStat::SecondaryShellSpeed,
                 shell_penetration: TtxStat::SecondaryShellPenetration,
                 shell_burn_chance: TtxStat::SecondaryShellBurnChance,
                 shell_flood_chance: TtxStat::SecondaryShellFloodChance,
@@ -572,7 +593,7 @@ pub struct ShellStats {
     /// `caliber * 1000` (FactoryArtillery.py:155).
     pub caliber: Option<Millimeters>,
     /// `bulletSpeed * timeFactor` in m/s (PreprocessedAmmo.py:16).
-    pub speed: Option<f32>,
+    pub speed: Option<MetersPerSecond>,
     /// HE `floor(alphaPiercingHE * GMPenetrationCoeffHE)` (FactoryArtillery.py:182),
     /// CS `floor(alphaPiercingCS)` (FactoryArtillery.py:185). AP is a ballistic sim
     /// (no closed-form `piercing` in the deob), left `None`.
@@ -734,6 +755,9 @@ mod tests {
     fn stat_value_display_delegates() {
         assert_eq!(StatValue::Hp(Hp::from(40350.0)).to_string(), "40350");
         assert_eq!(StatValue::Km(Km::from(10.5)).to_string(), "10.5 km");
+        assert_eq!(StatValue::MetersPerSecond(MetersPerSecond::from(820.0)).to_string(), "820 m/s");
+        assert_eq!(StatValue::Float(1.2).to_string(), "1.2");
+        assert_eq!(StatValue::Float(240.0).to_string(), "240.0");
         assert_eq!(StatValue::Count(3).to_string(), "3");
         assert_eq!(StatValue::Bool(true).to_string(), "yes");
         assert_eq!(StatValue::Bool(false).to_string(), "no");
@@ -743,6 +767,8 @@ mod tests {
     #[test]
     fn stat_value_as_f32() {
         assert_eq!(StatValue::Km(Km::from(10.5)).as_f32(), Some(10.5));
+        assert_eq!(StatValue::MetersPerSecond(MetersPerSecond::from(820.0)).as_f32(), Some(820.0));
+        assert_eq!(StatValue::Float(1.2).as_f32(), Some(1.2));
         assert_eq!(StatValue::Count(3).as_f32(), Some(3.0));
         assert_eq!(StatValue::Ammo(AmmoCount::Finite(120)).as_f32(), Some(120.0));
         assert_eq!(StatValue::Ammo(AmmoCount::Infinite).as_f32(), None);
@@ -834,17 +860,120 @@ mod tests {
         assert_eq!(speeds[1].qualifier.as_deref(), Some("1"));
     }
 
-    /// Every [`TtxStat`] variant must be reachable from `rows()` (its model
-    /// field, when present, yields a row) EXCEPT the four with no fitting
-    /// [`StatValue`] variant. This locks the known unmapped set.
+    /// A fully populated [`ShipStats`] yields a [`StatRow`] for every
+    /// [`TtxStat`] variant: the unmapped set is now empty. The four formerly
+    /// unmapped stats (shell muzzle speed for both batteries, submarine battery
+    /// capacity/regeneration) are exercised by [`rows_emit_speed_and_battery`];
+    /// here we assert each model field has a `rows()` mapping.
     #[test]
-    fn unmapped_stats_are_exactly_the_unitless_floats() {
+    fn unmapped_stats_set_is_empty() {
         use crate::game_params::ttx::labels::TtxStat as T;
-        let unmapped = [T::BatteryCapacity, T::BatteryRegeneration, T::ShellSpeed, T::SecondaryShellSpeed];
-        // Sanity: the four are real variants and distinct.
-        let mut seen = unmapped.to_vec();
-        seen.sort_by_key(|s| s.field_key());
-        seen.dedup();
-        assert_eq!(seen.len(), 4);
+
+        let shell = || ShellStats {
+            ammo_kind: Some("HE".to_string()),
+            damage: Some(Hp::from(1.0)),
+            caliber: Some(Millimeters::from(1.0)),
+            speed: Some(MetersPerSecond::from(1.0)),
+            penetration: Some(Millimeters::from(1.0)),
+            burn_chance: Some(Percent::from(1.0)),
+            flood_chance: Some(Percent::from(1.0)),
+            max_ammo: Some(AmmoCount::Finite(1)),
+            disabled_underwater: Some(true),
+            ..Default::default()
+        };
+        let gun = || {
+            Some(MainGun {
+                caliber: Some(Millimeters::from(1.0)),
+                num_barrels: Some(1),
+                num_guns: Some(1),
+                rotation_speed: Some(DegreesPerSecond::from(1.0)),
+                rotation_time: Some(Seconds::from(1.0)),
+            })
+        };
+        let artillery = || Artillery {
+            reload_time: Some(Seconds::from(1.0)),
+            range: Some(Km::from(1.0)),
+            dispersion: Some(Meters::from(1.0)),
+            ammo_switch_time: Some(Seconds::from(1.0)),
+            gun: gun(),
+            shells: vec![shell()],
+        };
+
+        let stats = ShipStats {
+            durability: Some(Durability { health: Some(Hp::from(1.0)), torpedo_protection: Some(Percent::from(1.0)) }),
+            mobility: Some(Mobility {
+                speed: Some(Knots::from(1.0)),
+                turning_radius: Some(Meters::from(1.0)),
+                rudder_time: Some(Seconds::from(1.0)),
+            }),
+            armor: Some(Armor { min: Some(Millimeters::from(1.0)), max: Some(Millimeters::from(1.0)) }),
+            battery: Some(Battery { capacity: Some(1.0), regeneration: Some(1.0) }),
+            artillery: Some(artillery()),
+            secondaries: Some(artillery()),
+            torpedoes: Some(Torpedoes {
+                reload_time: Some(Seconds::from(1.0)),
+                launchers: vec![Launcher {
+                    rotation_speed: Some(DegreesPerSecond::from(1.0)),
+                    rotation_time: Some(Seconds::from(1.0)),
+                    num_barrels: Some(1),
+                }],
+                torpedoes: vec![TorpedoStats {
+                    name: "T".to_string(),
+                    damage: Some(Hp::from(1.0)),
+                    speed: Some(Knots::from(1.0)),
+                    range: Some(Km::from(1.0)),
+                    visibility: Some(Km::from(1.0)),
+                    distance_of_max_damage: Some(Km::from(1.0)),
+                    is_damage_increasing: Some(true),
+                    disabled_underwater: Some(true),
+                }],
+            }),
+            fire_control: Some(FireControl { max_dist: Some(Km::from(1.0)) }),
+            visibility: Some(Visibility {
+                sea_detection: Some(Km::from(1.0)),
+                sea_detection_on_fire: Some(Km::from(1.0)),
+                air_detection: Some(Km::from(1.0)),
+                air_detection_on_fire: Some(Km::from(1.0)),
+                detection_in_smoke: Some(Km::from(1.0)),
+                secondary_range_detection: Some(Km::from(1.0)),
+                periscope_depth_detection: Some(Km::from(1.0)),
+            }),
+        };
+
+        let emitted: std::collections::HashSet<T> = stats.rows().into_iter().map(|r| r.stat).collect();
+        let unmapped: Vec<T> = T::ALL.iter().copied().filter(|s| !emitted.contains(s)).collect();
+        assert!(unmapped.is_empty(), "unmapped TtxStats: {unmapped:?}");
+    }
+
+    #[test]
+    fn rows_emit_speed_and_battery() {
+        let stats = ShipStats {
+            battery: Some(Battery { capacity: Some(240.0), regeneration: Some(1.2) }),
+            artillery: Some(Artillery {
+                shells: vec![ShellStats {
+                    ammo_kind: Some("HE".to_string()),
+                    speed: Some(MetersPerSecond::from(820.0)),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let rows = stats.rows();
+
+        let speed = rows.iter().find(|r| r.stat == TtxStat::ShellSpeed).unwrap();
+        assert_eq!(speed.qualifier.as_deref(), Some("HE"));
+        assert_eq!(speed.value, StatValue::MetersPerSecond(MetersPerSecond::from(820.0)));
+        assert_eq!(speed.value.to_string(), "820 m/s");
+
+        let capacity = rows.iter().find(|r| r.stat == TtxStat::BatteryCapacity).unwrap();
+        assert_eq!(capacity.qualifier, None);
+        assert_eq!(capacity.value, StatValue::Float(240.0));
+        assert_eq!(capacity.value.to_string(), "240.0");
+
+        let regen = rows.iter().find(|r| r.stat == TtxStat::BatteryRegeneration).unwrap();
+        assert_eq!(regen.qualifier, None);
+        assert_eq!(regen.value.to_string(), "1.2");
     }
 }
