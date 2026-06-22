@@ -29,6 +29,7 @@ use wows_replays::types::ArenaId;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::TranslationKey;
 use wowsunpack::data::Version;
 use wowsunpack::game_types::BattleType;
 use wowsunpack::game_types::DamageStatCategory;
@@ -445,12 +446,14 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
 
     fn report_map_name(&self) -> String {
         let id = format!("IDS_{}", self.meta().mapName.to_uppercase());
-        self.resources().localized_name_from_id(&id).unwrap_or_else(|| self.meta().mapName.clone())
+        self.resources().localized_name_from_id(&TranslationKey::new(id)).unwrap_or_else(|| self.meta().mapName.clone())
     }
 
     fn report_game_mode(&self) -> String {
         let id = format!("IDS_SCENARIO_{}", self.meta().scenario.to_uppercase());
-        self.resources().localized_name_from_id(&id).unwrap_or_else(|| self.meta().scenario.clone())
+        self.resources()
+            .localized_name_from_id(&TranslationKey::new(id))
+            .unwrap_or_else(|| self.meta().scenario.clone())
     }
 
     fn report_game_type(&self) -> Recognized<BattleType> {

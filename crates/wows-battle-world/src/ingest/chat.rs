@@ -11,6 +11,7 @@ use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::Relation;
 use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::TranslationKey;
 use wowsunpack::data::Version;
 
 use crate::resources::ChatLog;
@@ -110,7 +111,7 @@ pub fn handle_chat_message<G: ResourceLoader>(
 
 fn translate_ids<G: ResourceLoader>(resources: &G, text: &str) -> String {
     if text.starts_with("IDS_") {
-        resources.localized_name_from_id(text).unwrap_or_else(|| text.to_string())
+        resources.localized_name_from_id(&TranslationKey::new(text)).unwrap_or_else(|| text.to_string())
     } else {
         text.to_string()
     }
