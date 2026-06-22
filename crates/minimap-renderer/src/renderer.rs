@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use image::RgbaImage;
 use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::TranslationKey;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::AmmoType;
@@ -598,7 +599,9 @@ impl<'a> MinimapRenderer<'a> {
             let player_name = {
                 let raw_name = player.initial_state().username();
                 if player.is_bot() && raw_name.starts_with("IDS_") {
-                    self.game_params.localized_name_from_id(raw_name).unwrap_or_else(|| raw_name.to_string())
+                    self.game_params
+                        .localized_name_from_id(&TranslationKey::new(raw_name))
+                        .unwrap_or_else(|| raw_name.to_string())
                 } else {
                     raw_name.to_string()
                 }
@@ -2506,7 +2509,9 @@ impl<'a> MinimapRenderer<'a> {
             let player_name = self.player_names.get(&entity_id).cloned().unwrap_or_else(|| {
                 let raw = player.initial_state().username();
                 if player.is_bot() && raw.starts_with("IDS_") {
-                    self.game_params.localized_name_from_id(raw).unwrap_or_else(|| raw.to_string())
+                    self.game_params
+                        .localized_name_from_id(&TranslationKey::new(raw))
+                        .unwrap_or_else(|| raw.to_string())
                 } else {
                     raw.to_string()
                 }
