@@ -472,6 +472,16 @@ pub fn shell_stats(
     }
 }
 
+/// Main-battery range in km: base component `maxDist` (BigWorld m) scaled by the
+/// fire-control `maxDistCoef` and the `GMMaxDist` modifier (FactoryArtillery.py:42).
+pub(crate) fn artillery_range_km(
+    arty: &ArtilleryComponentStats,
+    fc_max_dist_coef: f32,
+    modifiers: &ModifierBundle,
+) -> Option<f32> {
+    arty.max_dist.map(|d| (d.value() / KM_TO_M) * fc_max_dist_coef * modifiers.coef("GMMaxDist"))
+}
+
 /// Main-battery armament section (`ArtilleryTTX`, FactoryArtillery.py + TTXFactory.py).
 ///
 /// `reload_time` = `gun.shotDelay * GMShotDelay` (FactoryArtillery.py:32 alt-fire analog;
@@ -503,7 +513,6 @@ pub fn artillery(
     }
 
     let shot_delay_coef = modifiers.coef("GMShotDelay");
-    let max_dist_coef = modifiers.coef("GMMaxDist");
     let ideal_radius_coef = modifiers.coef("GMIdealRadius");
     let switch_coef = modifiers.coef("switchAmmoReloadCoef");
     let yaw_coef = modifiers.coef("GMRotationSpeed");
@@ -514,7 +523,7 @@ pub fn artillery(
 
     let reload_time = first.shot_delay.map(|d| Seconds::from(d.value() * shot_delay_coef));
 
-    let range_km = arty.max_dist.map(|d| (d.value() / KM_TO_M) * fc_max_dist_coef * max_dist_coef);
+    let range_km = artillery_range_km(arty, fc_max_dist_coef, modifiers);
     let range = range_km.map(Km::from);
 
     // dispersion ellipse over the FC-adjusted range (FactoryArtillery.py:47; getEllipse).
@@ -1350,8 +1359,7 @@ mod tests {
         let arty = artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
             .expect("artillery computed");
         // dispersion over the FC-adjusted range 15.32 km, stock GMIdealRadius 1.0.
-        let expected =
-            constants::dispersion_horizontal(1.1, 8.0, 1000.0, Km::from(15.32), 1.0).to_meters().value();
+        let expected = constants::dispersion_horizontal(1.1, 8.0, 1000.0, Km::from(15.32), 1.0).to_meters().value();
         let got = arty.dispersion.expect("dispersion").value();
         assert!((got - expected).abs() < 1e-3, "got {got} expected {expected}");
         // The transcribed formula yields ~138.7 m at 15.32 km for Worcester's gun

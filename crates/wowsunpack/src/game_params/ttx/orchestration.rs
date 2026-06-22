@@ -6,17 +6,70 @@
 //! components; nothing is fabricated.
 
 use crate::game_params::keys::ComponentType;
+use crate::game_params::ttx::constants::DispersionCurve;
+use crate::game_params::ttx::constants::DispersionEllipse;
 use crate::game_params::ttx::factories;
 use crate::game_params::ttx::model::ShipStats;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::selection::ShipUpgradeSelection;
 use crate::game_params::types::ArmorMap;
 use crate::game_params::types::GameParamProvider;
+use crate::game_params::types::Km;
 use crate::game_params::types::Param;
 
 /// Stock fire-control range coefficient when no `_Suo` upgrade is selected
 /// (PreprocessedFireControl.py:7 identity; FactoryArtillery.py:42 default 1.0).
 const NO_FIRE_CONTROL_COEF: f32 = 1.0;
+
+/// Main-battery dispersion resolved for an equipped loadout: the gun's ellipse curve,
+/// the FC-adjusted max range, and the `GMIdealRadius` coefficient. Evaluate the ellipse
+/// at any aim distance with [`Self::ellipse_at`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ArtilleryDispersion {
+    pub curve: DispersionCurve,
+    pub max_range: Km,
+    pub ideal_radius_coef: f32,
+}
+
+impl ArtilleryDispersion {
+    /// The dispersion ellipse at firing distance `dist` (clamped to `max_range`).
+    pub fn ellipse_at(&self, dist: Km) -> DispersionEllipse {
+        crate::game_params::ttx::constants::dispersion_ellipse(
+            &self.curve,
+            dist,
+            self.max_range,
+            self.ideal_radius_coef,
+        )
+    }
+
+    /// The ellipse at max range (the port-card point).
+    pub fn at_max_range(&self) -> DispersionEllipse {
+        self.ellipse_at(self.max_range)
+    }
+}
+
+/// Resolve the main-battery dispersion profile for an equipped loadout. `None` when the
+/// ship has no main battery in `selection`, or the mounted gun lacks dispersion-curve data.
+pub fn artillery_dispersion(
+    ship: &Param,
+    selection: &ShipUpgradeSelection,
+    modifiers: &ModifierBundle,
+) -> Option<ArtilleryDispersion> {
+    let components = ship.vehicle()?.ttx_components()?;
+    let arty = selection.artillery.as_deref().and_then(|name| components.artillery(name))?;
+    let curve = arty.guns.first()?.dispersion_curve()?;
+    let fc_coef = selection
+        .fire_control
+        .as_deref()
+        .and_then(|name| components.fire_control_max_dist_coef(name))
+        .unwrap_or(NO_FIRE_CONTROL_COEF);
+    let range_km = factories::artillery_range_km(arty, fc_coef, modifiers)?;
+    Some(ArtilleryDispersion {
+        curve,
+        max_range: Km::from(range_km),
+        ideal_radius_coef: modifiers.coef("GMIdealRadius"),
+    })
+}
 
 /// `SMALL_SHELL_MAX_DIAMETER` (meters), the `isSmallGun` caliber gate
 /// (Modifiers/__init__.py:19 `barrelDiameter < SMALL_SHELL_MAX_DIAMETER`). The
@@ -356,6 +409,62 @@ mod tests {
 
     fn gearing_provider() -> StubProvider {
         StubProvider::new(&[("PAPT027_Mk_16_mod_1", gearing_torpedo()), ("PAPA127_127mm_HE", gearing_he())])
+    }
+
+    /// Gearing fixture identical to [`gearing_ship`] except the artillery gun carries
+    /// all four dispersion-curve fields so `dispersion_curve()` returns `Some`.
+    fn gearing_ship_with_dispersion_curve() -> Param {
+        let gun = || ArtilleryGunStats {
+            radius_on_zero: Some(1.0),
+            radius_on_delim: Some(1.4),
+            radius_on_max: Some(1.8),
+            delim: Some(0.5),
+            ..gearing_artillery().guns[0].clone()
+        };
+        let mut arty = gearing_artillery();
+        arty.guns = vec![gun(), gun(), gun()];
+        let mut components = ShipTtxComponents::default();
+        components.hulls.insert("PAUH911_Gearing_1945".to_string(), gearing_hull());
+        components.engines.insert("PAUE903_D10_ENG_STOCK".to_string(), EngineComponentStats { speed_coef: Some(0.0) });
+        components.artillery.insert("PAUA903_D10_ART_STOCK".to_string(), arty);
+        components.torpedoes.insert("PAUT902_D10_NEW_STOCK".to_string(), vec![gearing_launcher()]);
+        components.fire_controls.insert("PAUS911_Suo".to_string(), 1.0);
+        components.stock_selection = ShipUpgradeSelection::new(
+            Some("PAUH911_Gearing_1945".to_string()),
+            Some("PAUE903_D10_ENG_STOCK".to_string()),
+            Some("PAUA903_D10_ART_STOCK".to_string()),
+            Some("PAUT902_D10_NEW_STOCK".to_string()),
+            Some("PAUS911_Suo".to_string()),
+        );
+        ship_with("PASD013_Gearing_1945", 10, Species::Destroyer, components)
+    }
+
+    #[test]
+    fn artillery_dispersion_profile_resolves_and_evaluates() {
+        let ship = gearing_ship_with_dispersion_curve();
+        let sel = ShipUpgradeSelection::stock(&ship);
+        let bundle = ModifierBundle::empty(Species::Destroyer);
+        let profile = artillery_dispersion(&ship, &sel, &bundle).expect("profile");
+
+        let provider = gearing_provider();
+        let card = ship_stats(&ship, &sel, &bundle, 10, &provider).artillery.expect("arty");
+        assert!((profile.max_range.value() - card.range.expect("range").value()).abs() < 1e-3);
+
+        let e = profile.at_max_range();
+        assert!((e.vertical.value() - e.horizontal.value() * 1.8).abs() < 1e-3);
+
+        let near = profile.ellipse_at(Km::from(profile.max_range.value() / 2.0));
+        assert!(near.horizontal.value() < e.horizontal.value());
+    }
+
+    #[test]
+    fn artillery_dispersion_none_without_curve_or_battery() {
+        let ship = gearing_ship();
+        let sel = ShipUpgradeSelection::stock(&ship);
+        assert!(artillery_dispersion(&ship, &sel, &ModifierBundle::empty(Species::Destroyer)).is_none());
+
+        let no_arty = ShipUpgradeSelection { artillery: None, ..sel };
+        assert!(artillery_dispersion(&ship, &no_arty, &ModifierBundle::empty(Species::Destroyer)).is_none());
     }
 
     #[test]
