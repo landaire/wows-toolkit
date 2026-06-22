@@ -247,6 +247,10 @@ mod tests {
             min_radius: Some(1.0),
             ideal_radius: Some(10.0),
             ideal_distance: Some(1000.0),
+            radius_on_zero: None,
+            radius_on_delim: None,
+            radius_on_max: None,
+            delim: None,
             ammo: vec!["PAPA127_127mm_HE".to_string()],
         };
         ArtilleryComponentStats { max_dist: Some(Meters::from(11130.0)), guns: vec![gun(), gun(), gun()] }

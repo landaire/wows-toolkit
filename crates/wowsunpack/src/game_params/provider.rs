@@ -1059,6 +1059,10 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                     min_radius: read_float(&gun, keys::MIN_RADIUS),
                     ideal_radius: read_float(&gun, keys::IDEAL_RADIUS),
                     ideal_distance: read_float(&gun, keys::IDEAL_DISTANCE),
+                    radius_on_zero: read_float(&gun, keys::RADIUS_ON_ZERO),
+                    radius_on_delim: read_float(&gun, keys::RADIUS_ON_DELIM),
+                    radius_on_max: read_float(&gun, keys::RADIUS_ON_MAX),
+                    delim: read_float(&gun, keys::DISPERSION_DELIM),
                     ammo,
                 });
             }
@@ -1115,6 +1119,10 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                     min_radius: read_float(&gun, keys::MIN_RADIUS),
                     ideal_radius: read_float(&gun, keys::IDEAL_RADIUS),
                     ideal_distance: read_float(&gun, keys::IDEAL_DISTANCE),
+                    radius_on_zero: read_float(&gun, keys::RADIUS_ON_ZERO),
+                    radius_on_delim: read_float(&gun, keys::RADIUS_ON_DELIM),
+                    radius_on_max: read_float(&gun, keys::RADIUS_ON_MAX),
+                    delim: read_float(&gun, keys::DISPERSION_DELIM),
                     ammo,
                 });
             }

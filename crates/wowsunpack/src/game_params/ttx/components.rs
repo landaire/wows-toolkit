@@ -12,6 +12,7 @@
 
 use std::collections::HashMap;
 
+use crate::game_params::ttx::constants::DispersionCurve;
 use crate::game_params::ttx::model::DegreesPerSecond;
 use crate::game_params::ttx::model::Hp;
 use crate::game_params::ttx::model::Knots;
@@ -127,6 +128,14 @@ pub struct ArtilleryGunStats {
     pub ideal_radius: Option<f32>,
     /// Raw gun `idealDistance` dispersion field.
     pub ideal_distance: Option<f32>,
+    /// Raw gun `radiusOnZero` dispersion-curve coefficient (vertical/horizontal ratio at zero range).
+    pub radius_on_zero: Option<f32>,
+    /// Raw gun `radiusOnDelim` dispersion-curve coefficient (ratio at the `delim` distance).
+    pub radius_on_delim: Option<f32>,
+    /// Raw gun `radiusOnMax` dispersion-curve coefficient (ratio at max range).
+    pub radius_on_max: Option<f32>,
+    /// Raw gun `delim` dispersion-curve split point (fraction of max range).
+    pub delim: Option<f32>,
     /// Shell projectile names from `ammoList`; resolved to `Projectile` stats at query time.
     pub ammo: Vec<String>,
 }
@@ -248,5 +257,58 @@ impl ShipTtxComponents {
     /// The stock (base) upgrade selection per slot.
     pub fn stock_selection(&self) -> &super::selection::ShipUpgradeSelection {
         &self.stock_selection
+    }
+}
+
+impl ArtilleryGunStats {
+    /// This gun's dispersion ellipse curve, or `None` if any curve field is absent
+    /// (old data). Pairs with `constants::dispersion_ellipse`; returning `Option`
+    /// keeps a partially-populated curve from ever being built.
+    pub fn dispersion_curve(&self) -> Option<DispersionCurve> {
+        Some(DispersionCurve {
+            min_radius: self.min_radius?,
+            ideal_radius: self.ideal_radius?,
+            ideal_distance: self.ideal_distance?,
+            radius_on_zero: self.radius_on_zero?,
+            radius_on_delim: self.radius_on_delim?,
+            radius_on_max: self.radius_on_max?,
+            delim: self.delim?,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ArtilleryGunStats;
+
+    #[test]
+    fn dispersion_curve_fields_default_none_and_hold_values() {
+        let stock = ArtilleryGunStats::default();
+        assert!(stock.radius_on_zero.is_none());
+        assert!(stock.delim.is_none());
+
+        let g = ArtilleryGunStats { radius_on_max: Some(1.8), delim: Some(0.5), ..Default::default() };
+        assert_eq!(g.radius_on_max, Some(1.8));
+        assert_eq!(g.delim, Some(0.5));
+    }
+
+    #[test]
+    fn dispersion_curve_is_all_or_nothing() {
+        let partial = ArtilleryGunStats {
+            min_radius: Some(2.0),
+            ideal_radius: Some(12.0),
+            ideal_distance: Some(1000.0),
+            radius_on_zero: Some(1.0),
+            radius_on_delim: Some(1.4),
+            radius_on_max: Some(1.8),
+            delim: None,
+            ..Default::default()
+        };
+        assert!(partial.dispersion_curve().is_none());
+
+        let full = ArtilleryGunStats { delim: Some(0.5), ..partial };
+        let curve = full.dispersion_curve().expect("all fields present");
+        assert_eq!(curve.radius_on_max, 1.8);
+        assert_eq!(curve.delim, 0.5);
     }
 }

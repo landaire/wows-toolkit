@@ -1238,6 +1238,10 @@ mod tests {
             min_radius: Some(1.1),
             ideal_radius: Some(8.0),
             ideal_distance: Some(1000.0),
+            radius_on_zero: None,
+            radius_on_delim: None,
+            radius_on_max: None,
+            delim: None,
             ammo: vec!["PAPA051_152mm_HE_HC_Mark_39_Mod_0".to_string(), "PAPA050_152mm_AP_130lbs_Mk35".to_string()],
         };
         ArtilleryComponentStats {
@@ -1502,6 +1506,10 @@ mod tests {
             min_radius: Some(1.0),
             ideal_radius: Some(15.5),
             ideal_distance: Some(333.333),
+            radius_on_zero: None,
+            radius_on_delim: None,
+            radius_on_max: None,
+            delim: None,
             ammo: vec!["PGPA003_150mm_HE_HE_N_F".to_string()],
         };
         let gun_105 = ArtilleryGunStats {
@@ -1513,6 +1521,10 @@ mod tests {
             min_radius: Some(1.0),
             ideal_radius: Some(15.5),
             ideal_distance: Some(333.333),
+            radius_on_zero: None,
+            radius_on_delim: None,
+            radius_on_max: None,
+            delim: None,
             ammo: vec!["PGPA085_105mm_HE_HE_33lbs".to_string()],
         };
         SecondaryComponentStats {

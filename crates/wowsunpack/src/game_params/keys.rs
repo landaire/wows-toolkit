@@ -199,6 +199,10 @@ pub const BARREL_DIAMETER: &str = "barrelDiameter";
 pub const MIN_RADIUS: &str = "minRadius";
 pub const IDEAL_RADIUS: &str = "idealRadius";
 pub const IDEAL_DISTANCE: &str = "idealDistance";
+pub const RADIUS_ON_ZERO: &str = "radiusOnZero";
+pub const RADIUS_ON_DELIM: &str = "radiusOnDelim";
+pub const RADIUS_ON_MAX: &str = "radiusOnMax";
+pub const DISPERSION_DELIM: &str = "delim";
 // Weapon hardpoint sub-object keys are `HP_<nation><kind>_<index>`, where
 // `<nation>` is a single nation letter (A=USA, J=Japan, G=Germany, ...) and
 // `<kind>` is GM (main battery), GS (secondary/ATBA), or GT (torpedoes). The
