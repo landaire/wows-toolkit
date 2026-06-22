@@ -39,6 +39,7 @@ use crate::Rc;
 #[cfg(feature = "vfs")]
 use crate::data::DataFileWithCallback;
 use crate::data::ResourceLoader;
+use crate::data::TranslationKey;
 use crate::error::GameDataError;
 use crate::game_params::convert::game_params_to_pickle;
 use crate::game_types::GameParamId;
@@ -81,8 +82,8 @@ impl ResourceLoader for GameMetadataProvider {
         self.param_localization_id(param.id()).and_then(|id| self.translate(id))
     }
 
-    fn localized_name_from_id(&self, id: &str) -> Option<String> {
-        self.translate(id)
+    fn localized_name_from_id(&self, id: &TranslationKey) -> Option<String> {
+        self.translate(id.as_str())
     }
 
     fn game_param_by_id(&self, id: GameParamId) -> Option<Rc<Param>> {

@@ -27,6 +27,7 @@ use rootcause::prelude::*;
 use vfs::VfsPath;
 
 use crate::data::ResourceLoader;
+use crate::data::TranslationKey;
 use crate::game_params::keys;
 use crate::game_params::provider::GameMetadataProvider;
 use crate::game_params::types::ArmorMap;
@@ -494,7 +495,7 @@ impl ShipAssets {
             let ids_key = format!("IDS_{}", permo_name.to_uppercase());
             let display_name = self
                 .metadata
-                .localized_name_from_id(&ids_key)
+                .localized_name_from_id(&TranslationKey::new(ids_key))
                 .or_else(|| {
                     // Fallback: try IDS_{index}
                     self.metadata.localized_name_from_param(&param)
@@ -566,7 +567,7 @@ impl ShipAssets {
 
             let display_name = self
                 .metadata
-                .localized_name_from_id(&format!("IDS_{}", name.to_uppercase()))
+                .localized_name_from_id(&TranslationKey::new(format!("IDS_{}", name.to_uppercase())))
                 .unwrap_or_else(|| camo_name.to_string());
 
             let color_scheme_colors = if entry.tiled {

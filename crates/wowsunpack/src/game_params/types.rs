@@ -6,6 +6,7 @@ use bon::Builder;
 
 use crate::Rc;
 use crate::data::ResourceLoader;
+use crate::data::TranslationKey;
 use crate::data::Version;
 use crate::game_types::GameParamId;
 use crate::game_types::GunId;
@@ -1935,8 +1936,8 @@ impl CrewSkill {
     pub fn translated_name(&self, metadata_provider: &GameMetadataProvider, version: &Version) -> Option<String> {
         let (primary, fallback) = self.skill_translation_keys("IDS_SKILL", version);
         metadata_provider
-            .localized_name_from_id(&primary)
-            .or_else(|| metadata_provider.localized_name_from_id(&fallback))
+            .localized_name_from_id(&TranslationKey::new(primary))
+            .or_else(|| metadata_provider.localized_name_from_id(&TranslationKey::new(fallback)))
     }
 
     /// Expose `skill_translation_keys` to the describe module via the trait
@@ -1970,8 +1971,9 @@ impl CrewSkill {
         version: &Version,
     ) -> Option<String> {
         let (primary, fallback) = self.skill_translation_keys("IDS_SKILL_DESC", version);
-        let description =
-            metadata.localized_name_from_id(&primary).or_else(|| metadata.localized_name_from_id(&fallback));
+        let description = metadata
+            .localized_name_from_id(&TranslationKey::new(primary))
+            .or_else(|| metadata.localized_name_from_id(&TranslationKey::new(fallback)));
 
         description.and_then(|desc| if desc.is_empty() || desc == " " { None } else { Some(desc) })
     }
@@ -2006,7 +2008,10 @@ impl CrewSkill {
             // activationOnDetectTrigger -> IDS_SKILL_TRIGGER_ACTIVATIONONDETECTTRIGGER);
             // triggerDescIds is often empty.
             let sentence = metadata
-                .localized_name_from_id(&format!("IDS_SKILL_TRIGGER_{}", trig.trigger_type().to_uppercase()))
+                .localized_name_from_id(&TranslationKey::new(format!(
+                    "IDS_SKILL_TRIGGER_{}",
+                    trig.trigger_type().to_uppercase()
+                )))
                 .and_then(|s| if s.is_empty() || s == " " { None } else { Some(s) });
             let has_sentence = sentence.is_some();
             if let Some(sentence) = sentence {
@@ -3018,8 +3023,8 @@ mod crew_skill_description_tests {
         fn localized_name_from_param(&self, _param: &Param) -> Option<String> {
             None
         }
-        fn localized_name_from_id(&self, id: &str) -> Option<String> {
-            Some(id.to_string())
+        fn localized_name_from_id(&self, id: &crate::data::TranslationKey) -> Option<String> {
+            Some(id.as_str().to_string())
         }
         fn game_param_by_id(&self, _id: crate::game_types::GameParamId) -> Option<crate::Rc<Param>> {
             None
@@ -3037,11 +3042,11 @@ mod crew_skill_description_tests {
         fn localized_name_from_param(&self, _param: &Param) -> Option<String> {
             None
         }
-        fn localized_name_from_id(&self, id: &str) -> Option<String> {
-            if id.starts_with("IDS_SKILL_DESC") || id.starts_with("IDS_SKILL_TRIGGER_") {
+        fn localized_name_from_id(&self, id: &crate::data::TranslationKey) -> Option<String> {
+            if id.as_str().starts_with("IDS_SKILL_DESC") || id.as_str().starts_with("IDS_SKILL_TRIGGER_") {
                 None
             } else {
-                Some(id.to_string())
+                Some(id.as_str().to_string())
             }
         }
         fn game_param_by_id(&self, _id: crate::game_types::GameParamId) -> Option<crate::Rc<Param>> {
@@ -3059,8 +3064,8 @@ mod crew_skill_description_tests {
         fn localized_name_from_param(&self, _param: &Param) -> Option<String> {
             None
         }
-        fn localized_name_from_id(&self, id: &str) -> Option<String> {
-            if id.starts_with("IDS_SKILL_DESC") { None } else { Some(id.to_string()) }
+        fn localized_name_from_id(&self, id: &crate::data::TranslationKey) -> Option<String> {
+            if id.as_str().starts_with("IDS_SKILL_DESC") { None } else { Some(id.as_str().to_string()) }
         }
         fn game_param_by_id(&self, _id: crate::game_types::GameParamId) -> Option<crate::Rc<Param>> {
             None

@@ -3,6 +3,7 @@
 //! describable game entity. See docs spec 2026-06-18-describable-game-params.
 
 use crate::data::ResourceLoader;
+use crate::data::TranslationKey;
 use crate::data::Version;
 use crate::game_params::modifier_settings_data::format_modifier;
 use crate::game_params::modifier_settings_data::modifier_setting;
@@ -234,8 +235,8 @@ impl Describable for CrewSkill {
     fn display_name(&self, ctx: &DescribeContext) -> Option<String> {
         let (primary, fallback) = self.skill_translation_keys_pub("IDS_SKILL", ctx.version);
         ctx.resource_loader
-            .localized_name_from_id(&primary)
-            .or_else(|| ctx.resource_loader.localized_name_from_id(&fallback))
+            .localized_name_from_id(&TranslationKey::new(primary))
+            .or_else(|| ctx.resource_loader.localized_name_from_id(&TranslationKey::new(fallback)))
     }
     fn plain_description(&self, ctx: &DescribeContext) -> Option<String> {
         self.description_with_pub(species_or_default(ctx.species), ctx.resource_loader, ctx.version)
@@ -357,8 +358,8 @@ mod tests {
         fn localized_name_from_param(&self, _p: &Param) -> Option<String> {
             None
         }
-        fn localized_name_from_id(&self, id: &str) -> Option<String> {
-            Some(id.to_string())
+        fn localized_name_from_id(&self, id: &crate::data::TranslationKey) -> Option<String> {
+            Some(id.as_str().to_string())
         }
         fn game_param_by_id(&self, _id: crate::game_types::GameParamId) -> Option<crate::Rc<Param>> {
             None

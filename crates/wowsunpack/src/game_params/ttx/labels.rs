@@ -17,6 +17,7 @@
 //! yield `None` rather than borrowing a main-battery label.
 
 use crate::data::ResourceLoader;
+use crate::data::TranslationKey;
 
 /// One displayed TTX stat field. Variants are aligned with the leaf-struct
 /// fields in [`super::model`]; gun/shell/launcher/torpedo sub-fields are flat
@@ -365,7 +366,7 @@ impl TtxStat {
 /// caller decides on any English/field-name fallback.
 pub fn stat_label(stat: TtxStat, resource_loader: &dyn ResourceLoader) -> Option<String> {
     let key = stat.label_key()?;
-    resource_loader.localized_name_from_id(key)
+    resource_loader.localized_name_from_id(&TranslationKey::new(key))
 }
 
 #[cfg(test)]
@@ -381,8 +382,8 @@ mod tests {
         fn localized_name_from_param(&self, _p: &Param) -> Option<String> {
             None
         }
-        fn localized_name_from_id(&self, id: &str) -> Option<String> {
-            Some(id.to_string())
+        fn localized_name_from_id(&self, id: &crate::data::TranslationKey) -> Option<String> {
+            Some(id.as_str().to_string())
         }
         fn game_param_by_id(&self, _id: GameParamId) -> Option<crate::Rc<Param>> {
             None

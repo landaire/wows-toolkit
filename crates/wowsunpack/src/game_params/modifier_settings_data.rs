@@ -3,6 +3,7 @@
 //! settings (the client MODIFIER_SETTINGS table), version-gated by game version.
 #![allow(dead_code)]
 
+use crate::data::TranslationKey;
 use crate::data::Version;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -9054,15 +9055,19 @@ pub fn format_modifier(
     // Client `translations`: when the value equals a key, the localized label
     // replaces the number and unit entirely (ModifierSettings.localize).
     if let Some((_, ids)) = s.translations.iter().find(|(k, _)| *k == value) {
-        return Some(metadata.localized_name_from_id(ids).unwrap_or_else(|| ids.to_string()));
+        return Some(metadata.localized_name_from_id(&TranslationKey::new(*ids)).unwrap_or_else(|| ids.to_string()));
     }
 
     let label = {
         let upper = name.to_uppercase();
         let species_upper = format!("{species:?}").to_uppercase();
         metadata
-            .localized_name_from_id(&format!("IDS_PARAMS_MODIFIER_{upper}"))
-            .or_else(|| metadata.localized_name_from_id(&format!("IDS_PARAMS_MODIFIER_{upper}_{species_upper}")))
+            .localized_name_from_id(&TranslationKey::new(format!("IDS_PARAMS_MODIFIER_{upper}")))
+            .or_else(|| {
+                metadata.localized_name_from_id(&TranslationKey::new(format!(
+                    "IDS_PARAMS_MODIFIER_{upper}_{species_upper}"
+                )))
+            })
             .unwrap_or_else(|| name.to_string())
     };
 
@@ -9076,7 +9081,11 @@ pub fn format_modifier(
         String::new()
     } else {
         let val = if s.measure == Measure::Percent { (value - s.base_value) * 100.0 } else { value * s.multiplier };
-        let unit = s.measure.unit_ids_key().and_then(|key| metadata.localized_name_from_id(key)).unwrap_or_default();
+        let unit = s
+            .measure
+            .unit_ids_key()
+            .and_then(|key| metadata.localized_name_from_id(&TranslationKey::new(key)))
+            .unwrap_or_default();
         let num = format_number(val, s.round_digits, s.display_sign);
         if s.measure.space_before() { format!("{num} {unit}") } else { format!("{num}{unit}") }
     };
@@ -9107,8 +9116,8 @@ mod tests {
         fn localized_name_from_param(&self, _param: &crate::game_params::types::Param) -> Option<String> {
             None
         }
-        fn localized_name_from_id(&self, id: &str) -> Option<String> {
-            Some(id.to_string())
+        fn localized_name_from_id(&self, id: &crate::data::TranslationKey) -> Option<String> {
+            Some(id.as_str().to_string())
         }
         fn game_param_by_id(
             &self,
