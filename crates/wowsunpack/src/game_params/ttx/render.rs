@@ -1,27 +1,26 @@
 //! Render TTX stat rows into translated, formatted lines, and diff two cards.
 //!
-//! `render_stat_rows` turns a card's rows into labeled lines (translated label via
-//! `stat_label`, value via `StatValue`'s `Display`); `diff_stat_rows` reports only the
-//! rows that change between two cards. The `stat` stays on each output so a consumer can
-//! fall back to `TtxStat::field_key` when no translated label exists.
+//! `render_stat_rows` turns a card's rows into labeled lines (localized label via
+//! `stat_display_label`, value via `StatValue`'s `Display`); `diff_stat_rows` reports only the
+//! rows that change between two cards. Labels are always non-empty strings.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
 
 use crate::data::ResourceLoader;
 use crate::game_params::ttx::labels::TtxStat;
-use crate::game_params::ttx::labels::stat_label;
+use crate::game_params::ttx::labels::stat_display_label;
 use crate::game_params::ttx::model::StatRow;
 use crate::game_params::ttx::model::StatValue;
 
 /// A rendered stat row: the stat, its collection qualifier (ammo kind / launcher index),
-/// the translated label (`None` -> caller falls back to `stat.field_key()`), and the
-/// value formatted with its unit.
+/// the display label (localized catalog label, or humanized field_key when no catalog
+/// entry exists), and the value formatted with its unit.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StatLine {
     pub stat: TtxStat,
     pub qualifier: Option<String>,
-    pub label: Option<String>,
+    pub label: String,
     pub value: String,
 }
 
@@ -31,7 +30,7 @@ pub fn render_stat_rows(rows: &[StatRow], loader: &dyn ResourceLoader) -> Vec<St
         .map(|row| StatLine {
             stat: row.stat,
             qualifier: row.qualifier.clone(),
-            label: stat_label(row.stat, loader),
+            label: stat_display_label(row.stat, loader),
             value: row.value.to_string(),
         })
         .collect()
@@ -43,7 +42,7 @@ pub fn render_stat_rows(rows: &[StatRow], loader: &dyn ResourceLoader) -> Vec<St
 pub struct StatDelta {
     pub stat: TtxStat,
     pub qualifier: Option<String>,
-    pub label: Option<String>,
+    pub label: String,
     pub from: Option<String>,
     pub to: Option<String>,
 }
@@ -68,7 +67,7 @@ pub fn diff_stat_rows(baseline: &[StatRow], candidate: &[StatRow], loader: &dyn 
         out.push(StatDelta {
             stat: row.stat,
             qualifier: row.qualifier.clone(),
-            label: stat_label(row.stat, loader),
+            label: stat_display_label(row.stat, loader),
             from: from.map(|v| v.to_string()),
             to: Some(row.value.to_string()),
         });
@@ -81,7 +80,7 @@ pub fn diff_stat_rows(baseline: &[StatRow], candidate: &[StatRow], loader: &dyn 
         out.push(StatDelta {
             stat: row.stat,
             qualifier: row.qualifier.clone(),
-            label: stat_label(row.stat, loader),
+            label: stat_display_label(row.stat, loader),
             from: Some(row.value.to_string()),
             to: None,
         });
@@ -127,12 +126,10 @@ mod tests {
         let lines = render_stat_rows(&rows, &loader);
         assert_eq!(lines.len(), 2);
         // Echo loader returns the IDS key as the "translation".
-        assert_eq!(lines[0].label.as_deref(), TtxStat::SeaDetection.label_key());
-        assert!(lines[0].label.is_some());
+        assert_eq!(lines[0].label, TtxStat::SeaDetection.label_key().unwrap());
         assert_eq!(lines[0].value, StatValue::Km(Km::from(7.3)).to_string());
-        // No label_key -> None; caller would use field_key.
-        assert_eq!(lines[1].label, None);
-        assert_eq!(lines[1].stat.field_key(), "artillery.dispersion_vertical");
+        // No label_key -> humanized field_key fallback.
+        assert_eq!(lines[1].label, "Artillery Dispersion Vertical");
     }
 
     #[test]

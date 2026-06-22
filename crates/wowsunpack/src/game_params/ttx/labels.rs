@@ -242,6 +242,23 @@ impl TtxStat {
         }
     }
 
+    /// A human-readable label derived from `field_key`, for stats with no catalog
+    /// (port) label. E.g. `artillery.dispersion_vertical` -> `"Artillery Dispersion
+    /// Vertical"`. Always non-empty.
+    pub fn fallback_label(self) -> String {
+        self.field_key()
+            .split(['.', '_'])
+            .map(|word| {
+                let mut chars = word.chars();
+                match chars.next() {
+                    Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     /// The `global.mo` `IDS_*` label key for this stat, or `None` when no
     /// catalog entry confidently names the stat. Each key is annotated with the
     /// English value verified from the `en` `global.mo` (build 12668706).
@@ -378,6 +395,13 @@ pub fn stat_label(stat: TtxStat, resource_loader: &dyn ResourceLoader) -> Option
     resource_loader.localized_name_from_id(&TranslationKey::new(key))
 }
 
+/// The display label for a stat: the localized catalog label, or a humanized fallback
+/// from `field_key` when the catalog has no entry. Always non-empty -- callers never
+/// have to handle a missing label.
+pub fn stat_display_label(stat: TtxStat, loader: &dyn ResourceLoader) -> String {
+    stat_label(stat, loader).unwrap_or_else(|| stat.fallback_label())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,6 +465,12 @@ mod tests {
                 assert!(key.starts_with("IDS_SHIP_PARAM_"), "{stat:?} -> {key}");
             }
         }
+    }
+
+    #[test]
+    fn display_label_falls_back_to_humanized_field_key() {
+        assert_eq!(TtxStat::ArtilleryDispersionVertical.fallback_label(), "Artillery Dispersion Vertical");
+        assert_eq!(TtxStat::SecondaryDispersionVertical.fallback_label(), "Secondary Dispersion Vertical");
     }
 
     #[test]
