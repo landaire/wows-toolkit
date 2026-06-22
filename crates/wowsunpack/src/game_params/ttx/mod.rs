@@ -19,9 +19,14 @@ pub mod labels;
 pub mod model;
 pub mod modifiers;
 pub mod orchestration;
+pub mod render;
 pub mod selection;
 pub mod weapon_tables;
 
 pub use orchestration::ship_stats;
 pub use orchestration::ship_stats_stock;
+pub use render::StatDelta;
+pub use render::StatLine;
+pub use render::diff_stat_rows;
+pub use render::render_stat_rows;
 pub use selection::ShipUpgradeSelection;
