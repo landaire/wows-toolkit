@@ -5,6 +5,9 @@
 //! `BigWorld` engine module); the ones used here are recovered by solving a client
 //! formula against a known in-game port value, documented per constant.
 
+use crate::game_params::types::BigWorldDistance;
+use crate::game_params::types::Km;
+
 /// `KM_TO_M = 1000.0` (me658a8e4.py:41).
 pub const KM_TO_M: f32 = 1000.0;
 
@@ -70,13 +73,97 @@ pub const BW_TO_SHIP: f32 = 15.0;
 /// `SHIP_TO_BW = 1 / BW_TO_SHIP`. Inverse of the recovered scale above.
 pub const SHIP_TO_BW: f32 = 1.0 / BW_TO_SHIP;
 
-/// Main-battery horizontal dispersion in meters (FactoryArtillery.py:105-110
-/// `getDispersionValue`, identical to the alt-fire inline at line 46).
-///
-/// `componentParams.minRadius/idealRadius` are gun fields; `idealDistance` is a gun
-/// field; `maxDist` is the battery range in KM (PreprocessedArtillery.py:32 stores
-/// `module.maxDist / KM_TO_M`); `ideal_radius_coef` is the `GMIdealRadius` modifier
-/// (stock 1.0).
+/// The shell dispersion ellipse: both semi-axes in BigWorld units. Convert each to
+/// display meters with `.to_meters()` (the TTX card), or use the BigWorld values
+/// directly (e.g. a minimap aim-ellipse renderer). Transcribed from `getEllipse`
+/// (md938aab1.py:209-228).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DispersionEllipse {
+    pub horizontal: BigWorldDistance,
+    pub vertical: BigWorldDistance,
+}
+
+/// Raw gun dispersion-curve coefficients (`getEllipse` `params`). These are GameParams
+/// curve coefficients in mixed internal spaces (e.g. `ideal_distance` is a ballistic
+/// reference distance), not clean physical units, so they are `f32` by decision.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DispersionCurve {
+    pub min_radius: f32,
+    pub ideal_radius: f32,
+    pub ideal_distance: f32,
+    pub radius_on_zero: f32,
+    pub radius_on_delim: f32,
+    pub radius_on_max: f32,
+    pub delim: f32,
+}
+
+/// Horizontal dispersion semi-axis at `dist`, in BigWorld units. The always-available
+/// core (needs only the base radius/distance fields). `ideal_radius_coef` is the
+/// `GMIdealRadius` modifier (stock 1.0). `.to_meters()` gives the port "Maximum
+/// Dispersion" value.
+pub fn dispersion_horizontal(
+    min_radius: f32,
+    ideal_radius: f32,
+    ideal_distance: f32,
+    dist: Km,
+    ideal_radius_coef: f32,
+) -> BigWorldDistance {
+    let min_r = min_radius * ideal_radius_coef;
+    let ideal_r = ideal_radius * ideal_radius_coef;
+    BigWorldDistance::from(min_r + dist.value() * BALLISTIC_TO_BW * KM_TO_M * (ideal_r - min_r) / ideal_distance)
+}
+
+/// The vertical/horizontal dispersion ratio at `dist` (`getClampedCoeff`,
+/// md938aab1.py:14-28): a two-segment lerp of `(radius_on_zero, radius_on_delim,
+/// radius_on_max)` split at `delim * max_dist`. The distance terms are ratios, so the
+/// `Km` units cancel. Expects `delim < 1.0` (always true for real gun data); at
+/// `delim == 1.0` the second-segment denominator `max_dist - delim * max_dist` is zero.
+pub fn clamped_dispersion_coeff(
+    radius_on_zero: f32,
+    radius_on_delim: f32,
+    radius_on_max: f32,
+    delim: f32,
+    dist: Km,
+    max_dist: Km,
+) -> f32 {
+    let delim_dist = max_dist.value() * delim;
+    let f = dist.value() / delim_dist;
+    if f < 1.0 {
+        lerp(radius_on_zero, radius_on_delim, f)
+    } else {
+        lerp(radius_on_delim, radius_on_max, (dist.value() - delim_dist) / (max_dist.value() - delim_dist))
+    }
+}
+
+/// Linear interpolation with the deob's clamp (factor capped at 1.0; md938aab1.py:31-34).
+fn lerp(a: f32, b: f32, factor: f32) -> f32 {
+    a + (b - a) * factor.min(1.0)
+}
+
+/// Both dispersion ellipse semi-axes at `dist` (clamped to `max_dist`), faithful to
+/// `getEllipse`. `vertical = horizontal * clamped_dispersion_coeff(...)`.
+pub fn dispersion_ellipse(
+    curve: &DispersionCurve,
+    dist: Km,
+    max_dist: Km,
+    ideal_radius_coef: f32,
+) -> DispersionEllipse {
+    let clamped = Km::from(dist.value().min(max_dist.value()));
+    let horizontal =
+        dispersion_horizontal(curve.min_radius, curve.ideal_radius, curve.ideal_distance, clamped, ideal_radius_coef);
+    let coeff = clamped_dispersion_coeff(
+        curve.radius_on_zero,
+        curve.radius_on_delim,
+        curve.radius_on_max,
+        curve.delim,
+        clamped,
+        max_dist,
+    );
+    DispersionEllipse { horizontal, vertical: horizontal * coeff }
+}
+
+/// Main-battery horizontal dispersion in display meters. Thin wrapper over
+/// [`dispersion_horizontal`] for callers still on the scalar API.
 pub fn dispersion(
     min_radius: f32,
     ideal_radius: f32,
@@ -84,9 +171,9 @@ pub fn dispersion(
     max_dist_km: f32,
     ideal_radius_coef: f32,
 ) -> f32 {
-    let min_r = min_radius * ideal_radius_coef;
-    let ideal_r = ideal_radius * ideal_radius_coef;
-    (min_r + max_dist_km * BALLISTIC_TO_BW * KM_TO_M * (ideal_r - min_r) / ideal_distance) * BW_TO_SHIP * 2.0
+    dispersion_horizontal(min_radius, ideal_radius, ideal_distance, Km::from(max_dist_km), ideal_radius_coef)
+        .to_meters()
+        .value()
 }
 
 #[cfg(test)]
@@ -143,5 +230,60 @@ mod tests {
         // Port "Maximum Dispersion" 273 m; formula yields ~275.7 (published rounded).
         let d = dispersion(2.8, 10.0, 1000.0, 26630.0 / 1000.0, 1.0);
         assert!((d - 273.0).abs() < 3.0, "got {d}");
+    }
+
+    #[test]
+    fn lerp_clamps_factor_above_one() {
+        assert_eq!(lerp(2.0, 4.0, 1.5), 4.0);
+        assert!((lerp(2.0, 4.0, 0.5) - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn clamped_coeff_segments_and_boundary() {
+        // delim 0.5, maxDist 20 km -> delimDist 10 km. coeffs (1.0, 1.5, 2.0).
+        // First segment midpoint (dist 5 km, f=0.5): lerp(1.0, 1.5, 0.5) = 1.25.
+        assert!((clamped_dispersion_coeff(1.0, 1.5, 2.0, 0.5, Km::from(5.0), Km::from(20.0)) - 1.25).abs() < 1e-6);
+        // Second segment midpoint (dist 15 km): lerp(1.5, 2.0, 0.5) = 1.75.
+        assert!((clamped_dispersion_coeff(1.0, 1.5, 2.0, 0.5, Km::from(15.0), Km::from(20.0)) - 1.75).abs() < 1e-6);
+        // At max range the coeff is exactly radius_on_max.
+        assert!((clamped_dispersion_coeff(1.0, 1.5, 2.0, 0.5, Km::from(20.0), Km::from(20.0)) - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn horizontal_matches_legacy_north_carolina() {
+        // Same inputs as north_carolina_dispersion; .to_meters() reproduces 271 m.
+        let h = dispersion_horizontal(2.0, 12.0, 1000.0, Km::from(21143.0 / 1000.0), 1.0);
+        assert!((h.to_meters().value() - 271.0).abs() < 1.0, "got {}", h.to_meters().value());
+    }
+
+    #[test]
+    fn ellipse_vertical_is_horizontal_times_radius_on_max_at_max_range() {
+        let curve = DispersionCurve {
+            min_radius: 2.0,
+            ideal_radius: 12.0,
+            ideal_distance: 1000.0,
+            radius_on_zero: 1.0,
+            radius_on_delim: 1.4,
+            radius_on_max: 1.8,
+            delim: 0.5,
+        };
+        let e = dispersion_ellipse(&curve, Km::from(21.143), Km::from(21.143), 1.0);
+        assert!((e.vertical.value() - e.horizontal.value() * 1.8).abs() < 1e-3);
+    }
+
+    #[test]
+    fn ellipse_vertical_first_segment_uses_interpolated_coeff() {
+        let curve = DispersionCurve {
+            min_radius: 2.0,
+            ideal_radius: 12.0,
+            ideal_distance: 1000.0,
+            radius_on_zero: 1.0,
+            radius_on_delim: 2.0,
+            radius_on_max: 3.0,
+            delim: 0.5,
+        };
+        // dist 5 km, maxDist 20 km -> delimDist 10 km, f=0.5 -> coeff lerp(1.0,2.0,0.5)=1.5.
+        let e = dispersion_ellipse(&curve, Km::from(5.0), Km::from(20.0), 1.0);
+        assert!((e.vertical.value() - e.horizontal.value() * 1.5).abs() < 1e-3);
     }
 }
