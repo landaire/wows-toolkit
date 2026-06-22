@@ -15,6 +15,8 @@ pub mod pkg;
 pub mod ship_config;
 // File tree serialization utilities
 pub mod serialization;
+/// Localization catalog key newtype
+pub mod translation_key;
 /// Wrapper types for VFS data sources
 #[cfg(feature = "vfs")]
 pub mod wrappers;
@@ -33,6 +35,8 @@ pub trait ResourceLoader {
     fn game_param_by_id(&self, id: GameParamId) -> Option<Rc<Param>>;
     fn entity_specs(&self) -> &[EntitySpec];
 }
+
+pub use translation_key::TranslationKey;
 
 /// Game version. Defined in `wows-core`; re-exported so existing
 /// `wowsunpack::data::Version` paths keep working.
