@@ -171,4 +171,23 @@ mod tests {
         let rows = vec![row(TtxStat::SeaDetection, None, StatValue::Km(Km::from(7.3)))];
         assert!(diff_stat_rows(&rows, &rows, &loader).is_empty());
     }
+
+    #[test]
+    fn diff_keys_on_qualifier_distinctly() {
+        use crate::game_params::ttx::model::Hp;
+        let loader = EchoLoader;
+        let baseline = vec![
+            row(TtxStat::ShellDamage, Some("HE"), StatValue::Hp(Hp::from(1800.0))),
+            row(TtxStat::ShellDamage, Some("AP"), StatValue::Hp(Hp::from(5000.0))),
+        ];
+        let candidate = vec![
+            row(TtxStat::ShellDamage, Some("HE"), StatValue::Hp(Hp::from(2000.0))),
+            row(TtxStat::ShellDamage, Some("AP"), StatValue::Hp(Hp::from(5000.0))),
+        ];
+        let deltas = diff_stat_rows(&baseline, &candidate, &loader);
+        assert_eq!(deltas.len(), 1);
+        assert_eq!(deltas[0].stat, TtxStat::ShellDamage);
+        assert_eq!(deltas[0].qualifier.as_deref(), Some("HE"));
+        assert!(deltas[0].from.is_some() && deltas[0].to.is_some() && deltas[0].from != deltas[0].to);
+    }
 }

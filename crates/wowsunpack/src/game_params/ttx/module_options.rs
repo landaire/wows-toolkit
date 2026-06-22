@@ -124,7 +124,11 @@ pub fn module_options(
 mod tests {
     use super::*;
     use crate::Rc;
+    use crate::data::ResourceLoader;
+    use crate::game_params::ttx::components::EngineComponentStats;
     use crate::game_params::ttx::components::HullComponentStats;
+    use crate::game_params::ttx::components::ShipTtxComponents;
+    use crate::game_params::ttx::labels::TtxStat;
     use crate::game_params::ttx::model::Hp;
     use crate::game_params::types::ParamData;
     use crate::game_params::types::Species;
@@ -148,16 +152,31 @@ mod tests {
         }
     }
 
+    struct EchoLoader;
+    impl ResourceLoader for EchoLoader {
+        fn localized_name_from_param(&self, _p: &Param) -> Option<String> {
+            None
+        }
+        fn localized_name_from_id(&self, id: &crate::data::TranslationKey) -> Option<String> {
+            Some(id.as_str().to_string())
+        }
+        fn game_param_by_id(&self, _id: GameParamId) -> Option<Rc<Param>> {
+            None
+        }
+        fn entity_specs(&self) -> &[crate::rpc::entitydefs::EntitySpec] {
+            &[]
+        }
+    }
+
     fn hull(health: f32) -> HullComponentStats {
         HullComponentStats { health: Some(Hp::from(health)), ..Default::default() }
     }
 
-    /// A tier-10 ship with two hull options (A 19400 HP, B 21000 HP), stock = A.
-    fn two_hull_ship() -> Param {
-        let mut components = crate::game_params::ttx::components::ShipTtxComponents::default();
-        components.hulls.insert("HULL_A".to_string(), hull(19400.0));
-        components.hulls.insert("HULL_B".to_string(), hull(21000.0));
-        components.stock_selection = ShipUpgradeSelection::new(Some("HULL_A".to_string()), None, None, None, None);
+    fn engine(speed_coef: f32) -> EngineComponentStats {
+        EngineComponentStats { speed_coef: Some(speed_coef) }
+    }
+
+    fn ship_from(components: ShipTtxComponents) -> Param {
         let vehicle = Vehicle::builder()
             .level(10)
             .group("g".to_string())
@@ -174,11 +193,29 @@ mod tests {
         Param::builder()
             .id(GameParamId::from(900u32))
             .index("IDX".to_string())
-            .name("TwoHull".to_string())
+            .name("Fixture".to_string())
             .nation("USA".to_string())
             .species(Recognized::Known(Species::Cruiser))
             .data(ParamData::Vehicle(vehicle))
             .build()
+    }
+
+    fn two_hull_ship() -> Param {
+        let mut components = ShipTtxComponents::default();
+        components.hulls.insert("HULL_A".to_string(), hull(19400.0));
+        components.hulls.insert("HULL_B".to_string(), hull(21000.0));
+        components.stock_selection = ShipUpgradeSelection::new(Some("HULL_A".to_string()), None, None, None, None);
+        ship_from(components)
+    }
+
+    fn hull_and_engine_ship() -> Param {
+        let mut components = ShipTtxComponents::default();
+        components.hulls.insert("HULL_A".to_string(), hull(19400.0));
+        components.hulls.insert("HULL_B".to_string(), hull(21000.0));
+        components.engines.insert("ENG_A".to_string(), engine(0.0));
+        components.stock_selection =
+            ShipUpgradeSelection::new(Some("HULL_A".to_string()), Some("ENG_A".to_string()), None, None, None);
+        ship_from(components)
     }
 
     #[test]
@@ -190,7 +227,6 @@ mod tests {
 
         let hull_slot = opts.slots.iter().find(|s| s.slot == ModuleSlot::Hull).expect("hull slot");
         assert_eq!(hull_slot.baseline.as_deref(), Some("HULL_A"));
-        // Sorted by upgrade_name.
         let names: Vec<&str> = hull_slot.options.iter().map(|o| o.upgrade_name.as_str()).collect();
         assert_eq!(names, vec!["HULL_A", "HULL_B"]);
 
@@ -201,7 +237,6 @@ mod tests {
         assert_eq!(a.stats.durability.as_ref().unwrap().health.unwrap().value(), 19400.0);
         assert_eq!(b.stats.durability.as_ref().unwrap().health.unwrap().value(), 21000.0);
 
-        // Only the hull slot has options (no engine/artillery/etc on this fixture).
         assert_eq!(opts.slots.len(), 1);
     }
 
@@ -223,5 +258,38 @@ mod tests {
             &provider,
         );
         assert!(opts.slots.is_empty());
+    }
+
+    #[test]
+    fn enumerates_multiple_slots_in_order() {
+        let ship = hull_and_engine_ship();
+        let baseline = ShipUpgradeSelection::stock(&ship);
+        let provider = EmptyProvider;
+        let opts = module_options(&ship, &baseline, &ModifierBundle::empty(Species::Cruiser), 10, &provider);
+        let slots: Vec<ModuleSlot> = opts.slots.iter().map(|s| s.slot).collect();
+        assert_eq!(slots, vec![ModuleSlot::Hull, ModuleSlot::Engine]);
+        assert_eq!(opts.slots[0].options.len(), 2);
+        let eng = &opts.slots[1];
+        assert_eq!(eng.options.len(), 1);
+        assert_eq!(eng.baseline.as_deref(), Some("ENG_A"));
+        assert!(eng.options[0].is_baseline);
+    }
+
+    #[test]
+    fn module_diff_renders_hull_change() {
+        use crate::game_params::ttx::render::diff_stat_rows;
+        let ship = two_hull_ship();
+        let baseline = ShipUpgradeSelection::stock(&ship);
+        let provider = EmptyProvider;
+        let opts = module_options(&ship, &baseline, &ModifierBundle::empty(Species::Cruiser), 10, &provider);
+        let hull = opts.slots.iter().find(|s| s.slot == ModuleSlot::Hull).expect("hull slot");
+        let base_opt = hull.options.iter().find(|o| o.is_baseline).expect("baseline (HULL_A)");
+        let cand_opt = hull.options.iter().find(|o| !o.is_baseline).expect("non-baseline (HULL_B)");
+
+        let loader = EchoLoader;
+        let deltas = diff_stat_rows(&base_opt.stats.rows(), &cand_opt.stats.rows(), &loader);
+        assert_eq!(deltas.len(), 1);
+        assert_eq!(deltas[0].stat, TtxStat::Health);
+        assert!(deltas[0].from.is_some() && deltas[0].to.is_some() && deltas[0].from != deltas[0].to);
     }
 }
