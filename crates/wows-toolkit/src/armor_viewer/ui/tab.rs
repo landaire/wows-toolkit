@@ -255,7 +255,8 @@ impl ToolkitTabViewer<'_> {
                 .as_ref()
                 .and_then(|m| {
                     use wowsunpack::data::ResourceLoader;
-                    m.localized_name_from_id(&id)
+                    use wowsunpack::data::TranslationKey;
+                    m.localized_name_from_id(&TranslationKey::new(id))
                 })
                 .unwrap_or_else(|| name.to_string())
         };

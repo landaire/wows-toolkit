@@ -95,6 +95,7 @@ use wows_replays::types::AccountId;
 use itertools::Itertools;
 use wows_minimap_renderer::renderer::weapon_group_label;
 use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::TranslationKey;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
@@ -609,7 +610,7 @@ impl UiReport {
                 .as_ref()
                 .and_then(|species| {
                     metadata_provider
-                        .localized_name_from_id(&species.translation_id())
+                        .localized_name_from_id(&TranslationKey::new(species.translation_id()))
                         .or_else(|| Some(species.name().to_string()))
                 })
                 .unwrap_or_default();
@@ -637,7 +638,7 @@ impl UiReport {
             };
             let display_name = if player_state.is_bot() && player_state.username().starts_with("IDS_") {
                 metadata_provider
-                    .localized_name_from_id(player_state.username())
+                    .localized_name_from_id(&TranslationKey::new(player_state.username()))
                     .unwrap_or_else(|| player_state.username().to_string())
             } else {
                 player_state.username().to_string()
@@ -2628,14 +2629,14 @@ impl UiReport {
             // Ship species text
             if let Some(species) = vehicle_param.species().and_then(|r| r.known().cloned()) {
                 report.ship_species_text = metadata_provider
-                    .localized_name_from_id(&species.translation_id())
+                    .localized_name_from_id(&TranslationKey::new(species.translation_id()))
                     .unwrap_or_else(|| species.name().to_string());
             }
 
             // Bot display name
             if player_state.is_bot() && player_state.username().starts_with("IDS_") {
                 let display_name = metadata_provider
-                    .localized_name_from_id(player_state.username())
+                    .localized_name_from_id(&TranslationKey::new(player_state.username()))
                     .unwrap_or_else(|| player_state.username().to_string());
                 let name_color =
                     if player_state.is_abuser() { Color32::from_rgb(0xFF, 0xC0, 0xCB) } else { report.color };
@@ -3039,7 +3040,7 @@ impl Replay {
     pub fn vehicle_name(&self, metadata_provider: &GameMetadataProvider) -> String {
         self.player_vehicle()
             .and_then(|vehicle| metadata_provider.param_localization_id(vehicle.shipId.raw().into()))
-            .and_then(|id| metadata_provider.localized_name_from_id(id))
+            .and_then(|id| metadata_provider.localized_name_from_id(&TranslationKey::new(id)))
             .unwrap_or_else(|| t!("ui.replay.spectator").into())
     }
 
@@ -5328,10 +5329,12 @@ fn build_replay_chat_content(
 
         let (translated_name, translated_text) =
             if sender_relation.is_none() || player.as_ref().map(|player| player.is_bot()).unwrap_or_default() {
-                let translated_user =
-                    metadata_provider.and_then(|provider| provider.localized_name_from_id(sender_name).map(Cow::Owned));
-                let translated_text =
-                    metadata_provider.and_then(|provider| provider.localized_name_from_id(message).map(Cow::Owned));
+                let translated_user = metadata_provider.and_then(|provider| {
+                    provider.localized_name_from_id(&TranslationKey::new(sender_name.as_str())).map(Cow::Owned)
+                });
+                let translated_text = metadata_provider.and_then(|provider| {
+                    provider.localized_name_from_id(&TranslationKey::new(message.as_str())).map(Cow::Owned)
+                });
                 (translated_user, translated_text)
             } else {
                 (None, None)

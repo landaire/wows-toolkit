@@ -513,8 +513,12 @@ impl RealtimeArmorViewer {
             // Translate shell name via IDS_ localization key
             let shell_name = {
                 use wowsunpack::data::ResourceLoader;
+                use wowsunpack::data::TranslationKey;
                 let ids_key = format!("IDS_{}", shell.name.to_uppercase());
-                self.ship_assets.metadata().localized_name_from_id(&ids_key).unwrap_or_else(|| shell.name.clone())
+                self.ship_assets
+                    .metadata()
+                    .localized_name_from_id(&TranslationKey::new(ids_key))
+                    .unwrap_or_else(|| shell.name.clone())
             };
 
             let idx = self.salvo_groups.len();
