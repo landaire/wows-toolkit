@@ -45,6 +45,8 @@ use crate::game_params::ttx::weapon_tables::is_small_projectile;
 use crate::game_params::types::ArmorMap;
 use crate::game_params::types::GameParamProvider;
 use crate::game_params::types::Km;
+// `Meters` is named only by the test fixtures (the factory body uses `.to_meters()`).
+#[cfg(test)]
 use crate::game_params::types::Meters;
 use crate::game_params::types::MetersPerSecond;
 use crate::game_params::types::Millimeters;
@@ -515,12 +517,21 @@ pub fn artillery(
     let range_km = arty.max_dist.map(|d| (d.value() / KM_TO_M) * fc_max_dist_coef * max_dist_coef);
     let range = range_km.map(Km::from);
 
-    // dispersion over the FC-adjusted range (FactoryArtillery.py:47 uses `unknown_12`).
-    let dispersion = match (range_km, first.min_radius, first.ideal_radius, first.ideal_distance) {
+    // dispersion ellipse over the FC-adjusted range (FactoryArtillery.py:47; getEllipse).
+    let (dispersion, dispersion_vertical) = match (range_km, first.min_radius, first.ideal_radius, first.ideal_distance)
+    {
         (Some(rng), Some(min_r), Some(ideal_r), Some(ideal_d)) => {
-            Some(Meters::from(constants::dispersion(min_r, ideal_r, ideal_d, rng, ideal_radius_coef)))
+            let h = constants::dispersion_horizontal(min_r, ideal_r, ideal_d, Km::from(rng), ideal_radius_coef);
+            let vertical = match (first.radius_on_zero, first.radius_on_delim, first.radius_on_max, first.delim) {
+                (Some(z), Some(dl), Some(mx), Some(dm)) => {
+                    let coeff = constants::clamped_dispersion_coeff(z, dl, mx, dm, Km::from(rng), Km::from(rng));
+                    Some((h * coeff).to_meters())
+                }
+                _ => None,
+            };
+            (Some(h.to_meters()), vertical)
         }
-        _ => None,
+        _ => (None, None),
     };
 
     let ammo_switch_time = match (first.shot_delay, first.ammo_switch_coeff) {
@@ -555,7 +566,7 @@ pub fn artillery(
         }
     }
 
-    Some(Artillery { reload_time, range, dispersion, ammo_switch_time, gun, shells })
+    Some(Artillery { reload_time, range, dispersion, dispersion_vertical, ammo_switch_time, gun, shells })
 }
 
 /// Secondary-battery (ATBA) armament section (`createATBAGunTTX`,
@@ -605,11 +616,20 @@ pub fn secondaries(
     let range_km = atba.max_dist.map(|d| (d.value() / KM_TO_M) * max_dist_coef);
     let range = range_km.map(Km::from);
 
-    let dispersion = match (range_km, first.min_radius, first.ideal_radius, first.ideal_distance) {
+    let (dispersion, dispersion_vertical) = match (range_km, first.min_radius, first.ideal_radius, first.ideal_distance)
+    {
         (Some(rng), Some(min_r), Some(ideal_r), Some(ideal_d)) => {
-            Some(Meters::from(constants::dispersion(min_r, ideal_r, ideal_d, rng, ideal_radius_coef)))
+            let h = constants::dispersion_horizontal(min_r, ideal_r, ideal_d, Km::from(rng), ideal_radius_coef);
+            let vertical = match (first.radius_on_zero, first.radius_on_delim, first.radius_on_max, first.delim) {
+                (Some(z), Some(dl), Some(mx), Some(dm)) => {
+                    let coeff = constants::clamped_dispersion_coeff(z, dl, mx, dm, Km::from(rng), Km::from(rng));
+                    Some((h * coeff).to_meters())
+                }
+                _ => None,
+            };
+            (Some(h.to_meters()), vertical)
         }
-        _ => None,
+        _ => (None, None),
     };
 
     let rotation_speed = first.rotation_speed.map(|r| r.value() * yaw_coef + yaw_bonus);
@@ -645,6 +665,7 @@ pub fn secondaries(
         reload_time,
         range,
         dispersion,
+        dispersion_vertical,
         // Secondaries have no ammo switch (single shell type per gun, FactoryArtillery.py omits it).
         ammo_switch_time: None,
         gun,
@@ -1329,13 +1350,58 @@ mod tests {
         let arty = artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
             .expect("artillery computed");
         // dispersion over the FC-adjusted range 15.32 km, stock GMIdealRadius 1.0.
-        let expected = constants::dispersion(1.1, 8.0, 1000.0, 15.32, 1.0);
+        let expected =
+            constants::dispersion_horizontal(1.1, 8.0, 1000.0, Km::from(15.32), 1.0).to_meters().value();
         let got = arty.dispersion.expect("dispersion").value();
         assert!((got - expected).abs() < 1e-3, "got {got} expected {expected}");
         // The transcribed formula yields ~138.7 m at 15.32 km for Worcester's gun
         // (minRadius 1.1 / idealRadius 8 / idealDistance 1000); same BW_TO_SHIP=15
         // scale that recovers NC's 271 m and Yamato's 273 m in constants.rs.
         assert!((got - 138.7).abs() < 1.0, "got {got}");
+    }
+
+    /// Worcester artillery with the four vertical-dispersion curve fields set.
+    fn worcester_artillery_with_curve() -> ArtilleryComponentStats {
+        let gun = || ArtilleryGunStats {
+            shot_delay: Some(Seconds::from(4.6)),
+            rotation_speed: Some(DegreesPerSecond::from(25.0)),
+            num_barrels: Some(2.0),
+            barrel_diameter: Some(Meters::from(0.152)),
+            ammo_switch_coeff: Some(1.0),
+            min_radius: Some(1.1),
+            ideal_radius: Some(8.0),
+            ideal_distance: Some(1000.0),
+            radius_on_zero: Some(1.0),
+            radius_on_delim: Some(1.5),
+            radius_on_max: Some(2.0),
+            delim: Some(0.5),
+            ammo: vec!["PAPA051_152mm_HE_HC_Mark_39_Mod_0".to_string()],
+        };
+        ArtilleryComponentStats {
+            max_dist: Some(Meters::from(15320.0)),
+            guns: vec![gun(), gun(), gun(), gun(), gun(), gun()],
+        }
+    }
+
+    #[test]
+    fn artillery_vertical_dispersion_some_when_curve_fields_set() {
+        let provider = worcester_provider();
+        let arty =
+            artillery(&worcester_artillery_with_curve(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
+                .expect("artillery computed");
+        let h = arty.dispersion.expect("dispersion").value();
+        let v = arty.dispersion_vertical.expect("dispersion_vertical").value();
+        // At max range, clamped_dispersion_coeff with radius_on_max=2.0 yields coeff=2.0.
+        assert!((v - h * 2.0).abs() < 1e-2, "got v={v} h={h}");
+    }
+
+    #[test]
+    fn artillery_vertical_dispersion_none_when_curve_fields_absent() {
+        let provider = worcester_provider();
+        let arty = artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
+            .expect("artillery computed");
+        assert!(arty.dispersion.is_some(), "horizontal dispersion must be present");
+        assert!(arty.dispersion_vertical.is_none(), "vertical must be None when curve fields absent");
     }
 
     #[test]

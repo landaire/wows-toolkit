@@ -330,11 +330,7 @@ impl ShipStats {
         };
         let item = |rows: &mut Vec<StatRow>, stat: TtxStat, qualifier: &str, value: Option<StatValue>| {
             if let Some(value) = value {
-                rows.push(StatRow {
-                    stat,
-                    qualifier: Some(qualifier.to_string()),
-                    value,
-                });
+                rows.push(StatRow { stat, qualifier: Some(qualifier.to_string()), value });
             }
         };
 
@@ -363,7 +359,12 @@ impl ShipStats {
             scalar(&mut rows, TtxStat::TorpedoReloadTime, t.reload_time.map(StatValue::Seconds));
             for (idx, launcher) in t.launchers.iter().enumerate() {
                 let q = idx.to_string();
-                item(&mut rows, TtxStat::LauncherRotationSpeed, &q, launcher.rotation_speed.map(StatValue::DegreesPerSecond));
+                item(
+                    &mut rows,
+                    TtxStat::LauncherRotationSpeed,
+                    &q,
+                    launcher.rotation_speed.map(StatValue::DegreesPerSecond),
+                );
                 item(&mut rows, TtxStat::LauncherRotationTime, &q, launcher.rotation_time.map(StatValue::Seconds));
                 item(&mut rows, TtxStat::LauncherNumBarrels, &q, launcher.num_barrels.map(StatValue::Count));
             }
@@ -373,7 +374,12 @@ impl ShipStats {
                 item(&mut rows, TtxStat::TorpedoSpeed, &q, torp.speed.map(StatValue::Knots));
                 item(&mut rows, TtxStat::TorpedoRange, &q, torp.range.map(StatValue::Km));
                 item(&mut rows, TtxStat::TorpedoVisibility, &q, torp.visibility.map(StatValue::Km));
-                item(&mut rows, TtxStat::TorpedoDistanceOfMaxDamage, &q, torp.distance_of_max_damage.map(StatValue::Km));
+                item(
+                    &mut rows,
+                    TtxStat::TorpedoDistanceOfMaxDamage,
+                    &q,
+                    torp.distance_of_max_damage.map(StatValue::Km),
+                );
                 item(&mut rows, TtxStat::TorpedoIsDamageIncreasing, &q, torp.is_damage_increasing.map(StatValue::Bool));
                 item(&mut rows, TtxStat::TorpedoDisabledUnderwater, &q, torp.disabled_underwater.map(StatValue::Bool));
             }
@@ -416,11 +422,7 @@ fn shell_qualifier(shell: &ShellStats, idx: usize) -> String {
 
 /// The qualifier for a torpedo row: the projectile `name`, else the index.
 fn torpedo_qualifier(torp: &TorpedoStats, idx: usize) -> String {
-    if torp.name.is_empty() {
-        idx.to_string()
-    } else {
-        torp.name.clone()
-    }
+    if torp.name.is_empty() { idx.to_string() } else { torp.name.clone() }
 }
 
 #[allow(clippy::type_complexity)]
@@ -437,6 +439,7 @@ fn push_artillery_rows(
     scalar(rows, s.reload_time, a.reload_time.map(StatValue::Seconds));
     scalar(rows, s.range, a.range.map(StatValue::Km));
     scalar(rows, s.dispersion, a.dispersion.map(StatValue::Meters));
+    scalar(rows, s.dispersion_vertical, a.dispersion_vertical.map(StatValue::Meters));
     scalar(rows, s.ammo_switch_time, a.ammo_switch_time.map(StatValue::Seconds));
 
     if let Some(gun) = &a.gun {
@@ -469,6 +472,7 @@ struct ArtilleryStats {
     reload_time: TtxStat,
     range: TtxStat,
     dispersion: TtxStat,
+    dispersion_vertical: TtxStat,
     ammo_switch_time: TtxStat,
     gun_caliber: TtxStat,
     gun_num_barrels: TtxStat,
@@ -492,6 +496,7 @@ impl ArtilleryStats {
                 reload_time: TtxStat::ArtilleryReloadTime,
                 range: TtxStat::ArtilleryRange,
                 dispersion: TtxStat::ArtilleryDispersion,
+                dispersion_vertical: TtxStat::ArtilleryDispersionVertical,
                 ammo_switch_time: TtxStat::ArtilleryAmmoSwitchTime,
                 gun_caliber: TtxStat::GunCaliber,
                 gun_num_barrels: TtxStat::GunNumBarrels,
@@ -511,6 +516,7 @@ impl ArtilleryStats {
                 reload_time: TtxStat::SecondaryReloadTime,
                 range: TtxStat::SecondaryRange,
                 dispersion: TtxStat::SecondaryDispersion,
+                dispersion_vertical: TtxStat::SecondaryDispersionVertical,
                 ammo_switch_time: TtxStat::SecondaryAmmoSwitchTime,
                 gun_caliber: TtxStat::SecondaryGunCaliber,
                 gun_num_barrels: TtxStat::SecondaryGunNumBarrels,
@@ -618,6 +624,10 @@ pub struct Artillery {
     pub range: Option<Km>,
     /// `mgDispersion`: `getDispersionValue(gun, range_km, GMIdealRadius)` (FactoryArtillery.py:47).
     pub dispersion: Option<Meters>,
+    /// `mgDispersion` vertical semi-axis: `dispersion_horizontal * clamped_dispersion_coeff`
+    /// at max range (getEllipse, md938aab1.py:209). `None` when the gun lacks the
+    /// `radiusOn*`/`delim` curve fields.
+    pub dispersion_vertical: Option<Meters>,
     /// `ammoSwitchTime`: `shotDelay * ammoSwitchCoeff * GMShotDelay * switchAmmoReloadCoef`
     /// (FactoryTorpedoes.py:67 main-gun analog).
     pub ammo_switch_time: Option<Seconds>,
@@ -839,14 +849,8 @@ mod tests {
             torpedoes: Some(Torpedoes {
                 reload_time: None,
                 launchers: vec![
-                    Launcher {
-                        rotation_speed: Some(DegreesPerSecond::from(25.0)),
-                        ..Default::default()
-                    },
-                    Launcher {
-                        rotation_speed: Some(DegreesPerSecond::from(30.0)),
-                        ..Default::default()
-                    },
+                    Launcher { rotation_speed: Some(DegreesPerSecond::from(25.0)), ..Default::default() },
+                    Launcher { rotation_speed: Some(DegreesPerSecond::from(30.0)), ..Default::default() },
                 ],
                 torpedoes: Vec::new(),
             }),
@@ -894,6 +898,7 @@ mod tests {
             reload_time: Some(Seconds::from(1.0)),
             range: Some(Km::from(1.0)),
             dispersion: Some(Meters::from(1.0)),
+            dispersion_vertical: Some(Meters::from(1.0)),
             ammo_switch_time: Some(Seconds::from(1.0)),
             gun: gun(),
             shells: vec![shell()],

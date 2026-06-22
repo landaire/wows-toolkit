@@ -41,6 +41,7 @@ pub enum TtxStat {
     ArtilleryReloadTime,
     ArtilleryRange,
     ArtilleryDispersion,
+    ArtilleryDispersionVertical,
     ArtilleryAmmoSwitchTime,
     // Main gun mount
     GunCaliber,
@@ -63,6 +64,7 @@ pub enum TtxStat {
     SecondaryRange,
     SecondaryReloadTime,
     SecondaryDispersion,
+    SecondaryDispersionVertical,
     SecondaryAmmoSwitchTime,
     SecondaryGunCaliber,
     SecondaryGunNumBarrels,
@@ -117,6 +119,7 @@ impl TtxStat {
         TtxStat::ArtilleryReloadTime,
         TtxStat::ArtilleryRange,
         TtxStat::ArtilleryDispersion,
+        TtxStat::ArtilleryDispersionVertical,
         TtxStat::ArtilleryAmmoSwitchTime,
         TtxStat::GunCaliber,
         TtxStat::GunNumBarrels,
@@ -134,6 +137,7 @@ impl TtxStat {
         TtxStat::SecondaryRange,
         TtxStat::SecondaryReloadTime,
         TtxStat::SecondaryDispersion,
+        TtxStat::SecondaryDispersionVertical,
         TtxStat::SecondaryAmmoSwitchTime,
         TtxStat::SecondaryGunCaliber,
         TtxStat::SecondaryGunNumBarrels,
@@ -184,6 +188,7 @@ impl TtxStat {
             TtxStat::ArtilleryReloadTime => "artillery.reload_time",
             TtxStat::ArtilleryRange => "artillery.range",
             TtxStat::ArtilleryDispersion => "artillery.dispersion",
+            TtxStat::ArtilleryDispersionVertical => "artillery.dispersion_vertical",
             TtxStat::ArtilleryAmmoSwitchTime => "artillery.ammo_switch_time",
             TtxStat::GunCaliber => "artillery.gun.caliber",
             TtxStat::GunNumBarrels => "artillery.gun.num_barrels",
@@ -201,6 +206,7 @@ impl TtxStat {
             TtxStat::SecondaryRange => "secondary.range",
             TtxStat::SecondaryReloadTime => "secondary.reload_time",
             TtxStat::SecondaryDispersion => "secondary.dispersion",
+            TtxStat::SecondaryDispersionVertical => "secondary.dispersion_vertical",
             TtxStat::SecondaryAmmoSwitchTime => "secondary.ammo_switch_time",
             TtxStat::SecondaryGunCaliber => "secondary.gun.caliber",
             TtxStat::SecondaryGunNumBarrels => "secondary.gun.num_barrels",
@@ -325,6 +331,8 @@ impl TtxStat {
             // No confident catalog match: the section header (IDS_SHIP_PARAM_ARMOR
             // = "Armor") names the whole armor block, not min/max thickness.
             TtxStat::ArmorMin | TtxStat::ArmorMax => return None,
+            // No port label: the client shows only horizontal "Maximum Dispersion".
+            TtxStat::ArtilleryDispersionVertical => return None,
             // Barrels-per-mount has no distinct port label (only mount/tube counts).
             TtxStat::GunNumBarrels => return None,
             // No shell-specific underwater label (only the torpedo one exists).
@@ -345,6 +353,7 @@ impl TtxStat {
             // reusing a main-battery IDS_SHIP_PARAM_ARTILLERY_* label.
             TtxStat::SecondaryReloadTime
             | TtxStat::SecondaryDispersion
+            | TtxStat::SecondaryDispersionVertical
             | TtxStat::SecondaryAmmoSwitchTime
             | TtxStat::SecondaryGunCaliber
             | TtxStat::SecondaryGunNumBarrels
@@ -455,6 +464,7 @@ mod tests {
             TtxStat::ArmorMin,
             TtxStat::ArmorMax,
             TtxStat::GunNumBarrels,
+            TtxStat::ArtilleryDispersionVertical,
             TtxStat::ShellDisabledUnderwater,
             TtxStat::TorpedoIsDamageIncreasing,
             TtxStat::AirDetectionOnFire,
@@ -462,6 +472,7 @@ mod tests {
             // Secondaries: only ATBA range and gun-count have distinct keys.
             TtxStat::SecondaryReloadTime,
             TtxStat::SecondaryDispersion,
+            TtxStat::SecondaryDispersionVertical,
             TtxStat::SecondaryAmmoSwitchTime,
             TtxStat::SecondaryGunCaliber,
             TtxStat::SecondaryGunNumBarrels,

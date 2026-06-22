@@ -162,20 +162,6 @@ pub fn dispersion_ellipse(
     DispersionEllipse { horizontal, vertical: horizontal * coeff }
 }
 
-/// Main-battery horizontal dispersion in display meters. Thin wrapper over
-/// [`dispersion_horizontal`] for callers still on the scalar API.
-pub fn dispersion(
-    min_radius: f32,
-    ideal_radius: f32,
-    ideal_distance: f32,
-    max_dist_km: f32,
-    ideal_radius_coef: f32,
-) -> f32 {
-    dispersion_horizontal(min_radius, ideal_radius, ideal_distance, Km::from(max_dist_km), ideal_radius_coef)
-        .to_meters()
-        .value()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,7 +206,7 @@ mod tests {
     fn north_carolina_dispersion() {
         // PASB012 gun 2.0/12.0/1000.0, A_Artillery.maxDist=21143 (21.143 km), stock c=1.0.
         // Port "Maximum Dispersion" 271 m.
-        let d = dispersion(2.0, 12.0, 1000.0, 21143.0 / 1000.0, 1.0);
+        let d = dispersion_horizontal(2.0, 12.0, 1000.0, Km::from(21143.0 / 1000.0), 1.0).to_meters().value();
         assert!((d - 271.0).abs() < 1.0, "got {d}");
     }
 
@@ -228,7 +214,7 @@ mod tests {
     fn yamato_dispersion() {
         // PJSB018 gun 2.8/10.0/1000.0, A_Artillery.maxDist=26630 (26.63 km), stock c=1.0.
         // Port "Maximum Dispersion" 273 m; formula yields ~275.7 (published rounded).
-        let d = dispersion(2.8, 10.0, 1000.0, 26630.0 / 1000.0, 1.0);
+        let d = dispersion_horizontal(2.8, 10.0, 1000.0, Km::from(26630.0 / 1000.0), 1.0).to_meters().value();
         assert!((d - 273.0).abs() < 3.0, "got {d}");
     }
 
