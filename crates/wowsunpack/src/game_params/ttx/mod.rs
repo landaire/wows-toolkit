@@ -18,11 +18,17 @@ pub mod factories;
 pub mod labels;
 pub mod model;
 pub mod modifiers;
+pub mod module_options;
 pub mod orchestration;
 pub mod render;
 pub mod selection;
 pub mod weapon_tables;
 
+pub use module_options::ModuleOption;
+pub use module_options::ModuleOptions;
+pub use module_options::ModuleSlot;
+pub use module_options::SlotOptions;
+pub use module_options::module_options;
 pub use orchestration::ship_stats;
 pub use orchestration::ship_stats_stock;
 pub use render::StatDelta;
