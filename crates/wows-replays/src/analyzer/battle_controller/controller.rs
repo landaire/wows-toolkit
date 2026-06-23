@@ -9,7 +9,7 @@ use tracing::warn;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 pub use wowsunpack::data::ship_config::ShipConfig;
-use wowsunpack::data::ship_config::parse_ship_config;
+use wowsunpack::data::ship_config::parse_ship_config_value;
 use wowsunpack::game_params::types::CAPTAIN_SKILL_REWORK_VERSION;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::Param;
@@ -1172,10 +1172,11 @@ impl UpdateFromReplayArgs for VehicleProps {
 
         // TODO: sounds
 
-        // Older versions encode the ship config differently (or not as a blob);
-        // skip it rather than panicking when it isn't a blob or fails to parse.
-        if let Some(blob) = args.get(SHIP_CONFIG_KEY).and_then(|v| v.blob_ref())
-            && let Ok(ship_config) = parse_ship_config(blob.as_ref(), &version)
+        // Modern builds encode the ship config as a top-level blob; <=0.11.x wrap it
+        // in a FIXED_DICT { shipId, cd }. `parse_ship_config_value` handles both.
+        // Skip rather than panic if absent or unparseable.
+        if let Some(value) = args.get(SHIP_CONFIG_KEY)
+            && let Some(ship_config) = parse_ship_config_value(value, &version)
         {
             self.ship_config = ship_config;
         }

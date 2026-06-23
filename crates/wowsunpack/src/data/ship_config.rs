@@ -10,6 +10,7 @@ use winnow::combinator::repeat;
 use super::Version;
 use super::parser_utils::WResult;
 use crate::game_types::GameParamId;
+use crate::rpc::typedefs::ArgValue;
 
 /// A player's ship loadout as encoded in replay data.
 #[derive(Debug, Default, Clone)]
@@ -30,6 +31,13 @@ pub struct ShipConfig {
 }
 
 impl ShipConfig {
+    /// A bare config carrying only the ship's GameParam id (stock loadout). Used for
+    /// the <=0.11.x `SHIP_CONFIG` FIXED_DICT shape, whose `cd` blob uses an older
+    /// layout we don't decode; the ship id comes from the dict's `shipId` field.
+    pub fn stock(ship_params_id: GameParamId) -> Self {
+        Self { ship_params_id, ..Default::default() }
+    }
+
     pub fn ship_params_id(&self) -> GameParamId {
         self.ship_params_id
     }
@@ -76,6 +84,24 @@ impl ShipConfig {
 
 /// Parse a ship configuration from a binary blob.
 ///
+/// Resolve a `shipConfig` create-property value to a [`ShipConfig`], handling both
+/// encodings: modern builds send a top-level BLOB; <=0.11.x clients send a
+/// FIXED_DICT `{ shipId, cd: BLOB }`. The old `cd` blob uses a pre-modern layout
+/// (its header is not the modern version/ship_params_id/element_count triple, so
+/// feeding it to [`parse_ship_config`] misreads a hull-unit id as the ship id), so
+/// for the dict shape we take the ship id from the dict's own `shipId` field and
+/// use a stock loadout — enough to resolve the ship and its dispersion curve.
+pub fn parse_ship_config_value(value: &ArgValue, version: &Version) -> Option<ShipConfig> {
+    match value {
+        ArgValue::Blob(blob) => parse_ship_config(blob, version).ok(),
+        ArgValue::FixedDict(m) | ArgValue::NullableFixedDict(Some(m)) => {
+            let ship_id = m.get("shipId").and_then(|v| v.as_u32())?;
+            Some(ShipConfig::stock(GameParamId::from(ship_id)))
+        }
+        _ => None,
+    }
+}
+
 /// The blob format is version-dependent: versions >= 13.2 include an extra u32 field
 /// after the unit slots.
 pub fn parse_ship_config(blob: &[u8], version: &Version) -> WResult<ShipConfig> {
