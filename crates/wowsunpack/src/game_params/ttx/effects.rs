@@ -13,6 +13,7 @@ use crate::game_params::ttx::selection::ShipUpgradeSelection;
 use crate::game_params::types::CrewSkill;
 use crate::game_params::types::CrewSkillModifier;
 use crate::game_params::types::GameParamProvider;
+use crate::game_params::types::InnateSkillBreakpoint;
 use crate::game_params::types::Interpolator;
 use crate::game_params::types::KnownCrewSkill;
 use crate::game_params::types::Param;
@@ -83,6 +84,8 @@ pub enum EffectId {
     Skill(String),
     Modernizations,
     Consumable(String),
+    /// A ship innate skill, keyed by its `skill_type` (e.g. "adrenalineRush").
+    Innate(String),
 }
 
 /// How an effect activates and what coefficient it carries.
@@ -108,6 +111,10 @@ pub enum EffectKind {
     /// heat_interpolator.eval(seconds)` (quantized to 1% as the client does), then each
     /// modifier is lerped from its identity to its configured value by `ratio`.
     Heat { heat_interpolator: Interpolator },
+    /// Ship innate adrenaline (HP-breakpoint dispersion + reload). At `Health(hf)`, clamp to
+    /// the highest/lowest breakpoint or lerp between the two bracketing breakpoints. Held
+    /// descending by health fraction.
+    InnateAdrenaline { breakpoints: Vec<InnateSkillBreakpoint> },
 }
 
 /// One toggleable effect contributed by the loadout. Raw modifiers are private; resolution
@@ -127,7 +134,7 @@ impl Effect {
         &self.kind
     }
     /// The activation used when `EffectsState` leaves this effect unset:
-    /// `AlwaysOn -> On`, `Binary`/`Consumable -> Off`, `HealthScaledReload -> Health(FULL)`,
+    /// `AlwaysOn -> On`, `Binary`/`Consumable -> Off`, `HealthScaledReload`/`InnateAdrenaline -> Health(FULL)`,
     /// `StackingPerCount`/`StackingRepeated -> Stacks(0)`, `Heat -> Heat(0.0)`.
     pub fn default_activation(&self) -> EffectActivation {
         match self.kind {
@@ -136,6 +143,7 @@ impl Effect {
             EffectKind::HealthScaledReload => EffectActivation::Health(HealthFraction::FULL),
             EffectKind::StackingPerCount { .. } | EffectKind::StackingRepeated => EffectActivation::Stacks(0),
             EffectKind::Heat { .. } => EffectActivation::Heat(0.0),
+            EffectKind::InnateAdrenaline { .. } => EffectActivation::Health(HealthFraction::FULL),
         }
     }
 
@@ -301,6 +309,25 @@ impl Loadout<'_> {
             }
         }
 
+        if let Some(vehicle) = self.ship.vehicle() {
+            for innate in vehicle.innate_skills() {
+                if innate.breakpoints().is_empty() {
+                    continue;
+                }
+                let mut breakpoints = innate.breakpoints().to_vec();
+                breakpoints.sort_by(|a, b| {
+                    b.health_fraction()
+                        .partial_cmp(&a.health_fraction())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                effects.push(Effect {
+                    id: EffectId::Innate(innate.skill_type().to_owned()),
+                    kind: EffectKind::InnateAdrenaline { breakpoints },
+                    modifiers: Vec::new(),
+                });
+            }
+        }
+
         Effects(effects)
     }
 }
@@ -432,6 +459,8 @@ mod tests {
     use crate::game_params::types::CrewSkillName;
     use crate::game_params::types::CrewSkillTiers;
     use crate::game_params::types::CrewSkillType;
+    use crate::game_params::types::InnateSkill;
+    use crate::game_params::types::InnateSkillBreakpoint;
     use crate::game_params::types::Interpolator;
     use crate::game_params::types::ParamData;
     use crate::game_params::types::SkillPointCost;
@@ -1216,6 +1245,78 @@ mod tests {
         // 6.667s -> continuous ratio 0.33335, quantized floor to 0.33 -> lerp(1,0.5,0.33)=0.835,
         // distinct from the continuous 0.833325.
         assert!((coef(&at(6.667)) - 0.835).abs() < 1e-4, "1% quantization applied");
+    }
+
+    fn innate_breakpoint(hf: f32, ideal: f32, shot_delay: f32) -> InnateSkillBreakpoint {
+        InnateSkillBreakpoint::new(
+            hf,
+            vec![uniform_modifier("GMIdealRadius", ideal), uniform_modifier("GMShotDelay", shot_delay)],
+        )
+    }
+
+    fn oregon_breakpoints() -> Vec<InnateSkillBreakpoint> {
+        vec![
+            innate_breakpoint(1.0, 1.0, 1.0),
+            innate_breakpoint(0.5, 0.83, 0.9),
+            innate_breakpoint(0.25, 0.77, 0.85),
+        ]
+    }
+
+    fn ship_with_innate() -> Param {
+        let skill = InnateSkill::new("adrenalineRush".to_owned(), oregon_breakpoints());
+        let vehicle = Vehicle::builder()
+            .level(10)
+            .group("g".to_string())
+            .maybe_abilities(None)
+            .upgrades(Vec::new())
+            .maybe_config_data(None)
+            .maybe_model_path(None)
+            .maybe_armor(None)
+            .maybe_hit_locations(None)
+            .permoflages(Vec::new())
+            .camera_trajectories(Vec::new())
+            .maybe_ttx_components(None)
+            .innate_skills(vec![skill])
+            .build();
+        Param::builder()
+            .id(GameParamId::from(20u32))
+            .index("OREG".to_string())
+            .name("TestOregon".to_string())
+            .nation("USA".to_string())
+            .species(Recognized::Known(Species::Battleship))
+            .data(ParamData::Vehicle(vehicle))
+            .build()
+    }
+
+    #[test]
+    fn default_activation_innate_adrenaline() {
+        let effect = Effect::for_test(
+            EffectId::Innate("adrenalineRush".into()),
+            EffectKind::InnateAdrenaline { breakpoints: oregon_breakpoints() },
+            Vec::new(),
+        );
+        assert_eq!(effect.default_activation(), EffectActivation::Health(HealthFraction::FULL));
+    }
+
+    #[test]
+    fn innate_skill_emits_innate_adrenaline() {
+        let ship = ship_with_innate();
+        let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
+        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].id(), &EffectId::Innate("adrenalineRush".to_string()));
+        assert_eq!(
+            effects[0].kind(),
+            &EffectKind::InnateAdrenaline { breakpoints: oregon_breakpoints() }
+        );
+    }
+
+    #[test]
+    fn ship_without_innate_emits_none() {
+        let ship = ship_no_abilities();
+        let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
+        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        assert!(effects.is_empty());
     }
 
     #[test]
