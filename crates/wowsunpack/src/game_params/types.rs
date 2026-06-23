@@ -1849,6 +1849,40 @@ impl Interpolator {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    /// Clamped piecewise-linear evaluation (client `MultiLerp`, extrapolate=false): `x`
+    /// at or below the first point's x returns the first y, at or above the last returns
+    /// the last y, otherwise linear between the bracketing points. Empty -> 0.0.
+    pub fn eval(&self, x: f32) -> f32 {
+        let pts = &self.0;
+        let Some(&(first_x, first_y)) = pts.first() else {
+            return 0.0;
+        };
+        if x <= first_x {
+            return first_y;
+        }
+        let &(last_x, last_y) = pts.last().unwrap();
+        if x >= last_x {
+            return last_y;
+        }
+        for w in pts.windows(2) {
+            let (x0, y0) = w[0];
+            let (x1, y1) = w[1];
+            if x >= x0 && x <= x1 {
+                if x1 == x0 {
+                    return y0;
+                }
+                let t = (x - x0) / (x1 - x0);
+                return y0 + (y1 - y0) * t;
+            }
+        }
+        last_y
+    }
+
+    /// The last control point's x (the saturation input); 0.0 if empty.
+    pub fn max_x(&self) -> f32 {
+        self.0.last().map(|&(x, _)| x).unwrap_or(0.0)
+    }
 }
 
 #[derive(Clone, Builder, Debug)]
@@ -3366,5 +3400,22 @@ mod interpolator_tests {
         let interp = Interpolator::from_points(vec![(1.0, 0.5)]);
         assert!(!interp.is_empty());
         assert_eq!(interp.points().len(), 1);
+    }
+
+    #[test]
+    fn interpolator_eval_clamped_piecewise_linear() {
+        let lerp = Interpolator::from_points(vec![(0.0, 0.0), (10.0, 0.5), (45.0, 1.0)]);
+        assert_eq!(lerp.eval(-5.0), 0.0, "below first x clamps to first y");
+        assert_eq!(lerp.eval(0.0), 0.0, "first point");
+        assert!((lerp.eval(5.0) - 0.25).abs() < 1e-6, "midpoint of [0,0]-[10,0.5]");
+        assert!((lerp.eval(10.0) - 0.5).abs() < 1e-6, "second point");
+        assert!((lerp.eval(27.5) - 0.75).abs() < 1e-6, "midpoint of [10,0.5]-[45,1.0]");
+        assert_eq!(lerp.eval(45.0), 1.0, "last point");
+        assert_eq!(lerp.eval(100.0), 1.0, "above last x clamps to last y");
+        assert_eq!(lerp.max_x(), 45.0);
+
+        let empty = Interpolator::from_points(Vec::new());
+        assert_eq!(empty.eval(5.0), 0.0, "empty -> 0.0");
+        assert_eq!(empty.max_x(), 0.0, "empty -> 0.0");
     }
 }
