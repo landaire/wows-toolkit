@@ -9,6 +9,18 @@ use crate::data::Version;
 const TRIGGER_ACTIVATION_ON_BURN_FLOOD: &str = "activationOnBurnFlood";
 const TRIGGER_POTENTIAL_DAMAGE_RATIO: &str = "potentialDamageRatio";
 
+/// The deob clamps the stacking count to `PACKED_STATE_LIMITS` (1023).
+const STACK_LIMIT: u32 = 1023;
+
+/// Stack count carried by an activation; any non-`Stacks` activation (including the
+/// `Stacks(0)` default) yields 0.
+fn stacks(activation: EffectActivation) -> u32 {
+    match activation {
+        EffectActivation::Stacks(n) => n,
+        _ => 0,
+    }
+}
+
 use crate::game_params::ttx::model::ShipStats;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::modifiers::ModifierError;
@@ -325,6 +337,20 @@ impl Effects {
                 (EffectKind::Consumable { artillery_dist_coeff }, EffectActivation::On) => {
                     contributed.extend(effect.modifiers.iter().cloned());
                     dist *= artillery_dist_coeff;
+                }
+                (EffectKind::StackingPerCount { blocks }, activation) => {
+                    let n = stacks(activation);
+                    for (count, block) in blocks {
+                        if *count <= n {
+                            contributed.extend(block.iter().cloned());
+                        }
+                    }
+                }
+                (EffectKind::StackingRepeated, activation) => {
+                    let n = stacks(activation).min(STACK_LIMIT);
+                    for _ in 0..n {
+                        contributed.extend(effect.modifiers.iter().cloned());
+                    }
                 }
                 _ => {}
             }
@@ -980,6 +1006,99 @@ mod tests {
         let state_on = EffectsState::default().set(EffectId::Consumable("PCY012_Scout".into()), EffectActivation::On);
         let result_on = effects.resolve(&state_on, Species::Cruiser, test_version()).unwrap();
         assert!((result_on.artillery_dist_coeff() - 1.2).abs() < 1e-6, "on -> dist 1.2");
+    }
+
+    #[test]
+    fn resolve_stacking_per_count_accumulates() {
+        let blocks = vec![
+            (1u32, vec![uniform_modifier("GMShotDelay", 0.9)]),
+            (2u32, vec![uniform_modifier("GMShotDelay", 0.95)]),
+            (3u32, vec![uniform_modifier("GMShotDelay", 0.95)]),
+            (4u32, vec![uniform_modifier("GMShotDelay", 0.95)]),
+            (5u32, vec![uniform_modifier("GMShotDelay", 0.95)]),
+            (6u32, vec![uniform_modifier("GMShotDelay", 0.95)]),
+        ];
+        let effect = Effect::for_test(
+            EffectId::Skill("Furious".into()),
+            EffectKind::StackingPerCount { blocks },
+            Vec::new(),
+        );
+        let effects = Effects::for_test(vec![effect]);
+        let id = EffectId::Skill("Furious".into());
+
+        let r0 = effects.resolve(&EffectsState::default(), Species::Cruiser, test_version()).unwrap();
+        assert!((r0.bundle().coef("GMShotDelay") - 1.0).abs() < 1e-6, "Stacks(0) -> identity");
+
+        let r1 = effects
+            .resolve(
+                &EffectsState::default().set(id.clone(), EffectActivation::Stacks(1)),
+                Species::Cruiser,
+                test_version(),
+            )
+            .unwrap();
+        assert!((r1.bundle().coef("GMShotDelay") - 0.9).abs() < 1e-6, "Stacks(1) -> 0.9");
+
+        let r2 = effects
+            .resolve(
+                &EffectsState::default().set(id.clone(), EffectActivation::Stacks(2)),
+                Species::Cruiser,
+                test_version(),
+            )
+            .unwrap();
+        assert!((r2.bundle().coef("GMShotDelay") - 0.9 * 0.95).abs() < 1e-6, "Stacks(2) -> 0.9*0.95");
+
+        let r10 = effects
+            .resolve(
+                &EffectsState::default().set(id, EffectActivation::Stacks(10)),
+                Species::Cruiser,
+                test_version(),
+            )
+            .unwrap();
+        let expected = 0.9 * 0.95f32.powi(5);
+        assert!((r10.bundle().coef("GMShotDelay") - expected).abs() < 1e-5, "Stacks(10) capped at 6");
+    }
+
+    #[test]
+    fn resolve_stacking_repeated_multiplies_and_clamps() {
+        let effect = Effect::for_test(
+            EffectId::Skill("DefenceUw".into()),
+            EffectKind::StackingRepeated,
+            vec![uniform_modifier("regenCrewReloadCoeff", 0.992)],
+        );
+        let effects = Effects::for_test(vec![effect]);
+        let id = EffectId::Skill("DefenceUw".into());
+
+        let r0 = effects.resolve(&EffectsState::default(), Species::Cruiser, test_version()).unwrap();
+        assert!((r0.bundle().coef("regenCrewReloadCoeff") - 1.0).abs() < 1e-6, "Stacks(0) -> identity");
+
+        let r3 = effects
+            .resolve(
+                &EffectsState::default().set(id.clone(), EffectActivation::Stacks(3)),
+                Species::Cruiser,
+                test_version(),
+            )
+            .unwrap();
+        assert!((r3.bundle().coef("regenCrewReloadCoeff") - 0.992f32.powi(3)).abs() < 1e-6, "Stacks(3) -> 0.992^3");
+
+        let r_big = effects
+            .resolve(
+                &EffectsState::default().set(id.clone(), EffectActivation::Stacks(2000)),
+                Species::Cruiser,
+                test_version(),
+            )
+            .unwrap();
+        let r_cap = effects
+            .resolve(
+                &EffectsState::default().set(id, EffectActivation::Stacks(1023)),
+                Species::Cruiser,
+                test_version(),
+            )
+            .unwrap();
+        assert_eq!(
+            r_big.bundle().coef("regenCrewReloadCoeff"),
+            r_cap.bundle().coef("regenCrewReloadCoeff"),
+            "Stacks past the cap equals Stacks(1023)"
+        );
     }
 
     #[test]
