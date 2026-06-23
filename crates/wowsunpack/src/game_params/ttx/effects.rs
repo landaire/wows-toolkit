@@ -128,7 +128,7 @@ impl Effect {
     }
     /// The activation used when `EffectsState` leaves this effect unset:
     /// `AlwaysOn -> On`, `Binary`/`Consumable -> Off`, `HealthScaledReload -> Health(FULL)`,
-    /// `StackingPerCount`/`StackingRepeated -> Stacks(0)`.
+    /// `StackingPerCount`/`StackingRepeated -> Stacks(0)`, `Heat -> Heat(0.0)`.
     pub fn default_activation(&self) -> EffectActivation {
         match self.kind {
             EffectKind::AlwaysOn => EffectActivation::On,
