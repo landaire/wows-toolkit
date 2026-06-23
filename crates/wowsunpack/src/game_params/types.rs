@@ -1372,6 +1372,10 @@ pub struct Vehicle {
     /// Query-time factories apply formulas + modifiers without the raw pickle.
     #[cfg_attr(feature = "serde", serde(default))]
     ttx_components: Option<super::ttx::components::ShipTtxComponents>,
+    /// HP-breakpoint innate skills from the ship's `innateSkills` hull component.
+    /// Empty for ships that have no innate skills.
+    #[cfg_attr(feature = "serde", serde(default))]
+    innate_skills: Vec<InnateSkill>,
 }
 
 impl Vehicle {
@@ -1418,6 +1422,11 @@ impl Vehicle {
     /// Typed TTX hull/engine base stats, if any component sub-objects resolved.
     pub fn ttx_components(&self) -> Option<&super::ttx::components::ShipTtxComponents> {
         self.ttx_components.as_ref()
+    }
+
+    /// HP-breakpoint innate skills from the ship's hull component.
+    pub fn innate_skills(&self) -> &[InnateSkill] {
+        &self.innate_skills
     }
 
     /// Look up a specific hull upgrade config by name.
@@ -1774,7 +1783,7 @@ impl ConsumableReloadTimeModifier {
     }
 }
 
-#[derive(Clone, Builder, Debug)]
+#[derive(Clone, Builder, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct CrewSkillModifier {
@@ -1888,6 +1897,53 @@ impl CrewSkillLogicTrigger {
 
     pub fn cooling_interpolator(&self) -> &Interpolator {
         &self.cooling_interpolator
+    }
+}
+
+/// One HP-fraction breakpoint from a ship's innate adrenaline component.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct InnateSkillBreakpoint {
+    /// HP fraction at which this breakpoint applies (1.0 = full health).
+    health_fraction: f32,
+    modifiers: Vec<CrewSkillModifier>,
+}
+
+impl InnateSkillBreakpoint {
+    pub(super) fn new(health_fraction: f32, modifiers: Vec<CrewSkillModifier>) -> Self {
+        Self { health_fraction, modifiers }
+    }
+
+    pub fn health_fraction(&self) -> f32 {
+        self.health_fraction
+    }
+
+    pub fn modifiers(&self) -> &[CrewSkillModifier] {
+        &self.modifiers
+    }
+}
+
+/// A ship innate skill (HP-breakpoint adrenaline) from the hull's `innateSkills` component.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct InnateSkill {
+    skill_type: String,
+    breakpoints: Vec<InnateSkillBreakpoint>,
+}
+
+impl InnateSkill {
+    pub(super) fn new(skill_type: String, breakpoints: Vec<InnateSkillBreakpoint>) -> Self {
+        Self { skill_type, breakpoints }
+    }
+
+    pub fn skill_type(&self) -> &str {
+        &self.skill_type
+    }
+
+    pub fn breakpoints(&self) -> &[InnateSkillBreakpoint] {
+        &self.breakpoints
     }
 }
 
@@ -3005,6 +3061,7 @@ mod tests {
             permoflages: Vec::new(),
             camera_trajectories: Vec::new(),
             ttx_components: None,
+            innate_skills: Vec::new(),
         };
         let ship = Param {
             id: ship_id,

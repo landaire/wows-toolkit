@@ -390,6 +390,7 @@ mod tests {
             .permoflages(Vec::new())
             .camera_trajectories(Vec::new())
             .ttx_components(components)
+            .innate_skills(Vec::new())
             .build();
         Param::builder()
             .id(GameParamId::from(900u32))
@@ -647,6 +648,7 @@ mod tests {
             .permoflages(Vec::new())
             .camera_trajectories(Vec::new())
             .ttx_components(components)
+            .innate_skills(Vec::new())
             .build();
         let ship = Param::builder()
             .id(GameParamId::from(901u32))

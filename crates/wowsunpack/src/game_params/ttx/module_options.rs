@@ -189,6 +189,7 @@ mod tests {
             .permoflages(Vec::new())
             .camera_trajectories(Vec::new())
             .ttx_components(components)
+            .innate_skills(Vec::new())
             .build();
         Param::builder()
             .id(GameParamId::from(900u32))

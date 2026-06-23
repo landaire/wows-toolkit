@@ -38,6 +38,7 @@ pub const COMP_RADARS: &str = "radars";
 pub const COMP_TORPEDOES: &str = "torpedoes";
 pub const COMP_ENGINE: &str = "engine";
 pub const COMP_FIRE_CONTROL: &str = "fireControl";
+pub const COMP_INNATE_SKILLS: &str = "innateSkills";
 
 /// Typed representation of component type keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

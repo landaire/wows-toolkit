@@ -320,9 +320,8 @@ fn build_crew_skills(skills: &pickled::Dict) -> Vec<CrewSkill> {
                             .filter_map(|(k, v)| {
                                 let count: u32 = k.string_ref()?.inner().parse().ok()?;
                                 let block_name = v.string_ref()?.inner();
-                                let block = logic_trigger_data
-                                    .get(&pk(block_name))
-                                    .and_then(|bv| bv.dict_or_object_dict())?;
+                                let block =
+                                    logic_trigger_data.get(&pk(block_name)).and_then(|bv| bv.dict_or_object_dict())?;
                                 Some((count, build_skill_modifiers(&block.inner())))
                             })
                             .collect();
@@ -335,12 +334,7 @@ fn build_crew_skills(skills: &pickled::Dict) -> Vec<CrewSkill> {
                     .get(&pk("heatInterpolator"))
                     .and_then(|v| v.list_ref())
                     .map(|list| {
-                        let points = list
-                            .inner()
-                            .iter()
-                            .filter_map(|pair| read_pair_both(pair))
-                            .map(|[x, y]| (x, y))
-                            .collect();
+                        let points = list.inner().iter().filter_map(read_pair_both).map(|[x, y]| (x, y)).collect();
                         Interpolator::from_points(points)
                     })
                     .unwrap_or_default();
@@ -349,12 +343,7 @@ fn build_crew_skills(skills: &pickled::Dict) -> Vec<CrewSkill> {
                     .get(&pk("coolingInterpolator"))
                     .and_then(|v| v.list_ref())
                     .map(|list| {
-                        let points = list
-                            .inner()
-                            .iter()
-                            .filter_map(|pair| read_pair_both(pair))
-                            .map(|[x, y]| (x, y))
-                            .collect();
+                        let points = list.inner().iter().filter_map(read_pair_both).map(|[x, y]| (x, y)).collect();
                         Interpolator::from_points(points)
                     })
                     .unwrap_or_default();
@@ -980,6 +969,12 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
     // engine stats from the separate _Engine upgrade entries.
     let mut ttx_components = crate::game_params::ttx::components::ShipTtxComponents::default();
 
+    // Innate skills are hull-level and identical across hull upgrades in practice.
+    // Collected once, from the first _Hull upgrade that carries an innateSkills
+    // component; subsequent hulls are skipped.
+    let mut innate_skills: Vec<InnateSkill> = Vec::new();
+    let mut innate_skills_set = false;
+
     for (upgrade_name_val, upgrade_value) in upgrade_data.inner().iter() {
         let Some(upgrade_name) = upgrade_name_val.string_ref().map(|s| s.inner().clone()) else {
             continue;
@@ -1221,6 +1216,48 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
             continue;
         };
         let components = components.inner();
+
+        // Innate skills are parsed from the stock hull only; all hulls carry the same
+        // innateSkills component name in practice, so we stop after the first find.
+        if !innate_skills_set && let Some(innate_names) = components.get(&pk(keys::COMP_INNATE_SKILLS)) {
+            for innate_name in read_all_strings(innate_names) {
+                let Some(innate_comp) = ship_data.get(&pk(&innate_name)).and_then(|v| v.dict_or_object_dict()) else {
+                    continue;
+                };
+                let innate_comp = innate_comp.inner();
+                for (_, skill_val) in innate_comp.iter() {
+                    let Some(skill_dict) = skill_val.dict_or_object_dict() else {
+                        continue;
+                    };
+                    let skill_dict = skill_dict.inner();
+                    let Some(skill_type) = read_string(&skill_dict, "skillType") else {
+                        continue;
+                    };
+                    let breakpoints = skill_dict
+                        .get(&pk("healthModifiers"))
+                        .and_then(|v| v.list_ref())
+                        .map(|list| {
+                            list.inner()
+                                .iter()
+                                .filter_map(|pair| {
+                                    let pair = pair
+                                        .list_ref()
+                                        .map(|l| l.inner().clone())
+                                        .or_else(|| pair.tuple_ref().map(|t| t.inner().to_vec()))?;
+                                    let health_fraction = pair.first().and_then(value_f32)?;
+                                    let bp_name = pair.get(1)?.string_ref()?.inner().clone();
+                                    let block = skill_dict.get(&pk(&bp_name)).and_then(|v| v.dict_or_object_dict())?;
+                                    let modifiers = build_skill_modifiers(&block.inner());
+                                    Some(InnateSkillBreakpoint::new(health_fraction, modifiers))
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    innate_skills.push(InnateSkill::new(skill_type, breakpoints));
+                }
+            }
+            innate_skills_set = true;
+        }
 
         let mut config = crate::game_params::types::HullUpgradeConfig::default();
 
@@ -1565,6 +1602,7 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
         .permoflages(permoflages)
         .camera_trajectories(camera_trajectories)
         .maybe_ttx_components((!ttx_components.is_empty()).then_some(ttx_components))
+        .innate_skills(innate_skills)
         .build()
 }
 
@@ -2664,31 +2702,27 @@ mod crew_skill_logic_trigger_tests {
             (pk("canBeLearned"), Value::Bool(true)),
             (pk("isEpic"), Value::Bool(false)),
             (pk("uiTreatAsTrigger"), Value::Bool(true)),
-            (pk("tier"), dict(vec![
-                (pk("AirCarrier"), iv(1)),
-                (pk("Auxiliary"), iv(1)),
-                (pk("Battleship"), iv(1)),
-                (pk("Cruiser"), iv(1)),
-                (pk("Destroyer"), iv(1)),
-                (pk("Submarine"), iv(1)),
-            ])),
+            (
+                pk("tier"),
+                dict(vec![
+                    (pk("AirCarrier"), iv(1)),
+                    (pk("Auxiliary"), iv(1)),
+                    (pk("Battleship"), iv(1)),
+                    (pk("Cruiser"), iv(1)),
+                    (pk("Destroyer"), iv(1)),
+                    (pk("Submarine"), iv(1)),
+                ]),
+            ),
         ];
-        let skill_dict: pickled::Dict = vec![(
-            HashableValue::String("TestSkill".to_string().into()),
-            dict(skill_entries),
-        )]
-        .into_iter()
-        .collect();
+        let skill_dict: pickled::Dict =
+            vec![(HashableValue::String("TestSkill".to_string().into()), dict(skill_entries))].into_iter().collect();
         build_crew_skills(&skill_dict)
     }
 
     #[test]
     fn count_to_modifier_parsed_and_sorted() {
         let mut entries = base_trigger_entries("activationOnBurnFlood");
-        entries.push((
-            pk("countToModifier"),
-            dict(vec![(pk("2"), sv("BurnFlood_2")), (pk("1"), sv("BurnFlood_1"))]),
-        ));
+        entries.push((pk("countToModifier"), dict(vec![(pk("2"), sv("BurnFlood_2")), (pk("1"), sv("BurnFlood_1"))])));
         entries.push((pk("BurnFlood_1"), dict(vec![(pk("GMShotDelay"), fv(0.9))])));
         entries.push((pk("BurnFlood_2"), dict(vec![(pk("GMShotDelay"), fv(0.95))])));
 
@@ -2720,16 +2754,10 @@ mod crew_skill_logic_trigger_tests {
         let mut entries = base_trigger_entries("atbaHeat");
         entries.push((
             pk("heatInterpolator"),
-            list(vec![
-                list(vec![fv(0.0), fv(0.0)]),
-                list(vec![fv(10.0), fv(0.5)]),
-                list(vec![fv(45.0), fv(1.0)]),
-            ]),
+            list(vec![list(vec![fv(0.0), fv(0.0)]), list(vec![fv(10.0), fv(0.5)]), list(vec![fv(45.0), fv(1.0)])]),
         ));
-        entries.push((
-            pk("coolingInterpolator"),
-            list(vec![list(vec![fv(0.0), fv(1.0)]), list(vec![fv(10.0), fv(0.0)])]),
-        ));
+        entries
+            .push((pk("coolingInterpolator"), list(vec![list(vec![fv(0.0), fv(1.0)]), list(vec![fv(10.0), fv(0.0)])])));
 
         let skills = build_skill_with_trigger(entries);
         let trigger = skills[0].logic_trigger().expect("trigger present");
@@ -2749,5 +2777,96 @@ mod crew_skill_logic_trigger_tests {
         assert_eq!(trigger.damage_value(), None);
         assert!(trigger.heat_interpolator().is_empty());
         assert!(trigger.cooling_interpolator().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod innate_skill_tests {
+    use super::*;
+    use pickled::value::Shared;
+
+    fn fv(f: f64) -> Value {
+        Value::F64(f)
+    }
+
+    fn sv(s: &str) -> Value {
+        Value::String(s.to_string().into())
+    }
+
+    fn list(items: Vec<Value>) -> Value {
+        Value::List(Shared::new(items))
+    }
+
+    fn dict(entries: Vec<(HashableValue, Value)>) -> Value {
+        Value::Dict(Shared::new(entries.into_iter().collect()))
+    }
+
+    fn build_minimal_ship(extra_entries: Vec<(HashableValue, Value)>) -> Vehicle {
+        let hull_components = dict(vec![(pk("hull"), list(vec![sv("A_Hull")]))]);
+        let hull_upgrade =
+            dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components), (pk("prev"), sv(""))]);
+        let upgrade_info = dict(vec![(pk("PAUH001_Stock"), hull_upgrade)]);
+        let a_hull = dict(vec![(pk("health"), fv(10000.0))]);
+        let mut entries = vec![
+            (pk("level"), Value::I64(8)),
+            (pk("group"), sv("special")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+        ];
+        entries.extend(extra_entries);
+        let ship_data: pickled::Dict = entries.into_iter().collect();
+        build_ship(&ship_data)
+    }
+
+    #[test]
+    fn innate_skills_parsed_from_hull_component() {
+        let full_health_block = dict(vec![(pk("GMShotDelay"), fv(1.0))]);
+        let half_health_block = dict(vec![(pk("GMShotDelay"), fv(0.9))]);
+        let adrenaline_rush = dict(vec![
+            (pk("skillType"), sv("adrenalineRush")),
+            (
+                pk("healthModifiers"),
+                list(vec![list(vec![fv(1.0), sv("fullHealth")]), list(vec![fv(0.5), sv("halfHealth")])]),
+            ),
+            (pk("fullHealth"), full_health_block),
+            (pk("halfHealth"), half_health_block),
+        ]);
+        let a_innate = dict(vec![(pk("AdrenalineRush"), adrenaline_rush)]);
+
+        let hull_components =
+            dict(vec![(pk("hull"), list(vec![sv("A_Hull")])), (pk("innateSkills"), list(vec![sv("A_Innate")]))]);
+        let hull_upgrade =
+            dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components), (pk("prev"), sv(""))]);
+        let upgrade_info = dict(vec![(pk("PAUH001_Stock"), hull_upgrade)]);
+        let a_hull = dict(vec![(pk("health"), fv(10000.0))]);
+        let ship_data: pickled::Dict = vec![
+            (pk("level"), Value::I64(8)),
+            (pk("group"), sv("special")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+            (pk("A_Innate"), a_innate),
+        ]
+        .into_iter()
+        .collect();
+
+        let vehicle = build_ship(&ship_data);
+        let skills = vehicle.innate_skills();
+        assert_eq!(skills.len(), 1, "expected one innate skill");
+        let skill = &skills[0];
+        assert_eq!(skill.skill_type(), "adrenalineRush");
+        let bps = skill.breakpoints();
+        assert_eq!(bps.len(), 2);
+        assert!((bps[0].health_fraction() - 1.0).abs() < 1e-6);
+        assert_eq!(bps[0].modifiers().len(), 1);
+        assert_eq!(bps[0].modifiers()[0].name(), "GMShotDelay");
+        assert!((bps[0].modifiers()[0].get_for_species(&Species::Battleship) - 1.0).abs() < 1e-6);
+        assert!((bps[1].health_fraction() - 0.5).abs() < 1e-6);
+        assert!((bps[1].modifiers()[0].get_for_species(&Species::Battleship) - 0.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ship_without_innate_skills_has_empty_vec() {
+        let vehicle = build_minimal_ship(vec![]);
+        assert!(vehicle.innate_skills().is_empty());
     }
 }
