@@ -127,11 +127,30 @@ impl EffectsState {
     }
 }
 
-/// The resolved modifiers for a state: the aggregated bundle plus the consumable artillery
-/// range coefficient (applied out-of-band by the artillery factory).
+/// Per-armament reload multipliers from dynamic effects (Adrenaline Rush), evaluated at
+/// the state's health fraction. `1.0` = no change. Kept separate from the bundle because
+/// `lastChanceReloadCoefficient_*` is additive in `MODIFIER_SETTINGS` (the raw per-HP
+/// coefficient sums across sources), whereas the evaluated value is a multiplier.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReloadCoeffs {
+    pub main: f32,
+    pub secondary: f32,
+    pub torpedo: f32,
+}
+
+impl Default for ReloadCoeffs {
+    fn default() -> Self {
+        ReloadCoeffs { main: 1.0, secondary: 1.0, torpedo: 1.0 }
+    }
+}
+
+/// The resolved modifiers for a state: the aggregated static bundle, the consumable
+/// artillery range coefficient, and the dynamic per-armament reload multipliers -- all
+/// applied by the artillery/torpedo factories.
 pub struct EffectiveModifiers {
     bundle: ModifierBundle,
     artillery_dist_coeff: f32,
+    reload_coeffs: ReloadCoeffs,
 }
 
 impl EffectiveModifiers {
@@ -140,6 +159,9 @@ impl EffectiveModifiers {
     }
     pub fn artillery_dist_coeff(&self) -> f32 {
         self.artillery_dist_coeff
+    }
+    pub fn reload_coeffs(&self) -> ReloadCoeffs {
+        self.reload_coeffs
     }
 }
 
@@ -225,11 +247,54 @@ impl Effects {
     }
     pub fn resolve(
         &self,
-        _state: &EffectsState,
+        state: &EffectsState,
         species: Species,
-        _version: Version,
+        version: Version,
     ) -> Result<EffectiveModifiers, ModifierError> {
-        Ok(EffectiveModifiers { bundle: ModifierBundle::empty(species), artillery_dist_coeff: 1.0 }) // Task 3
+        const EPSILON: f32 = 1e-6;
+        let mut contributed: Vec<CrewSkillModifier> = Vec::new();
+        let mut dist: f32 = 1.0;
+        let mut reload_coeffs = ReloadCoeffs::default();
+
+        for effect in &self.0 {
+            let activation = state.get(effect.id()).unwrap_or_else(|| effect.default_activation());
+            match (&effect.kind, activation) {
+                (EffectKind::AlwaysOn, _) => {
+                    contributed.extend(effect.modifiers.iter().cloned());
+                }
+                (EffectKind::Binary, EffectActivation::On) => {
+                    contributed.extend(effect.modifiers.iter().cloned());
+                }
+                (EffectKind::HealthScaledReload, activation) => {
+                    let hf = match activation {
+                        EffectActivation::Health(hf) => hf,
+                        _ => HealthFraction::FULL,
+                    };
+                    let lost = 1.0 - hf.value();
+                    for m in &effect.modifiers {
+                        let name = m.name();
+                        if let Some(suffix) = name.strip_prefix("lastChanceReloadCoefficient_") {
+                            let c = m.get_for_species(&species);
+                            let mul = (1.0 - lost * c).max(EPSILON);
+                            match suffix {
+                                "Main" => reload_coeffs.main *= mul,
+                                "Sec" => reload_coeffs.secondary *= mul,
+                                "Torp" => reload_coeffs.torpedo *= mul,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                (EffectKind::Consumable { artillery_dist_coeff }, EffectActivation::On) => {
+                    contributed.extend(effect.modifiers.iter().cloned());
+                    dist *= artillery_dist_coeff;
+                }
+                _ => {}
+            }
+        }
+
+        let bundle = ModifierBundle::from_modifiers(&contributed, species, version)?;
+        Ok(EffectiveModifiers { bundle, artillery_dist_coeff: dist, reload_coeffs })
     }
 }
 
@@ -629,5 +694,149 @@ mod tests {
         let effects: Vec<_> =
             loadout.effects(&CrashCrewProvider(ability_param_rc)).iter().cloned().collect();
         assert!(effects.is_empty(), "crashCrew with dist_coeff=1.0 and no modifiers should emit no effect");
+    }
+
+    fn test_version() -> crate::data::Version {
+        crate::data::Version::base(15, 4, 0)
+    }
+
+    #[test]
+    fn resolve_always_on_always_contributes() {
+        let effect = Effect::for_test(
+            EffectId::Modernizations,
+            EffectKind::AlwaysOn,
+            vec![uniform_modifier("GMShotDelay", 0.9)],
+        );
+        let effects = Effects(vec![effect]);
+        let state = EffectsState::default();
+        let result = effects.resolve(&state, Species::Cruiser, test_version()).unwrap();
+        assert!((result.bundle().coef("GMShotDelay") - 0.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn resolve_binary_off_omits_on_includes() {
+        let effect = Effect::for_test(
+            EffectId::Skill("Outnumbered".into()),
+            EffectKind::Binary,
+            vec![uniform_modifier("GMIdealRadius", 0.85)],
+        );
+        let effects = Effects(vec![effect.clone()]);
+
+        let state_off = EffectsState::default();
+        let result_off = effects.resolve(&state_off, Species::Cruiser, test_version()).unwrap();
+        assert!((result_off.bundle().coef("GMIdealRadius") - 1.0).abs() < 1e-6);
+
+        let state_on = EffectsState::default()
+            .set(EffectId::Skill("Outnumbered".into()), EffectActivation::On);
+        let result_on = effects.resolve(&state_on, Species::Cruiser, test_version()).unwrap();
+        assert!((result_on.bundle().coef("GMIdealRadius") - 0.85).abs() < 1e-6);
+
+        assert!(
+            result_on.bundle().coef("GMIdealRadius") != result_off.bundle().coef("GMIdealRadius"),
+            "binary on/off must differ"
+        );
+    }
+
+    #[test]
+    fn resolve_adrenaline_full_hp_is_identity() {
+        let raw = 0.2f32;
+        let effect = Effect::for_test(
+            EffectId::Skill("ArmamentReloadAaDamage".into()),
+            EffectKind::HealthScaledReload,
+            vec![uniform_modifier("lastChanceReloadCoefficient_Main", raw)],
+        );
+        let effects = Effects(vec![effect]);
+
+        let state_full = EffectsState::default();
+        let result = effects.resolve(&state_full, Species::Cruiser, test_version()).unwrap();
+        assert!(
+            (result.reload_coeffs().main - 1.0).abs() < 1e-6,
+            "at full HP reload_coeffs.main == 1.0"
+        );
+    }
+
+    #[test]
+    fn resolve_adrenaline_half_hp() {
+        let raw = 0.2f32;
+        let effect = Effect::for_test(
+            EffectId::Skill("ArmamentReloadAaDamage".into()),
+            EffectKind::HealthScaledReload,
+            vec![uniform_modifier("lastChanceReloadCoefficient_Main", raw)],
+        );
+        let effects = Effects(vec![effect]);
+
+        let state_half = EffectsState::default()
+            .set(
+                EffectId::Skill("ArmamentReloadAaDamage".into()),
+                EffectActivation::Health(HealthFraction::new(0.5)),
+            );
+        let result = effects.resolve(&state_half, Species::Cruiser, test_version()).unwrap();
+        let expected = 1.0 - 0.5 * raw;
+        assert!(
+            (result.reload_coeffs().main - expected).abs() < 1e-6,
+            "at 50% HP reload_coeffs.main == {expected}"
+        );
+    }
+
+    #[test]
+    fn resolve_consumable_on_applies_dist_coeff() {
+        let effect = Effect::for_test(
+            EffectId::Consumable("PCY012_Scout".into()),
+            EffectKind::Consumable { artillery_dist_coeff: 1.2 },
+            vec![],
+        );
+        let effects = Effects(vec![effect]);
+
+        let state_off = EffectsState::default();
+        let result_off = effects.resolve(&state_off, Species::Cruiser, test_version()).unwrap();
+        assert!((result_off.artillery_dist_coeff() - 1.0).abs() < 1e-6, "off -> dist 1.0");
+
+        let state_on = EffectsState::default()
+            .set(EffectId::Consumable("PCY012_Scout".into()), EffectActivation::On);
+        let result_on = effects.resolve(&state_on, Species::Cruiser, test_version()).unwrap();
+        assert!((result_on.artillery_dist_coeff() - 1.2).abs() < 1e-6, "on -> dist 1.2");
+    }
+
+    #[test]
+    fn resolve_mixed_state_folds_correctly() {
+        let always_on = Effect::for_test(
+            EffectId::Modernizations,
+            EffectKind::AlwaysOn,
+            vec![uniform_modifier("GMShotDelay", 0.9)],
+        );
+        let binary = Effect::for_test(
+            EffectId::Skill("Outnumbered".into()),
+            EffectKind::Binary,
+            vec![uniform_modifier("GMIdealRadius", 0.85)],
+        );
+        let adrenaline = Effect::for_test(
+            EffectId::Skill("ArmamentReloadAaDamage".into()),
+            EffectKind::HealthScaledReload,
+            vec![uniform_modifier("lastChanceReloadCoefficient_Main", 0.2)],
+        );
+        let consumable = Effect::for_test(
+            EffectId::Consumable("PCY012_Scout".into()),
+            EffectKind::Consumable { artillery_dist_coeff: 1.2 },
+            vec![uniform_modifier("GMIdealRadius", 0.95)],
+        );
+
+        let effects = Effects(vec![always_on, binary, adrenaline, consumable]);
+        let state = EffectsState::default()
+            .set(EffectId::Skill("Outnumbered".into()), EffectActivation::On)
+            .set(
+                EffectId::Skill("ArmamentReloadAaDamage".into()),
+                EffectActivation::Health(HealthFraction::new(0.5)),
+            )
+            .set(EffectId::Consumable("PCY012_Scout".into()), EffectActivation::On);
+
+        let result = effects.resolve(&state, Species::Cruiser, test_version()).unwrap();
+
+        assert!((result.bundle().coef("GMShotDelay") - 0.9).abs() < 1e-6, "always-on GMShotDelay");
+        assert!((result.bundle().coef("GMIdealRadius") - (0.85 * 0.95)).abs() < 1e-5, "binary + consumable GMIdealRadius");
+        assert!(
+            (result.reload_coeffs().main - 0.9).abs() < 1e-6,
+            "adrenaline at 50% HP"
+        );
+        assert!((result.artillery_dist_coeff() - 1.2).abs() < 1e-6, "consumable dist coeff");
     }
 }
