@@ -355,21 +355,24 @@ fn build_crew_skills(skills: &pickled::Dict) -> Vec<CrewSkill> {
                         "changePriorityTargetPenalty",
                         Option<f32>
                     ))
-                    .consumable_type(game_param_to_type!(logic_trigger_data, "consumableType", String))
-                    .cooling_delay(game_param_to_type!(logic_trigger_data, "coolingDelay", f32))
+                    // consumableType/coolingDelay are absent from some builds'
+                    // LogicTrigger (added across patches); thread the Option through
+                    // so absence stays None instead of becoming a fake default.
+                    .maybe_consumable_type(game_param_to_type!(logic_trigger_data, "consumableType", Option<String>))
+                    .maybe_cooling_delay(game_param_to_type!(logic_trigger_data, "coolingDelay", Option<f32>))
                     .cooling_interpolator(cooling_interpolator)
                     .count_to_modifier(count_to_modifier)
                     .maybe_damage_value(damage_value)
                     .maybe_divider_type(game_param_to_type!(logic_trigger_data, "dividerType", Option<String>))
                     .maybe_divider_value(game_param_to_type!(logic_trigger_data, "dividerValue", Option<f32>))
-                    .duration(game_param_to_type!(logic_trigger_data, "duration", f32))
-                    .energy_coeff(game_param_to_type!(logic_trigger_data, "energyCoeff", f32))
+                    .maybe_duration(game_param_to_type!(logic_trigger_data, "duration", Option<f32>))
+                    .maybe_energy_coeff(game_param_to_type!(logic_trigger_data, "energyCoeff", Option<f32>))
                     .maybe_flood_count(game_param_to_type!(logic_trigger_data, "floodCount", Option<usize>))
                     .maybe_health_factor(game_param_to_type!(logic_trigger_data, "healthFactor", Option<f32>))
                     .heat_interpolator(heat_interpolator)
                     .maybe_modifiers(trigger_modifiers)
-                    .trigger_desc_ids(game_param_to_type!(logic_trigger_data, "triggerDescIds", String))
-                    .trigger_type(game_param_to_type!(logic_trigger_data, "triggerType", String))
+                    .maybe_trigger_desc_ids(game_param_to_type!(logic_trigger_data, "triggerDescIds", Option<String>))
+                    .maybe_trigger_type(game_param_to_type!(logic_trigger_data, "triggerType", Option<String>))
                     .build()
             });
 

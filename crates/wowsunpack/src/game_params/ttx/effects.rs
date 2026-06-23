@@ -112,12 +112,17 @@ pub enum TriggerCondition {
 
 impl TriggerCondition {
     /// Classify a trigger into its condition. Reads `trigger.duration()` for `OnDetected` and
-    /// `trigger.consumable_type(version)` for `OnConsumableActive`.
-    pub fn from_trigger_type(trigger: &CrewSkillLogicTrigger, version: Version) -> TriggerCondition {
-        match trigger.trigger_type() {
+    /// `trigger.consumable_type(version)` for `OnConsumableActive`. `None` when the trigger
+    /// carries no `triggerType` (absent on some builds) and thus has no classifiable condition.
+    pub fn from_trigger_type(trigger: &CrewSkillLogicTrigger, version: Version) -> Option<TriggerCondition> {
+        let condition = match trigger.trigger_type()? {
             "entityIsVisibleTrigger" => TriggerCondition::Detected,
             "entityIsInvisibleTrigger" => TriggerCondition::Undetected,
-            "activationOnDetectTrigger" => TriggerCondition::OnDetected { duration: trigger.duration() },
+            // A detect-window trigger with no duration field can't be modeled as one.
+            "activationOnDetectTrigger" => match trigger.duration() {
+                Some(duration) => TriggerCondition::OnDetected { duration },
+                None => TriggerCondition::Other("activationOnDetectTrigger".to_owned()),
+            },
             "enemyWithinVisibilityTrigger" => TriggerCondition::EnemyWithinDetectionRange,
             "noEnemiesWithinVisibilityTrigger" => TriggerCondition::NoEnemyWithinDetectionRange,
             "VisibleEnemyWithinGmTrigger" => TriggerCondition::EnemyWithinMainGunRange,
@@ -125,12 +130,13 @@ impl TriggerCondition {
             "EnemiesNotLessThanAlliesWithinGMTrigger" => TriggerCondition::Outnumbered,
             "activeAirDefense" => TriggerCondition::ActiveAirDefense,
             "activationOnBattery" => TriggerCondition::SubmarineBatteryLow,
-            "activationOnConsumable" => match trigger.consumable_type(version).into_known() {
+            "activationOnConsumable" => match trigger.consumable_type(version).and_then(|c| c.into_known()) {
                 Some(c) => TriggerCondition::OnConsumableActive(c),
-                None => TriggerCondition::Other(trigger.trigger_type().to_owned()),
+                None => TriggerCondition::Other("activationOnConsumable".to_owned()),
             },
             other => TriggerCondition::Other(other.to_owned()),
-        }
+        };
+        Some(condition)
     }
 
     /// Whether this condition is satisfied by `facts`. `Other` is never satisfied.
@@ -427,14 +433,14 @@ impl Loadout<'_> {
             }
             if let Some(trigger) = skill.logic_trigger() {
                 match trigger.trigger_type() {
-                    TRIGGER_ACTIVATION_ON_BURN_FLOOD if !trigger.count_to_modifier().is_empty() => {
+                    Some(TRIGGER_ACTIVATION_ON_BURN_FLOOD) if !trigger.count_to_modifier().is_empty() => {
                         effects.push(Effect {
                             id: EffectId::Skill(name),
                             kind: EffectKind::StackingPerCount { blocks: trigger.count_to_modifier().to_vec() },
                             modifiers: Vec::new(),
                         });
                     }
-                    TRIGGER_POTENTIAL_DAMAGE_RATIO => {
+                    Some(TRIGGER_POTENTIAL_DAMAGE_RATIO) => {
                         if let Some(tmods) = trigger.modifiers().filter(|m| !m.is_empty()) {
                             effects.push(Effect {
                                 id: EffectId::Skill(name),
@@ -443,7 +449,7 @@ impl Loadout<'_> {
                             });
                         }
                     }
-                    TRIGGER_ATBA_HEAT => {
+                    Some(TRIGGER_ATBA_HEAT) => {
                         if let Some(tmods) = trigger.modifiers().filter(|m| !m.is_empty()) {
                             effects.push(Effect {
                                 id: EffectId::Skill(name),
@@ -457,12 +463,14 @@ impl Loadout<'_> {
                             let recognized = KnownCrewSkill::recognize(skill.internal_name(), skill.skill_type());
                             let kind = match recognized.known() {
                                 Some(KnownCrewSkill::AdrenalineRush)
-                                | Some(KnownCrewSkill::SubmarineAdrenalineRush) => EffectKind::HealthScaledReload,
-                                _ => EffectKind::Binary {
-                                    condition: TriggerCondition::from_trigger_type(trigger, version),
-                                },
+                                | Some(KnownCrewSkill::SubmarineAdrenalineRush) => Some(EffectKind::HealthScaledReload),
+                                // A trigger with no classifiable condition (no `triggerType`) yields no effect.
+                                _ => TriggerCondition::from_trigger_type(trigger, version)
+                                    .map(|condition| EffectKind::Binary { condition }),
                             };
-                            effects.push(Effect { id: EffectId::Skill(name), kind, modifiers: tmods.clone() });
+                            if let Some(kind) = kind {
+                                effects.push(Effect { id: EffectId::Skill(name), kind, modifiers: tmods.clone() });
+                            }
                         }
                     }
                 }
@@ -1633,12 +1641,12 @@ mod tests {
             let s = skill_with_trigger("S", 0, tt, vec![uniform_modifier("speedCoef", 1.08)]);
             TriggerCondition::from_trigger_type(s.logic_trigger().unwrap(), v)
         };
-        assert_eq!(mk("entityIsVisibleTrigger"), TriggerCondition::Detected);
-        assert_eq!(mk("entityIsInvisibleTrigger"), TriggerCondition::Undetected);
-        assert_eq!(mk("EnemiesNotLessThanAlliesWithinGMTrigger"), TriggerCondition::Outnumbered);
-        assert_eq!(mk("activeAirDefense"), TriggerCondition::ActiveAirDefense);
-        assert_eq!(mk("activationOnBattery"), TriggerCondition::SubmarineBatteryLow);
-        assert_eq!(mk("somethingNewUnmodeled"), TriggerCondition::Other("somethingNewUnmodeled".to_string()));
+        assert_eq!(mk("entityIsVisibleTrigger"), Some(TriggerCondition::Detected));
+        assert_eq!(mk("entityIsInvisibleTrigger"), Some(TriggerCondition::Undetected));
+        assert_eq!(mk("EnemiesNotLessThanAlliesWithinGMTrigger"), Some(TriggerCondition::Outnumbered));
+        assert_eq!(mk("activeAirDefense"), Some(TriggerCondition::ActiveAirDefense));
+        assert_eq!(mk("activationOnBattery"), Some(TriggerCondition::SubmarineBatteryLow));
+        assert_eq!(mk("somethingNewUnmodeled"), Some(TriggerCondition::Other("somethingNewUnmodeled".to_string())));
     }
 
     #[test]
@@ -1657,7 +1665,7 @@ mod tests {
             .build();
         assert_eq!(
             TriggerCondition::from_trigger_type(&trigger, test_version()),
-            TriggerCondition::OnDetected { duration: 15.0 }
+            Some(TriggerCondition::OnDetected { duration: 15.0 })
         );
     }
 
@@ -1677,7 +1685,7 @@ mod tests {
             .build();
         assert_eq!(
             TriggerCondition::from_trigger_type(&trigger, test_version()),
-            TriggerCondition::OnConsumableActive(Consumable::Hydrophone)
+            Some(TriggerCondition::OnConsumableActive(Consumable::Hydrophone))
         );
     }
 

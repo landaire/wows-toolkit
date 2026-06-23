@@ -1907,21 +1907,23 @@ impl Interpolator {
 pub struct CrewSkillLogicTrigger {
     burn_count: Option<usize>,
     change_priority_target_penalty: Option<f32>,
-    consumable_type: String,
-    cooling_delay: f32,
+    /// `consumable_type`/`cooling_delay` are absent from some builds' LogicTrigger
+    /// (added across patches); model absence as None rather than a fake default.
+    consumable_type: Option<String>,
+    cooling_delay: Option<f32>,
     cooling_interpolator: Interpolator,
     count_to_modifier: Vec<(u32, Vec<CrewSkillModifier>)>,
     damage_value: Option<f32>,
     divider_type: Option<String>,
     divider_value: Option<f32>,
-    duration: f32,
-    energy_coeff: f32,
+    duration: Option<f32>,
+    energy_coeff: Option<f32>,
     flood_count: Option<usize>,
     health_factor: Option<f32>,
     heat_interpolator: Interpolator,
     modifiers: Option<Vec<CrewSkillModifier>>,
-    trigger_desc_ids: String,
-    trigger_type: String,
+    trigger_desc_ids: Option<String>,
+    trigger_type: Option<String>,
 }
 
 impl CrewSkillLogicTrigger {
@@ -1929,8 +1931,8 @@ impl CrewSkillLogicTrigger {
         self.modifiers.as_ref()
     }
 
-    pub fn trigger_type(&self) -> &str {
-        &self.trigger_type
+    pub fn trigger_type(&self) -> Option<&str> {
+        self.trigger_type.as_deref()
     }
 
     pub fn damage_value(&self) -> Option<f32> {
@@ -1953,12 +1955,15 @@ impl CrewSkillLogicTrigger {
     pub fn consumable_type(
         &self,
         version: crate::data::Version,
-    ) -> crate::recognized::Recognized<crate::game_types::Consumable> {
-        crate::game_types::Consumable::from_consumable_type(&self.consumable_type, version)
+    ) -> Option<crate::recognized::Recognized<crate::game_types::Consumable>> {
+        // `None` when the trigger carries no `consumableType` (absent on some
+        // builds); the caller decides what an absent consumable means.
+        self.consumable_type.as_deref().map(|ct| crate::game_types::Consumable::from_consumable_type(ct, version))
     }
 
-    /// The trigger's active-window duration in seconds (`activationOnDetect`/`activationOnConsumable`).
-    pub fn duration(&self) -> f32 {
+    /// The trigger's active-window duration in seconds (`activationOnDetect`/`activationOnConsumable`),
+    /// or `None` when the trigger carries no duration field.
+    pub fn duration(&self) -> Option<f32> {
         self.duration
     }
 }
@@ -2174,12 +2179,11 @@ impl CrewSkill {
             // The trigger condition sentence is keyed by trigger TYPE (e.g.
             // activationOnDetectTrigger -> IDS_SKILL_TRIGGER_ACTIVATIONONDETECTTRIGGER);
             // triggerDescIds is often empty.
-            let sentence = metadata
-                .localized_name_from_id(&TranslationKey::new(format!(
-                    "IDS_SKILL_TRIGGER_{}",
-                    trig.trigger_type().to_uppercase()
-                )))
-                .and_then(|s| if s.is_empty() || s == " " { None } else { Some(s) });
+            let sentence = trig.trigger_type().and_then(|tt| {
+                metadata
+                    .localized_name_from_id(&TranslationKey::new(format!("IDS_SKILL_TRIGGER_{}", tt.to_uppercase())))
+                    .and_then(|s| if s.is_empty() || s == " " { None } else { Some(s) })
+            });
             let has_sentence = sentence.is_some();
             if let Some(sentence) = sentence {
                 lines.push(sentence);
@@ -3380,8 +3384,11 @@ mod crew_skill_description_tests {
             .trigger_type("activationOnConsumable".to_owned())
             .build();
         let v = crate::data::Version::base(15, 4, 0);
-        assert_eq!(trigger.consumable_type(v).into_known(), Some(crate::game_types::Consumable::Hydrophone));
-        assert_eq!(trigger.duration(), 15.0);
+        assert_eq!(
+            trigger.consumable_type(v).and_then(|c| c.into_known()),
+            Some(crate::game_types::Consumable::Hydrophone)
+        );
+        assert_eq!(trigger.duration(), Some(15.0));
     }
 }
 
