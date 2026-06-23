@@ -186,23 +186,17 @@ impl Loadout<'_> {
                     modifiers: mods.clone(),
                 });
             }
-            if let Some(trigger) = skill.logic_trigger() {
-                if let Some(tmods) = trigger.modifiers().filter(|m| !m.is_empty()) {
-                    let recognized =
-                        KnownCrewSkill::recognize(skill.internal_name(), skill.skill_type());
-                    let kind = match recognized.known() {
-                        Some(KnownCrewSkill::AdrenalineRush)
-                        | Some(KnownCrewSkill::SubmarineAdrenalineRush) => {
-                            EffectKind::HealthScaledReload
-                        }
-                        _ => EffectKind::Binary,
-                    };
-                    effects.push(Effect {
-                        id: EffectId::Skill(name),
-                        kind,
-                        modifiers: tmods.clone(),
-                    });
-                }
+            if let Some(trigger) = skill.logic_trigger()
+                && let Some(tmods) = trigger.modifiers().filter(|m| !m.is_empty())
+            {
+                let recognized = KnownCrewSkill::recognize(skill.internal_name(), skill.skill_type());
+                let kind = match recognized.known() {
+                    Some(KnownCrewSkill::AdrenalineRush) | Some(KnownCrewSkill::SubmarineAdrenalineRush) => {
+                        EffectKind::HealthScaledReload
+                    }
+                    _ => EffectKind::Binary,
+                };
+                effects.push(Effect { id: EffectId::Skill(name), kind, modifiers: tmods.clone() });
             }
         }
 
@@ -223,8 +217,7 @@ impl Loadout<'_> {
                         Some(c) => c,
                         None => continue,
                     };
-                    let artillery_dist_coeff =
-                        cat.effect_fields().get("artilleryDistCoeff").copied().unwrap_or(1.0);
+                    let artillery_dist_coeff = cat.effect_fields().get("artilleryDistCoeff").copied().unwrap_or(1.0);
                     let cat_modifiers = cat.modifiers();
                     if artillery_dist_coeff != 1.0 || !cat_modifiers.is_empty() {
                         effects.push(Effect {
@@ -245,6 +238,12 @@ impl Effects {
     pub fn iter(&self) -> std::slice::Iter<'_, Effect> {
         self.0.iter()
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(effects: Vec<Effect>) -> Self {
+        Effects(effects)
+    }
+
     pub fn resolve(
         &self,
         state: &EffectsState,
@@ -274,7 +273,10 @@ impl Effects {
                     for m in &effect.modifiers {
                         let name = m.name();
                         if let Some(suffix) = name.strip_prefix("lastChanceReloadCoefficient_") {
-                            let c = m.get_for_species(&species);
+                            // `clamp` matches `_getLastChanceReloadCoefficient` (ModifiersApply.py:551).
+                            // Multiplying per modifier is exact for SP1's single health-scaled source;
+                            // SP2 stacking/innate must instead sum `c` per channel and evaluate once.
+                            let c = m.get_for_species(&species).clamp(0.0, 1.0);
                             let mul = (1.0 - lost * c).max(EPSILON);
                             match suffix {
                                 "Main" => reload_coeffs.main *= mul,
@@ -299,6 +301,8 @@ impl Effects {
 }
 
 impl EffectiveModifiers {
+    /// The ship's stat card under these effective modifiers, threading the spotter range
+    /// coefficient and per-armament reload multipliers into the factories.
     pub fn stats(
         &self,
         ship: &Param,
@@ -306,7 +310,15 @@ impl EffectiveModifiers {
         level: u32,
         provider: &dyn GameParamProvider,
     ) -> ShipStats {
-        crate::game_params::ttx::orchestration::ship_stats(ship, selection, &self.bundle, level, provider) // Task 4 threads dist coeff
+        crate::game_params::ttx::orchestration::ship_stats_with(
+            ship,
+            selection,
+            &self.bundle,
+            self.reload_coeffs,
+            self.artillery_dist_coeff,
+            level,
+            provider,
+        )
     }
 }
 
@@ -499,12 +511,8 @@ mod tests {
     #[test]
     fn non_adrenaline_trigger_emits_binary() {
         let ship = ship_no_abilities();
-        let skill = skill_with_trigger(
-            "TriggerGmReload",
-            0,
-            "triggerBattleLosing",
-            vec![uniform_modifier("GMShotDelay", 0.8)],
-        );
+        let skill =
+            skill_with_trigger("TriggerGmReload", 0, "triggerBattleLosing", vec![uniform_modifier("GMShotDelay", 0.8)]);
         let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
         let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
@@ -622,6 +630,85 @@ mod tests {
     }
 
     #[test]
+    fn consumable_with_modifiers_and_coeff_1_emits_effect() {
+        let ship_name = "PCY020_SpeedBoost";
+        let variant = "SpeedBoost";
+        let mut fields = BTreeMap::new();
+        fields.insert("artilleryDistCoeff".to_string(), 1.0f32);
+        let cat = AbilityCategory::builder()
+            .consumable_type("speedBoost".to_string())
+            .group("ship".to_string())
+            .icon_id(String::new())
+            .num_consumables(3)
+            .preparation_time(0.0)
+            .reload_time(180.0)
+            .work_time(120.0)
+            .effect_fields(fields)
+            .modifiers(vec![uniform_modifier("GMIdealRadius", 0.9)])
+            .build();
+        let ability = Ability::builder()
+            .can_buy(false)
+            .cost_credits(0)
+            .cost_gold(0)
+            .is_free(true)
+            .categories(HashMap::from([(variant.to_string(), cat)]))
+            .build();
+        let ability_param = Param::builder()
+            .id(GameParamId::from(6u32))
+            .index("PCY020".to_string())
+            .name(ship_name.to_string())
+            .nation(String::new())
+            .maybe_species(None)
+            .data(ParamData::Ability(ability))
+            .build();
+        let ability_param_rc = Rc::new(ability_param);
+
+        struct SpeedBoostProvider(Rc<Param>);
+        impl GameParamProvider for SpeedBoostProvider {
+            fn game_param_by_id(&self, _id: GameParamId) -> Option<Rc<Param>> {
+                None
+            }
+            fn game_param_by_index(&self, _: &str) -> Option<Rc<Param>> {
+                None
+            }
+            fn game_param_by_name(&self, name: &str) -> Option<Rc<Param>> {
+                if name == "PCY020_SpeedBoost" { Some(self.0.clone()) } else { None }
+            }
+            fn params(&self) -> &[Rc<Param>] {
+                &[]
+            }
+        }
+
+        let vehicle = Vehicle::builder()
+            .level(10)
+            .group("g".to_string())
+            .abilities(vec![vec![(ship_name.to_string(), variant.to_string())]])
+            .upgrades(Vec::new())
+            .maybe_config_data(None)
+            .maybe_model_path(None)
+            .maybe_armor(None)
+            .maybe_hit_locations(None)
+            .permoflages(Vec::new())
+            .camera_trajectories(Vec::new())
+            .maybe_ttx_components(None)
+            .build();
+        let ship = Param::builder()
+            .id(GameParamId::from(7u32))
+            .index("SHIP3".to_string())
+            .name("TestShipWithSpeedBoost".to_string())
+            .nation("USA".to_string())
+            .species(Recognized::Known(Species::Destroyer))
+            .data(ParamData::Vehicle(vehicle))
+            .build();
+
+        let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
+        let effects: Vec<_> = loadout.effects(&SpeedBoostProvider(ability_param_rc)).iter().cloned().collect();
+        assert_eq!(effects.len(), 1, "non-empty modifiers should emit a consumable effect even with coeff==1.0");
+        assert_eq!(effects[0].id(), &EffectId::Consumable(ship_name.to_string()));
+        assert_eq!(effects[0].kind(), &EffectKind::Consumable { artillery_dist_coeff: 1.0 });
+    }
+
+    #[test]
     fn consumable_with_dist_coeff_1_and_no_modifiers_emits_nothing() {
         let mut fields = BTreeMap::new();
         fields.insert("artilleryDistCoeff".to_string(), 1.0f32);
@@ -691,8 +778,7 @@ mod tests {
             .build();
 
         let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> =
-            loadout.effects(&CrashCrewProvider(ability_param_rc)).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&CrashCrewProvider(ability_param_rc)).iter().cloned().collect();
         assert!(effects.is_empty(), "crashCrew with dist_coeff=1.0 and no modifiers should emit no effect");
     }
 
@@ -726,8 +812,7 @@ mod tests {
         let result_off = effects.resolve(&state_off, Species::Cruiser, test_version()).unwrap();
         assert!((result_off.bundle().coef("GMIdealRadius") - 1.0).abs() < 1e-6);
 
-        let state_on = EffectsState::default()
-            .set(EffectId::Skill("Outnumbered".into()), EffectActivation::On);
+        let state_on = EffectsState::default().set(EffectId::Skill("Outnumbered".into()), EffectActivation::On);
         let result_on = effects.resolve(&state_on, Species::Cruiser, test_version()).unwrap();
         assert!((result_on.bundle().coef("GMIdealRadius") - 0.85).abs() < 1e-6);
 
@@ -749,10 +834,7 @@ mod tests {
 
         let state_full = EffectsState::default();
         let result = effects.resolve(&state_full, Species::Cruiser, test_version()).unwrap();
-        assert!(
-            (result.reload_coeffs().main - 1.0).abs() < 1e-6,
-            "at full HP reload_coeffs.main == 1.0"
-        );
+        assert!((result.reload_coeffs().main - 1.0).abs() < 1e-6, "at full HP reload_coeffs.main == 1.0");
     }
 
     #[test]
@@ -766,16 +848,10 @@ mod tests {
         let effects = Effects(vec![effect]);
 
         let state_half = EffectsState::default()
-            .set(
-                EffectId::Skill("ArmamentReloadAaDamage".into()),
-                EffectActivation::Health(HealthFraction::new(0.5)),
-            );
+            .set(EffectId::Skill("ArmamentReloadAaDamage".into()), EffectActivation::Health(HealthFraction::new(0.5)));
         let result = effects.resolve(&state_half, Species::Cruiser, test_version()).unwrap();
         let expected = 1.0 - 0.5 * raw;
-        assert!(
-            (result.reload_coeffs().main - expected).abs() < 1e-6,
-            "at 50% HP reload_coeffs.main == {expected}"
-        );
+        assert!((result.reload_coeffs().main - expected).abs() < 1e-6, "at 50% HP reload_coeffs.main == {expected}");
     }
 
     #[test]
@@ -791,8 +867,7 @@ mod tests {
         let result_off = effects.resolve(&state_off, Species::Cruiser, test_version()).unwrap();
         assert!((result_off.artillery_dist_coeff() - 1.0).abs() < 1e-6, "off -> dist 1.0");
 
-        let state_on = EffectsState::default()
-            .set(EffectId::Consumable("PCY012_Scout".into()), EffectActivation::On);
+        let state_on = EffectsState::default().set(EffectId::Consumable("PCY012_Scout".into()), EffectActivation::On);
         let result_on = effects.resolve(&state_on, Species::Cruiser, test_version()).unwrap();
         assert!((result_on.artillery_dist_coeff() - 1.2).abs() < 1e-6, "on -> dist 1.2");
     }
@@ -823,20 +898,17 @@ mod tests {
         let effects = Effects(vec![always_on, binary, adrenaline, consumable]);
         let state = EffectsState::default()
             .set(EffectId::Skill("Outnumbered".into()), EffectActivation::On)
-            .set(
-                EffectId::Skill("ArmamentReloadAaDamage".into()),
-                EffectActivation::Health(HealthFraction::new(0.5)),
-            )
+            .set(EffectId::Skill("ArmamentReloadAaDamage".into()), EffectActivation::Health(HealthFraction::new(0.5)))
             .set(EffectId::Consumable("PCY012_Scout".into()), EffectActivation::On);
 
         let result = effects.resolve(&state, Species::Cruiser, test_version()).unwrap();
 
         assert!((result.bundle().coef("GMShotDelay") - 0.9).abs() < 1e-6, "always-on GMShotDelay");
-        assert!((result.bundle().coef("GMIdealRadius") - (0.85 * 0.95)).abs() < 1e-5, "binary + consumable GMIdealRadius");
         assert!(
-            (result.reload_coeffs().main - 0.9).abs() < 1e-6,
-            "adrenaline at 50% HP"
+            (result.bundle().coef("GMIdealRadius") - (0.85 * 0.95)).abs() < 1e-5,
+            "binary + consumable GMIdealRadius"
         );
+        assert!((result.reload_coeffs().main - 0.9).abs() < 1e-6, "adrenaline at 50% HP");
         assert!((result.artillery_dist_coeff() - 1.2).abs() < 1e-6, "consumable dist coeff");
     }
 }

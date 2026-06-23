@@ -8,6 +8,7 @@
 use crate::game_params::keys::ComponentType;
 use crate::game_params::ttx::constants::DispersionCurve;
 use crate::game_params::ttx::constants::DispersionEllipse;
+use crate::game_params::ttx::effects::ReloadCoeffs;
 use crate::game_params::ttx::factories;
 use crate::game_params::ttx::model::ShipStats;
 use crate::game_params::ttx::modifiers::ModifierBundle;
@@ -63,7 +64,7 @@ pub fn artillery_dispersion(
         .as_deref()
         .and_then(|name| components.fire_control_max_dist_coef(name))
         .unwrap_or(NO_FIRE_CONTROL_COEF);
-    let range_km = factories::artillery_range_km(arty, fc_coef, modifiers)?;
+    let range_km = factories::artillery_range_km(arty, fc_coef, 1.0, modifiers)?;
     Some(ArtilleryDispersion {
         curve,
         max_range: Km::from(range_km),
@@ -105,6 +106,21 @@ pub fn ship_stats(
     level: u32,
     provider: &dyn GameParamProvider,
 ) -> ShipStats {
+    ship_stats_with(ship, selection, modifiers, ReloadCoeffs::default(), 1.0, level, provider)
+}
+
+/// Compute a ship's stat card with per-armament reload multipliers and a spotter
+/// artillery range coefficient layered on top of `modifiers`. The public [`ship_stats`]
+/// delegates here with identity values so existing callers see no behavior change.
+pub(crate) fn ship_stats_with(
+    ship: &Param,
+    selection: &ShipUpgradeSelection,
+    modifiers: &ModifierBundle,
+    reload_coeffs: ReloadCoeffs,
+    spotter_dist_coef: f32,
+    level: u32,
+    provider: &dyn GameParamProvider,
+) -> ShipStats {
     let Some(vehicle) = ship.vehicle() else {
         return ShipStats::default();
     };
@@ -130,23 +146,21 @@ pub fn ship_stats(
         .and_then(|name| components.fire_control_max_dist_coef(name))
         .unwrap_or(NO_FIRE_CONTROL_COEF);
 
-    let artillery = selection
-        .artillery
-        .as_deref()
-        .and_then(|name| components.artillery(name))
-        .and_then(|arty| factories::artillery(arty, modifiers, fc_coef, level, provider));
+    let artillery = selection.artillery.as_deref().and_then(|name| components.artillery(name)).and_then(|arty| {
+        factories::artillery(arty, modifiers, fc_coef, spotter_dist_coef, reload_coeffs.main, level, provider)
+    });
 
     let secondaries = selection
         .hull
         .as_deref()
         .and_then(|name| components.secondaries(name))
-        .and_then(|atba| factories::secondaries(atba, modifiers, level, provider));
+        .and_then(|atba| factories::secondaries(atba, modifiers, reload_coeffs.secondary, level, provider));
 
     let torpedoes = selection
         .torpedoes
         .as_deref()
         .and_then(|name| components.torpedoes(name))
-        .and_then(|launchers| factories::torpedoes(launchers, modifiers, provider));
+        .and_then(|launchers| factories::torpedoes(launchers, modifiers, reload_coeffs.torpedo, provider));
 
     // Armor: hull plate map plus the selected hull's main-battery mount armor maps.
     let armor = vehicle.armor().and_then(|hull_armor| {
@@ -650,5 +664,161 @@ mod tests {
         assert!(stats.mobility.is_none());
         assert!(stats.artillery.is_none());
         assert!(stats.visibility.is_none());
+    }
+
+    fn test_version() -> crate::data::Version {
+        crate::data::Version::base(15, 4, 0)
+    }
+
+    fn uniform_modifier(name: &str, value: f32) -> crate::game_params::types::CrewSkillModifier {
+        crate::game_params::types::CrewSkillModifier::builder()
+            .name(name.to_owned())
+            .aircraft_carrier(value)
+            .auxiliary(value)
+            .battleship(value)
+            .cruiser(value)
+            .destroyer(value)
+            .submarine(value)
+            .excluded_consumables(Vec::new())
+            .build()
+    }
+
+    #[test]
+    fn effective_modifiers_default_state_matches_ship_stats_empty_bundle() {
+        let ship = gearing_ship();
+        let provider = gearing_provider();
+        let sel = ShipUpgradeSelection::stock(&ship);
+        let level = 10u32;
+
+        let base = ship_stats(&ship, &sel, &ModifierBundle::empty(Species::Destroyer), level, &provider);
+
+        let em = crate::game_params::ttx::effects::Effects::for_test(vec![])
+            .resolve(&crate::game_params::ttx::effects::EffectsState::default(), Species::Destroyer, test_version())
+            .unwrap();
+        let under_em = em.stats(&ship, &sel, level, &provider);
+
+        let base_reload = base.artillery.as_ref().and_then(|a| a.reload_time).map(|s| s.value());
+        let em_reload = under_em.artillery.as_ref().and_then(|a| a.reload_time).map(|s| s.value());
+        assert_eq!(base_reload, em_reload, "reload must match with identity coefficients");
+
+        let base_range = base.artillery.as_ref().and_then(|a| a.range).map(|r| r.value());
+        let em_range = under_em.artillery.as_ref().and_then(|a| a.range).map(|r| r.value());
+        assert_eq!(base_range, em_range, "range must match with identity spotter coeff");
+    }
+
+    #[test]
+    fn adrenaline_reload_half_hp_multiplies_main_reload() {
+        use crate::game_params::ttx::effects::Effect;
+        use crate::game_params::ttx::effects::EffectActivation;
+        use crate::game_params::ttx::effects::EffectId;
+        use crate::game_params::ttx::effects::EffectKind;
+        use crate::game_params::ttx::effects::Effects;
+        use crate::game_params::ttx::effects::EffectsState;
+        use crate::game_params::ttx::effects::HealthFraction;
+
+        let ship = gearing_ship();
+        let provider = gearing_provider();
+        let sel = ShipUpgradeSelection::stock(&ship);
+        let level = 10u32;
+
+        let raw_coeff = 0.2f32;
+        let adrenaline = Effect::for_test(
+            EffectId::Skill("ArmamentReloadAaDamage".into()),
+            EffectKind::HealthScaledReload,
+            vec![uniform_modifier("lastChanceReloadCoefficient_Main", raw_coeff)],
+        );
+        let effects = Effects::for_test(vec![adrenaline]);
+
+        let state_full = EffectsState::default();
+        let em_full = effects.resolve(&state_full, Species::Destroyer, test_version()).unwrap();
+        let reload_full = em_full
+            .stats(&ship, &sel, level, &provider)
+            .artillery
+            .and_then(|a| a.reload_time)
+            .map(|s| s.value())
+            .unwrap();
+
+        let state_half = EffectsState::default()
+            .set(EffectId::Skill("ArmamentReloadAaDamage".into()), EffectActivation::Health(HealthFraction::new(0.5)));
+        let em_half = effects.resolve(&state_half, Species::Destroyer, test_version()).unwrap();
+        let reload_half = em_half
+            .stats(&ship, &sel, level, &provider)
+            .artillery
+            .and_then(|a| a.reload_time)
+            .map(|s| s.value())
+            .unwrap();
+
+        let expected_coeff = 1.0 - 0.5 * raw_coeff;
+        let expected_reload = reload_full * expected_coeff;
+        assert!((reload_half - expected_reload).abs() < 1e-4, "got {reload_half}, expected {expected_reload}");
+        assert!(reload_half < reload_full, "adrenaline at 50% HP must reduce reload");
+    }
+
+    #[test]
+    fn spotter_consumable_extends_range_and_off_reverts_to_base() {
+        use crate::game_params::ttx::effects::Effect;
+        use crate::game_params::ttx::effects::EffectActivation;
+        use crate::game_params::ttx::effects::EffectId;
+        use crate::game_params::ttx::effects::EffectKind;
+        use crate::game_params::ttx::effects::Effects;
+        use crate::game_params::ttx::effects::EffectsState;
+
+        let ship = gearing_ship();
+        let provider = gearing_provider();
+        let sel = ShipUpgradeSelection::stock(&ship);
+        let level = 10u32;
+
+        let dist_coeff = 1.2f32;
+        let scout_effect = Effect::for_test(
+            EffectId::Consumable("PCY012_Scout".into()),
+            EffectKind::Consumable { artillery_dist_coeff: dist_coeff },
+            vec![uniform_modifier("GMIdealRadius", 0.9)],
+        );
+        let effects = Effects::for_test(vec![scout_effect]);
+
+        let state_off = EffectsState::default();
+        let em_off = effects.resolve(&state_off, Species::Destroyer, test_version()).unwrap();
+        let range_off =
+            em_off.stats(&ship, &sel, level, &provider).artillery.and_then(|a| a.range).map(|r| r.value()).unwrap();
+
+        let state_on = EffectsState::default().set(EffectId::Consumable("PCY012_Scout".into()), EffectActivation::On);
+        let em_on = effects.resolve(&state_on, Species::Destroyer, test_version()).unwrap();
+        let range_on =
+            em_on.stats(&ship, &sel, level, &provider).artillery.and_then(|a| a.range).map(|r| r.value()).unwrap();
+
+        let base_range = ship_stats(&ship, &sel, &ModifierBundle::empty(Species::Destroyer), level, &provider)
+            .artillery
+            .and_then(|a| a.range)
+            .map(|r| r.value())
+            .unwrap();
+
+        // Build a reference On state without the GMIdealRadius modifier to isolate its effect.
+        let scout_no_radius_mod = Effect::for_test(
+            EffectId::Consumable("PCY012_Scout".into()),
+            EffectKind::Consumable { artillery_dist_coeff: dist_coeff },
+            vec![],
+        );
+        let effects_no_radius = Effects::for_test(vec![scout_no_radius_mod]);
+        let em_on_no_radius = effects_no_radius.resolve(&state_on, Species::Destroyer, test_version()).unwrap();
+        let dispersion_on =
+            em_on.stats(&ship, &sel, level, &provider).artillery.and_then(|a| a.dispersion).map(|d| d.value()).unwrap();
+        let dispersion_on_no_radius = em_on_no_radius
+            .stats(&ship, &sel, level, &provider)
+            .artillery
+            .and_then(|a| a.dispersion)
+            .map(|d| d.value())
+            .unwrap();
+
+        assert!((range_off - base_range).abs() < 1e-4, "spotter off: got {range_off}, expected {base_range}");
+        assert!(
+            (range_on - base_range * dist_coeff).abs() < 1e-3,
+            "spotter on: got {range_on}, expected {}",
+            base_range * dist_coeff
+        );
+        assert!(range_on > range_off, "spotter on must increase range");
+        assert!(
+            dispersion_on < dispersion_on_no_radius,
+            "GMIdealRadius 0.9 must tighten dispersion vs no-modifier baseline: on={dispersion_on}, baseline={dispersion_on_no_radius}"
+        );
     }
 }

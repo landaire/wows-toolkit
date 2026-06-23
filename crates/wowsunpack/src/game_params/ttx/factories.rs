@@ -308,6 +308,7 @@ fn warn_unresolved_ammo(name: &str) {
 pub fn torpedoes(
     launchers: &[TorpedoLauncherStats],
     modifiers: &ModifierBundle,
+    reload_coeff: f32,
     provider: &dyn GameParamProvider,
 ) -> Option<Torpedoes> {
     if launchers.is_empty() {
@@ -335,7 +336,7 @@ pub fn torpedoes(
         });
 
         if let Some(delay) = launcher.shot_delay {
-            let reload = delay.value() * shot_delay_coef;
+            let reload = delay.value() * shot_delay_coef * reload_coeff;
             if reload != 0.0 {
                 reload_times.push(reload);
             }
@@ -473,13 +474,16 @@ pub fn shell_stats(
 }
 
 /// Main-battery range in km: base component `maxDist` (BigWorld m) scaled by the
-/// fire-control `maxDistCoef` and the `GMMaxDist` modifier (FactoryArtillery.py:42).
+/// fire-control `maxDistCoef`, the `GMMaxDist` modifier, and an optional spotter
+/// range coefficient (FactoryArtillery.py:42; spotter extends range by its
+/// `artilleryDistCoeff`).
 pub(crate) fn artillery_range_km(
     arty: &ArtilleryComponentStats,
     fc_max_dist_coef: f32,
+    spotter_dist_coef: f32,
     modifiers: &ModifierBundle,
 ) -> Option<f32> {
-    arty.max_dist.map(|d| (d.value() / KM_TO_M) * fc_max_dist_coef * modifiers.coef("GMMaxDist"))
+    arty.max_dist.map(|d| (d.value() / KM_TO_M) * fc_max_dist_coef * modifiers.coef("GMMaxDist") * spotter_dist_coef)
 }
 
 /// Main-battery armament section (`ArtilleryTTX`, FactoryArtillery.py + TTXFactory.py).
@@ -505,6 +509,8 @@ pub fn artillery(
     arty: &ArtilleryComponentStats,
     modifiers: &ModifierBundle,
     fc_max_dist_coef: f32,
+    spotter_dist_coef: f32,
+    reload_coeff: f32,
     level: u32,
     provider: &dyn GameParamProvider,
 ) -> Option<Artillery> {
@@ -521,9 +527,9 @@ pub fn artillery(
     // All main-battery mounts share the same reload; take the first gun's shotDelay.
     let first = &arty.guns[0];
 
-    let reload_time = first.shot_delay.map(|d| Seconds::from(d.value() * shot_delay_coef));
+    let reload_time = first.shot_delay.map(|d| Seconds::from(d.value() * shot_delay_coef * reload_coeff));
 
-    let range_km = artillery_range_km(arty, fc_max_dist_coef, modifiers);
+    let range_km = artillery_range_km(arty, fc_max_dist_coef, spotter_dist_coef, modifiers);
     let range = range_km.map(Km::from);
 
     // dispersion ellipse over the FC-adjusted range (FactoryArtillery.py:47; getEllipse).
@@ -602,6 +608,7 @@ pub fn artillery(
 pub fn secondaries(
     atba: &SecondaryComponentStats,
     modifiers: &ModifierBundle,
+    reload_coeff: f32,
     level: u32,
     provider: &dyn GameParamProvider,
 ) -> Option<Artillery> {
@@ -618,7 +625,7 @@ pub fn secondaries(
     // First gun group drives the displayed reload/gun (FactoryArtillery.py:83 is per gun).
     let first = &atba.guns[0];
 
-    let reload_time = first.shot_delay.map(|d| Seconds::from(d.value() * shot_delay_coef));
+    let reload_time = first.shot_delay.map(|d| Seconds::from(d.value() * shot_delay_coef * reload_coeff));
 
     // range = (maxDist / KM_TO_M) * GSMaxDist (FactoryArtillery.py:84 over the KM
     // maxDist of PreprocessedATBA.py:30). No fire-control coef for secondaries.
@@ -1129,8 +1136,8 @@ mod tests {
     fn gearing_stock_torpedoes_via_provider() {
         let launchers = [gearing_launcher()];
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
-        let torps =
-            torpedoes(&launchers, &ModifierBundle::empty(Species::Destroyer), &provider).expect("torpedoes computed");
+        let torps = torpedoes(&launchers, &ModifierBundle::empty(Species::Destroyer), 1.0, &provider)
+            .expect("torpedoes computed");
 
         // reload_time: shotDelay 103 * GTShotDelay 1.0 = 103 (min over one mount).
         assert_eq!(torps.reload_time, Some(Seconds::from(103.0)));
@@ -1185,7 +1192,7 @@ mod tests {
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let launchers = [gearing_launcher()];
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
-        let torps = torpedoes(&launchers, &bundle, &provider).expect("torpedoes computed");
+        let torps = torpedoes(&launchers, &bundle, 1.0, &provider).expect("torpedoes computed");
         let launcher = &torps.launchers[0];
         let rs = launcher.rotation_speed.expect("rotation_speed").value();
         assert!(approx(rs, 30.0), "got {rs}");
@@ -1201,7 +1208,7 @@ mod tests {
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let launchers = [gearing_launcher()];
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
-        let torps = torpedoes(&launchers, &bundle, &provider).expect("torpedoes computed");
+        let torps = torpedoes(&launchers, &bundle, 1.0, &provider).expect("torpedoes computed");
         let launcher = &torps.launchers[0];
         assert_eq!(launcher.rotation_speed, Some(DegreesPerSecond::from(30.0)));
         let rt = launcher.rotation_time.expect("rotation_time").value();
@@ -1211,7 +1218,7 @@ mod tests {
     #[test]
     fn torpedoes_none_when_no_launchers() {
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
-        assert!(torpedoes(&[], &ModifierBundle::empty(Species::Destroyer), &provider).is_none());
+        assert!(torpedoes(&[], &ModifierBundle::empty(Species::Destroyer), 1.0, &provider).is_none());
     }
 
     #[test]
@@ -1331,8 +1338,9 @@ mod tests {
     #[test]
     fn worcester_stock_artillery_gun_and_range() {
         let provider = worcester_provider();
-        let arty = artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
-            .expect("artillery computed");
+        let arty =
+            artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 1.0, 1.0, 10, &provider)
+                .expect("artillery computed");
 
         // range: (15320 / 1000) * 1.0 (fc) * 1.0 (GMMaxDist) = 15.32.
         assert_eq!(arty.range, Some(Km::from(15.32)));
@@ -1356,8 +1364,9 @@ mod tests {
     #[test]
     fn worcester_stock_dispersion_matches_helper() {
         let provider = worcester_provider();
-        let arty = artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
-            .expect("artillery computed");
+        let arty =
+            artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 1.0, 1.0, 10, &provider)
+                .expect("artillery computed");
         // dispersion over the FC-adjusted range 15.32 km, stock GMIdealRadius 1.0.
         let expected = constants::dispersion_horizontal(1.1, 8.0, 1000.0, Km::from(15.32), 1.0).to_meters().value();
         let got = arty.dispersion.expect("dispersion").value();
@@ -1394,9 +1403,16 @@ mod tests {
     #[test]
     fn artillery_vertical_dispersion_some_when_curve_fields_set() {
         let provider = worcester_provider();
-        let arty =
-            artillery(&worcester_artillery_with_curve(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
-                .expect("artillery computed");
+        let arty = artillery(
+            &worcester_artillery_with_curve(),
+            &ModifierBundle::empty(Species::Cruiser),
+            1.0,
+            1.0,
+            1.0,
+            10,
+            &provider,
+        )
+        .expect("artillery computed");
         let h = arty.dispersion.expect("dispersion").value();
         let v = arty.dispersion_vertical.expect("dispersion_vertical").value();
         // At max range, clamped_dispersion_coeff with radius_on_max=2.0 yields coeff=2.0.
@@ -1406,8 +1422,9 @@ mod tests {
     #[test]
     fn artillery_vertical_dispersion_none_when_curve_fields_absent() {
         let provider = worcester_provider();
-        let arty = artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
-            .expect("artillery computed");
+        let arty =
+            artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 1.0, 1.0, 10, &provider)
+                .expect("artillery computed");
         assert!(arty.dispersion.is_some(), "horizontal dispersion must be present");
         assert!(arty.dispersion_vertical.is_none(), "vertical must be None when curve fields absent");
     }
@@ -1415,8 +1432,9 @@ mod tests {
     #[test]
     fn worcester_stock_he_shell() {
         let provider = worcester_provider();
-        let arty = artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
-            .expect("artillery computed");
+        let arty =
+            artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 1.0, 1.0, 10, &provider)
+                .expect("artillery computed");
         let he = arty.shells.iter().find(|s| s.ammo_kind.as_deref() == Some("HE")).expect("HE shell");
         // stock damage reduces to alphaDamage 2200.
         assert_eq!(he.damage, Some(Hp::from(2200.0)));
@@ -1436,8 +1454,9 @@ mod tests {
     #[test]
     fn worcester_stock_ap_shell() {
         let provider = worcester_provider();
-        let arty = artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
-            .expect("artillery computed");
+        let arty =
+            artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 1.0, 1.0, 10, &provider)
+                .expect("artillery computed");
         let ap = arty.shells.iter().find(|s| s.ammo_kind.as_deref() == Some("AP")).expect("AP shell");
         // stock damage reduces to alphaDamage 3200.
         assert_eq!(ap.damage, Some(Hp::from(3200.0)));
@@ -1458,7 +1477,8 @@ mod tests {
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         let provider = worcester_provider();
-        let arty = artillery(&worcester_artillery(), &bundle, 1.0, 10, &provider).expect("artillery computed");
+        let arty =
+            artillery(&worcester_artillery(), &bundle, 1.0, 1.0, 1.0, 10, &provider).expect("artillery computed");
         let reload = arty.reload_time.expect("reload").value();
         assert!(approx(reload, 4.14), "got {reload}");
         let range = arty.range.expect("range").value();
@@ -1472,7 +1492,8 @@ mod tests {
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         let provider = worcester_provider();
-        let arty = artillery(&worcester_artillery(), &bundle, 1.0, 10, &provider).expect("artillery computed");
+        let arty =
+            artillery(&worcester_artillery(), &bundle, 1.0, 1.0, 1.0, 10, &provider).expect("artillery computed");
         let gun = arty.gun.expect("gun");
         let rs = gun.rotation_speed.expect("rotation_speed").value();
         assert!(approx(rs, 30.0), "got {rs}");
@@ -1484,7 +1505,7 @@ mod tests {
     fn artillery_none_when_no_guns() {
         let provider = worcester_provider();
         let empty = ArtilleryComponentStats::default();
-        assert!(artillery(&empty, &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider).is_none());
+        assert!(artillery(&empty, &ModifierBundle::empty(Species::Cruiser), 1.0, 1.0, 1.0, 10, &provider).is_none());
     }
 
     #[test]
@@ -1493,8 +1514,9 @@ mod tests {
         // section is still produced with the resolvable HE row, and the AP row is
         // silently dropped (a warn-once diagnostic fires; no fabrication).
         let provider = MultiProvider::new(&[("PAPA051_152mm_HE_HC_Mark_39_Mod_0", worcester_he())]);
-        let arty = artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 10, &provider)
-            .expect("artillery computed");
+        let arty =
+            artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 1.0, 1.0, 10, &provider)
+                .expect("artillery computed");
         assert_eq!(arty.shells.len(), 1);
         assert!(arty.shells.iter().any(|s| s.ammo_kind.as_deref() == Some("HE")));
         assert!(!arty.shells.iter().any(|s| s.ammo_kind.as_deref() == Some("AP")));
@@ -1618,7 +1640,7 @@ mod tests {
     #[test]
     fn bismarck_stock_secondaries_gun_and_range() {
         let provider = bismarck_secondary_provider();
-        let sec = secondaries(&bismarck_secondaries(), &ModifierBundle::empty(Species::Battleship), 8, &provider)
+        let sec = secondaries(&bismarck_secondaries(), &ModifierBundle::empty(Species::Battleship), 1.0, 8, &provider)
             .expect("secondaries computed");
 
         // range: (7600 / 1000) * 1.0 (GSMaxDist) = 7.6 (Bismarck's in-game stock range).
@@ -1643,7 +1665,7 @@ mod tests {
     #[test]
     fn bismarck_stock_secondaries_shells() {
         let provider = bismarck_secondary_provider();
-        let sec = secondaries(&bismarck_secondaries(), &ModifierBundle::empty(Species::Battleship), 8, &provider)
+        let sec = secondaries(&bismarck_secondaries(), &ModifierBundle::empty(Species::Battleship), 1.0, 8, &provider)
             .expect("secondaries computed");
 
         // One shell per distinct ATBA ammo across the mixed-caliber mounts.
@@ -1674,7 +1696,7 @@ mod tests {
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let provider = bismarck_secondary_provider();
-        let sec = secondaries(&bismarck_secondaries(), &bundle, 8, &provider).expect("secondaries computed");
+        let sec = secondaries(&bismarck_secondaries(), &bundle, 1.0, 8, &provider).expect("secondaries computed");
         let range = sec.range.expect("range").value();
         assert!(approx(range, 9.12), "got {range}");
     }
@@ -1686,7 +1708,7 @@ mod tests {
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let provider = bismarck_secondary_provider();
-        let sec = secondaries(&bismarck_secondaries(), &bundle, 8, &provider).expect("secondaries computed");
+        let sec = secondaries(&bismarck_secondaries(), &bundle, 1.0, 8, &provider).expect("secondaries computed");
         let reload = sec.reload_time.expect("reload").value();
         assert!(approx(reload, 6.375), "got {reload}");
     }
@@ -1695,7 +1717,7 @@ mod tests {
     fn secondaries_none_when_no_guns() {
         let provider = bismarck_secondary_provider();
         let empty = SecondaryComponentStats::default();
-        assert!(secondaries(&empty, &ModifierBundle::empty(Species::Battleship), 8, &provider).is_none());
+        assert!(secondaries(&empty, &ModifierBundle::empty(Species::Battleship), 1.0, 8, &provider).is_none());
     }
 
     #[test]
