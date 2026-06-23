@@ -1556,6 +1556,13 @@ pub struct AbilityCategory {
     #[cfg_attr(feature = "serde", serde(default))]
     #[builder(default)]
     effect_fields: BTreeMap<String, f32>,
+    /// Named modifiers from `logic.modifiers` as uniform per-species values.
+    /// Empty for consumables whose logic sub-dict carries no `modifiers` block.
+    /// Each entry corresponds to a modifier name (e.g. `GMIdealRadius`) with the
+    /// same float value applied uniformly across all ship species.
+    #[cfg_attr(feature = "serde", serde(default))]
+    #[builder(default)]
+    modifiers: Vec<CrewSkillModifier>,
 }
 
 impl AbilityCategory {
@@ -1631,6 +1638,12 @@ impl AbilityCategory {
     /// Raw numeric effect fields merged from the category root and `logic`.
     pub fn effect_fields(&self) -> &BTreeMap<String, f32> {
         &self.effect_fields
+    }
+
+    /// Named modifiers from `logic.modifiers` as uniform per-species values.
+    /// Empty for consumables without a `modifiers` block in their logic sub-dict.
+    pub(crate) fn modifiers(&self) -> &[CrewSkillModifier] {
+        &self.modifiers
     }
 }
 

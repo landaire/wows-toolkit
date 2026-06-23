@@ -12,6 +12,7 @@ use crate::game_params::ttx::selection::ShipUpgradeSelection;
 use crate::game_params::types::CrewSkill;
 use crate::game_params::types::CrewSkillModifier;
 use crate::game_params::types::GameParamProvider;
+use crate::game_params::types::KnownCrewSkill;
 use crate::game_params::types::Param;
 use crate::game_params::types::Species;
 
@@ -143,8 +144,78 @@ impl EffectiveModifiers {
 }
 
 impl Loadout<'_> {
-    pub fn effects(&self, _provider: &dyn GameParamProvider) -> Effects {
-        Effects(Vec::new()) // Task 2
+    pub fn effects(&self, provider: &dyn GameParamProvider) -> Effects {
+        let mut effects: Vec<Effect> = Vec::new();
+
+        if !self.modernization_modifiers.is_empty() {
+            effects.push(Effect {
+                id: EffectId::Modernizations,
+                kind: EffectKind::AlwaysOn,
+                modifiers: self.modernization_modifiers.to_vec(),
+            });
+        }
+
+        for skill in self.skills {
+            let name = skill.internal_name().as_str().to_owned();
+            if let Some(mods) = skill.modifiers().filter(|m| !m.is_empty()) {
+                effects.push(Effect {
+                    id: EffectId::Skill(name.clone()),
+                    kind: EffectKind::AlwaysOn,
+                    modifiers: mods.clone(),
+                });
+            }
+            if let Some(trigger) = skill.logic_trigger() {
+                if let Some(tmods) = trigger.modifiers().filter(|m| !m.is_empty()) {
+                    let recognized =
+                        KnownCrewSkill::recognize(skill.internal_name(), skill.skill_type());
+                    let kind = match recognized.known() {
+                        Some(KnownCrewSkill::AdrenalineRush)
+                        | Some(KnownCrewSkill::SubmarineAdrenalineRush) => {
+                            EffectKind::HealthScaledReload
+                        }
+                        _ => EffectKind::Binary,
+                    };
+                    effects.push(Effect {
+                        id: EffectId::Skill(name),
+                        kind,
+                        modifiers: tmods.clone(),
+                    });
+                }
+            }
+        }
+
+        if let Some(vehicle) = self.ship.vehicle()
+            && let Some(ability_slots) = vehicle.abilities()
+        {
+            for slot in ability_slots {
+                for (ability_name, variant_name) in slot {
+                    let param = match provider.game_param_by_name(ability_name) {
+                        Some(p) => p,
+                        None => continue,
+                    };
+                    let ability = match param.ability() {
+                        Some(a) => a,
+                        None => continue,
+                    };
+                    let cat = match ability.get_category(variant_name) {
+                        Some(c) => c,
+                        None => continue,
+                    };
+                    let artillery_dist_coeff =
+                        cat.effect_fields().get("artilleryDistCoeff").copied().unwrap_or(1.0);
+                    let cat_modifiers = cat.modifiers();
+                    if artillery_dist_coeff != 1.0 || !cat_modifiers.is_empty() {
+                        effects.push(Effect {
+                            id: EffectId::Consumable(ability_name.clone()),
+                            kind: EffectKind::Consumable { artillery_dist_coeff },
+                            modifiers: cat_modifiers.to_vec(),
+                        });
+                    }
+                }
+            }
+        }
+
+        Effects(effects)
     }
 }
 
@@ -176,7 +247,126 @@ impl EffectiveModifiers {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+    use std::collections::HashMap;
+
     use super::*;
+    use crate::Rc;
+    use crate::game_params::types::Ability;
+    use crate::game_params::types::AbilityCategory;
+    use crate::game_params::types::CrewSkillLogicTrigger;
+    use crate::game_params::types::CrewSkillName;
+    use crate::game_params::types::CrewSkillTiers;
+    use crate::game_params::types::CrewSkillType;
+    use crate::game_params::types::ParamData;
+    use crate::game_params::types::SkillPointCost;
+    use crate::game_params::types::Vehicle;
+    use crate::game_types::GameParamId;
+    use crate::recognized::Recognized;
+
+    struct EmptyProvider;
+    impl GameParamProvider for EmptyProvider {
+        fn game_param_by_id(&self, _id: GameParamId) -> Option<Rc<Param>> {
+            None
+        }
+        fn game_param_by_index(&self, _index: &str) -> Option<Rc<Param>> {
+            None
+        }
+        fn game_param_by_name(&self, _name: &str) -> Option<Rc<Param>> {
+            None
+        }
+        fn params(&self) -> &[Rc<Param>] {
+            &[]
+        }
+    }
+
+    fn tiers() -> CrewSkillTiers {
+        CrewSkillTiers::builder()
+            .aircraft_carrier(SkillPointCost::new(1))
+            .auxiliary(SkillPointCost::new(1))
+            .battleship(SkillPointCost::new(1))
+            .cruiser(SkillPointCost::new(1))
+            .destroyer(SkillPointCost::new(1))
+            .submarine(SkillPointCost::new(1))
+            .build()
+    }
+
+    fn uniform_modifier(name: &str, value: f32) -> CrewSkillModifier {
+        CrewSkillModifier::builder()
+            .name(name.to_owned())
+            .aircraft_carrier(value)
+            .auxiliary(value)
+            .battleship(value)
+            .cruiser(value)
+            .destroyer(value)
+            .submarine(value)
+            .excluded_consumables(Vec::new())
+            .build()
+    }
+
+    fn skill_only_modifiers(name: &str, modifiers: Vec<CrewSkillModifier>) -> CrewSkill {
+        CrewSkill::builder()
+            .internal_name(CrewSkillName::from(name))
+            .can_be_learned(true)
+            .is_epic(false)
+            .skill_type(CrewSkillType::new(1))
+            .ui_treat_as_trigger(false)
+            .tier(tiers())
+            .modifiers(modifiers)
+            .build()
+    }
+
+    fn skill_with_trigger(
+        name: &str,
+        skill_type: u32,
+        trigger_type: &str,
+        trigger_mods: Vec<CrewSkillModifier>,
+    ) -> CrewSkill {
+        let trigger = CrewSkillLogicTrigger::builder()
+            .consumable_type(String::new())
+            .cooling_delay(0.0)
+            .cooling_interpolator(Vec::new())
+            .duration(0.0)
+            .energy_coeff(0.0)
+            .heat_interpolator(Vec::new())
+            .modifiers(trigger_mods)
+            .trigger_desc_ids(String::new())
+            .trigger_type(trigger_type.to_owned())
+            .build();
+        CrewSkill::builder()
+            .internal_name(CrewSkillName::from(name))
+            .can_be_learned(true)
+            .is_epic(false)
+            .skill_type(CrewSkillType::new(skill_type))
+            .ui_treat_as_trigger(false)
+            .tier(tiers())
+            .logic_trigger(trigger)
+            .build()
+    }
+
+    fn ship_no_abilities() -> Param {
+        let vehicle = Vehicle::builder()
+            .level(10)
+            .group("g".to_string())
+            .maybe_abilities(None)
+            .upgrades(Vec::new())
+            .maybe_config_data(None)
+            .maybe_model_path(None)
+            .maybe_armor(None)
+            .maybe_hit_locations(None)
+            .permoflages(Vec::new())
+            .camera_trajectories(Vec::new())
+            .maybe_ttx_components(None)
+            .build();
+        Param::builder()
+            .id(GameParamId::from(1u32))
+            .index("IDX".to_string())
+            .name("TestShip".to_string())
+            .nation("USA".to_string())
+            .species(Recognized::Known(Species::Destroyer))
+            .data(ParamData::Vehicle(vehicle))
+            .build()
+    }
 
     #[test]
     fn health_fraction_clamps() {
@@ -209,5 +399,235 @@ mod tests {
         assert_eq!(s.get(&EffectId::Skill("X".into())), Some(EffectActivation::On));
         assert_eq!(s.get(&EffectId::Consumable("Y".into())), Some(EffectActivation::Off));
         assert_eq!(s.get(&EffectId::Modernizations), None);
+    }
+
+    #[test]
+    fn modernization_modifiers_emit_always_on() {
+        let ship = ship_no_abilities();
+        let mods = vec![uniform_modifier("GMShotDelay", 0.9)];
+        let loadout = Loadout { skills: &[], modernization_modifiers: &mods, ship: &ship };
+        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].id(), &EffectId::Modernizations);
+        assert_eq!(effects[0].kind(), &EffectKind::AlwaysOn);
+    }
+
+    #[test]
+    fn empty_modernization_modifiers_emit_nothing() {
+        let ship = ship_no_abilities();
+        let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
+        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn skill_with_only_modifiers_emits_always_on() {
+        let ship = ship_no_abilities();
+        let skill = skill_only_modifiers("GunFeeder", vec![uniform_modifier("GMShotDelay", 0.9)]);
+        let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
+        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].id(), &EffectId::Skill("GunFeeder".to_string()));
+        assert_eq!(effects[0].kind(), &EffectKind::AlwaysOn);
+    }
+
+    #[test]
+    fn non_adrenaline_trigger_emits_binary() {
+        let ship = ship_no_abilities();
+        let skill = skill_with_trigger(
+            "TriggerGmReload",
+            0,
+            "triggerBattleLosing",
+            vec![uniform_modifier("GMShotDelay", 0.8)],
+        );
+        let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
+        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].id(), &EffectId::Skill("TriggerGmReload".to_string()));
+        assert_eq!(effects[0].kind(), &EffectKind::Binary);
+    }
+
+    #[test]
+    fn adrenaline_rush_trigger_emits_health_scaled_reload() {
+        let ship = ship_no_abilities();
+        let skill = skill_with_trigger(
+            "ArmamentReloadAaDamage",
+            0,
+            "lifeBonus",
+            vec![uniform_modifier("lastChanceReloadCoefficient_Main", 0.25)],
+        );
+        let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
+        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].id(), &EffectId::Skill("ArmamentReloadAaDamage".to_string()));
+        assert_eq!(effects[0].kind(), &EffectKind::HealthScaledReload);
+    }
+
+    #[test]
+    fn submarine_adrenaline_trigger_emits_health_scaled_reload() {
+        let ship = ship_no_abilities();
+        let skill = skill_with_trigger(
+            "ArmamentReloadSubmarine",
+            0,
+            "lifeBonus",
+            vec![uniform_modifier("lastChanceReloadCoefficient_Torp", 0.25)],
+        );
+        let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
+        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].kind(), &EffectKind::HealthScaledReload);
+    }
+
+    #[test]
+    fn consumable_with_artillery_dist_coeff_emits_consumable_effect() {
+        let ship_name = "PCY012_Scout";
+        let variant = "Scout";
+        let mut fields = BTreeMap::new();
+        fields.insert("artilleryDistCoeff".to_string(), 1.2f32);
+        let cat = AbilityCategory::builder()
+            .consumable_type("scout".to_string())
+            .group("ship".to_string())
+            .icon_id(String::new())
+            .num_consumables(2)
+            .preparation_time(0.0)
+            .reload_time(240.0)
+            .work_time(20.0)
+            .effect_fields(fields)
+            .build();
+        let ability = Ability::builder()
+            .can_buy(false)
+            .cost_credits(0)
+            .cost_gold(0)
+            .is_free(true)
+            .categories(HashMap::from([(variant.to_string(), cat)]))
+            .build();
+        let ability_param = Param::builder()
+            .id(GameParamId::from(2u32))
+            .index("PCY012".to_string())
+            .name(ship_name.to_string())
+            .nation(String::new())
+            .maybe_species(None)
+            .data(ParamData::Ability(ability))
+            .build();
+        let ability_param_rc = Rc::new(ability_param);
+
+        struct ScoutProvider(Rc<Param>);
+        impl GameParamProvider for ScoutProvider {
+            fn game_param_by_id(&self, _id: GameParamId) -> Option<Rc<Param>> {
+                None
+            }
+            fn game_param_by_index(&self, _: &str) -> Option<Rc<Param>> {
+                None
+            }
+            fn game_param_by_name(&self, name: &str) -> Option<Rc<Param>> {
+                if name == "PCY012_Scout" { Some(self.0.clone()) } else { None }
+            }
+            fn params(&self) -> &[Rc<Param>] {
+                &[]
+            }
+        }
+
+        let vehicle = Vehicle::builder()
+            .level(10)
+            .group("g".to_string())
+            .abilities(vec![vec![(ship_name.to_string(), variant.to_string())]])
+            .upgrades(Vec::new())
+            .maybe_config_data(None)
+            .maybe_model_path(None)
+            .maybe_armor(None)
+            .maybe_hit_locations(None)
+            .permoflages(Vec::new())
+            .camera_trajectories(Vec::new())
+            .maybe_ttx_components(None)
+            .build();
+        let ship = Param::builder()
+            .id(GameParamId::from(3u32))
+            .index("SHIP".to_string())
+            .name("TestShipWithScout".to_string())
+            .nation("USA".to_string())
+            .species(Recognized::Known(Species::Cruiser))
+            .data(ParamData::Vehicle(vehicle))
+            .build();
+
+        let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
+        let effects: Vec<_> = loadout.effects(&ScoutProvider(ability_param_rc)).iter().cloned().collect();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].id(), &EffectId::Consumable(ship_name.to_string()));
+        assert_eq!(effects[0].kind(), &EffectKind::Consumable { artillery_dist_coeff: 1.2 });
+    }
+
+    #[test]
+    fn consumable_with_dist_coeff_1_and_no_modifiers_emits_nothing() {
+        let mut fields = BTreeMap::new();
+        fields.insert("artilleryDistCoeff".to_string(), 1.0f32);
+        let cat = AbilityCategory::builder()
+            .consumable_type("crashCrew".to_string())
+            .group("ship".to_string())
+            .icon_id(String::new())
+            .num_consumables(-1)
+            .preparation_time(0.0)
+            .reload_time(120.0)
+            .work_time(15.0)
+            .effect_fields(fields)
+            .build();
+        let ability = Ability::builder()
+            .can_buy(false)
+            .cost_credits(0)
+            .cost_gold(0)
+            .is_free(true)
+            .categories(HashMap::from([("CrashCrew".to_string(), cat)]))
+            .build();
+        let ability_param = Param::builder()
+            .id(GameParamId::from(4u32))
+            .index("PCY001".to_string())
+            .name("PCY001_CrashCrew".to_string())
+            .nation(String::new())
+            .maybe_species(None)
+            .data(ParamData::Ability(ability))
+            .build();
+        let ability_param_rc = Rc::new(ability_param);
+
+        struct CrashCrewProvider(Rc<Param>);
+        impl GameParamProvider for CrashCrewProvider {
+            fn game_param_by_id(&self, _id: GameParamId) -> Option<Rc<Param>> {
+                None
+            }
+            fn game_param_by_index(&self, _: &str) -> Option<Rc<Param>> {
+                None
+            }
+            fn game_param_by_name(&self, name: &str) -> Option<Rc<Param>> {
+                if name == "PCY001_CrashCrew" { Some(self.0.clone()) } else { None }
+            }
+            fn params(&self) -> &[Rc<Param>] {
+                &[]
+            }
+        }
+
+        let vehicle = Vehicle::builder()
+            .level(10)
+            .group("g".to_string())
+            .abilities(vec![vec![("PCY001_CrashCrew".to_string(), "CrashCrew".to_string())]])
+            .upgrades(Vec::new())
+            .maybe_config_data(None)
+            .maybe_model_path(None)
+            .maybe_armor(None)
+            .maybe_hit_locations(None)
+            .permoflages(Vec::new())
+            .camera_trajectories(Vec::new())
+            .maybe_ttx_components(None)
+            .build();
+        let ship = Param::builder()
+            .id(GameParamId::from(5u32))
+            .index("SHIP2".to_string())
+            .name("TestShipWithCC".to_string())
+            .nation("USA".to_string())
+            .species(Recognized::Known(Species::Destroyer))
+            .data(ParamData::Vehicle(vehicle))
+            .build();
+
+        let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
+        let effects: Vec<_> =
+            loadout.effects(&CrashCrewProvider(ability_param_rc)).iter().cloned().collect();
+        assert!(effects.is_empty(), "crashCrew with dist_coeff=1.0 and no modifiers should emit no effect");
     }
 }

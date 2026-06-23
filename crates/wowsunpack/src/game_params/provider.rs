@@ -517,18 +517,21 @@ fn build_ability_category(category_data: &pickled::Dict) -> AbilityCategory {
     }
     // The client merges logic's nested `modifiers` dict last (GPToParamsDict lines 70-73),
     // so its fields override on collision.
+    let mut ability_modifiers: Vec<crate::game_params::types::CrewSkillModifier> = Vec::new();
     if let Some(logic) = logic.as_ref()
-        && let Some(modifiers) = logic.inner().get(&pk("modifiers")).and_then(|v| v.dict_or_object_dict())
+        && let Some(modifiers_dict) = logic.inner().get(&pk("modifiers")).and_then(|v| v.dict_or_object_dict())
     {
-        for (key, value) in modifiers.inner().iter() {
+        for (key, value) in modifiers_dict.inner().iter() {
             if let (Some(name), Some(n)) = (key.string_ref(), num(value)) {
                 effect_fields.insert(name.inner().to_owned(), n);
             }
         }
+        ability_modifiers = build_skill_modifiers(&modifiers_dict.inner());
     }
 
     AbilityCategory::builder()
         .effect_fields(effect_fields)
+        .modifiers(ability_modifiers)
         .maybe_special_sound_id(game_param_to_type!(category_data, "SpecialSoundID", Option<String>))
         .consumable_type(game_param_to_type!(category_data, "consumableType", Option<String>).unwrap_or_default())
         .group(game_param_to_type!(category_data, "group", Option<String>).unwrap_or_default())
