@@ -140,6 +140,104 @@ impl TriggerCondition {
             other => TriggerCondition::Other(other.to_owned()),
         }
     }
+
+    /// Whether this condition is satisfied by `facts`. `Other` is never satisfied.
+    pub fn holds(&self, facts: &SituationFacts) -> bool {
+        match self {
+            TriggerCondition::Detected => facts.detected,
+            TriggerCondition::Undetected => !facts.detected,
+            TriggerCondition::OnDetected { duration } => {
+                facts.seconds_since_detected.is_some_and(|t| t <= *duration)
+            }
+            TriggerCondition::EnemyWithinDetectionRange => facts.enemy_within_detection_range,
+            TriggerCondition::NoEnemyWithinDetectionRange => !facts.enemy_within_detection_range,
+            TriggerCondition::EnemyWithinMainGunRange => facts.enemy_within_main_gun_range,
+            TriggerCondition::EnemyWithinSecondaryRange => facts.enemy_within_secondary_range,
+            TriggerCondition::Outnumbered => facts.outnumbered,
+            TriggerCondition::ActiveAirDefense => facts.active_air_defense,
+            TriggerCondition::SubmarineBatteryLow => facts.submarine_battery_low,
+            TriggerCondition::OnConsumableActive(c) => facts.active_consumables.contains(c),
+            TriggerCondition::Other(_) => false,
+        }
+    }
+}
+
+/// A snapshot of battle-context facts used to derive per-effect activations without
+/// requiring the caller to know the internal `EffectsState` layout. Pass a default
+/// instance (stock, full-health) to `Effects::situation_state` to reproduce the
+/// identity card.
+pub struct SituationFacts {
+    /// Current HP fraction in `[0.0, 1.0]`; `1.0` = full health. Drives
+    /// `HealthScaledReload` (Adrenaline Rush) and `InnateAdrenaline` effects.
+    pub hp_fraction: f32,
+    /// Number of active burns and floods on the ship right now. Drives `StackingPerCount`
+    /// (Furious) effects.
+    pub burn_flood_count: u32,
+    /// Cumulative potential damage received since the start of battle (the raw game counter,
+    /// not normalized). Drives `StackingRepeated` (Potential Damage ratio) effects: stacks =
+    /// `floor(potential_damage / max_health)`.
+    pub potential_damage: f32,
+    /// The ship's maximum health pool (used as the denominator for `potential_damage`
+    /// stacking). Must be `> 0.0` for stacking to be non-zero.
+    pub max_health: f32,
+    /// Seconds the manual-secondaries target has been continuously held. Drives `Heat`
+    /// (ATBA manual-secondaries accuracy) effects.
+    pub secondary_fire_seconds: f32,
+    /// Consumable types currently active on this ship. Drives `Consumable` effects and
+    /// `OnConsumableActive` binary triggers.
+    pub active_consumables: Vec<Consumable>,
+    /// `true` if the ship is currently spotted by at least one enemy. Independent of
+    /// `seconds_since_detected`: a ship can be spotted (`detected = true`) while
+    /// `seconds_since_detected` is `None` (the detection event was not recorded), or
+    /// unspotted (`detected = false`) while `seconds_since_detected` is `Some(t)` (the
+    /// ship was detected `t` seconds ago but has since gone dark). Drives `Detected` and
+    /// `Undetected` trigger conditions.
+    pub detected: bool,
+    /// Seconds elapsed since the most recent detection event began, or `None` if no
+    /// detection event is being tracked. This is the elapsed time since the ship *became*
+    /// detected, not a live "currently spotted for X seconds" counter -- once the ship goes
+    /// dark the value keeps counting up (or the caller may clear it). Drives `OnDetected {
+    /// duration }`: the condition holds while `seconds_since_detected <= duration`.
+    pub seconds_since_detected: Option<f32>,
+    /// `true` if at least one enemy is within this ship's detection range. Drives
+    /// `EnemyWithinDetectionRange` and `NoEnemyWithinDetectionRange` trigger conditions.
+    pub enemy_within_detection_range: bool,
+    /// `true` if at least one enemy is within main-gun range. Drives
+    /// `EnemyWithinMainGunRange` trigger condition.
+    pub enemy_within_main_gun_range: bool,
+    /// `true` if at least one enemy is within secondary-gun range. Drives
+    /// `EnemyWithinSecondaryRange` trigger condition.
+    pub enemy_within_secondary_range: bool,
+    /// `true` if the team's side of the map has at least as many enemies as allies. Drives
+    /// the `Outnumbered` trigger condition.
+    pub outnumbered: bool,
+    /// `true` if the ship's AA defense is currently active. Drives `ActiveAirDefense`
+    /// trigger condition.
+    pub active_air_defense: bool,
+    /// `true` if the submarine's battery charge is low. Drives `SubmarineBatteryLow`
+    /// trigger condition.
+    pub submarine_battery_low: bool,
+}
+
+impl Default for SituationFacts {
+    fn default() -> Self {
+        SituationFacts {
+            hp_fraction: 1.0,
+            burn_flood_count: 0,
+            potential_damage: 0.0,
+            max_health: 0.0,
+            secondary_fire_seconds: 0.0,
+            active_consumables: Vec::new(),
+            detected: false,
+            seconds_since_detected: None,
+            enemy_within_detection_range: false,
+            enemy_within_main_gun_range: false,
+            enemy_within_secondary_range: false,
+            outnumbered: false,
+            active_air_defense: false,
+            submarine_battery_low: false,
+        }
+    }
 }
 
 /// A ship's equipped build: the source of effects. Borrowed; the caller assembles it
@@ -1480,6 +1578,41 @@ mod tests {
         let three_q = EffectsState::default().set(id, EffectActivation::Health(HealthFraction::new(0.75)));
         assert!((coef(&three_q, "GMShotDelay") - 0.95).abs() < 1e-6);
         assert!((coef(&three_q, "GMIdealRadius") - 0.915).abs() < 1e-6);
+    }
+
+    #[test]
+    fn situation_facts_default_is_stock() {
+        let f = SituationFacts::default();
+        assert_eq!(f.hp_fraction, 1.0);
+        assert_eq!(f.seconds_since_detected, None);
+        assert_eq!(f.burn_flood_count, 0);
+        assert!(!f.detected && !f.outnumbered && f.active_consumables.is_empty());
+    }
+
+    #[test]
+    fn trigger_condition_holds_maps_facts() {
+        let mut f = SituationFacts::default();
+        assert!(TriggerCondition::Undetected.holds(&f));
+        assert!(!TriggerCondition::Detected.holds(&f));
+        f.detected = true;
+        assert!(TriggerCondition::Detected.holds(&f));
+        assert!(!TriggerCondition::Undetected.holds(&f));
+
+        f.outnumbered = true;
+        assert!(TriggerCondition::Outnumbered.holds(&f));
+
+        f.active_consumables = vec![Consumable::Hydrophone];
+        assert!(TriggerCondition::OnConsumableActive(Consumable::Hydrophone).holds(&f));
+        assert!(!TriggerCondition::OnConsumableActive(Consumable::Radar).holds(&f));
+
+        f.seconds_since_detected = Some(10.0);
+        assert!(TriggerCondition::OnDetected { duration: 15.0 }.holds(&f));
+        f.seconds_since_detected = Some(20.0);
+        assert!(!TriggerCondition::OnDetected { duration: 15.0 }.holds(&f));
+        f.seconds_since_detected = None;
+        assert!(!TriggerCondition::OnDetected { duration: 15.0 }.holds(&f));
+
+        assert!(!TriggerCondition::Other("x".to_string()).holds(&SituationFacts::default()));
     }
 
     #[test]
