@@ -58,7 +58,6 @@ impl Method {
         let size = self.args.iter().map(|arg| arg.sort_size()).sum::<usize>();
         if size >= 0xffff { 0xffff + self.variable_length_header_size } else { size + self.variable_length_header_size }
     }
-
 }
 
 struct DefFile {

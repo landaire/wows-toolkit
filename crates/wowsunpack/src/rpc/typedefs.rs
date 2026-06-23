@@ -813,10 +813,7 @@ mod test {
         let mut input = &data[..];
         let result = t.parse_value(&mut input).unwrap();
         assert!(input.is_empty(), "all bytes consumed, no length prefix");
-        assert_eq!(
-            result,
-            ArgValue::Tuple(vec![ArgValue::Uint8(7), ArgValue::Uint8(8), ArgValue::Uint8(9)])
-        );
+        assert_eq!(result, ArgValue::Tuple(vec![ArgValue::Uint8(7), ArgValue::Uint8(8), ArgValue::Uint8(9)]));
 
         // It serializes as a JSON array.
         let json = serde_json::to_string(&result).unwrap();

@@ -37,7 +37,12 @@ fn main() {
 
     let stat = |label: &str| {
         let s = dhat::HeapStats::get();
-        eprintln!("{label:<28} curr={:>5.1} MiB  peak={:>5.1} MiB  blocks={}", mib(s.curr_bytes), mib(s.max_bytes), s.curr_blocks);
+        eprintln!(
+            "{label:<28} curr={:>5.1} MiB  peak={:>5.1} MiB  blocks={}",
+            mib(s.curr_bytes),
+            mib(s.max_bytes),
+            s.curr_blocks
+        );
     };
 
     eprintln!("building bare IdxVfs: dir={wows_dir} build={build}");
