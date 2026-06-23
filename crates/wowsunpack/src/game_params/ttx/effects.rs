@@ -549,6 +549,39 @@ impl Effects {
         Effects(effects)
     }
 
+    /// Derive a per-effect `EffectsState` from a tactical snapshot. Each effect's activation
+    /// is computed from its kind and `facts`; `AlwaysOn` effects keep their default.
+    pub fn situation_state(&self, facts: &SituationFacts) -> EffectsState {
+        let mut state = EffectsState::default();
+        for effect in &self.0 {
+            let activation = match effect.kind() {
+                EffectKind::AlwaysOn => continue,
+                EffectKind::HealthScaledReload | EffectKind::InnateAdrenaline { .. } => {
+                    EffectActivation::Health(HealthFraction::new(facts.hp_fraction))
+                }
+                EffectKind::StackingPerCount { .. } => EffectActivation::Stacks(facts.burn_flood_count),
+                EffectKind::StackingRepeated => {
+                    let n = if facts.max_health > 0.0 {
+                        (facts.potential_damage / facts.max_health) as u32
+                    } else {
+                        0
+                    };
+                    EffectActivation::Stacks(n)
+                }
+                EffectKind::Heat { .. } => EffectActivation::Heat(facts.secondary_fire_seconds),
+                EffectKind::Consumable { .. } => {
+                    let on = matches!(effect.id(), EffectId::Consumable(c) if facts.active_consumables.contains(c));
+                    if on { EffectActivation::On } else { EffectActivation::Off }
+                }
+                EffectKind::Binary { condition } => {
+                    if condition.holds(facts) { EffectActivation::On } else { EffectActivation::Off }
+                }
+            };
+            state = state.set(effect.id().clone(), activation);
+        }
+        state
+    }
+
     pub fn resolve(
         &self,
         state: &EffectsState,
@@ -1678,6 +1711,43 @@ mod tests {
         let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].kind(), &EffectKind::Binary { condition: TriggerCondition::Outnumbered });
+    }
+
+    #[test]
+    fn situation_state_default_reproduces_stock() {
+        let modern = Effect::for_test(EffectId::Modernizations, EffectKind::AlwaysOn, vec![uniform_modifier("GMShotDelay", 0.9)]);
+        let adren = Effect::for_test(EffectId::Skill(CrewSkillName::from("Adren")), EffectKind::HealthScaledReload, vec![uniform_modifier("lastChanceReloadCoefficient_Main", 0.2)]);
+        let furious = Effect::for_test(EffectId::Skill(CrewSkillName::from("Furious")), EffectKind::StackingPerCount { blocks: vec![(1, vec![uniform_modifier("GMShotDelay", 0.9)])] }, Vec::new());
+        let effects = Effects::for_test(vec![modern, adren, furious]);
+
+        let state = effects.situation_state(&SituationFacts::default());
+        let r = effects.resolve(&state, Species::Cruiser, test_version()).unwrap();
+        assert!((r.bundle().coef("GMShotDelay") - 0.9).abs() < 1e-6, "only the always-on modifier");
+        assert!((r.reload_coeffs().main - 1.0).abs() < 1e-6, "adrenaline identity at full HP");
+    }
+
+    #[test]
+    fn situation_state_sets_each_kind() {
+        let furious = Effect::for_test(EffectId::Skill(CrewSkillName::from("Furious")), EffectKind::StackingPerCount { blocks: vec![(1, vec![uniform_modifier("GMShotDelay", 0.9)]), (2, vec![uniform_modifier("GMShotDelay", 0.95)])] }, Vec::new());
+        let outnum = Effect::for_test(EffectId::Skill(CrewSkillName::from("Outnum")), EffectKind::Binary { condition: TriggerCondition::Outnumbered }, vec![uniform_modifier("GMIdealRadius", 0.9)]);
+        let scout = Effect::for_test(EffectId::Consumable(Consumable::SpottingAircraft), EffectKind::Consumable { artillery_dist_coeff: 1.2 }, Vec::new());
+        let effects = Effects::for_test(vec![furious, outnum, scout]);
+
+        let facts = SituationFacts { burn_flood_count: 2, outnumbered: true, active_consumables: vec![Consumable::SpottingAircraft], ..Default::default() };
+        let state = effects.situation_state(&facts);
+
+        assert_eq!(state.get(&EffectId::Skill(CrewSkillName::from("Furious"))), Some(EffectActivation::Stacks(2)));
+        assert_eq!(state.get(&EffectId::Skill(CrewSkillName::from("Outnum"))), Some(EffectActivation::On));
+        assert_eq!(state.get(&EffectId::Consumable(Consumable::SpottingAircraft)), Some(EffectActivation::On));
+    }
+
+    #[test]
+    fn situation_state_potential_damage_stacks() {
+        let pot = Effect::for_test(EffectId::Skill(CrewSkillName::from("Pot")), EffectKind::StackingRepeated, vec![uniform_modifier("regenCrewReloadCoeff", 0.992)]);
+        let effects = Effects::for_test(vec![pot]);
+        let facts = SituationFacts { potential_damage: 2.0e6, max_health: 1.0e5, ..Default::default() };
+        let state = effects.situation_state(&facts);
+        assert_eq!(state.get(&EffectId::Skill(CrewSkillName::from("Pot"))), Some(EffectActivation::Stacks(20)));
     }
 
     #[test]
