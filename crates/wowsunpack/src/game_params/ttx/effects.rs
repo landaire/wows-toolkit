@@ -12,12 +12,14 @@ use crate::game_params::ttx::selection::ShipUpgradeSelection;
 use crate::game_params::types::CrewSkill;
 use crate::game_params::types::CrewSkillModifier;
 use crate::game_params::types::GameParamProvider;
+use crate::game_params::types::Interpolator;
 use crate::game_params::types::KnownCrewSkill;
 use crate::game_params::types::Param;
 use crate::game_params::types::Species;
 
 const TRIGGER_ACTIVATION_ON_BURN_FLOOD: &str = "activationOnBurnFlood";
 const TRIGGER_POTENTIAL_DAMAGE_RATIO: &str = "potentialDamageRatio";
+const TRIGGER_ATBA_HEAT: &str = "atbaHeat";
 
 /// The deob clamps the stacking count to `PACKED_STATE_LIMITS` (1023).
 const STACK_LIMIT: u32 = 1023;
@@ -54,14 +56,16 @@ impl HealthFraction {
     }
 }
 
-/// How an effect is activated. `Off` / `On` / `Health` / `Stacks`; `Stacks(n)` drives the
-/// stacking triggers (Furious burn+flood count, potential-damage health-multiplier).
+/// How an effect is activated. `Off` / `On` / `Health` / `Stacks` / `Heat`; `Stacks(n)` drives
+/// the stacking triggers (Furious burn+flood count, potential-damage health-multiplier);
+/// `Heat(seconds)` drives manual-secondaries heat triggers.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EffectActivation {
     Off,
     On,
     Health(HealthFraction),
     Stacks(u32),
+    Heat(f32),
 }
 
 /// Identifies a toggleable effect within a loadout.
@@ -93,6 +97,10 @@ pub enum EffectKind {
     /// Potential-damage (`potentialDamageRatio`): at `Stacks(n)`, contribute `Effect.modifiers`
     /// `n` times (the modifier folds multiplicatively to `^n`).
     StackingRepeated,
+    /// Manual-secondaries heat (`atbaHeat`): at `Heat(seconds)`, `ratio =
+    /// heat_interpolator.eval(seconds)` (quantized to 1% as the client does), then each
+    /// modifier is lerped from its identity to its configured value by `ratio`.
+    Heat { heat_interpolator: Interpolator },
 }
 
 /// One toggleable effect contributed by the loadout. Raw modifiers are private; resolution
@@ -120,6 +128,7 @@ impl Effect {
             EffectKind::Binary | EffectKind::Consumable { .. } => EffectActivation::Off,
             EffectKind::HealthScaledReload => EffectActivation::Health(HealthFraction::FULL),
             EffectKind::StackingPerCount { .. } | EffectKind::StackingRepeated => EffectActivation::Stacks(0),
+            EffectKind::Heat { .. } => EffectActivation::Heat(0.0),
         }
     }
 
@@ -224,6 +233,15 @@ impl Loadout<'_> {
                             effects.push(Effect {
                                 id: EffectId::Skill(name),
                                 kind: EffectKind::StackingRepeated,
+                                modifiers: tmods.clone(),
+                            });
+                        }
+                    }
+                    TRIGGER_ATBA_HEAT => {
+                        if let Some(tmods) = trigger.modifiers().filter(|m| !m.is_empty()) {
+                            effects.push(Effect {
+                                id: EffectId::Skill(name),
+                                kind: EffectKind::Heat { heat_interpolator: trigger.heat_interpolator().clone() },
                                 modifiers: tmods.clone(),
                             });
                         }
@@ -915,6 +933,55 @@ mod tests {
         let repeated =
             Effect::for_test(EffectId::Skill("DefenceUw".into()), EffectKind::StackingRepeated, Vec::new());
         assert_eq!(repeated.default_activation(), EffectActivation::Stacks(0));
+    }
+
+    fn atba_heat_skill(name: &str, points: Vec<(f32, f32)>, modifiers: Vec<CrewSkillModifier>) -> CrewSkill {
+        let trigger = CrewSkillLogicTrigger::builder()
+            .consumable_type(String::new())
+            .cooling_delay(15.0)
+            .cooling_interpolator(Interpolator::default())
+            .count_to_modifier(Vec::new())
+            .duration(0.0)
+            .energy_coeff(0.0)
+            .heat_interpolator(Interpolator::from_points(points))
+            .modifiers(modifiers)
+            .trigger_desc_ids(String::new())
+            .trigger_type("atbaHeat".to_owned())
+            .build();
+        CrewSkill::builder()
+            .internal_name(CrewSkillName::from(name))
+            .can_be_learned(true)
+            .is_epic(false)
+            .skill_type(CrewSkillType::new(0))
+            .ui_treat_as_trigger(false)
+            .tier(tiers())
+            .logic_trigger(trigger)
+            .build()
+    }
+
+    #[test]
+    fn default_activation_heat_kind() {
+        let effect = Effect::for_test(
+            EffectId::Skill("AtbaAccuracy".into()),
+            EffectKind::Heat { heat_interpolator: Interpolator::from_points(vec![(0.0, 0.0), (45.0, 1.0)]) },
+            Vec::new(),
+        );
+        assert_eq!(effect.default_activation(), EffectActivation::Heat(0.0));
+    }
+
+    #[test]
+    fn atba_heat_trigger_emits_heat_effect() {
+        let ship = ship_no_abilities();
+        let points = vec![(0.0, 0.0), (10.0, 0.5), (45.0, 1.0)];
+        let skill = atba_heat_skill("AtbaAccuracy", points.clone(), vec![uniform_modifier("GSPriorityTargetIdealRadius", 0.5)]);
+        let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
+        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].id(), &EffectId::Skill("AtbaAccuracy".to_string()));
+        assert_eq!(
+            effects[0].kind(),
+            &EffectKind::Heat { heat_interpolator: Interpolator::from_points(points) }
+        );
     }
 
     fn test_version() -> crate::data::Version {
