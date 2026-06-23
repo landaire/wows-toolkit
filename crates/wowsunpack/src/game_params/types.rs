@@ -1828,6 +1828,22 @@ impl CrewSkillModifier {
     pub fn excludes(&self, consumable_type: &str) -> bool {
         self.excluded_consumables.iter().any(|t| t == consumable_type)
     }
+
+    /// A modifier whose value is the same for every species. The effects engine builds
+    /// these to carry an evaluated coefficient into `ModifierBundle::from_modifiers`,
+    /// which reads only the resolved species.
+    pub(crate) fn uniform(name: &str, value: f32) -> CrewSkillModifier {
+        CrewSkillModifier::builder()
+            .name(name.to_owned())
+            .aircraft_carrier(value)
+            .auxiliary(value)
+            .battleship(value)
+            .cruiser(value)
+            .destroyer(value)
+            .submarine(value)
+            .excluded_consumables(Vec::new())
+            .build()
+    }
 }
 
 /// A piecewise-linear control-point ramp (`MultiLerp`): `(x, y)` points, `y` in 0..1.

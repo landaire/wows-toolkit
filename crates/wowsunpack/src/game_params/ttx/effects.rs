@@ -8,6 +8,7 @@ use crate::data::Version;
 use crate::game_params::ttx::model::ShipStats;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::modifiers::ModifierError;
+use crate::game_params::ttx::modifiers::modifier_identity;
 use crate::game_params::ttx::selection::ShipUpgradeSelection;
 use crate::game_params::types::CrewSkill;
 use crate::game_params::types::CrewSkillModifier;
@@ -31,6 +32,12 @@ fn stacks(activation: EffectActivation) -> u32 {
         EffectActivation::Stacks(n) => n,
         _ => 0,
     }
+}
+
+/// The client packs the heat coefficient into 0..100 (`int(ratio*100)`); replicate that
+/// 1% quantization. `ratio` is in `[0, 1]` (clamped by `eval`), so `floor` matches `int`.
+fn quantize_heat_ratio(ratio: f32) -> f32 {
+    (ratio * 100.0).floor() / 100.0
 }
 
 /// A ship's equipped build: the source of effects. Borrowed; the caller assembles it
@@ -367,6 +374,18 @@ impl Effects {
                     let n = stacks(activation).min(STACK_LIMIT);
                     for _ in 0..n {
                         contributed.extend(effect.modifiers.iter().cloned());
+                    }
+                }
+                (EffectKind::Heat { heat_interpolator }, activation) => {
+                    let seconds = match activation {
+                        EffectActivation::Heat(s) => s,
+                        _ => 0.0,
+                    };
+                    let ratio = quantize_heat_ratio(heat_interpolator.eval(seconds));
+                    for m in &effect.modifiers {
+                        let identity = modifier_identity(version, m.name())?;
+                        let effective = identity + (m.get_for_species(&species) - identity) * ratio;
+                        contributed.push(CrewSkillModifier::uniform(m.name(), effective));
                     }
                 }
                 _ => {}
@@ -1165,6 +1184,38 @@ mod tests {
             r_cap.bundle().coef("regenCrewReloadCoeff"),
             "Stacks past the cap equals Stacks(1023)"
         );
+    }
+
+    #[test]
+    fn crew_skill_modifier_uniform_is_species_uniform() {
+        let m = CrewSkillModifier::uniform("GSPriorityTargetIdealRadius", 0.75);
+        assert_eq!(m.name(), "GSPriorityTargetIdealRadius");
+        assert!((m.get_for_species(&Species::Cruiser) - 0.75).abs() < 1e-6);
+        assert!((m.get_for_species(&Species::Battleship) - 0.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn resolve_heat_lerps_and_quantizes() {
+        let points = vec![(0.0, 0.0), (10.0, 0.5), (45.0, 1.0)];
+        let effect = Effect::for_test(
+            EffectId::Skill("AtbaAccuracy".into()),
+            EffectKind::Heat { heat_interpolator: Interpolator::from_points(points) },
+            vec![uniform_modifier("GSPriorityTargetIdealRadius", 0.5)],
+        );
+        let effects = Effects::for_test(vec![effect]);
+        let id = EffectId::Skill("AtbaAccuracy".into());
+        let coef = |state: &EffectsState| {
+            effects.resolve(state, Species::Cruiser, test_version()).unwrap().bundle().coef("GSPriorityTargetIdealRadius")
+        };
+
+        assert!((coef(&EffectsState::default()) - 1.0).abs() < 1e-6, "Heat(0) default -> identity");
+        let at = |s: f32| EffectsState::default().set(id.clone(), EffectActivation::Heat(s));
+        assert!((coef(&at(10.0)) - 0.75).abs() < 1e-6, "ratio 0.5 -> lerp(1,0.5,0.5)=0.75");
+        assert!((coef(&at(45.0)) - 0.5).abs() < 1e-6, "ratio 1.0 -> 0.5");
+        assert!((coef(&at(100.0)) - 0.5).abs() < 1e-6, "clamped -> 0.5");
+        // 6.667s -> continuous ratio 0.33335, quantized floor to 0.33 -> lerp(1,0.5,0.33)=0.835,
+        // distinct from the continuous 0.833325.
+        assert!((coef(&at(6.667)) - 0.835).abs() < 1e-4, "1% quantization applied");
     }
 
     #[test]
