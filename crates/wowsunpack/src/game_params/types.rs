@@ -1950,7 +1950,10 @@ impl CrewSkillLogicTrigger {
     }
 
     /// The consumable this trigger watches (`activationOnConsumable`), resolved to a type.
-    pub fn consumable_type(&self, version: crate::data::Version) -> crate::recognized::Recognized<crate::game_types::Consumable> {
+    pub fn consumable_type(
+        &self,
+        version: crate::data::Version,
+    ) -> crate::recognized::Recognized<crate::game_types::Consumable> {
         crate::game_types::Consumable::from_consumable_type(&self.consumable_type, version)
     }
 

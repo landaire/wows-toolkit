@@ -783,7 +783,8 @@ mod tests {
         let range_off =
             em_off.stats(&ship, &sel, level, &provider).artillery.and_then(|a| a.range).map(|r| r.value()).unwrap();
 
-        let state_on = EffectsState::default().set(EffectId::Consumable(crate::game_types::Consumable::SpottingAircraft), EffectActivation::On);
+        let state_on = EffectsState::default()
+            .set(EffectId::Consumable(crate::game_types::Consumable::SpottingAircraft), EffectActivation::On);
         let em_on = effects.resolve(&state_on, Species::Destroyer, test_version()).unwrap();
         let range_on =
             em_on.stats(&ship, &sel, level, &provider).artillery.and_then(|a| a.range).map(|r| r.value()).unwrap();

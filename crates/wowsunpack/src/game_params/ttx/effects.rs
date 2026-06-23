@@ -47,11 +47,7 @@ fn quantize_heat_ratio(ratio: f32) -> f32 {
 /// The active innate-adrenaline modifier set at health fraction `hf`: the bounding breakpoint
 /// (clamped, no extrapolation) or a per-key lerp between the two bracketing breakpoints,
 /// evaluated for `species`. `breakpoints` is descending by health fraction and non-empty.
-fn active_innate_modifiers(
-    breakpoints: &[InnateSkillBreakpoint],
-    hf: f32,
-    species: Species,
-) -> Vec<CrewSkillModifier> {
+fn active_innate_modifiers(breakpoints: &[InnateSkillBreakpoint], hf: f32, species: Species) -> Vec<CrewSkillModifier> {
     let hi_end = &breakpoints[0];
     let lo_end = &breakpoints[breakpoints.len() - 1];
     if hf >= hi_end.health_fraction() {
@@ -64,11 +60,7 @@ fn active_innate_modifiers(
         let (hi, lo) = (&pair[0], &pair[1]);
         if hf <= hi.health_fraction() && hf >= lo.health_fraction() {
             let span = lo.health_fraction() - hi.health_fraction();
-            let t = if span == 0.0 {
-                0.0
-            } else {
-                ((hf - hi.health_fraction()) / span).clamp(0.0, 1.0)
-            };
+            let t = if span == 0.0 { 0.0 } else { ((hf - hi.health_fraction()) / span).clamp(0.0, 1.0) };
             return hi
                 .modifiers()
                 .iter()
@@ -146,9 +138,7 @@ impl TriggerCondition {
         match self {
             TriggerCondition::Detected => facts.detected,
             TriggerCondition::Undetected => !facts.detected,
-            TriggerCondition::OnDetected { duration } => {
-                facts.seconds_since_detected.is_some_and(|t| t <= *duration)
-            }
+            TriggerCondition::OnDetected { duration } => facts.seconds_since_detected.is_some_and(|t| t <= *duration),
             TriggerCondition::EnemyWithinDetectionRange => facts.enemy_within_detection_range,
             TriggerCondition::NoEnemyWithinDetectionRange => !facts.enemy_within_detection_range,
             TriggerCondition::EnemyWithinMainGunRange => facts.enemy_within_main_gun_range,
@@ -464,16 +454,13 @@ impl Loadout<'_> {
                     }
                     _ => {
                         if let Some(tmods) = trigger.modifiers().filter(|m| !m.is_empty()) {
-                            let recognized =
-                                KnownCrewSkill::recognize(skill.internal_name(), skill.skill_type());
+                            let recognized = KnownCrewSkill::recognize(skill.internal_name(), skill.skill_type());
                             let kind = match recognized.known() {
                                 Some(KnownCrewSkill::AdrenalineRush)
-                                | Some(KnownCrewSkill::SubmarineAdrenalineRush) => {
-                                    EffectKind::HealthScaledReload
-                                }
+                                | Some(KnownCrewSkill::SubmarineAdrenalineRush) => EffectKind::HealthScaledReload,
                                 _ => EffectKind::Binary {
-                            condition: TriggerCondition::from_trigger_type(trigger, version),
-                        },
+                                    condition: TriggerCondition::from_trigger_type(trigger, version),
+                                },
                             };
                             effects.push(Effect { id: EffectId::Skill(name), kind, modifiers: tmods.clone() });
                         }
@@ -523,9 +510,7 @@ impl Loadout<'_> {
                 }
                 let mut breakpoints = innate.breakpoints().to_vec();
                 breakpoints.sort_by(|a, b| {
-                    b.health_fraction()
-                        .partial_cmp(&a.health_fraction())
-                        .unwrap_or(std::cmp::Ordering::Equal)
+                    b.health_fraction().partial_cmp(&a.health_fraction()).unwrap_or(std::cmp::Ordering::Equal)
                 });
                 effects.push(Effect {
                     id: EffectId::Innate(innate.skill_type().to_owned()),
@@ -561,11 +546,7 @@ impl Effects {
                 }
                 EffectKind::StackingPerCount { .. } => EffectActivation::Stacks(facts.burn_flood_count),
                 EffectKind::StackingRepeated => {
-                    let n = if facts.max_health > 0.0 {
-                        (facts.potential_damage / facts.max_health) as u32
-                    } else {
-                        0
-                    };
+                    let n = if facts.max_health > 0.0 { (facts.potential_damage / facts.max_health) as u32 } else { 0 };
                     EffectActivation::Stacks(n)
                 }
                 EffectKind::Heat { .. } => EffectActivation::Heat(facts.secondary_fire_seconds),
@@ -574,7 +555,11 @@ impl Effects {
                     if on { EffectActivation::On } else { EffectActivation::Off }
                 }
                 EffectKind::Binary { condition } => {
-                    if condition.holds(facts) { EffectActivation::On } else { EffectActivation::Off }
+                    if condition.holds(facts) {
+                        EffectActivation::On
+                    } else {
+                        EffectActivation::Off
+                    }
                 }
             };
             state = state.set(effect.id().clone(), activation);
@@ -888,7 +873,10 @@ mod tests {
     fn default_activation_per_kind() {
         let mk = |kind: EffectKind| Effect::for_test(EffectId::Modernizations, kind, Vec::new());
         assert_eq!(mk(EffectKind::AlwaysOn).default_activation(), EffectActivation::On);
-        assert_eq!(mk(EffectKind::Binary { condition: TriggerCondition::Outnumbered }).default_activation(), EffectActivation::Off);
+        assert_eq!(
+            mk(EffectKind::Binary { condition: TriggerCondition::Outnumbered }).default_activation(),
+            EffectActivation::Off
+        );
         assert_eq!(
             mk(EffectKind::Consumable { artillery_dist_coeff: 1.2 }).default_activation(),
             EffectActivation::Off
@@ -948,7 +936,10 @@ mod tests {
         let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].id(), &EffectId::Skill(CrewSkillName::from("TriggerGmReload")));
-        assert_eq!(effects[0].kind(), &EffectKind::Binary { condition: TriggerCondition::Other("triggerBattleLosing".to_string()) });
+        assert_eq!(
+            effects[0].kind(),
+            &EffectKind::Binary { condition: TriggerCondition::Other("triggerBattleLosing".to_string()) }
+        );
     }
 
     #[test]
@@ -1055,7 +1046,8 @@ mod tests {
             .build();
 
         let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&ScoutProvider(ability_param_rc), test_version()).iter().cloned().collect();
+        let effects: Vec<_> =
+            loadout.effects(&ScoutProvider(ability_param_rc), test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].id(), &EffectId::Consumable(Consumable::SpottingAircraft));
         assert_eq!(effects[0].kind(), &EffectKind::Consumable { artillery_dist_coeff: 1.2 });
@@ -1135,7 +1127,8 @@ mod tests {
             .build();
 
         let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&SpeedBoostProvider(ability_param_rc), test_version()).iter().cloned().collect();
+        let effects: Vec<_> =
+            loadout.effects(&SpeedBoostProvider(ability_param_rc), test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1, "non-empty modifiers should emit a consumable effect even with coeff==1.0");
         assert_eq!(effects[0].id(), &EffectId::Consumable(Consumable::SpeedBoost));
         assert_eq!(effects[0].kind(), &EffectKind::Consumable { artillery_dist_coeff: 1.0 });
@@ -1212,7 +1205,8 @@ mod tests {
             .build();
 
         let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&CrashCrewProvider(ability_param_rc), test_version()).iter().cloned().collect();
+        let effects: Vec<_> =
+            loadout.effects(&CrashCrewProvider(ability_param_rc), test_version()).iter().cloned().collect();
         assert!(effects.is_empty(), "crashCrew with dist_coeff=1.0 and no modifiers should emit no effect");
     }
 
@@ -1225,8 +1219,7 @@ mod tests {
         );
         assert_eq!(per_count.default_activation(), EffectActivation::Stacks(0));
 
-        let repeated =
-            Effect::for_test(EffectId::Skill("DefenceUw".into()), EffectKind::StackingRepeated, Vec::new());
+        let repeated = Effect::for_test(EffectId::Skill("DefenceUw".into()), EffectKind::StackingRepeated, Vec::new());
         assert_eq!(repeated.default_activation(), EffectActivation::Stacks(0));
     }
 
@@ -1268,15 +1261,13 @@ mod tests {
     fn atba_heat_trigger_emits_heat_effect() {
         let ship = ship_no_abilities();
         let points = vec![(0.0, 0.0), (10.0, 0.5), (45.0, 1.0)];
-        let skill = atba_heat_skill("AtbaAccuracy", points.clone(), vec![uniform_modifier("GSPriorityTargetIdealRadius", 0.5)]);
+        let skill =
+            atba_heat_skill("AtbaAccuracy", points.clone(), vec![uniform_modifier("GSPriorityTargetIdealRadius", 0.5)]);
         let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
         let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].id(), &EffectId::Skill(CrewSkillName::from("AtbaAccuracy")));
-        assert_eq!(
-            effects[0].kind(),
-            &EffectKind::Heat { heat_interpolator: Interpolator::from_points(points) }
-        );
+        assert_eq!(effects[0].kind(), &EffectKind::Heat { heat_interpolator: Interpolator::from_points(points) });
     }
 
     fn test_version() -> crate::data::Version {
@@ -1364,7 +1355,8 @@ mod tests {
         let result_off = effects.resolve(&state_off, Species::Cruiser, test_version()).unwrap();
         assert!((result_off.artillery_dist_coeff() - 1.0).abs() < 1e-6, "off -> dist 1.0");
 
-        let state_on = EffectsState::default().set(EffectId::Consumable(Consumable::SpottingAircraft), EffectActivation::On);
+        let state_on =
+            EffectsState::default().set(EffectId::Consumable(Consumable::SpottingAircraft), EffectActivation::On);
         let result_on = effects.resolve(&state_on, Species::Cruiser, test_version()).unwrap();
         assert!((result_on.artillery_dist_coeff() - 1.2).abs() < 1e-6, "on -> dist 1.2");
     }
@@ -1379,11 +1371,8 @@ mod tests {
             (5u32, vec![uniform_modifier("GMShotDelay", 0.95)]),
             (6u32, vec![uniform_modifier("GMShotDelay", 0.95)]),
         ];
-        let effect = Effect::for_test(
-            EffectId::Skill("Furious".into()),
-            EffectKind::StackingPerCount { blocks },
-            Vec::new(),
-        );
+        let effect =
+            Effect::for_test(EffectId::Skill("Furious".into()), EffectKind::StackingPerCount { blocks }, Vec::new());
         let effects = Effects::for_test(vec![effect]);
         let id = EffectId::Skill("Furious".into());
 
@@ -1409,11 +1398,7 @@ mod tests {
         assert!((r2.bundle().coef("GMShotDelay") - 0.9 * 0.95).abs() < 1e-6, "Stacks(2) -> 0.9*0.95");
 
         let r10 = effects
-            .resolve(
-                &EffectsState::default().set(id, EffectActivation::Stacks(10)),
-                Species::Cruiser,
-                test_version(),
-            )
+            .resolve(&EffectsState::default().set(id, EffectActivation::Stacks(10)), Species::Cruiser, test_version())
             .unwrap();
         let expected = 0.9 * 0.95f32.powi(5);
         assert!((r10.bundle().coef("GMShotDelay") - expected).abs() < 1e-5, "Stacks(10) capped at 6");
@@ -1449,11 +1434,7 @@ mod tests {
             )
             .unwrap();
         let r_cap = effects
-            .resolve(
-                &EffectsState::default().set(id, EffectActivation::Stacks(1023)),
-                Species::Cruiser,
-                test_version(),
-            )
+            .resolve(&EffectsState::default().set(id, EffectActivation::Stacks(1023)), Species::Cruiser, test_version())
             .unwrap();
         assert_eq!(
             r_big.bundle().coef("regenCrewReloadCoeff"),
@@ -1481,7 +1462,11 @@ mod tests {
         let effects = Effects::for_test(vec![effect]);
         let id = EffectId::Skill("AtbaAccuracy".into());
         let coef = |state: &EffectsState| {
-            effects.resolve(state, Species::Cruiser, test_version()).unwrap().bundle().coef("GSPriorityTargetIdealRadius")
+            effects
+                .resolve(state, Species::Cruiser, test_version())
+                .unwrap()
+                .bundle()
+                .coef("GSPriorityTargetIdealRadius")
         };
 
         assert!((coef(&EffectsState::default()) - 1.0).abs() < 1e-6, "Heat(0) default -> identity");
@@ -1502,11 +1487,7 @@ mod tests {
     }
 
     fn oregon_breakpoints() -> Vec<InnateSkillBreakpoint> {
-        vec![
-            innate_breakpoint(1.0, 1.0, 1.0),
-            innate_breakpoint(0.5, 0.83, 0.9),
-            innate_breakpoint(0.25, 0.77, 0.85),
-        ]
+        vec![innate_breakpoint(1.0, 1.0, 1.0), innate_breakpoint(0.5, 0.83, 0.9), innate_breakpoint(0.25, 0.77, 0.85)]
     }
 
     fn ship_with_innate() -> Param {
@@ -1552,10 +1533,7 @@ mod tests {
         let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].id(), &EffectId::Innate("adrenalineRush".to_owned()));
-        assert_eq!(
-            effects[0].kind(),
-            &EffectKind::InnateAdrenaline { breakpoints: oregon_breakpoints() }
-        );
+        assert_eq!(effects[0].kind(), &EffectKind::InnateAdrenaline { breakpoints: oregon_breakpoints() });
     }
 
     #[test]
@@ -1706,7 +1684,12 @@ mod tests {
     #[test]
     fn binary_trigger_emits_condition() {
         let ship = ship_no_abilities();
-        let skill = skill_with_trigger("Outnum", 0, "EnemiesNotLessThanAlliesWithinGMTrigger", vec![uniform_modifier("speedCoef", 1.08)]);
+        let skill = skill_with_trigger(
+            "Outnum",
+            0,
+            "EnemiesNotLessThanAlliesWithinGMTrigger",
+            vec![uniform_modifier("speedCoef", 1.08)],
+        );
         let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
         let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
@@ -1715,9 +1698,21 @@ mod tests {
 
     #[test]
     fn situation_state_default_reproduces_stock() {
-        let modern = Effect::for_test(EffectId::Modernizations, EffectKind::AlwaysOn, vec![uniform_modifier("GMShotDelay", 0.9)]);
-        let adren = Effect::for_test(EffectId::Skill(CrewSkillName::from("Adren")), EffectKind::HealthScaledReload, vec![uniform_modifier("lastChanceReloadCoefficient_Main", 0.2)]);
-        let furious = Effect::for_test(EffectId::Skill(CrewSkillName::from("Furious")), EffectKind::StackingPerCount { blocks: vec![(1, vec![uniform_modifier("GMShotDelay", 0.9)])] }, Vec::new());
+        let modern = Effect::for_test(
+            EffectId::Modernizations,
+            EffectKind::AlwaysOn,
+            vec![uniform_modifier("GMShotDelay", 0.9)],
+        );
+        let adren = Effect::for_test(
+            EffectId::Skill(CrewSkillName::from("Adren")),
+            EffectKind::HealthScaledReload,
+            vec![uniform_modifier("lastChanceReloadCoefficient_Main", 0.2)],
+        );
+        let furious = Effect::for_test(
+            EffectId::Skill(CrewSkillName::from("Furious")),
+            EffectKind::StackingPerCount { blocks: vec![(1, vec![uniform_modifier("GMShotDelay", 0.9)])] },
+            Vec::new(),
+        );
         let effects = Effects::for_test(vec![modern, adren, furious]);
 
         let state = effects.situation_state(&SituationFacts::default());
@@ -1728,12 +1723,34 @@ mod tests {
 
     #[test]
     fn situation_state_sets_each_kind() {
-        let furious = Effect::for_test(EffectId::Skill(CrewSkillName::from("Furious")), EffectKind::StackingPerCount { blocks: vec![(1, vec![uniform_modifier("GMShotDelay", 0.9)]), (2, vec![uniform_modifier("GMShotDelay", 0.95)])] }, Vec::new());
-        let outnum = Effect::for_test(EffectId::Skill(CrewSkillName::from("Outnum")), EffectKind::Binary { condition: TriggerCondition::Outnumbered }, vec![uniform_modifier("GMIdealRadius", 0.9)]);
-        let scout = Effect::for_test(EffectId::Consumable(Consumable::SpottingAircraft), EffectKind::Consumable { artillery_dist_coeff: 1.2 }, Vec::new());
+        let furious = Effect::for_test(
+            EffectId::Skill(CrewSkillName::from("Furious")),
+            EffectKind::StackingPerCount {
+                blocks: vec![
+                    (1, vec![uniform_modifier("GMShotDelay", 0.9)]),
+                    (2, vec![uniform_modifier("GMShotDelay", 0.95)]),
+                ],
+            },
+            Vec::new(),
+        );
+        let outnum = Effect::for_test(
+            EffectId::Skill(CrewSkillName::from("Outnum")),
+            EffectKind::Binary { condition: TriggerCondition::Outnumbered },
+            vec![uniform_modifier("GMIdealRadius", 0.9)],
+        );
+        let scout = Effect::for_test(
+            EffectId::Consumable(Consumable::SpottingAircraft),
+            EffectKind::Consumable { artillery_dist_coeff: 1.2 },
+            Vec::new(),
+        );
         let effects = Effects::for_test(vec![furious, outnum, scout]);
 
-        let facts = SituationFacts { burn_flood_count: 2, outnumbered: true, active_consumables: vec![Consumable::SpottingAircraft], ..Default::default() };
+        let facts = SituationFacts {
+            burn_flood_count: 2,
+            outnumbered: true,
+            active_consumables: vec![Consumable::SpottingAircraft],
+            ..Default::default()
+        };
         let state = effects.situation_state(&facts);
 
         assert_eq!(state.get(&EffectId::Skill(CrewSkillName::from("Furious"))), Some(EffectActivation::Stacks(2)));
@@ -1743,7 +1760,11 @@ mod tests {
 
     #[test]
     fn situation_state_potential_damage_stacks() {
-        let pot = Effect::for_test(EffectId::Skill(CrewSkillName::from("Pot")), EffectKind::StackingRepeated, vec![uniform_modifier("regenCrewReloadCoeff", 0.992)]);
+        let pot = Effect::for_test(
+            EffectId::Skill(CrewSkillName::from("Pot")),
+            EffectKind::StackingRepeated,
+            vec![uniform_modifier("regenCrewReloadCoeff", 0.992)],
+        );
         let effects = Effects::for_test(vec![pot]);
         let facts = SituationFacts { potential_damage: 2.0e6, max_health: 1.0e5, ..Default::default() };
         let state = effects.situation_state(&facts);

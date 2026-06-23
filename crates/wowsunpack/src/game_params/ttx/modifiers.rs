@@ -155,9 +155,7 @@ impl Combine {
 /// The fold identity for `name` at `version`: 1.0 for multiplicative names, 0.0 for
 /// additive ones. Errors when the name cannot be classified (same rule as `from_modifiers`).
 pub(crate) fn modifier_identity(version: Version, name: &str) -> Result<f32, ModifierError> {
-    Combine::classify(version, name)
-        .map(Combine::identity)
-        .map_err(|e| ModifierError::Unknown(vec![e.name]))
+    Combine::classify(version, name).map(Combine::identity).map_err(|e| ModifierError::Unknown(vec![e.name]))
 }
 
 /// Equipped modifiers aggregated per name and resolved for a fixed `Species`.
