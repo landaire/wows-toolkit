@@ -772,7 +772,7 @@ mod tests {
 
         let dist_coeff = 1.2f32;
         let scout_effect = Effect::for_test(
-            EffectId::Consumable("PCY012_Scout".into()),
+            EffectId::Consumable(crate::game_types::Consumable::SpottingAircraft),
             EffectKind::Consumable { artillery_dist_coeff: dist_coeff },
             vec![uniform_modifier("GMIdealRadius", 0.9)],
         );
@@ -783,7 +783,7 @@ mod tests {
         let range_off =
             em_off.stats(&ship, &sel, level, &provider).artillery.and_then(|a| a.range).map(|r| r.value()).unwrap();
 
-        let state_on = EffectsState::default().set(EffectId::Consumable("PCY012_Scout".into()), EffectActivation::On);
+        let state_on = EffectsState::default().set(EffectId::Consumable(crate::game_types::Consumable::SpottingAircraft), EffectActivation::On);
         let em_on = effects.resolve(&state_on, Species::Destroyer, test_version()).unwrap();
         let range_on =
             em_on.stats(&ship, &sel, level, &provider).artillery.and_then(|a| a.range).map(|r| r.value()).unwrap();
@@ -796,7 +796,7 @@ mod tests {
 
         // Build a reference On state without the GMIdealRadius modifier to isolate its effect.
         let scout_no_radius_mod = Effect::for_test(
-            EffectId::Consumable("PCY012_Scout".into()),
+            EffectId::Consumable(crate::game_types::Consumable::SpottingAircraft),
             EffectKind::Consumable { artillery_dist_coeff: dist_coeff },
             vec![],
         );

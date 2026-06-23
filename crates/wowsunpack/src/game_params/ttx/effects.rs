@@ -12,12 +12,14 @@ use crate::game_params::ttx::modifiers::modifier_identity;
 use crate::game_params::ttx::selection::ShipUpgradeSelection;
 use crate::game_params::types::CrewSkill;
 use crate::game_params::types::CrewSkillModifier;
+use crate::game_params::types::CrewSkillName;
 use crate::game_params::types::GameParamProvider;
 use crate::game_params::types::InnateSkillBreakpoint;
 use crate::game_params::types::Interpolator;
 use crate::game_params::types::KnownCrewSkill;
 use crate::game_params::types::Param;
 use crate::game_params::types::Species;
+use crate::game_types::Consumable;
 
 const TRIGGER_ACTIVATION_ON_BURN_FLOOD: &str = "activationOnBurnFlood";
 const TRIGGER_POTENTIAL_DAMAGE_RATIO: &str = "potentialDamageRatio";
@@ -123,11 +125,12 @@ pub enum EffectActivation {
 /// Identifies a toggleable effect within a loadout.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum EffectId {
-    /// Commander-skill internal name; `Modernizations` is the single aggregate always-on
-    /// effect for equipped upgrade modifiers.
-    Skill(String),
+    /// A commander skill, keyed by its stable internal name.
+    Skill(CrewSkillName),
+    /// The single aggregate always-on effect for equipped upgrade modifiers.
     Modernizations,
-    Consumable(String),
+    /// A ship consumable, keyed by its recognized type (e.g. `Consumable::SpottingAircraft`).
+    Consumable(Consumable),
     /// A ship innate skill, keyed by its `skill_type` (e.g. "adrenalineRush").
     Innate(String),
 }
@@ -258,7 +261,7 @@ impl EffectiveModifiers {
 }
 
 impl Loadout<'_> {
-    pub fn effects(&self, provider: &dyn GameParamProvider) -> Effects {
+    pub fn effects(&self, provider: &dyn GameParamProvider, version: Version) -> Effects {
         let mut effects: Vec<Effect> = Vec::new();
 
         if !self.modernization_modifiers.is_empty() {
@@ -270,7 +273,7 @@ impl Loadout<'_> {
         }
 
         for skill in self.skills {
-            let name = skill.internal_name().as_str().to_owned();
+            let name = skill.internal_name().clone();
             if let Some(mods) = skill.modifiers().filter(|m| !m.is_empty()) {
                 effects.push(Effect {
                     id: EffectId::Skill(name.clone()),
@@ -340,11 +343,15 @@ impl Loadout<'_> {
                         Some(c) => c,
                         None => continue,
                     };
+                    let consumable = match cat.consumable_type(version).into_known() {
+                        Some(c) => c,
+                        None => continue,
+                    };
                     let artillery_dist_coeff = cat.effect_fields().get("artilleryDistCoeff").copied().unwrap_or(1.0);
                     let cat_modifiers = cat.modifiers();
                     if artillery_dist_coeff != 1.0 || !cat_modifiers.is_empty() {
                         effects.push(Effect {
-                            id: EffectId::Consumable(ability_name.clone()),
+                            id: EffectId::Consumable(consumable),
                             kind: EffectKind::Consumable { artillery_dist_coeff },
                             modifiers: cat_modifiers.to_vec(),
                         });
@@ -666,9 +673,9 @@ mod tests {
         ];
         let skill = furious_skill("TriggerBurnGmReload", blocks.clone());
         let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
-        assert_eq!(effects[0].id(), &EffectId::Skill("TriggerBurnGmReload".to_string()));
+        assert_eq!(effects[0].id(), &EffectId::Skill(CrewSkillName::from("TriggerBurnGmReload")));
         assert_eq!(effects[0].kind(), &EffectKind::StackingPerCount { blocks });
     }
 
@@ -682,9 +689,9 @@ mod tests {
             vec![uniform_modifier("regenCrewReloadCoeff", 0.992)],
         );
         let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
-        assert_eq!(effects[0].id(), &EffectId::Skill("DefenceUw".to_string()));
+        assert_eq!(effects[0].id(), &EffectId::Skill(CrewSkillName::from("DefenceUw")));
         assert_eq!(effects[0].kind(), &EffectKind::StackingRepeated);
     }
 
@@ -706,10 +713,10 @@ mod tests {
     #[test]
     fn effects_state_builds_and_reads() {
         let s = EffectsState::default()
-            .set(EffectId::Skill("X".into()), EffectActivation::On)
-            .set(EffectId::Consumable("Y".into()), EffectActivation::Off);
-        assert_eq!(s.get(&EffectId::Skill("X".into())), Some(EffectActivation::On));
-        assert_eq!(s.get(&EffectId::Consumable("Y".into())), Some(EffectActivation::Off));
+            .set(EffectId::Skill(CrewSkillName::from("X")), EffectActivation::On)
+            .set(EffectId::Consumable(Consumable::DamageControl), EffectActivation::Off);
+        assert_eq!(s.get(&EffectId::Skill(CrewSkillName::from("X"))), Some(EffectActivation::On));
+        assert_eq!(s.get(&EffectId::Consumable(Consumable::DamageControl)), Some(EffectActivation::Off));
         assert_eq!(s.get(&EffectId::Modernizations), None);
     }
 
@@ -718,7 +725,7 @@ mod tests {
         let ship = ship_no_abilities();
         let mods = vec![uniform_modifier("GMShotDelay", 0.9)];
         let loadout = Loadout { skills: &[], modernization_modifiers: &mods, ship: &ship };
-        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].id(), &EffectId::Modernizations);
         assert_eq!(effects[0].kind(), &EffectKind::AlwaysOn);
@@ -728,7 +735,7 @@ mod tests {
     fn empty_modernization_modifiers_emit_nothing() {
         let ship = ship_no_abilities();
         let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert!(effects.is_empty());
     }
 
@@ -737,9 +744,9 @@ mod tests {
         let ship = ship_no_abilities();
         let skill = skill_only_modifiers("GunFeeder", vec![uniform_modifier("GMShotDelay", 0.9)]);
         let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
-        assert_eq!(effects[0].id(), &EffectId::Skill("GunFeeder".to_string()));
+        assert_eq!(effects[0].id(), &EffectId::Skill(CrewSkillName::from("GunFeeder")));
         assert_eq!(effects[0].kind(), &EffectKind::AlwaysOn);
     }
 
@@ -749,9 +756,9 @@ mod tests {
         let skill =
             skill_with_trigger("TriggerGmReload", 0, "triggerBattleLosing", vec![uniform_modifier("GMShotDelay", 0.8)]);
         let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
-        assert_eq!(effects[0].id(), &EffectId::Skill("TriggerGmReload".to_string()));
+        assert_eq!(effects[0].id(), &EffectId::Skill(CrewSkillName::from("TriggerGmReload")));
         assert_eq!(effects[0].kind(), &EffectKind::Binary);
     }
 
@@ -765,9 +772,9 @@ mod tests {
             vec![uniform_modifier("lastChanceReloadCoefficient_Main", 0.25)],
         );
         let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
-        assert_eq!(effects[0].id(), &EffectId::Skill("ArmamentReloadAaDamage".to_string()));
+        assert_eq!(effects[0].id(), &EffectId::Skill(CrewSkillName::from("ArmamentReloadAaDamage")));
         assert_eq!(effects[0].kind(), &EffectKind::HealthScaledReload);
     }
 
@@ -781,7 +788,7 @@ mod tests {
             vec![uniform_modifier("lastChanceReloadCoefficient_Torp", 0.25)],
         );
         let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].kind(), &EffectKind::HealthScaledReload);
     }
@@ -859,9 +866,9 @@ mod tests {
             .build();
 
         let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&ScoutProvider(ability_param_rc)).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&ScoutProvider(ability_param_rc), test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
-        assert_eq!(effects[0].id(), &EffectId::Consumable(ship_name.to_string()));
+        assert_eq!(effects[0].id(), &EffectId::Consumable(Consumable::SpottingAircraft));
         assert_eq!(effects[0].kind(), &EffectKind::Consumable { artillery_dist_coeff: 1.2 });
     }
 
@@ -872,7 +879,7 @@ mod tests {
         let mut fields = BTreeMap::new();
         fields.insert("artilleryDistCoeff".to_string(), 1.0f32);
         let cat = AbilityCategory::builder()
-            .consumable_type("speedBoost".to_string())
+            .consumable_type("speedBoosters".to_string())
             .group("ship".to_string())
             .icon_id(String::new())
             .num_consumables(3)
@@ -939,9 +946,9 @@ mod tests {
             .build();
 
         let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&SpeedBoostProvider(ability_param_rc)).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&SpeedBoostProvider(ability_param_rc), test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1, "non-empty modifiers should emit a consumable effect even with coeff==1.0");
-        assert_eq!(effects[0].id(), &EffectId::Consumable(ship_name.to_string()));
+        assert_eq!(effects[0].id(), &EffectId::Consumable(Consumable::SpeedBoost));
         assert_eq!(effects[0].kind(), &EffectKind::Consumable { artillery_dist_coeff: 1.0 });
     }
 
@@ -1016,7 +1023,7 @@ mod tests {
             .build();
 
         let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&CrashCrewProvider(ability_param_rc)).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&CrashCrewProvider(ability_param_rc), test_version()).iter().cloned().collect();
         assert!(effects.is_empty(), "crashCrew with dist_coeff=1.0 and no modifiers should emit no effect");
     }
 
@@ -1074,9 +1081,9 @@ mod tests {
         let points = vec![(0.0, 0.0), (10.0, 0.5), (45.0, 1.0)];
         let skill = atba_heat_skill("AtbaAccuracy", points.clone(), vec![uniform_modifier("GSPriorityTargetIdealRadius", 0.5)]);
         let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
-        assert_eq!(effects[0].id(), &EffectId::Skill("AtbaAccuracy".to_string()));
+        assert_eq!(effects[0].id(), &EffectId::Skill(CrewSkillName::from("AtbaAccuracy")));
         assert_eq!(
             effects[0].kind(),
             &EffectKind::Heat { heat_interpolator: Interpolator::from_points(points) }
@@ -1158,7 +1165,7 @@ mod tests {
     #[test]
     fn resolve_consumable_on_applies_dist_coeff() {
         let effect = Effect::for_test(
-            EffectId::Consumable("PCY012_Scout".into()),
+            EffectId::Consumable(Consumable::SpottingAircraft),
             EffectKind::Consumable { artillery_dist_coeff: 1.2 },
             vec![],
         );
@@ -1168,7 +1175,7 @@ mod tests {
         let result_off = effects.resolve(&state_off, Species::Cruiser, test_version()).unwrap();
         assert!((result_off.artillery_dist_coeff() - 1.0).abs() < 1e-6, "off -> dist 1.0");
 
-        let state_on = EffectsState::default().set(EffectId::Consumable("PCY012_Scout".into()), EffectActivation::On);
+        let state_on = EffectsState::default().set(EffectId::Consumable(Consumable::SpottingAircraft), EffectActivation::On);
         let result_on = effects.resolve(&state_on, Species::Cruiser, test_version()).unwrap();
         assert!((result_on.artillery_dist_coeff() - 1.2).abs() < 1e-6, "on -> dist 1.2");
     }
@@ -1353,9 +1360,9 @@ mod tests {
     fn innate_skill_emits_innate_adrenaline() {
         let ship = ship_with_innate();
         let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
-        assert_eq!(effects[0].id(), &EffectId::Innate("adrenalineRush".to_string()));
+        assert_eq!(effects[0].id(), &EffectId::Innate("adrenalineRush".to_owned()));
         assert_eq!(
             effects[0].kind(),
             &EffectKind::InnateAdrenaline { breakpoints: oregon_breakpoints() }
@@ -1366,7 +1373,7 @@ mod tests {
     fn ship_without_innate_emits_none() {
         let ship = ship_no_abilities();
         let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
-        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert!(effects.is_empty());
     }
 
@@ -1435,7 +1442,7 @@ mod tests {
             vec![uniform_modifier("lastChanceReloadCoefficient_Main", 0.2)],
         );
         let consumable = Effect::for_test(
-            EffectId::Consumable("PCY012_Scout".into()),
+            EffectId::Consumable(Consumable::SpottingAircraft),
             EffectKind::Consumable { artillery_dist_coeff: 1.2 },
             vec![uniform_modifier("GMIdealRadius", 0.95)],
         );
@@ -1444,7 +1451,7 @@ mod tests {
         let state = EffectsState::default()
             .set(EffectId::Skill("Outnumbered".into()), EffectActivation::On)
             .set(EffectId::Skill("ArmamentReloadAaDamage".into()), EffectActivation::Health(HealthFraction::new(0.5)))
-            .set(EffectId::Consumable("PCY012_Scout".into()), EffectActivation::On);
+            .set(EffectId::Consumable(Consumable::SpottingAircraft), EffectActivation::On);
 
         let result = effects.resolve(&state, Species::Cruiser, test_version()).unwrap();
 
