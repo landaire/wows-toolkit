@@ -306,6 +306,59 @@ fn build_crew_skills(skills: &pickled::Dict) -> Vec<CrewSkill> {
                 // skill-level "modifiers" is empty for triggered skills.
                 let trigger_modifiers = game_param_to_type!(logic_trigger_data, "modifiers", Option<HashMap<(), ()>>)
                     .map(|m| build_skill_modifiers(&m.inner()));
+                let damage_value = logic_trigger_data
+                    .get(&pk("damageValue"))
+                    .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)));
+
+                let count_to_modifier = logic_trigger_data
+                    .get(&pk("countToModifier"))
+                    .and_then(|v| v.dict_or_object_dict())
+                    .map(|ctm_dict| {
+                        let ctm_dict = ctm_dict.inner();
+                        let mut pairs: Vec<(u32, Vec<CrewSkillModifier>)> = ctm_dict
+                            .iter()
+                            .filter_map(|(k, v)| {
+                                let count: u32 = k.string_ref()?.inner().parse().ok()?;
+                                let block_name = v.string_ref()?.inner();
+                                let block = logic_trigger_data
+                                    .get(&pk(block_name))
+                                    .and_then(|bv| bv.dict_or_object_dict())?;
+                                Some((count, build_skill_modifiers(&block.inner())))
+                            })
+                            .collect();
+                        pairs.sort_by_key(|(count, _)| *count);
+                        pairs
+                    })
+                    .unwrap_or_default();
+
+                let heat_interpolator = logic_trigger_data
+                    .get(&pk("heatInterpolator"))
+                    .and_then(|v| v.list_ref())
+                    .map(|list| {
+                        let points = list
+                            .inner()
+                            .iter()
+                            .filter_map(|pair| read_pair_both(pair))
+                            .map(|[x, y]| (x, y))
+                            .collect();
+                        Interpolator::from_points(points)
+                    })
+                    .unwrap_or_default();
+
+                let cooling_interpolator = logic_trigger_data
+                    .get(&pk("coolingInterpolator"))
+                    .and_then(|v| v.list_ref())
+                    .map(|list| {
+                        let points = list
+                            .inner()
+                            .iter()
+                            .filter_map(|pair| read_pair_both(pair))
+                            .map(|[x, y]| (x, y))
+                            .collect();
+                        Interpolator::from_points(points)
+                    })
+                    .unwrap_or_default();
+
                 CrewSkillLogicTrigger::builder()
                     .maybe_burn_count(game_param_to_type!(logic_trigger_data, "burnCount", Option<usize>))
                     .maybe_change_priority_target_penalty(game_param_to_type!(
@@ -315,14 +368,16 @@ fn build_crew_skills(skills: &pickled::Dict) -> Vec<CrewSkill> {
                     ))
                     .consumable_type(game_param_to_type!(logic_trigger_data, "consumableType", String))
                     .cooling_delay(game_param_to_type!(logic_trigger_data, "coolingDelay", f32))
-                    .cooling_interpolator(Vec::default())
+                    .cooling_interpolator(cooling_interpolator)
+                    .count_to_modifier(count_to_modifier)
+                    .maybe_damage_value(damage_value)
                     .maybe_divider_type(game_param_to_type!(logic_trigger_data, "dividerType", Option<String>))
                     .maybe_divider_value(game_param_to_type!(logic_trigger_data, "dividerValue", Option<f32>))
                     .duration(game_param_to_type!(logic_trigger_data, "duration", f32))
                     .energy_coeff(game_param_to_type!(logic_trigger_data, "energyCoeff", f32))
                     .maybe_flood_count(game_param_to_type!(logic_trigger_data, "floodCount", Option<usize>))
                     .maybe_health_factor(game_param_to_type!(logic_trigger_data, "healthFactor", Option<f32>))
-                    .heat_interpolator(Vec::default())
+                    .heat_interpolator(heat_interpolator)
                     .maybe_modifiers(trigger_modifiers)
                     .trigger_desc_ids(game_param_to_type!(logic_trigger_data, "triggerDescIds", String))
                     .trigger_type(game_param_to_type!(logic_trigger_data, "triggerType", String))
@@ -2561,5 +2616,138 @@ mod camera_tests {
         let ttx = vehicle.ttx_components().expect("ttx components extracted");
         assert!(ttx.fire_controls.is_empty());
         assert!(ttx.fire_control_max_dist_coef("PAUH001_Hull").is_none());
+    }
+}
+
+#[cfg(test)]
+mod crew_skill_logic_trigger_tests {
+    use super::*;
+    use pickled::value::Shared;
+
+    fn fv(f: f64) -> Value {
+        Value::F64(f)
+    }
+
+    fn iv(i: i64) -> Value {
+        Value::I64(i)
+    }
+
+    fn sv(s: &str) -> Value {
+        Value::String(s.to_string().into())
+    }
+
+    fn list(items: Vec<Value>) -> Value {
+        Value::List(Shared::new(items))
+    }
+
+    fn dict(entries: Vec<(HashableValue, Value)>) -> Value {
+        Value::Dict(Shared::new(entries.into_iter().collect()))
+    }
+
+    fn base_trigger_entries(trigger_type: &str) -> Vec<(HashableValue, Value)> {
+        vec![
+            (pk("triggerType"), sv(trigger_type)),
+            (pk("triggerDescIds"), sv("")),
+            (pk("consumableType"), sv("")),
+            (pk("coolingDelay"), fv(0.0)),
+            (pk("duration"), fv(0.0)),
+            (pk("energyCoeff"), fv(0.0)),
+        ]
+    }
+
+    fn build_skill_with_trigger(trigger_entries: Vec<(HashableValue, Value)>) -> Vec<CrewSkill> {
+        let logic_trigger = dict(trigger_entries);
+        let skill_entries = vec![
+            (pk("LogicTrigger"), logic_trigger),
+            (pk("column"), iv(0)),
+            (pk("skillType"), iv(1)),
+            (pk("canBeLearned"), Value::Bool(true)),
+            (pk("isEpic"), Value::Bool(false)),
+            (pk("uiTreatAsTrigger"), Value::Bool(true)),
+            (pk("tier"), dict(vec![
+                (pk("AirCarrier"), iv(1)),
+                (pk("Auxiliary"), iv(1)),
+                (pk("Battleship"), iv(1)),
+                (pk("Cruiser"), iv(1)),
+                (pk("Destroyer"), iv(1)),
+                (pk("Submarine"), iv(1)),
+            ])),
+        ];
+        let skill_dict: pickled::Dict = vec![(
+            HashableValue::String("TestSkill".to_string().into()),
+            dict(skill_entries),
+        )]
+        .into_iter()
+        .collect();
+        build_crew_skills(&skill_dict)
+    }
+
+    #[test]
+    fn count_to_modifier_parsed_and_sorted() {
+        let mut entries = base_trigger_entries("activationOnBurnFlood");
+        entries.push((
+            pk("countToModifier"),
+            dict(vec![(pk("2"), sv("BurnFlood_2")), (pk("1"), sv("BurnFlood_1"))]),
+        ));
+        entries.push((pk("BurnFlood_1"), dict(vec![(pk("GMShotDelay"), fv(0.9))])));
+        entries.push((pk("BurnFlood_2"), dict(vec![(pk("GMShotDelay"), fv(0.95))])));
+
+        let skills = build_skill_with_trigger(entries);
+        let trigger = skills[0].logic_trigger().expect("trigger present");
+        let ctm = trigger.count_to_modifier();
+        assert_eq!(ctm.len(), 2, "expected 2 stacks");
+        assert_eq!(ctm[0].0, 1);
+        assert_eq!(ctm[0].1.len(), 1);
+        assert_eq!(ctm[0].1[0].name(), "GMShotDelay");
+        assert!((ctm[0].1[0].get_for_species(&Species::Battleship) - 0.9).abs() < 1e-6);
+        assert_eq!(ctm[1].0, 2);
+        assert!((ctm[1].1[0].get_for_species(&Species::Battleship) - 0.95).abs() < 1e-6);
+    }
+
+    #[test]
+    fn damage_value_integer_parsed() {
+        let mut entries = base_trigger_entries("potentialDamageRatio");
+        entries.push((pk("damageValue"), iv(2000000)));
+        entries.push((pk("healthFactor"), fv(1.0)));
+
+        let skills = build_skill_with_trigger(entries);
+        let trigger = skills[0].logic_trigger().expect("trigger present");
+        assert_eq!(trigger.damage_value(), Some(2_000_000.0_f32));
+    }
+
+    #[test]
+    fn interpolators_parsed_from_lists() {
+        let mut entries = base_trigger_entries("atbaHeat");
+        entries.push((
+            pk("heatInterpolator"),
+            list(vec![
+                list(vec![fv(0.0), fv(0.0)]),
+                list(vec![fv(10.0), fv(0.5)]),
+                list(vec![fv(45.0), fv(1.0)]),
+            ]),
+        ));
+        entries.push((
+            pk("coolingInterpolator"),
+            list(vec![list(vec![fv(0.0), fv(1.0)]), list(vec![fv(10.0), fv(0.0)])]),
+        ));
+
+        let skills = build_skill_with_trigger(entries);
+        let trigger = skills[0].logic_trigger().expect("trigger present");
+        let heat = trigger.heat_interpolator();
+        assert_eq!(heat.points(), &[(0.0, 0.0), (10.0, 0.5), (45.0, 1.0)]);
+        let cool = trigger.cooling_interpolator();
+        assert_eq!(cool.points(), &[(0.0, 1.0), (10.0, 0.0)]);
+    }
+
+    #[test]
+    fn missing_new_fields_yield_defaults() {
+        let entries = base_trigger_entries("activationOnDetectTrigger");
+
+        let skills = build_skill_with_trigger(entries);
+        let trigger = skills[0].logic_trigger().expect("trigger present");
+        assert!(trigger.count_to_modifier().is_empty());
+        assert_eq!(trigger.damage_value(), None);
+        assert!(trigger.heat_interpolator().is_empty());
+        assert!(trigger.cooling_interpolator().is_empty());
     }
 }

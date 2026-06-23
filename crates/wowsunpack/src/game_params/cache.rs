@@ -18,7 +18,7 @@ const MAGIC: [u8; 4] = *b"WUGP";
 /// caches. New writes always carry the latest version; reads that see an
 /// older or unknown version return `None`, prompting the caller to
 /// re-parse from the source VFS.
-pub const FORMAT_VERSION: u32 = 11;
+pub const FORMAT_VERSION: u32 = 12;
 
 const HEADER_LEN: usize = MAGIC.len() + std::mem::size_of::<u32>();
 
@@ -73,4 +73,14 @@ pub fn load(path: &Path) -> Option<Vec<Param>> {
 pub fn save(path: &Path, params: &[Param]) -> io::Result<()> {
     let buf = encode(params)?;
     fs::write(path, &buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FORMAT_VERSION;
+
+    #[test]
+    fn format_version_is_12() {
+        assert_eq!(FORMAT_VERSION, 12);
+    }
 }

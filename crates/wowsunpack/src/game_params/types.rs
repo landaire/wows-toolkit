@@ -1821,26 +1821,45 @@ impl CrewSkillModifier {
     }
 }
 
+/// A piecewise-linear control-point ramp (`MultiLerp`): `(x, y)` points, `y` in 0..1.
+/// Evaluation (the lerp) lands in the heat sub-project; this is the parsed shape.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct Interpolator(Vec<(f32, f32)>);
+
+impl Interpolator {
+    pub fn from_points(points: Vec<(f32, f32)>) -> Self {
+        Interpolator(points)
+    }
+
+    pub fn points(&self) -> &[(f32, f32)] {
+        &self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 #[derive(Clone, Builder, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct CrewSkillLogicTrigger {
-    /// Sometimes this field isn't present?
     burn_count: Option<usize>,
-    /// Not present in every skill's LogicTrigger (absent in some builds).
     change_priority_target_penalty: Option<f32>,
     consumable_type: String,
     cooling_delay: f32,
-    /// TODO: figure out type
-    cooling_interpolator: Vec<()>,
+    cooling_interpolator: Interpolator,
+    count_to_modifier: Vec<(u32, Vec<CrewSkillModifier>)>,
+    damage_value: Option<f32>,
     divider_type: Option<String>,
     divider_value: Option<f32>,
     duration: f32,
     energy_coeff: f32,
     flood_count: Option<usize>,
     health_factor: Option<f32>,
-    /// TODO: figure out type
-    heat_interpolator: Vec<()>,
+    heat_interpolator: Interpolator,
     modifiers: Option<Vec<CrewSkillModifier>>,
     trigger_desc_ids: String,
     trigger_type: String,
@@ -1853,6 +1872,22 @@ impl CrewSkillLogicTrigger {
 
     pub fn trigger_type(&self) -> &str {
         &self.trigger_type
+    }
+
+    pub fn damage_value(&self) -> Option<f32> {
+        self.damage_value
+    }
+
+    pub fn count_to_modifier(&self) -> &[(u32, Vec<CrewSkillModifier>)] {
+        &self.count_to_modifier
+    }
+
+    pub fn heat_interpolator(&self) -> &Interpolator {
+        &self.heat_interpolator
+    }
+
+    pub fn cooling_interpolator(&self) -> &Interpolator {
+        &self.cooling_interpolator
     }
 }
 
@@ -3153,10 +3188,11 @@ mod crew_skill_description_tests {
         CrewSkillLogicTrigger::builder()
             .consumable_type(String::new())
             .cooling_delay(0.0)
-            .cooling_interpolator(Vec::new())
+            .cooling_interpolator(Interpolator::default())
+            .count_to_modifier(Vec::new())
             .duration(0.0)
             .energy_coeff(0.0)
-            .heat_interpolator(Vec::new())
+            .heat_interpolator(Interpolator::default())
             .modifiers(modifiers)
             .trigger_desc_ids(String::new())
             .trigger_type(trigger_type.to_owned())
@@ -3246,5 +3282,32 @@ mod known_skill_tests {
     fn unknown_skill_preserves_raw_type() {
         let other = KnownCrewSkill::recognize(&CrewSkillName::from("NotARealSkill"), CrewSkillType::new(255));
         assert_eq!(other, Recognized::Unknown(CrewSkillType::new(255)));
+    }
+}
+
+#[cfg(test)]
+mod interpolator_tests {
+    use super::Interpolator;
+
+    #[test]
+    fn empty_by_default() {
+        let interp = Interpolator::default();
+        assert!(interp.is_empty());
+        assert_eq!(interp.points(), &[]);
+    }
+
+    #[test]
+    fn from_points_round_trips() {
+        let pts = vec![(0.0f32, 0.0f32), (10.0, 0.5), (45.0, 1.0)];
+        let interp = Interpolator::from_points(pts.clone());
+        assert!(!interp.is_empty());
+        assert_eq!(interp.points(), pts.as_slice());
+    }
+
+    #[test]
+    fn single_point_not_empty() {
+        let interp = Interpolator::from_points(vec![(1.0, 0.5)]);
+        assert!(!interp.is_empty());
+        assert_eq!(interp.points().len(), 1);
     }
 }

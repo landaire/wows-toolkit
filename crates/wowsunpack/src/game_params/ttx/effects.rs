@@ -335,6 +335,7 @@ mod tests {
     use crate::game_params::types::CrewSkillName;
     use crate::game_params::types::CrewSkillTiers;
     use crate::game_params::types::CrewSkillType;
+    use crate::game_params::types::Interpolator;
     use crate::game_params::types::ParamData;
     use crate::game_params::types::SkillPointCost;
     use crate::game_params::types::Vehicle;
@@ -402,10 +403,11 @@ mod tests {
         let trigger = CrewSkillLogicTrigger::builder()
             .consumable_type(String::new())
             .cooling_delay(0.0)
-            .cooling_interpolator(Vec::new())
+            .cooling_interpolator(Interpolator::default())
+            .count_to_modifier(Vec::new())
             .duration(0.0)
             .energy_coeff(0.0)
-            .heat_interpolator(Vec::new())
+            .heat_interpolator(Interpolator::default())
             .modifiers(trigger_mods)
             .trigger_desc_ids(String::new())
             .trigger_type(trigger_type.to_owned())
