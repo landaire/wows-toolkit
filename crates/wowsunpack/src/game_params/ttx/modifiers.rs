@@ -152,6 +152,14 @@ impl Combine {
     }
 }
 
+/// The fold identity for `name` at `version`: 1.0 for multiplicative names, 0.0 for
+/// additive ones. Errors when the name cannot be classified (same rule as `from_modifiers`).
+pub(crate) fn modifier_identity(version: Version, name: &str) -> Result<f32, ModifierError> {
+    Combine::classify(version, name)
+        .map(Combine::identity)
+        .map_err(|e| ModifierError::Unknown(vec![e.name]))
+}
+
 /// Equipped modifiers aggregated per name and resolved for a fixed `Species`.
 ///
 /// Each entry holds the fold of every same-name modifier value using that name's
@@ -509,5 +517,16 @@ mod tests {
     #[test]
     fn classify_gmcritprob_at_default_version_is_multiply() {
         assert_eq!(Combine::classify(Version::default(), "GMCritProb"), Ok(Combine::Multiply));
+    }
+
+    #[test]
+    fn modifier_identity_classifies() {
+        let v = crate::data::Version::base(15, 4, 0);
+        assert_eq!(modifier_identity(v, "GSPriorityTargetIdealRadius").unwrap(), 1.0, "multiplicative");
+        assert_eq!(modifier_identity(v, "yawSpeedBonus").unwrap(), 0.0, "additive");
+        assert!(
+            matches!(modifier_identity(v, "definitelyNotAModifier_xyz"), Err(ModifierError::Unknown(_))),
+            "unknown name errors"
+        );
     }
 }
