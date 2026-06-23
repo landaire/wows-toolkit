@@ -11,6 +11,7 @@ use crate::game_params::ttx::modifiers::ModifierError;
 use crate::game_params::ttx::modifiers::modifier_identity;
 use crate::game_params::ttx::selection::ShipUpgradeSelection;
 use crate::game_params::types::CrewSkill;
+use crate::game_params::types::CrewSkillLogicTrigger;
 use crate::game_params::types::CrewSkillModifier;
 use crate::game_params::types::CrewSkillName;
 use crate::game_params::types::GameParamProvider;
@@ -87,6 +88,60 @@ fn active_innate_modifiers(
     Vec::new()
 }
 
+/// The condition that gates a `Binary` effect's activation: what game-world state must hold
+/// for the effect to be `On`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TriggerCondition {
+    /// Ship is currently detected by an enemy (`entityIsVisibleTrigger`).
+    Detected,
+    /// Ship is currently undetected (`entityIsInvisibleTrigger`).
+    Undetected,
+    /// Ship was detected and the effect persists for `duration` seconds (`activationOnDetectTrigger`).
+    OnDetected { duration: f32 },
+    /// An enemy is within this ship's detection range (`enemyWithinVisibilityTrigger`).
+    EnemyWithinDetectionRange,
+    /// No enemy is within this ship's detection range (`noEnemiesWithinVisibilityTrigger`).
+    NoEnemyWithinDetectionRange,
+    /// An enemy is within main-gun range (`VisibleEnemyWithinGmTrigger`).
+    EnemyWithinMainGunRange,
+    /// An enemy is within secondary-gun range (`visibleEnemyWithinGsTrigger`).
+    EnemyWithinSecondaryRange,
+    /// Enemies on the team's side of the map are not fewer than allies (`EnemiesNotLessThanAlliesWithinGMTrigger`).
+    Outnumbered,
+    /// Ship's AA defense is active (`activeAirDefense`).
+    ActiveAirDefense,
+    /// Submarine battery is low (`activationOnBattery`).
+    SubmarineBatteryLow,
+    /// A recognized consumable of this type is currently active (`activationOnConsumable`).
+    OnConsumableActive(Consumable),
+    /// Trigger type not yet modeled; the raw string is preserved for diagnostics.
+    Other(String),
+}
+
+impl TriggerCondition {
+    /// Classify a trigger into its condition. Reads `trigger.duration()` for `OnDetected` and
+    /// `trigger.consumable_type(version)` for `OnConsumableActive`.
+    pub fn from_trigger_type(trigger: &CrewSkillLogicTrigger, version: Version) -> TriggerCondition {
+        match trigger.trigger_type() {
+            "entityIsVisibleTrigger" => TriggerCondition::Detected,
+            "entityIsInvisibleTrigger" => TriggerCondition::Undetected,
+            "activationOnDetectTrigger" => TriggerCondition::OnDetected { duration: trigger.duration() },
+            "enemyWithinVisibilityTrigger" => TriggerCondition::EnemyWithinDetectionRange,
+            "noEnemiesWithinVisibilityTrigger" => TriggerCondition::NoEnemyWithinDetectionRange,
+            "VisibleEnemyWithinGmTrigger" => TriggerCondition::EnemyWithinMainGunRange,
+            "visibleEnemyWithinGsTrigger" => TriggerCondition::EnemyWithinSecondaryRange,
+            "EnemiesNotLessThanAlliesWithinGMTrigger" => TriggerCondition::Outnumbered,
+            "activeAirDefense" => TriggerCondition::ActiveAirDefense,
+            "activationOnBattery" => TriggerCondition::SubmarineBatteryLow,
+            "activationOnConsumable" => match trigger.consumable_type(version).into_known() {
+                Some(c) => TriggerCondition::OnConsumableActive(c),
+                None => TriggerCondition::Other(trigger.trigger_type().to_owned()),
+            },
+            other => TriggerCondition::Other(other.to_owned()),
+        }
+    }
+}
+
 /// A ship's equipped build: the source of effects. Borrowed; the caller assembles it
 /// (a replay's parsed build, or a calculator selection).
 pub struct Loadout<'a> {
@@ -140,8 +195,9 @@ pub enum EffectId {
 pub enum EffectKind {
     /// Always applied (modernizations, always-on skill modifiers); no toggle.
     AlwaysOn,
-    /// On/off conditional trigger (most skill triggers).
-    Binary,
+    /// On/off conditional trigger (most skill triggers). `condition` is metadata describing
+    /// what game-world state activates it; resolution still keys off `On`/`Off` activation.
+    Binary { condition: TriggerCondition },
     /// HP-scaled reload (Adrenaline Rush): the modifiers are `lastChanceReloadCoefficient_*`
     /// per-armament coefficients, evaluated by the gameplay formula at the health fraction.
     HealthScaledReload,
@@ -186,7 +242,7 @@ impl Effect {
     pub fn default_activation(&self) -> EffectActivation {
         match self.kind {
             EffectKind::AlwaysOn => EffectActivation::On,
-            EffectKind::Binary | EffectKind::Consumable { .. } => EffectActivation::Off,
+            EffectKind::Binary { .. } | EffectKind::Consumable { .. } => EffectActivation::Off,
             EffectKind::HealthScaledReload => EffectActivation::Health(HealthFraction::FULL),
             EffectKind::StackingPerCount { .. } | EffectKind::StackingRepeated => EffectActivation::Stacks(0),
             EffectKind::Heat { .. } => EffectActivation::Heat(0.0),
@@ -317,7 +373,9 @@ impl Loadout<'_> {
                                 | Some(KnownCrewSkill::SubmarineAdrenalineRush) => {
                                     EffectKind::HealthScaledReload
                                 }
-                                _ => EffectKind::Binary,
+                                _ => EffectKind::Binary {
+                            condition: TriggerCondition::from_trigger_type(trigger, version),
+                        },
                             };
                             effects.push(Effect { id: EffectId::Skill(name), kind, modifiers: tmods.clone() });
                         }
@@ -410,7 +468,7 @@ impl Effects {
                 (EffectKind::AlwaysOn, _) => {
                     contributed.extend(effect.modifiers.iter().cloned());
                 }
-                (EffectKind::Binary, EffectActivation::On) => {
+                (EffectKind::Binary { .. }, EffectActivation::On) => {
                     contributed.extend(effect.modifiers.iter().cloned());
                 }
                 (EffectKind::HealthScaledReload, activation) => {
@@ -699,7 +757,7 @@ mod tests {
     fn default_activation_per_kind() {
         let mk = |kind: EffectKind| Effect::for_test(EffectId::Modernizations, kind, Vec::new());
         assert_eq!(mk(EffectKind::AlwaysOn).default_activation(), EffectActivation::On);
-        assert_eq!(mk(EffectKind::Binary).default_activation(), EffectActivation::Off);
+        assert_eq!(mk(EffectKind::Binary { condition: TriggerCondition::Outnumbered }).default_activation(), EffectActivation::Off);
         assert_eq!(
             mk(EffectKind::Consumable { artillery_dist_coeff: 1.2 }).default_activation(),
             EffectActivation::Off
@@ -759,7 +817,7 @@ mod tests {
         let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].id(), &EffectId::Skill(CrewSkillName::from("TriggerGmReload")));
-        assert_eq!(effects[0].kind(), &EffectKind::Binary);
+        assert_eq!(effects[0].kind(), &EffectKind::Binary { condition: TriggerCondition::Other("triggerBattleLosing".to_string()) });
     }
 
     #[test]
@@ -1111,7 +1169,7 @@ mod tests {
     fn resolve_binary_off_omits_on_includes() {
         let effect = Effect::for_test(
             EffectId::Skill("Outnumbered".into()),
-            EffectKind::Binary,
+            EffectKind::Binary { condition: TriggerCondition::Outnumbered },
             vec![uniform_modifier("GMIdealRadius", 0.85)],
         );
         let effects = Effects(vec![effect.clone()]);
@@ -1425,6 +1483,71 @@ mod tests {
     }
 
     #[test]
+    fn trigger_condition_from_trigger_type_classifies() {
+        let v = test_version();
+        let mk = |tt: &str| {
+            let s = skill_with_trigger("S", 0, tt, vec![uniform_modifier("speedCoef", 1.08)]);
+            TriggerCondition::from_trigger_type(s.logic_trigger().unwrap(), v)
+        };
+        assert_eq!(mk("entityIsVisibleTrigger"), TriggerCondition::Detected);
+        assert_eq!(mk("entityIsInvisibleTrigger"), TriggerCondition::Undetected);
+        assert_eq!(mk("EnemiesNotLessThanAlliesWithinGMTrigger"), TriggerCondition::Outnumbered);
+        assert_eq!(mk("activeAirDefense"), TriggerCondition::ActiveAirDefense);
+        assert_eq!(mk("activationOnBattery"), TriggerCondition::SubmarineBatteryLow);
+        assert_eq!(mk("somethingNewUnmodeled"), TriggerCondition::Other("somethingNewUnmodeled".to_string()));
+    }
+
+    #[test]
+    fn trigger_condition_on_detect_carries_duration() {
+        let trigger = CrewSkillLogicTrigger::builder()
+            .consumable_type(String::new())
+            .cooling_delay(0.0)
+            .cooling_interpolator(Interpolator::default())
+            .count_to_modifier(Vec::new())
+            .duration(15.0)
+            .energy_coeff(0.0)
+            .heat_interpolator(Interpolator::default())
+            .modifiers(vec![uniform_modifier("shootShift", 1.2)])
+            .trigger_desc_ids(String::new())
+            .trigger_type("activationOnDetectTrigger".to_owned())
+            .build();
+        assert_eq!(
+            TriggerCondition::from_trigger_type(&trigger, test_version()),
+            TriggerCondition::OnDetected { duration: 15.0 }
+        );
+    }
+
+    #[test]
+    fn trigger_condition_on_consumable_carries_type() {
+        let trigger = CrewSkillLogicTrigger::builder()
+            .consumable_type("hydrophone".to_owned())
+            .cooling_delay(0.0)
+            .cooling_interpolator(Interpolator::default())
+            .count_to_modifier(Vec::new())
+            .duration(30.0)
+            .energy_coeff(0.0)
+            .heat_interpolator(Interpolator::default())
+            .modifiers(vec![uniform_modifier("firstSectorTimeCoeff", 1.25)])
+            .trigger_desc_ids(String::new())
+            .trigger_type("activationOnConsumable".to_owned())
+            .build();
+        assert_eq!(
+            TriggerCondition::from_trigger_type(&trigger, test_version()),
+            TriggerCondition::OnConsumableActive(Consumable::Hydrophone)
+        );
+    }
+
+    #[test]
+    fn binary_trigger_emits_condition() {
+        let ship = ship_no_abilities();
+        let skill = skill_with_trigger("Outnum", 0, "EnemiesNotLessThanAlliesWithinGMTrigger", vec![uniform_modifier("speedCoef", 1.08)]);
+        let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
+        let effects: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().cloned().collect();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].kind(), &EffectKind::Binary { condition: TriggerCondition::Outnumbered });
+    }
+
+    #[test]
     fn resolve_mixed_state_folds_correctly() {
         let always_on = Effect::for_test(
             EffectId::Modernizations,
@@ -1433,7 +1556,7 @@ mod tests {
         );
         let binary = Effect::for_test(
             EffectId::Skill("Outnumbered".into()),
-            EffectKind::Binary,
+            EffectKind::Binary { condition: TriggerCondition::Outnumbered },
             vec![uniform_modifier("GMIdealRadius", 0.85)],
         );
         let adrenaline = Effect::for_test(
