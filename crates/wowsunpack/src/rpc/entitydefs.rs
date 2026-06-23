@@ -58,6 +58,7 @@ impl Method {
         let size = self.args.iter().map(|arg| arg.sort_size()).sum::<usize>();
         if size >= 0xffff { 0xffff + self.variable_length_header_size } else { size + self.variable_length_header_size }
     }
+
 }
 
 struct DefFile {
@@ -291,6 +292,16 @@ pub fn parse_scripts(gamedata: &impl DataFileLoader) -> Result<Vec<EntitySpec>, 
 
         let mut client_methods = inherits.client_methods;
         client_methods.append(&mut def.client_methods);
+
+        // The engine rejects a client method already defined by an earlier-
+        // processed interface/own list (loadDataSection: "Method already
+        // defined"), keeping the first occurrence. Mirror that: a duplicate name
+        // (e.g. `increaseConsumableCount` on 0.9.x Avatar) would otherwise leave
+        // our list one longer than the client's, shifting every later exposed-
+        // method index by one and mis-resolving artillery/damage methods. No-op
+        // when there are no duplicates (e.g. modern builds).
+        let mut seen_client = std::collections::HashSet::new();
+        client_methods.retain(|m| seen_client.insert(m.name.clone()));
 
         client_methods.sort_by_key(|method| method.sort_size());
 
