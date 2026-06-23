@@ -39,13 +39,14 @@ impl HealthFraction {
     }
 }
 
-/// How an effect is activated. SP1: `Off` / `On` / `Health`; later sub-projects add
-/// `Stacks(u32)` and `Heat(f32)`.
+/// How an effect is activated. `Off` / `On` / `Health` / `Stacks`; `Stacks(n)` drives the
+/// stacking triggers (Furious burn+flood count, potential-damage health-multiplier).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EffectActivation {
     Off,
     On,
     Health(HealthFraction),
+    Stacks(u32),
 }
 
 /// Identifies a toggleable effect within a loadout.
@@ -71,6 +72,12 @@ pub enum EffectKind {
     /// A consumable that, while active, applies its `modifiers` block and (for the spotter)
     /// an `artillery_dist_coeff` range multiplier.
     Consumable { artillery_dist_coeff: f32 },
+    /// Furious (`activationOnBurnFlood`): at `Stacks(n)`, contribute every per-count block
+    /// with `count <= n` (accumulative). Capped at the highest count present.
+    StackingPerCount { blocks: Vec<(u32, Vec<CrewSkillModifier>)> },
+    /// Potential-damage (`potentialDamageRatio`): at `Stacks(n)`, contribute `Effect.modifiers`
+    /// `n` times (the modifier folds multiplicatively to `^n`).
+    StackingRepeated,
 }
 
 /// One toggleable effect contributed by the loadout. Raw modifiers are private; resolution
@@ -90,12 +97,14 @@ impl Effect {
         &self.kind
     }
     /// The activation used when `EffectsState` leaves this effect unset:
-    /// `AlwaysOn -> On`, `Binary`/`Consumable -> Off`, `HealthScaledReload -> Health(FULL)`.
+    /// `AlwaysOn -> On`, `Binary`/`Consumable -> Off`, `HealthScaledReload -> Health(FULL)`,
+    /// `StackingPerCount`/`StackingRepeated -> Stacks(0)`.
     pub fn default_activation(&self) -> EffectActivation {
         match self.kind {
             EffectKind::AlwaysOn => EffectActivation::On,
             EffectKind::Binary | EffectKind::Consumable { .. } => EffectActivation::Off,
             EffectKind::HealthScaledReload => EffectActivation::Health(HealthFraction::FULL),
+            EffectKind::StackingPerCount { .. } | EffectKind::StackingRepeated => EffectActivation::Stacks(0),
         }
     }
 
@@ -786,6 +795,20 @@ mod tests {
         let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
         let effects: Vec<_> = loadout.effects(&CrashCrewProvider(ability_param_rc)).iter().cloned().collect();
         assert!(effects.is_empty(), "crashCrew with dist_coeff=1.0 and no modifiers should emit no effect");
+    }
+
+    #[test]
+    fn default_activation_stacking_kinds() {
+        let per_count = Effect::for_test(
+            EffectId::Skill("Furious".into()),
+            EffectKind::StackingPerCount { blocks: Vec::new() },
+            Vec::new(),
+        );
+        assert_eq!(per_count.default_activation(), EffectActivation::Stacks(0));
+
+        let repeated =
+            Effect::for_test(EffectId::Skill("DefenceUw".into()), EffectKind::StackingRepeated, Vec::new());
+        assert_eq!(repeated.default_activation(), EffectActivation::Stacks(0));
     }
 
     fn test_version() -> crate::data::Version {
