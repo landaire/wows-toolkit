@@ -41,6 +41,50 @@ fn quantize_heat_ratio(ratio: f32) -> f32 {
     (ratio * 100.0).floor() / 100.0
 }
 
+/// The active innate-adrenaline modifier set at health fraction `hf`: the bounding breakpoint
+/// (clamped, no extrapolation) or a per-key lerp between the two bracketing breakpoints,
+/// evaluated for `species`. `breakpoints` is descending by health fraction and non-empty.
+fn active_innate_modifiers(
+    breakpoints: &[InnateSkillBreakpoint],
+    hf: f32,
+    species: Species,
+) -> Vec<CrewSkillModifier> {
+    let hi_end = &breakpoints[0];
+    let lo_end = &breakpoints[breakpoints.len() - 1];
+    if hf >= hi_end.health_fraction() {
+        return hi_end.modifiers().to_vec();
+    }
+    if hf <= lo_end.health_fraction() {
+        return lo_end.modifiers().to_vec();
+    }
+    for pair in breakpoints.windows(2) {
+        let (hi, lo) = (&pair[0], &pair[1]);
+        if hf <= hi.health_fraction() && hf >= lo.health_fraction() {
+            let span = lo.health_fraction() - hi.health_fraction();
+            let t = if span == 0.0 {
+                0.0
+            } else {
+                ((hf - hi.health_fraction()) / span).clamp(0.0, 1.0)
+            };
+            return hi
+                .modifiers()
+                .iter()
+                .map(|m| {
+                    let a = m.get_for_species(&species);
+                    let b = lo
+                        .modifiers()
+                        .iter()
+                        .find(|o| o.name() == m.name())
+                        .map(|o| o.get_for_species(&species))
+                        .unwrap_or(a);
+                    CrewSkillModifier::uniform(m.name(), a + (b - a) * t)
+                })
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
 /// A ship's equipped build: the source of effects. Borrowed; the caller assembles it
 /// (a replay's parsed build, or a calculator selection).
 pub struct Loadout<'a> {
@@ -414,6 +458,13 @@ impl Effects {
                         let effective = identity + (m.get_for_species(&species) - identity) * ratio;
                         contributed.push(CrewSkillModifier::uniform(m.name(), effective));
                     }
+                }
+                (EffectKind::InnateAdrenaline { breakpoints }, activation) => {
+                    let hf = match activation {
+                        EffectActivation::Health(h) => h.value(),
+                        _ => HealthFraction::FULL.value(),
+                    };
+                    contributed.extend(active_innate_modifiers(breakpoints, hf, species));
                 }
                 _ => {}
             }
@@ -1317,6 +1368,53 @@ mod tests {
         let loadout = Loadout { skills: &[], modernization_modifiers: &[], ship: &ship };
         let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
         assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn active_innate_modifiers_clamp_and_lerp() {
+        let bps = oregon_breakpoints();
+        let coef = |hf: f32, name: &str| {
+            active_innate_modifiers(&bps, hf, Species::Battleship)
+                .iter()
+                .find(|m| m.name() == name)
+                .unwrap()
+                .get_for_species(&Species::Battleship)
+        };
+
+        assert!((coef(1.0, "GMShotDelay") - 1.0).abs() < 1e-6, "full HP -> identity");
+        assert!((coef(1.0, "GMIdealRadius") - 1.0).abs() < 1e-6);
+        assert!((coef(0.5, "GMShotDelay") - 0.9).abs() < 1e-6, "exact half breakpoint");
+        assert!((coef(0.5, "GMIdealRadius") - 0.83).abs() < 1e-6);
+        assert!((coef(0.25, "GMShotDelay") - 0.85).abs() < 1e-6, "quarter breakpoint");
+        assert!((coef(0.1, "GMShotDelay") - 0.85).abs() < 1e-6, "below lowest clamps to quarter");
+        assert!((coef(0.75, "GMShotDelay") - 0.95).abs() < 1e-6, "lerp t=0.5 -> 1.0..0.9");
+        assert!((coef(0.75, "GMIdealRadius") - 0.915).abs() < 1e-6, "lerp t=0.5 -> 1.0..0.83");
+    }
+
+    #[test]
+    fn resolve_innate_adrenaline() {
+        let effect = Effect::for_test(
+            EffectId::Innate("adrenalineRush".into()),
+            EffectKind::InnateAdrenaline { breakpoints: oregon_breakpoints() },
+            Vec::new(),
+        );
+        let effects = Effects::for_test(vec![effect]);
+        let id = EffectId::Innate("adrenalineRush".into());
+        let coef = |state: &EffectsState, name: &str| {
+            effects.resolve(state, Species::Battleship, test_version()).unwrap().bundle().coef(name)
+        };
+
+        // Default Health(FULL) -> identity.
+        assert!((coef(&EffectsState::default(), "GMShotDelay") - 1.0).abs() < 1e-6);
+        assert!((coef(&EffectsState::default(), "GMIdealRadius") - 1.0).abs() < 1e-6);
+
+        let half = EffectsState::default().set(id.clone(), EffectActivation::Health(HealthFraction::new(0.5)));
+        assert!((coef(&half, "GMShotDelay") - 0.9).abs() < 1e-6);
+        assert!((coef(&half, "GMIdealRadius") - 0.83).abs() < 1e-6);
+
+        let three_q = EffectsState::default().set(id, EffectActivation::Health(HealthFraction::new(0.75)));
+        assert!((coef(&three_q, "GMShotDelay") - 0.95).abs() < 1e-6);
+        assert!((coef(&three_q, "GMIdealRadius") - 0.915).abs() < 1e-6);
     }
 
     #[test]
