@@ -1948,6 +1948,16 @@ impl CrewSkillLogicTrigger {
     pub fn cooling_interpolator(&self) -> &Interpolator {
         &self.cooling_interpolator
     }
+
+    /// The consumable this trigger watches (`activationOnConsumable`), resolved to a type.
+    pub fn consumable_type(&self, version: crate::data::Version) -> crate::recognized::Recognized<crate::game_types::Consumable> {
+        crate::game_types::Consumable::from_consumable_type(&self.consumable_type, version)
+    }
+
+    /// The trigger's active-window duration in seconds (`activationOnDetect`/`activationOnConsumable`).
+    pub fn duration(&self) -> f32 {
+        self.duration
+    }
 }
 
 /// One HP-fraction breakpoint from a ship's innate adrenaline component.
@@ -3351,6 +3361,24 @@ mod crew_skill_description_tests {
         // No static desc and no modifiers means nothing to show.
         let skill = skill_with_modifiers(Vec::new());
         assert!(skill.description_with(Species::Battleship, &ModifierOnlyLoader, &version()).is_none());
+    }
+
+    #[test]
+    fn logic_trigger_consumable_type_and_duration() {
+        let trigger = CrewSkillLogicTrigger::builder()
+            .consumable_type("hydrophone".to_owned())
+            .cooling_delay(0.0)
+            .cooling_interpolator(Interpolator::default())
+            .count_to_modifier(Vec::new())
+            .duration(15.0)
+            .energy_coeff(0.0)
+            .heat_interpolator(Interpolator::default())
+            .trigger_desc_ids(String::new())
+            .trigger_type("activationOnConsumable".to_owned())
+            .build();
+        let v = crate::data::Version::base(15, 4, 0);
+        assert_eq!(trigger.consumable_type(v).into_known(), Some(crate::game_types::Consumable::Hydrophone));
+        assert_eq!(trigger.duration(), 15.0);
     }
 }
 
