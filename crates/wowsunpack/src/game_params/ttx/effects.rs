@@ -5,6 +5,16 @@
 use std::collections::HashMap;
 
 use crate::data::Version;
+use crate::game_params::ttx::model::ShipStats;
+use crate::game_params::ttx::modifiers::ModifierBundle;
+use crate::game_params::ttx::modifiers::ModifierError;
+use crate::game_params::ttx::selection::ShipUpgradeSelection;
+use crate::game_params::types::CrewSkill;
+use crate::game_params::types::CrewSkillModifier;
+use crate::game_params::types::GameParamProvider;
+use crate::game_params::types::KnownCrewSkill;
+use crate::game_params::types::Param;
+use crate::game_params::types::Species;
 
 const TRIGGER_ACTIVATION_ON_BURN_FLOOD: &str = "activationOnBurnFlood";
 const TRIGGER_POTENTIAL_DAMAGE_RATIO: &str = "potentialDamageRatio";
@@ -20,17 +30,6 @@ fn stacks(activation: EffectActivation) -> u32 {
         _ => 0,
     }
 }
-
-use crate::game_params::ttx::model::ShipStats;
-use crate::game_params::ttx::modifiers::ModifierBundle;
-use crate::game_params::ttx::modifiers::ModifierError;
-use crate::game_params::ttx::selection::ShipUpgradeSelection;
-use crate::game_params::types::CrewSkill;
-use crate::game_params::types::CrewSkillModifier;
-use crate::game_params::types::GameParamProvider;
-use crate::game_params::types::KnownCrewSkill;
-use crate::game_params::types::Param;
-use crate::game_params::types::Species;
 
 /// A ship's equipped build: the source of effects. Borrowed; the caller assembles it
 /// (a replay's parsed build, or a calculator selection).
@@ -528,7 +527,7 @@ mod tests {
             .heat_interpolator(Interpolator::default())
             .maybe_modifiers(None)
             .trigger_desc_ids(String::new())
-            .trigger_type("activationOnBurnFlood".to_owned())
+            .trigger_type(TRIGGER_ACTIVATION_ON_BURN_FLOOD.to_owned())
             .build();
         CrewSkill::builder()
             .internal_name(CrewSkillName::from(name))
