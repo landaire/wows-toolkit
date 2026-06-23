@@ -40,6 +40,13 @@ pub enum ParseError {
     #[error("method id {method_id} is out of bounds for entity type {entity_type}")]
     MethodIdOutOfBounds { method_id: u32, entity_type: u16 },
 
+    #[error(
+        "entity-method {method} (id {method_id}, entity type {entity_type}) has only {got} payload bytes but its fixed-size args require {expected}; \
+         the exposed-method id table is out of sync with the client (a type's on-wire size is misclassified as fixed vs variable), \
+         which would otherwise silently mislabel every later method"
+    )]
+    ExposedMethodMappingDrift { method: String, method_id: u32, entity_type: u16, expected: usize, got: usize },
+
     #[error("I/O error")]
     Io(#[from] std::io::Error),
 }

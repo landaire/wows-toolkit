@@ -1,4 +1,3 @@
-use crate::PResult;
 use crate::packet2::EntityMethodPacket;
 use crate::packet2::Packet;
 use crate::packet2::PacketType;
@@ -25,11 +24,6 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::iter::FromIterator;
 use tracing::error;
-use winnow::Parser;
-use winnow::binary::le_f32;
-use winnow::binary::le_u8;
-use winnow::binary::le_u16;
-use winnow::binary::le_u64;
 use wowsunpack::data::Version;
 use wowsunpack::game_constants::DEFAULT_BATTLE_CONSTANTS;
 use wowsunpack::game_constants::DEFAULT_COMMON_CONSTANTS;
@@ -1383,76 +1377,13 @@ fn try_convert_pickle_to_string(value: pickled::value::Value) -> pickled::value:
     }
 }
 
-fn parse_receive_common_cmd_blob(blob: &[u8]) -> PResult<(VoiceLine, bool)> {
-    let i = &mut &*blob;
-    let line = le_u16.parse_next(i)?;
-    let audience = le_u8.parse_next(i)?;
-
-    let is_global = match audience {
-        0 => false,
-        1 => true,
-        _ => {
-            panic!("Got unknown audience {}", audience);
-        }
-    };
-    let message = match line {
-        1 => {
-            let x = le_u16.parse_next(i)?;
-            let y = le_u16.parse_next(i)?;
-            VoiceLine::AttentionToSquare(x as u32, y as u32)
-        }
-        2 => {
-            let target_type = le_u16.parse_next(i)?;
-            let target_id = le_u64.parse_next(i)?;
-            VoiceLine::QuickTactic(target_type, target_id)
-        }
-        3 => VoiceLine::RequestingSupport(None),
-        // 4 is "QUICK_SOS"
-        // 5 is AYE_AYE
-        5 => VoiceLine::Wilco,
-        // 6 is NO_WAY
-        6 => VoiceLine::Negative,
-        // GOOD_GAME
-        7 => VoiceLine::WellDone, // TODO: Find the corresponding field
-        // GOOD_LUCK
-        8 => VoiceLine::FairWinds,
-        // CARAMBA
-        9 => VoiceLine::Curses,
-        // 10 -> THANK_YOU
-        10 => VoiceLine::DefendTheBase,
-        // 11 -> NEED_AIR_DEFENSE
-        11 => VoiceLine::ProvideAntiAircraft,
-        // BACK
-        12 => {
-            let _target_type = le_u16.parse_next(i)?;
-            let target_id = le_u64.parse_next(i)?;
-            VoiceLine::Retreat(if target_id != 0 { Some(target_id as i32) } else { None })
-        }
-        // NEED_VISION
-        13 => VoiceLine::IntelRequired,
-        // NEED_SMOKE
-        14 => VoiceLine::SetSmokeScreen,
-        // RLS
-        15 => VoiceLine::UsingRadar,
-        // SONAR
-        16 => VoiceLine::UsingHydroSearch,
-        // FOLLOW_ME
-        17 => VoiceLine::FollowMe,
-        // MAP_POINT_ATTENTION
-        18 => {
-            let x = le_f32.parse_next(i)?;
-            let y = le_f32.parse_next(i)?;
-            VoiceLine::MapPointAttention(x, y)
-        }
-        //  SUBMARINE_LOCATOR
-        19 => VoiceLine::UsingSubmarineLocator,
-        line => {
-            eprintln!("Warning: Unknown voice line {}, {:#X?}", line, *i);
-            VoiceLine::Unknown(line as i64)
-        }
-    };
-
-    Ok((message, is_global))
+fn parse_receive_common_cmd_blob(blob: &[u8]) -> (VoiceLine, bool) {
+    // Since 12.7.0 the command rides as a channel-name string ("battle_team" /
+    // "battle_common"): the audience is the channel and the line content is no
+    // longer carried by this method. (The pre-12.7.0 binary line+audience record
+    // is decoded on the version-gated arg path in the caller.)
+    let is_global = std::str::from_utf8(blob).is_ok_and(|c| c.contains("common") || c.contains("all"));
+    (VoiceLine::Unknown(0), is_global)
 }
 
 impl<'replay, 'argtype, 'rawpacket> DecodedPacketPayload<'replay, 'argtype, 'rawpacket>
@@ -1671,17 +1602,17 @@ where
                 extra_data,
             }
         } else if *method == "receive_CommonCMD" {
-            let (sender_id, message, is_global) = if version.is_at_least(&Version::from_client_exe("0,12,8,0")) {
+            // The method signature changed at 12.7.0: older clients send a
+            // binary `(audience, sender, line, a, b)` arg tuple; 12.7.0+ send
+            // `(sender, command)` where `command` is a channel-name blob.
+            let (sender_id, message, is_global) = if version.is_at_least(&Version::from_client_exe("12,7,0,0")) {
                 // The sender is an unsigned account id, so it arrives as a Uint32
                 // (not Int32); `as_i32` accepts any integer variant. Tolerate
                 // arg-layout drift across versions rather than panicking, which
                 // would abort the whole replay parse.
                 let sender = args.first().and_then(|a| a.as_i32()).unwrap_or(0);
                 let (message_type, is_global) = match args.get(1).and_then(|a| a.blob_ref()) {
-                    Some(blob) => parse_receive_common_cmd_blob(blob.as_ref()).unwrap_or_else(|e| {
-                        tracing::warn!("receive_CommonCMD: failed to parse blob: {e:?}");
-                        (VoiceLine::Unknown(0), false)
-                    }),
+                    Some(blob) => parse_receive_common_cmd_blob(blob.as_ref()),
                     None => {
                         tracing::warn!("receive_CommonCMD: second argument is not a blob");
                         (VoiceLine::Unknown(0), false)
@@ -1691,16 +1622,9 @@ where
                 (sender, message_type, is_global)
             } else {
                 let (audience, sender_id, line, a, b) = unpack_rpc_args!(args, u8, i32, u8, u32, u64);
-                let is_global = match audience {
-                    0 => false,
-                    1 => true,
-                    _ => {
-                        panic!(
-                            "Got unknown audience {} sender=0x{:x} line={} a={:x} b={:x}",
-                            audience, sender_id, line, a, b
-                        );
-                    }
-                };
+                // Audience is team(0)/all(1); default unknown values to team
+                // rather than aborting the whole replay.
+                let is_global = audience == 1;
                 let message = match line {
                     1 => VoiceLine::AttentionToSquare(a, b as u32),
                     2 => VoiceLine::QuickTactic(a as u16, b),

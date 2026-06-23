@@ -823,6 +823,24 @@ impl<'argtype> Parser<'argtype> {
             .get(method_id as usize)
             .ok_or_else(|| failure(ParseError::MethodIdOutOfBounds { method_id, entity_type }))?;
 
+        // Fast-fail on exposed-method id drift. When every arg is fixed-size the
+        // client always sends at least that many bytes, so a shorter payload means
+        // this method_id resolved to the wrong spec: the exposed-method ordering no
+        // longer matches the client, which happens when a type's on-wire size is
+        // misclassified (e.g. a variable-length USER_TYPE sized as its fixed inner
+        // type). sort_size() reports INFINITY (0xffff) for any variable arg, so a
+        // sum below that means the method is wholly fixed-size. Over-long payloads
+        // are legitimate (methods can carry trailing data) and are not flagged.
+        let fixed_size: usize = spec.args.iter().map(|a| a.sort_size()).sum();
+        if fixed_size < 0xffff && payload.len() < fixed_size {
+            return Err(failure(ParseError::ExposedMethodMappingDrift {
+                method: spec.name.to_string(),
+                method_id,
+                entity_type,
+                expected: fixed_size,
+                got: payload.len(),
+            }));
+        }
         let mut sub = payload;
         let mut args = vec![];
         for (idx, arg) in spec.args.iter().enumerate() {
@@ -981,13 +999,17 @@ impl<'argtype> Parser<'argtype> {
     }
 
     fn parse_camera_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+        // Pre-~0.11 the packet is 56 bytes and omits the `unknown` f32 that sits
+        // between `fov` and `position`; later builds added it (60 bytes total).
+        // Detect by payload length so both layouts decode.
+        let has_unknown = i.len() >= 60;
         let q0 = le_f32.parse_next(i)?;
         let q1 = le_f32.parse_next(i)?;
         let q2 = le_f32.parse_next(i)?;
         let q3 = le_f32.parse_next(i)?;
         let camera_position = parse_vec3.parse_next(i)?;
         let fov = le_f32.parse_next(i)?;
-        let unknown = le_f32.parse_next(i)?;
+        let unknown = if has_unknown { le_f32.parse_next(i)? } else { -1.0 };
         let position = parse_vec3.parse_next(i)?;
         let direction = parse_vec3.parse_next(i)?;
         Ok(PacketType::Camera(CameraPacket {
@@ -1413,6 +1435,12 @@ impl<'argtype> Parser<'argtype> {
             Ok(payload) => (sub, payload),
             Err(winnow::error::ErrMode::Cut(ParseError::UnsupportedReplayVersion { version })) => {
                 return Err(failure(ParseError::UnsupportedReplayVersion { version }));
+            }
+            // Method-id drift is never a single bad packet; it means the whole
+            // exposed-method table is misaligned, so surface it loudly instead of
+            // burying it as one Invalid packet among the resulting garbage.
+            Err(winnow::error::ErrMode::Cut(drift @ ParseError::ExposedMethodMappingDrift { .. })) => {
+                return Err(failure(drift));
             }
             Err(e) => {
                 (

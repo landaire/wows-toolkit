@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use serde::Serialize;
-use wowsunpack::rpc::typedefs::ArgType;
 use crate::error::PResult;
 use crate::error::ParseError;
 use crate::error::failure;
+use serde::Serialize;
+use wowsunpack::rpc::typedefs::ArgType;
 use wowsunpack::rpc::typedefs::ArgValue;
 use wowsunpack::rpc::typedefs::PrimitiveType;
 
@@ -196,9 +196,16 @@ fn nested_update_command<'argtype>(
 
             if let Some(stop) = idx2 {
                 slice_insert(idx1, stop, elements, new_elements.clone());
-                Ok(PropertyNesting { levels: vec![], action: UpdateAction::SetRange { start: idx1, stop, values: new_elements } })
+                Ok(PropertyNesting {
+                    levels: vec![],
+                    action: UpdateAction::SetRange { start: idx1, stop, values: new_elements },
+                })
             } else {
-                let value = if new_elements.is_empty() { return Err(failure(ParseError::InvalidPacketData)) } else { new_elements.remove(0) };
+                let value = if new_elements.is_empty() {
+                    return Err(failure(ParseError::InvalidPacketData));
+                } else {
+                    new_elements.remove(0)
+                };
                 // A non-slice element set can target one past the end (append) or
                 // an array left empty at entity create; grow with defaults so the
                 // assignment lands instead of indexing out of bounds.
@@ -206,7 +213,10 @@ fn nested_update_command<'argtype>(
                     elements.resize_with(idx1 + 1, || default_arg_value(element_type));
                 }
                 elements[idx1] = value;
-                Ok(PropertyNesting { levels: vec![], action: UpdateAction::SetElement { index: idx1, value: elements[idx1].clone() } })
+                Ok(PropertyNesting {
+                    levels: vec![],
+                    action: UpdateAction::SetElement { index: idx1, value: elements[idx1].clone() },
+                })
             }
         }
         (_, _) => Err(failure(ParseError::InvalidPacketData)),
