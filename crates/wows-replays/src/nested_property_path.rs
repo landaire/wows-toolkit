@@ -51,6 +51,8 @@ pub(crate) fn default_arg_value<'argtype>(arg_type: &'argtype ArgType) -> ArgVal
             ArgValue::Tuple((0..*size).map(|_| default_arg_value(element_type)).collect())
         }
         ArgType::Named { inner, .. } => default_arg_value(inner),
+        // Transparent: a USER_TYPE's value is its inner network type.
+        ArgType::UserType(inner) => default_arg_value(inner),
     }
 }
 

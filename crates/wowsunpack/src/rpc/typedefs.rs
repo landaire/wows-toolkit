@@ -145,6 +145,14 @@ pub enum ArgType {
         name: String,
         inner: Box<ArgType>,
     },
+
+    /// A `USER_TYPE` (a converter-backed custom type). Its value streams as the
+    /// bare `inner` network type (transparent, no length prefix), but for
+    /// exposed-method index ordering BigWorld treats every USER_TYPE as
+    /// variable-size (its converter's stream size is unbounded) — so it sorts
+    /// into the variable region regardless of the inner's fixed size. Conflating
+    /// it with the plain inner type shifts every later exposed-method id.
+    UserType(Box<ArgType>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -384,6 +392,7 @@ impl ArgType {
     pub fn peeled(&self) -> &ArgType {
         match self {
             Self::Named { inner, .. } => inner.peeled(),
+            Self::UserType(inner) => inner.peeled(),
             other => other,
         }
     }
@@ -424,6 +433,9 @@ impl ArgType {
                 if sort_size == INFINITY { INFINITY } else { sort_size * count }
             }
             Self::Named { inner, .. } => inner.sort_size(),
+            // A USER_TYPE is variable-size for exposed-method ordering even when
+            // its inner streams a fixed number of bytes.
+            Self::UserType(_) => INFINITY,
         }
     }
 
@@ -468,6 +480,8 @@ impl ArgType {
                 Ok(ArgValue::Tuple(values))
             }
             Self::Named { inner, .. } => inner.parse_value(input),
+            // Transparent on the wire: the value is the bare inner type.
+            Self::UserType(inner) => inner.parse_value(input),
         }
     }
 
@@ -479,6 +493,7 @@ impl ArgType {
                 inner.collect_semantic_names(out);
             }
             Self::Array((_, inner)) => inner.collect_semantic_names(out),
+            Self::UserType(inner) => inner.collect_semantic_names(out),
             Self::Tuple((inner, _)) => inner.collect_semantic_names(out),
             Self::FixedDict((_, props)) => {
                 for p in props {
@@ -524,12 +539,15 @@ pub fn parse_type(arg: &roxmltree::Node, aliases: &HashMap<String, ArgType>) -> 
     } else if t == "BLOB" {
         ArgType::Primitive(PrimitiveType::Blob)
     } else if t == "USER_TYPE" {
-        // A USER_TYPE streams as the network type declared by its inner <Type>
-        // (e.g. FLAT_VECTOR streams as VECTOR2, GUN_DIRECTIONS as UINT16). Honor
-        // it; without an inner <Type> the type is converter-defined and opaque,
-        // streamed as a length-prefixed blob.
+        // A USER_TYPE's value streams as the network type declared by its inner
+        // <Type> (e.g. FLAT_VECTOR streams as VECTOR2, GUN_DIRECTIONS as UINT16),
+        // transparently with no length prefix. But for exposed-method index
+        // ordering BigWorld treats every USER_TYPE as variable-size, so it must
+        // be wrapped (not collapsed to the inner) to sort into the variable
+        // region. Without an inner <Type> the type is converter-defined and
+        // opaque, streamed as a length-prefixed blob (already variable).
         match child_by_name(arg, "Type") {
-            Some(inner) => parse_type(&inner, aliases),
+            Some(inner) => ArgType::UserType(Box::new(parse_type(&inner, aliases))),
             None => ArgType::Primitive(PrimitiveType::Blob),
         }
     } else if t == "MAILBOX" || t == "PYTHON" {
@@ -803,6 +821,30 @@ mod test {
         // It serializes as a JSON array.
         let json = serde_json::to_string(&result).unwrap();
         assert_eq!(json, "[7,8,9]");
+    }
+
+    #[test]
+    fn user_type_is_variable_for_ordering_but_parses_as_inner() {
+        // A USER_TYPE whose inner streams as a fixed VECTOR2. On the wire its
+        // value is the bare inner (transparent, 8 bytes, no length prefix), but
+        // for exposed-method ordering BigWorld classifies USER_TYPE as variable
+        // (its converter's stream size is unbounded), so sort_size must be
+        // INFINITY. Getting this wrong sorts USER_TYPE methods into the
+        // fixed-size region and shifts every later exposed-method id.
+        let spec = "<Type>USER_TYPE<Type>VECTOR2</Type></Type>";
+        let doc = roxmltree::Document::parse(spec).unwrap();
+        let root = doc.root_element();
+        let aliases = HashMap::new();
+        let t = parse_type(&root, &aliases);
+
+        assert_eq!(t.sort_size(), INFINITY, "USER_TYPE is variable-size for ordering");
+
+        // Parsing is transparent: the inner VECTOR2's 8 bytes, no length prefix.
+        let data = [0, 0, 0x80, 0x3f, 0, 0, 0, 0x40]; // (1.0, 2.0)
+        let mut input = &data[..];
+        let result = t.parse_value(&mut input).unwrap();
+        assert!(input.is_empty(), "transparent: all 8 bytes consumed, no length prefix");
+        assert_eq!(result, ArgValue::Vector2((1.0, 2.0)));
     }
 
     #[test]
