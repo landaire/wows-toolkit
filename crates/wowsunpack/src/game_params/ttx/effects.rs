@@ -5,6 +5,10 @@
 use std::collections::HashMap;
 
 use crate::data::Version;
+
+const TRIGGER_ACTIVATION_ON_BURN_FLOOD: &str = "activationOnBurnFlood";
+const TRIGGER_POTENTIAL_DAMAGE_RATIO: &str = "potentialDamageRatio";
+
 use crate::game_params::ttx::model::ShipStats;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::modifiers::ModifierError;
@@ -195,17 +199,39 @@ impl Loadout<'_> {
                     modifiers: mods.clone(),
                 });
             }
-            if let Some(trigger) = skill.logic_trigger()
-                && let Some(tmods) = trigger.modifiers().filter(|m| !m.is_empty())
-            {
-                let recognized = KnownCrewSkill::recognize(skill.internal_name(), skill.skill_type());
-                let kind = match recognized.known() {
-                    Some(KnownCrewSkill::AdrenalineRush) | Some(KnownCrewSkill::SubmarineAdrenalineRush) => {
-                        EffectKind::HealthScaledReload
+            if let Some(trigger) = skill.logic_trigger() {
+                match trigger.trigger_type() {
+                    TRIGGER_ACTIVATION_ON_BURN_FLOOD if !trigger.count_to_modifier().is_empty() => {
+                        effects.push(Effect {
+                            id: EffectId::Skill(name),
+                            kind: EffectKind::StackingPerCount { blocks: trigger.count_to_modifier().to_vec() },
+                            modifiers: Vec::new(),
+                        });
                     }
-                    _ => EffectKind::Binary,
-                };
-                effects.push(Effect { id: EffectId::Skill(name), kind, modifiers: tmods.clone() });
+                    TRIGGER_POTENTIAL_DAMAGE_RATIO => {
+                        if let Some(tmods) = trigger.modifiers().filter(|m| !m.is_empty()) {
+                            effects.push(Effect {
+                                id: EffectId::Skill(name),
+                                kind: EffectKind::StackingRepeated,
+                                modifiers: tmods.clone(),
+                            });
+                        }
+                    }
+                    _ => {
+                        if let Some(tmods) = trigger.modifiers().filter(|m| !m.is_empty()) {
+                            let recognized =
+                                KnownCrewSkill::recognize(skill.internal_name(), skill.skill_type());
+                            let kind = match recognized.known() {
+                                Some(KnownCrewSkill::AdrenalineRush)
+                                | Some(KnownCrewSkill::SubmarineAdrenalineRush) => {
+                                    EffectKind::HealthScaledReload
+                                }
+                                _ => EffectKind::Binary,
+                            };
+                            effects.push(Effect { id: EffectId::Skill(name), kind, modifiers: tmods.clone() });
+                        }
+                    }
+                }
             }
         }
 
@@ -463,6 +489,61 @@ mod tests {
         assert_eq!(HealthFraction::new(-0.2).value(), 0.0);
         assert_eq!(HealthFraction::new(0.5).value(), 0.5);
         assert_eq!(HealthFraction::FULL.value(), 1.0);
+    }
+
+    fn furious_skill(name: &str, blocks: Vec<(u32, Vec<CrewSkillModifier>)>) -> CrewSkill {
+        let trigger = CrewSkillLogicTrigger::builder()
+            .consumable_type(String::new())
+            .cooling_delay(0.0)
+            .cooling_interpolator(Interpolator::default())
+            .count_to_modifier(blocks)
+            .duration(0.0)
+            .energy_coeff(0.0)
+            .heat_interpolator(Interpolator::default())
+            .maybe_modifiers(None)
+            .trigger_desc_ids(String::new())
+            .trigger_type("activationOnBurnFlood".to_owned())
+            .build();
+        CrewSkill::builder()
+            .internal_name(CrewSkillName::from(name))
+            .can_be_learned(true)
+            .is_epic(false)
+            .skill_type(CrewSkillType::new(0))
+            .ui_treat_as_trigger(false)
+            .tier(tiers())
+            .logic_trigger(trigger)
+            .build()
+    }
+
+    #[test]
+    fn furious_trigger_emits_stacking_per_count() {
+        let ship = ship_no_abilities();
+        let blocks = vec![
+            (1u32, vec![uniform_modifier("GMShotDelay", 0.9)]),
+            (2u32, vec![uniform_modifier("GMShotDelay", 0.95)]),
+        ];
+        let skill = furious_skill("TriggerBurnGmReload", blocks.clone());
+        let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
+        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].id(), &EffectId::Skill("TriggerBurnGmReload".to_string()));
+        assert_eq!(effects[0].kind(), &EffectKind::StackingPerCount { blocks });
+    }
+
+    #[test]
+    fn potential_damage_trigger_emits_stacking_repeated() {
+        let ship = ship_no_abilities();
+        let skill = skill_with_trigger(
+            "DefenceUw",
+            0,
+            "potentialDamageRatio",
+            vec![uniform_modifier("regenCrewReloadCoeff", 0.992)],
+        );
+        let loadout = Loadout { skills: &[skill], modernization_modifiers: &[], ship: &ship };
+        let effects: Vec<_> = loadout.effects(&EmptyProvider).iter().cloned().collect();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].id(), &EffectId::Skill("DefenceUw".to_string()));
+        assert_eq!(effects[0].kind(), &EffectKind::StackingRepeated);
     }
 
     #[test]
