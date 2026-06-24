@@ -228,8 +228,18 @@ pub(crate) fn ship_stats_with(
     let mg_max_dist_km = artillery.as_ref().and_then(|a| a.range.map(|r| r.value()));
     let atba_max_dist_km = secondaries.as_ref().and_then(|a| a.range.map(|r| r.value()));
 
-    let visibility =
-        hull.map(|h| factories::visibility(h, modifiers, has_big_gun_artillery, mg_max_dist_km, atba_max_dist_km));
+    let visibility = hull.map(|h| {
+        factories::visibility(
+            h,
+            selection.hull.as_deref().unwrap_or(""),
+            modifiers,
+            &ModifierSources::default(),
+            has_big_gun_artillery,
+            mg_max_dist_km,
+            atba_max_dist_km,
+            &mut Off,
+        )
+    });
 
     ShipStats {
         durability,

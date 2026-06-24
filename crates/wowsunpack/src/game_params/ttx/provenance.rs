@@ -132,6 +132,14 @@ impl StepBuilder<'_> {
         }
         self.steps.push(Contribution { input, modifier_name: name.to_string(), op: Op::Mul, operand: value });
     }
+    /// A module-level additive contribution (e.g. on-fire detection penalty). No-op
+    /// when `value` is the additive identity `0.0`.
+    pub fn module_add(&mut self, input: InputId, name: &str, value: f32) {
+        if value == 0.0 {
+            return;
+        }
+        self.steps.push(Contribution { input, modifier_name: name.to_string(), op: Op::Add, operand: value });
+    }
 }
 
 /// Zero-cost when off, accumulating when on.
@@ -308,5 +316,30 @@ mod recorder_tests {
             },
         );
         assert!(rec.into_provenance().attributions[0].steps.is_empty());
+    }
+
+    #[test]
+    fn module_add_skips_zero_and_records_add() {
+        let hull_src = InputId::Module { slot: ModuleSlot::Hull, name: "H".into() };
+
+        // Zero value: no step recorded.
+        let mut rec = On::default();
+        rec.record(TtxStat::SeaDetectionOnFire, None, 7.33, hull_src.clone(), 7.33, |b| {
+            b.module_add(hull_src.clone(), "visibilityCoefFire", 0.0);
+        });
+        assert!(rec.into_provenance().attributions[0].steps.is_empty(), "zero fire should record no step");
+
+        // Non-zero value: one Op::Add step recorded.
+        let mut rec = On::default();
+        rec.record(TtxStat::SeaDetectionOnFire, None, 7.33, hull_src.clone(), 9.33, |b| {
+            b.module_add(hull_src.clone(), "visibilityCoefFire", 2.0);
+        });
+        let prov = rec.into_provenance();
+        let a = &prov.attributions[0];
+        assert_eq!(a.steps.len(), 1);
+        assert_eq!(a.steps[0].op, Op::Add);
+        assert!((a.steps[0].operand - 2.0).abs() < 1e-6);
+        // Replay: 7.33 + 2.0 = 9.33.
+        assert!((ShipStatsProvenance::replay(a) - 9.33).abs() < 1e-4);
     }
 }
