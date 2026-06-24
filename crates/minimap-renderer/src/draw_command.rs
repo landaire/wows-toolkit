@@ -118,6 +118,14 @@ pub enum ShipConfigCircleKind {
     Hydro,
 }
 
+/// Detection consumable a pulsing radius represents, used to flag it the instant it lights up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum DetectionPulse {
+    Radar,
+    Hydro,
+}
+
 /// Per-range-type visibility filter for ship configuration circles.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -473,6 +481,8 @@ pub enum DrawCommand {
         color: [u8; 3],
         /// Fill transparency
         alpha: f32,
+        /// When set, pulse the circle to flag a just-activated detection consumable
+        pulse: Option<DetectionPulse>,
     },
     /// Fighter patrol radius circle (filled only, no outline)
     PatrolRadius {

@@ -16,6 +16,7 @@ use egui::Vec2;
 
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::draw_command::DamageBreakdownEntry;
+use wows_minimap_renderer::draw_command::DetectionPulse;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wt_translations::TextResolver;
 use wt_translations::TranslatableText;
@@ -1090,14 +1091,31 @@ pub fn draw_command_to_shapes(
             shapes.push(Shape::line_segment([start, end], Stroke::new(stroke_width, line_color)));
         }
 
-        DrawCommand::ConsumableRadius { pos, radius_px, color, alpha, .. } => {
+        DrawCommand::ConsumableRadius { pos, radius_px, color, alpha, pulse, .. } => {
             let center = transform.minimap_to_screen(pos);
             let r = transform.scale_distance(*radius_px as f32);
-            let fill_color = color_from_rgba(*color, *alpha);
-            shapes.push(Shape::circle_filled(center, r, fill_color));
-            let outline_color = color_from_rgba(*color, 0.5);
-            let stroke_w = transform.scale_stroke(2.0);
-            shapes.push(Shape::circle_stroke(center, r, Stroke::new(stroke_w, outline_color)));
+            if let Some(kind) = pulse {
+                // Pulse fill and outline so an active detection bubble cannot be missed.
+                // Red for radar, green for hydro, regardless of team.
+                let rgb = match kind {
+                    DetectionPulse::Radar => [230, 30, 30],
+                    DetectionPulse::Hydro => [30, 200, 60],
+                };
+                let t = ctx.input(|i| i.time) as f32;
+                let wave = 0.5 + 0.5 * (t * std::f32::consts::TAU * 1.5).sin();
+                let fill_color = color_from_rgba(rgb, *alpha + wave * 0.30);
+                shapes.push(Shape::circle_filled(center, r, fill_color));
+                let outline_color = color_from_rgba(rgb, 0.5 + wave * 0.5);
+                let stroke_w = transform.scale_stroke(2.0 + wave * 2.0);
+                shapes.push(Shape::circle_stroke(center, r, Stroke::new(stroke_w, outline_color)));
+                ctx.request_repaint();
+            } else {
+                let fill_color = color_from_rgba(*color, *alpha);
+                shapes.push(Shape::circle_filled(center, r, fill_color));
+                let outline_color = color_from_rgba(*color, 0.5);
+                let stroke_w = transform.scale_stroke(2.0);
+                shapes.push(Shape::circle_stroke(center, r, Stroke::new(stroke_w, outline_color)));
+            }
         }
 
         DrawCommand::PatrolRadius { pos, radius_px, color, alpha, .. } => {
