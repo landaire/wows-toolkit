@@ -1,7 +1,7 @@
 [package]
 name = "wows-core"
 description = "Lightweight domain core (shared types and small derived data) for the WoWS toolkit"
-version = "0.7.0"
+version = "0.8.0"
 repository = "https://github.com/landaire/wows-toolkit"
 edition.workspace = true
 rust-version.workspace = true
