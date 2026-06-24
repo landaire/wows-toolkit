@@ -11,6 +11,7 @@
 //! equipped-modifier pipeline). Public entry: [`ship_stats`] / [`ship_stats_stock`].
 
 pub mod armor_materials;
+pub mod attribution_render;
 pub mod components;
 pub mod constants;
 pub mod consumables;
@@ -26,6 +27,9 @@ pub mod render;
 pub mod selection;
 pub mod weapon_tables;
 
+pub use attribution_render::AttributionLine;
+pub use attribution_render::ContributorLine;
+pub use attribution_render::render_attributions;
 pub use effects::Effect;
 pub use effects::EffectActivation;
 pub use effects::EffectId;
