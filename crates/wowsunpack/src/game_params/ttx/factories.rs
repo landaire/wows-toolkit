@@ -18,6 +18,7 @@ use crate::game_params::ttx::constants::BW_TO_BALLISTIC;
 use crate::game_params::ttx::constants::HULL_HEALTH_ROUND;
 use crate::game_params::ttx::constants::KM_TO_M;
 use crate::game_params::ttx::constants::TORPEDO_DAMAGE_CONSTANT;
+use crate::game_params::ttx::labels::TtxStat;
 use crate::game_params::ttx::model::AmmoCount;
 use crate::game_params::ttx::model::Armor;
 use crate::game_params::ttx::model::Artillery;
@@ -36,6 +37,10 @@ use crate::game_params::ttx::model::TorpedoStats;
 use crate::game_params::ttx::model::Torpedoes;
 use crate::game_params::ttx::model::Visibility;
 use crate::game_params::ttx::modifiers::ModifierBundle;
+use crate::game_params::ttx::module_options::ModuleSlot;
+use crate::game_params::ttx::provenance::InputId;
+use crate::game_params::ttx::provenance::ModifierSources;
+use crate::game_params::ttx::provenance::Recorder;
 use crate::game_params::ttx::weapon_tables::StatWeaponType;
 use crate::game_params::ttx::weapon_tables::alpha_damage_coeff;
 use crate::game_params::ttx::weapon_tables::ammo_to_stat_weapon_table;
@@ -73,16 +78,52 @@ const TORPEDO_TYPE_COMMON: i64 = 0;
 /// at parse time from `floodNodes` (HullComponentStats::flood_prob, PreprocessedHull.py:12);
 /// `uwCoeffMultiplier` is a coefficient (`*`) and `uwCoeffBonus` an additive bonus (`+`,
 /// MODIFIER_SETTINGS base_value 0.0). `None` when `flood_prob` is absent.
-pub fn durability(hull: &HullComponentStats, modifiers: &ModifierBundle, level: u32) -> Durability {
+pub fn durability<R: Recorder>(
+    hull: &HullComponentStats,
+    hull_name: &str,
+    modifiers: &ModifierBundle,
+    sources: &ModifierSources,
+    level: u32,
+    rec: &mut R,
+) -> Durability {
     let health = hull.health.map(|base| {
         let raw = (base.value() + modifiers.bonus("healthPerLevel") * level as f32) * modifiers.coef("healthHullCoeff");
         // ceil(raw / round) * round (ModifiersApply.py:143).
         let rounded = (raw / HULL_HEALTH_ROUND).ceil() * HULL_HEALTH_ROUND;
+        if R::ON {
+            // Provenance records pre-round `raw` so replay(attr) reproduces it exactly;
+            // the model stores the rounded value via Hp::from(rounded) below.
+            rec.record(
+                TtxStat::Health,
+                None,
+                base.value(),
+                InputId::Module { slot: ModuleSlot::Hull, name: hull_name.to_string() },
+                raw,
+                |b| {
+                    b.bonus(sources, "healthPerLevel", level as f32);
+                    b.coef(sources, "healthHullCoeff");
+                },
+            );
+        }
         Hp::from(rounded)
     });
 
     let torpedo_protection = hull.flood_prob.map(|prob| {
-        Percent::from(prob * modifiers.coef("uwCoeffMultiplier") * 100.0 + modifiers.bonus("uwCoeffBonus"))
+        let value = prob * modifiers.coef("uwCoeffMultiplier") * 100.0 + modifiers.bonus("uwCoeffBonus");
+        if R::ON {
+            rec.record(
+                TtxStat::TorpedoProtection,
+                None,
+                prob * 100.0,
+                InputId::Module { slot: ModuleSlot::Hull, name: hull_name.to_string() },
+                value,
+                |b| {
+                    b.coef(sources, "uwCoeffMultiplier");
+                    b.bonus(sources, "uwCoeffBonus", 1.0);
+                },
+            );
+        }
+        Percent::from(value)
     });
 
     Durability { health, torpedo_protection }
@@ -99,19 +140,70 @@ pub fn durability(hull: &HullComponentStats, modifiers: &ModifierBundle, level: 
 ///
 /// `rudder_time` = `hull.rudderTime * SGRudderTime` (FactoryMobility.py:10).
 /// `SGRudderTime` is multiplicative (base_value 1.0 -> `coef`).
-pub fn mobility(hull: &HullComponentStats, engine: &EngineComponentStats, modifiers: &ModifierBundle) -> Mobility {
+pub fn mobility<R: Recorder>(
+    hull: &HullComponentStats,
+    hull_name: &str,
+    engine: &EngineComponentStats,
+    engine_name: Option<&str>,
+    modifiers: &ModifierBundle,
+    sources: &ModifierSources,
+    rec: &mut R,
+) -> Mobility {
     let speed = match (hull.max_speed, hull.speed_coef) {
         (Some(max_speed), Some(hull_speed_coef)) => {
             let engine_speed_coef = engine.speed_coef.unwrap_or(0.0);
             let coef = (hull_speed_coef + engine_speed_coef).clamp(0.0, 1.0);
-            Some(Knots::from(max_speed.value() * coef * modifiers.coef("speedCoef")))
+            let value = max_speed.value() * coef * modifiers.coef("speedCoef");
+            if R::ON {
+                rec.record(
+                    TtxStat::Speed,
+                    None,
+                    max_speed.value(),
+                    InputId::Module { slot: ModuleSlot::Hull, name: hull_name.to_string() },
+                    value,
+                    |b| {
+                        // hull+engine speedCoef blend, attributed to the engine (the variable part).
+                        let engine_src = engine_name
+                            .map(|n| InputId::Module { slot: ModuleSlot::Engine, name: n.to_string() })
+                            .unwrap_or(InputId::Module { slot: ModuleSlot::Hull, name: hull_name.to_string() });
+                        b.module(engine_src, "speedCoef", coef);
+                        b.coef(sources, "speedCoef");
+                    },
+                );
+            }
+            Some(Knots::from(value))
         }
         _ => None,
     };
 
     let turning_radius = hull.turning_radius;
+    if R::ON {
+        if let Some(t) = turning_radius {
+            rec.record(
+                TtxStat::TurningRadius,
+                None,
+                t.value(),
+                InputId::Module { slot: ModuleSlot::Hull, name: hull_name.to_string() },
+                t.value(),
+                |_b| {},
+            );
+        }
+    }
 
-    let rudder_time = hull.rudder_time.map(|t| Seconds::from(t.value() * modifiers.coef("SGRudderTime")));
+    let rudder_time = hull.rudder_time.map(|t| {
+        let value = t.value() * modifiers.coef("SGRudderTime");
+        if R::ON {
+            rec.record(
+                TtxStat::RudderTime,
+                None,
+                t.value(),
+                InputId::Module { slot: ModuleSlot::Hull, name: hull_name.to_string() },
+                value,
+                |b| b.coef(sources, "SGRudderTime"),
+            );
+        }
+        Seconds::from(value)
+    });
 
     Mobility { speed, turning_radius, rudder_time }
 }
@@ -123,15 +215,29 @@ pub fn mobility(hull: &HullComponentStats, engine: &EngineComponentStats, modifi
 /// Both coeffs are multiplicative (MODIFIER_SETTINGS base_value 1.0). The deob returns
 /// `None` when `batteryCapacity == 0` (FactoryBattery.py:5); here the hull carries
 /// battery fields only for submarines, so `None` when they are absent.
-pub fn battery(hull: &HullComponentStats, modifiers: &ModifierBundle) -> Option<Battery> {
+pub fn battery<R: Recorder>(
+    hull: &HullComponentStats,
+    hull_name: &str,
+    modifiers: &ModifierBundle,
+    sources: &ModifierSources,
+    rec: &mut R,
+) -> Option<Battery> {
     let (capacity, regen) = (hull.battery_capacity?, hull.battery_regen_rate?);
     if capacity == 0.0 {
         return None;
     }
-    Some(Battery {
-        capacity: Some(capacity * modifiers.coef("batteryCapacityCoeff")),
-        regeneration: Some(regen * modifiers.coef("batteryRegenCoeff")),
-    })
+    let cap_value = capacity * modifiers.coef("batteryCapacityCoeff");
+    let regen_value = regen * modifiers.coef("batteryRegenCoeff");
+    if R::ON {
+        let hull_src = || InputId::Module { slot: ModuleSlot::Hull, name: hull_name.to_string() };
+        rec.record(TtxStat::BatteryCapacity, None, capacity, hull_src(), cap_value, |b| {
+            b.coef(sources, "batteryCapacityCoeff")
+        });
+        rec.record(TtxStat::BatteryRegeneration, None, regen, hull_src(), regen_value, |b| {
+            b.coef(sources, "batteryRegenCoeff")
+        });
+    }
+    Some(Battery { capacity: Some(cap_value), regeneration: Some(regen_value) })
 }
 
 /// Default lowest armor thickness when an `armorList` yields no classified plate
@@ -782,6 +888,8 @@ mod tests {
     use super::*;
     use crate::game_params::ttx::components::ArtilleryGunStats;
     use crate::game_params::ttx::constants::DEFAULT_UW_DAMAGE_COEFF;
+    use crate::game_params::ttx::provenance::ModifierSources;
+    use crate::game_params::ttx::provenance::Off;
     use crate::game_params::types::CrewSkillModifier;
     use crate::game_params::types::Species;
 
@@ -845,7 +953,14 @@ mod tests {
 
     #[test]
     fn gearing_stock_durability_health() {
-        let durability = durability(&gearing_hull(), &ModifierBundle::empty(Species::Destroyer), 10);
+        let durability = durability(
+            &gearing_hull(),
+            "H",
+            &ModifierBundle::empty(Species::Destroyer),
+            &ModifierSources::default(),
+            10,
+            &mut Off,
+        );
         // ceil(19400 / 50) * 50 = 19400 (healthPerLevel 0, healthHullCoeff 1).
         assert_eq!(durability.health, Some(Hp::from(19400.0)));
     }
@@ -853,7 +968,14 @@ mod tests {
     #[test]
     fn gearing_stock_durability_ptz_zero() {
         // Gearing floodNodes[0][0] == DEFAULT_UW_DAMAGE_COEFF -> flood_prob 0 -> ptz 0.
-        let durability = durability(&gearing_hull(), &ModifierBundle::empty(Species::Destroyer), 10);
+        let durability = durability(
+            &gearing_hull(),
+            "H",
+            &ModifierBundle::empty(Species::Destroyer),
+            &ModifierSources::default(),
+            10,
+            &mut Off,
+        );
         assert_eq!(durability.torpedo_protection, Some(Percent::from(0.0)));
     }
 
@@ -861,7 +983,14 @@ mod tests {
     fn yamato_stock_durability_ptz() {
         // flood_prob * 1.0 (stock uwCoeffMultiplier) * 100 + 0 (stock uwCoeffBonus).
         // (0.333 - 0.15) / 0.333 * 100 = 54.9549... (Yamato in-game ptz ~55%).
-        let durability = durability(&yamato_hull(), &ModifierBundle::empty(Species::Battleship), 10);
+        let durability = durability(
+            &yamato_hull(),
+            "H",
+            &ModifierBundle::empty(Species::Battleship),
+            &ModifierSources::default(),
+            10,
+            &mut Off,
+        );
         let ptz = durability.torpedo_protection.expect("ptz computed").value();
         let expected = (DEFAULT_UW_DAMAGE_COEFF - 0.15) / DEFAULT_UW_DAMAGE_COEFF * 100.0;
         assert!((ptz - expected).abs() < 1e-4, "got {ptz}, expected {expected}");
@@ -874,7 +1003,7 @@ mod tests {
         let mods = [modifier("uwCoeffBonus", 25.0)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
-        let durability = durability(&yamato_hull(), &bundle, 10);
+        let durability = durability(&yamato_hull(), "H", &bundle, &ModifierSources::default(), 10, &mut Off);
         let ptz = durability.torpedo_protection.expect("ptz computed").value();
         let expected = (DEFAULT_UW_DAMAGE_COEFF - 0.15) / DEFAULT_UW_DAMAGE_COEFF * 100.0 + 25.0;
         assert!((ptz - expected).abs() < 1e-4, "got {ptz}, expected {expected}");
@@ -884,13 +1013,28 @@ mod tests {
     fn ptz_none_when_flood_absent() {
         // No floodNodes -> flood_prob None -> ptz None (not fabricated).
         let hull = HullComponentStats::default();
-        let durability = durability(&hull, &ModifierBundle::empty(Species::Destroyer), 10);
+        let durability = durability(
+            &hull,
+            "H",
+            &ModifierBundle::empty(Species::Destroyer),
+            &ModifierSources::default(),
+            10,
+            &mut Off,
+        );
         assert!(durability.torpedo_protection.is_none());
     }
 
     #[test]
     fn gearing_stock_mobility() {
-        let mobility = mobility(&gearing_hull(), &gearing_engine(), &ModifierBundle::empty(Species::Destroyer));
+        let mobility = mobility(
+            &gearing_hull(),
+            "H",
+            &gearing_engine(),
+            Some("E"),
+            &ModifierBundle::empty(Species::Destroyer),
+            &ModifierSources::default(),
+            &mut Off,
+        );
         // 36 * clamp(1.0 + 0.0) * 1.0 = 36.
         assert_eq!(mobility.speed, Some(Knots::from(36.0)));
         // turningRadius is a direct field.
@@ -905,7 +1049,15 @@ mod tests {
         let mods = [modifier("speedCoef", 1.05)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
-        let mobility = mobility(&gearing_hull(), &gearing_engine(), &bundle);
+        let mobility = mobility(
+            &gearing_hull(),
+            "H",
+            &gearing_engine(),
+            Some("E"),
+            &bundle,
+            &ModifierSources::default(),
+            &mut Off,
+        );
         let speed = mobility.speed.expect("speed computed").value();
         assert!((speed - 37.8).abs() < 1e-4, "got {speed}");
     }
@@ -917,30 +1069,60 @@ mod tests {
         let mods = [modifier("healthPerLevel", 350.0), modifier("healthHullCoeff", 1.05)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
-        let durability = durability(&gearing_hull(), &bundle, 10);
+        let durability = durability(&gearing_hull(), "H", &bundle, &ModifierSources::default(), 10, &mut Off);
         assert_eq!(durability.health, Some(Hp::from(24050.0)));
     }
 
     #[test]
     fn absent_inputs_are_none() {
         let empty_hull = HullComponentStats::default();
-        let durability = durability(&empty_hull, &ModifierBundle::empty(Species::Destroyer), 10);
+        let durability = durability(
+            &empty_hull,
+            "H",
+            &ModifierBundle::empty(Species::Destroyer),
+            &ModifierSources::default(),
+            10,
+            &mut Off,
+        );
         assert!(durability.health.is_none());
 
-        let mobility =
-            mobility(&empty_hull, &EngineComponentStats::default(), &ModifierBundle::empty(Species::Destroyer));
+        let mobility = mobility(
+            &empty_hull,
+            "H",
+            &EngineComponentStats::default(),
+            Some("E"),
+            &ModifierBundle::empty(Species::Destroyer),
+            &ModifierSources::default(),
+            &mut Off,
+        );
         assert!(mobility.speed.is_none());
         assert!(mobility.turning_radius.is_none());
         assert!(mobility.rudder_time.is_none());
 
         // No SubmarineBattery -> battery None.
-        assert!(battery(&empty_hull, &ModifierBundle::empty(Species::Submarine)).is_none());
+        assert!(
+            battery(
+                &empty_hull,
+                "H",
+                &ModifierBundle::empty(Species::Submarine),
+                &ModifierSources::default(),
+                &mut Off
+            )
+            .is_none()
+        );
     }
 
     #[test]
     fn balao_stock_battery() {
         // capacity 240 * 1.0, regenRate 1.2 * 1.0 (stock battery coeffs).
-        let battery = battery(&balao_hull(), &ModifierBundle::empty(Species::Submarine)).expect("battery computed");
+        let battery = battery(
+            &balao_hull(),
+            "H",
+            &ModifierBundle::empty(Species::Submarine),
+            &ModifierSources::default(),
+            &mut Off,
+        )
+        .expect("battery computed");
         assert_eq!(battery.capacity, Some(240.0));
         assert_eq!(battery.regeneration, Some(1.2));
     }
@@ -951,7 +1133,8 @@ mod tests {
         let mods = [modifier("batteryCapacityCoeff", 1.1), modifier("batteryRegenCoeff", 1.25)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Submarine, VERSION).expect("test modifiers are all known");
-        let battery = battery(&balao_hull(), &bundle).expect("battery computed");
+        let battery =
+            battery(&balao_hull(), "H", &bundle, &ModifierSources::default(), &mut Off).expect("battery computed");
         let capacity = battery.capacity.expect("capacity");
         let regen = battery.regeneration.expect("regen");
         assert!((capacity - 264.0).abs() < 1e-4, "got {capacity}");
@@ -961,7 +1144,40 @@ mod tests {
     #[test]
     fn battery_none_for_non_sub() {
         // Gearing has no SubmarineBattery -> battery None.
-        assert!(battery(&gearing_hull(), &ModifierBundle::empty(Species::Destroyer)).is_none());
+        assert!(
+            battery(
+                &gearing_hull(),
+                "H",
+                &ModifierBundle::empty(Species::Destroyer),
+                &ModifierSources::default(),
+                &mut Off
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn durability_records_health_provenance() {
+        use crate::game_params::ttx::provenance::{InputId, ModifierSources, On, Op, Recorder, ShipStatsProvenance};
+        let mods = [modifier("healthPerLevel", 350.0), modifier("healthHullCoeff", 1.05)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).unwrap();
+        let mut sources = ModifierSources::default();
+        sources.record("healthPerLevel", InputId::Upgrade { name: "U".into() }, 350.0);
+        sources.record("healthHullCoeff", InputId::Skill { name: "S".into() }, 1.05);
+
+        let mut rec = On::default();
+        let _ = durability(&gearing_hull(), "HULL", &bundle, &sources, 10, &mut rec);
+        let prov = rec.into_provenance();
+        let health = prov.attributions.iter().find(|a| a.stat == TtxStat::Health).unwrap();
+        assert_eq!(health.base_value, 19400.0);
+        assert!(
+            matches!(&health.base_source, InputId::Module { slot, .. } if *slot == crate::game_params::ttx::module_options::ModuleSlot::Hull)
+        );
+        // base + 350*10 (add), * 1.05 (mul): replay reproduces the pre-round raw.
+        let expected = (19400.0 + 350.0 * 10.0) * 1.05;
+        assert!((ShipStatsProvenance::replay(health) - expected).abs() < 1e-1);
+        assert_eq!(health.steps.iter().filter(|c| c.op == Op::Add).count(), 1);
+        assert_eq!(health.steps.iter().filter(|c| c.op == Op::Mul).count(), 1);
     }
 
     /// Build an [`ArmorMap`] from `(raw_key, thickness)` pairs, mirroring

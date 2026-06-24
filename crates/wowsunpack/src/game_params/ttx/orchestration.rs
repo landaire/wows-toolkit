@@ -12,6 +12,8 @@ use crate::game_params::ttx::effects::ReloadCoeffs;
 use crate::game_params::ttx::factories;
 use crate::game_params::ttx::model::ShipStats;
 use crate::game_params::ttx::modifiers::ModifierBundle;
+use crate::game_params::ttx::provenance::ModifierSources;
+use crate::game_params::ttx::provenance::Off;
 use crate::game_params::ttx::selection::ShipUpgradeSelection;
 use crate::game_params::types::ArmorMap;
 use crate::game_params::types::GameParamProvider;
@@ -130,14 +132,33 @@ pub(crate) fn ship_stats_with(
 
     let hull = selection.hull.as_deref().and_then(|name| components.hull(name));
 
-    let durability = hull.map(|h| factories::durability(h, modifiers, level));
+    let durability = hull.map(|h| {
+        factories::durability(
+            h,
+            selection.hull.as_deref().unwrap_or(""),
+            modifiers,
+            &ModifierSources::default(),
+            level,
+            &mut Off,
+        )
+    });
 
     let mobility = hull.map(|h| {
         let engine = selection.engine.as_deref().and_then(|name| components.engine(name)).cloned().unwrap_or_default();
-        factories::mobility(h, &engine, modifiers)
+        factories::mobility(
+            h,
+            selection.hull.as_deref().unwrap_or(""),
+            &engine,
+            selection.engine.as_deref(),
+            modifiers,
+            &ModifierSources::default(),
+            &mut Off,
+        )
     });
 
-    let battery = hull.and_then(|h| factories::battery(h, modifiers));
+    let battery = hull.and_then(|h| {
+        factories::battery(h, selection.hull.as_deref().unwrap_or(""), modifiers, &ModifierSources::default(), &mut Off)
+    });
 
     // Fire-control coefficient feeds main-battery range (default 1.0 when no FC).
     let fc_coef = selection
