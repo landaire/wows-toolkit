@@ -2,6 +2,8 @@
 //! consumables, innate effects) produced each TTX stat value, and the magnitude
 //! each contributed. Built by the recording factory path; rendered by `render`.
 
+use std::collections::HashMap;
+
 use crate::game_params::ttx::labels::TtxStat;
 use crate::game_params::ttx::module_options::ModuleSlot;
 use crate::game_params::types::CrewSkillName;
@@ -74,6 +76,133 @@ impl ShipStatsProvenance {
     }
 }
 
+/// Per-source raw modifier values, the provenance side-channel built next to the
+/// `ModifierBundle` in `Effects::resolve`. `name -> [(source, raw_value)]`,
+/// preserving contribution order.
+#[derive(Clone, Debug, Default)]
+pub struct ModifierSources {
+    by_name: HashMap<String, Vec<(InputId, f32)>>,
+}
+
+impl ModifierSources {
+    pub fn record(&mut self, name: &str, input: InputId, raw: f32) {
+        self.by_name.entry(name.to_string()).or_default().push((input, raw));
+    }
+    pub fn get(&self, name: &str) -> &[(InputId, f32)] {
+        self.by_name.get(name).map(Vec::as_slice).unwrap_or(&[])
+    }
+}
+
+/// Appends contributions for one stat while recording. Held only on the `On` path.
+pub struct StepBuilder<'a> {
+    steps: &'a mut Vec<Contribution>,
+}
+
+impl StepBuilder<'_> {
+    /// One `Mul` contribution per source behind a coefficient `name`.
+    pub fn coef(&mut self, sources: &ModifierSources, name: &str) {
+        for (input, raw) in sources.get(name) {
+            self.steps.push(Contribution {
+                input: input.clone(),
+                modifier_name: name.to_string(),
+                op: Op::Mul,
+                operand: *raw,
+            });
+        }
+    }
+    /// One `Add` contribution per source behind a bonus `name`, each scaled by
+    /// `scale` (e.g. `healthPerLevel` scaled by ship level). `scale` defaults to
+    /// `1.0` via callers passing `1.0`.
+    pub fn bonus(&mut self, sources: &ModifierSources, name: &str, scale: f32) {
+        for (input, raw) in sources.get(name) {
+            self.steps.push(Contribution {
+                input: input.clone(),
+                modifier_name: name.to_string(),
+                op: Op::Add,
+                operand: *raw * scale,
+            });
+        }
+    }
+    /// A module-level coefficient not carried in the bundle (fire-control
+    /// `maxDistCoef`, engine clamp factor). No-op when `value` is the identity
+    /// `1.0` (the module did not move the stat).
+    pub fn module(&mut self, input: InputId, name: &str, value: f32) {
+        if value == 1.0 {
+            return;
+        }
+        self.steps.push(Contribution { input, modifier_name: name.to_string(), op: Op::Mul, operand: value });
+    }
+}
+
+/// Zero-cost when off, accumulating when on.
+pub trait Recorder {
+    const ON: bool;
+    fn record(
+        &mut self,
+        stat: TtxStat,
+        qualifier: Option<&str>,
+        base_value: f32,
+        base_source: InputId,
+        final_value: f32,
+        build: impl FnOnce(&mut StepBuilder<'_>),
+    );
+    fn into_provenance(self) -> ShipStatsProvenance;
+}
+
+/// The no-op recorder. Guarded by `if R::ON`, every recording block (including
+/// `InputId` construction) is eliminated.
+pub struct Off;
+
+impl Recorder for Off {
+    const ON: bool = false;
+    fn record(
+        &mut self,
+        _stat: TtxStat,
+        _qualifier: Option<&str>,
+        _base_value: f32,
+        _base_source: InputId,
+        _final_value: f32,
+        _build: impl FnOnce(&mut StepBuilder<'_>),
+    ) {
+    }
+    fn into_provenance(self) -> ShipStatsProvenance {
+        ShipStatsProvenance::default()
+    }
+}
+
+/// The accumulating recorder.
+#[derive(Default)]
+pub struct On {
+    attributions: Vec<StatAttribution>,
+}
+
+impl Recorder for On {
+    const ON: bool = true;
+    fn record(
+        &mut self,
+        stat: TtxStat,
+        qualifier: Option<&str>,
+        base_value: f32,
+        base_source: InputId,
+        final_value: f32,
+        build: impl FnOnce(&mut StepBuilder<'_>),
+    ) {
+        let mut steps = Vec::new();
+        build(&mut StepBuilder { steps: &mut steps });
+        self.attributions.push(StatAttribution {
+            stat,
+            qualifier: qualifier.map(str::to_string),
+            base_value,
+            base_source,
+            steps,
+            value: final_value,
+        });
+    }
+    fn into_provenance(self) -> ShipStatsProvenance {
+        ShipStatsProvenance { attributions: self.attributions }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,5 +232,81 @@ mod tests {
         };
         // 19400 * 1.05 + 3500 = 23870.
         assert!((ShipStatsProvenance::replay(&attr) - 23870.0).abs() < 1e-3);
+    }
+}
+
+#[cfg(test)]
+mod recorder_tests {
+    use super::*;
+
+    fn sources_with(name: &str, entries: &[(InputId, f32)]) -> ModifierSources {
+        let mut s = ModifierSources::default();
+        for (input, raw) in entries {
+            s.record(name, input.clone(), *raw);
+        }
+        s
+    }
+
+    #[test]
+    fn off_records_nothing() {
+        let mut rec = Off;
+        rec.record(
+            TtxStat::Speed,
+            None,
+            36.0,
+            InputId::Module { slot: ModuleSlot::Hull, name: "H".into() },
+            37.8,
+            |b| {
+                b.coef(&ModifierSources::default(), "speedCoef");
+            },
+        );
+        assert!(rec.into_provenance().attributions.is_empty());
+    }
+
+    #[test]
+    fn on_records_base_and_per_source_steps() {
+        let up = InputId::Upgrade { name: "U1".into() };
+        let sk = InputId::Skill { name: CrewSkillName::from("S1") };
+        let sources = sources_with("speedCoef", &[(up.clone(), 1.05), (sk.clone(), 1.10)]);
+
+        let mut rec = On::default();
+        rec.record(
+            TtxStat::Speed,
+            None,
+            36.0,
+            InputId::Module { slot: ModuleSlot::Hull, name: "H".into() },
+            41.58,
+            |b| {
+                b.coef(&sources, "speedCoef");
+            },
+        );
+
+        let prov = rec.into_provenance();
+        assert_eq!(prov.attributions.len(), 1);
+        let a = &prov.attributions[0];
+        assert_eq!(a.base_value, 36.0);
+        assert_eq!(a.steps.len(), 2);
+        assert_eq!(a.steps[0].input, up);
+        assert_eq!(a.steps[0].op, Op::Mul);
+        assert!((a.steps[0].operand - 1.05).abs() < 1e-6);
+        assert_eq!(a.steps[1].input, sk);
+        // Replay: 36 * 1.05 * 1.10 = 41.58.
+        assert!((ShipStatsProvenance::replay(a) - 41.58).abs() < 1e-3);
+    }
+
+    #[test]
+    fn module_identity_factor_is_skipped() {
+        let mut rec = On::default();
+        rec.record(
+            TtxStat::ArtilleryRange,
+            None,
+            11.13,
+            InputId::Module { slot: ModuleSlot::Artillery, name: "A".into() },
+            11.13,
+            |b| {
+                b.module(InputId::Module { slot: ModuleSlot::FireControl, name: "FC".into() }, "maxDistCoef", 1.0);
+            },
+        );
+        assert!(rec.into_provenance().attributions[0].steps.is_empty());
     }
 }
