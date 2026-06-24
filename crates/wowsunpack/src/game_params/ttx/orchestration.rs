@@ -183,11 +183,18 @@ pub(crate) fn ship_stats_with(
         )
     });
 
-    let secondaries = selection
-        .hull
-        .as_deref()
-        .and_then(|name| components.secondaries(name))
-        .and_then(|atba| factories::secondaries(atba, modifiers, reload_coeffs.secondary, level, provider));
+    let secondaries = selection.hull.as_deref().and_then(|name| components.secondaries(name)).and_then(|atba| {
+        factories::secondaries(
+            atba,
+            selection.hull.as_deref().unwrap_or(""),
+            modifiers,
+            &ModifierSources::default(),
+            reload_coeffs.secondary,
+            level,
+            provider,
+            &mut Off,
+        )
+    });
 
     let torpedoes = selection
         .torpedoes

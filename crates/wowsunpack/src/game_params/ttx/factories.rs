@@ -881,16 +881,21 @@ pub fn artillery<R: Recorder>(
 /// group for `reload_time`/`gun` (as [`artillery`] does for main mounts) and lists a
 /// shell per distinct ATBA ammo name across all mounts; `range`/`dispersion` use the
 /// component `maxDist`. `None` when the component has no guns.
-pub fn secondaries(
+pub fn secondaries<R: Recorder>(
     atba: &SecondaryComponentStats,
+    hull_name: &str,
     modifiers: &ModifierBundle,
+    sources: &ModifierSources,
     reload_coeff: f32,
     level: u32,
     provider: &dyn GameParamProvider,
+    rec: &mut R,
 ) -> Option<Artillery> {
     if atba.guns.is_empty() {
         return None;
     }
+
+    let hull_src = || InputId::Module { slot: ModuleSlot::Hull, name: hull_name.to_string() };
 
     let shot_delay_coef = modifiers.coef("GSShotDelay");
     let max_dist_coef = modifiers.coef("GSMaxDist");
@@ -901,35 +906,102 @@ pub fn secondaries(
     // First gun group drives the displayed reload/gun (FactoryArtillery.py:83 is per gun).
     let first = &atba.guns[0];
 
-    let reload_time = first.shot_delay.map(|d| Seconds::from(d.value() * shot_delay_coef * reload_coeff));
+    let reload_time = first.shot_delay.map(|d| {
+        let value = d.value() * shot_delay_coef * reload_coeff;
+        if R::ON {
+            rec.record(TtxStat::SecondaryReloadTime, None, d.value(), hull_src(), value, |b| {
+                b.coef(sources, "GSShotDelay");
+                // reload_coeff is the dynamic Adrenaline coefficient. Record as a module
+                // step so base * GSShotDelay * reloadCoeff replays exactly.
+                b.module(hull_src(), "reloadCoeff", reload_coeff);
+            });
+        }
+        Seconds::from(value)
+    });
 
     // range = (maxDist / KM_TO_M) * GSMaxDist (FactoryArtillery.py:84 over the KM
     // maxDist of PreprocessedATBA.py:30). No fire-control coef for secondaries.
     let range_km = atba.max_dist.map(|d| (d.value() / KM_TO_M) * max_dist_coef);
-    let range = range_km.map(Km::from);
+    let range = range_km.map(|rng| {
+        if R::ON {
+            if let Some(base_km) = atba.max_dist.map(|d| d.value() / KM_TO_M) {
+                rec.record(TtxStat::SecondaryRange, None, base_km, hull_src(), rng, |b| {
+                    b.coef(sources, "GSMaxDist");
+                });
+            }
+        }
+        Km::from(rng)
+    });
 
     let (dispersion, dispersion_vertical) = match (range_km, first.min_radius, first.ideal_radius, first.ideal_distance)
     {
         (Some(rng), Some(min_r), Some(ideal_r), Some(ideal_d)) => {
             let h = constants::dispersion_horizontal(min_r, ideal_r, ideal_d, Km::from(rng), ideal_radius_coef);
+            let h_m = h.to_meters();
             let vertical = match (first.radius_on_zero, first.radius_on_delim, first.radius_on_max, first.delim) {
                 (Some(z), Some(dl), Some(mx), Some(dm)) => {
                     let coeff = constants::clamped_dispersion_coeff(z, dl, mx, dm, Km::from(rng), Km::from(rng));
-                    Some((h * coeff).to_meters())
+                    Some(((h * coeff).to_meters(), coeff))
                 }
                 _ => None,
             };
-            (Some(h.to_meters()), vertical)
+            if R::ON {
+                let base_h = constants::dispersion_horizontal(min_r, ideal_r, ideal_d, Km::from(rng), 1.0).to_meters();
+                rec.record(TtxStat::SecondaryDispersion, None, base_h.value(), hull_src(), h_m.value(), |b| {
+                    b.coef(sources, "GSIdealRadius");
+                });
+                if let Some((v, coeff)) = vertical {
+                    // base_h * coeff absorbs the vertical scale so replay stays exact:
+                    // base * GSIdealRadius = base_h * coeff * ideal_radius_coef = v.
+                    rec.record(
+                        TtxStat::SecondaryDispersionVertical,
+                        None,
+                        base_h.value() * coeff,
+                        hull_src(),
+                        v.value(),
+                        |b| b.coef(sources, "GSIdealRadius"),
+                    );
+                }
+            }
+            (Some(h_m), vertical.map(|(v, _)| v))
         }
         _ => (None, None),
     };
 
     let rotation_speed = first.rotation_speed.map(|r| r.value() * yaw_coef + yaw_bonus);
     let rotation_time = rotation_speed.filter(|&r| r != 0.0).map(|r| Seconds::from(180.0 / r));
+
+    if R::ON {
+        if let Some(speed) = rotation_speed {
+            let base_speed = first.rotation_speed.map(|r| r.value()).unwrap();
+            rec.record(TtxStat::SecondaryGunRotationSpeed, None, base_speed, hull_src(), speed, |b| {
+                b.coef(sources, "GSRotationSpeed");
+                b.bonus(sources, "GSRotationSpeedBonus", 1.0);
+            });
+        }
+        if let Some(rt) = rotation_time {
+            rec.record(TtxStat::SecondaryGunRotationTime, None, rt.value(), hull_src(), rt.value(), |_b| {});
+        }
+    }
+
+    let caliber = first.barrel_diameter.map(|b| b.to_mm());
+    let num_barrels = first.num_barrels.map(|n| n as u32);
+    let num_guns = atba.guns.len() as u32;
+
+    if R::ON {
+        if let Some(c) = caliber {
+            rec.record(TtxStat::SecondaryGunCaliber, None, c.value(), hull_src(), c.value(), |_b| {});
+        }
+        if let Some(nb) = num_barrels {
+            rec.record(TtxStat::SecondaryGunNumBarrels, None, nb as f32, hull_src(), nb as f32, |_b| {});
+        }
+        rec.record(TtxStat::SecondaryGunNumGuns, None, num_guns as f32, hull_src(), num_guns as f32, |_b| {});
+    }
+
     let gun = Some(MainGun {
-        caliber: first.barrel_diameter.map(|b| b.to_mm()),
-        num_barrels: first.num_barrels.map(|n| n as u32),
-        num_guns: Some(atba.guns.len() as u32),
+        caliber,
+        num_barrels,
+        num_guns: Some(num_guns),
         rotation_speed: rotation_speed.map(DegreesPerSecond::from),
         rotation_time,
     });
@@ -946,15 +1018,18 @@ pub fn secondaries(
             if let Some(param) = provider.game_param_by_name(ammo_name)
                 && let Some(projectile) = param.projectile()
             {
+                // Pass hull_name as arty_name: shell attribution appears under the hull
+                // module (the ATBA is referenced by the selected hull, not a separate
+                // artillery slot).
                 shells.push(shell_stats(
                     ammo_name.clone(),
                     projectile,
                     modifiers,
-                    "",
-                    &ModifierSources::default(),
+                    hull_name,
+                    sources,
                     level,
                     true,
-                    &mut Off,
+                    rec,
                 ));
             } else {
                 warn_unresolved_ammo(ammo_name);
@@ -2175,8 +2250,17 @@ mod tests {
     #[test]
     fn bismarck_stock_secondaries_gun_and_range() {
         let provider = bismarck_secondary_provider();
-        let sec = secondaries(&bismarck_secondaries(), &ModifierBundle::empty(Species::Battleship), 1.0, 8, &provider)
-            .expect("secondaries computed");
+        let sec = secondaries(
+            &bismarck_secondaries(),
+            "HULL",
+            &ModifierBundle::empty(Species::Battleship),
+            &ModifierSources::default(),
+            1.0,
+            8,
+            &provider,
+            &mut Off,
+        )
+        .expect("secondaries computed");
 
         // range: (7600 / 1000) * 1.0 (GSMaxDist) = 7.6 (Bismarck's in-game stock range).
         assert_eq!(sec.range, Some(Km::from(7.6)));
@@ -2200,8 +2284,17 @@ mod tests {
     #[test]
     fn bismarck_stock_secondaries_shells() {
         let provider = bismarck_secondary_provider();
-        let sec = secondaries(&bismarck_secondaries(), &ModifierBundle::empty(Species::Battleship), 1.0, 8, &provider)
-            .expect("secondaries computed");
+        let sec = secondaries(
+            &bismarck_secondaries(),
+            "HULL",
+            &ModifierBundle::empty(Species::Battleship),
+            &ModifierSources::default(),
+            1.0,
+            8,
+            &provider,
+            &mut Off,
+        )
+        .expect("secondaries computed");
 
         // One shell per distinct ATBA ammo across the mixed-caliber mounts.
         assert_eq!(sec.shells.len(), 2);
@@ -2231,7 +2324,17 @@ mod tests {
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let provider = bismarck_secondary_provider();
-        let sec = secondaries(&bismarck_secondaries(), &bundle, 1.0, 8, &provider).expect("secondaries computed");
+        let sec = secondaries(
+            &bismarck_secondaries(),
+            "HULL",
+            &bundle,
+            &ModifierSources::default(),
+            1.0,
+            8,
+            &provider,
+            &mut Off,
+        )
+        .expect("secondaries computed");
         let range = sec.range.expect("range").value();
         assert!(approx(range, 9.12), "got {range}");
     }
@@ -2243,7 +2346,17 @@ mod tests {
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let provider = bismarck_secondary_provider();
-        let sec = secondaries(&bismarck_secondaries(), &bundle, 1.0, 8, &provider).expect("secondaries computed");
+        let sec = secondaries(
+            &bismarck_secondaries(),
+            "HULL",
+            &bundle,
+            &ModifierSources::default(),
+            1.0,
+            8,
+            &provider,
+            &mut Off,
+        )
+        .expect("secondaries computed");
         let reload = sec.reload_time.expect("reload").value();
         assert!(approx(reload, 6.375), "got {reload}");
     }
@@ -2252,7 +2365,19 @@ mod tests {
     fn secondaries_none_when_no_guns() {
         let provider = bismarck_secondary_provider();
         let empty = SecondaryComponentStats::default();
-        assert!(secondaries(&empty, &ModifierBundle::empty(Species::Battleship), 1.0, 8, &provider).is_none());
+        assert!(
+            secondaries(
+                &empty,
+                "HULL",
+                &ModifierBundle::empty(Species::Battleship),
+                &ModifierSources::default(),
+                1.0,
+                8,
+                &provider,
+                &mut Off
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -2523,5 +2648,118 @@ mod tests {
             rel_err < 1e-4,
             "vertical dispersion replay not exact: replay={replayed}, factory={expected_v}, rel_err={rel_err}"
         );
+    }
+
+    /// Bismarck secondaries with the four vertical-dispersion curve fields set,
+    /// so `SecondaryDispersionVertical` is recorded.
+    fn bismarck_secondaries_with_curve() -> SecondaryComponentStats {
+        let gun_150 = ArtilleryGunStats {
+            shot_delay: Some(Seconds::from(7.5)),
+            rotation_speed: Some(DegreesPerSecond::from(60.0)),
+            num_barrels: Some(2.0),
+            barrel_diameter: Some(Meters::from(0.15)),
+            ammo_switch_coeff: None,
+            min_radius: Some(1.0),
+            ideal_radius: Some(15.5),
+            ideal_distance: Some(333.333),
+            radius_on_zero: Some(1.0),
+            radius_on_delim: Some(1.5),
+            radius_on_max: Some(2.0),
+            delim: Some(0.5),
+            ammo: vec!["PGPA003_150mm_HE_HE_N_F".to_string()],
+        };
+        SecondaryComponentStats { max_dist: Some(Meters::from(7600.0)), guns: vec![gun_150] }
+    }
+
+    /// `SecondaryRange` records a Hull-module base + `GSMaxDist` Mul step; replay reproduces
+    /// the final value exactly.
+    #[test]
+    fn secondary_range_records_gs_max_dist_and_replay_exact() {
+        use crate::game_params::ttx::provenance::{On, ShipStatsProvenance};
+
+        let mods = [modifier("GSMaxDist", 1.2)];
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+
+        let mut sources = ModifierSources::default();
+        sources.record("GSMaxDist", InputId::Upgrade { name: "U".into() }, 1.2);
+
+        let provider = bismarck_secondary_provider();
+        let mut rec = On::default();
+        let sec = secondaries(&bismarck_secondaries(), "HULL_B", &bundle, &sources, 1.0, 8, &provider, &mut rec)
+            .expect("secondaries computed");
+
+        let prov = rec.into_provenance();
+
+        let range_attr =
+            prov.attributions.iter().find(|a| a.stat == TtxStat::SecondaryRange).expect("SecondaryRange recorded");
+
+        assert!(
+            matches!(&range_attr.base_source, InputId::Module { slot, .. } if *slot == ModuleSlot::Hull),
+            "SecondaryRange base source must be the Hull module"
+        );
+
+        let gs_step = range_attr.steps.iter().find(|c| c.modifier_name == "GSMaxDist");
+        assert!(gs_step.is_some(), "GSMaxDist step must be recorded");
+        assert!((gs_step.unwrap().operand - 1.2).abs() < 1e-6);
+
+        let expected_range = sec.range.expect("range").value();
+        let replayed = ShipStatsProvenance::replay(range_attr);
+        assert!((replayed - expected_range).abs() < 1e-4, "replay got {replayed}, expected {expected_range}");
+    }
+
+    /// `SecondaryDispersionVertical` replay must use `base_h * coeff` as the base value (not
+    /// `base_h` alone), so a single `GSIdealRadius` Mul step reproduces the final value.
+    /// A base of `base_h` alone would give a wrong replay when `coeff != 1.0`.
+    #[test]
+    fn secondary_vertical_dispersion_records_exact_replay() {
+        use crate::game_params::ttx::provenance::{On, ShipStatsProvenance};
+
+        let mods = [modifier("GSIdealRadius", 0.95)];
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+
+        let mut sources = ModifierSources::default();
+        sources.record("GSIdealRadius", InputId::Upgrade { name: "U".into() }, 0.95);
+
+        let provider = bismarck_secondary_provider();
+        let mut rec = On::default();
+        let sec =
+            secondaries(&bismarck_secondaries_with_curve(), "HULL_B", &bundle, &sources, 1.0, 8, &provider, &mut rec)
+                .expect("secondaries computed");
+
+        let prov = rec.into_provenance();
+
+        let v_attr = prov
+            .attributions
+            .iter()
+            .find(|a| a.stat == TtxStat::SecondaryDispersionVertical)
+            .expect("SecondaryDispersionVertical recorded");
+
+        let expected_v = sec.dispersion_vertical.expect("dispersion_vertical").value();
+        let replayed = ShipStatsProvenance::replay(v_attr);
+        let rel_err = (replayed - expected_v).abs() / expected_v;
+        assert!(
+            rel_err < 1e-4,
+            "vertical dispersion replay not exact: replay={replayed}, factory={expected_v}, rel_err={rel_err}"
+        );
+
+        // Confirm the base is NOT bare base_h (which would give the wrong answer when coeff != 1.0).
+        // The range at max_dist 7.6 km, ideal_radius_coef 1.0, produces some base_h.
+        // With coeff != 1.0 (at max range, radius_on_max=2.0 -> coeff=2.0), replaying
+        // base_h alone * 0.95 would not equal expected_v.
+        let range_km =
+            atba_range_km_for_test(&bismarck_secondaries_with_curve(), &ModifierBundle::empty(Species::Battleship));
+        let base_h_only =
+            constants::dispersion_horizontal(1.0, 15.5, 333.333, Km::from(range_km), 1.0).to_meters().value();
+        let wrong_replay = base_h_only * 0.95;
+        assert!(
+            (wrong_replay - expected_v).abs() > 1e-3,
+            "a base_h-only replay should NOT equal the vertical value (coeff != 1.0 case)"
+        );
+    }
+
+    fn atba_range_km_for_test(atba: &SecondaryComponentStats, modifiers: &ModifierBundle) -> f32 {
+        atba.max_dist.map(|d| (d.value() / KM_TO_M) * modifiers.coef("GSMaxDist")).unwrap_or(0.0)
     }
 }
