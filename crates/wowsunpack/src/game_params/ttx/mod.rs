@@ -59,6 +59,7 @@ pub use provenance::Op;
 pub use provenance::Recorder;
 pub use provenance::ShipStatsProvenance;
 pub use provenance::StatAttribution;
+pub use provenance::StatKey;
 pub use provenance::StepBuilder;
 pub use render::StatDelta;
 pub use render::StatLine;

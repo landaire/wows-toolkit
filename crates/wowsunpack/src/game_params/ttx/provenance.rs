@@ -43,6 +43,15 @@ pub struct Contribution {
     pub operand: f32,
 }
 
+/// Identity of one stat row: the `TtxStat` and its collection qualifier (ammo
+/// kind / mount label / launcher index). The `(stat, qualifier)` pair `rows()`,
+/// the diff, and the coverage check key on.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StatKey {
+    pub stat: TtxStat,
+    pub qualifier: Option<String>,
+}
+
 /// Full provenance for one stat value.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StatAttribution {
@@ -53,6 +62,12 @@ pub struct StatAttribution {
     pub base_source: InputId,
     /// Contributions in application order.
     pub steps: Vec<Contribution>,
+    /// Upstream stats this value is derived from (rotation time from rotation
+    /// speed; on-fire detection from base detection; range detection from
+    /// detection and gun range). Empty for non-derived stats. Orthogonal to
+    /// `value` (replay) and to coverage; the render layer follows it to surface a
+    /// derived stat's real cause.
+    pub derived_from: Vec<StatKey>,
     /// Final value (equals the card's `StatValue` magnitude).
     pub value: f32,
 }
@@ -96,6 +111,7 @@ impl ModifierSources {
 /// Appends contributions for one stat while recording. Held only on the `On` path.
 pub struct StepBuilder<'a> {
     steps: &'a mut Vec<Contribution>,
+    derived: &'a mut Vec<StatKey>,
 }
 
 impl StepBuilder<'_> {
@@ -139,6 +155,10 @@ impl StepBuilder<'_> {
             return;
         }
         self.steps.push(Contribution { input, modifier_name: name.to_string(), op: Op::Add, operand: value });
+    }
+    /// Record that the enclosing stat is derived from an upstream stat.
+    pub fn derived_from(&mut self, stat: TtxStat, qualifier: Option<&str>) {
+        self.derived.push(StatKey { stat, qualifier: qualifier.map(str::to_string) });
     }
 }
 
@@ -196,13 +216,15 @@ impl Recorder for On {
         build: impl FnOnce(&mut StepBuilder<'_>),
     ) {
         let mut steps = Vec::new();
-        build(&mut StepBuilder { steps: &mut steps });
+        let mut derived = Vec::new();
+        build(&mut StepBuilder { steps: &mut steps, derived: &mut derived });
         self.attributions.push(StatAttribution {
             stat,
             qualifier: qualifier.map(str::to_string),
             base_value,
             base_source,
             steps,
+            derived_from: derived,
             value: final_value,
         });
     }
@@ -236,6 +258,7 @@ mod tests {
                     operand: 3500.0,
                 },
             ],
+            derived_from: Vec::new(),
             value: 23870.0,
         };
         // 19400 * 1.05 + 3500 = 23870.
@@ -341,5 +364,26 @@ mod recorder_tests {
         assert!((a.steps[0].operand - 2.0).abs() < 1e-6);
         // Replay: 7.33 + 2.0 = 9.33.
         assert!((ShipStatsProvenance::replay(a) - 9.33).abs() < 1e-4);
+    }
+
+    #[test]
+    fn on_records_derived_from_links() {
+        let mut rec = On::default();
+        rec.record(
+            TtxStat::GunRotationTime,
+            None,
+            9.0,
+            InputId::Module { slot: ModuleSlot::Artillery, name: "A".into() },
+            9.0,
+            |b| {
+                b.derived_from(TtxStat::GunRotationSpeed, None);
+            },
+        );
+        let prov = rec.into_provenance();
+        let a = &prov.attributions[0];
+        assert!(a.steps.is_empty());
+        assert_eq!(a.derived_from, vec![StatKey { stat: TtxStat::GunRotationSpeed, qualifier: None }]);
+        // derived_from does not affect replay.
+        assert!((ShipStatsProvenance::replay(a) - 9.0).abs() < 1e-6);
     }
 }

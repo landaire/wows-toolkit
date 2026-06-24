@@ -192,6 +192,7 @@ mod tests {
                         operand: 3500.0,
                     },
                 ],
+                derived_from: Vec::new(),
                 value: 23870.0,
             }],
         };
@@ -219,6 +220,7 @@ mod tests {
                 base_value: -1.0,
                 base_source: InputId::Module { slot: ModuleSlot::Hull, name: "PAUH911".into() },
                 steps: vec![],
+                derived_from: Vec::new(),
                 value: -1.0,
             }],
         };
@@ -245,6 +247,7 @@ mod tests {
                 base_value: 1.0,
                 base_source: InputId::Module { slot: ModuleSlot::Hull, name: "PAUH911".into() },
                 steps: vec![],
+                derived_from: Vec::new(),
                 value: 1.0,
             }],
         };
