@@ -40,6 +40,7 @@ use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::module_options::ModuleSlot;
 use crate::game_params::ttx::provenance::InputId;
 use crate::game_params::ttx::provenance::ModifierSources;
+use crate::game_params::ttx::provenance::Off;
 use crate::game_params::ttx::provenance::Recorder;
 use crate::game_params::ttx::weapon_tables::StatWeaponType;
 use crate::game_params::ttx::weapon_tables::alpha_damage_coeff;
@@ -498,13 +499,19 @@ const SMALL_PROJECTILE_MAX_DIAMETER_M: f32 = 0.0;
 /// read the `GS*` coefficients, and HE penetration uses `GSPenetrationCoeffHE`
 /// (FactoryArtillery.py:175) rather than `GMPenetrationCoeffHE`.
 ///
+/// `arty_name` and `sources` provide the artillery module name and per-source modifier
+/// table for provenance recording. `rec` accumulates attributions when `R::ON`.
+///
 /// Each field is `None` when its base projectile input is absent.
-pub fn shell_stats(
+pub fn shell_stats<R: Recorder>(
     name: String,
     projectile: &Projectile,
     modifiers: &ModifierBundle,
+    arty_name: &str,
+    sources: &ModifierSources,
     level: u32,
     is_atba: bool,
+    rec: &mut R,
 ) -> ShellStats {
     let ammo_kind = projectile.ammo_type();
     let mut weapon = ammo_to_stat_weapon_table(ammo_kind);
@@ -513,14 +520,30 @@ pub fn shell_stats(
         weapon = weapon.to_atba();
     }
 
+    // Shell qualifier matches model.rs shell_qualifier: ammo_kind string (e.g. "HE", "AP").
+    let qualifier = ammo_kind;
+    let arty_src = || InputId::Module { slot: ModuleSlot::Artillery, name: arty_name.to_string() };
+
     // caliber * 1000 (FactoryArtillery.py:155). caliber (m) = bulletDiametr.
     let caliber_m = projectile.bullet_diametr();
     let caliber = caliber_m.map(|c| Millimeters::from(c * 1000.0));
+    if R::ON {
+        // Derived: base == final, no modifier steps.
+        if let Some(c) = caliber {
+            rec.record(TtxStat::ShellCaliber, Some(qualifier), c.value(), arty_src(), c.value(), |_b| {});
+        }
+    }
 
     // speed = bulletSpeed * timeFactor (PreprocessedAmmo.py:16). timeFactor defaults to
     // 1.0 when absent (maa3520d6.py:1151, GameParams class attribute); most shells omit it,
     // but PXPA* event shells carry 0.5/0.75/2.2.
     let speed = projectile.bullet_speed().map(|s| MetersPerSecond::from(s * projectile.time_factor().unwrap_or(1.0)));
+    if R::ON {
+        // Derived: base == final, no modifier steps.
+        if let Some(s) = speed {
+            rec.record(TtxStat::ShellSpeed, Some(qualifier), s.value(), arty_src(), s.value(), |_b| {});
+        }
+    }
 
     // damage = alphaDamage * getAlphaDamageCoeff * controllableWeaponDamageCoeff
     //   * getArtilleryDamageCoeff * citadelCSAP(if weapon in WEAPONS_CSAP)
@@ -534,6 +557,19 @@ pub fn shell_stats(
                 * modifiers.coef("controllableWeaponDamageCoeff")
                 * artillery_damage_coeff(cal_m, weapon, modifiers, HEAVY_CRUISER_SHELL_DIAMETER_M)
                 * csap;
+            if R::ON {
+                // alpha_damage_coeff and artillery_damage_coeff each fold several named
+                // bundle coefficients internally. Record the net composite factor as a
+                // single module step so replay is exact.
+                let net_damage_coeff = value / alpha;
+                rec.record(TtxStat::ShellDamage, Some(qualifier), alpha, arty_src(), value, |b| {
+                    b.coef(sources, "controllableWeaponDamageCoeff");
+                    // Net of alpha_damage_coeff * artillery_damage_coeff * csap, collapsed
+                    // to keep replay exact without decomposing the composite helpers.
+                    let net_without_cwdc = net_damage_coeff / modifiers.coef("controllableWeaponDamageCoeff");
+                    b.module(arty_src(), "damageCoeff", net_without_cwdc);
+                });
+            }
             Some(Hp::from(value))
         }
         _ => None,
@@ -547,11 +583,26 @@ pub fn shell_stats(
         if is_atba { modifiers.coef("GSPenetrationCoeffHE") } else { modifiers.coef("GMPenetrationCoeffHE") };
     let penetration = match weapon {
         StatWeaponType::MainHe | StatWeaponType::AtbaHe => {
-            projectile.alpha_piercing_he().map(|p| Millimeters::from((p * he_pen_coef).floor()))
+            projectile.alpha_piercing_he().map(|p| {
+                let floored = (p * he_pen_coef).floor();
+                if R::ON {
+                    // Record pre-floor product so replay is exact within tolerance
+                    // (floor breaks arithmetic replay by at most 1 mm).
+                    let pre_floor = p * he_pen_coef;
+                    let pen_coef_name = if is_atba { "GSPenetrationCoeffHE" } else { "GMPenetrationCoeffHE" };
+                    rec.record(TtxStat::ShellPenetration, Some(qualifier), p, arty_src(), pre_floor, |b| {
+                        b.coef(sources, pen_coef_name)
+                    });
+                }
+                Millimeters::from(floored)
+            })
         }
-        StatWeaponType::MainCs | StatWeaponType::AtbaCs => {
-            projectile.alpha_piercing_cs().map(|p| Millimeters::from(p.floor()))
-        }
+        StatWeaponType::MainCs | StatWeaponType::AtbaCs => projectile.alpha_piercing_cs().map(|p| {
+            if R::ON {
+                rec.record(TtxStat::ShellPenetration, Some(qualifier), p, arty_src(), p, |_b| {});
+            }
+            Millimeters::from(p.floor())
+        }),
         _ => None,
     };
 
@@ -560,15 +611,33 @@ pub fn shell_stats(
     // Stored as a percent (burnProb 0.12 -> 12%).
     let is_small = caliber_m.is_some_and(|c| is_small_projectile(c, SMALL_PROJECTILE_MAX_DIAMETER_M));
     let burn_chance = match weapon {
-        StatWeaponType::MainHe | StatWeaponType::MainAp | StatWeaponType::AtbaHe | StatWeaponType::AtbaAp => projectile
-            .burn_prob()
-            .map(|bp| Percent::from(calculate_burn_chance(level, bp, modifiers, is_small) * 100.0)),
+        StatWeaponType::MainHe | StatWeaponType::MainAp | StatWeaponType::AtbaHe | StatWeaponType::AtbaAp => {
+            projectile.burn_prob().map(|bp| {
+                let chance_val = calculate_burn_chance(level, bp, modifiers, is_small) * 100.0;
+                if R::ON {
+                    let base_pct = bp.max(0.0) * 100.0;
+                    // calculate_burn_chance folds several named bundle coefficients internally.
+                    // Record the net factor as one module step to keep replay exact.
+                    let net_burn_coeff = if base_pct != 0.0 { chance_val / base_pct } else { 1.0 };
+                    rec.record(TtxStat::ShellBurnChance, Some(qualifier), base_pct, arty_src(), chance_val, |b| {
+                        b.module(arty_src(), "burnChanceCoeff", net_burn_coeff)
+                    });
+                }
+                Percent::from(chance_val)
+            })
+        }
         _ => None,
     };
 
     // floodChance = uwCritical, HE only (FactoryArtillery.py:172). Stored as a percent.
     let flood_chance = match weapon {
-        StatWeaponType::MainHe | StatWeaponType::AtbaHe => projectile.uw_critical().map(|f| Percent::from(f * 100.0)),
+        StatWeaponType::MainHe | StatWeaponType::AtbaHe => projectile.uw_critical().map(|f| {
+            let value = f * 100.0;
+            if R::ON {
+                rec.record(TtxStat::ShellFloodChance, Some(qualifier), value, arty_src(), value, |_b| {});
+            }
+            Percent::from(value)
+        }),
         _ => None,
     };
 
@@ -620,19 +689,27 @@ pub(crate) fn artillery_range_km(
 /// `num_barrels = gp.numBarrels`, `num_guns = HP_AGM mount count`.
 ///
 /// `fc_max_dist_coef` is the fire-control `maxDistCoef` (FactoryArtillery.py:42, default
-/// 1.0; M5 supplies the real value). `None` when the component has no guns.
-pub fn artillery(
+/// 1.0; M5 supplies the real value). `arty_name` and `fc_name` identify the module slots
+/// for provenance attribution. `sources` and `rec` thread the recording context.
+/// `None` when the component has no guns.
+pub fn artillery<R: Recorder>(
     arty: &ArtilleryComponentStats,
+    arty_name: &str,
+    fc_name: Option<&str>,
     modifiers: &ModifierBundle,
+    sources: &ModifierSources,
     fc_max_dist_coef: f32,
     spotter_dist_coef: f32,
     reload_coeff: f32,
     level: u32,
     provider: &dyn GameParamProvider,
+    rec: &mut R,
 ) -> Option<Artillery> {
     if arty.guns.is_empty() {
         return None;
     }
+
+    let arty_src = || InputId::Module { slot: ModuleSlot::Artillery, name: arty_name.to_string() };
 
     let shot_delay_coef = modifiers.coef("GMShotDelay");
     let ideal_radius_coef = modifiers.coef("GMIdealRadius");
@@ -643,39 +720,122 @@ pub fn artillery(
     // All main-battery mounts share the same reload; take the first gun's shotDelay.
     let first = &arty.guns[0];
 
-    let reload_time = first.shot_delay.map(|d| Seconds::from(d.value() * shot_delay_coef * reload_coeff));
+    let reload_time = first.shot_delay.map(|d| {
+        let value = d.value() * shot_delay_coef * reload_coeff;
+        if R::ON {
+            rec.record(TtxStat::ArtilleryReloadTime, None, d.value(), arty_src(), value, |b| {
+                b.coef(sources, "GMShotDelay");
+                // reload_coeff is the dynamic Adrenaline coefficient, not a player
+                // input in sources. Record it as a module step so replay is exact.
+                b.module(arty_src(), "reloadCoeff", reload_coeff);
+            });
+        }
+        Seconds::from(value)
+    });
 
     let range_km = artillery_range_km(arty, fc_max_dist_coef, spotter_dist_coef, modifiers);
-    let range = range_km.map(Km::from);
+    let range = range_km.map(|rng| {
+        if R::ON {
+            if let Some(base_km) = arty.max_dist.map(|d| d.value() / KM_TO_M) {
+                let fc_src = fc_name
+                    .map(|n| InputId::Module { slot: ModuleSlot::FireControl, name: n.to_string() })
+                    .unwrap_or_else(arty_src);
+                rec.record(TtxStat::ArtilleryRange, None, base_km, arty_src(), rng, |b| {
+                    b.module(fc_src, "maxDistCoef", fc_max_dist_coef);
+                    b.coef(sources, "GMMaxDist");
+                    // spotter_dist_coef is a consumable range extension, attributed
+                    // under the artillery module when no consumable InputId is available here.
+                    b.module(arty_src(), "spotterDistCoeff", spotter_dist_coef);
+                });
+            }
+        }
+        Km::from(rng)
+    });
 
     // dispersion ellipse over the FC-adjusted range (FactoryArtillery.py:47; getEllipse).
     let (dispersion, dispersion_vertical) = match (range_km, first.min_radius, first.ideal_radius, first.ideal_distance)
     {
         (Some(rng), Some(min_r), Some(ideal_r), Some(ideal_d)) => {
             let h = constants::dispersion_horizontal(min_r, ideal_r, ideal_d, Km::from(rng), ideal_radius_coef);
+            let h_m = h.to_meters();
             let vertical = match (first.radius_on_zero, first.radius_on_delim, first.radius_on_max, first.delim) {
                 (Some(z), Some(dl), Some(mx), Some(dm)) => {
                     let coeff = constants::clamped_dispersion_coeff(z, dl, mx, dm, Km::from(rng), Km::from(rng));
-                    Some((h * coeff).to_meters())
+                    Some(((h * coeff).to_meters(), coeff))
                 }
                 _ => None,
             };
-            (Some(h.to_meters()), vertical)
+            if R::ON {
+                let base_h = constants::dispersion_horizontal(min_r, ideal_r, ideal_d, Km::from(rng), 1.0).to_meters();
+                rec.record(TtxStat::ArtilleryDispersion, None, base_h.value(), arty_src(), h_m.value(), |b| {
+                    b.coef(sources, "GMIdealRadius")
+                });
+                if let Some((v, coeff)) = vertical {
+                    // base_h * coeff absorbs the vertical scale so replay stays exact:
+                    // base * GMIdealRadius = base_h * coeff * ideal_radius_coef = v.
+                    rec.record(
+                        TtxStat::ArtilleryDispersionVertical,
+                        None,
+                        base_h.value() * coeff,
+                        arty_src(),
+                        v.value(),
+                        |b| b.coef(sources, "GMIdealRadius"),
+                    );
+                }
+            }
+            (Some(h_m), vertical.map(|(v, _)| v))
         }
         _ => (None, None),
     };
 
     let ammo_switch_time = match (first.shot_delay, first.ammo_switch_coeff) {
-        (Some(delay), Some(coeff)) => Some(Seconds::from(delay.value() * coeff * shot_delay_coef * switch_coef)),
+        (Some(delay), Some(coeff)) => {
+            let value = delay.value() * coeff * shot_delay_coef * switch_coef;
+            if R::ON {
+                rec.record(TtxStat::ArtilleryAmmoSwitchTime, None, delay.value() * coeff, arty_src(), value, |b| {
+                    b.coef(sources, "GMShotDelay");
+                    b.coef(sources, "switchAmmoReloadCoef");
+                });
+            }
+            Some(Seconds::from(value))
+        }
         _ => None,
     };
 
     let rotation_speed = first.rotation_speed.map(|r| r.value() * yaw_coef + yaw_bonus);
     let rotation_time = rotation_speed.filter(|&r| r != 0.0).map(|r| Seconds::from(180.0 / r));
+
+    if R::ON {
+        if let Some(speed) = rotation_speed {
+            let base_speed = first.rotation_speed.map(|r| r.value()).unwrap();
+            rec.record(TtxStat::GunRotationSpeed, None, base_speed, arty_src(), speed, |b| {
+                b.coef(sources, "GMRotationSpeed");
+                b.bonus(sources, "GMRotationSpeedBonus", 1.0);
+            });
+        }
+        if let Some(rt) = rotation_time {
+            rec.record(TtxStat::GunRotationTime, None, rt.value(), arty_src(), rt.value(), |_b| {});
+        }
+    }
+
+    let caliber = first.barrel_diameter.map(|b| b.to_mm());
+    let num_barrels = first.num_barrels.map(|n| n as u32);
+    let num_guns = arty.guns.len() as u32;
+
+    if R::ON {
+        if let Some(c) = caliber {
+            rec.record(TtxStat::GunCaliber, None, c.value(), arty_src(), c.value(), |_b| {});
+        }
+        if let Some(nb) = num_barrels {
+            rec.record(TtxStat::GunNumBarrels, None, nb as f32, arty_src(), nb as f32, |_b| {});
+        }
+        rec.record(TtxStat::GunNumGuns, None, num_guns as f32, arty_src(), num_guns as f32, |_b| {});
+    }
+
     let gun = Some(MainGun {
-        caliber: first.barrel_diameter.map(|b| b.to_mm()),
-        num_barrels: first.num_barrels.map(|n| n as u32),
-        num_guns: Some(arty.guns.len() as u32),
+        caliber,
+        num_barrels,
+        num_guns: Some(num_guns),
         rotation_speed: rotation_speed.map(DegreesPerSecond::from),
         rotation_time,
     });
@@ -691,7 +851,7 @@ pub fn artillery(
         if let Some(param) = provider.game_param_by_name(ammo_name)
             && let Some(projectile) = param.projectile()
         {
-            shells.push(shell_stats(ammo_name.clone(), projectile, modifiers, level, false));
+            shells.push(shell_stats(ammo_name.clone(), projectile, modifiers, arty_name, sources, level, false, rec));
         } else {
             warn_unresolved_ammo(ammo_name);
         }
@@ -786,7 +946,16 @@ pub fn secondaries(
             if let Some(param) = provider.game_param_by_name(ammo_name)
                 && let Some(projectile) = param.projectile()
             {
-                shells.push(shell_stats(ammo_name.clone(), projectile, modifiers, level, true));
+                shells.push(shell_stats(
+                    ammo_name.clone(),
+                    projectile,
+                    modifiers,
+                    "",
+                    &ModifierSources::default(),
+                    level,
+                    true,
+                    &mut Off,
+                ));
             } else {
                 warn_unresolved_ammo(ammo_name);
             }
@@ -1568,9 +1737,20 @@ mod tests {
     #[test]
     fn worcester_stock_artillery_gun_and_range() {
         let provider = worcester_provider();
-        let arty =
-            artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 1.0, 1.0, 10, &provider)
-                .expect("artillery computed");
+        let arty = artillery(
+            &worcester_artillery(),
+            "",
+            None,
+            &ModifierBundle::empty(Species::Cruiser),
+            &ModifierSources::default(),
+            1.0,
+            1.0,
+            1.0,
+            10,
+            &provider,
+            &mut Off,
+        )
+        .expect("artillery computed");
 
         // range: (15320 / 1000) * 1.0 (fc) * 1.0 (GMMaxDist) = 15.32.
         assert_eq!(arty.range, Some(Km::from(15.32)));
@@ -1594,9 +1774,20 @@ mod tests {
     #[test]
     fn worcester_stock_dispersion_matches_helper() {
         let provider = worcester_provider();
-        let arty =
-            artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 1.0, 1.0, 10, &provider)
-                .expect("artillery computed");
+        let arty = artillery(
+            &worcester_artillery(),
+            "",
+            None,
+            &ModifierBundle::empty(Species::Cruiser),
+            &ModifierSources::default(),
+            1.0,
+            1.0,
+            1.0,
+            10,
+            &provider,
+            &mut Off,
+        )
+        .expect("artillery computed");
         // dispersion over the FC-adjusted range 15.32 km, stock GMIdealRadius 1.0.
         let expected = constants::dispersion_horizontal(1.1, 8.0, 1000.0, Km::from(15.32), 1.0).to_meters().value();
         let got = arty.dispersion.expect("dispersion").value();
@@ -1635,12 +1826,16 @@ mod tests {
         let provider = worcester_provider();
         let arty = artillery(
             &worcester_artillery_with_curve(),
+            "",
+            None,
             &ModifierBundle::empty(Species::Cruiser),
+            &ModifierSources::default(),
             1.0,
             1.0,
             1.0,
             10,
             &provider,
+            &mut Off,
         )
         .expect("artillery computed");
         let h = arty.dispersion.expect("dispersion").value();
@@ -1652,9 +1847,20 @@ mod tests {
     #[test]
     fn artillery_vertical_dispersion_none_when_curve_fields_absent() {
         let provider = worcester_provider();
-        let arty =
-            artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 1.0, 1.0, 10, &provider)
-                .expect("artillery computed");
+        let arty = artillery(
+            &worcester_artillery(),
+            "",
+            None,
+            &ModifierBundle::empty(Species::Cruiser),
+            &ModifierSources::default(),
+            1.0,
+            1.0,
+            1.0,
+            10,
+            &provider,
+            &mut Off,
+        )
+        .expect("artillery computed");
         assert!(arty.dispersion.is_some(), "horizontal dispersion must be present");
         assert!(arty.dispersion_vertical.is_none(), "vertical must be None when curve fields absent");
     }
@@ -1662,9 +1868,20 @@ mod tests {
     #[test]
     fn worcester_stock_he_shell() {
         let provider = worcester_provider();
-        let arty =
-            artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 1.0, 1.0, 10, &provider)
-                .expect("artillery computed");
+        let arty = artillery(
+            &worcester_artillery(),
+            "",
+            None,
+            &ModifierBundle::empty(Species::Cruiser),
+            &ModifierSources::default(),
+            1.0,
+            1.0,
+            1.0,
+            10,
+            &provider,
+            &mut Off,
+        )
+        .expect("artillery computed");
         let he = arty.shells.iter().find(|s| s.ammo_kind.as_deref() == Some("HE")).expect("HE shell");
         // stock damage reduces to alphaDamage 2200.
         assert_eq!(he.damage, Some(Hp::from(2200.0)));
@@ -1684,9 +1901,20 @@ mod tests {
     #[test]
     fn worcester_stock_ap_shell() {
         let provider = worcester_provider();
-        let arty =
-            artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 1.0, 1.0, 10, &provider)
-                .expect("artillery computed");
+        let arty = artillery(
+            &worcester_artillery(),
+            "",
+            None,
+            &ModifierBundle::empty(Species::Cruiser),
+            &ModifierSources::default(),
+            1.0,
+            1.0,
+            1.0,
+            10,
+            &provider,
+            &mut Off,
+        )
+        .expect("artillery computed");
         let ap = arty.shells.iter().find(|s| s.ammo_kind.as_deref() == Some("AP")).expect("AP shell");
         // stock damage reduces to alphaDamage 3200.
         assert_eq!(ap.damage, Some(Hp::from(3200.0)));
@@ -1707,8 +1935,20 @@ mod tests {
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         let provider = worcester_provider();
-        let arty =
-            artillery(&worcester_artillery(), &bundle, 1.0, 1.0, 1.0, 10, &provider).expect("artillery computed");
+        let arty = artillery(
+            &worcester_artillery(),
+            "",
+            None,
+            &bundle,
+            &ModifierSources::default(),
+            1.0,
+            1.0,
+            1.0,
+            10,
+            &provider,
+            &mut Off,
+        )
+        .expect("artillery computed");
         let reload = arty.reload_time.expect("reload").value();
         assert!(approx(reload, 4.14), "got {reload}");
         let range = arty.range.expect("range").value();
@@ -1722,8 +1962,20 @@ mod tests {
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         let provider = worcester_provider();
-        let arty =
-            artillery(&worcester_artillery(), &bundle, 1.0, 1.0, 1.0, 10, &provider).expect("artillery computed");
+        let arty = artillery(
+            &worcester_artillery(),
+            "",
+            None,
+            &bundle,
+            &ModifierSources::default(),
+            1.0,
+            1.0,
+            1.0,
+            10,
+            &provider,
+            &mut Off,
+        )
+        .expect("artillery computed");
         let gun = arty.gun.expect("gun");
         let rs = gun.rotation_speed.expect("rotation_speed").value();
         assert!(approx(rs, 30.0), "got {rs}");
@@ -1735,7 +1987,22 @@ mod tests {
     fn artillery_none_when_no_guns() {
         let provider = worcester_provider();
         let empty = ArtilleryComponentStats::default();
-        assert!(artillery(&empty, &ModifierBundle::empty(Species::Cruiser), 1.0, 1.0, 1.0, 10, &provider).is_none());
+        assert!(
+            artillery(
+                &empty,
+                "",
+                None,
+                &ModifierBundle::empty(Species::Cruiser),
+                &ModifierSources::default(),
+                1.0,
+                1.0,
+                1.0,
+                10,
+                &provider,
+                &mut Off,
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -1744,9 +2011,20 @@ mod tests {
         // section is still produced with the resolvable HE row, and the AP row is
         // silently dropped (a warn-once diagnostic fires; no fabrication).
         let provider = MultiProvider::new(&[("PAPA051_152mm_HE_HC_Mark_39_Mod_0", worcester_he())]);
-        let arty =
-            artillery(&worcester_artillery(), &ModifierBundle::empty(Species::Cruiser), 1.0, 1.0, 1.0, 10, &provider)
-                .expect("artillery computed");
+        let arty = artillery(
+            &worcester_artillery(),
+            "",
+            None,
+            &ModifierBundle::empty(Species::Cruiser),
+            &ModifierSources::default(),
+            1.0,
+            1.0,
+            1.0,
+            10,
+            &provider,
+            &mut Off,
+        )
+        .expect("artillery computed");
         assert_eq!(arty.shells.len(), 1);
         assert!(arty.shells.iter().any(|s| s.ammo_kind.as_deref() == Some("HE")));
         assert!(!arty.shells.iter().any(|s| s.ammo_kind.as_deref() == Some("AP")));
@@ -1756,7 +2034,16 @@ mod tests {
     fn shell_stats_none_when_inputs_absent() {
         // A projectile with no shell fields -> stat fields None (no fabrication).
         let empty = Projectile::builder().ammo_type("HE".to_string()).build();
-        let stats = shell_stats("X".to_string(), &empty, &ModifierBundle::empty(Species::Cruiser), 10, false);
+        let stats = shell_stats(
+            "X".to_string(),
+            &empty,
+            &ModifierBundle::empty(Species::Cruiser),
+            "",
+            &ModifierSources::default(),
+            10,
+            false,
+            &mut Off,
+        );
         assert!(stats.damage.is_none());
         assert!(stats.caliber.is_none());
         assert!(stats.speed.is_none());
@@ -1775,12 +2062,30 @@ mod tests {
             .bullet_speed(762.0)
             .time_factor(0.5)
             .build();
-        let stats = shell_stats("X".to_string(), &shell, &ModifierBundle::empty(Species::Cruiser), 10, false);
+        let stats = shell_stats(
+            "X".to_string(),
+            &shell,
+            &ModifierBundle::empty(Species::Cruiser),
+            "",
+            &ModifierSources::default(),
+            10,
+            false,
+            &mut Off,
+        );
         assert_eq!(stats.speed, Some(MetersPerSecond::from(381.0)));
 
         // A shell without timeFactor defaults to 1.0 (maa3520d6.py:1151): speed == bulletSpeed.
         let plain = Projectile::builder().ammo_type("HE".to_string()).bullet_diametr(0.152).bullet_speed(812.0).build();
-        let plain_stats = shell_stats("Y".to_string(), &plain, &ModifierBundle::empty(Species::Cruiser), 10, false);
+        let plain_stats = shell_stats(
+            "Y".to_string(),
+            &plain,
+            &ModifierBundle::empty(Species::Cruiser),
+            "",
+            &ModifierSources::default(),
+            10,
+            false,
+            &mut Off,
+        );
         assert_eq!(plain_stats.speed, Some(MetersPerSecond::from(812.0)));
     }
 
@@ -2088,5 +2393,135 @@ mod tests {
         assert!(vis.main_gun_range_detection.is_none());
         assert!(vis.secondary_range_detection.is_none());
         assert!(vis.periscope_depth_detection.is_none());
+    }
+
+    #[test]
+    fn artillery_reload_records_gmshot_delay_and_replay_exact() {
+        use crate::game_params::ttx::provenance::{On, Op, ShipStatsProvenance};
+
+        let mods = [modifier("GMShotDelay", 0.9)];
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
+
+        let mut sources = ModifierSources::default();
+        sources.record("GMShotDelay", InputId::Upgrade { name: "U".into() }, 0.9);
+
+        let provider = worcester_provider();
+        let mut rec = On::default();
+        let arty =
+            artillery(&worcester_artillery(), "ARTY", None, &bundle, &sources, 1.0, 1.0, 1.0, 10, &provider, &mut rec)
+                .expect("artillery computed");
+
+        let prov = rec.into_provenance();
+
+        let reload_attr = prov
+            .attributions
+            .iter()
+            .find(|a| a.stat == TtxStat::ArtilleryReloadTime)
+            .expect("ArtilleryReloadTime recorded");
+
+        assert_eq!(reload_attr.base_value, 4.6);
+        assert!(
+            matches!(&reload_attr.base_source, InputId::Module { slot, .. } if *slot == ModuleSlot::Artillery),
+            "base source must be the artillery module"
+        );
+
+        let gm_step = reload_attr.steps.iter().find(|c| c.modifier_name == "GMShotDelay");
+        assert!(gm_step.is_some(), "GMShotDelay step must be recorded");
+        assert_eq!(gm_step.unwrap().op, Op::Mul);
+        assert!((gm_step.unwrap().operand - 0.9).abs() < 1e-6);
+
+        let expected_reload = arty.reload_time.expect("reload").value();
+        let replayed = ShipStatsProvenance::replay(reload_attr);
+        assert!((replayed - expected_reload).abs() < 1e-4, "replay got {replayed}, expected {expected_reload}");
+    }
+
+    #[test]
+    fn artillery_range_records_fc_coef_step_and_replay_exact() {
+        use crate::game_params::ttx::provenance::{On, ShipStatsProvenance};
+
+        let provider = worcester_provider();
+        let mut rec = On::default();
+        let fc_coef = 1.2f32;
+        let arty = artillery(
+            &worcester_artillery(),
+            "ARTY",
+            Some("FC"),
+            &ModifierBundle::empty(Species::Cruiser),
+            &ModifierSources::default(),
+            fc_coef,
+            1.0,
+            1.0,
+            10,
+            &provider,
+            &mut rec,
+        )
+        .expect("artillery computed");
+
+        let prov = rec.into_provenance();
+
+        let range_attr =
+            prov.attributions.iter().find(|a| a.stat == TtxStat::ArtilleryRange).expect("ArtilleryRange recorded");
+
+        let fc_step = range_attr.steps.iter().find(|c| c.modifier_name == "maxDistCoef");
+        assert!(fc_step.is_some(), "maxDistCoef step must be recorded when fc_max_dist_coef != 1.0");
+        assert!(
+            matches!(&fc_step.unwrap().input, InputId::Module { slot, .. } if *slot == ModuleSlot::FireControl),
+            "maxDistCoef step must be attributed to FireControl module"
+        );
+        assert!((fc_step.unwrap().operand - 1.2).abs() < 1e-6);
+
+        let expected_range = arty.range.expect("range").value();
+        let replayed = ShipStatsProvenance::replay(range_attr);
+        assert!((replayed - expected_range).abs() < 1e-3, "replay got {replayed}, expected {expected_range}");
+    }
+
+    /// `ArtilleryDispersionVertical` provenance replay must reproduce the factory value exactly
+    /// when the gun has non-trivial curve fields (coeff != 1.0). The vertical dispersion is
+    /// `base_h * coeff * GMIdealRadius`; recording `base_h * coeff` as the base value and
+    /// a single `GMIdealRadius` Mul step makes `ShipStatsProvenance::replay` reproduce it.
+    #[test]
+    fn artillery_vertical_dispersion_records_exact_replay() {
+        use crate::game_params::ttx::provenance::{On, ShipStatsProvenance};
+
+        let mods = [modifier("GMIdealRadius", 0.95)];
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
+
+        let mut sources = ModifierSources::default();
+        sources.record("GMIdealRadius", InputId::Upgrade { name: "U".into() }, 0.95);
+
+        let provider = worcester_provider();
+        let mut rec = On::default();
+        let arty = artillery(
+            &worcester_artillery_with_curve(),
+            "ARTY",
+            None,
+            &bundle,
+            &sources,
+            1.0,
+            1.0,
+            1.0,
+            10,
+            &provider,
+            &mut rec,
+        )
+        .expect("artillery computed");
+
+        let prov = rec.into_provenance();
+
+        let v_attr = prov
+            .attributions
+            .iter()
+            .find(|a| a.stat == TtxStat::ArtilleryDispersionVertical)
+            .expect("ArtilleryDispersionVertical recorded");
+
+        let expected_v = arty.dispersion_vertical.expect("dispersion_vertical").value();
+        let replayed = ShipStatsProvenance::replay(v_attr);
+        let rel_err = (replayed - expected_v).abs() / expected_v;
+        assert!(
+            rel_err < 1e-4,
+            "vertical dispersion replay not exact: replay={replayed}, factory={expected_v}, rel_err={rel_err}"
+        );
     }
 }

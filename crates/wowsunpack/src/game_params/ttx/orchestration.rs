@@ -168,7 +168,19 @@ pub(crate) fn ship_stats_with(
         .unwrap_or(NO_FIRE_CONTROL_COEF);
 
     let artillery = selection.artillery.as_deref().and_then(|name| components.artillery(name)).and_then(|arty| {
-        factories::artillery(arty, modifiers, fc_coef, spotter_dist_coef, reload_coeffs.main, level, provider)
+        factories::artillery(
+            arty,
+            selection.artillery.as_deref().unwrap_or(""),
+            selection.fire_control.as_deref(),
+            modifiers,
+            &ModifierSources::default(),
+            fc_coef,
+            spotter_dist_coef,
+            reload_coeffs.main,
+            level,
+            provider,
+            &mut Off,
+        )
     });
 
     let secondaries = selection
