@@ -725,6 +725,130 @@ mod tests {
         assert!(stats.visibility.is_none());
     }
 
+    use crate::game_params::ttx::components::SecondaryComponentStats;
+
+    /// 150 mm secondary gun with full dispersion curve and one HE ammo.
+    fn g150() -> ArtilleryGunStats {
+        ArtilleryGunStats {
+            shot_delay: Some(Seconds::from(7.5)),
+            rotation_speed: Some(DegreesPerSecond::from(10.0)),
+            num_barrels: Some(2.0),
+            barrel_diameter: Some(Meters::from(0.15)),
+            ammo_switch_coeff: None,
+            min_radius: Some(2.0),
+            ideal_radius: Some(15.0),
+            ideal_distance: Some(1000.0),
+            radius_on_zero: Some(1.0),
+            radius_on_delim: Some(1.4),
+            radius_on_max: Some(1.8),
+            delim: Some(0.5),
+            ammo: vec!["SEC_150mm_HE".to_string()],
+        }
+    }
+
+    /// 105 mm secondary gun with full dispersion curve and one HE ammo.
+    fn g105() -> ArtilleryGunStats {
+        ArtilleryGunStats {
+            shot_delay: Some(Seconds::from(3.5)),
+            rotation_speed: Some(DegreesPerSecond::from(12.0)),
+            num_barrels: Some(1.0),
+            barrel_diameter: Some(Meters::from(0.105)),
+            ammo_switch_coeff: None,
+            min_radius: Some(1.5),
+            ideal_radius: Some(12.0),
+            ideal_distance: Some(1000.0),
+            radius_on_zero: Some(1.0),
+            radius_on_delim: Some(1.35),
+            radius_on_max: Some(1.7),
+            delim: Some(0.5),
+            ammo: vec!["SEC_105mm_HE".to_string()],
+        }
+    }
+
+    fn sec150_he() -> crate::game_params::types::Projectile {
+        crate::game_params::types::Projectile::builder()
+            .ammo_type("HE".to_string())
+            .alpha_damage(2100.0)
+            .alpha_piercing_he(25.0)
+            .burn_prob(0.12)
+            .uw_critical(0.0)
+            .bullet_diametr(0.15)
+            .bullet_speed(800.0)
+            .build()
+    }
+
+    fn sec105_he() -> crate::game_params::types::Projectile {
+        crate::game_params::types::Projectile::builder()
+            .ammo_type("HE".to_string())
+            .alpha_damage(1200.0)
+            .alpha_piercing_he(17.0)
+            .burn_prob(0.07)
+            .uw_critical(0.0)
+            .bullet_diametr(0.105)
+            .bullet_speed(900.0)
+            .build()
+    }
+
+    fn secondaries_provider() -> StubProvider {
+        StubProvider::new(&[("SEC_150mm_HE", sec150_he()), ("SEC_105mm_HE", sec105_he())])
+    }
+
+    /// A battleship hull with an ATBA component carrying two distinct calibers
+    /// (four guns: two 150 mm, two 105 mm). Secondaries are keyed by the hull
+    /// name so `components.secondaries(hull_name)` resolves correctly.
+    fn secondaries_ship() -> crate::game_params::types::Param {
+        let hull_name = "PGSH010_Hull_B";
+        let mut components = ShipTtxComponents::default();
+        components.hulls.insert(hull_name.to_string(), gearing_hull());
+        components.engines.insert("PGSE_Engine".to_string(), EngineComponentStats { speed_coef: Some(0.0) });
+        components.secondaries.insert(
+            hull_name.to_string(),
+            SecondaryComponentStats {
+                max_dist: Some(Meters::from(7600.0)),
+                guns: vec![g150(), g150(), g105(), g105()],
+            },
+        );
+        components.stock_selection =
+            ShipUpgradeSelection::new(Some(hull_name.to_string()), Some("PGSE_Engine".to_string()), None, None, None);
+        ship_with("PGSB_SecondaryBB", 10, Species::Battleship, components)
+    }
+
+    #[test]
+    fn secondaries_bearing_card_coverage_and_replay() {
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
+        let ship = secondaries_ship();
+        let provider = secondaries_provider();
+        let sel = ShipUpgradeSelection::stock(&ship);
+        let (stats, prov) = ship_stats_explained(
+            &ship,
+            &sel,
+            &ModifierBundle::empty(Species::Battleship),
+            &ModifierSources::default(),
+            10,
+            &provider,
+        );
+
+        let battery = stats.secondaries.as_ref().expect("secondaries");
+        assert_eq!(battery.mounts.len(), 2);
+
+        use std::collections::HashSet;
+        let row_keys: HashSet<_> = stats.rows().into_iter().map(|r| (r.stat, r.qualifier)).collect();
+        let prov_keys: HashSet<_> = prov.attributions.iter().map(|a| (a.stat, a.qualifier.clone())).collect();
+        assert_eq!(row_keys, prov_keys, "every secondary stat row must have exactly one attribution");
+
+        for a in &prov.attributions {
+            let replayed = ShipStatsProvenance::replay(a);
+            assert!(
+                (replayed - a.value).abs() <= 1e-2 + a.value.abs() * 1e-4,
+                "replay mismatch for {:?} ({:?}): replayed={} value={}",
+                a.stat,
+                a.qualifier,
+                replayed,
+                a.value
+            );
+        }
+    }
+
     fn test_version() -> crate::data::Version {
         crate::data::Version::base(15, 4, 0)
     }
