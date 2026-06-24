@@ -40,6 +40,8 @@ pub use effects::EffectsState;
 pub use effects::HealthFraction;
 pub use effects::Loadout;
 pub use effects::ReloadCoeffs;
+pub use model::SecondaryBattery;
+pub use model::SecondaryMount;
 pub use module_options::ModuleOption;
 pub use module_options::ModuleOptions;
 pub use module_options::ModuleSlot;

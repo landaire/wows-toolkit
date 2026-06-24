@@ -9,6 +9,7 @@
 use crate::game_params::ttx::armor_materials::armor_type_classifies;
 use crate::game_params::ttx::armor_materials::collision_material_name;
 use crate::game_params::ttx::components::ArtilleryComponentStats;
+use crate::game_params::ttx::components::ArtilleryGunStats;
 use crate::game_params::ttx::components::EngineComponentStats;
 use crate::game_params::ttx::components::HullComponentStats;
 use crate::game_params::ttx::components::SecondaryComponentStats;
@@ -654,6 +655,7 @@ pub fn shell_stats<R: Recorder>(
     sources: &ModifierSources,
     level: u32,
     is_atba: bool,
+    shell_qualifier: &str,
     rec: &mut R,
 ) -> ShellStats {
     let ammo_kind = projectile.ammo_type();
@@ -663,8 +665,7 @@ pub fn shell_stats<R: Recorder>(
         weapon = weapon.to_atba();
     }
 
-    // Shell qualifier matches model.rs shell_qualifier: ammo_kind string (e.g. "HE", "AP").
-    let qualifier = ammo_kind;
+    let qualifier = shell_qualifier;
     let arty_src = || InputId::Module { slot: ModuleSlot::Artillery, name: arty_name.to_string() };
 
     // Select TtxStat variants based on battery path so provenance keys match rows().
@@ -1005,13 +1006,61 @@ pub fn artillery<R: Recorder>(
         if let Some(param) = provider.game_param_by_name(ammo_name)
             && let Some(projectile) = param.projectile()
         {
-            shells.push(shell_stats(ammo_name.clone(), projectile, modifiers, arty_name, sources, level, false, rec));
+            shells.push(shell_stats(
+                ammo_name.clone(),
+                projectile,
+                modifiers,
+                arty_name,
+                sources,
+                level,
+                false,
+                projectile.ammo_type(),
+                rec,
+            ));
         } else {
             warn_unresolved_ammo(ammo_name);
         }
     }
 
     Some(Artillery { reload_time, range, dispersion, dispersion_vertical, ammo_switch_time, gun, shells })
+}
+
+/// Group secondary gun mounts by identical gun stats (`ArtilleryGunStats`
+/// `PartialEq` covers caliber, reload, rotation, barrels, ammo, and the
+/// dispersion curve), preserving first-seen order. Returns each group's
+/// representative gun and its mount count.
+fn group_secondary_guns(guns: &[ArtilleryGunStats]) -> Vec<(&ArtilleryGunStats, u32)> {
+    let mut groups: Vec<(&ArtilleryGunStats, u32)> = Vec::new();
+    for gun in guns {
+        if let Some(entry) = groups.iter_mut().find(|(rep, _)| *rep == gun) {
+            entry.1 += 1;
+        } else {
+            groups.push((gun, 1));
+        }
+    }
+    groups
+}
+
+/// Per-mount display labels from caliber ("150 mm" via `Millimeters` Display),
+/// disambiguating duplicates ("150 mm (2)") so each mount's row qualifier is
+/// unique. Order matches `calibers`.
+fn secondary_labels(calibers: &[Millimeters]) -> Vec<String> {
+    let base: Vec<String> = calibers.iter().map(|c| c.to_string()).collect();
+    let mut totals: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for b in &base {
+        *totals.entry(b.as_str()).or_default() += 1;
+    }
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    base.iter()
+        .map(|b| {
+            if totals[b.as_str()] <= 1 {
+                return b.clone();
+            }
+            let n = seen.entry(b.clone()).or_insert(0);
+            *n += 1;
+            if *n == 1 { b.clone() } else { format!("{b} ({n})") }
+        })
+        .collect()
 }
 
 /// Secondary-battery (ATBA) armament section (`createATBAGunTTX`,
@@ -1185,6 +1234,7 @@ pub fn secondaries<R: Recorder>(
                     sources,
                     level,
                     true,
+                    projectile.ammo_type(),
                     rec,
                 ));
             } else {
@@ -2469,6 +2519,7 @@ mod tests {
             &ModifierSources::default(),
             10,
             false,
+            "HE",
             &mut Off,
         );
         assert!(stats.damage.is_none());
@@ -2497,6 +2548,7 @@ mod tests {
             &ModifierSources::default(),
             10,
             false,
+            "HE",
             &mut Off,
         );
         assert_eq!(stats.speed, Some(MetersPerSecond::from(381.0)));
@@ -2511,6 +2563,7 @@ mod tests {
             &ModifierSources::default(),
             10,
             false,
+            "HE",
             &mut Off,
         );
         assert_eq!(plain_stats.speed, Some(MetersPerSecond::from(812.0)));
@@ -3345,5 +3398,35 @@ mod tests {
 
     fn atba_range_km_for_test(atba: &SecondaryComponentStats, modifiers: &ModifierBundle) -> f32 {
         atba.max_dist.map(|d| (d.value() / KM_TO_M) * modifiers.coef("GSMaxDist")).unwrap_or(0.0)
+    }
+
+    #[test]
+    fn group_secondary_guns_groups_by_identity_and_counts() {
+        use crate::game_params::ttx::components::ArtilleryGunStats;
+        let g150 = || ArtilleryGunStats {
+            barrel_diameter: Some(Meters::from(0.15)),
+            shot_delay: Some(Seconds::from(6.0)),
+            ammo: vec!["A150".into()],
+            ..Default::default()
+        };
+        let g105 = || ArtilleryGunStats {
+            barrel_diameter: Some(Meters::from(0.105)),
+            shot_delay: Some(Seconds::from(4.0)),
+            ammo: vec!["A105".into()],
+            ..Default::default()
+        };
+        let guns = vec![g150(), g105(), g150(), g105(), g105()];
+        let groups = group_secondary_guns(&guns);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].1, 2); // two 150mm
+        assert_eq!(groups[1].1, 3); // three 105mm
+    }
+
+    #[test]
+    fn secondary_labels_disambiguate_only_on_collision() {
+        let a = secondary_labels(&[Millimeters::from(150.0), Millimeters::from(105.0)]);
+        assert_eq!(a, vec!["150 mm", "105 mm"]);
+        let b = secondary_labels(&[Millimeters::from(150.0), Millimeters::from(150.0)]);
+        assert_eq!(b, vec!["150 mm", "150 mm (2)"]);
     }
 }

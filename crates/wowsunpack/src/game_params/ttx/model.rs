@@ -426,6 +426,28 @@ fn torpedo_qualifier(torp: &TorpedoStats, idx: usize) -> String {
     if torp.name.is_empty() { idx.to_string() } else { torp.name.clone() }
 }
 
+/// Emit the seven per-shell rows for one shell under `qualifier`, mapping each
+/// `ShellStats` field to its `s.shell_*` TtxStat. Shared by main and secondary
+/// row emission.
+fn push_shell_rows(
+    rows: &mut Vec<StatRow>,
+    s: &ArtilleryStats,
+    shell: &ShellStats,
+    qualifier: &str,
+    item: &dyn Fn(&mut Vec<StatRow>, TtxStat, &str, Option<StatValue>),
+) {
+    item(rows, s.shell_damage, qualifier, shell.damage.map(StatValue::Hp));
+    item(rows, s.shell_caliber, qualifier, shell.caliber.map(StatValue::Millimeters));
+    item(rows, s.shell_speed, qualifier, shell.speed.map(StatValue::MetersPerSecond));
+    item(rows, s.shell_penetration, qualifier, shell.penetration.map(StatValue::Millimeters));
+    item(rows, s.shell_burn_chance, qualifier, shell.burn_chance.map(StatValue::Percent));
+    item(rows, s.shell_flood_chance, qualifier, shell.flood_chance.map(StatValue::Percent));
+    item(rows, s.shell_max_ammo, qualifier, shell.max_ammo.map(StatValue::Ammo));
+    if let Some(stat) = s.shell_disabled_underwater {
+        item(rows, stat, qualifier, shell.disabled_underwater.map(StatValue::Bool));
+    }
+}
+
 #[allow(clippy::type_complexity)]
 fn push_artillery_rows(
     rows: &mut Vec<StatRow>,
@@ -453,16 +475,33 @@ fn push_artillery_rows(
 
     for (idx, shell) in a.shells.iter().enumerate() {
         let q = shell_qualifier(shell, idx);
-        item(rows, s.shell_damage, &q, shell.damage.map(StatValue::Hp));
-        item(rows, s.shell_caliber, &q, shell.caliber.map(StatValue::Millimeters));
-        item(rows, s.shell_speed, &q, shell.speed.map(StatValue::MetersPerSecond));
-        item(rows, s.shell_penetration, &q, shell.penetration.map(StatValue::Millimeters));
-        item(rows, s.shell_burn_chance, &q, shell.burn_chance.map(StatValue::Percent));
-        item(rows, s.shell_flood_chance, &q, shell.flood_chance.map(StatValue::Percent));
-        item(rows, s.shell_max_ammo, &q, shell.max_ammo.map(StatValue::Ammo));
-        if let Some(stat) = s.shell_disabled_underwater {
-            item(rows, stat, &q, shell.disabled_underwater.map(StatValue::Bool));
-        }
+        push_shell_rows(rows, &s, shell, &q, item);
+    }
+}
+
+/// Emit the flat secondary rows: `SecondaryRange` at battery level (no
+/// qualifier), then per mount every gun stat and the single shell's stats, all
+/// under the mount's `label` qualifier so each mount groups under one key.
+fn push_secondary_rows(
+    rows: &mut Vec<StatRow>,
+    battery: Option<&SecondaryBattery>,
+    scalar: &dyn Fn(&mut Vec<StatRow>, TtxStat, Option<StatValue>),
+    item: &dyn Fn(&mut Vec<StatRow>, TtxStat, &str, Option<StatValue>),
+) {
+    let Some(b) = battery else { return };
+    let s = ArtilleryStats::for_kind(ArtilleryKind::Secondary);
+    scalar(rows, s.range, Some(StatValue::Km(b.range)));
+    for m in &b.mounts {
+        let q = m.label.as_str();
+        item(rows, s.reload_time, q, Some(StatValue::Seconds(m.reload_time)));
+        item(rows, s.gun_caliber, q, Some(StatValue::Millimeters(m.caliber)));
+        item(rows, s.gun_num_barrels, q, Some(StatValue::Count(m.num_barrels)));
+        item(rows, s.gun_num_guns, q, Some(StatValue::Count(m.num_mounts)));
+        item(rows, s.gun_rotation_speed, q, Some(StatValue::DegreesPerSecond(m.rotation_speed)));
+        item(rows, s.gun_rotation_time, q, Some(StatValue::Seconds(m.rotation_time)));
+        item(rows, s.dispersion, q, Some(StatValue::Meters(m.dispersion)));
+        item(rows, s.dispersion_vertical, q, Some(StatValue::Meters(m.dispersion_vertical)));
+        push_shell_rows(rows, &s, &m.shell, q, item);
     }
 }
 
@@ -636,6 +675,38 @@ pub struct Artillery {
     pub gun: Option<MainGun>,
     /// Per-shell stats, one per resolved ammo name.
     pub shells: Vec<ShellStats>,
+}
+
+/// A ship's secondary armament: a shared maximum range plus one mount per
+/// distinct secondary gun group (by caliber/gun identity). `mounts` is non-empty
+/// (the battery is `None` on a ship without secondaries).
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SecondaryBattery {
+    pub range: Km,
+    pub mounts: Vec<SecondaryMount>,
+}
+
+/// One secondary gun group: all mounts of a single gun type. Every field is
+/// always present for a real secondary gun (validated across all 1,159 guns in
+/// GameParams); the `shell` carries its own kind-dependent `Option`s.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SecondaryMount {
+    pub caliber: Millimeters,
+    /// Display + row-qualifier label ("150 mm"); disambiguated ("150 mm (2)")
+    /// only if two mounts share a caliber.
+    pub label: String,
+    pub reload_time: Seconds,
+    pub rotation_speed: DegreesPerSecond,
+    pub rotation_time: Seconds,
+    /// Barrels per mount.
+    pub num_barrels: u32,
+    /// Count of mounts in this group.
+    pub num_mounts: u32,
+    pub dispersion: Meters,
+    pub dispersion_vertical: Meters,
+    pub shell: ShellStats,
 }
 
 /// Torpedo launcher + ammo stats (`FactoryTorpedoes.py` `createTorpedoesTTX`).
