@@ -743,6 +743,13 @@ pub fn shell_stats<R: Recorder>(
         _ => None,
     };
 
+    // Main battery pools are unlimited (INFINITE_AMMO_POOL_SIZE = -1, PreprocessedAmmo.py:6).
+    // Record as -1.0 so replay is exact; the model stores AmmoCount::Infinite.
+    let max_ammo = Some(AmmoCount::Infinite);
+    if R::ON {
+        rec.record(TtxStat::ShellMaxAmmo, Some(qualifier), -1.0, arty_src(), -1.0, |_b| {});
+    }
+
     ShellStats {
         name,
         ammo_kind: Some(ammo_kind.to_string()),
@@ -752,8 +759,7 @@ pub fn shell_stats<R: Recorder>(
         penetration,
         burn_chance,
         flood_chance,
-        // Main battery pools are unlimited (INFINITE_AMMO_POOL_SIZE -> Infinite).
-        max_ammo: Some(AmmoCount::Infinite),
+        max_ammo,
         // Deferred: FactoryArtillery.py:165 sets this from the hull's canBeUnderwater,
         // which is not threaded into this projectile-only path.
         disabled_underwater: None,

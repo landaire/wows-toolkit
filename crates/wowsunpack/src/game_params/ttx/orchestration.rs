@@ -14,6 +14,9 @@ use crate::game_params::ttx::model::ShipStats;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::provenance::ModifierSources;
 use crate::game_params::ttx::provenance::Off;
+use crate::game_params::ttx::provenance::On;
+use crate::game_params::ttx::provenance::Recorder;
+use crate::game_params::ttx::provenance::ShipStatsProvenance;
 use crate::game_params::ttx::selection::ShipUpgradeSelection;
 use crate::game_params::types::ArmorMap;
 use crate::game_params::types::GameParamProvider;
@@ -108,20 +111,49 @@ pub fn ship_stats(
     level: u32,
     provider: &dyn GameParamProvider,
 ) -> ShipStats {
-    ship_stats_with(ship, selection, modifiers, ReloadCoeffs::default(), 1.0, level, provider)
+    ship_stats_with(
+        ship,
+        selection,
+        modifiers,
+        &ModifierSources::default(),
+        ReloadCoeffs::default(),
+        1.0,
+        level,
+        provider,
+        &mut Off,
+    )
+}
+
+/// `ship_stats` plus per-stat provenance. `sources` carries the per-input raw
+/// modifier values (from `EffectiveModifiers::sources`); pass
+/// `&ModifierSources::default()` for a module-only (no-modifier) explanation.
+pub fn ship_stats_explained(
+    ship: &Param,
+    selection: &ShipUpgradeSelection,
+    modifiers: &ModifierBundle,
+    sources: &ModifierSources,
+    level: u32,
+    provider: &dyn GameParamProvider,
+) -> (ShipStats, ShipStatsProvenance) {
+    let mut rec = On::default();
+    let stats =
+        ship_stats_with(ship, selection, modifiers, sources, ReloadCoeffs::default(), 1.0, level, provider, &mut rec);
+    (stats, rec.into_provenance())
 }
 
 /// Compute a ship's stat card with per-armament reload multipliers and a spotter
 /// artillery range coefficient layered on top of `modifiers`. The public [`ship_stats`]
 /// delegates here with identity values so existing callers see no behavior change.
-pub(crate) fn ship_stats_with(
+pub(crate) fn ship_stats_with<R: Recorder>(
     ship: &Param,
     selection: &ShipUpgradeSelection,
     modifiers: &ModifierBundle,
+    sources: &ModifierSources,
     reload_coeffs: ReloadCoeffs,
     spotter_dist_coef: f32,
     level: u32,
     provider: &dyn GameParamProvider,
+    rec: &mut R,
 ) -> ShipStats {
     let Some(vehicle) = ship.vehicle() else {
         return ShipStats::default();
@@ -131,34 +163,16 @@ pub(crate) fn ship_stats_with(
     };
 
     let hull = selection.hull.as_deref().and_then(|name| components.hull(name));
+    let hull_name = selection.hull.as_deref().unwrap_or("");
 
-    let durability = hull.map(|h| {
-        factories::durability(
-            h,
-            selection.hull.as_deref().unwrap_or(""),
-            modifiers,
-            &ModifierSources::default(),
-            level,
-            &mut Off,
-        )
-    });
+    let durability = hull.map(|h| factories::durability(h, hull_name, modifiers, sources, level, rec));
 
     let mobility = hull.map(|h| {
         let engine = selection.engine.as_deref().and_then(|name| components.engine(name)).cloned().unwrap_or_default();
-        factories::mobility(
-            h,
-            selection.hull.as_deref().unwrap_or(""),
-            &engine,
-            selection.engine.as_deref(),
-            modifiers,
-            &ModifierSources::default(),
-            &mut Off,
-        )
+        factories::mobility(h, hull_name, &engine, selection.engine.as_deref(), modifiers, sources, rec)
     });
 
-    let battery = hull.and_then(|h| {
-        factories::battery(h, selection.hull.as_deref().unwrap_or(""), modifiers, &ModifierSources::default(), &mut Off)
-    });
+    let battery = hull.and_then(|h| factories::battery(h, hull_name, modifiers, sources, rec));
 
     // Fire-control coefficient feeds main-battery range (default 1.0 when no FC).
     let fc_coef = selection
@@ -167,51 +181,36 @@ pub(crate) fn ship_stats_with(
         .and_then(|name| components.fire_control_max_dist_coef(name))
         .unwrap_or(NO_FIRE_CONTROL_COEF);
 
+    let arty_name = selection.artillery.as_deref().unwrap_or("");
     let artillery = selection.artillery.as_deref().and_then(|name| components.artillery(name)).and_then(|arty| {
         factories::artillery(
             arty,
-            selection.artillery.as_deref().unwrap_or(""),
+            arty_name,
             selection.fire_control.as_deref(),
             modifiers,
-            &ModifierSources::default(),
+            sources,
             fc_coef,
             spotter_dist_coef,
             reload_coeffs.main,
             level,
             provider,
-            &mut Off,
+            rec,
         )
     });
 
     let secondaries = selection.hull.as_deref().and_then(|name| components.secondaries(name)).and_then(|atba| {
-        factories::secondaries(
-            atba,
-            selection.hull.as_deref().unwrap_or(""),
-            modifiers,
-            &ModifierSources::default(),
-            reload_coeffs.secondary,
-            level,
-            provider,
-            &mut Off,
-        )
+        factories::secondaries(atba, hull_name, modifiers, sources, reload_coeffs.secondary, level, provider, rec)
     });
 
+    let torp_name = selection.torpedoes.as_deref().unwrap_or("");
     let torpedoes = selection.torpedoes.as_deref().and_then(|name| components.torpedoes(name)).and_then(|launchers| {
-        factories::torpedoes(
-            launchers,
-            modifiers,
-            reload_coeffs.torpedo,
-            provider,
-            selection.torpedoes.as_deref().unwrap_or(""),
-            &ModifierSources::default(),
-            &mut Off,
-        )
+        factories::torpedoes(launchers, modifiers, reload_coeffs.torpedo, provider, torp_name, sources, rec)
     });
 
     // Armor: hull plate map plus the selected hull's main-battery mount armor maps.
     let armor = vehicle.armor().and_then(|hull_armor| {
         let arti_armor = artillery_armor_maps(vehicle, selection.hull.as_deref());
-        factories::armor(hull_armor, selection.hull.as_deref().unwrap_or(""), arti_armor.iter().copied(), &mut Off)
+        factories::armor(hull_armor, hull_name, arti_armor.iter().copied(), rec)
     });
 
     // has_big_gun: the gate is `artillery present and not isSmallGun` (FactoryVisibility
@@ -231,13 +230,13 @@ pub(crate) fn ship_stats_with(
     let visibility = hull.map(|h| {
         factories::visibility(
             h,
-            selection.hull.as_deref().unwrap_or(""),
+            hull_name,
             modifiers,
-            &ModifierSources::default(),
+            sources,
             has_big_gun_artillery,
             mg_max_dist_km,
             atba_max_dist_km,
-            &mut Off,
+            rec,
         )
     });
 
@@ -879,5 +878,51 @@ mod tests {
             dispersion_on < dispersion_on_no_radius,
             "GMIdealRadius 0.9 must tighten dispersion vs no-modifier baseline: on={dispersion_on}, baseline={dispersion_on_no_radius}"
         );
+    }
+
+    #[test]
+    fn explained_provenance_covers_every_row() {
+        let ship = gearing_ship();
+        let provider = gearing_provider();
+        let sel = ShipUpgradeSelection::stock(&ship);
+        let (stats, prov) = ship_stats_explained(
+            &ship,
+            &sel,
+            &ModifierBundle::empty(Species::Destroyer),
+            &ModifierSources::default(),
+            10,
+            &provider,
+        );
+
+        use std::collections::HashSet;
+        let row_keys: HashSet<_> = stats.rows().into_iter().map(|r| (r.stat, r.qualifier)).collect();
+        let prov_keys: HashSet<_> = prov.attributions.iter().map(|a| (a.stat, a.qualifier.clone())).collect();
+        assert_eq!(row_keys, prov_keys, "every stat row must have exactly one attribution");
+    }
+
+    #[test]
+    fn explained_provenance_replays_to_value() {
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
+        let ship = gearing_ship();
+        let provider = gearing_provider();
+        let sel = ShipUpgradeSelection::stock(&ship);
+        let (_stats, prov) = ship_stats_explained(
+            &ship,
+            &sel,
+            &ModifierBundle::empty(Species::Destroyer),
+            &ModifierSources::default(),
+            10,
+            &provider,
+        );
+        for a in &prov.attributions {
+            let replayed = ShipStatsProvenance::replay(a);
+            assert!(
+                (replayed - a.value).abs() <= 1e-2 + a.value.abs() * 1e-4,
+                "replay mismatch for {:?}: {} vs {}",
+                a.stat,
+                replayed,
+                a.value
+            );
+        }
     }
 }

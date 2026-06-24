@@ -42,6 +42,7 @@ pub use module_options::ModuleSlot;
 pub use module_options::SlotOptions;
 pub use module_options::module_options;
 pub use orchestration::ship_stats;
+pub use orchestration::ship_stats_explained;
 pub use orchestration::ship_stats_stock;
 pub use provenance::Contribution;
 pub use provenance::InputId;

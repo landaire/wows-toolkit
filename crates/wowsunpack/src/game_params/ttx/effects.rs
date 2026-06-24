@@ -11,6 +11,7 @@ use crate::game_params::ttx::modifiers::ModifierError;
 use crate::game_params::ttx::modifiers::modifier_identity;
 use crate::game_params::ttx::provenance::InputId;
 use crate::game_params::ttx::provenance::ModifierSources;
+use crate::game_params::ttx::provenance::Recorder;
 use crate::game_params::ttx::selection::ShipUpgradeSelection;
 use crate::game_params::types::CrewSkill;
 use crate::game_params::types::CrewSkillLogicTrigger;
@@ -727,11 +728,36 @@ impl EffectiveModifiers {
             ship,
             selection,
             &self.bundle,
+            &self.sources,
             self.reload_coeffs,
             self.artillery_dist_coeff,
             level,
             provider,
+            &mut crate::game_params::ttx::provenance::Off,
         )
+    }
+
+    /// The ship's stat card plus per-stat provenance under these effective modifiers.
+    pub fn stats_explained(
+        &self,
+        ship: &Param,
+        selection: &ShipUpgradeSelection,
+        level: u32,
+        provider: &dyn GameParamProvider,
+    ) -> (ShipStats, crate::game_params::ttx::provenance::ShipStatsProvenance) {
+        let mut rec = crate::game_params::ttx::provenance::On::default();
+        let stats = crate::game_params::ttx::orchestration::ship_stats_with(
+            ship,
+            selection,
+            &self.bundle,
+            &self.sources,
+            self.reload_coeffs,
+            self.artillery_dist_coeff,
+            level,
+            provider,
+            &mut rec,
+        );
+        (stats, rec.into_provenance())
     }
 }
 
