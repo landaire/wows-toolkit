@@ -186,7 +186,7 @@ pub(crate) fn ship_stats_with(
     // Armor: hull plate map plus the selected hull's main-battery mount armor maps.
     let armor = vehicle.armor().and_then(|hull_armor| {
         let arti_armor = artillery_armor_maps(vehicle, selection.hull.as_deref());
-        factories::armor(hull_armor, arti_armor.iter().copied())
+        factories::armor(hull_armor, selection.hull.as_deref().unwrap_or(""), arti_armor.iter().copied(), &mut Off)
     });
 
     // has_big_gun: the gate is `artillery present and not isSmallGun` (FactoryVisibility

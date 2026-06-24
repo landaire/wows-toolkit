@@ -295,7 +295,12 @@ fn armor_list_min_max(armor: &ArmorMap) -> (f32, f32) {
 /// `artillery_armor` yields each main-battery mount's armor map
 /// (`MountPoint::mount_armor`); an empty iterator is the no-artillery branch.
 /// `None` when the hull carries no armor data.
-pub fn armor<'a>(hull_armor: &ArmorMap, artillery_armor: impl IntoIterator<Item = &'a ArmorMap>) -> Option<Armor> {
+pub fn armor<'a, R: Recorder>(
+    hull_armor: &ArmorMap,
+    hull_name: &str,
+    artillery_armor: impl IntoIterator<Item = &'a ArmorMap>,
+    rec: &mut R,
+) -> Option<Armor> {
     if hull_armor.is_empty() {
         return None;
     }
@@ -315,6 +320,11 @@ pub fn armor<'a>(hull_armor: &ArmorMap, artillery_armor: impl IntoIterator<Item 
         _ => (hull_min, hull_max),
     };
 
+    if R::ON {
+        let src = || InputId::Module { slot: ModuleSlot::Hull, name: hull_name.to_string() };
+        rec.record(TtxStat::ArmorMin, None, min, src(), min, |_b| {});
+        rec.record(TtxStat::ArmorMax, None, max, src(), max, |_b| {});
+    }
     Some(Armor { min: Some(Millimeters::from(min)), max: Some(Millimeters::from(max)) })
 }
 
@@ -1224,7 +1234,7 @@ mod tests {
         // min = min(135, 19)  = 19.
         let hull = yamato_hull_armor();
         let arti = [yamato_turret_armor()];
-        let armor = armor(&hull, arti.iter()).expect("armor computed");
+        let armor = armor(&hull, "HULL", arti.iter(), &mut Off).expect("armor computed");
         assert_eq!(armor.max, Some(Millimeters::from(650.0)));
         assert_eq!(armor.min, Some(Millimeters::from(19.0)));
     }
@@ -1234,7 +1244,7 @@ mod tests {
         // No artillery branch: extremes over classified hull plates only.
         // RudderSide (350) is excluded, so max = 560 (Tur1GkBar), min = 19.
         let hull = yamato_hull_armor();
-        let armor = armor(&hull, std::iter::empty()).expect("armor computed");
+        let armor = armor(&hull, "HULL", std::iter::empty(), &mut Off).expect("armor computed");
         assert_eq!(armor.max, Some(Millimeters::from(560.0)));
         assert_eq!(armor.min, Some(Millimeters::from(19.0)));
     }
@@ -1243,7 +1253,7 @@ mod tests {
     fn armor_none_when_hull_armor_absent() {
         // No armor data at all -> None (not fabricated as the default 6mm).
         let empty: ArmorMap = std::collections::HashMap::new();
-        assert!(armor(&empty, std::iter::empty()).is_none());
+        assert!(armor(&empty, "HULL", std::iter::empty(), &mut Off).is_none());
     }
 
     #[test]
@@ -1251,7 +1261,7 @@ mod tests {
         // Hull with only unclassified plates -> default 6mm extremes
         // (PreprocessedArmor.py:8 seed), not None: the hull map is non-empty.
         let hull = armor_map(&[(131072 | 82, 350.0), (131072 | 80, 200.0)]); // Rudder*
-        let armor = armor(&hull, std::iter::empty()).expect("armor computed");
+        let armor = armor(&hull, "HULL", std::iter::empty(), &mut Off).expect("armor computed");
         assert_eq!(armor.min, Some(Millimeters::from(6.0)));
         assert_eq!(armor.max, Some(Millimeters::from(6.0)));
     }
