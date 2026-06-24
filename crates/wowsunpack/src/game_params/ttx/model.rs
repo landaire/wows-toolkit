@@ -393,6 +393,7 @@ impl ShipStats {
             scalar(&mut rows, TtxStat::AirDetection, v.air_detection.map(StatValue::Km));
             scalar(&mut rows, TtxStat::AirDetectionOnFire, v.air_detection_on_fire.map(StatValue::Km));
             scalar(&mut rows, TtxStat::DetectionInSmoke, v.detection_in_smoke.map(StatValue::Km));
+            scalar(&mut rows, TtxStat::MainGunRangeDetection, v.main_gun_range_detection.map(StatValue::Km));
             scalar(&mut rows, TtxStat::SecondaryRangeDetection, v.secondary_range_detection.map(StatValue::Km));
             scalar(&mut rows, TtxStat::PeriscopeDepthDetection, v.periscope_depth_detection.map(StatValue::Km));
         }
@@ -698,9 +699,10 @@ pub struct FireControl {
 ///
 /// Ranges are in km. `sea_detection`/`air_detection` are the `visibilityByShip.normal`
 /// / `visibilityByPlane.normal` slots; the `_on_fire` variants are the `.fire` slots;
-/// `detection_in_smoke` is `visibilityByShip.smoke`; `secondary_range_detection` is the
-/// `visibilityByShip.atba` (secondary/MG floor); `periscope_depth_detection` is
-/// `visibilityFromDepth.max`. Per-depth submarine ranges (`byDepth`,
+/// `detection_in_smoke` is `visibilityByShip.smoke`; `main_gun_range_detection` is the
+/// `visibilityByShip.mg` slot (main-battery range floor) and `secondary_range_detection`
+/// the `visibilityByShip.atba` slot (secondary range floor); `periscope_depth_detection`
+/// is `visibilityFromDepth.max`. Per-depth submarine ranges (`byDepth`,
 /// createVisibilityTTX@387-513) are a runtime entity calc and deferred.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -710,6 +712,7 @@ pub struct Visibility {
     pub air_detection: Option<Km>,
     pub air_detection_on_fire: Option<Km>,
     pub detection_in_smoke: Option<Km>,
+    pub main_gun_range_detection: Option<Km>,
     pub secondary_range_detection: Option<Km>,
     pub periscope_depth_detection: Option<Km>,
 }
@@ -940,6 +943,7 @@ mod tests {
                 air_detection: Some(Km::from(1.0)),
                 air_detection_on_fire: Some(Km::from(1.0)),
                 detection_in_smoke: Some(Km::from(1.0)),
+                main_gun_range_detection: Some(Km::from(1.0)),
                 secondary_range_detection: Some(Km::from(1.0)),
                 periscope_depth_detection: Some(Km::from(1.0)),
             }),

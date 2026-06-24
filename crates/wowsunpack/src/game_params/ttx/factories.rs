@@ -708,9 +708,9 @@ const MINIMAL_VALID_VALUE: f32 = 0.01;
 /// exceeds `MINIMAL_VALID_VALUE`. `air_detection` (@278-307) =
 /// `hull.visibilityFactorByPlane * mod.visibilityFactorByPlane * coeff`;
 /// `air_detection_on_fire` (@310-341) = `air + hull.visibilityCoefFireByPlane`.
-/// `secondary_range_detection` (@227-272) = `max(sea, atbaMaxDist)` when the secondary
-/// range is supplied; the MG floor (`max(sea, mgMaxDist)`, @173-224) folds into the same
-/// field via `mg_max_dist_km`. `periscope_depth_detection` (@359-384) =
+/// `main_gun_range_detection` (@188-224) = `max(sea, mgMaxDist)` when the main-battery
+/// range is supplied; `secondary_range_detection` (@227-272) = `max(sea, atbaMaxDist)`
+/// when the secondary range is supplied. `periscope_depth_detection` (@359-384) =
 /// `hull.visibilityByPeriscope * mod.visibilityForSubmarineCoeff`, present only for subs.
 ///
 /// Per-depth submarine ranges (`byDepth`, @387-513) are a runtime entity calc
@@ -740,13 +740,16 @@ pub fn visibility(
     let detection_in_smoke =
         hull.visibility_coef_gk_in_smoke.filter(|&v| v.value() > MINIMAL_VALID_VALUE).map(|v| Km::from(v.value()));
 
-    // mgMaxDist and atbaMaxDist both write the same secondary-detection floor; take the
-    // max over whichever ranges are supplied, floored by `sea` (@188-272).
-    let secondary_range_detection = match (sea, mg_max_dist_km, atba_max_dist_km) {
-        (Some(s), mg, atba) if mg.is_some() || atba.is_some() => {
-            let floor = mg.unwrap_or(s).max(atba.unwrap_or(s));
-            Some(Km::from(s.max(floor)))
-        }
+    // visibilityByShip.mg (@188-224) and .atba (@227-272) are distinct slots: each is its
+    // own battery range floored by `sea`, gated on that battery being present. mg is the
+    // main battery ("after firing a main gun shell"), atba the secondaries ("after firing
+    // a secondary gun shell").
+    let main_gun_range_detection = match (sea, mg_max_dist_km) {
+        (Some(s), Some(mg)) => Some(Km::from(s.max(mg))),
+        _ => None,
+    };
+    let secondary_range_detection = match (sea, atba_max_dist_km) {
+        (Some(s), Some(atba)) => Some(Km::from(s.max(atba))),
         _ => None,
     };
 
@@ -768,6 +771,7 @@ pub fn visibility(
         air_detection,
         air_detection_on_fire,
         detection_in_smoke,
+        main_gun_range_detection,
         secondary_range_detection,
         periscope_depth_detection,
     }
@@ -1738,7 +1742,8 @@ mod tests {
         assert!(approx(air_fire, 5.41), "got {air_fire}");
         // smoke = visibilityCoefGKInSmoke 2.83 (> MINIMAL_VALID_VALUE).
         assert_eq!(vis.detection_in_smoke, Some(Km::from(2.83)));
-        // No secondary range supplied, DD has no periscope.
+        // No main-battery or secondary range supplied, DD has no periscope.
+        assert!(vis.main_gun_range_detection.is_none());
         assert!(vis.secondary_range_detection.is_none());
         assert!(vis.periscope_depth_detection.is_none());
     }
@@ -1804,6 +1809,25 @@ mod tests {
     }
 
     #[test]
+    fn main_gun_range_detection_floors_at_main_gun_range() {
+        // Main-battery range floors the main-gun firing detection, independent of atba.
+        let hull = HullComponentStats { visibility_factor: Some(Km::from(6.0)), ..gearing_hull() };
+        let vis = visibility(&hull, &ModifierBundle::empty(Species::Battleship), false, Some(20.0), None);
+        // sea = 6.0; main-gun floor = max(6.0, 20.0) = 20.0; no secondaries -> atba None.
+        assert_eq!(vis.main_gun_range_detection, Some(Km::from(20.0)));
+        assert!(vis.secondary_range_detection.is_none());
+    }
+
+    #[test]
+    fn main_gun_present_without_secondaries_yields_no_secondary_detection() {
+        // A gunship with no secondaries (e.g. Elbing) must not surface a secondary line.
+        let hull = HullComponentStats { visibility_factor: Some(Km::from(6.0)), ..gearing_hull() };
+        let vis = visibility(&hull, &ModifierBundle::empty(Species::Destroyer), false, Some(11.0), None);
+        assert_eq!(vis.main_gun_range_detection, Some(Km::from(11.0)));
+        assert!(vis.secondary_range_detection.is_none());
+    }
+
+    #[test]
     fn near_zero_smoke_coef_yields_no_smoke_detection() {
         // visibilityCoefGKInSmoke == MINIMAL_VALID_VALUE (0.01) is not > the gate -> None.
         let hull = HullComponentStats { visibility_coef_gk_in_smoke: Some(Km::from(0.01)), ..gearing_hull() };
@@ -1835,6 +1859,7 @@ mod tests {
         assert!(vis.air_detection.is_none());
         assert!(vis.air_detection_on_fire.is_none());
         assert!(vis.detection_in_smoke.is_none());
+        assert!(vis.main_gun_range_detection.is_none());
         assert!(vis.secondary_range_detection.is_none());
         assert!(vis.periscope_depth_detection.is_none());
     }

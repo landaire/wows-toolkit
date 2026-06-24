@@ -100,6 +100,7 @@ pub enum TtxStat {
     AirDetection,
     AirDetectionOnFire,
     DetectionInSmoke,
+    MainGunRangeDetection,
     SecondaryRangeDetection,
     PeriscopeDepthDetection,
 }
@@ -168,6 +169,7 @@ impl TtxStat {
         TtxStat::AirDetection,
         TtxStat::AirDetectionOnFire,
         TtxStat::DetectionInSmoke,
+        TtxStat::MainGunRangeDetection,
         TtxStat::SecondaryRangeDetection,
         TtxStat::PeriscopeDepthDetection,
     ];
@@ -237,6 +239,7 @@ impl TtxStat {
             TtxStat::AirDetection => "visibility.air_detection",
             TtxStat::AirDetectionOnFire => "visibility.air_detection_on_fire",
             TtxStat::DetectionInSmoke => "visibility.detection_in_smoke",
+            TtxStat::MainGunRangeDetection => "visibility.main_gun_range_detection",
             TtxStat::SecondaryRangeDetection => "visibility.secondary_range_detection",
             TtxStat::PeriscopeDepthDetection => "visibility.periscope_depth_detection",
         }
@@ -340,6 +343,8 @@ impl TtxStat {
             TtxStat::SeaDetectionOnFire => "IDS_SHIP_PARAM_VISIBILITY_DIST_BY_FIRE",
             // "Detectability Range by Air"
             TtxStat::AirDetection => "IDS_SHIP_PARAM_VISIBILITY_DIST_BY_PLANE",
+            // "Detectability after firing a main gun shell" (visibilityByShip.mg slot)
+            TtxStat::MainGunRangeDetection => "IDS_SHIP_PARAM_VISIBILITY_DIST_BY_GK",
             // "Detectability after firing a secondary gun shell" (visibilityByShip.atba slot)
             TtxStat::SecondaryRangeDetection => "IDS_SHIP_PARAM_VISIBILITY_DIST_BY_ATBA",
             // "At periscope depth"
