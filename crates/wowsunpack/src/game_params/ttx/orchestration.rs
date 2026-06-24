@@ -196,11 +196,17 @@ pub(crate) fn ship_stats_with(
         )
     });
 
-    let torpedoes = selection
-        .torpedoes
-        .as_deref()
-        .and_then(|name| components.torpedoes(name))
-        .and_then(|launchers| factories::torpedoes(launchers, modifiers, reload_coeffs.torpedo, provider));
+    let torpedoes = selection.torpedoes.as_deref().and_then(|name| components.torpedoes(name)).and_then(|launchers| {
+        factories::torpedoes(
+            launchers,
+            modifiers,
+            reload_coeffs.torpedo,
+            provider,
+            selection.torpedoes.as_deref().unwrap_or(""),
+            &ModifierSources::default(),
+            &mut Off,
+        )
+    });
 
     // Armor: hull plate map plus the selected hull's main-battery mount armor maps.
     let armor = vehicle.armor().and_then(|hull_armor| {

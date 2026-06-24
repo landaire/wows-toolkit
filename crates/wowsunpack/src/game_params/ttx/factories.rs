@@ -40,7 +40,6 @@ use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::module_options::ModuleSlot;
 use crate::game_params::ttx::provenance::InputId;
 use crate::game_params::ttx::provenance::ModifierSources;
-use crate::game_params::ttx::provenance::Off;
 use crate::game_params::ttx::provenance::Recorder;
 use crate::game_params::ttx::weapon_tables::StatWeaponType;
 use crate::game_params::ttx::weapon_tables::alpha_damage_coeff;
@@ -335,8 +334,22 @@ pub fn armor<'a, R: Recorder>(
 /// `ammoList` entry); `disabled_underwater` is left `None` here (surface-ship path,
 /// FactoryTorpedoes.py:100-101 gates it on `isSubmarine`).
 ///
+/// `torp_name` and `sources` provide the torpedo module name and per-source modifier
+/// table for provenance recording. `rec` accumulates attributions when `R::ON`.
+///
 /// Each field is `None` when its base projectile input is absent.
-pub fn torpedo_stats(name: String, projectile: &Projectile, modifiers: &ModifierBundle) -> TorpedoStats {
+pub fn torpedo_stats<R: Recorder>(
+    name: String,
+    projectile: &Projectile,
+    modifiers: &ModifierBundle,
+    torp_name: &str,
+    sources: &ModifierSources,
+    rec: &mut R,
+) -> TorpedoStats {
+    let torp_src = || InputId::Module { slot: ModuleSlot::Torpedoes, name: torp_name.to_string() };
+    // qualifier for per-ammo rows matches torpedo_qualifier in model.rs: the ammo name.
+    let qualifier = name.as_str();
+
     // damage: getTorpedoDamage (ModifiersApply.py:477-488). Surface torpedoes take
     // the `alphaDamage / TORPEDO_DAMAGE_CONSTANT` branch (line 484); the submarine
     // citadel branch (line 480) needs SubmarineTorpedoParams not modeled here.
@@ -344,32 +357,61 @@ pub fn torpedo_stats(name: String, projectile: &Projectile, modifiers: &Modifier
     let damage = match (projectile.alpha_damage(), projectile.damage()) {
         (Some(alpha), Some(flood)) => {
             let base = alpha / TORPEDO_DAMAGE_CONSTANT + flood;
-            Some(Hp::from(
-                base * modifiers.coef("torpedoDamageCoeff") * modifiers.coef("controllableWeaponDamageCoeff"),
-            ))
+            let value = base * modifiers.coef("torpedoDamageCoeff") * modifiers.coef("controllableWeaponDamageCoeff");
+            if R::ON {
+                rec.record(TtxStat::TorpedoDamage, Some(qualifier), base, torp_src(), value, |b| {
+                    b.coef(sources, "torpedoDamageCoeff");
+                    b.coef(sources, "controllableWeaponDamageCoeff");
+                });
+            }
+            Some(Hp::from(value))
         }
         _ => None,
     };
 
     // speed: getTorpedoSpeed (ModifiersApply.py:491-499). normalTorpedoSpeedMultiplier
     // only applies when ammoType == AMMO_TYPES.TORPEDO (line 495); deep-water/alt
-    // torpedoes skip it (multiplier stays 1.0).
+    // torpedoes skip it (multiplier stays 1.0, unrecorded).
     let speed = projectile.speed().map(|s| {
-        let normal = if projectile.ammo_type() == AMMO_TYPE_TORPEDO {
-            modifiers.coef("normalTorpedoSpeedMultiplier")
-        } else {
-            1.0
-        };
-        Knots::from(s * modifiers.coef("torpedoSpeedMultiplier") * normal + modifiers.bonus("torpedoSpeedBonus"))
+        let is_torpedo = projectile.ammo_type() == AMMO_TYPE_TORPEDO;
+        let normal = if is_torpedo { modifiers.coef("normalTorpedoSpeedMultiplier") } else { 1.0 };
+        let value = s * modifiers.coef("torpedoSpeedMultiplier") * normal + modifiers.bonus("torpedoSpeedBonus");
+        if R::ON {
+            rec.record(TtxStat::TorpedoSpeed, Some(qualifier), s, torp_src(), value, |b| {
+                b.coef(sources, "torpedoSpeedMultiplier");
+                // normalTorpedoSpeedMultiplier only for ammoType == torpedo; skip it
+                // (identity 1.0) for deep-water and alt torpedoes.
+                if is_torpedo {
+                    b.coef(sources, "normalTorpedoSpeedMultiplier");
+                }
+                b.bonus(sources, "torpedoSpeedBonus", 1.0);
+            });
+        }
+        Knots::from(value)
     });
 
     // range: maxDist * torpedoRangeCoefficient * BW_TO_BALLISTIC / KM_TO_M (FactoryTorpedoes.py:93).
-    let range = projectile
-        .max_dist()
-        .map(|d| Km::from(d.value() * modifiers.coef("torpedoRangeCoefficient") * BW_TO_BALLISTIC / KM_TO_M));
+    let range = projectile.max_dist().map(|d| {
+        let base = d.value() * BW_TO_BALLISTIC / KM_TO_M;
+        let value = base * modifiers.coef("torpedoRangeCoefficient");
+        if R::ON {
+            rec.record(TtxStat::TorpedoRange, Some(qualifier), base, torp_src(), value, |b| {
+                b.coef(sources, "torpedoRangeCoefficient");
+            });
+        }
+        Km::from(value)
+    });
 
     // visibility: visibilityFactor * torpedoVisibilityFactor (FactoryTorpedoes.py:92).
-    let visibility = projectile.visibility_factor().map(|v| Km::from(v * modifiers.coef("torpedoVisibilityFactor")));
+    let visibility = projectile.visibility_factor().map(|v| {
+        let value = v * modifiers.coef("torpedoVisibilityFactor");
+        if R::ON {
+            rec.record(TtxStat::TorpedoVisibility, Some(qualifier), v, torp_src(), value, |b| {
+                b.coef(sources, "torpedoVisibilityFactor");
+            });
+        }
+        Km::from(value)
+    });
 
     // isDamageIncreasing: distanceOfDamage max-coeff dist > min-coeff dist (FactoryTorpedoes.py:103-120).
     // distanceOfMaxDamage (line 119) also needs ammoParams.armingTime/maneuverDist,
@@ -379,6 +421,20 @@ pub fn torpedo_stats(name: String, projectile: &Projectile, modifiers: &Modifier
         let coeff_at_max_dist = pairs.iter().max_by(|a, b| a.1.total_cmp(&b.1)).map(|p| p.0).unwrap_or(0.0);
         coeff_at_max_dist > coeff_at_min_dist
     });
+    if R::ON {
+        if let Some(flag) = is_damage_increasing {
+            let v = if flag { 1.0 } else { 0.0 };
+            rec.record(TtxStat::TorpedoIsDamageIncreasing, Some(qualifier), v, torp_src(), v, |_b| {});
+        }
+    }
+
+    let disabled_underwater: Option<bool> = None;
+    if R::ON {
+        if let Some(flag) = disabled_underwater {
+            let v = if flag { 1.0 } else { 0.0 };
+            rec.record(TtxStat::TorpedoDisabledUnderwater, Some(qualifier), v, torp_src(), v, |_b| {});
+        }
+    }
 
     TorpedoStats {
         name,
@@ -388,7 +444,7 @@ pub fn torpedo_stats(name: String, projectile: &Projectile, modifiers: &Modifier
         visibility,
         distance_of_max_damage: None,
         is_damage_increasing,
-        disabled_underwater: None,
+        disabled_underwater,
     }
 }
 
@@ -422,15 +478,20 @@ fn warn_unresolved_ammo(name: &str) {
 }
 
 /// `None` when `launchers` is empty (no torpedo armament).
-pub fn torpedoes(
+pub fn torpedoes<R: Recorder>(
     launchers: &[TorpedoLauncherStats],
     modifiers: &ModifierBundle,
     reload_coeff: f32,
     provider: &dyn GameParamProvider,
+    torp_name: &str,
+    sources: &ModifierSources,
+    rec: &mut R,
 ) -> Option<Torpedoes> {
     if launchers.is_empty() {
         return None;
     }
+
+    let torp_src = || InputId::Module { slot: ModuleSlot::Torpedoes, name: torp_name.to_string() };
 
     // Real modifier names behind GunRotationSpeedModifiersStruct.yawSpeedCoef/yawSpeedBonus
     // (GunRotationSpeed.py:10-13, ModifiersApply.py:123).
@@ -439,23 +500,43 @@ pub fn torpedoes(
     let shot_delay_coef = modifiers.coef("GTShotDelay");
 
     let mut result_launchers = Vec::with_capacity(launchers.len());
-    let mut reload_times: Vec<f32> = Vec::new();
+    // Each element is (reload_value, shot_delay_base) for the min-reload attribution.
+    let mut reload_candidates: Vec<(f32, f32)> = Vec::new();
     let mut seen_ammo: Vec<String> = Vec::new();
     let mut torpedoes = Vec::new();
 
-    for launcher in launchers {
+    for (idx, launcher) in launchers.iter().enumerate() {
         let rotation_speed = launcher.rotation_speed.map(|r| r.value() * yaw_coef + yaw_bonus);
         let rotation_time = rotation_speed.filter(|&r| r != 0.0).map(|r| Seconds::from(180.0 / r));
+        let num_barrels = launcher.num_barrels.map(|n| n as u32);
+
+        if R::ON {
+            let q = idx.to_string();
+            if let Some(speed) = rotation_speed {
+                let base_speed = launcher.rotation_speed.map(|r| r.value()).unwrap();
+                rec.record(TtxStat::LauncherRotationSpeed, Some(&q), base_speed, torp_src(), speed, |b| {
+                    b.coef(sources, "GTRotationSpeed");
+                    b.bonus(sources, "GTRotationSpeedBonus", 1.0);
+                });
+            }
+            if let Some(rt) = rotation_time {
+                rec.record(TtxStat::LauncherRotationTime, Some(&q), rt.value(), torp_src(), rt.value(), |_b| {});
+            }
+            if let Some(nb) = num_barrels {
+                rec.record(TtxStat::LauncherNumBarrels, Some(&q), nb as f32, torp_src(), nb as f32, |_b| {});
+            }
+        }
+
         result_launchers.push(Launcher {
             rotation_speed: rotation_speed.map(DegreesPerSecond::from),
             rotation_time,
-            num_barrels: launcher.num_barrels.map(|n| n as u32),
+            num_barrels,
         });
 
         if let Some(delay) = launcher.shot_delay {
             let reload = delay.value() * shot_delay_coef * reload_coeff;
             if reload != 0.0 {
-                reload_times.push(reload);
+                reload_candidates.push((reload, delay.value()));
             }
         }
 
@@ -467,14 +548,35 @@ pub fn torpedoes(
             if let Some(param) = provider.game_param_by_name(ammo_name)
                 && let Some(projectile) = param.projectile()
             {
-                torpedoes.push(torpedo_stats(ammo_name.clone(), projectile, modifiers));
+                torpedoes.push(torpedo_stats(ammo_name.clone(), projectile, modifiers, torp_name, sources, rec));
             } else {
                 warn_unresolved_ammo(ammo_name);
             }
         }
     }
 
-    let reload_time = reload_times.iter().copied().reduce(f32::min).map(Seconds::from);
+    let reload_time = if reload_candidates.is_empty() {
+        None
+    } else {
+        // Pick the launcher with the minimum reload (initAmmoReloadParams, FactoryTorpedoes.py:40).
+        let (min_reload, min_base) = reload_candidates
+            .iter()
+            .copied()
+            .reduce(|(ra, ba), (rb, bb)| if ra <= rb { (ra, ba) } else { (rb, bb) })?;
+        if R::ON {
+            // base * GTShotDelay * reloadCoeff == min_reload. Record the chosen launcher's
+            // shot_delay as base; steps reproduce the final value exactly.
+            rec.record(TtxStat::TorpedoReloadTime, None, min_base, torp_src(), min_reload, |b| {
+                b.coef(sources, "GTShotDelay");
+                // reload_coeff is the dynamic Adrenaline coefficient, not a player
+                // input in sources. Record it as a module step so replay is exact.
+                if reload_coeff != 1.0 {
+                    b.module(torp_src(), "reloadCoeff", reload_coeff);
+                }
+            });
+        }
+        Some(Seconds::from(min_reload))
+    };
 
     Some(Torpedoes { reload_time, launchers: result_launchers, torpedoes })
 }
@@ -1587,6 +1689,9 @@ mod tests {
             "PAPT027_Mk_16_mod_1".to_string(),
             &gearing_torpedo(),
             &ModifierBundle::empty(Species::Destroyer),
+            "",
+            &ModifierSources::default(),
+            &mut Off,
         );
         // damage: 53500/3 + 1200 = 19033.33 (alphaDamage/3 + flood, stock coeffs 1.0).
         let damage = stats.damage.expect("damage").value();
@@ -1610,8 +1715,16 @@ mod tests {
     fn gearing_stock_torpedoes_via_provider() {
         let launchers = [gearing_launcher()];
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
-        let torps = torpedoes(&launchers, &ModifierBundle::empty(Species::Destroyer), 1.0, &provider)
-            .expect("torpedoes computed");
+        let torps = torpedoes(
+            &launchers,
+            &ModifierBundle::empty(Species::Destroyer),
+            1.0,
+            &provider,
+            "",
+            &ModifierSources::default(),
+            &mut Off,
+        )
+        .expect("torpedoes computed");
 
         // reload_time: shotDelay 103 * GTShotDelay 1.0 = 103 (min over one mount).
         assert_eq!(torps.reload_time, Some(Seconds::from(103.0)));
@@ -1640,7 +1753,14 @@ mod tests {
         let mods = [modifier("torpedoSpeedBonus", 5.0)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
-        let stats = torpedo_stats("PAPT027_Mk_16_mod_1".to_string(), &gearing_torpedo(), &bundle);
+        let stats = torpedo_stats(
+            "PAPT027_Mk_16_mod_1".to_string(),
+            &gearing_torpedo(),
+            &bundle,
+            "",
+            &ModifierSources::default(),
+            &mut Off,
+        );
         let speed = stats.speed.expect("speed").value();
         assert!(approx(speed, 71.0), "got {speed}");
     }
@@ -1651,7 +1771,14 @@ mod tests {
         let mods = [modifier("torpedoDamageCoeff", 1.2)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
-        let stats = torpedo_stats("PAPT027_Mk_16_mod_1".to_string(), &gearing_torpedo(), &bundle);
+        let stats = torpedo_stats(
+            "PAPT027_Mk_16_mod_1".to_string(),
+            &gearing_torpedo(),
+            &bundle,
+            "",
+            &ModifierSources::default(),
+            &mut Off,
+        );
         let damage = stats.damage.expect("damage").value();
         assert!(approx(damage, (53500.0 / 3.0 + 1200.0) * 1.2), "got {damage}");
     }
@@ -1666,7 +1793,8 @@ mod tests {
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let launchers = [gearing_launcher()];
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
-        let torps = torpedoes(&launchers, &bundle, 1.0, &provider).expect("torpedoes computed");
+        let torps = torpedoes(&launchers, &bundle, 1.0, &provider, "", &ModifierSources::default(), &mut Off)
+            .expect("torpedoes computed");
         let launcher = &torps.launchers[0];
         let rs = launcher.rotation_speed.expect("rotation_speed").value();
         assert!(approx(rs, 30.0), "got {rs}");
@@ -1682,7 +1810,8 @@ mod tests {
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let launchers = [gearing_launcher()];
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
-        let torps = torpedoes(&launchers, &bundle, 1.0, &provider).expect("torpedoes computed");
+        let torps = torpedoes(&launchers, &bundle, 1.0, &provider, "", &ModifierSources::default(), &mut Off)
+            .expect("torpedoes computed");
         let launcher = &torps.launchers[0];
         assert_eq!(launcher.rotation_speed, Some(DegreesPerSecond::from(30.0)));
         let rt = launcher.rotation_time.expect("rotation_time").value();
@@ -1692,18 +1821,111 @@ mod tests {
     #[test]
     fn torpedoes_none_when_no_launchers() {
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
-        assert!(torpedoes(&[], &ModifierBundle::empty(Species::Destroyer), 1.0, &provider).is_none());
+        assert!(
+            torpedoes(
+                &[],
+                &ModifierBundle::empty(Species::Destroyer),
+                1.0,
+                &provider,
+                "",
+                &ModifierSources::default(),
+                &mut Off
+            )
+            .is_none()
+        );
     }
 
     #[test]
     fn torpedo_stats_none_when_inputs_absent() {
         // A projectile with no torpedo fields -> all stats None (no fabrication).
         let empty = Projectile::builder().ammo_type("torpedo".to_string()).build();
-        let stats = torpedo_stats("X".to_string(), &empty, &ModifierBundle::empty(Species::Destroyer));
+        let stats = torpedo_stats(
+            "X".to_string(),
+            &empty,
+            &ModifierBundle::empty(Species::Destroyer),
+            "",
+            &ModifierSources::default(),
+            &mut Off,
+        );
         assert!(stats.damage.is_none());
         assert!(stats.speed.is_none());
         assert!(stats.range.is_none());
         assert!(stats.visibility.is_none());
+    }
+
+    /// `TorpedoSpeed` and `TorpedoRange` provenance records exact replay values.
+    /// Uses Gearing's torpedo with both speed multipliers + bonus and a real
+    /// torpedoRangeCoefficient, exercising the full recording table.
+    #[test]
+    fn torpedo_speed_and_range_records_exact_replay() {
+        use crate::game_params::ttx::provenance::{InputId, On, Op, ShipStatsProvenance};
+
+        // torpedoSpeedMultiplier 1.05, normalTorpedoSpeedMultiplier 1.1, torpedoSpeedBonus 2.0,
+        // torpedoRangeCoefficient 1.15. Gearing torpedo ammoType "torpedo" -> normal multiplier applies.
+        let mods = [
+            modifier("torpedoSpeedMultiplier", 1.05),
+            modifier("normalTorpedoSpeedMultiplier", 1.1),
+            modifier("torpedoSpeedBonus", 2.0),
+            modifier("torpedoRangeCoefficient", 1.15),
+        ];
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
+
+        let mut sources = ModifierSources::default();
+        sources.record("torpedoSpeedMultiplier", InputId::Upgrade { name: "U1".into() }, 1.05);
+        sources.record("normalTorpedoSpeedMultiplier", InputId::Skill { name: "S1".into() }, 1.1);
+        sources.record("torpedoSpeedBonus", InputId::Skill { name: "S2".into() }, 2.0);
+        sources.record("torpedoRangeCoefficient", InputId::Upgrade { name: "U2".into() }, 1.15);
+
+        let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
+        let launchers = [gearing_launcher()];
+        let mut rec = On::default();
+        let torps = torpedoes(&launchers, &bundle, 1.0, &provider, "PAUT902_D10_NEW_STOCK", &sources, &mut rec)
+            .expect("torpedoes computed");
+        let prov = rec.into_provenance();
+
+        // TorpedoSpeed: base == raw speed (66), steps reproduce final.
+        // final = 66 * 1.05 * 1.1 + 2.0 = 66 * 1.155 + 2.0 = 76.23 + 2.0 = 78.23.
+        let speed_attr =
+            prov.attributions.iter().find(|a| a.stat == TtxStat::TorpedoSpeed).expect("TorpedoSpeed recorded");
+        assert_eq!(speed_attr.qualifier.as_deref(), Some("PAPT027_Mk_16_mod_1"), "qualifier must be the torpedo name");
+        assert!(
+            matches!(&speed_attr.base_source, InputId::Module { slot, .. } if *slot == ModuleSlot::Torpedoes),
+            "base source must be the Torpedoes module"
+        );
+        assert_eq!(speed_attr.base_value, 66.0, "base must be raw speed");
+        let mul_steps: Vec<_> = speed_attr.steps.iter().filter(|c| c.op == Op::Mul).collect();
+        let add_steps: Vec<_> = speed_attr.steps.iter().filter(|c| c.op == Op::Add).collect();
+        assert_eq!(mul_steps.len(), 2, "two Mul steps: torpedoSpeedMultiplier and normalTorpedoSpeedMultiplier");
+        assert_eq!(add_steps.len(), 1, "one Add step: torpedoSpeedBonus");
+        let tsmul = mul_steps.iter().find(|c| c.modifier_name == "torpedoSpeedMultiplier");
+        assert!(tsmul.is_some(), "torpedoSpeedMultiplier step present");
+        assert!((tsmul.unwrap().operand - 1.05).abs() < 1e-6);
+        let ntsmul = mul_steps.iter().find(|c| c.modifier_name == "normalTorpedoSpeedMultiplier");
+        assert!(ntsmul.is_some(), "normalTorpedoSpeedMultiplier step present");
+        assert!((ntsmul.unwrap().operand - 1.1).abs() < 1e-6);
+        let expected_speed = torps.torpedoes[0].speed.expect("speed").value();
+        let replayed_speed = ShipStatsProvenance::replay(speed_attr);
+        assert!(
+            (replayed_speed - expected_speed).abs() < 1e-3,
+            "TorpedoSpeed replay got {replayed_speed}, factory={expected_speed}"
+        );
+
+        // TorpedoRange: base = raw maxDist * BW_TO_BALLISTIC / KM_TO_M; replay exact.
+        // base = 350 * 30 / 1000 = 10.5; final = 10.5 * 1.15 = 12.075.
+        let range_attr =
+            prov.attributions.iter().find(|a| a.stat == TtxStat::TorpedoRange).expect("TorpedoRange recorded");
+        assert_eq!(range_attr.qualifier.as_deref(), Some("PAPT027_Mk_16_mod_1"), "qualifier must be the torpedo name");
+        assert!((range_attr.base_value - 10.5).abs() < 1e-3, "range base must be maxDist*BW_TO_BALLISTIC/KM_TO_M");
+        let rc_step = range_attr.steps.iter().find(|c| c.modifier_name == "torpedoRangeCoefficient");
+        assert!(rc_step.is_some(), "torpedoRangeCoefficient step present");
+        assert!((rc_step.unwrap().operand - 1.15).abs() < 1e-6);
+        let expected_range = torps.torpedoes[0].range.expect("range").value();
+        let replayed_range = ShipStatsProvenance::replay(range_attr);
+        assert!(
+            (replayed_range - expected_range).abs() < 1e-3,
+            "TorpedoRange replay got {replayed_range}, factory={expected_range}"
+        );
     }
 
     /// Worcester's real HE shell `PAPA051_152mm_HE_HC_Mark_39_Mod_0` (GameParams):
