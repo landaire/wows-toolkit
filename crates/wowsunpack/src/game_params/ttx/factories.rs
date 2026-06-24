@@ -177,17 +177,17 @@ pub fn mobility<R: Recorder>(
     };
 
     let turning_radius = hull.turning_radius;
-    if R::ON {
-        if let Some(t) = turning_radius {
-            rec.record(
-                TtxStat::TurningRadius,
-                None,
-                t.value(),
-                InputId::Module { slot: ModuleSlot::Hull, name: hull_name.to_string() },
-                t.value(),
-                |_b| {},
-            );
-        }
+    if R::ON
+        && let Some(t) = turning_radius
+    {
+        rec.record(
+            TtxStat::TurningRadius,
+            None,
+            t.value(),
+            InputId::Module { slot: ModuleSlot::Hull, name: hull_name.to_string() },
+            t.value(),
+            |_b| {},
+        );
     }
 
     let rudder_time = hull.rudder_time.map(|t| {
@@ -421,19 +421,19 @@ pub fn torpedo_stats<R: Recorder>(
         let coeff_at_max_dist = pairs.iter().max_by(|a, b| a.1.total_cmp(&b.1)).map(|p| p.0).unwrap_or(0.0);
         coeff_at_max_dist > coeff_at_min_dist
     });
-    if R::ON {
-        if let Some(flag) = is_damage_increasing {
-            let v = if flag { 1.0 } else { 0.0 };
-            rec.record(TtxStat::TorpedoIsDamageIncreasing, Some(qualifier), v, torp_src(), v, |_b| {});
-        }
+    if R::ON
+        && let Some(flag) = is_damage_increasing
+    {
+        let v = if flag { 1.0 } else { 0.0 };
+        rec.record(TtxStat::TorpedoIsDamageIncreasing, Some(qualifier), v, torp_src(), v, |_b| {});
     }
 
     let disabled_underwater: Option<bool> = None;
-    if R::ON {
-        if let Some(flag) = disabled_underwater {
-            let v = if flag { 1.0 } else { 0.0 };
-            rec.record(TtxStat::TorpedoDisabledUnderwater, Some(qualifier), v, torp_src(), v, |_b| {});
-        }
+    if R::ON
+        && let Some(flag) = disabled_underwater
+    {
+        let v = if flag { 1.0 } else { 0.0 };
+        rec.record(TtxStat::TorpedoDisabledUnderwater, Some(qualifier), v, torp_src(), v, |_b| {});
     }
 
     TorpedoStats {
@@ -605,6 +605,8 @@ const SMALL_PROJECTILE_MAX_DIAMETER_M: f32 = 0.0;
 /// table for provenance recording. `rec` accumulates attributions when `R::ON`.
 ///
 /// Each field is `None` when its base projectile input is absent.
+// Threads recorder, modifier bundle, per-source provenance, level, and ammo-type flag alongside the base inputs.
+#[allow(clippy::too_many_arguments)]
 pub fn shell_stats<R: Recorder>(
     name: String,
     projectile: &Projectile,
@@ -800,6 +802,8 @@ pub(crate) fn artillery_range_km(
 /// 1.0; M5 supplies the real value). `arty_name` and `fc_name` identify the module slots
 /// for provenance attribution. `sources` and `rec` thread the recording context.
 /// `None` when the component has no guns.
+// Threads FC coefs, spotter coef, reload coef, recorder, modifier bundle, and per-source provenance alongside the base inputs.
+#[allow(clippy::too_many_arguments)]
 pub fn artillery<R: Recorder>(
     arty: &ArtilleryComponentStats,
     arty_name: &str,
@@ -843,19 +847,19 @@ pub fn artillery<R: Recorder>(
 
     let range_km = artillery_range_km(arty, fc_max_dist_coef, spotter_dist_coef, modifiers);
     let range = range_km.map(|rng| {
-        if R::ON {
-            if let Some(base_km) = arty.max_dist.map(|d| d.value() / KM_TO_M) {
-                let fc_src = fc_name
-                    .map(|n| InputId::Module { slot: ModuleSlot::FireControl, name: n.to_string() })
-                    .unwrap_or_else(arty_src);
-                rec.record(TtxStat::ArtilleryRange, None, base_km, arty_src(), rng, |b| {
-                    b.module(fc_src, "maxDistCoef", fc_max_dist_coef);
-                    b.coef(sources, "GMMaxDist");
-                    // spotter_dist_coef is a consumable range extension, attributed
-                    // under the artillery module when no consumable InputId is available here.
-                    b.module(arty_src(), "spotterDistCoeff", spotter_dist_coef);
-                });
-            }
+        if R::ON
+            && let Some(base_km) = arty.max_dist.map(|d| d.value() / KM_TO_M)
+        {
+            let fc_src = fc_name
+                .map(|n| InputId::Module { slot: ModuleSlot::FireControl, name: n.to_string() })
+                .unwrap_or_else(arty_src);
+            rec.record(TtxStat::ArtilleryRange, None, base_km, arty_src(), rng, |b| {
+                b.module(fc_src, "maxDistCoef", fc_max_dist_coef);
+                b.coef(sources, "GMMaxDist");
+                // spotter_dist_coef is a consumable range extension, attributed
+                // under the artillery module when no consumable InputId is available here.
+                b.module(arty_src(), "spotterDistCoeff", spotter_dist_coef);
+            });
         }
         Km::from(rng)
     });
@@ -989,6 +993,8 @@ pub fn artillery<R: Recorder>(
 /// group for `reload_time`/`gun` (as [`artillery`] does for main mounts) and lists a
 /// shell per distinct ATBA ammo name across all mounts; `range`/`dispersion` use the
 /// component `maxDist`. `None` when the component has no guns.
+// Threads recorder, modifier bundle, per-source provenance, reload coef, and level alongside the base inputs.
+#[allow(clippy::too_many_arguments)]
 pub fn secondaries<R: Recorder>(
     atba: &SecondaryComponentStats,
     hull_name: &str,
@@ -1031,12 +1037,12 @@ pub fn secondaries<R: Recorder>(
     // maxDist of PreprocessedATBA.py:30). No fire-control coef for secondaries.
     let range_km = atba.max_dist.map(|d| (d.value() / KM_TO_M) * max_dist_coef);
     let range = range_km.map(|rng| {
-        if R::ON {
-            if let Some(base_km) = atba.max_dist.map(|d| d.value() / KM_TO_M) {
-                rec.record(TtxStat::SecondaryRange, None, base_km, hull_src(), rng, |b| {
-                    b.coef(sources, "GSMaxDist");
-                });
-            }
+        if R::ON
+            && let Some(base_km) = atba.max_dist.map(|d| d.value() / KM_TO_M)
+        {
+            rec.record(TtxStat::SecondaryRange, None, base_km, hull_src(), rng, |b| {
+                b.coef(sources, "GSMaxDist");
+            });
         }
         Km::from(rng)
     });
@@ -1185,6 +1191,8 @@ const MINIMAL_VALID_VALUE: f32 = 0.01;
 /// (`ShipParams.getVehicleParams` + `getPerDepthRangeVisiblity`) and are deferred.
 ///
 /// Each field is `None` when its base hull input is absent.
+// Threads recorder, modifier bundle, per-source provenance, big-gun flag, and range inputs alongside the base hull stats.
+#[allow(clippy::too_many_arguments)]
 pub fn visibility<R: Recorder>(
     hull: &HullComponentStats,
     hull_name: &str,
@@ -1204,16 +1212,16 @@ pub fn visibility<R: Recorder>(
 
     let sea = hull.visibility_factor.map(|v| v.value() * modifiers.coef("visibilityFactor") * coeff);
     let sea_detection = sea.map(Km::from);
-    if R::ON {
-        if let (Some(sea_val), Some(base)) = (sea, hull.visibility_factor) {
-            rec.record(TtxStat::SeaDetection, None, base.value(), hull_src(), sea_val, |b| {
-                b.coef(sources, "visibilityFactor");
-                b.coef(sources, "visibilityDistCoeff");
-                if has_big_gun_artillery {
-                    b.coef(sources, "GMBigGunVisibilityCoeff");
-                }
-            });
-        }
+    if R::ON
+        && let (Some(sea_val), Some(base)) = (sea, hull.visibility_factor)
+    {
+        rec.record(TtxStat::SeaDetection, None, base.value(), hull_src(), sea_val, |b| {
+            b.coef(sources, "visibilityFactor");
+            b.coef(sources, "visibilityDistCoeff");
+            if has_big_gun_artillery {
+                b.coef(sources, "GMBigGunVisibilityCoeff");
+            }
+        });
     }
 
     let sea_detection_on_fire = match (sea, hull.visibility_coef_fire) {
@@ -1264,16 +1272,16 @@ pub fn visibility<R: Recorder>(
 
     let air = hull.visibility_factor_by_plane.map(|v| v.value() * modifiers.coef("visibilityFactorByPlane") * coeff);
     let air_detection = air.map(Km::from);
-    if R::ON {
-        if let (Some(air_val), Some(base)) = (air, hull.visibility_factor_by_plane) {
-            rec.record(TtxStat::AirDetection, None, base.value(), hull_src(), air_val, |b| {
-                b.coef(sources, "visibilityFactorByPlane");
-                b.coef(sources, "visibilityDistCoeff");
-                if has_big_gun_artillery {
-                    b.coef(sources, "GMBigGunVisibilityCoeff");
-                }
-            });
-        }
+    if R::ON
+        && let (Some(air_val), Some(base)) = (air, hull.visibility_factor_by_plane)
+    {
+        rec.record(TtxStat::AirDetection, None, base.value(), hull_src(), air_val, |b| {
+            b.coef(sources, "visibilityFactorByPlane");
+            b.coef(sources, "visibilityDistCoeff");
+            if has_big_gun_artillery {
+                b.coef(sources, "GMBigGunVisibilityCoeff");
+            }
+        });
     }
 
     let air_detection_on_fire = match (air, hull.visibility_coef_fire_by_plane) {

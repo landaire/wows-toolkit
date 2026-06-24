@@ -144,6 +144,8 @@ pub fn ship_stats_explained(
 /// Compute a ship's stat card with per-armament reload multipliers and a spotter
 /// artillery range coefficient layered on top of `modifiers`. The public [`ship_stats`]
 /// delegates here with identity values so existing callers see no behavior change.
+// Threads recorder, modifier bundle, per-source provenance, reload coefficients, and spotter coef alongside the base inputs.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn ship_stats_with<R: Recorder>(
     ship: &Param,
     selection: &ShipUpgradeSelection,
