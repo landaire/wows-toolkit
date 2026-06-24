@@ -58,14 +58,12 @@ pub enum TtxStat {
     ShellFloodChance,
     ShellMaxAmmo,
     ShellDisabledUnderwater,
-    // Secondaries (ATBA): same Artillery model as the main battery, but the
-    // client labels secondary rows with IDS_SHIP_PARAM_ATBA_* keys. Only range
-    // and gun-count have distinct catalog keys; the rest have no ATBA label.
+    // Secondaries (ATBA): per-caliber mounts with a shared battery range. Only
+    // range and gun-count have distinct catalog keys; the rest have no ATBA label.
     SecondaryRange,
     SecondaryReloadTime,
     SecondaryDispersion,
     SecondaryDispersionVertical,
-    SecondaryAmmoSwitchTime,
     SecondaryGunCaliber,
     SecondaryGunNumBarrels,
     SecondaryGunNumGuns,
@@ -139,7 +137,6 @@ impl TtxStat {
         TtxStat::SecondaryReloadTime,
         TtxStat::SecondaryDispersion,
         TtxStat::SecondaryDispersionVertical,
-        TtxStat::SecondaryAmmoSwitchTime,
         TtxStat::SecondaryGunCaliber,
         TtxStat::SecondaryGunNumBarrels,
         TtxStat::SecondaryGunNumGuns,
@@ -209,7 +206,6 @@ impl TtxStat {
             TtxStat::SecondaryReloadTime => "secondary.reload_time",
             TtxStat::SecondaryDispersion => "secondary.dispersion",
             TtxStat::SecondaryDispersionVertical => "secondary.dispersion_vertical",
-            TtxStat::SecondaryAmmoSwitchTime => "secondary.ammo_switch_time",
             TtxStat::SecondaryGunCaliber => "secondary.gun.caliber",
             TtxStat::SecondaryGunNumBarrels => "secondary.gun.num_barrels",
             TtxStat::SecondaryGunNumGuns => "secondary.gun.num_guns",
@@ -369,14 +365,13 @@ impl TtxStat {
 
             // Secondaries: the en global.mo only defines IDS_SHIP_PARAM_ATBA_*
             // for range ("Firing Range") and gun count ("Secondary Gun Turrets").
-            // No distinct ATBA key exists for reload, dispersion, ammo-switch,
-            // gun caliber/barrels/rotation, or any shell stat (damage, caliber,
-            // speed, penetration, burn, flood, ammo), so each is None rather than
+            // No distinct ATBA key exists for reload, dispersion, gun caliber/
+            // barrels/rotation, or any shell stat (damage, caliber, speed,
+            // penetration, burn, flood, ammo), so each is None rather than
             // reusing a main-battery IDS_SHIP_PARAM_ARTILLERY_* label.
             TtxStat::SecondaryReloadTime
             | TtxStat::SecondaryDispersion
             | TtxStat::SecondaryDispersionVertical
-            | TtxStat::SecondaryAmmoSwitchTime
             | TtxStat::SecondaryGunCaliber
             | TtxStat::SecondaryGunNumBarrels
             | TtxStat::SecondaryGunRotationSpeed
@@ -508,7 +503,6 @@ mod tests {
             TtxStat::SecondaryReloadTime,
             TtxStat::SecondaryDispersion,
             TtxStat::SecondaryDispersionVertical,
-            TtxStat::SecondaryAmmoSwitchTime,
             TtxStat::SecondaryGunCaliber,
             TtxStat::SecondaryGunNumBarrels,
             TtxStat::SecondaryGunRotationSpeed,

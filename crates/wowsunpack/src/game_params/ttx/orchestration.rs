@@ -227,7 +227,7 @@ pub(crate) fn ship_stats_with<R: Recorder>(
         .is_some_and(|d| d.value() >= SMALL_SHELL_MAX_DIAMETER_M);
 
     let mg_max_dist_km = artillery.as_ref().and_then(|a| a.range.map(|r| r.value()));
-    let atba_max_dist_km = secondaries.as_ref().and_then(|a| a.range.map(|r| r.value()));
+    let atba_max_dist_km = secondaries.as_ref().map(|b| b.range.value());
 
     let visibility = hull.map(|h| {
         factories::visibility(

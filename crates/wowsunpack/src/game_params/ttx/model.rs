@@ -294,7 +294,7 @@ pub struct ShipStats {
     pub battery: Option<Battery>,
     /// Main battery: guns + shells.
     pub artillery: Option<Artillery>,
-    pub secondaries: Option<Artillery>,
+    pub secondaries: Option<SecondaryBattery>,
     /// Launchers + per-ammo.
     pub torpedoes: Option<Torpedoes>,
     pub fire_control: Option<FireControl>,
@@ -353,7 +353,7 @@ impl ShipStats {
         }
 
         push_artillery_rows(&mut rows, self.artillery.as_ref(), ArtilleryKind::Main, &scalar, &item);
-        push_artillery_rows(&mut rows, self.secondaries.as_ref(), ArtilleryKind::Secondary, &scalar, &item);
+        push_secondary_rows(&mut rows, self.secondaries.as_ref(), &scalar, &item);
 
         if let Some(t) = &self.torpedoes {
             scalar(&mut rows, TtxStat::TorpedoReloadTime, t.reload_time.map(StatValue::Seconds));
@@ -429,6 +429,7 @@ fn torpedo_qualifier(torp: &TorpedoStats, idx: usize) -> String {
 /// Emit the seven per-shell rows for one shell under `qualifier`, mapping each
 /// `ShellStats` field to its `s.shell_*` TtxStat. Shared by main and secondary
 /// row emission.
+#[allow(clippy::type_complexity)]
 fn push_shell_rows(
     rows: &mut Vec<StatRow>,
     s: &ArtilleryStats,
@@ -463,7 +464,9 @@ fn push_artillery_rows(
     scalar(rows, s.range, a.range.map(StatValue::Km));
     scalar(rows, s.dispersion, a.dispersion.map(StatValue::Meters));
     scalar(rows, s.dispersion_vertical, a.dispersion_vertical.map(StatValue::Meters));
-    scalar(rows, s.ammo_switch_time, a.ammo_switch_time.map(StatValue::Seconds));
+    if let Some(stat) = s.ammo_switch_time {
+        scalar(rows, stat, a.ammo_switch_time.map(StatValue::Seconds));
+    }
 
     if let Some(gun) = &a.gun {
         scalar(rows, s.gun_caliber, gun.caliber.map(StatValue::Millimeters));
@@ -482,6 +485,7 @@ fn push_artillery_rows(
 /// Emit the flat secondary rows: `SecondaryRange` at battery level (no
 /// qualifier), then per mount every gun stat and the single shell's stats, all
 /// under the mount's `label` qualifier so each mount groups under one key.
+#[allow(clippy::type_complexity)]
 fn push_secondary_rows(
     rows: &mut Vec<StatRow>,
     battery: Option<&SecondaryBattery>,
@@ -506,14 +510,14 @@ fn push_secondary_rows(
 }
 
 /// The per-kind [`TtxStat`] variant set for an [`Artillery`] block.
-/// `shell_disabled_underwater` is `None` for the secondary battery, which has no
-/// such variant.
+/// `ammo_switch_time` and `shell_disabled_underwater` are `None` for the
+/// secondary battery (which has neither concept).
 struct ArtilleryStats {
     reload_time: TtxStat,
     range: TtxStat,
     dispersion: TtxStat,
     dispersion_vertical: TtxStat,
-    ammo_switch_time: TtxStat,
+    ammo_switch_time: Option<TtxStat>,
     gun_caliber: TtxStat,
     gun_num_barrels: TtxStat,
     gun_num_guns: TtxStat,
@@ -537,7 +541,7 @@ impl ArtilleryStats {
                 range: TtxStat::ArtilleryRange,
                 dispersion: TtxStat::ArtilleryDispersion,
                 dispersion_vertical: TtxStat::ArtilleryDispersionVertical,
-                ammo_switch_time: TtxStat::ArtilleryAmmoSwitchTime,
+                ammo_switch_time: Some(TtxStat::ArtilleryAmmoSwitchTime),
                 gun_caliber: TtxStat::GunCaliber,
                 gun_num_barrels: TtxStat::GunNumBarrels,
                 gun_num_guns: TtxStat::GunNumGuns,
@@ -557,7 +561,7 @@ impl ArtilleryStats {
                 range: TtxStat::SecondaryRange,
                 dispersion: TtxStat::SecondaryDispersion,
                 dispersion_vertical: TtxStat::SecondaryDispersionVertical,
-                ammo_switch_time: TtxStat::SecondaryAmmoSwitchTime,
+                ammo_switch_time: None,
                 gun_caliber: TtxStat::SecondaryGunCaliber,
                 gun_num_barrels: TtxStat::SecondaryGunNumBarrels,
                 gun_num_guns: TtxStat::SecondaryGunNumGuns,
@@ -988,7 +992,21 @@ mod tests {
             armor: Some(Armor { min: Some(Millimeters::from(1.0)), max: Some(Millimeters::from(1.0)) }),
             battery: Some(Battery { capacity: Some(1.0), regeneration: Some(1.0) }),
             artillery: Some(artillery()),
-            secondaries: Some(artillery()),
+            secondaries: Some(SecondaryBattery {
+                range: Km::from(1.0),
+                mounts: vec![SecondaryMount {
+                    caliber: Millimeters::from(1.0),
+                    label: "1 mm".to_string(),
+                    reload_time: Seconds::from(1.0),
+                    rotation_speed: DegreesPerSecond::from(1.0),
+                    rotation_time: Seconds::from(1.0),
+                    num_barrels: 1,
+                    num_mounts: 1,
+                    dispersion: Meters::from(1.0),
+                    dispersion_vertical: Meters::from(1.0),
+                    shell: shell(),
+                }],
+            }),
             torpedoes: Some(Torpedoes {
                 reload_time: Some(Seconds::from(1.0)),
                 launchers: vec![Launcher {

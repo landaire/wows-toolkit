@@ -103,6 +103,19 @@ fn ttx_cross_class_against_port_values() {
         let stats = ship_stats_stock(&ship, &provider);
         let checks = ship_checks(ship_name, &stats);
 
+        if ship_name == "PGSB108_Bismarck" {
+            let battery = stats.secondaries.as_ref().expect("Bismarck has secondaries");
+            assert_eq!(battery.mounts.len(), 2, "Bismarck: expected 2 per-caliber secondary mounts");
+            assert!(
+                battery.mounts.iter().any(|m| (m.caliber.value() - 150.0).abs() < 1.0),
+                "Bismarck: 150mm secondary mount"
+            );
+            assert!(
+                battery.mounts.iter().any(|m| (m.caliber.value() - 105.0).abs() < 1.0),
+                "Bismarck: 105mm secondary mount"
+            );
+        }
+
         eprintln!("\n=== {ship_name} ===");
         eprintln!("{:<26} {:>12} {:>12} {:>8}", "stat", "expected", "computed", "match");
         for c in &checks {
@@ -143,7 +156,7 @@ fn ship_checks(ship: &str, stats: &wowsunpack::game_params::ttx::model::ShipStat
     let arty_caliber = arty.and_then(|a| a.gun.as_ref()).and_then(|g| g.caliber.map(|c| c.value()));
     let arty_dispersion = arty.and_then(|a| a.dispersion.map(|d| d.value()));
     let sea = vis.and_then(|v| v.sea_detection.map(|s| s.value()));
-    let secn_range = secn.and_then(|s| s.range.map(|r| r.value()));
+    let secn_range = secn.map(|b| b.range.value());
 
     // First HE/AP shell stats by ammo_kind.
     let he = arty.and_then(|a| a.shells.iter().find(|s| s.ammo_kind.as_deref() == Some("HE")));
