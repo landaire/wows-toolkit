@@ -1636,7 +1636,12 @@ mod tests {
 
     #[test]
     fn durability_records_health_provenance() {
-        use crate::game_params::ttx::provenance::{InputId, ModifierSources, On, Op, Recorder, ShipStatsProvenance};
+        use crate::game_params::ttx::provenance::InputId;
+        use crate::game_params::ttx::provenance::ModifierSources;
+        use crate::game_params::ttx::provenance::On;
+        use crate::game_params::ttx::provenance::Op;
+        use crate::game_params::ttx::provenance::Recorder;
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
         let mods = [modifier("healthPerLevel", 350.0), modifier("healthHullCoeff", 1.05)];
         let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).unwrap();
         let mut sources = ModifierSources::default();
@@ -1980,7 +1985,10 @@ mod tests {
     /// torpedoRangeCoefficient, exercising the full recording table.
     #[test]
     fn torpedo_speed_and_range_records_exact_replay() {
-        use crate::game_params::ttx::provenance::{InputId, On, Op, ShipStatsProvenance};
+        use crate::game_params::ttx::provenance::InputId;
+        use crate::game_params::ttx::provenance::On;
+        use crate::game_params::ttx::provenance::Op;
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
 
         // torpedoSpeedMultiplier 1.05, normalTorpedoSpeedMultiplier 1.1, torpedoSpeedBonus 2.0,
         // torpedoRangeCoefficient 1.15. Gearing torpedo ammoType "torpedo" -> normal multiplier applies.
@@ -2730,7 +2738,8 @@ mod tests {
     /// provenance keys diverged from `rows()` and shells were mislabeled.
     #[test]
     fn secondary_shell_provenance_uses_secondary_variants() {
-        use crate::game_params::ttx::provenance::{On, ShipStatsProvenance};
+        use crate::game_params::ttx::provenance::On;
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
 
         let provider = bismarck_secondary_provider();
         let mut rec = On::default();
@@ -3020,7 +3029,9 @@ mod tests {
     /// one `Op::Add` step. `ShipStatsProvenance::replay` reproduces the factory values exactly.
     #[test]
     fn visibility_records_sea_detection_and_on_fire_replay_exact() {
-        use crate::game_params::ttx::provenance::{On, Op, ShipStatsProvenance};
+        use crate::game_params::ttx::provenance::On;
+        use crate::game_params::ttx::provenance::Op;
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
 
         let mods = [
             modifier("visibilityFactor", 0.9),
@@ -3089,7 +3100,9 @@ mod tests {
 
     #[test]
     fn artillery_reload_records_gmshot_delay_and_replay_exact() {
-        use crate::game_params::ttx::provenance::{On, Op, ShipStatsProvenance};
+        use crate::game_params::ttx::provenance::On;
+        use crate::game_params::ttx::provenance::Op;
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
 
         let mods = [modifier("GMShotDelay", 0.9)];
         let bundle =
@@ -3130,7 +3143,8 @@ mod tests {
 
     #[test]
     fn artillery_range_records_fc_coef_step_and_replay_exact() {
-        use crate::game_params::ttx::provenance::{On, ShipStatsProvenance};
+        use crate::game_params::ttx::provenance::On;
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
 
         let provider = worcester_provider();
         let mut rec = On::default();
@@ -3174,7 +3188,8 @@ mod tests {
     /// a single `GMIdealRadius` Mul step makes `ShipStatsProvenance::replay` reproduce it.
     #[test]
     fn artillery_vertical_dispersion_records_exact_replay() {
-        use crate::game_params::ttx::provenance::{On, ShipStatsProvenance};
+        use crate::game_params::ttx::provenance::On;
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
 
         let mods = [modifier("GMIdealRadius", 0.95)];
         let bundle =
@@ -3242,7 +3257,8 @@ mod tests {
     /// the final value exactly.
     #[test]
     fn secondary_range_records_gs_max_dist_and_replay_exact() {
-        use crate::game_params::ttx::provenance::{On, ShipStatsProvenance};
+        use crate::game_params::ttx::provenance::On;
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
 
         let mods = [modifier("GSMaxDist", 1.2)];
         let bundle =
@@ -3280,7 +3296,8 @@ mod tests {
     /// A base of `base_h` alone would give a wrong replay when `coeff != 1.0`.
     #[test]
     fn secondary_vertical_dispersion_records_exact_replay() {
-        use crate::game_params::ttx::provenance::{On, ShipStatsProvenance};
+        use crate::game_params::ttx::provenance::On;
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
 
         let mods = [modifier("GSIdealRadius", 0.95)];
         let bundle =
