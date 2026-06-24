@@ -11,7 +11,7 @@ use crate::game_params::types::GameParamProvider;
 use crate::game_params::types::Param;
 
 /// A TTX-relevant upgrade slot.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ModuleSlot {
     Hull,
     Engine,
