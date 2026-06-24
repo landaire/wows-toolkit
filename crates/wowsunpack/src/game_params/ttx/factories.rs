@@ -588,6 +588,45 @@ pub fn torpedoes<R: Recorder>(
 const HEAVY_CRUISER_SHELL_DIAMETER_M: f32 = 0.0;
 const SMALL_PROJECTILE_MAX_DIAMETER_M: f32 = 0.0;
 
+/// The `TtxStat` variants a shell row maps to, selected by battery: the main
+/// battery uses `Shell*`, the secondary battery the distinct `Secondary*` set.
+/// Mirrors `model::ArtilleryStats::for_kind` so provenance keys match `rows()`.
+struct ShellStatKeys {
+    caliber: TtxStat,
+    speed: TtxStat,
+    damage: TtxStat,
+    penetration: TtxStat,
+    burn_chance: TtxStat,
+    flood_chance: TtxStat,
+    max_ammo: TtxStat,
+}
+
+impl ShellStatKeys {
+    fn for_battery(is_atba: bool) -> Self {
+        if is_atba {
+            ShellStatKeys {
+                caliber: TtxStat::SecondaryShellCaliber,
+                speed: TtxStat::SecondaryShellSpeed,
+                damage: TtxStat::SecondaryShellDamage,
+                penetration: TtxStat::SecondaryShellPenetration,
+                burn_chance: TtxStat::SecondaryShellBurnChance,
+                flood_chance: TtxStat::SecondaryShellFloodChance,
+                max_ammo: TtxStat::SecondaryShellMaxAmmo,
+            }
+        } else {
+            ShellStatKeys {
+                caliber: TtxStat::ShellCaliber,
+                speed: TtxStat::ShellSpeed,
+                damage: TtxStat::ShellDamage,
+                penetration: TtxStat::ShellPenetration,
+                burn_chance: TtxStat::ShellBurnChance,
+                flood_chance: TtxStat::ShellFloodChance,
+                max_ammo: TtxStat::ShellMaxAmmo,
+            }
+        }
+    }
+}
+
 /// Per-shell stats from a resolved [`Projectile`] (`createAmmoTTX`,
 /// FactoryArtillery.py:147-190). Pure over the projectile + bundle so the formulas
 /// are testable without a provider. `level` is the ship tier (burn-chance branch,
@@ -628,13 +667,16 @@ pub fn shell_stats<R: Recorder>(
     let qualifier = ammo_kind;
     let arty_src = || InputId::Module { slot: ModuleSlot::Artillery, name: arty_name.to_string() };
 
+    // Select TtxStat variants based on battery path so provenance keys match rows().
+    let stat = ShellStatKeys::for_battery(is_atba);
+
     // caliber * 1000 (FactoryArtillery.py:155). caliber (m) = bulletDiametr.
     let caliber_m = projectile.bullet_diametr();
     let caliber = caliber_m.map(|c| Millimeters::from(c * 1000.0));
     if R::ON {
         // Derived: base == final, no modifier steps.
         if let Some(c) = caliber {
-            rec.record(TtxStat::ShellCaliber, Some(qualifier), c.value(), arty_src(), c.value(), |_b| {});
+            rec.record(stat.caliber, Some(qualifier), c.value(), arty_src(), c.value(), |_b| {});
         }
     }
 
@@ -645,7 +687,7 @@ pub fn shell_stats<R: Recorder>(
     if R::ON {
         // Derived: base == final, no modifier steps.
         if let Some(s) = speed {
-            rec.record(TtxStat::ShellSpeed, Some(qualifier), s.value(), arty_src(), s.value(), |_b| {});
+            rec.record(stat.speed, Some(qualifier), s.value(), arty_src(), s.value(), |_b| {});
         }
     }
 
@@ -666,7 +708,7 @@ pub fn shell_stats<R: Recorder>(
                 // bundle coefficients internally. Record the net composite factor as a
                 // single module step so replay is exact.
                 let net_damage_coeff = value / alpha;
-                rec.record(TtxStat::ShellDamage, Some(qualifier), alpha, arty_src(), value, |b| {
+                rec.record(stat.damage, Some(qualifier), alpha, arty_src(), value, |b| {
                     b.coef(sources, "controllableWeaponDamageCoeff");
                     // Net of alpha_damage_coeff * artillery_damage_coeff * csap, collapsed
                     // to keep replay exact without decomposing the composite helpers.
@@ -694,7 +736,7 @@ pub fn shell_stats<R: Recorder>(
                     // (floor breaks arithmetic replay by at most 1 mm).
                     let pre_floor = p * he_pen_coef;
                     let pen_coef_name = if is_atba { "GSPenetrationCoeffHE" } else { "GMPenetrationCoeffHE" };
-                    rec.record(TtxStat::ShellPenetration, Some(qualifier), p, arty_src(), pre_floor, |b| {
+                    rec.record(stat.penetration, Some(qualifier), p, arty_src(), pre_floor, |b| {
                         b.coef(sources, pen_coef_name)
                     });
                 }
@@ -703,7 +745,7 @@ pub fn shell_stats<R: Recorder>(
         }
         StatWeaponType::MainCs | StatWeaponType::AtbaCs => projectile.alpha_piercing_cs().map(|p| {
             if R::ON {
-                rec.record(TtxStat::ShellPenetration, Some(qualifier), p, arty_src(), p, |_b| {});
+                rec.record(stat.penetration, Some(qualifier), p, arty_src(), p, |_b| {});
             }
             Millimeters::from(p.floor())
         }),
@@ -723,7 +765,7 @@ pub fn shell_stats<R: Recorder>(
                     // calculate_burn_chance folds several named bundle coefficients internally.
                     // Record the net factor as one module step to keep replay exact.
                     let net_burn_coeff = if base_pct != 0.0 { chance_val / base_pct } else { 1.0 };
-                    rec.record(TtxStat::ShellBurnChance, Some(qualifier), base_pct, arty_src(), chance_val, |b| {
+                    rec.record(stat.burn_chance, Some(qualifier), base_pct, arty_src(), chance_val, |b| {
                         b.module(arty_src(), "burnChanceCoeff", net_burn_coeff)
                     });
                 }
@@ -738,7 +780,7 @@ pub fn shell_stats<R: Recorder>(
         StatWeaponType::MainHe | StatWeaponType::AtbaHe => projectile.uw_critical().map(|f| {
             let value = f * 100.0;
             if R::ON {
-                rec.record(TtxStat::ShellFloodChance, Some(qualifier), value, arty_src(), value, |_b| {});
+                rec.record(stat.flood_chance, Some(qualifier), value, arty_src(), value, |_b| {});
             }
             Percent::from(value)
         }),
@@ -749,7 +791,7 @@ pub fn shell_stats<R: Recorder>(
     // Record as -1.0 so replay is exact; the model stores AmmoCount::Infinite.
     let max_ammo = Some(AmmoCount::Infinite);
     if R::ON {
-        rec.record(TtxStat::ShellMaxAmmo, Some(qualifier), -1.0, arty_src(), -1.0, |_b| {});
+        rec.record(stat.max_ammo, Some(qualifier), -1.0, arty_src(), -1.0, |_b| {});
     }
 
     ShellStats {
@@ -2679,6 +2721,74 @@ mod tests {
                 &mut Off
             )
             .is_none()
+        );
+    }
+
+    /// Secondary shell stats must be recorded under `SecondaryShell*` TtxStat variants,
+    /// not the main-battery `Shell*` variants. Before the is_atba variant-selection fix,
+    /// `shell_stats` hardcoded the main-battery variants regardless of `is_atba`, so
+    /// provenance keys diverged from `rows()` and shells were mislabeled.
+    #[test]
+    fn secondary_shell_provenance_uses_secondary_variants() {
+        use crate::game_params::ttx::provenance::{On, ShipStatsProvenance};
+
+        let provider = bismarck_secondary_provider();
+        let mut rec = On::default();
+        let sec = secondaries(
+            &bismarck_secondaries(),
+            "HULL_B",
+            &ModifierBundle::empty(Species::Battleship),
+            &ModifierSources::default(),
+            1.0,
+            8,
+            &provider,
+            &mut rec,
+        )
+        .expect("secondaries computed");
+        let prov = rec.into_provenance();
+
+        // Every shell attribution must use a Secondary* variant.
+        let shell_main_variants = [
+            TtxStat::ShellDamage,
+            TtxStat::ShellCaliber,
+            TtxStat::ShellSpeed,
+            TtxStat::ShellPenetration,
+            TtxStat::ShellBurnChance,
+            TtxStat::ShellFloodChance,
+            TtxStat::ShellMaxAmmo,
+        ];
+        for attr in &prov.attributions {
+            assert!(
+                !shell_main_variants.contains(&attr.stat),
+                "secondary path must not record main-battery Shell* variant {:?}",
+                attr.stat
+            );
+        }
+
+        // At least one SecondaryShellDamage attribution must be present.
+        assert!(
+            prov.attributions.iter().any(|a| a.stat == TtxStat::SecondaryShellDamage),
+            "expected SecondaryShellDamage in provenance"
+        );
+
+        // Replay: SecondaryShellDamage for the 150mm shell reproduces the factory value.
+        let damage_150 = prov
+            .attributions
+            .iter()
+            .find(|a| a.stat == TtxStat::SecondaryShellDamage && a.qualifier.as_deref() == Some("HE"))
+            .expect("SecondaryShellDamage HE recorded");
+        let factory_damage = sec
+            .shells
+            .iter()
+            .find(|s| s.name == "PGPA003_150mm_HE_HE_N_F")
+            .expect("150mm shell")
+            .damage
+            .expect("damage")
+            .value();
+        let replayed = ShipStatsProvenance::replay(damage_150);
+        assert!(
+            (replayed - factory_damage).abs() < 1e-2,
+            "SecondaryShellDamage replay got {replayed}, factory={factory_damage}"
         );
     }
 

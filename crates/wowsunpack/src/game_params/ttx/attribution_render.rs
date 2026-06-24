@@ -91,6 +91,12 @@ pub fn render_attributions(
         .iter()
         .map(|a| {
             let key = (a.stat, a.qualifier.clone());
+            debug_assert!(
+                display.contains_key(&key),
+                "render_attributions: stat {:?} qualifier {:?} absent from rows map; provenance key-set diverged from rows()",
+                a.stat,
+                a.qualifier
+            );
             let value = display.get(&key).cloned().unwrap_or_else(|| trim(a.value));
             let base_value = if a.steps.is_empty() {
                 // No contributors: base IS the final value (ammo counts, bools,
