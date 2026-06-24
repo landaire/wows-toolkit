@@ -1041,7 +1041,8 @@ fn group_secondary_guns(guns: &[ArtilleryGunStats]) -> Vec<(&ArtilleryGunStats, 
 
 /// Per-mount display labels from caliber ("150 mm" via `Millimeters` Display),
 /// disambiguating duplicates ("150 mm (2)") so each mount's row qualifier is
-/// unique. Order matches `calibers`.
+/// unique. Order matches `calibers`. Labels are whole-mm display values (port
+/// rounding), so two sub-mm-distinct calibers that round equal disambiguate by suffix.
 fn secondary_labels(calibers: &[Millimeters]) -> Vec<String> {
     let base: Vec<String> = calibers.iter().map(|c| c.to_string()).collect();
     let mut totals: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();

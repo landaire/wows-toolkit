@@ -426,7 +426,7 @@ fn torpedo_qualifier(torp: &TorpedoStats, idx: usize) -> String {
     if torp.name.is_empty() { idx.to_string() } else { torp.name.clone() }
 }
 
-/// Emit the seven per-shell rows for one shell under `qualifier`, mapping each
+/// Emit the per-shell rows for one shell under `qualifier`, mapping each
 /// `ShellStats` field to its `s.shell_*` TtxStat. Shared by main and secondary
 /// row emission.
 #[allow(clippy::type_complexity)]
