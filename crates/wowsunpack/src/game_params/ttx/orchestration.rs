@@ -1240,6 +1240,151 @@ mod tests {
         crate::data::Version::base(15, 4, 0)
     }
 
+    // --- consumables fixture helpers ---
+
+    use std::collections::HashMap as StdHashMap;
+
+    /// A finite-charge sonar (HydroacousticSearch) ability category: COUNT_BASED,
+    /// `numConsumables=3`, reloadTime=90, workTime=100. Sonar is in
+    /// `ConsumablesWithReloadCoefficients` and `ADDITIONAL_CONSUMABLES_COUNT` is NOT
+    /// applicable to sonar (only to specific types), so only `additionalConsumables`
+    /// (group-wide) adds charges.
+    fn finite_sonar_category() -> crate::game_params::types::AbilityCategory {
+        use crate::game_params::types::AbilityCategory;
+        use std::collections::BTreeMap;
+        let mut fields = BTreeMap::new();
+        fields.insert("lifeCycleType".to_string(), 0.0_f32); // COUNT_BASED
+        AbilityCategory::builder()
+            .consumable_type("sonar".to_string())
+            .group("ship".to_string())
+            .icon_id(String::new())
+            .num_consumables(3)
+            .preparation_time(0.0)
+            .reload_time(90.0)
+            .work_time(100.0)
+            .effect_fields(fields)
+            .build()
+    }
+
+    /// Build a provider that serves projectile params AND an ability param for
+    /// `ability_name`. The ability has one variant keyed by `variant_name`.
+    struct ConsumablesProvider {
+        params: Vec<Rc<Param>>,
+    }
+
+    impl ConsumablesProvider {
+        fn new(
+            projectiles: &[(&str, Projectile)],
+            ability_name: &str,
+            variant_name: &str,
+            category: crate::game_params::types::AbilityCategory,
+        ) -> Self {
+            use crate::game_params::types::Ability;
+            let mut params: Vec<Rc<Param>> = projectiles
+                .iter()
+                .enumerate()
+                .map(|(i, (name, proj))| {
+                    Rc::new(
+                        Param::builder()
+                            .id(GameParamId::from((i + 1) as u32))
+                            .index(format!("S{i:04}"))
+                            .name(name.to_string())
+                            .nation("USA".to_string())
+                            .data(ParamData::Projectile(proj.clone()))
+                            .build(),
+                    )
+                })
+                .collect();
+            let mut categories = StdHashMap::new();
+            categories.insert(variant_name.to_string(), category);
+            let ability = Ability::builder()
+                .can_buy(false)
+                .cost_credits(0)
+                .cost_gold(0)
+                .is_free(true)
+                .categories(categories)
+                .build();
+            let idx = params.len() + 1;
+            params.push(Rc::new(
+                Param::builder()
+                    .id(GameParamId::from(idx as u32))
+                    .index(format!("A{idx:04}"))
+                    .name(ability_name.to_string())
+                    .nation("USA".to_string())
+                    .data(ParamData::Ability(ability))
+                    .build(),
+            ));
+            ConsumablesProvider { params }
+        }
+    }
+
+    impl GameParamProvider for ConsumablesProvider {
+        fn game_param_by_id(&self, _id: GameParamId) -> Option<Rc<Param>> {
+            None
+        }
+        fn game_param_by_index(&self, _index: &str) -> Option<Rc<Param>> {
+            None
+        }
+        fn game_param_by_name(&self, name: &str) -> Option<Rc<Param>> {
+            self.params.iter().find(|p| p.name() == name).cloned()
+        }
+        fn params(&self) -> &[Rc<Param>] {
+            &self.params
+        }
+    }
+
+    /// Gearing-shaped ship with one finite-charge sonar ability slot added.
+    /// The ability is named "PCY_Sonar" with variant "IVariant"; the provider
+    /// must return an Ability param for that name.
+    fn gearing_ship_with_sonar() -> Param {
+        let mut components = ShipTtxComponents::default();
+        components.hulls.insert("PAUH911_Gearing_1945".to_string(), gearing_hull());
+        components.engines.insert("PAUE903_D10_ENG_STOCK".to_string(), EngineComponentStats { speed_coef: Some(0.0) });
+        components.artillery.insert("PAUA903_D10_ART_STOCK".to_string(), gearing_artillery());
+        components.torpedoes.insert("PAUT902_D10_NEW_STOCK".to_string(), vec![gearing_launcher()]);
+        components.fire_controls.insert("PAUS911_Suo".to_string(), 1.0);
+        components.stock_selection = ShipUpgradeSelection::new(
+            Some("PAUH911_Gearing_1945".to_string()),
+            Some("PAUE903_D10_ENG_STOCK".to_string()),
+            Some("PAUA903_D10_ART_STOCK".to_string()),
+            Some("PAUT902_D10_NEW_STOCK".to_string()),
+            Some("PAUS911_Suo".to_string()),
+        );
+        // abilities: one slot with one (ability_name, variant_name) pair
+        let abilities = Some(vec![vec![("PCY_Sonar".to_string(), "IVariant".to_string())]]);
+        let vehicle = Vehicle::builder()
+            .level(10)
+            .group("g".to_string())
+            .maybe_abilities(abilities)
+            .upgrades(Vec::new())
+            .maybe_config_data(None)
+            .maybe_model_path(None)
+            .maybe_armor(None)
+            .maybe_hit_locations(None)
+            .permoflages(Vec::new())
+            .camera_trajectories(Vec::new())
+            .ttx_components(components)
+            .innate_skills(Vec::new())
+            .build();
+        Param::builder()
+            .id(GameParamId::from(900u32))
+            .index("IDX".to_string())
+            .name("PASD013_Gearing_1945".to_string())
+            .nation("USA".to_string())
+            .species(crate::recognized::Recognized::Known(Species::Destroyer))
+            .data(ParamData::Vehicle(vehicle))
+            .build()
+    }
+
+    fn sonar_consumables_provider() -> ConsumablesProvider {
+        ConsumablesProvider::new(
+            &[("PAPT027_Mk_16_mod_1", gearing_torpedo()), ("PAPA127_127mm_HE", gearing_he())],
+            "PCY_Sonar",
+            "IVariant",
+            finite_sonar_category(),
+        )
+    }
+
     fn uniform_modifier(name: &str, value: f32) -> crate::game_params::types::CrewSkillModifier {
         crate::game_params::types::CrewSkillModifier::builder()
             .name(name.to_owned())
@@ -1439,6 +1584,164 @@ mod tests {
         }
     }
 
+    // --- consumable coverage / self-check / attribution tests ---
+
+    /// Provenance key set equals `rows()` key set on a consumables-bearing fixture,
+    /// including consumable stats. Also verifies every attribution replays to value.
+    #[test]
+    fn consumables_bearing_coverage_and_replay() {
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
+        use std::collections::HashSet;
+
+        let ship = gearing_ship_with_sonar();
+        let provider = sonar_consumables_provider();
+        let sel = ShipUpgradeSelection::stock(&ship);
+        let (stats, prov) = ship_stats_explained(
+            &ship,
+            &sel,
+            &ModifierBundle::empty(Species::Destroyer),
+            &ModifierSources::default(),
+            10,
+            &provider,
+        );
+
+        // Fixture must have at least one consumable card.
+        assert!(!stats.consumables.is_empty(), "fixture must have at least one consumable card");
+
+        let row_keys: HashSet<_> = stats.rows().into_iter().map(|r| (r.stat, r.qualifier)).collect();
+        let prov_keys: HashSet<_> = prov.attributions.iter().map(|a| (a.stat, a.qualifier.clone())).collect();
+        assert_eq!(row_keys, prov_keys, "consumable stats: row keys must equal provenance keys");
+
+        for a in &prov.attributions {
+            let replayed = ShipStatsProvenance::replay(a);
+            assert!(
+                (replayed - a.value).abs() <= 1e-2 + a.value.abs() * 1e-4,
+                "replay mismatch for {:?} ({:?}): replayed={} value={}",
+                a.stat,
+                a.qualifier,
+                replayed,
+                a.value
+            );
+        }
+    }
+
+    /// With an `additionalConsumables` modifier from a Skill InputId on a
+    /// finite-charge consumable, the ConsumableCharges attribution has a bonus step
+    /// whose input is that skill (Superintendent-style), and replay reproduces the
+    /// increased charge count.
+    #[test]
+    fn consumable_charge_attribution_is_skill() {
+        use crate::game_params::ttx::labels::TtxStat;
+        use crate::game_params::ttx::provenance::InputId;
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
+
+        let ship = gearing_ship_with_sonar();
+        let provider = sonar_consumables_provider();
+        let sel = ShipUpgradeSelection::stock(&ship);
+
+        // additionalConsumables adds +1 to all ship-group consumable charges.
+        let mods = [uniform_modifier("additionalConsumables", 1.0)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, test_version()).unwrap();
+        let mut sources = ModifierSources::default();
+        sources.record("additionalConsumables", InputId::Skill { name: "Superintendent".into() }, 1.0);
+
+        let (stats, prov) = ship_stats_explained(&ship, &sel, &bundle, &sources, 10, &provider);
+
+        // Sonar has finite charges; the card must be present.
+        let card = stats.consumables.iter().find(|c| c.label == "sonar").expect("sonar card");
+        let label = card.label.clone();
+
+        let charges_attr = prov
+            .attributions
+            .iter()
+            .find(|a| a.stat == TtxStat::ConsumableCharges && a.qualifier.as_deref() == Some(&label))
+            .expect("ConsumableCharges attribution for sonar");
+
+        // base=3, final=4 after the +1 bonus.
+        let replayed = ShipStatsProvenance::replay(charges_attr);
+        assert!(
+            (replayed - charges_attr.value).abs() <= 1e-2,
+            "replay mismatch: replayed={} value={}",
+            replayed,
+            charges_attr.value
+        );
+        assert!(
+            (charges_attr.value - 4.0).abs() < 1e-3,
+            "expected 4 charges after +1 bonus, got {}",
+            charges_attr.value
+        );
+
+        // The bonus step must be attributed to the Superintendent skill.
+        let bonus_step = charges_attr
+            .steps
+            .iter()
+            .find(|s| s.modifier_name == "additionalConsumables")
+            .expect("additionalConsumables step on ConsumableCharges");
+        assert_eq!(
+            bonus_step.input,
+            InputId::Skill { name: "Superintendent".into() },
+            "ConsumableCharges bonus step must be attributed to the Superintendent skill"
+        );
+    }
+
+    /// With a `ConsumableReloadTime` modifier from an Upgrade InputId, the
+    /// ConsumableReloadTime attribution has a coef step attributed to that upgrade.
+    #[test]
+    fn consumable_reload_attribution_is_upgrade() {
+        use crate::game_params::ttx::labels::TtxStat;
+        use crate::game_params::ttx::provenance::InputId;
+        use crate::game_params::ttx::provenance::Op;
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
+
+        let ship = gearing_ship_with_sonar();
+        let provider = sonar_consumables_provider();
+        let sel = ShipUpgradeSelection::stock(&ship);
+
+        // ConsumableReloadTime 0.9 applied as a multiplicative coef: 90 * 0.9 = 81.
+        let mods = [uniform_modifier("ConsumableReloadTime", 0.9)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, test_version()).unwrap();
+        let mut sources = ModifierSources::default();
+        sources.record("ConsumableReloadTime", InputId::Upgrade { name: "ConsumablesMod3".into() }, 0.9);
+
+        let (stats, prov) = ship_stats_explained(&ship, &sel, &bundle, &sources, 10, &provider);
+
+        let card = stats.consumables.iter().find(|c| c.label == "sonar").expect("sonar card");
+        let label = card.label.clone();
+
+        let reload_attr = prov
+            .attributions
+            .iter()
+            .find(|a| a.stat == TtxStat::ConsumableReloadTime && a.qualifier.as_deref() == Some(&label))
+            .expect("ConsumableReloadTime attribution for sonar");
+
+        let replayed = ShipStatsProvenance::replay(reload_attr);
+        assert!(
+            (replayed - reload_attr.value).abs() <= 1e-2 + reload_attr.value.abs() * 1e-4,
+            "replay mismatch: replayed={} value={}",
+            replayed,
+            reload_attr.value
+        );
+        // 90 * allConsumableReloadTime(1.0) * ConsumableReloadTime(0.9) * sonarReloadCoeff(1.0) = 81
+        assert!(
+            (reload_attr.value - 81.0).abs() < 1e-2,
+            "expected 81 s reload after 0.9x modifier, got {}",
+            reload_attr.value
+        );
+
+        // The ConsumableReloadTime step must be attributed to the upgrade.
+        let coef_step = reload_attr
+            .steps
+            .iter()
+            .find(|s| s.modifier_name == "ConsumableReloadTime")
+            .expect("ConsumableReloadTime coef step");
+        assert_eq!(coef_step.op, Op::Mul, "ConsumableReloadTime step must be multiplicative");
+        assert_eq!(
+            coef_step.input,
+            InputId::Upgrade { name: "ConsumablesMod3".into() },
+            "ConsumableReloadTime step must be attributed to ConsumablesMod3 upgrade"
+        );
+    }
+
     #[test]
     fn derived_from_links_resolve_to_existing_rows() {
         use crate::game_params::ttx::labels::TtxStat;
@@ -1529,8 +1832,9 @@ mod tests {
     fn every_changed_stat_is_explained() {
         use crate::game_params::ttx::provenance::StatKey;
         use std::collections::HashMap;
-        let ship = gearing_ship();
-        let provider = gearing_provider();
+        // Use the consumables-bearing ship so consumable stats enter the diff.
+        let ship = gearing_ship_with_sonar();
+        let provider = sonar_consumables_provider();
         let sel = ShipUpgradeSelection::stock(&ship);
 
         let (_stock, stock_prov) = ship_stats_explained(
@@ -1547,16 +1851,22 @@ mod tests {
             .map(|a| (StatKey { stat: a.stat, qualifier: a.qualifier.clone() }, a.value))
             .collect();
 
+        // Include consumable charge (+additionalConsumables) and reload
+        // (ConsumableReloadTime) modifiers so consumable stat changes appear in the diff.
         let mods = [
             uniform_modifier("visibilityDistCoeff", 0.9),
             uniform_modifier("GMRotationSpeed", 1.2),
             uniform_modifier("GMShotDelay", 0.9),
+            uniform_modifier("additionalConsumables", 1.0),
+            uniform_modifier("ConsumableReloadTime", 0.9),
         ];
         let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, test_version()).unwrap();
         let mut sources = ModifierSources::default();
         sources.record("visibilityDistCoeff", InputId::Skill { name: "ConcealmentExpert".into() }, 0.9);
         sources.record("GMRotationSpeed", InputId::Skill { name: "ExpertMarksman".into() }, 1.2);
         sources.record("GMShotDelay", InputId::Upgrade { name: "MainBatteryMod3".into() }, 0.9);
+        sources.record("additionalConsumables", InputId::Skill { name: "Superintendent".into() }, 1.0);
+        sources.record("ConsumableReloadTime", InputId::Upgrade { name: "ConsumablesMod3".into() }, 0.9);
         let (_built, prov) = ship_stats_explained(&ship, &sel, &bundle, &sources, 10, &provider);
 
         for a in &prov.attributions {
