@@ -1128,6 +1128,7 @@ mod tests {
         use crate::game_params::ttx::labels::TtxStat;
         use crate::game_params::ttx::provenance::InputId;
         use crate::game_types::Consumable;
+        use crate::recognized::Recognized;
 
         let ship = gearing_ship();
         let provider = gearing_provider();
@@ -1169,7 +1170,7 @@ mod tests {
         assert!(spotter_step.is_some(), "spotterDistCoeff step must be recorded when coeff != 1.0");
         assert_eq!(
             spotter_step.unwrap().input,
-            InputId::Consumable(Consumable::SpottingAircraft),
+            InputId::Consumable(Recognized::Known(Consumable::SpottingAircraft)),
             "spotterDistCoeff step must be attributed to the spotter consumable"
         );
     }

@@ -14,6 +14,7 @@ use crate::game_params::ttx::provenance::Op;
 use crate::game_params::ttx::provenance::ShipStatsProvenance;
 use crate::game_params::ttx::provenance::StatKey;
 use crate::game_params::types::GameParamProvider;
+use crate::recognized::Recognized;
 
 /// One contributing input rendered for display.
 #[derive(Clone, Debug, PartialEq)]
@@ -46,7 +47,10 @@ fn input_label(input: &InputId, loader: &dyn ResourceLoader, provider: &dyn Game
     match input {
         InputId::Module { name, .. } | InputId::Upgrade { name } => resolve_param_label(name, loader, provider),
         InputId::Skill { name } => name.as_str().to_string(),
-        InputId::Consumable(c) => format!("{c:?}"),
+        InputId::Consumable(c) => match c {
+            Recognized::Known(k) => k.name().to_string(),
+            Recognized::Unknown(raw) => raw.clone(),
+        },
         InputId::Innate { skill_type } => skill_type.clone(),
     }
 }

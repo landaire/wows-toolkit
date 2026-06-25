@@ -24,6 +24,7 @@ use crate::game_params::types::KnownCrewSkill;
 use crate::game_params::types::Param;
 use crate::game_params::types::Species;
 use crate::game_types::Consumable;
+use crate::recognized::Recognized;
 
 const TRIGGER_ACTIVATION_ON_BURN_FLOOD: &str = "activationOnBurnFlood";
 const TRIGGER_POTENTIAL_DAMAGE_RATIO: &str = "potentialDamageRatio";
@@ -440,7 +441,7 @@ fn input_id_for(id: &EffectId) -> InputId {
     match id {
         EffectId::Skill(name) => InputId::Skill { name: name.clone() },
         EffectId::Upgrade(name) => InputId::Upgrade { name: name.clone() },
-        EffectId::Consumable(c) => InputId::Consumable(*c),
+        EffectId::Consumable(c) => InputId::Consumable(Recognized::Known(*c)),
         EffectId::Innate(t) => InputId::Innate { skill_type: t.clone() },
     }
 }

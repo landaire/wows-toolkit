@@ -8,6 +8,7 @@ use crate::game_params::ttx::labels::TtxStat;
 use crate::game_params::ttx::module_options::ModuleSlot;
 use crate::game_params::types::CrewSkillName;
 use crate::game_types::Consumable;
+use crate::recognized::Recognized;
 
 /// The identity of one attribution input.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -21,7 +22,7 @@ pub enum InputId {
     /// A commander skill, keyed by internal name.
     Skill { name: CrewSkillName },
     /// A ship consumable.
-    Consumable(Consumable),
+    Consumable(Recognized<Consumable>),
     /// A ship innate skill, keyed by `skill_type`.
     Innate { skill_type: String },
 }
