@@ -480,6 +480,8 @@ fn warn_unresolved_ammo(name: &str) {
 }
 
 /// `None` when `launchers` is empty (no torpedo armament).
+// Threads the modifier bundle, per-source provenance, reload coef + its source, recorder, and module name alongside the base inputs.
+#[allow(clippy::too_many_arguments)]
 pub fn torpedoes<R: Recorder>(
     launchers: &[TorpedoLauncherStats],
     modifiers: &ModifierBundle,
