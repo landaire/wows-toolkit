@@ -21,10 +21,39 @@ use crate::game_params::ttx::constants::KM_TO_M;
 use crate::game_params::ttx::model::AmmoCount;
 use crate::game_params::ttx::model::Seconds;
 use crate::game_params::ttx::modifiers::ModifierBundle;
+use crate::game_params::ttx::provenance::Op;
 use crate::game_params::types::AbilityCategory;
 use crate::game_params::types::Km;
 use crate::game_params::types::Meters;
 use crate::recognized::Recognized;
+
+/// One modifier a consumable computation applied, in application order. Owned
+/// `String` because the per-type names are `format!`-built (`{type}ReloadCoeff`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppliedConsumableModifier {
+    pub name: String,
+    pub op: Op,
+}
+
+/// The ordered applied-modifier list per consumable stat (parallels the
+/// `EffectiveConsumable` fields that can carry modifier steps). A field with no
+/// applied modifiers has an empty Vec.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ConsumableApplied {
+    pub reload_time: Vec<AppliedConsumableModifier>,
+    pub work_time: Vec<AppliedConsumableModifier>,
+    pub preparation_time: Vec<AppliedConsumableModifier>,
+    pub charges: Vec<AppliedConsumableModifier>,
+    pub max_capacity: Vec<AppliedConsumableModifier>,
+    pub regeneration_hp_speed: Vec<AppliedConsumableModifier>,
+    pub smoke_radius: Vec<AppliedConsumableModifier>,
+    pub smoke_lifetime: Vec<AppliedConsumableModifier>,
+    pub fighters_count: Vec<AppliedConsumableModifier>,
+    pub call_fighters_radius: Vec<AppliedConsumableModifier>,
+    pub call_fighters_time_delay: Vec<AppliedConsumableModifier>,
+    pub call_fighters_time_from_heaven: Vec<AppliedConsumableModifier>,
+    pub plane_regeneration_rate: Vec<AppliedConsumableModifier>,
+}
 
 /// Consumable group strings, `ConsumableConstants.py` `ConsumableGroup`.
 const GROUP_SHIP: &str = "ship";
@@ -208,8 +237,21 @@ pub struct ConsumableCard {
 /// Multiply `base` by `bundle.coef(name)` only when the consumable `type_name` is in
 /// `gate`; otherwise return `base` unchanged. Mirrors the client's
 /// `if type in <Set>: coeff *= getattr(modifier, type + '<Suffix>')`.
-fn gated_type_coef(bundle: &ModifierBundle, base: f32, type_name: &str, gate: &[&str], suffix: &str) -> f32 {
-    if gate.contains(&type_name) { base * bundle.coef(&format!("{type_name}{suffix}")) } else { base }
+fn gated_type_coef(
+    bundle: &ModifierBundle,
+    base: f32,
+    type_name: &str,
+    gate: &[&str],
+    suffix: &str,
+    out: &mut Vec<AppliedConsumableModifier>,
+) -> f32 {
+    if gate.contains(&type_name) {
+        let name = format!("{type_name}{suffix}");
+        out.push(AppliedConsumableModifier { name: name.clone(), op: Op::Mul });
+        base * bundle.coef(&name)
+    } else {
+        base
+    }
 }
 
 /// `getConsumableReloadTime` (ModifiersApply.py:190-214), `slotID=None`.
@@ -217,16 +259,28 @@ fn gated_type_coef(bundle: &ModifierBundle, base: f32, type_name: &str, gate: &[
 /// `coeff = allConsumableReloadTime`; SHIP `*= ConsumableReloadTime`, SQUADRON
 /// `*= planeConsumableReloadTime`; then `*= <typeName>ReloadCoeff` when the type is
 /// in `ConsumablesWithReloadCoefficients`.
-fn consumable_reload_coeff(bundle: &ModifierBundle, type_name: &str, group: &str) -> f32 {
+fn consumable_reload_coeff(
+    bundle: &ModifierBundle,
+    type_name: &str,
+    group: &str,
+    out: &mut Vec<AppliedConsumableModifier>,
+) -> f32 {
     // ModifiersApply.py:191
     let mut coeff = bundle.coef("allConsumableReloadTime");
+    out.push(AppliedConsumableModifier { name: "allConsumableReloadTime".into(), op: Op::Mul });
     match group {
-        GROUP_SHIP => coeff *= bundle.coef("ConsumableReloadTime"), // :197
-        GROUP_SQUADRON => coeff *= bundle.coef("planeConsumableReloadTime"), // :206
+        GROUP_SHIP => {
+            coeff *= bundle.coef("ConsumableReloadTime"); // :197
+            out.push(AppliedConsumableModifier { name: "ConsumableReloadTime".into(), op: Op::Mul });
+        }
+        GROUP_SQUADRON => {
+            coeff *= bundle.coef("planeConsumableReloadTime"); // :206
+            out.push(AppliedConsumableModifier { name: "planeConsumableReloadTime".into(), op: Op::Mul });
+        }
         _ => {}
     }
     // :200-201 / :209-210
-    gated_type_coef(bundle, coeff, type_name, CONSUMABLES_WITH_RELOAD_COEFFICIENTS, "ReloadCoeff")
+    gated_type_coef(bundle, coeff, type_name, CONSUMABLES_WITH_RELOAD_COEFFICIENTS, "ReloadCoeff", out)
 }
 
 /// `getConsumableWorkTime` (ModifiersApply.py:217-239), `slotID=None`.
@@ -234,15 +288,26 @@ fn consumable_reload_coeff(bundle: &ModifierBundle, type_name: &str, group: &str
 /// SHIP `*= ConsumablesWorkTime`, SQUADRON `*= planeConsumablesWorkTime`; then
 /// `*= <typeName>WorkTimeCoeff` when the type is in
 /// `ConsumablesWithWorkTimeCoefficients`.
-fn consumable_work_time_coeff(bundle: &ModifierBundle, type_name: &str, group: &str) -> f32 {
+fn consumable_work_time_coeff(
+    bundle: &ModifierBundle,
+    type_name: &str,
+    group: &str,
+    out: &mut Vec<AppliedConsumableModifier>,
+) -> f32 {
     let mut coeff = 1.0;
     match group {
-        GROUP_SHIP => coeff *= bundle.coef("ConsumablesWorkTime"), // :222
-        GROUP_SQUADRON => coeff *= bundle.coef("planeConsumablesWorkTime"), // :231
+        GROUP_SHIP => {
+            coeff *= bundle.coef("ConsumablesWorkTime"); // :222
+            out.push(AppliedConsumableModifier { name: "ConsumablesWorkTime".into(), op: Op::Mul });
+        }
+        GROUP_SQUADRON => {
+            coeff *= bundle.coef("planeConsumablesWorkTime"); // :231
+            out.push(AppliedConsumableModifier { name: "planeConsumablesWorkTime".into(), op: Op::Mul });
+        }
         _ => {}
     }
     // :225-226 / :234-235
-    gated_type_coef(bundle, coeff, type_name, CONSUMABLES_WITH_WORK_TIME_COEFFICIENTS, "WorkTimeCoeff")
+    gated_type_coef(bundle, coeff, type_name, CONSUMABLES_WITH_WORK_TIME_COEFFICIENTS, "WorkTimeCoeff", out)
 }
 
 /// `getConsumableCapacity` (ModifiersApply.py:242-263).
@@ -250,24 +315,42 @@ fn consumable_work_time_coeff(bundle: &ModifierBundle, type_name: &str, group: &
 /// `coeff = consumableCapacityCoeff`; SHIP `*= shipConsumableCapacityCoeff`,
 /// SQUADRON `*= squadronConsumableCapacityCoeff`; then `*= <typeName>CapacityCoeff`
 /// when the type is in `ConsumablesWithCapacityCoefficients`.
-fn consumable_capacity_coeff(bundle: &ModifierBundle, type_name: &str, group: &str) -> f32 {
+fn consumable_capacity_coeff(
+    bundle: &ModifierBundle,
+    type_name: &str,
+    group: &str,
+    out: &mut Vec<AppliedConsumableModifier>,
+) -> f32 {
     let mut coeff = bundle.coef("consumableCapacityCoeff"); // :243
+    out.push(AppliedConsumableModifier { name: "consumableCapacityCoeff".into(), op: Op::Mul });
     match group {
-        GROUP_SHIP => coeff *= bundle.coef("shipConsumableCapacityCoeff"), // :246
-        GROUP_SQUADRON => coeff *= bundle.coef("squadronConsumableCapacityCoeff"), // :255
+        GROUP_SHIP => {
+            coeff *= bundle.coef("shipConsumableCapacityCoeff"); // :246
+            out.push(AppliedConsumableModifier { name: "shipConsumableCapacityCoeff".into(), op: Op::Mul });
+        }
+        GROUP_SQUADRON => {
+            coeff *= bundle.coef("squadronConsumableCapacityCoeff"); // :255
+            out.push(AppliedConsumableModifier { name: "squadronConsumableCapacityCoeff".into(), op: Op::Mul });
+        }
         _ => {}
     }
     // :249-250 / :258-259
-    gated_type_coef(bundle, coeff, type_name, CONSUMABLES_WITH_CAPACITY_COEFFICIENTS, "CapacityCoeff")
+    gated_type_coef(bundle, coeff, type_name, CONSUMABLES_WITH_CAPACITY_COEFFICIENTS, "CapacityCoeff", out)
 }
 
 /// `getAdditionalConsumablesCount` (ModifiersApply.py:274-280): the additive
 /// per-type `<typeName>AdditionalConsumables` bonus (0 when the type is not in
 /// `AdditionalConsumablesCount`).
-fn additional_consumables_count(bundle: &ModifierBundle, type_name: &str) -> f32 {
+fn additional_consumables_count(
+    bundle: &ModifierBundle,
+    type_name: &str,
+    out: &mut Vec<AppliedConsumableModifier>,
+) -> f32 {
     if ADDITIONAL_CONSUMABLES_COUNT.contains(&type_name) {
         // The bonus name is additive (base 0.0); read it via apply onto 0.0.
-        bundle.apply(0.0, &format!("{type_name}AdditionalConsumables"))
+        let name = format!("{type_name}AdditionalConsumables");
+        out.push(AppliedConsumableModifier { name: name.clone(), op: Op::Add });
+        bundle.apply(0.0, &name)
     } else {
         0.0
     }
@@ -276,10 +359,20 @@ fn additional_consumables_count(bundle: &ModifierBundle, type_name: &str) -> f32
 /// `getAdditionalConsumablesCountForGroup` (ModifiersApply.py:283-290): the additive
 /// group-wide bonus, `additionalConsumables` (SHIP) or `planeAdditionalConsumables`
 /// (SQUADRON).
-fn additional_consumables_for_group(bundle: &ModifierBundle, group: &str) -> f32 {
+fn additional_consumables_for_group(
+    bundle: &ModifierBundle,
+    group: &str,
+    out: &mut Vec<AppliedConsumableModifier>,
+) -> f32 {
     match group {
-        GROUP_SHIP => bundle.apply(0.0, "additionalConsumables"), // :285
-        GROUP_SQUADRON => bundle.apply(0.0, "planeAdditionalConsumables"), // :288
+        GROUP_SHIP => {
+            out.push(AppliedConsumableModifier { name: "additionalConsumables".into(), op: Op::Add });
+            bundle.apply(0.0, "additionalConsumables") // :285
+        }
+        GROUP_SQUADRON => {
+            out.push(AppliedConsumableModifier { name: "planeAdditionalConsumables".into(), op: Op::Add });
+            bundle.apply(0.0, "planeAdditionalConsumables") // :288
+        }
         _ => 0.0,
     }
 }
@@ -299,18 +392,23 @@ fn km_from_ballistic(radius: f32) -> Km {
 
 /// Compute the final, modifier-applied stats for `category` under `modifiers`.
 ///
-/// This is the consumable analog of the TTX weapon factories: it returns FINAL
-/// values with the equipped bundle folded in, so callers never need to know which
-/// modifier multiplies and which adds. An empty bundle yields the base values
-/// unchanged.
-pub fn effective_consumable(category: &AbilityCategory, modifiers: &ModifierBundle) -> EffectiveConsumable {
+/// Returns the effective stats and the ordered applied-modifier lists per stat.
+/// An empty bundle yields the base values unchanged and empty applied lists.
+pub fn effective_consumable(
+    category: &AbilityCategory,
+    modifiers: &ModifierBundle,
+) -> (EffectiveConsumable, ConsumableApplied) {
     let type_name = category.consumable_type_raw();
     let group = category.group();
     let fields = category.effect_fields();
 
+    let mut applied = ConsumableApplied::default();
+
     // reloadTime / preparationTime both scale by getConsumableReloadTime
-    // (ConsumableUtils.py:115-116).
-    let reload_coeff = consumable_reload_coeff(modifiers, type_name, group);
+    // (ConsumableUtils.py:115-116). reload_time and preparation_time share the same
+    // coefficient steps; record once and clone for preparation_time.
+    let reload_coeff = consumable_reload_coeff(modifiers, type_name, group, &mut applied.reload_time);
+    applied.preparation_time = applied.reload_time.clone();
     let reload_time = Seconds::from(category.reload_time() * reload_coeff);
     let preparation_time = Seconds::from(category.preparation_time() * reload_coeff);
 
@@ -319,7 +417,8 @@ pub fn effective_consumable(category: &AbilityCategory, modifiers: &ModifierBund
     // workTime is multiplied only for COUNT_BASED consumables (ConsumableUtils.py:120);
     // TIME_BASED consumables have no port workTime stat (capacity/minWorkTime govern).
     let work_time = if lifecycle == LIFECYCLE_COUNT_BASED {
-        Some(Seconds::from(category.work_time() * consumable_work_time_coeff(modifiers, type_name, group)))
+        let wt = consumable_work_time_coeff(modifiers, type_name, group, &mut applied.work_time);
+        Some(Seconds::from(category.work_time() * wt))
     } else {
         None
     };
@@ -331,8 +430,8 @@ pub fn effective_consumable(category: &AbilityCategory, modifiers: &ModifierBund
     let charges = if base_count < 0 {
         AmmoCount::Infinite
     } else if lifecycle == LIFECYCLE_COUNT_BASED {
-        let added =
-            additional_consumables_count(modifiers, type_name) + additional_consumables_for_group(modifiers, group);
+        let added = additional_consumables_count(modifiers, type_name, &mut applied.charges)
+            + additional_consumables_for_group(modifiers, group, &mut applied.charges);
         // ConsumableUtils.py:128 `max(0, numConsumables + added)`
         let total = (base_count as f32 + added).max(0.0);
         AmmoCount::Finite(total.round() as u32)
@@ -345,7 +444,7 @@ pub fn effective_consumable(category: &AbilityCategory, modifiers: &ModifierBund
     let max_capacity = if lifecycle == LIFECYCLE_TIME_BASED {
         field(fields, "maxCapacity")
             .filter(|&c| c >= 0.0)
-            .map(|c| c * consumable_capacity_coeff(modifiers, type_name, group))
+            .map(|c| c * consumable_capacity_coeff(modifiers, type_name, group, &mut applied.max_capacity))
     } else {
         None
     };
@@ -353,7 +452,12 @@ pub fn effective_consumable(category: &AbilityCategory, modifiers: &ModifierBund
     // regenerationHPSpeed: REGEN_CREW only, `*= regenerationHPSpeed` modifier
     // (ConsumableUtils.py:140). The base is read off the typed accessor.
     let regeneration_hp_speed = if type_name == TYPE_REGEN_CREW {
-        category.regeneration_hp_speed().map(|v| v * modifiers.coef("regenerationHPSpeed"))
+        category.regeneration_hp_speed().map(|v| {
+            applied
+                .regeneration_hp_speed
+                .push(AppliedConsumableModifier { name: "regenerationHPSpeed".into(), op: Op::Mul });
+            v * modifiers.coef("regenerationHPSpeed")
+        })
     } else {
         None
     };
@@ -376,48 +480,83 @@ pub fn effective_consumable(category: &AbilityCategory, modifiers: &ModifierBund
 
     if type_name == TYPE_SMOKE_GENERATOR {
         // :133 lifeTime *= smokeGeneratorLifeTime; :134 radius *= smokeScreenRadiusCoefficient
-        smoke_lifetime = field(fields, "lifeTime").map(|v| Seconds::from(modifiers.apply(v, "smokeGeneratorLifeTime")));
-        smoke_radius =
-            field(fields, "radius").map(|v| km_from_ballistic(modifiers.apply(v, "smokeScreenRadiusCoefficient")));
+        smoke_lifetime = field(fields, "lifeTime").map(|v| {
+            applied
+                .smoke_lifetime
+                .push(AppliedConsumableModifier { name: "smokeGeneratorLifeTime".into(), op: Op::Mul });
+            Seconds::from(modifiers.apply(v, "smokeGeneratorLifeTime"))
+        });
+        smoke_radius = field(fields, "radius").map(|v| {
+            applied
+                .smoke_radius
+                .push(AppliedConsumableModifier { name: "smokeScreenRadiusCoefficient".into(), op: Op::Mul });
+            km_from_ballistic(modifiers.apply(v, "smokeScreenRadiusCoefficient"))
+        });
     } else if type_name == TYPE_PLANE_SMOKE_GENERATOR {
         // :137 lifeTime *= planeSmokeGeneratorLifeTime (plane smoke has no radius modifier)
-        smoke_lifetime =
-            field(fields, "lifeTime").map(|v| Seconds::from(modifiers.apply(v, "planeSmokeGeneratorLifeTime")));
+        smoke_lifetime = field(fields, "lifeTime").map(|v| {
+            applied
+                .smoke_lifetime
+                .push(AppliedConsumableModifier { name: "planeSmokeGeneratorLifeTime".into(), op: Op::Mul });
+            Seconds::from(modifiers.apply(v, "planeSmokeGeneratorLifeTime"))
+        });
     } else if type_name == TYPE_REGENERATE_HEALTH {
         // :144 regenerationRate *= planeRegenerationRate
-        plane_regeneration_rate =
-            field(fields, "regenerationRate").map(|v| modifiers.apply(v, "planeRegenerationRate"));
+        plane_regeneration_rate = field(fields, "regenerationRate").map(|v| {
+            applied
+                .plane_regeneration_rate
+                .push(AppliedConsumableModifier { name: "planeRegenerationRate".into(), op: Op::Mul });
+            modifiers.apply(v, "planeRegenerationRate")
+        });
     } else if type_name == TYPE_FIGHTER {
         // :147 fightersNum += extraFighterCount (additive, base 0.0)
-        fighters_count = field(fields, "fightersNum").map(|v| modifiers.apply(v, "extraFighterCount"));
+        fighters_count = field(fields, "fightersNum").map(|v| {
+            applied.fighters_count.push(AppliedConsumableModifier { name: "extraFighterCount".into(), op: Op::Add });
+            modifiers.apply(v, "extraFighterCount")
+        });
     } else if CALL_FIGHTERS_CONSUMABLES.contains(&type_name) {
         // :150 radius *= callFightersRadiusCoeff
-        call_fighters_radius =
-            field(fields, "radius").map(|v| km_from_ballistic(modifiers.apply(v, "callFightersRadiusCoeff")));
+        call_fighters_radius = field(fields, "radius").map(|v| {
+            applied
+                .call_fighters_radius
+                .push(AppliedConsumableModifier { name: "callFightersRadiusCoeff".into(), op: Op::Mul });
+            km_from_ballistic(modifiers.apply(v, "callFightersRadiusCoeff"))
+        });
         // :151 timeDelayAttack *= callFightersTimeDelayAttack
-        call_fighters_time_delay =
-            field(fields, "timeDelayAttack").map(|v| Seconds::from(modifiers.apply(v, "callFightersTimeDelayAttack")));
+        call_fighters_time_delay = field(fields, "timeDelayAttack").map(|v| {
+            applied
+                .call_fighters_time_delay
+                .push(AppliedConsumableModifier { name: "callFightersTimeDelayAttack".into(), op: Op::Mul });
+            Seconds::from(modifiers.apply(v, "callFightersTimeDelayAttack"))
+        });
         // :152 timeFromHeaven *= callFightersAppearDelay
-        call_fighters_time_from_heaven =
-            field(fields, "timeFromHeaven").map(|v| Seconds::from(modifiers.apply(v, "callFightersAppearDelay")));
+        call_fighters_time_from_heaven = field(fields, "timeFromHeaven").map(|v| {
+            applied
+                .call_fighters_time_from_heaven
+                .push(AppliedConsumableModifier { name: "callFightersAppearDelay".into(), op: Op::Mul });
+            Seconds::from(modifiers.apply(v, "callFightersAppearDelay"))
+        });
     }
 
-    EffectiveConsumable {
-        reload_time,
-        work_time,
-        preparation_time,
-        charges,
-        max_capacity,
-        detection_radius,
-        regeneration_hp_speed,
-        smoke_radius,
-        smoke_lifetime,
-        fighters_count,
-        call_fighters_radius,
-        call_fighters_time_delay,
-        call_fighters_time_from_heaven,
-        plane_regeneration_rate,
-    }
+    (
+        EffectiveConsumable {
+            reload_time,
+            work_time,
+            preparation_time,
+            charges,
+            max_capacity,
+            detection_radius,
+            regeneration_hp_speed,
+            smoke_radius,
+            smoke_lifetime,
+            fighters_count,
+            call_fighters_radius,
+            call_fighters_time_delay,
+            call_fighters_time_from_heaven,
+            plane_regeneration_rate,
+        },
+        applied,
+    )
 }
 
 #[cfg(test)]
@@ -560,7 +699,7 @@ mod tests {
     #[test]
     fn empty_bundle_yields_base_values() {
         let cat = crash_crew();
-        let eff = effective_consumable(&cat, &ModifierBundle::empty(Species::Battleship));
+        let (eff, _applied) = effective_consumable(&cat, &ModifierBundle::empty(Species::Battleship));
         assert_eq!(eff.reload_time, Seconds::from(120.0));
         assert_eq!(eff.preparation_time, Seconds::from(0.0));
         assert_eq!(eff.work_time, Some(Seconds::from(15.0)));
@@ -576,7 +715,7 @@ mod tests {
         let mods = [modifier("ConsumableReloadTime", 0.9)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
-        let eff = effective_consumable(&cat, &bundle);
+        let (eff, _applied) = effective_consumable(&cat, &bundle);
         assert!((eff.reload_time.value() - 108.0).abs() < 1e-3, "got {}", eff.reload_time.value());
     }
 
@@ -588,7 +727,7 @@ mod tests {
         let mods = [modifier("ConsumableReloadTime", 0.9), modifier("allConsumableReloadTime", 0.95)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
-        let eff = effective_consumable(&cat, &bundle);
+        let (eff, _applied) = effective_consumable(&cat, &bundle);
         assert!((eff.reload_time.value() - 102.6).abs() < 1e-3, "got {}", eff.reload_time.value());
     }
 
@@ -600,7 +739,7 @@ mod tests {
         let mods = [modifier("crashCrewAdditionalConsumables", 1.0)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
-        let eff = effective_consumable(&cat, &bundle);
+        let (eff, _applied) = effective_consumable(&cat, &bundle);
         assert_eq!(eff.charges, AmmoCount::Infinite);
     }
 
@@ -613,7 +752,7 @@ mod tests {
         let mods = [modifier("additionalConsumables", 1.0)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
-        let eff = effective_consumable(&cat, &bundle);
+        let (eff, _applied) = effective_consumable(&cat, &bundle);
         assert_eq!(eff.charges, AmmoCount::Finite(4));
     }
 
@@ -621,7 +760,7 @@ mod tests {
     #[test]
     fn finite_charges_base_unchanged() {
         let cat = finite_sonar();
-        let eff = effective_consumable(&cat, &ModifierBundle::empty(Species::Cruiser));
+        let (eff, _applied) = effective_consumable(&cat, &ModifierBundle::empty(Species::Cruiser));
         assert_eq!(eff.charges, AmmoCount::Finite(3));
     }
 
@@ -634,7 +773,7 @@ mod tests {
         let mods = [modifier("sonarWorkTimeCoeff", 0.8)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
-        let eff = effective_consumable(&cat, &bundle);
+        let (eff, _applied) = effective_consumable(&cat, &bundle);
         assert_eq!(eff.work_time, Some(Seconds::from(80.0)));
     }
 
@@ -643,7 +782,7 @@ mod tests {
     #[test]
     fn smoke_effects_base() {
         let cat = smoke_generator();
-        let eff = effective_consumable(&cat, &ModifierBundle::empty(Species::Cruiser));
+        let (eff, _applied) = effective_consumable(&cat, &ModifierBundle::empty(Species::Cruiser));
         assert_eq!(eff.smoke_radius, Some(Km::from(0.45)));
         assert_eq!(eff.smoke_lifetime, Some(Seconds::from(77.0)));
         assert_eq!(eff.call_fighters_radius, None);
@@ -659,7 +798,7 @@ mod tests {
         let mods = [modifier("smokeScreenRadiusCoefficient", 1.2)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
-        let eff = effective_consumable(&cat, &bundle);
+        let (eff, _applied) = effective_consumable(&cat, &bundle);
         assert!((eff.smoke_radius.unwrap().value() - 0.54).abs() < 1e-4, "got {}", eff.smoke_radius.unwrap().value());
     }
 
@@ -668,7 +807,7 @@ mod tests {
     #[test]
     fn call_fighters_effects_base() {
         let cat = call_fighters();
-        let eff = effective_consumable(&cat, &ModifierBundle::empty(Species::AirCarrier));
+        let (eff, _applied) = effective_consumable(&cat, &ModifierBundle::empty(Species::AirCarrier));
         assert!(
             (eff.call_fighters_radius.unwrap().value() - 3.5).abs() < 1e-3,
             "got {}",
@@ -688,7 +827,7 @@ mod tests {
         let mods = [modifier("callFightersTimeDelayAttack", 0.8)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::AirCarrier, VERSION).expect("test modifiers are all known");
-        let eff = effective_consumable(&cat, &bundle);
+        let (eff, _applied) = effective_consumable(&cat, &bundle);
         assert_eq!(eff.call_fighters_time_delay, Some(Seconds::from(4.0)));
     }
 
@@ -700,7 +839,7 @@ mod tests {
         let mods = [modifier("extraFighterCount", 1.0)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
-        let eff = effective_consumable(&cat, &bundle);
+        let (eff, _applied) = effective_consumable(&cat, &bundle);
         assert_eq!(eff.fighters_count, Some(2.0));
         assert_eq!(eff.smoke_radius, None);
     }
@@ -709,7 +848,7 @@ mod tests {
     #[test]
     fn fighter_count_base() {
         let cat = fighter();
-        let eff = effective_consumable(&cat, &ModifierBundle::empty(Species::Cruiser));
+        let (eff, _applied) = effective_consumable(&cat, &ModifierBundle::empty(Species::Cruiser));
         assert_eq!(eff.fighters_count, Some(1.0));
     }
 
@@ -721,7 +860,7 @@ mod tests {
         let mods = [modifier("planeRegenerationRate", 1.5)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::AirCarrier, VERSION).expect("test modifiers are all known");
-        let eff = effective_consumable(&cat, &bundle);
+        let (eff, _applied) = effective_consumable(&cat, &bundle);
         assert!(
             (eff.plane_regeneration_rate.unwrap() - 0.15).abs() < 1e-6,
             "got {}",
@@ -734,7 +873,7 @@ mod tests {
     #[test]
     fn non_matching_consumable_has_no_effect_fields() {
         let cat = crash_crew();
-        let eff = effective_consumable(&cat, &ModifierBundle::empty(Species::Battleship));
+        let (eff, _applied) = effective_consumable(&cat, &ModifierBundle::empty(Species::Battleship));
         assert_eq!(eff.smoke_radius, None);
         assert_eq!(eff.smoke_lifetime, None);
         assert_eq!(eff.fighters_count, None);
@@ -742,5 +881,21 @@ mod tests {
         assert_eq!(eff.call_fighters_time_delay, None);
         assert_eq!(eff.call_fighters_time_from_heaven, None);
         assert_eq!(eff.plane_regeneration_rate, None);
+    }
+
+    /// `applied.reload_time` contains the expected names in order when reload
+    /// modifiers are in the bundle: `allConsumableReloadTime` (always), then
+    /// `ConsumableReloadTime` (SHIP group), then `crashCrewReloadCoeff` (crashCrew
+    /// is in CONSUMABLES_WITH_RELOAD_COEFFICIENTS).
+    #[test]
+    fn applied_reload_time_names_in_order() {
+        let cat = crash_crew();
+        let mods = [modifier("ConsumableReloadTime", 0.9), modifier("allConsumableReloadTime", 0.95)];
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
+        let (_eff, applied) = effective_consumable(&cat, &bundle);
+        let names: Vec<&str> = applied.reload_time.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, vec!["allConsumableReloadTime", "ConsumableReloadTime", "crashCrewReloadCoeff"]);
+        assert!(applied.reload_time.iter().all(|m| m.op == Op::Mul));
     }
 }
