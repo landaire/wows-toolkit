@@ -784,7 +784,11 @@ pub fn shell_stats<R: Recorder>(
                             }
                         });
                     } else {
-                        // bp <= 0 (AP "N/A" sentinel): base and final are both 0; no steps.
+                        // bp <= 0 (AP "N/A" sentinel): no fire chance, base and final are both 0,
+                        // no steps. This matches the model value (chance_val clamps to 0): the only
+                        // player-accessible fire modifiers are multiplicative (Demolition Expert etc.),
+                        // which leave a negative sentinel negative, so a flat 0 cannot diverge from
+                        // the clamped model value for real data.
                         rec.record(stat.burn_chance, Some(qualifier), 0.0, arty_src(), 0.0, |_b| {});
                     }
                 }
