@@ -41,6 +41,7 @@ use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::module_options::ModuleSlot;
 use crate::game_params::ttx::provenance::InputId;
 use crate::game_params::ttx::provenance::ModifierSources;
+use crate::game_params::ttx::provenance::Op;
 use crate::game_params::ttx::provenance::Recorder;
 use crate::game_params::ttx::weapon_tables::StatWeaponType;
 use crate::game_params::ttx::weapon_tables::alpha_damage_coeff;
@@ -702,22 +703,22 @@ pub fn shell_stats<R: Recorder>(
     let damage = match (projectile.alpha_damage(), caliber_m) {
         (Some(alpha), Some(cal_m)) => {
             let csap = if weapon.is_csap() { modifiers.coef("citadelDamageMultiplierCSAP") } else { 1.0 };
-            let value = alpha
-                * alpha_damage_coeff(weapon, modifiers, false)
-                * modifiers.coef("controllableWeaponDamageCoeff")
-                * artillery_damage_coeff(cal_m, weapon, modifiers, HEAVY_CRUISER_SHELL_DIAMETER_M)
-                * csap;
+            let (alpha_coeff, alpha_applied) = alpha_damage_coeff(weapon, modifiers, false);
+            let (arty_coeff, arty_applied) =
+                artillery_damage_coeff(cal_m, weapon, modifiers, HEAVY_CRUISER_SHELL_DIAMETER_M);
+            let value = alpha * alpha_coeff * modifiers.coef("controllableWeaponDamageCoeff") * arty_coeff * csap;
             if R::ON {
-                // alpha_damage_coeff and artillery_damage_coeff each fold several named
-                // bundle coefficients internally. Record the net composite factor as a
-                // single module step so replay is exact.
-                let net_damage_coeff = value / alpha;
                 rec.record(stat.damage, Some(qualifier), alpha, arty_src(), value, |b| {
+                    for m in &alpha_applied {
+                        b.coef(sources, m.name);
+                    }
                     b.coef(sources, "controllableWeaponDamageCoeff");
-                    // Net of alpha_damage_coeff * artillery_damage_coeff * csap, collapsed
-                    // to keep replay exact without decomposing the composite helpers.
-                    let net_without_cwdc = net_damage_coeff / modifiers.coef("controllableWeaponDamageCoeff");
-                    b.module(arty_src(), "damageCoeff", net_without_cwdc);
+                    for m in &arty_applied {
+                        b.coef(sources, m.name);
+                    }
+                    if weapon.is_csap() {
+                        b.coef(sources, "citadelDamageMultiplierCSAP");
+                    }
                 });
             }
             Some(Hp::from(value))
@@ -757,21 +758,33 @@ pub fn shell_stats<R: Recorder>(
     };
 
     // burnChance: calculateBurnChance(level, burnProb) for HE (line 171) and AP (line 188);
-    // CS sets no burnChance. burnProb -0.5 (AP "N/A") clamps to 0 in calculate_burn_chance.
+    // CS sets no burnChance. burnProb -0.5 (AP "N/A") clamps to 0.
     // Stored as a percent (burnProb 0.12 -> 12%).
     let is_small = caliber_m.is_some_and(|c| is_small_projectile(c, SMALL_PROJECTILE_MAX_DIAMETER_M));
     let burn_chance = match weapon {
         StatWeaponType::MainHe | StatWeaponType::MainAp | StatWeaponType::AtbaHe | StatWeaponType::AtbaAp => {
             projectile.burn_prob().map(|bp| {
-                let chance_val = calculate_burn_chance(level, bp, modifiers, is_small) * 100.0;
+                let (pre_clamp, burn_applied) = calculate_burn_chance(level, bp, modifiers, is_small);
+                let chance_val = pre_clamp.max(0.0) * 100.0;
                 if R::ON {
                     let base_pct = bp.max(0.0) * 100.0;
-                    // calculate_burn_chance folds several named bundle coefficients internally.
-                    // Record the net factor as one module step to keep replay exact.
-                    let net_burn_coeff = if base_pct != 0.0 { chance_val / base_pct } else { 1.0 };
-                    rec.record(stat.burn_chance, Some(qualifier), base_pct, arty_src(), chance_val, |b| {
-                        b.module(arty_src(), "burnChanceCoeff", net_burn_coeff)
-                    });
+                    if base_pct > 0.0 {
+                        // Record pre-clamp percent as final_value (mirrors the pre-floor/pre-round
+                        // pattern). The helper works on 0..1; additive bonuses scale by 100 for
+                        // percent; coefs are scale-invariant.
+                        let pre_clamp_pct = pre_clamp * 100.0;
+                        rec.record(stat.burn_chance, Some(qualifier), base_pct, arty_src(), pre_clamp_pct, |b| {
+                            for m in &burn_applied {
+                                match m.op {
+                                    Op::Mul => b.coef(sources, m.name),
+                                    Op::Add => b.bonus(sources, m.name, 100.0),
+                                }
+                            }
+                        });
+                    } else {
+                        // bp <= 0 (AP "N/A" sentinel): base and final are both 0; no steps.
+                        rec.record(stat.burn_chance, Some(qualifier), 0.0, arty_src(), 0.0, |_b| {});
+                    }
                 }
                 Percent::from(chance_val)
             })
@@ -3492,5 +3505,92 @@ mod tests {
         assert_eq!(a, vec!["150 mm", "105 mm"]);
         let b = secondary_labels(&[Millimeters::from(150.0), Millimeters::from(150.0)]);
         assert_eq!(b, vec!["150 mm", "150 mm (2)"]);
+    }
+
+    /// ShellBurnChance decomposition: with `burnChanceMultiplier` from a skill, the
+    /// recorded steps include a coef step whose input is that skill (not a Module step),
+    /// and `ShipStatsProvenance::replay` reproduces the recorded value.
+    #[test]
+    fn shell_burn_chance_attributes_to_real_skill_input() {
+        use crate::game_params::ttx::provenance::On;
+        use crate::game_params::ttx::provenance::Op;
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
+
+        let mods = [modifier("burnChanceMultiplier", 1.17)];
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
+        let skill_id = InputId::Skill { name: crate::game_params::types::CrewSkillName::from("DemoExpert") };
+        let mut sources = ModifierSources::default();
+        sources.record("burnChanceMultiplier", skill_id.clone(), 1.17);
+
+        let mut rec = On::default();
+        let stats =
+            shell_stats("PAPA051".to_string(), &worcester_he(), &bundle, "ARTY", &sources, 10, false, "HE", &mut rec);
+        let prov = rec.into_provenance();
+
+        let bc_attr =
+            prov.attributions.iter().find(|a| a.stat == TtxStat::ShellBurnChance).expect("ShellBurnChance recorded");
+
+        // The burnChanceMultiplier step must be attributed to the skill, not a Module.
+        let mult_step = bc_attr
+            .steps
+            .iter()
+            .find(|c| c.modifier_name == "burnChanceMultiplier")
+            .expect("burnChanceMultiplier step present");
+        assert_eq!(mult_step.op, Op::Mul);
+        assert_eq!(&mult_step.input, &skill_id, "burnChanceMultiplier must be attributed to the skill");
+
+        // Replay reproduces the recorded final_value (pre-clamp percent).
+        let replayed = ShipStatsProvenance::replay(bc_attr);
+        assert!(
+            (replayed - bc_attr.value).abs() < 1e-4,
+            "burn chance replay got {replayed}, recorded value={}",
+            bc_attr.value
+        );
+
+        // The model value (post-clamp) must equal the pre-clamp recorded value clamped.
+        let model_pct = stats.burn_chance.expect("burn_chance").value();
+        assert!((model_pct - replayed.max(0.0)).abs() < 1e-4, "model={model_pct} replay_clamped={}", replayed.max(0.0));
+    }
+
+    /// ShellDamage decomposition: with `GMAPDamageCoeff` from an upgrade, the recorded
+    /// steps include a coef step attributed to that upgrade (not a net module step),
+    /// and `ShipStatsProvenance::replay` reproduces the factory damage value.
+    #[test]
+    fn shell_damage_ap_attributes_gmap_to_real_input() {
+        use crate::game_params::ttx::provenance::On;
+        use crate::game_params::ttx::provenance::Op;
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
+
+        let mods = [modifier("GMAPDamageCoeff", 1.05)];
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
+        let upgrade_id = InputId::Upgrade { name: "APDamageUpgrade".into() };
+        let mut sources = ModifierSources::default();
+        sources.record("GMAPDamageCoeff", upgrade_id.clone(), 1.05);
+
+        let mut rec = On::default();
+        let stats =
+            shell_stats("PAPA050".to_string(), &worcester_ap(), &bundle, "ARTY", &sources, 10, false, "AP", &mut rec);
+        let prov = rec.into_provenance();
+
+        let dmg_attr = prov.attributions.iter().find(|a| a.stat == TtxStat::ShellDamage).expect("ShellDamage recorded");
+
+        // The GMAPDamageCoeff step must be present and attributed to the upgrade.
+        let gmap_step =
+            dmg_attr.steps.iter().find(|c| c.modifier_name == "GMAPDamageCoeff").expect("GMAPDamageCoeff step present");
+        assert_eq!(gmap_step.op, Op::Mul);
+        assert_eq!(&gmap_step.input, &upgrade_id, "GMAPDamageCoeff must be attributed to the upgrade");
+
+        // No net "damageCoeff" module step (the old collapsed step).
+        assert!(
+            !dmg_attr.steps.iter().any(|c| c.modifier_name == "damageCoeff"),
+            "damageCoeff net step must not appear after decomposition"
+        );
+
+        // Replay reproduces the factory value.
+        let factory_dmg = stats.damage.expect("damage").value();
+        let replayed = ShipStatsProvenance::replay(dmg_attr);
+        assert!((replayed - factory_dmg).abs() < 1e-2, "ShellDamage replay got {replayed}, factory={factory_dmg}");
     }
 }

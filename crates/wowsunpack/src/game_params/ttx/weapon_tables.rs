@@ -15,6 +15,13 @@
 //! stock-ship result of every formula here reduces to the bare projectile value.
 
 use crate::game_params::ttx::modifiers::ModifierBundle;
+use crate::game_params::ttx::provenance::Op;
+
+/// One modifier a weapon-coefficient helper applied, in application order.
+pub struct AppliedModifier {
+    pub name: &'static str,
+    pub op: Op,
+}
 
 /// `MAX_SMALL_CATEGORY_LEVEL = 7` (me658a8e4.py:16). Tiers above this take the
 /// high-level burn-chance branch (ModifiersApply.py:43).
@@ -111,17 +118,28 @@ pub fn ammo_to_stat_weapon_table(ammo: &str) -> StatWeaponType {
 /// (lines 458-466): `allAlphaMultiplier` times `GMAlphaFactor` for main, or
 /// `GSAlphaFactor` (and `GSMAlphaFactor` in alt mode) for ATBA. `is_alt_mode` carries
 /// `weaponMode & WeaponModeFlags.ALT_MODE` (line 465); stock shells are not alt-mode.
-pub fn alpha_damage_coeff(weapon: StatWeaponType, modifier: &ModifierBundle, is_alt_mode: bool) -> f32 {
+///
+/// Returns `(coeff, applied)` where `applied` is the ordered list of modifiers used.
+pub fn alpha_damage_coeff(
+    weapon: StatWeaponType,
+    modifier: &ModifierBundle,
+    is_alt_mode: bool,
+) -> (f32, Vec<AppliedModifier>) {
+    let mut applied = Vec::new();
     let mut coeff = modifier.coef("allAlphaMultiplier");
+    applied.push(AppliedModifier { name: "allAlphaMultiplier", op: Op::Mul });
     if weapon.is_main() {
         coeff *= modifier.coef("GMAlphaFactor");
+        applied.push(AppliedModifier { name: "GMAlphaFactor", op: Op::Mul });
     } else if weapon.is_atba() {
         coeff *= modifier.coef("GSAlphaFactor");
+        applied.push(AppliedModifier { name: "GSAlphaFactor", op: Op::Mul });
         if is_alt_mode {
             coeff *= modifier.coef("GSMAlphaFactor");
+            applied.push(AppliedModifier { name: "GSMAlphaFactor", op: Op::Mul });
         }
     }
-    coeff
+    (coeff, applied)
 }
 
 /// `getArtilleryDamageCoeff(caliber, statWeaponType, modifier, onFire=False)`
@@ -137,43 +155,61 @@ pub fn alpha_damage_coeff(weapon: StatWeaponType, modifier: &ModifierBundle, is_
 /// data. It is gated behind `GMHeavyCruiserCaliberDamageCoeff`, a coefficient whose
 /// stock identity is 1.0, so the stock result is unaffected; the caller passes the
 /// faithful threshold once it is recovered.
+///
+/// Returns `(coeff, applied)` where `applied` is the ordered list of modifiers used.
 pub fn artillery_damage_coeff(
     caliber_m: f32,
     weapon: StatWeaponType,
     modifier: &ModifierBundle,
     heavy_cruiser_shell_diameter_m: f32,
-) -> f32 {
+) -> (f32, Vec<AppliedModifier>) {
+    let mut applied = Vec::new();
+
     if weapon.is_main() {
         let mut y = modifier.coef("GMDamageCoeff");
+        applied.push(AppliedModifier { name: "GMDamageCoeff", op: Op::Mul });
         match weapon {
             StatWeaponType::MainAp => {
                 y *= modifier.coef("GMAPDamageCoeff");
+                applied.push(AppliedModifier { name: "GMAPDamageCoeff", op: Op::Mul });
                 if caliber_m >= heavy_cruiser_shell_diameter_m {
                     y *= modifier.coef("GMHeavyCruiserCaliberDamageCoeff");
+                    applied.push(AppliedModifier { name: "GMHeavyCruiserCaliberDamageCoeff", op: Op::Mul });
                 }
             }
-            StatWeaponType::MainCs => y *= modifier.coef("GMCSDamageCoeff"),
+            StatWeaponType::MainCs => {
+                y *= modifier.coef("GMCSDamageCoeff");
+                applied.push(AppliedModifier { name: "GMCSDamageCoeff", op: Op::Mul });
+            }
             // MainHe: only the onFire branch (never taken in the TTX path) would apply.
             _ => {}
         }
         if weapon.is_hecs() {
             y *= modifier.coef("GMHECSDamageCoeff");
+            applied.push(AppliedModifier { name: "GMHECSDamageCoeff", op: Op::Mul });
         }
-        return y;
+        return (y, applied);
     }
 
     if weapon.is_atba() {
         let mut y = modifier.coef("GSDamageCoeff");
+        applied.push(AppliedModifier { name: "GSDamageCoeff", op: Op::Mul });
         match weapon {
-            StatWeaponType::AtbaCs => y *= modifier.coef("GSCSDamageCoeff"),
-            StatWeaponType::AtbaAp => y *= modifier.coef("GSAPDamageCoeff"),
+            StatWeaponType::AtbaCs => {
+                y *= modifier.coef("GSCSDamageCoeff");
+                applied.push(AppliedModifier { name: "GSCSDamageCoeff", op: Op::Mul });
+            }
+            StatWeaponType::AtbaAp => {
+                y *= modifier.coef("GSAPDamageCoeff");
+                applied.push(AppliedModifier { name: "GSAPDamageCoeff", op: Op::Mul });
+            }
             // AtbaHe: only the onFire branch (never taken in the TTX path) would apply.
             _ => {}
         }
-        return y;
+        return (y, applied);
     }
 
-    1.0
+    (1.0, applied)
 }
 
 /// Whether a projectile counts as "small" for the burn-chance factor split
@@ -202,27 +238,46 @@ pub fn is_small_projectile(bullet_diametr_m: f32, small_projectile_max_diameter_
 /// (`*HighLevel`/`*LowLevel`/`GMGSMultiplier`/`Multiplier` -> 1.0,
 /// `*Bonus`/`*Small`/`*Big` -> 0.0), so the stock burn chance is exactly
 /// `max(initialBurnProb, 0)`.
+///
+/// Returns `(pre_clamp, applied)` where `pre_clamp` is the value before
+/// `max(result, 0)` and `applied` is the ordered list of modifiers used. The caller
+/// applies `.max(0.0)` for the final model value; the record site uses `pre_clamp`
+/// as `final_value` so replay is exact even when clamping would otherwise hide the
+/// recorded step sum.
 pub fn calculate_burn_chance(
     ammo_owner_level: u32,
     initial_burn_prob: f32,
     modifier: &ModifierBundle,
     is_small: bool,
-) -> f32 {
+) -> (f32, Vec<AppliedModifier>) {
+    let mut applied = Vec::new();
     let mut prob = initial_burn_prob;
     if ammo_owner_level > MAX_SMALL_CATEGORY_LEVEL {
         prob *= modifier.coef("burnChanceFactorHighLevel");
+        applied.push(AppliedModifier { name: "burnChanceFactorHighLevel", op: Op::Mul });
     } else {
         prob *= modifier.coef("burnChanceFactorLowLevel");
+        applied.push(AppliedModifier { name: "burnChanceFactorLowLevel", op: Op::Mul });
     }
     prob *= modifier.coef("burnChanceGMGSMultiplier");
+    applied.push(AppliedModifier { name: "burnChanceGMGSMultiplier", op: Op::Mul });
     prob += modifier.bonus("artilleryBurnChanceBonus");
+    applied.push(AppliedModifier { name: "artilleryBurnChanceBonus", op: Op::Add });
 
     prob *= modifier.coef("burnChanceMultiplier");
+    applied.push(AppliedModifier { name: "burnChanceMultiplier", op: Op::Mul });
     prob += modifier.bonus("burnChanceBonus");
+    applied.push(AppliedModifier { name: "burnChanceBonus", op: Op::Add });
 
-    prob += if is_small { modifier.bonus("burnChanceFactorSmall") } else { modifier.bonus("burnChanceFactorBig") };
+    if is_small {
+        prob += modifier.bonus("burnChanceFactorSmall");
+        applied.push(AppliedModifier { name: "burnChanceFactorSmall", op: Op::Add });
+    } else {
+        prob += modifier.bonus("burnChanceFactorBig");
+        applied.push(AppliedModifier { name: "burnChanceFactorBig", op: Op::Add });
+    }
 
-    prob.max(0.0)
+    (prob, applied)
 }
 
 #[cfg(test)]
@@ -295,8 +350,8 @@ mod tests {
     /// both stock 1.0).
     #[test]
     fn stock_alpha_damage_coeff_is_one() {
-        assert_eq!(alpha_damage_coeff(StatWeaponType::MainHe, &stock(), false), 1.0);
-        assert_eq!(alpha_damage_coeff(StatWeaponType::AtbaHe, &stock(), false), 1.0);
+        assert_eq!(alpha_damage_coeff(StatWeaponType::MainHe, &stock(), false).0, 1.0);
+        assert_eq!(alpha_damage_coeff(StatWeaponType::AtbaHe, &stock(), false).0, 1.0);
     }
 
     /// allAlphaMultiplier and GMAlphaFactor both fold into the main coeff.
@@ -305,15 +360,32 @@ mod tests {
         let mods = [modifier("allAlphaMultiplier", 1.1), modifier("GMAlphaFactor", 1.2)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
-        let got = alpha_damage_coeff(StatWeaponType::MainAp, &bundle, false);
+        let (got, applied) = alpha_damage_coeff(StatWeaponType::MainAp, &bundle, false);
         assert!((got - 1.32).abs() < 1e-5, "got {got}");
+        // Two modifiers applied: allAlphaMultiplier, GMAlphaFactor.
+        assert_eq!(applied.len(), 2);
+        assert_eq!(applied[0].name, "allAlphaMultiplier");
+        assert_eq!(applied[1].name, "GMAlphaFactor");
+        assert!(applied.iter().all(|m| m.op == Op::Mul));
+    }
+
+    /// ATBA path reports GSAlphaFactor (not GMAlphaFactor).
+    #[test]
+    fn alpha_damage_coeff_atba_reports_gs_factor() {
+        let mods = [modifier("allAlphaMultiplier", 1.0), modifier("GSAlphaFactor", 1.05)];
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
+        let (got, applied) = alpha_damage_coeff(StatWeaponType::AtbaHe, &bundle, false);
+        assert!((got - 1.05).abs() < 1e-5, "got {got}");
+        assert!(applied.iter().any(|m| m.name == "GSAlphaFactor"), "GSAlphaFactor must be reported");
+        assert!(!applied.iter().any(|m| m.name == "GMAlphaFactor"), "GMAlphaFactor must not be reported for ATBA");
     }
 
     /// Stock artillery-damage coeff is 1.0 for a main HE shell (GMDamageCoeff *
     /// GMHECSDamageCoeff, both stock 1.0; no AP/CS sub-coeff).
     #[test]
     fn stock_artillery_damage_coeff_he_is_one() {
-        let got = artillery_damage_coeff(0.152, StatWeaponType::MainHe, &stock(), 0.149);
+        let (got, _) = artillery_damage_coeff(0.152, StatWeaponType::MainHe, &stock(), 0.149);
         assert_eq!(got, 1.0);
     }
 
@@ -325,26 +397,28 @@ mod tests {
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
         // caliber 0.152 < threshold 0.190 -> heavy-cruiser coeff NOT applied: 1.5.
-        let below = artillery_damage_coeff(0.152, StatWeaponType::MainAp, &bundle, 0.190);
+        let (below, below_applied) = artillery_damage_coeff(0.152, StatWeaponType::MainAp, &bundle, 0.190);
         assert!((below - 1.5).abs() < 1e-5, "got {below}");
+        assert!(!below_applied.iter().any(|m| m.name == "GMHeavyCruiserCaliberDamageCoeff"));
         // caliber 0.203 >= threshold 0.190 -> heavy-cruiser coeff applied: 1.5 * 2.0.
-        let above = artillery_damage_coeff(0.203, StatWeaponType::MainAp, &bundle, 0.190);
+        let (above, above_applied) = artillery_damage_coeff(0.203, StatWeaponType::MainAp, &bundle, 0.190);
         assert!((above - 3.0).abs() < 1e-5, "got {above}");
+        assert!(above_applied.iter().any(|m| m.name == "GMHeavyCruiserCaliberDamageCoeff"));
     }
 
     /// Stock burn chance for a tier-10 (high-level) HE shell equals its bare burnProb:
     /// every burn modifier reads its identity (factors 1.0, bonuses 0.0).
     #[test]
     fn stock_burn_chance_high_level_is_burn_prob() {
-        let got = calculate_burn_chance(10, 0.12, &stock(), false);
-        assert!((got - 0.12).abs() < 1e-6, "got {got}");
+        let (got, _) = calculate_burn_chance(10, 0.12, &stock(), false);
+        assert!((got.max(0.0) - 0.12).abs() < 1e-6, "got {got}");
     }
 
     /// Stock burn chance for a low-tier shell is likewise its burnProb.
     #[test]
     fn stock_burn_chance_low_level_is_burn_prob() {
-        let got = calculate_burn_chance(5, 0.08, &stock(), true);
-        assert!((got - 0.08).abs() < 1e-6, "got {got}");
+        let (got, _) = calculate_burn_chance(5, 0.08, &stock(), true);
+        assert!((got.max(0.0) - 0.08).abs() < 1e-6, "got {got}");
     }
 
     /// Hand-computed against the transcribed formula with non-identity modifiers, a
@@ -362,27 +436,41 @@ mod tests {
         ];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
-        let got = calculate_burn_chance(10, 0.12, &bundle, false);
-        // ((0.12*0.9)*0.95 + 0.02)*1.1 + 0.01 - 0.03
+        let (got, applied) = calculate_burn_chance(10, 0.12, &bundle, false);
+        // ((0.12*0.9)*0.95 + 0.02)*1.1 + 0.01 - 0.03 (pre-clamp)
         let expected = ((0.12f32 * 0.9 * 0.95) + 0.02) * 1.1 + 0.01 - 0.03;
         assert!((got - expected).abs() < 1e-6, "got {got} expected {expected}");
+        // Six modifiers in order: highLevel, GMGSMultiplier, artilleryBonus, multiplier, bonus, big.
+        assert_eq!(applied.len(), 6);
+        assert_eq!(applied[0].name, "burnChanceFactorHighLevel");
+        assert_eq!(applied[0].op, Op::Mul);
+        assert_eq!(applied[1].name, "burnChanceGMGSMultiplier");
+        assert_eq!(applied[1].op, Op::Mul);
+        assert_eq!(applied[2].name, "artilleryBurnChanceBonus");
+        assert_eq!(applied[2].op, Op::Add);
+        assert_eq!(applied[3].name, "burnChanceMultiplier");
+        assert_eq!(applied[3].op, Op::Mul);
+        assert_eq!(applied[4].name, "burnChanceBonus");
+        assert_eq!(applied[4].op, Op::Add);
+        assert_eq!(applied[5].name, "burnChanceFactorBig");
+        assert_eq!(applied[5].op, Op::Add);
     }
 
-    /// Negative results clamp to 0 (max(prob, 0), ModifiersApply.py:66).
+    /// Negative pre-clamp results: the helper returns the raw (negative) value; caller applies max(0).
     #[test]
     fn burn_chance_clamps_to_zero() {
         let mods = [modifier("burnChanceBonus", -1.0)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
-        let got = calculate_burn_chance(10, 0.12, &bundle, false);
-        assert_eq!(got, 0.0);
+        let (got, _) = calculate_burn_chance(10, 0.12, &bundle, false);
+        assert_eq!(got.max(0.0), 0.0);
     }
 
-    /// AP shells carry burnProb -0.5 (the "N/A" sentinel); clamped to 0.
+    /// AP shells carry burnProb -0.5 (the "N/A" sentinel); clamped to 0 by caller.
     #[test]
     fn burn_chance_ap_na_clamps_to_zero() {
-        let got = calculate_burn_chance(10, -0.5, &stock(), false);
-        assert_eq!(got, 0.0);
+        let (got, _) = calculate_burn_chance(10, -0.5, &stock(), false);
+        assert_eq!(got.max(0.0), 0.0);
     }
 
     #[test]
