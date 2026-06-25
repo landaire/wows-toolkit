@@ -1240,8 +1240,6 @@ mod tests {
         crate::data::Version::base(15, 4, 0)
     }
 
-    // --- consumables fixture helpers ---
-
     use std::collections::HashMap as StdHashMap;
 
     /// A finite-charge sonar (HydroacousticSearch) ability category: COUNT_BASED,
@@ -1583,8 +1581,6 @@ mod tests {
             );
         }
     }
-
-    // --- consumable coverage / self-check / attribution tests ---
 
     /// Provenance key set equals `rows()` key set on a consumables-bearing fixture,
     /// including consumable stats. Also verifies every attribution replays to value.
