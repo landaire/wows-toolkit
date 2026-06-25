@@ -521,7 +521,9 @@ pub fn torpedoes<R: Recorder>(
                 });
             }
             if let Some(rt) = rotation_time {
-                rec.record(TtxStat::LauncherRotationTime, Some(&q), rt.value(), torp_src(), rt.value(), |_b| {});
+                rec.record(TtxStat::LauncherRotationTime, Some(&q), rt.value(), torp_src(), rt.value(), |b| {
+                    b.derived_from(TtxStat::LauncherRotationSpeed, Some(&q));
+                });
             }
             if let Some(nb) = num_barrels {
                 rec.record(TtxStat::LauncherNumBarrels, Some(&q), nb as f32, torp_src(), nb as f32, |_b| {});
@@ -967,7 +969,9 @@ pub fn artillery<R: Recorder>(
             });
         }
         if let Some(rt) = rotation_time {
-            rec.record(TtxStat::GunRotationTime, None, rt.value(), arty_src(), rt.value(), |_b| {});
+            rec.record(TtxStat::GunRotationTime, None, rt.value(), arty_src(), rt.value(), |b| {
+                b.derived_from(TtxStat::GunRotationSpeed, None);
+            });
         }
     }
 
@@ -1154,7 +1158,9 @@ pub fn secondaries<R: Recorder>(
                 rotation_time_value,
                 hull_src(),
                 rotation_time_value,
-                |_b| {},
+                |b| {
+                    b.derived_from(TtxStat::SecondaryGunRotationSpeed, Some(q));
+                },
             );
             rec.record(TtxStat::SecondaryGunCaliber, Some(q), caliber.value(), hull_src(), caliber.value(), |_b| {});
             rec.record(TtxStat::SecondaryGunNumBarrels, Some(q), nb, hull_src(), nb, |_b| {});
@@ -1306,6 +1312,7 @@ pub fn visibility<R: Recorder>(
             let value = s + fire.value();
             if R::ON {
                 rec.record(TtxStat::SeaDetectionOnFire, None, s, hull_src(), value, |b| {
+                    b.derived_from(TtxStat::SeaDetection, None);
                     b.module_add(hull_src(), "visibilityCoefFire", fire.value());
                 });
             }
@@ -1330,7 +1337,10 @@ pub fn visibility<R: Recorder>(
         (Some(s), Some(mg)) => {
             let value = s.max(mg);
             if R::ON {
-                rec.record(TtxStat::MainGunRangeDetection, None, value, hull_src(), value, |_b| {});
+                rec.record(TtxStat::MainGunRangeDetection, None, value, hull_src(), value, |b| {
+                    b.derived_from(TtxStat::SeaDetection, None);
+                    b.derived_from(TtxStat::ArtilleryRange, None);
+                });
             }
             Some(Km::from(value))
         }
@@ -1340,7 +1350,10 @@ pub fn visibility<R: Recorder>(
         (Some(s), Some(atba)) => {
             let value = s.max(atba);
             if R::ON {
-                rec.record(TtxStat::SecondaryRangeDetection, None, value, hull_src(), value, |_b| {});
+                rec.record(TtxStat::SecondaryRangeDetection, None, value, hull_src(), value, |b| {
+                    b.derived_from(TtxStat::SeaDetection, None);
+                    b.derived_from(TtxStat::SecondaryRange, None);
+                });
             }
             Some(Km::from(value))
         }
@@ -1365,6 +1378,7 @@ pub fn visibility<R: Recorder>(
             let value = a + fire.value();
             if R::ON {
                 rec.record(TtxStat::AirDetectionOnFire, None, a, hull_src(), value, |b| {
+                    b.derived_from(TtxStat::AirDetection, None);
                     b.module_add(hull_src(), "visibilityCoefFireByPlane", fire.value());
                 });
             }

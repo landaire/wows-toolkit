@@ -1051,4 +1051,31 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn derived_from_links_resolve_to_existing_rows() {
+        use crate::game_params::ttx::labels::TtxStat;
+        use crate::game_params::ttx::provenance::StatKey;
+        use std::collections::HashSet;
+        let ship = gearing_ship();
+        let provider = gearing_provider();
+        let sel = ShipUpgradeSelection::stock(&ship);
+        let (_stats, prov) = ship_stats_explained(
+            &ship,
+            &sel,
+            &ModifierBundle::empty(Species::Destroyer),
+            &ModifierSources::default(),
+            10,
+            &provider,
+        );
+        let keys: HashSet<StatKey> =
+            prov.attributions.iter().map(|a| StatKey { stat: a.stat, qualifier: a.qualifier.clone() }).collect();
+        for a in &prov.attributions {
+            for link in &a.derived_from {
+                assert!(keys.contains(link), "derived_from {:?} of {:?} has no matching attribution", link, a.stat);
+            }
+        }
+        let rt = prov.attributions.iter().find(|a| a.stat == TtxStat::GunRotationTime).expect("rotation time");
+        assert_eq!(rt.derived_from, vec![StatKey { stat: TtxStat::GunRotationSpeed, qualifier: None }]);
+    }
 }
