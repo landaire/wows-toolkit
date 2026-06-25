@@ -12,6 +12,7 @@ use crate::game_params::ttx::provenance::Contribution;
 use crate::game_params::ttx::provenance::InputId;
 use crate::game_params::ttx::provenance::Op;
 use crate::game_params::ttx::provenance::ShipStatsProvenance;
+use crate::game_params::ttx::provenance::StatKey;
 use crate::game_params::types::GameParamProvider;
 
 /// One contributing input rendered for display.
@@ -33,6 +34,10 @@ pub struct AttributionLine {
     pub base_label: String,
     pub base_value: String,
     pub contributors: Vec<ContributorLine>,
+    /// Upstream stats this value is derived from (e.g. rotation time from
+    /// rotation speed). A consumer can resolve each key against the rendered
+    /// set to recurse into the upstream stat's contributors.
+    pub derived_from: Vec<StatKey>,
 }
 
 /// The display label for an attribution input. Module/Upgrade names are resolved
@@ -121,6 +126,7 @@ pub fn render_attributions(
                         effect: format_effect(c),
                     })
                     .collect(),
+                derived_from: a.derived_from.clone(),
             }
         })
         .collect()

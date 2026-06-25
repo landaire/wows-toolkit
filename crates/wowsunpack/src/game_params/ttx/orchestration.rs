@@ -1175,6 +1175,58 @@ mod tests {
     }
 
     #[test]
+    fn every_changed_stat_is_explained() {
+        use crate::game_params::ttx::provenance::StatKey;
+        use std::collections::HashMap;
+        let ship = gearing_ship();
+        let provider = gearing_provider();
+        let sel = ShipUpgradeSelection::stock(&ship);
+
+        let (_stock, stock_prov) = ship_stats_explained(
+            &ship,
+            &sel,
+            &ModifierBundle::empty(Species::Destroyer),
+            &ModifierSources::default(),
+            10,
+            &provider,
+        );
+        let stock_by_key: HashMap<StatKey, f32> = stock_prov
+            .attributions
+            .iter()
+            .map(|a| (StatKey { stat: a.stat, qualifier: a.qualifier.clone() }, a.value))
+            .collect();
+
+        let mods = [
+            uniform_modifier("visibilityDistCoeff", 0.9),
+            uniform_modifier("GMRotationSpeed", 1.2),
+            uniform_modifier("GMShotDelay", 0.9),
+        ];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, test_version()).unwrap();
+        let mut sources = ModifierSources::default();
+        sources.record("visibilityDistCoeff", InputId::Skill { name: "ConcealmentExpert".into() }, 0.9);
+        sources.record("GMRotationSpeed", InputId::Skill { name: "ExpertMarksman".into() }, 1.2);
+        sources.record("GMShotDelay", InputId::Upgrade { name: "MainBatteryMod3".into() }, 0.9);
+        let (_built, prov) = ship_stats_explained(&ship, &sel, &bundle, &sources, 10, &provider);
+
+        for a in &prov.attributions {
+            let key = StatKey { stat: a.stat, qualifier: a.qualifier.clone() };
+            let changed = stock_by_key.get(&key).map(|s| (s - a.value).abs() > 1e-4).unwrap_or(true);
+            if !changed {
+                continue;
+            }
+            let explained = !a.steps.is_empty()
+                || !a.derived_from.is_empty()
+                || stock_prov
+                    .attributions
+                    .iter()
+                    .find(|s| s.stat == a.stat && s.qualifier == a.qualifier)
+                    .map(|s| s.base_source != a.base_source)
+                    .unwrap_or(true);
+            assert!(explained, "changed stat {:?} ({:?}) has no explanation", a.stat, a.qualifier);
+        }
+    }
+
+    #[test]
     fn adrenaline_reload_step_input_is_skill_not_module() {
         use crate::game_params::ttx::effects::Effect;
         use crate::game_params::ttx::effects::EffectActivation;
