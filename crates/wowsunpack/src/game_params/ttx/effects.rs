@@ -413,6 +413,7 @@ pub struct EffectiveModifiers {
     artillery_dist_coeff_source: Option<InputId>,
     reload_coeffs: ReloadCoeffs,
     reload_coeff_sources: ReloadCoeffSources,
+    version: Version,
 }
 
 impl EffectiveModifiers {
@@ -434,6 +435,9 @@ impl EffectiveModifiers {
     pub fn reload_coeff_sources(&self) -> &ReloadCoeffSources {
         &self.reload_coeff_sources
     }
+    pub fn version(&self) -> Version {
+        self.version
+    }
 }
 
 /// The attribution identity for an effect's contributions.
@@ -443,6 +447,26 @@ fn input_id_for(id: &EffectId) -> InputId {
         EffectId::Upgrade(name) => InputId::Upgrade { name: name.clone() },
         EffectId::Consumable(c) => InputId::Consumable(Recognized::Known(*c)),
         EffectId::Innate(t) => InputId::Innate { skill_type: t.clone() },
+    }
+}
+
+/// Walk the ship's ability slots, invoking `f` for each resolved consumable.
+/// Skips slots whose param or category cannot be resolved. Does NOT filter by
+/// `into_known()`; callers apply that filter themselves if needed.
+pub(crate) fn walk_ability_slots<F>(ship: &Param, provider: &dyn GameParamProvider, version: Version, mut f: F)
+where
+    F: FnMut(Recognized<crate::game_types::Consumable>, &crate::game_params::types::AbilityCategory),
+{
+    let Some(vehicle) = ship.vehicle() else { return };
+    let Some(ability_slots) = vehicle.abilities() else { return };
+    for slot in ability_slots {
+        for (ability_name, variant_name) in slot {
+            let Some(param) = provider.game_param_by_name(ability_name) else { continue };
+            let Some(ability) = param.ability() else { continue };
+            let Some(cat) = ability.get_category(variant_name) else { continue };
+            let consumable = cat.consumable_type(version);
+            f(consumable, cat);
+        }
     }
 }
 
@@ -516,39 +540,18 @@ impl Loadout<'_> {
             }
         }
 
-        if let Some(vehicle) = self.ship.vehicle()
-            && let Some(ability_slots) = vehicle.abilities()
-        {
-            for slot in ability_slots {
-                for (ability_name, variant_name) in slot {
-                    let param = match provider.game_param_by_name(ability_name) {
-                        Some(p) => p,
-                        None => continue,
-                    };
-                    let ability = match param.ability() {
-                        Some(a) => a,
-                        None => continue,
-                    };
-                    let cat = match ability.get_category(variant_name) {
-                        Some(c) => c,
-                        None => continue,
-                    };
-                    let consumable = match cat.consumable_type(version).into_known() {
-                        Some(c) => c,
-                        None => continue,
-                    };
-                    let artillery_dist_coeff = cat.effect_fields().get("artilleryDistCoeff").copied().unwrap_or(1.0);
-                    let cat_modifiers = cat.modifiers();
-                    if artillery_dist_coeff != 1.0 || !cat_modifiers.is_empty() {
-                        effects.push(Effect {
-                            id: EffectId::Consumable(consumable),
-                            kind: EffectKind::Consumable { artillery_dist_coeff },
-                            modifiers: cat_modifiers.to_vec(),
-                        });
-                    }
-                }
+        walk_ability_slots(self.ship, provider, version, |recognized, cat| {
+            let Some(consumable) = recognized.into_known() else { return };
+            let artillery_dist_coeff = cat.effect_fields().get("artilleryDistCoeff").copied().unwrap_or(1.0);
+            let cat_modifiers = cat.modifiers();
+            if artillery_dist_coeff != 1.0 || !cat_modifiers.is_empty() {
+                effects.push(Effect {
+                    id: EffectId::Consumable(consumable),
+                    kind: EffectKind::Consumable { artillery_dist_coeff },
+                    modifiers: cat_modifiers.to_vec(),
+                });
             }
-        }
+        });
 
         if let Some(vehicle) = self.ship.vehicle() {
             for innate in vehicle.innate_skills() {
@@ -747,6 +750,7 @@ impl Effects {
             artillery_dist_coeff_source: dist_source,
             reload_coeffs,
             reload_coeff_sources,
+            version,
         })
     }
 }
@@ -771,6 +775,7 @@ impl EffectiveModifiers {
             self.artillery_dist_coeff_source.clone(),
             self.reload_coeff_sources.clone(),
             level,
+            self.version,
             provider,
             &mut crate::game_params::ttx::provenance::Off,
         )
@@ -795,6 +800,7 @@ impl EffectiveModifiers {
             self.artillery_dist_coeff_source.clone(),
             self.reload_coeff_sources.clone(),
             level,
+            self.version,
             provider,
             &mut rec,
         );

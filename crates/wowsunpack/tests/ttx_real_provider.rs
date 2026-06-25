@@ -25,6 +25,26 @@ use wowsunpack::game_params::ttx::ship_stats_stock;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
 
+/// Smoke test: a cruiser (Worcester) must have non-empty consumables including a
+/// Damage Control Party. Gated `#[ignore]` like the main cross-class test.
+#[test]
+#[ignore]
+fn ttx_consumables_non_empty() {
+    let Some(provider) = load_provider() else {
+        panic!("could not build a provider; set WOWS_DIR to your World_of_Warships install");
+    };
+    let ship_name = "PASC210_Worcester";
+    let ship = provider.game_param_by_name(ship_name).unwrap_or_else(|| panic!("ship {ship_name} not in params"));
+    let stats = ship_stats_stock(&ship, &provider);
+    assert!(!stats.consumables.is_empty(), "Worcester must have at least one consumable");
+    let has_crash_crew = stats.consumables.iter().any(|c| c.label == "crashCrew");
+    assert!(
+        has_crash_crew,
+        "Worcester must have a crashCrew consumable; found: {:?}",
+        stats.consumables.iter().map(|c| c.label.as_str()).collect::<Vec<_>>()
+    );
+}
+
 /// One expected-vs-computed check; a tolerance band around a published port value.
 struct Check {
     label: &'static str,

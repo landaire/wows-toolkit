@@ -5,18 +5,28 @@
 //! assembles a [`ShipStats`]. Each section is `None` when the ship lacks its
 //! components; nothing is fabricated.
 
+use std::collections::HashMap;
+use std::collections::HashSet;
+
+use crate::data::Version;
 use crate::game_params::keys::ComponentType;
 use crate::game_params::ttx::constants::DispersionCurve;
 use crate::game_params::ttx::constants::DispersionEllipse;
+use crate::game_params::ttx::consumables::ConsumableCard;
+use crate::game_params::ttx::consumables::effective_consumable;
 use crate::game_params::ttx::effects::ReloadCoeffSources;
 use crate::game_params::ttx::effects::ReloadCoeffs;
+use crate::game_params::ttx::effects::walk_ability_slots;
 use crate::game_params::ttx::factories;
+use crate::game_params::ttx::labels::TtxStat;
+use crate::game_params::ttx::model::AmmoCount;
 use crate::game_params::ttx::model::ShipStats;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::provenance::InputId;
 use crate::game_params::ttx::provenance::ModifierSources;
 use crate::game_params::ttx::provenance::Off;
 use crate::game_params::ttx::provenance::On;
+use crate::game_params::ttx::provenance::Op;
 use crate::game_params::ttx::provenance::Recorder;
 use crate::game_params::ttx::provenance::ShipStatsProvenance;
 use crate::game_params::ttx::selection::ShipUpgradeSelection;
@@ -24,6 +34,8 @@ use crate::game_params::types::ArmorMap;
 use crate::game_params::types::GameParamProvider;
 use crate::game_params::types::Km;
 use crate::game_params::types::Param;
+use crate::game_params::types::Species;
+use crate::recognized::Recognized;
 
 /// Stock fire-control range coefficient when no `_Suo` upgrade is selected
 /// (PreprocessedFireControl.py:7 identity; FactoryArtillery.py:42 default 1.0).
@@ -123,6 +135,7 @@ pub fn ship_stats(
         None,
         ReloadCoeffSources::default(),
         level,
+        Version::base(15, 0, 0),
         provider,
         &mut Off,
     )
@@ -150,6 +163,7 @@ pub fn ship_stats_explained(
         None,
         ReloadCoeffSources::default(),
         level,
+        Version::base(15, 0, 0),
         provider,
         &mut rec,
     );
@@ -171,6 +185,7 @@ pub(crate) fn ship_stats_with<R: Recorder>(
     spotter_dist_coef_source: Option<InputId>,
     reload_coeff_sources: ReloadCoeffSources,
     level: u32,
+    version: Version,
     provider: &dyn GameParamProvider,
     rec: &mut R,
 ) -> ShipStats {
@@ -280,6 +295,8 @@ pub(crate) fn ship_stats_with<R: Recorder>(
         )
     });
 
+    let consumables = build_consumable_cards(ship, modifiers, sources, version, provider, rec);
+
     ShipStats {
         durability,
         mobility,
@@ -291,7 +308,338 @@ pub(crate) fn ship_stats_with<R: Recorder>(
         // Fire control has no standalone card (its coef folds into artillery range).
         fire_control: None,
         visibility,
-        consumables: Vec::new(),
+        consumables,
+    }
+}
+
+/// Enumerate every distinct consumable the ship can mount, compute stats, assign
+/// disambiguated labels, and record attribution. Always builds cards; records only
+/// when `R::ON`.
+fn build_consumable_cards<R: Recorder>(
+    ship: &Param,
+    modifiers: &ModifierBundle,
+    sources: &ModifierSources,
+    version: Version,
+    provider: &dyn GameParamProvider,
+    rec: &mut R,
+) -> Vec<ConsumableCard> {
+    // Collect (recognized, stats, applied, base_stats) for each distinct consumable,
+    // computing effective_consumable inside the walk while the category ref is live.
+    let species = ship.species().and_then(|s| s.known().copied()).unwrap_or(Species::Destroyer);
+    let empty_bundle = ModifierBundle::empty(species);
+
+    let mut seen: HashSet<Recognized<crate::game_types::Consumable>> = HashSet::new();
+    let mut raw: Vec<(
+        Recognized<crate::game_types::Consumable>,
+        crate::game_params::ttx::consumables::EffectiveConsumable,
+        crate::game_params::ttx::consumables::ConsumableApplied,
+        crate::game_params::ttx::consumables::EffectiveConsumable,
+    )> = Vec::new();
+
+    walk_ability_slots(ship, provider, version, |recognized, cat| {
+        if seen.contains(&recognized) {
+            return;
+        }
+        seen.insert(recognized.clone());
+        let (stats, applied) = effective_consumable(cat, modifiers);
+        let (base_stats, _) = effective_consumable(cat, &empty_bundle);
+        raw.push((recognized, stats, applied, base_stats));
+    });
+
+    // Assign disambiguated labels.
+    let mut label_count: HashMap<String, u32> = HashMap::new();
+    let mut cards: Vec<ConsumableCard> = Vec::new();
+
+    for (consumable, stats, applied, base_stats) in raw {
+        let base_label = match &consumable {
+            Recognized::Known(c) => c.name().to_string(),
+            Recognized::Unknown(raw_name) => raw_name.clone(),
+        };
+        let count = label_count.entry(base_label.clone()).or_insert(0);
+        *count += 1;
+        let label = if *count == 1 { base_label } else { format!("{base_label} ({})", *count) };
+
+        if R::ON {
+            record_consumable_stats(&consumable, &label, &stats, &applied, &base_stats, sources, rec);
+        }
+
+        cards.push(ConsumableCard { consumable, label, stats });
+    }
+
+    cards
+}
+
+/// Record attribution for every present consumable stat in `stats`.
+fn record_consumable_stats<R: Recorder>(
+    consumable: &Recognized<crate::game_types::Consumable>,
+    label: &str,
+    stats: &crate::game_params::ttx::consumables::EffectiveConsumable,
+    applied: &crate::game_params::ttx::consumables::ConsumableApplied,
+    base_stats: &crate::game_params::ttx::consumables::EffectiveConsumable,
+    sources: &ModifierSources,
+    rec: &mut R,
+) {
+    let base_source = InputId::Consumable(consumable.clone());
+
+    // reload_time: always present
+    rec.record(
+        TtxStat::ConsumableReloadTime,
+        Some(label),
+        base_stats.reload_time.value(),
+        base_source.clone(),
+        stats.reload_time.value(),
+        |b| {
+            for m in &applied.reload_time {
+                match m.op {
+                    Op::Mul => b.coef(sources, &m.name),
+                    Op::Add => b.bonus(sources, &m.name, 1.0),
+                }
+            }
+        },
+    );
+
+    // preparation_time: always present
+    rec.record(
+        TtxStat::ConsumablePreparationTime,
+        Some(label),
+        base_stats.preparation_time.value(),
+        base_source.clone(),
+        stats.preparation_time.value(),
+        |b| {
+            for m in &applied.preparation_time {
+                match m.op {
+                    Op::Mul => b.coef(sources, &m.name),
+                    Op::Add => b.bonus(sources, &m.name, 1.0),
+                }
+            }
+        },
+    );
+
+    // charges: always present
+    let (base_charges_f32, final_charges_f32) = match (base_stats.charges, stats.charges) {
+        (AmmoCount::Infinite, AmmoCount::Infinite) => {
+            // Infinite: base == final, no steps.
+            rec.record(
+                TtxStat::ConsumableCharges,
+                Some(label),
+                f32::INFINITY,
+                base_source.clone(),
+                f32::INFINITY,
+                |_| {},
+            );
+            (f32::INFINITY, f32::INFINITY)
+        }
+        (AmmoCount::Finite(base_n), AmmoCount::Finite(final_n)) => {
+            rec.record(
+                TtxStat::ConsumableCharges,
+                Some(label),
+                base_n as f32,
+                base_source.clone(),
+                final_n as f32,
+                |b| {
+                    for m in &applied.charges {
+                        match m.op {
+                            Op::Mul => b.coef(sources, &m.name),
+                            Op::Add => b.bonus(sources, &m.name, 1.0),
+                        }
+                    }
+                },
+            );
+            (base_n as f32, final_n as f32)
+        }
+        // Infinite -> Finite transition is not modeled (per spec: Infinite never becomes Finite).
+        _ => (0.0, 0.0),
+    };
+    let _ = (base_charges_f32, final_charges_f32);
+
+    // work_time: Some only for COUNT_BASED consumables
+    if let (Some(base_wt), Some(final_wt)) = (base_stats.work_time, stats.work_time) {
+        rec.record(
+            TtxStat::ConsumableWorkTime,
+            Some(label),
+            base_wt.value(),
+            base_source.clone(),
+            final_wt.value(),
+            |b| {
+                for m in &applied.work_time {
+                    match m.op {
+                        Op::Mul => b.coef(sources, &m.name),
+                        Op::Add => b.bonus(sources, &m.name, 1.0),
+                    }
+                }
+            },
+        );
+    }
+
+    // max_capacity: Some only for TIME_BASED consumables
+    if let (Some(base_mc), Some(final_mc)) = (base_stats.max_capacity, stats.max_capacity) {
+        rec.record(TtxStat::ConsumableMaxCapacity, Some(label), base_mc, base_source.clone(), final_mc, |b| {
+            for m in &applied.max_capacity {
+                match m.op {
+                    Op::Mul => b.coef(sources, &m.name),
+                    Op::Add => b.bonus(sources, &m.name, 1.0),
+                }
+            }
+        });
+    }
+
+    // detection_radius: no modifiers, base == final
+    if let Some(dr) = stats.detection_radius {
+        rec.record(
+            TtxStat::ConsumableDetectionRadius,
+            Some(label),
+            dr.value(),
+            base_source.clone(),
+            dr.value(),
+            |_| {},
+        );
+    }
+
+    // regeneration_hp_speed: regenCrew only
+    if let (Some(base_rhs), Some(final_rhs)) = (base_stats.regeneration_hp_speed, stats.regeneration_hp_speed) {
+        rec.record(
+            TtxStat::ConsumableRegenerationHpSpeed,
+            Some(label),
+            base_rhs,
+            base_source.clone(),
+            final_rhs,
+            |b| {
+                for m in &applied.regeneration_hp_speed {
+                    match m.op {
+                        Op::Mul => b.coef(sources, &m.name),
+                        Op::Add => b.bonus(sources, &m.name, 1.0),
+                    }
+                }
+            },
+        );
+    }
+
+    // smoke_radius: smoke generators
+    if let (Some(base_sr), Some(final_sr)) = (base_stats.smoke_radius, stats.smoke_radius) {
+        rec.record(
+            TtxStat::ConsumableSmokeRadius,
+            Some(label),
+            base_sr.value(),
+            base_source.clone(),
+            final_sr.value(),
+            |b| {
+                for m in &applied.smoke_radius {
+                    match m.op {
+                        Op::Mul => b.coef(sources, &m.name),
+                        Op::Add => b.bonus(sources, &m.name, 1.0),
+                    }
+                }
+            },
+        );
+    }
+
+    // smoke_lifetime: smoke generators
+    if let (Some(base_sl), Some(final_sl)) = (base_stats.smoke_lifetime, stats.smoke_lifetime) {
+        rec.record(
+            TtxStat::ConsumableSmokeLifetime,
+            Some(label),
+            base_sl.value(),
+            base_source.clone(),
+            final_sl.value(),
+            |b| {
+                for m in &applied.smoke_lifetime {
+                    match m.op {
+                        Op::Mul => b.coef(sources, &m.name),
+                        Op::Add => b.bonus(sources, &m.name, 1.0),
+                    }
+                }
+            },
+        );
+    }
+
+    // fighters_count: fighter type
+    if let (Some(base_fc), Some(final_fc)) = (base_stats.fighters_count, stats.fighters_count) {
+        rec.record(TtxStat::ConsumableFightersCount, Some(label), base_fc, base_source.clone(), final_fc, |b| {
+            for m in &applied.fighters_count {
+                match m.op {
+                    Op::Mul => b.coef(sources, &m.name),
+                    Op::Add => b.bonus(sources, &m.name, 1.0),
+                }
+            }
+        });
+    }
+
+    // call_fighters_radius
+    if let (Some(base_cfr), Some(final_cfr)) = (base_stats.call_fighters_radius, stats.call_fighters_radius) {
+        rec.record(
+            TtxStat::ConsumableCallFightersRadius,
+            Some(label),
+            base_cfr.value(),
+            base_source.clone(),
+            final_cfr.value(),
+            |b| {
+                for m in &applied.call_fighters_radius {
+                    match m.op {
+                        Op::Mul => b.coef(sources, &m.name),
+                        Op::Add => b.bonus(sources, &m.name, 1.0),
+                    }
+                }
+            },
+        );
+    }
+
+    // call_fighters_time_delay
+    if let (Some(base_cftd), Some(final_cftd)) = (base_stats.call_fighters_time_delay, stats.call_fighters_time_delay) {
+        rec.record(
+            TtxStat::ConsumableCallFightersTimeDelay,
+            Some(label),
+            base_cftd.value(),
+            base_source.clone(),
+            final_cftd.value(),
+            |b| {
+                for m in &applied.call_fighters_time_delay {
+                    match m.op {
+                        Op::Mul => b.coef(sources, &m.name),
+                        Op::Add => b.bonus(sources, &m.name, 1.0),
+                    }
+                }
+            },
+        );
+    }
+
+    // call_fighters_time_from_heaven
+    if let (Some(base_cffh), Some(final_cffh)) =
+        (base_stats.call_fighters_time_from_heaven, stats.call_fighters_time_from_heaven)
+    {
+        rec.record(
+            TtxStat::ConsumableCallFightersTimeFromHeaven,
+            Some(label),
+            base_cffh.value(),
+            base_source.clone(),
+            final_cffh.value(),
+            |b| {
+                for m in &applied.call_fighters_time_from_heaven {
+                    match m.op {
+                        Op::Mul => b.coef(sources, &m.name),
+                        Op::Add => b.bonus(sources, &m.name, 1.0),
+                    }
+                }
+            },
+        );
+    }
+
+    // plane_regeneration_rate
+    if let (Some(base_prr), Some(final_prr)) = (base_stats.plane_regeneration_rate, stats.plane_regeneration_rate) {
+        rec.record(
+            TtxStat::ConsumablePlaneRegenerationRate,
+            Some(label),
+            base_prr,
+            base_source.clone(),
+            final_prr,
+            |b| {
+                for m in &applied.plane_regeneration_rate {
+                    match m.op {
+                        Op::Mul => b.coef(sources, &m.name),
+                        Op::Add => b.bonus(sources, &m.name, 1.0),
+                    }
+                }
+            },
+        );
     }
 }
 
@@ -1156,6 +1504,7 @@ mod tests {
             em.artillery_dist_coeff_source().cloned(),
             em.reload_coeff_sources().clone(),
             10,
+            em.version(),
             &provider,
             &mut rec,
         );
@@ -1267,6 +1616,7 @@ mod tests {
             em.artillery_dist_coeff_source().cloned(),
             em.reload_coeff_sources().clone(),
             10,
+            em.version(),
             &provider,
             &mut rec,
         );
