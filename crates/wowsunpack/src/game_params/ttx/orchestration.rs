@@ -363,6 +363,8 @@ fn build_consumable_cards<R: Recorder>(
         };
         let count = label_count.entry(base_label.clone()).or_insert(0);
         *count += 1;
+        // The suffix guards a future non-bijective label source; today distinct
+        // consumables always have distinct labels, so only the count==1 arm fires.
         let label = if *count == 1 { base_label } else { format!("{base_label} ({})", *count) };
 
         if R::ON {
