@@ -300,7 +300,7 @@ pub struct ShipStats {
     pub torpedoes: Option<Torpedoes>,
     pub fire_control: Option<FireControl>,
     pub visibility: Option<Visibility>,
-    /// Consumable stat cards. Populated by Task 4; empty by default.
+    /// Consumable stat cards; empty when the ship has no consumables.
     pub consumables: Vec<ConsumableCard>,
 }
 
