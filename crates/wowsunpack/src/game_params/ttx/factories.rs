@@ -1246,11 +1246,17 @@ const MINIMAL_VALID_VALUE: f32 = 0.01;
 /// (`artillery and not artillery.isSmall`, @30-58); `has_big_gun_artillery` is that
 /// gate. Both modifiers are coefficients (MODIFIER_SETTINGS base_value 1.0).
 ///
-/// `sea_detection` (@65-94) = `hull.visibilityFactor * mod.visibilityFactor * coeff`.
+/// `mod.visibilityFactor` and `mod.visibilityFactorByPlane` also appear in the bytecode
+/// (@82, @295) but are not player-accessible GameParams modifiers: no upgrade, skill, or
+/// consumable sets them (verified against GameParams.json). They are runtime-only fields
+/// populated by on-fire state (`wildFireState`). Their default value is 1.0 (identity),
+/// so they are omitted here.
+///
+/// `sea_detection` (@65-94) = `hull.visibilityFactor * coeff`.
 /// `sea_detection_on_fire` (@97-128) = `sea + hull.visibilityCoefFire`.
 /// `detection_in_smoke` (@131-167) = `hull.visibilityCoefGKInSmoke`, only when it
 /// exceeds `MINIMAL_VALID_VALUE`. `air_detection` (@278-307) =
-/// `hull.visibilityFactorByPlane * mod.visibilityFactorByPlane * coeff`;
+/// `hull.visibilityFactorByPlane * coeff`;
 /// `air_detection_on_fire` (@310-341) = `air + hull.visibilityCoefFireByPlane`.
 /// `main_gun_range_detection` (@188-224) = `max(sea, mgMaxDist)` when the main-battery
 /// range is supplied; `secondary_range_detection` (@227-272) = `max(sea, atbaMaxDist)`
@@ -1274,18 +1280,20 @@ pub fn visibility<R: Recorder>(
 ) -> Visibility {
     let hull_src = || InputId::Module { slot: ModuleSlot::Hull, name: hull_name.to_string() };
 
+    // Per-domain sea/air concealment is carried entirely by visibilityDistCoeff (and the
+    // big-gun coef). visibilityFactor/visibilityFactorByPlane are runtime-only on-fire
+    // fields, not player-accessible GameParams modifiers; their default is 1.0 (identity).
     let mut coeff = modifiers.coef("visibilityDistCoeff");
     if has_big_gun_artillery {
         coeff *= modifiers.coef("GMBigGunVisibilityCoeff");
     }
 
-    let sea = hull.visibility_factor.map(|v| v.value() * modifiers.coef("visibilityFactor") * coeff);
+    let sea = hull.visibility_factor.map(|v| v.value() * coeff);
     let sea_detection = sea.map(Km::from);
     if R::ON
         && let (Some(sea_val), Some(base)) = (sea, hull.visibility_factor)
     {
         rec.record(TtxStat::SeaDetection, None, base.value(), hull_src(), sea_val, |b| {
-            b.coef(sources, "visibilityFactor");
             b.coef(sources, "visibilityDistCoeff");
             if has_big_gun_artillery {
                 b.coef(sources, "GMBigGunVisibilityCoeff");
@@ -1339,13 +1347,12 @@ pub fn visibility<R: Recorder>(
         _ => None,
     };
 
-    let air = hull.visibility_factor_by_plane.map(|v| v.value() * modifiers.coef("visibilityFactorByPlane") * coeff);
+    let air = hull.visibility_factor_by_plane.map(|v| v.value() * coeff);
     let air_detection = air.map(Km::from);
     if R::ON
         && let (Some(air_val), Some(base)) = (air, hull.visibility_factor_by_plane)
     {
         rec.record(TtxStat::AirDetection, None, base.value(), hull_src(), air_val, |b| {
-            b.coef(sources, "visibilityFactorByPlane");
             b.coef(sources, "visibilityDistCoeff");
             if has_big_gun_artillery {
                 b.coef(sources, "GMBigGunVisibilityCoeff");
@@ -2871,8 +2878,9 @@ mod tests {
 
     #[test]
     fn concealment_modifier_reduces_sea_detection() {
-        // Concealment System Mod 1: visibilityFactor 0.9 (-10%) -> 7.33 * 0.9 = 6.597.
-        let mods = [modifier("visibilityFactor", 0.9)];
+        // PCM027 ConcealmentMeasures Mod I uses visibilityDistCoeff 0.9 -> 7.33 * 0.9 = 6.597.
+        // visibilityFactor is a runtime-only on-fire field; no GameParams modifier sets it.
+        let mods = [modifier("visibilityDistCoeff", 0.9)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let vis = visibility(&gearing_hull(), "H", &bundle, &ModifierSources::default(), false, None, None, &mut Off);
@@ -3059,25 +3067,20 @@ mod tests {
         assert!(vis.periscope_depth_detection.is_none());
     }
 
-    /// `SeaDetection` records three Mul steps (visibilityFactor + visibilityDistCoeff +
-    /// GMBigGunVisibilityCoeff) when `has_big_gun_artillery`. `SeaDetectionOnFire` records
-    /// one `Op::Add` step. `ShipStatsProvenance::replay` reproduces the factory values exactly.
+    /// `SeaDetection` records two Mul steps (visibilityDistCoeff + GMBigGunVisibilityCoeff)
+    /// when `has_big_gun_artillery`. `SeaDetectionOnFire` records one `Op::Add` step.
+    /// `ShipStatsProvenance::replay` reproduces the factory values exactly.
     #[test]
     fn visibility_records_sea_detection_and_on_fire_replay_exact() {
         use crate::game_params::ttx::provenance::On;
         use crate::game_params::ttx::provenance::Op;
         use crate::game_params::ttx::provenance::ShipStatsProvenance;
 
-        let mods = [
-            modifier("visibilityFactor", 0.9),
-            modifier("visibilityDistCoeff", 0.97),
-            modifier("GMBigGunVisibilityCoeff", 1.05),
-        ];
+        let mods = [modifier("visibilityDistCoeff", 0.97), modifier("GMBigGunVisibilityCoeff", 1.05)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
 
         let mut sources = ModifierSources::default();
-        sources.record("visibilityFactor", InputId::Upgrade { name: "CSM1".into() }, 0.9);
         sources.record("visibilityDistCoeff", InputId::Upgrade { name: "Camo".into() }, 0.97);
         sources.record(
             "GMBigGunVisibilityCoeff",
@@ -3089,7 +3092,7 @@ mod tests {
         let vis = visibility(&gearing_hull(), "HULL", &bundle, &sources, true, None, None, &mut rec);
         let prov = rec.into_provenance();
 
-        // SeaDetection: base=7.33, steps: visibilityFactor * 0.9, visibilityDistCoeff * 0.97, GMBigGunVisibilityCoeff * 1.05.
+        // SeaDetection: base=7.33, steps: visibilityDistCoeff * 0.97, GMBigGunVisibilityCoeff * 1.05.
         let sea_attr =
             prov.attributions.iter().find(|a| a.stat == TtxStat::SeaDetection).expect("SeaDetection recorded");
         assert_eq!(sea_attr.base_value, 7.33);
@@ -3097,14 +3100,9 @@ mod tests {
             matches!(&sea_attr.base_source, InputId::Module { slot, .. } if *slot == ModuleSlot::Hull),
             "base source must be Hull"
         );
-        assert_eq!(
-            sea_attr.steps.len(),
-            3,
-            "expected visibilityFactor + visibilityDistCoeff + GMBigGunVisibilityCoeff"
-        );
+        assert_eq!(sea_attr.steps.len(), 2, "expected visibilityDistCoeff + GMBigGunVisibilityCoeff");
         assert!(sea_attr.steps.iter().all(|c| c.op == Op::Mul), "all sea steps must be Mul");
-        // All three steps present by name.
-        assert!(sea_attr.steps.iter().any(|c| c.modifier_name == "visibilityFactor"));
+        // Both steps present by name.
         assert!(sea_attr.steps.iter().any(|c| c.modifier_name == "visibilityDistCoeff"));
         assert!(sea_attr.steps.iter().any(|c| c.modifier_name == "GMBigGunVisibilityCoeff"));
 
