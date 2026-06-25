@@ -135,6 +135,8 @@ pub fn ship_stats(
         None,
         ReloadCoeffSources::default(),
         level,
+        // No game version at this boundary; from_consumable_type ignores version today
+        // (Known/Unknown classification only; re-audit here if that changes).
         Version::base(15, 0, 0),
         provider,
         &mut Off,
@@ -163,6 +165,8 @@ pub fn ship_stats_explained(
         None,
         ReloadCoeffSources::default(),
         level,
+        // No game version at this boundary; from_consumable_type ignores version today
+        // (Known/Unknown classification only; re-audit here if that changes).
         Version::base(15, 0, 0),
         provider,
         &mut rec,
@@ -325,6 +329,8 @@ fn build_consumable_cards<R: Recorder>(
 ) -> Vec<ConsumableCard> {
     // Collect (recognized, stats, applied, base_stats) for each distinct consumable,
     // computing effective_consumable inside the walk while the category ref is live.
+    // empty() carries no values: coef() returns 1.0 and bonus() returns 0.0 for every
+    // name regardless of species, so the fallback species does not affect base values.
     let species = ship.species().and_then(|s| s.known().copied()).unwrap_or(Species::Destroyer);
     let empty_bundle = ModifierBundle::empty(species);
 
@@ -415,19 +421,11 @@ fn record_consumable_stats<R: Recorder>(
         },
     );
 
-    // charges: always present
-    let (base_charges_f32, final_charges_f32) = match (base_stats.charges, stats.charges) {
+    // charges: always present. Infinite uses -1.0 (the game sentinel) as the recorded
+    // value so replay is exact: replay(-1.0) = -1.0 = value, with no steps.
+    match (base_stats.charges, stats.charges) {
         (AmmoCount::Infinite, AmmoCount::Infinite) => {
-            // Infinite: base == final, no steps.
-            rec.record(
-                TtxStat::ConsumableCharges,
-                Some(label),
-                f32::INFINITY,
-                base_source.clone(),
-                f32::INFINITY,
-                |_| {},
-            );
-            (f32::INFINITY, f32::INFINITY)
+            rec.record(TtxStat::ConsumableCharges, Some(label), -1.0, base_source.clone(), -1.0, |_| {});
         }
         (AmmoCount::Finite(base_n), AmmoCount::Finite(final_n)) => {
             rec.record(
@@ -445,12 +443,14 @@ fn record_consumable_stats<R: Recorder>(
                     }
                 },
             );
-            (base_n as f32, final_n as f32)
         }
-        // Infinite -> Finite transition is not modeled (per spec: Infinite never becomes Finite).
-        _ => (0.0, 0.0),
-    };
-    let _ = (base_charges_f32, final_charges_f32);
+        (base_kind, final_kind) => {
+            tracing::warn!(
+                consumable = %label,
+                "unexpected charge-kind mismatch: base={base_kind:?} final={final_kind:?}; skipping charges record"
+            );
+        }
+    }
 
     // work_time: Some only for COUNT_BASED consumables
     if let (Some(base_wt), Some(final_wt)) = (base_stats.work_time, stats.work_time) {
