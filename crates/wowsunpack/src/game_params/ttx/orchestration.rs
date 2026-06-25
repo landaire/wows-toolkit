@@ -8,10 +8,12 @@
 use crate::game_params::keys::ComponentType;
 use crate::game_params::ttx::constants::DispersionCurve;
 use crate::game_params::ttx::constants::DispersionEllipse;
+use crate::game_params::ttx::effects::ReloadCoeffSources;
 use crate::game_params::ttx::effects::ReloadCoeffs;
 use crate::game_params::ttx::factories;
 use crate::game_params::ttx::model::ShipStats;
 use crate::game_params::ttx::modifiers::ModifierBundle;
+use crate::game_params::ttx::provenance::InputId;
 use crate::game_params::ttx::provenance::ModifierSources;
 use crate::game_params::ttx::provenance::Off;
 use crate::game_params::ttx::provenance::On;
@@ -118,6 +120,8 @@ pub fn ship_stats(
         &ModifierSources::default(),
         ReloadCoeffs::default(),
         1.0,
+        None,
+        ReloadCoeffSources::default(),
         level,
         provider,
         &mut Off,
@@ -136,8 +140,19 @@ pub fn ship_stats_explained(
     provider: &dyn GameParamProvider,
 ) -> (ShipStats, ShipStatsProvenance) {
     let mut rec = On::default();
-    let stats =
-        ship_stats_with(ship, selection, modifiers, sources, ReloadCoeffs::default(), 1.0, level, provider, &mut rec);
+    let stats = ship_stats_with(
+        ship,
+        selection,
+        modifiers,
+        sources,
+        ReloadCoeffs::default(),
+        1.0,
+        None,
+        ReloadCoeffSources::default(),
+        level,
+        provider,
+        &mut rec,
+    );
     (stats, rec.into_provenance())
 }
 
@@ -153,6 +168,8 @@ pub(crate) fn ship_stats_with<R: Recorder>(
     sources: &ModifierSources,
     reload_coeffs: ReloadCoeffs,
     spotter_dist_coef: f32,
+    spotter_dist_coef_source: Option<InputId>,
+    reload_coeff_sources: ReloadCoeffSources,
     level: u32,
     provider: &dyn GameParamProvider,
     rec: &mut R,
@@ -193,7 +210,9 @@ pub(crate) fn ship_stats_with<R: Recorder>(
             sources,
             fc_coef,
             spotter_dist_coef,
+            spotter_dist_coef_source.clone(),
             reload_coeffs.main,
+            reload_coeff_sources.main.clone(),
             level,
             provider,
             rec,
@@ -201,12 +220,31 @@ pub(crate) fn ship_stats_with<R: Recorder>(
     });
 
     let secondaries = selection.hull.as_deref().and_then(|name| components.secondaries(name)).and_then(|atba| {
-        factories::secondaries(atba, hull_name, modifiers, sources, reload_coeffs.secondary, level, provider, rec)
+        factories::secondaries(
+            atba,
+            hull_name,
+            modifiers,
+            sources,
+            reload_coeffs.secondary,
+            reload_coeff_sources.secondary.clone(),
+            level,
+            provider,
+            rec,
+        )
     });
 
     let torp_name = selection.torpedoes.as_deref().unwrap_or("");
     let torpedoes = selection.torpedoes.as_deref().and_then(|name| components.torpedoes(name)).and_then(|launchers| {
-        factories::torpedoes(launchers, modifiers, reload_coeffs.torpedo, provider, torp_name, sources, rec)
+        factories::torpedoes(
+            launchers,
+            modifiers,
+            reload_coeffs.torpedo,
+            reload_coeff_sources.torpedo.clone(),
+            provider,
+            torp_name,
+            sources,
+            rec,
+        )
     });
 
     // Armor: hull plate map plus the selected hull's main-battery mount armor maps.
@@ -1077,5 +1115,121 @@ mod tests {
         }
         let rt = prov.attributions.iter().find(|a| a.stat == TtxStat::GunRotationTime).expect("rotation time");
         assert_eq!(rt.derived_from, vec![StatKey { stat: TtxStat::GunRotationSpeed, qualifier: None }]);
+    }
+
+    #[test]
+    fn spotter_step_input_is_consumable_not_module() {
+        use crate::game_params::ttx::effects::Effect;
+        use crate::game_params::ttx::effects::EffectActivation;
+        use crate::game_params::ttx::effects::EffectId;
+        use crate::game_params::ttx::effects::EffectKind;
+        use crate::game_params::ttx::effects::Effects;
+        use crate::game_params::ttx::effects::EffectsState;
+        use crate::game_params::ttx::labels::TtxStat;
+        use crate::game_params::ttx::provenance::InputId;
+        use crate::game_types::Consumable;
+
+        let ship = gearing_ship();
+        let provider = gearing_provider();
+        let sel = ShipUpgradeSelection::stock(&ship);
+
+        let scout_effect = Effect::for_test(
+            EffectId::Consumable(Consumable::SpottingAircraft),
+            EffectKind::Consumable { artillery_dist_coeff: 1.2 },
+            vec![],
+        );
+        let effects = Effects::for_test(vec![scout_effect]);
+        let state =
+            EffectsState::default().set(EffectId::Consumable(Consumable::SpottingAircraft), EffectActivation::On);
+        let em = effects.resolve(&state, Species::Destroyer, test_version()).unwrap();
+
+        let mut rec = crate::game_params::ttx::provenance::On::default();
+        crate::game_params::ttx::orchestration::ship_stats_with(
+            &ship,
+            &sel,
+            em.bundle(),
+            em.sources(),
+            em.reload_coeffs(),
+            em.artillery_dist_coeff(),
+            em.artillery_dist_coeff_source().cloned(),
+            em.reload_coeff_sources().clone(),
+            10,
+            &provider,
+            &mut rec,
+        );
+        let prov = rec.into_provenance();
+
+        let range_attr = prov
+            .attributions
+            .iter()
+            .find(|a| a.stat == TtxStat::ArtilleryRange)
+            .expect("ArtilleryRange must be recorded");
+
+        let spotter_step = range_attr.steps.iter().find(|s| s.modifier_name == "spotterDistCoeff");
+        assert!(spotter_step.is_some(), "spotterDistCoeff step must be recorded when coeff != 1.0");
+        assert_eq!(
+            spotter_step.unwrap().input,
+            InputId::Consumable(Consumable::SpottingAircraft),
+            "spotterDistCoeff step must be attributed to the spotter consumable"
+        );
+    }
+
+    #[test]
+    fn adrenaline_reload_step_input_is_skill_not_module() {
+        use crate::game_params::ttx::effects::Effect;
+        use crate::game_params::ttx::effects::EffectActivation;
+        use crate::game_params::ttx::effects::EffectId;
+        use crate::game_params::ttx::effects::EffectKind;
+        use crate::game_params::ttx::effects::Effects;
+        use crate::game_params::ttx::effects::EffectsState;
+        use crate::game_params::ttx::effects::HealthFraction;
+        use crate::game_params::ttx::labels::TtxStat;
+        use crate::game_params::ttx::provenance::InputId;
+        use crate::game_params::types::CrewSkillName;
+
+        let ship = gearing_ship();
+        let provider = gearing_provider();
+        let sel = ShipUpgradeSelection::stock(&ship);
+
+        let skill_name = CrewSkillName::from("ArmamentReloadAaDamage");
+        let adrenaline = Effect::for_test(
+            EffectId::Skill(skill_name.clone()),
+            EffectKind::HealthScaledReload,
+            vec![uniform_modifier("lastChanceReloadCoefficient_Main", 0.2)],
+        );
+        let effects = Effects::for_test(vec![adrenaline]);
+        let state = EffectsState::default()
+            .set(EffectId::Skill(skill_name.clone()), EffectActivation::Health(HealthFraction::new(0.5)));
+        let em = effects.resolve(&state, Species::Destroyer, test_version()).unwrap();
+
+        let mut rec = crate::game_params::ttx::provenance::On::default();
+        crate::game_params::ttx::orchestration::ship_stats_with(
+            &ship,
+            &sel,
+            em.bundle(),
+            em.sources(),
+            em.reload_coeffs(),
+            em.artillery_dist_coeff(),
+            em.artillery_dist_coeff_source().cloned(),
+            em.reload_coeff_sources().clone(),
+            10,
+            &provider,
+            &mut rec,
+        );
+        let prov = rec.into_provenance();
+
+        let reload_attr = prov
+            .attributions
+            .iter()
+            .find(|a| a.stat == TtxStat::ArtilleryReloadTime)
+            .expect("ArtilleryReloadTime must be recorded");
+
+        let reload_step = reload_attr.steps.iter().find(|s| s.modifier_name == "reloadCoeff");
+        assert!(reload_step.is_some(), "reloadCoeff step must be recorded when coeff != 1.0");
+        assert_eq!(
+            reload_step.unwrap().input,
+            InputId::Skill { name: skill_name },
+            "reloadCoeff step must be attributed to the Adrenaline skill"
+        );
     }
 }

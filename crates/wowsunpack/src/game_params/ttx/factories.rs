@@ -483,6 +483,7 @@ pub fn torpedoes<R: Recorder>(
     launchers: &[TorpedoLauncherStats],
     modifiers: &ModifierBundle,
     reload_coeff: f32,
+    reload_coeff_source: Option<crate::game_params::ttx::provenance::InputId>,
     provider: &dyn GameParamProvider,
     torp_name: &str,
     sources: &ModifierSources,
@@ -571,10 +572,11 @@ pub fn torpedoes<R: Recorder>(
             // shot_delay as base; steps reproduce the final value exactly.
             rec.record(TtxStat::TorpedoReloadTime, None, min_base, torp_src(), min_reload, |b| {
                 b.coef(sources, "GTShotDelay");
-                // reload_coeff is the dynamic Adrenaline coefficient, not a player
-                // input in sources. Record it as a module step so replay is exact.
+                // Attribute to the real source (Adrenaline skill) when available;
+                // fall back to the torpedo module when source is absent.
                 if reload_coeff != 1.0 {
-                    b.module(torp_src(), "reloadCoeff", reload_coeff);
+                    let src = reload_coeff_source.clone().unwrap_or_else(torp_src);
+                    b.module(src, "reloadCoeff", reload_coeff);
                 }
             });
         }
@@ -855,7 +857,9 @@ pub fn artillery<R: Recorder>(
     sources: &ModifierSources,
     fc_max_dist_coef: f32,
     spotter_dist_coef: f32,
+    spotter_dist_coef_source: Option<crate::game_params::ttx::provenance::InputId>,
     reload_coeff: f32,
+    reload_coeff_source: Option<crate::game_params::ttx::provenance::InputId>,
     level: u32,
     provider: &dyn GameParamProvider,
     rec: &mut R,
@@ -880,9 +884,12 @@ pub fn artillery<R: Recorder>(
         if R::ON {
             rec.record(TtxStat::ArtilleryReloadTime, None, d.value(), arty_src(), value, |b| {
                 b.coef(sources, "GMShotDelay");
-                // reload_coeff is the dynamic Adrenaline coefficient, not a player
-                // input in sources. Record it as a module step so replay is exact.
-                b.module(arty_src(), "reloadCoeff", reload_coeff);
+                // Attribute to the real source (Adrenaline skill) when available;
+                // fall back to the artillery module when source is absent.
+                if reload_coeff != 1.0 {
+                    let src = reload_coeff_source.clone().unwrap_or_else(arty_src);
+                    b.module(src, "reloadCoeff", reload_coeff);
+                }
             });
         }
         Seconds::from(value)
@@ -899,9 +906,12 @@ pub fn artillery<R: Recorder>(
             rec.record(TtxStat::ArtilleryRange, None, base_km, arty_src(), rng, |b| {
                 b.module(fc_src, "maxDistCoef", fc_max_dist_coef);
                 b.coef(sources, "GMMaxDist");
-                // spotter_dist_coef is a consumable range extension, attributed
-                // under the artillery module when no consumable InputId is available here.
-                b.module(arty_src(), "spotterDistCoeff", spotter_dist_coef);
+                // Attribute to the real source (consumable) when available; fall back
+                // to the artillery module when source is absent.
+                if spotter_dist_coef != 1.0 {
+                    let src = spotter_dist_coef_source.clone().unwrap_or_else(arty_src);
+                    b.module(src, "spotterDistCoeff", spotter_dist_coef);
+                }
             });
         }
         Km::from(rng)
@@ -1079,6 +1089,7 @@ pub fn secondaries<R: Recorder>(
     modifiers: &ModifierBundle,
     sources: &ModifierSources,
     reload_coeff: f32,
+    reload_coeff_source: Option<crate::game_params::ttx::provenance::InputId>,
     level: u32,
     provider: &dyn GameParamProvider,
     rec: &mut R,
@@ -1137,7 +1148,12 @@ pub fn secondaries<R: Recorder>(
         if R::ON {
             rec.record(TtxStat::SecondaryReloadTime, Some(q), shot_delay.value(), hull_src(), reload_value, |b| {
                 b.coef(sources, "GSShotDelay");
-                b.module(hull_src(), "reloadCoeff", reload_coeff);
+                // Attribute to the real source (Adrenaline skill) when available;
+                // fall back to the hull module when source is absent.
+                if reload_coeff != 1.0 {
+                    let src = reload_coeff_source.clone().unwrap_or_else(hull_src);
+                    b.module(src, "reloadCoeff", reload_coeff);
+                }
             });
         }
 
@@ -1894,6 +1910,7 @@ mod tests {
             &launchers,
             &ModifierBundle::empty(Species::Destroyer),
             1.0,
+            None,
             &provider,
             "",
             &ModifierSources::default(),
@@ -1968,7 +1985,7 @@ mod tests {
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let launchers = [gearing_launcher()];
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
-        let torps = torpedoes(&launchers, &bundle, 1.0, &provider, "", &ModifierSources::default(), &mut Off)
+        let torps = torpedoes(&launchers, &bundle, 1.0, None, &provider, "", &ModifierSources::default(), &mut Off)
             .expect("torpedoes computed");
         let launcher = &torps.launchers[0];
         let rs = launcher.rotation_speed.expect("rotation_speed").value();
@@ -1985,7 +2002,7 @@ mod tests {
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let launchers = [gearing_launcher()];
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
-        let torps = torpedoes(&launchers, &bundle, 1.0, &provider, "", &ModifierSources::default(), &mut Off)
+        let torps = torpedoes(&launchers, &bundle, 1.0, None, &provider, "", &ModifierSources::default(), &mut Off)
             .expect("torpedoes computed");
         let launcher = &torps.launchers[0];
         assert_eq!(launcher.rotation_speed, Some(DegreesPerSecond::from(30.0)));
@@ -2001,6 +2018,7 @@ mod tests {
                 &[],
                 &ModifierBundle::empty(Species::Destroyer),
                 1.0,
+                None,
                 &provider,
                 "",
                 &ModifierSources::default(),
@@ -2058,7 +2076,7 @@ mod tests {
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
         let launchers = [gearing_launcher()];
         let mut rec = On::default();
-        let torps = torpedoes(&launchers, &bundle, 1.0, &provider, "PAUT902_D10_NEW_STOCK", &sources, &mut rec)
+        let torps = torpedoes(&launchers, &bundle, 1.0, None, &provider, "PAUT902_D10_NEW_STOCK", &sources, &mut rec)
             .expect("torpedoes computed");
         let prov = rec.into_provenance();
 
@@ -2220,7 +2238,9 @@ mod tests {
             &ModifierSources::default(),
             1.0,
             1.0,
+            None,
             1.0,
+            None,
             10,
             &provider,
             &mut Off,
@@ -2257,7 +2277,9 @@ mod tests {
             &ModifierSources::default(),
             1.0,
             1.0,
+            None,
             1.0,
+            None,
             10,
             &provider,
             &mut Off,
@@ -2307,7 +2329,9 @@ mod tests {
             &ModifierSources::default(),
             1.0,
             1.0,
+            None,
             1.0,
+            None,
             10,
             &provider,
             &mut Off,
@@ -2330,7 +2354,9 @@ mod tests {
             &ModifierSources::default(),
             1.0,
             1.0,
+            None,
             1.0,
+            None,
             10,
             &provider,
             &mut Off,
@@ -2351,7 +2377,9 @@ mod tests {
             &ModifierSources::default(),
             1.0,
             1.0,
+            None,
             1.0,
+            None,
             10,
             &provider,
             &mut Off,
@@ -2384,7 +2412,9 @@ mod tests {
             &ModifierSources::default(),
             1.0,
             1.0,
+            None,
             1.0,
+            None,
             10,
             &provider,
             &mut Off,
@@ -2418,7 +2448,9 @@ mod tests {
             &ModifierSources::default(),
             1.0,
             1.0,
+            None,
             1.0,
+            None,
             10,
             &provider,
             &mut Off,
@@ -2445,7 +2477,9 @@ mod tests {
             &ModifierSources::default(),
             1.0,
             1.0,
+            None,
             1.0,
+            None,
             10,
             &provider,
             &mut Off,
@@ -2471,7 +2505,9 @@ mod tests {
                 &ModifierSources::default(),
                 1.0,
                 1.0,
+                None,
                 1.0,
+                None,
                 10,
                 &provider,
                 &mut Off,
@@ -2494,7 +2530,9 @@ mod tests {
             &ModifierSources::default(),
             1.0,
             1.0,
+            None,
             1.0,
+            None,
             10,
             &provider,
             &mut Off,
@@ -2659,6 +2697,7 @@ mod tests {
             &ModifierBundle::empty(Species::Battleship),
             &ModifierSources::default(),
             1.0,
+            None,
             8,
             &provider,
             &mut Off,
@@ -2693,6 +2732,7 @@ mod tests {
             &ModifierBundle::empty(Species::Battleship),
             &ModifierSources::default(),
             1.0,
+            None,
             8,
             &provider,
             &mut Off,
@@ -2735,6 +2775,7 @@ mod tests {
             &bundle,
             &ModifierSources::default(),
             1.0,
+            None,
             8,
             &provider,
             &mut Off,
@@ -2757,6 +2798,7 @@ mod tests {
             &bundle,
             &ModifierSources::default(),
             1.0,
+            None,
             8,
             &provider,
             &mut Off,
@@ -2778,6 +2820,7 @@ mod tests {
                 &ModifierBundle::empty(Species::Battleship),
                 &ModifierSources::default(),
                 1.0,
+                None,
                 8,
                 &provider,
                 &mut Off
@@ -2803,6 +2846,7 @@ mod tests {
             &ModifierBundle::empty(Species::Battleship),
             &ModifierSources::default(),
             1.0,
+            None,
             8,
             &provider,
             &mut rec,
@@ -3160,9 +3204,22 @@ mod tests {
 
         let provider = worcester_provider();
         let mut rec = On::default();
-        let arty =
-            artillery(&worcester_artillery(), "ARTY", None, &bundle, &sources, 1.0, 1.0, 1.0, 10, &provider, &mut rec)
-                .expect("artillery computed");
+        let arty = artillery(
+            &worcester_artillery(),
+            "ARTY",
+            None,
+            &bundle,
+            &sources,
+            1.0,
+            1.0,
+            None,
+            1.0,
+            None,
+            10,
+            &provider,
+            &mut rec,
+        )
+        .expect("artillery computed");
 
         let prov = rec.into_provenance();
 
@@ -3204,7 +3261,9 @@ mod tests {
             &ModifierSources::default(),
             fc_coef,
             1.0,
+            None,
             1.0,
+            None,
             10,
             &provider,
             &mut rec,
@@ -3255,7 +3314,9 @@ mod tests {
             &sources,
             1.0,
             1.0,
+            None,
             1.0,
+            None,
             10,
             &provider,
             &mut rec,
@@ -3316,7 +3377,7 @@ mod tests {
 
         let provider = bismarck_secondary_provider();
         let mut rec = On::default();
-        let sec = secondaries(&bismarck_secondaries(), "HULL_B", &bundle, &sources, 1.0, 8, &provider, &mut rec)
+        let sec = secondaries(&bismarck_secondaries(), "HULL_B", &bundle, &sources, 1.0, None, 8, &provider, &mut rec)
             .expect("secondaries computed");
 
         let prov = rec.into_provenance();
@@ -3355,9 +3416,18 @@ mod tests {
 
         let provider = bismarck_secondary_provider();
         let mut rec = On::default();
-        let sec =
-            secondaries(&bismarck_secondaries_with_curve(), "HULL_B", &bundle, &sources, 1.0, 8, &provider, &mut rec)
-                .expect("secondaries computed");
+        let sec = secondaries(
+            &bismarck_secondaries_with_curve(),
+            "HULL_B",
+            &bundle,
+            &sources,
+            1.0,
+            None,
+            8,
+            &provider,
+            &mut rec,
+        )
+        .expect("secondaries computed");
 
         let prov = rec.into_provenance();
 

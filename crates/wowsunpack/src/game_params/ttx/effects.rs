@@ -393,6 +393,15 @@ impl Default for ReloadCoeffs {
     }
 }
 
+/// The `InputId` source for each per-armament reload channel populated by dynamic
+/// effects (Adrenaline Rush). `None` when the channel was not modified.
+#[derive(Clone, Debug, Default)]
+pub struct ReloadCoeffSources {
+    pub main: Option<InputId>,
+    pub secondary: Option<InputId>,
+    pub torpedo: Option<InputId>,
+}
+
 /// The resolved modifiers for a state: the aggregated static bundle, the consumable
 /// artillery range coefficient, and the dynamic per-armament reload multipliers -- all
 /// applied by the artillery/torpedo factories.
@@ -400,7 +409,9 @@ pub struct EffectiveModifiers {
     bundle: ModifierBundle,
     sources: ModifierSources,
     artillery_dist_coeff: f32,
+    artillery_dist_coeff_source: Option<InputId>,
     reload_coeffs: ReloadCoeffs,
+    reload_coeff_sources: ReloadCoeffSources,
 }
 
 impl EffectiveModifiers {
@@ -413,8 +424,14 @@ impl EffectiveModifiers {
     pub fn artillery_dist_coeff(&self) -> f32 {
         self.artillery_dist_coeff
     }
+    pub fn artillery_dist_coeff_source(&self) -> Option<&InputId> {
+        self.artillery_dist_coeff_source.as_ref()
+    }
     pub fn reload_coeffs(&self) -> ReloadCoeffs {
         self.reload_coeffs
+    }
+    pub fn reload_coeff_sources(&self) -> &ReloadCoeffSources {
+        &self.reload_coeff_sources
     }
 }
 
@@ -606,7 +623,9 @@ impl Effects {
         let mut contributed: Vec<CrewSkillModifier> = Vec::new();
         let mut sources = ModifierSources::default();
         let mut dist: f32 = 1.0;
+        let mut dist_source: Option<InputId> = None;
         let mut reload_coeffs = ReloadCoeffs::default();
+        let mut reload_coeff_sources = ReloadCoeffSources::default();
 
         for effect in &self.0 {
             let activation = state.get(effect.id()).unwrap_or_else(|| effect.default_activation());
@@ -637,13 +656,20 @@ impl Effects {
                             // SP2 stacking/innate must instead sum `c` per channel and evaluate once.
                             let c = m.get_for_species(&species).clamp(0.0, 1.0);
                             let mul = (1.0 - lost * c).max(EPSILON);
-                            // Reload coefficients are applied directly as per-armament multipliers,
-                            // not via the bundle; provenance for reload-coeff channels is out of scope
-                            // for this milestone.
+                            let src = input_id_for(effect.id());
                             match suffix {
-                                "Main" => reload_coeffs.main *= mul,
-                                "Sec" => reload_coeffs.secondary *= mul,
-                                "Torp" => reload_coeffs.torpedo *= mul,
+                                "Main" => {
+                                    reload_coeffs.main *= mul;
+                                    reload_coeff_sources.main = Some(src);
+                                }
+                                "Sec" => {
+                                    reload_coeffs.secondary *= mul;
+                                    reload_coeff_sources.secondary = Some(src);
+                                }
+                                "Torp" => {
+                                    reload_coeffs.torpedo *= mul;
+                                    reload_coeff_sources.torpedo = Some(src);
+                                }
                                 _ => {}
                             }
                         }
@@ -653,6 +679,9 @@ impl Effects {
                     for m in &effect.modifiers {
                         sources.record(m.name(), input_id_for(effect.id()), m.get_for_species(&species));
                         contributed.push(m.clone());
+                    }
+                    if *artillery_dist_coeff != 1.0 {
+                        dist_source = Some(input_id_for(effect.id()));
                     }
                     dist *= artillery_dist_coeff;
                 }
@@ -710,7 +739,14 @@ impl Effects {
         }
 
         let bundle = ModifierBundle::from_modifiers(&contributed, species, version)?;
-        Ok(EffectiveModifiers { bundle, sources, artillery_dist_coeff: dist, reload_coeffs })
+        Ok(EffectiveModifiers {
+            bundle,
+            sources,
+            artillery_dist_coeff: dist,
+            artillery_dist_coeff_source: dist_source,
+            reload_coeffs,
+            reload_coeff_sources,
+        })
     }
 }
 
@@ -731,6 +767,8 @@ impl EffectiveModifiers {
             &self.sources,
             self.reload_coeffs,
             self.artillery_dist_coeff,
+            self.artillery_dist_coeff_source.clone(),
+            self.reload_coeff_sources.clone(),
             level,
             provider,
             &mut crate::game_params::ttx::provenance::Off,
@@ -753,6 +791,8 @@ impl EffectiveModifiers {
             &self.sources,
             self.reload_coeffs,
             self.artillery_dist_coeff,
+            self.artillery_dist_coeff_source.clone(),
+            self.reload_coeff_sources.clone(),
             level,
             provider,
             &mut rec,
