@@ -2073,20 +2073,27 @@ impl ReplayRendererViewer {
                                 let click_pos = response.interact_pointer_pos().unwrap_or(response.rect.center());
                                 ann.context_menu_pos = click_pos;
 
-                                // Detect nearest ship to right-click position
+                                // Detect nearest ship to right-click position. Hit-test on
+                                // entity_id alone: player_name is absent when names are hidden
+                                // or the ship is undetected, but the ship is still selectable.
                                 ann.context_menu_ship = None;
                                 let state = shared_state.lock();
                                 if let Some(ref frame) = state.frame {
                                     let mut best_dist = 30.0_f32; // max click distance in screen px
+                                    let mut best: Option<(EntityId, Option<String>)> = None;
                                     for cmd in &frame.commands {
-                                        if let DrawCommand::Ship { pos, entity_id, player_name: Some(name), .. } = cmd {
+                                        if let DrawCommand::Ship { pos, entity_id, player_name, ship_name, .. } = cmd {
                                             let screen_pos = transform.minimap_to_screen(pos);
                                             let dist = click_pos.distance(screen_pos);
                                             if dist < best_dist {
                                                 best_dist = dist;
-                                                ann.context_menu_ship = Some((*entity_id, name.clone()));
+                                                best = Some((*entity_id, player_name.clone().or_else(|| ship_name.clone())));
                                             }
                                         }
+                                    }
+                                    if let Some((eid, name)) = best {
+                                        let label = name.unwrap_or_else(|| format!("Ship {eid}"));
+                                        ann.context_menu_ship = Some((eid, label));
                                     }
                                 }
                                 ann.show_context_menu = true;
@@ -2486,15 +2493,9 @@ impl ReplayRendererViewer {
                                     });
                                 });
 
-                            // Close menu on click outside (but not if a sub-popup like color picker is open)
-                            let menu_rect = menu_resp.response.rect;
-                            let any_popup = ctx.any_popup_open();
-                            let clicked_outside = !any_popup
-                                && ctx.input(|i| {
-                                    i.pointer.any_click()
-                                        && i.pointer.interact_pos().is_some_and(|p| !menu_rect.contains(p))
-                                });
-                            if clicked_outside {
+                            // Close menu on click outside (but not if a sub-popup like the
+                            // color picker is open, whose clicks land outside the menu rect).
+                            if menu_resp.response.clicked_elsewhere() && !ctx.any_popup_open() {
                                 annotation_arc.lock().show_context_menu = false;
                             }
                         }
