@@ -291,6 +291,7 @@ pub(crate) fn ship_stats_with<R: Recorder>(
         // Fire control has no standalone card (its coef folds into artillery range).
         fire_control: None,
         visibility,
+        consumables: Vec::new(),
     }
 }
 

@@ -92,6 +92,21 @@ pub enum TtxStat {
     TorpedoDisabledUnderwater,
     // Fire control
     FireControlMaxDist,
+    // Consumables: one variant per EffectiveConsumable field.
+    ConsumableReloadTime,
+    ConsumableWorkTime,
+    ConsumableCharges,
+    ConsumablePreparationTime,
+    ConsumableMaxCapacity,
+    ConsumableDetectionRadius,
+    ConsumableRegenerationHpSpeed,
+    ConsumableSmokeRadius,
+    ConsumableSmokeLifetime,
+    ConsumableFightersCount,
+    ConsumableCallFightersRadius,
+    ConsumableCallFightersTimeDelay,
+    ConsumableCallFightersTimeFromHeaven,
+    ConsumablePlaneRegenerationRate,
     // Visibility
     SeaDetection,
     SeaDetectionOnFire,
@@ -161,6 +176,20 @@ impl TtxStat {
         TtxStat::TorpedoIsDamageIncreasing,
         TtxStat::TorpedoDisabledUnderwater,
         TtxStat::FireControlMaxDist,
+        TtxStat::ConsumableReloadTime,
+        TtxStat::ConsumableWorkTime,
+        TtxStat::ConsumableCharges,
+        TtxStat::ConsumablePreparationTime,
+        TtxStat::ConsumableMaxCapacity,
+        TtxStat::ConsumableDetectionRadius,
+        TtxStat::ConsumableRegenerationHpSpeed,
+        TtxStat::ConsumableSmokeRadius,
+        TtxStat::ConsumableSmokeLifetime,
+        TtxStat::ConsumableFightersCount,
+        TtxStat::ConsumableCallFightersRadius,
+        TtxStat::ConsumableCallFightersTimeDelay,
+        TtxStat::ConsumableCallFightersTimeFromHeaven,
+        TtxStat::ConsumablePlaneRegenerationRate,
         TtxStat::SeaDetection,
         TtxStat::SeaDetectionOnFire,
         TtxStat::AirDetection,
@@ -230,6 +259,20 @@ impl TtxStat {
             TtxStat::TorpedoIsDamageIncreasing => "torpedoes.torpedoes.is_damage_increasing",
             TtxStat::TorpedoDisabledUnderwater => "torpedoes.torpedoes.disabled_underwater",
             TtxStat::FireControlMaxDist => "fire_control.max_dist",
+            TtxStat::ConsumableReloadTime => "consumable.reload_time",
+            TtxStat::ConsumableWorkTime => "consumable.work_time",
+            TtxStat::ConsumableCharges => "consumable.charges",
+            TtxStat::ConsumablePreparationTime => "consumable.preparation_time",
+            TtxStat::ConsumableMaxCapacity => "consumable.max_capacity",
+            TtxStat::ConsumableDetectionRadius => "consumable.detection_radius",
+            TtxStat::ConsumableRegenerationHpSpeed => "consumable.regeneration_hp_speed",
+            TtxStat::ConsumableSmokeRadius => "consumable.smoke_radius",
+            TtxStat::ConsumableSmokeLifetime => "consumable.smoke_lifetime",
+            TtxStat::ConsumableFightersCount => "consumable.fighters_count",
+            TtxStat::ConsumableCallFightersRadius => "consumable.call_fighters_radius",
+            TtxStat::ConsumableCallFightersTimeDelay => "consumable.call_fighters_time_delay",
+            TtxStat::ConsumableCallFightersTimeFromHeaven => "consumable.call_fighters_time_from_heaven",
+            TtxStat::ConsumablePlaneRegenerationRate => "consumable.plane_regeneration_rate",
             TtxStat::SeaDetection => "visibility.sea_detection",
             TtxStat::SeaDetectionOnFire => "visibility.sea_detection_on_fire",
             TtxStat::AirDetection => "visibility.air_detection",
@@ -383,6 +426,22 @@ impl TtxStat {
             | TtxStat::SecondaryShellBurnChance
             | TtxStat::SecondaryShellFloodChance
             | TtxStat::SecondaryShellMaxAmmo => return None,
+            // Consumables have no IDS_SHIP_PARAM_* catalog keys; labels are
+            // derived from the consumable type name at display time.
+            TtxStat::ConsumableReloadTime
+            | TtxStat::ConsumableWorkTime
+            | TtxStat::ConsumableCharges
+            | TtxStat::ConsumablePreparationTime
+            | TtxStat::ConsumableMaxCapacity
+            | TtxStat::ConsumableDetectionRadius
+            | TtxStat::ConsumableRegenerationHpSpeed
+            | TtxStat::ConsumableSmokeRadius
+            | TtxStat::ConsumableSmokeLifetime
+            | TtxStat::ConsumableFightersCount
+            | TtxStat::ConsumableCallFightersRadius
+            | TtxStat::ConsumableCallFightersTimeDelay
+            | TtxStat::ConsumableCallFightersTimeFromHeaven
+            | TtxStat::ConsumablePlaneRegenerationRate => return None,
         })
     }
 }
@@ -514,6 +573,21 @@ mod tests {
             TtxStat::SecondaryShellBurnChance,
             TtxStat::SecondaryShellFloodChance,
             TtxStat::SecondaryShellMaxAmmo,
+            // Consumables: no IDS_SHIP_PARAM_* catalog keys.
+            TtxStat::ConsumableReloadTime,
+            TtxStat::ConsumableWorkTime,
+            TtxStat::ConsumableCharges,
+            TtxStat::ConsumablePreparationTime,
+            TtxStat::ConsumableMaxCapacity,
+            TtxStat::ConsumableDetectionRadius,
+            TtxStat::ConsumableRegenerationHpSpeed,
+            TtxStat::ConsumableSmokeRadius,
+            TtxStat::ConsumableSmokeLifetime,
+            TtxStat::ConsumableFightersCount,
+            TtxStat::ConsumableCallFightersRadius,
+            TtxStat::ConsumableCallFightersTimeDelay,
+            TtxStat::ConsumableCallFightersTimeFromHeaven,
+            TtxStat::ConsumablePlaneRegenerationRate,
         ];
         expected.sort_by_key(|s| s.field_key());
 

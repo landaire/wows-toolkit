@@ -5,6 +5,7 @@
 //! remaining TTX quantities. Leaf structs hold `Option` fields (absent when not
 //! computable); per-species fields are filled in by later milestones.
 
+use crate::game_params::ttx::consumables::ConsumableCard;
 use crate::game_params::ttx::labels::TtxStat;
 use crate::game_params::types::Km;
 use crate::game_params::types::Meters;
@@ -299,6 +300,8 @@ pub struct ShipStats {
     pub torpedoes: Option<Torpedoes>,
     pub fire_control: Option<FireControl>,
     pub visibility: Option<Visibility>,
+    /// Consumable stat cards. Populated by Task 4; empty by default.
+    pub consumables: Vec<ConsumableCard>,
 }
 
 /// One enumerated stat: which [`TtxStat`] it is, an optional collection
@@ -397,6 +400,8 @@ impl ShipStats {
             scalar(&mut rows, TtxStat::SecondaryRangeDetection, v.secondary_range_detection.map(StatValue::Km));
             scalar(&mut rows, TtxStat::PeriscopeDepthDetection, v.periscope_depth_detection.map(StatValue::Km));
         }
+
+        push_consumable_rows(&mut rows, &self.consumables, &item);
 
         rows
     }
@@ -506,6 +511,37 @@ fn push_secondary_rows(
         item(rows, s.dispersion, q, Some(StatValue::Meters(m.dispersion)));
         item(rows, s.dispersion_vertical, q, Some(StatValue::Meters(m.dispersion_vertical)));
         push_shell_rows(rows, &s, &m.shell, q, item);
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn push_consumable_rows(
+    rows: &mut Vec<StatRow>,
+    cards: &[ConsumableCard],
+    item: &dyn Fn(&mut Vec<StatRow>, TtxStat, &str, Option<StatValue>),
+) {
+    for c in cards {
+        let q = c.label.as_str();
+        let s = &c.stats;
+        item(rows, TtxStat::ConsumableReloadTime, q, Some(StatValue::Seconds(s.reload_time)));
+        item(rows, TtxStat::ConsumablePreparationTime, q, Some(StatValue::Seconds(s.preparation_time)));
+        item(rows, TtxStat::ConsumableCharges, q, Some(StatValue::Ammo(s.charges)));
+        item(rows, TtxStat::ConsumableWorkTime, q, s.work_time.map(StatValue::Seconds));
+        item(rows, TtxStat::ConsumableMaxCapacity, q, s.max_capacity.map(StatValue::Float));
+        item(rows, TtxStat::ConsumableDetectionRadius, q, s.detection_radius.map(StatValue::Meters));
+        item(rows, TtxStat::ConsumableRegenerationHpSpeed, q, s.regeneration_hp_speed.map(StatValue::Float));
+        item(rows, TtxStat::ConsumableSmokeRadius, q, s.smoke_radius.map(StatValue::Km));
+        item(rows, TtxStat::ConsumableSmokeLifetime, q, s.smoke_lifetime.map(StatValue::Seconds));
+        item(rows, TtxStat::ConsumableFightersCount, q, s.fighters_count.map(StatValue::Float));
+        item(rows, TtxStat::ConsumableCallFightersRadius, q, s.call_fighters_radius.map(StatValue::Km));
+        item(rows, TtxStat::ConsumableCallFightersTimeDelay, q, s.call_fighters_time_delay.map(StatValue::Seconds));
+        item(
+            rows,
+            TtxStat::ConsumableCallFightersTimeFromHeaven,
+            q,
+            s.call_fighters_time_from_heaven.map(StatValue::Seconds),
+        );
+        item(rows, TtxStat::ConsumablePlaneRegenerationRate, q, s.plane_regeneration_rate.map(StatValue::Float));
     }
 }
 
@@ -808,6 +844,7 @@ mod tests {
         assert!(stats.torpedoes.is_none());
         assert!(stats.fire_control.is_none());
         assert!(stats.visibility.is_none());
+        assert!(stats.consumables.is_empty());
     }
 
     #[test]
@@ -982,6 +1019,33 @@ mod tests {
             shells: vec![shell()],
         };
 
+        use crate::game_params::ttx::consumables::ConsumableCard;
+        use crate::game_params::ttx::consumables::EffectiveConsumable;
+        use crate::recognized::Recognized;
+
+        // A card with all 14 EffectiveConsumable fields present so every
+        // Consumable* TtxStat variant is reachable from rows().
+        let full_consumable = ConsumableCard {
+            consumable: Recognized::Unknown("test".to_string()),
+            label: "test".to_string(),
+            stats: EffectiveConsumable {
+                reload_time: Seconds::from(1.0),
+                preparation_time: Seconds::from(1.0),
+                charges: AmmoCount::Finite(1),
+                work_time: Some(Seconds::from(1.0)),
+                max_capacity: Some(1.0),
+                detection_radius: Some(Meters::from(1.0)),
+                regeneration_hp_speed: Some(1.0),
+                smoke_radius: Some(Km::from(1.0)),
+                smoke_lifetime: Some(Seconds::from(1.0)),
+                fighters_count: Some(1.0),
+                call_fighters_radius: Some(Km::from(1.0)),
+                call_fighters_time_delay: Some(Seconds::from(1.0)),
+                call_fighters_time_from_heaven: Some(Seconds::from(1.0)),
+                plane_regeneration_rate: Some(1.0),
+            },
+        };
+
         let stats = ShipStats {
             durability: Some(Durability { health: Some(Hp::from(1.0)), torpedo_protection: Some(Percent::from(1.0)) }),
             mobility: Some(Mobility {
@@ -1036,6 +1100,7 @@ mod tests {
                 secondary_range_detection: Some(Km::from(1.0)),
                 periscope_depth_detection: Some(Km::from(1.0)),
             }),
+            consumables: vec![full_consumable],
         };
 
         let emitted: std::collections::HashSet<T> = stats.rows().into_iter().map(|r| r.stat).collect();
@@ -1073,5 +1138,47 @@ mod tests {
         let regen = rows.iter().find(|r| r.stat == TtxStat::BatteryRegeneration).unwrap();
         assert_eq!(regen.qualifier, None);
         assert_eq!(regen.value.to_string(), "1.2");
+    }
+
+    #[test]
+    fn consumable_rows_emits_present_fields_and_skips_none() {
+        use crate::game_params::ttx::consumables::ConsumableCard;
+        use crate::game_params::ttx::consumables::EffectiveConsumable;
+        use crate::recognized::Recognized;
+
+        let card = ConsumableCard {
+            consumable: Recognized::Unknown("crashCrew".to_string()),
+            label: "Damage Control Party".to_string(),
+            stats: EffectiveConsumable {
+                reload_time: Seconds::from(120.0),
+                preparation_time: Seconds::from(0.0),
+                charges: AmmoCount::Infinite,
+                work_time: Some(Seconds::from(15.0)),
+                max_capacity: None,
+                detection_radius: None,
+                regeneration_hp_speed: None,
+                smoke_radius: None,
+                smoke_lifetime: None,
+                fighters_count: None,
+                call_fighters_radius: None,
+                call_fighters_time_delay: None,
+                call_fighters_time_from_heaven: None,
+                plane_regeneration_rate: None,
+            },
+        };
+
+        let stats = ShipStats { consumables: vec![card], ..Default::default() };
+        let rows = stats.rows();
+
+        let reload = rows.iter().find(|r| r.stat == TtxStat::ConsumableReloadTime).unwrap();
+        assert_eq!(reload.qualifier.as_deref(), Some("Damage Control Party"));
+        assert_eq!(reload.value.to_string(), "120.0 s");
+
+        assert!(rows.iter().any(|r| r.stat == TtxStat::ConsumableCharges));
+        assert!(rows.iter().any(|r| r.stat == TtxStat::ConsumableWorkTime));
+
+        // None fields yield no rows.
+        assert!(!rows.iter().any(|r| r.stat == TtxStat::ConsumableSmokeRadius));
+        assert!(!rows.iter().any(|r| r.stat == TtxStat::ConsumableDetectionRadius));
     }
 }

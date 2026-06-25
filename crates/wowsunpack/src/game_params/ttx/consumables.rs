@@ -24,6 +24,7 @@ use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::types::AbilityCategory;
 use crate::game_params::types::Km;
 use crate::game_params::types::Meters;
+use crate::recognized::Recognized;
 
 /// Consumable group strings, `ConsumableConstants.py` `ConsumableGroup`.
 const GROUP_SHIP: &str = "ship";
@@ -133,6 +134,7 @@ const ADDITIONAL_CONSUMABLES_COUNT: &[&str] = &[
 /// equipped [`ModifierBundle`] has been folded in. Fields that are not applicable to
 /// a given consumable (or whose base value is absent) are `None`.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EffectiveConsumable {
     /// Cooldown between charges, `reloadTime * getConsumableReloadTime`
     /// (ConsumableUtils.py:115).
@@ -189,6 +191,18 @@ pub struct EffectiveConsumable {
     /// (ConsumableUtils.py:144). Raw rate (PERCENT measure, multiplier 1.0). `Some` only
     /// for the `regenerateHealth` type with a base `regenerationRate`.
     pub plane_regeneration_rate: Option<f32>,
+}
+
+/// One consumable the ship can mount, with its modifier-folded stats.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ConsumableCard {
+    /// Consumable identity (known or unknown), from `AbilityCategory::consumable_type`.
+    pub consumable: Recognized<crate::game_types::Consumable>,
+    /// Row-qualifier label: the raw consumable type, disambiguated "type (2)" only
+    /// if two cards share a type. Stored so recorder and rows() use one qualifier.
+    pub label: String,
+    pub stats: EffectiveConsumable,
 }
 
 /// Multiply `base` by `bundle.coef(name)` only when the consumable `type_name` is in
