@@ -23,6 +23,14 @@ pub struct ContributorLine {
     pub label: String,
     /// The applied magnitude, formatted: "x0.95" (Mul) or "+350" (Add).
     pub effect: String,
+    /// The signed amount this step moved the stat, in its units, trimmed
+    /// ("+1000", "-1.2"). Per-step deltas sum to `value - base_value`; for an
+    /// `order_sensitive` stat a multiplicative step's delta reflects its position
+    /// in the game formula.
+    pub delta: String,
+    /// The running stat value after this step applies, trimmed (the waterfall
+    /// absolute; the last contributor's equals the final `value`).
+    pub value_after: String,
 }
 
 /// One stat's full attribution, rendered.
@@ -39,6 +47,11 @@ pub struct AttributionLine {
     /// rotation speed). A consumer can resolve each key against the rendered
     /// set to recurse into the upstream stat's contributors.
     pub derived_from: Vec<StatKey>,
+    /// True when this stat's chain interleaves multiply and add. The per-step
+    /// `delta`s still sum to the total change, but a multiplicative step's delta
+    /// reflects its position in the game formula (an additive input applied before
+    /// a later multiply is amplified), so consumers may want to note that.
+    pub order_sensitive: bool,
 }
 
 /// The display label for an attribution input. Module/Upgrade names are resolved
@@ -69,6 +82,12 @@ fn format_effect(c: &Contribution) -> String {
         Op::Mul => format!("x{}", trim(c.operand)),
         Op::Add => format!("+{}", trim(c.operand)),
     }
+}
+
+/// Format a signed unit delta: "+1000", "-1.2" (`trim` already carries the minus).
+fn format_delta(d: f32) -> String {
+    let s = trim(d);
+    if d >= 0.0 { format!("+{s}") } else { s }
 }
 
 /// Trim a float to at most 3 decimals without trailing zeros.
@@ -125,12 +144,17 @@ pub fn render_attributions(
                 contributors: a
                     .steps
                     .iter()
-                    .map(|c| ContributorLine {
+                    .zip(a.step_deltas())
+                    .zip(a.running_values())
+                    .map(|((c, delta), running)| ContributorLine {
                         label: input_label(&c.input, loader, provider),
                         effect: format_effect(c),
+                        delta: format_delta(delta),
+                        value_after: trim(running),
                     })
                     .collect(),
                 derived_from: a.derived_from.clone(),
+                order_sensitive: a.order_sensitive(),
             }
         })
         .collect()
@@ -217,6 +241,15 @@ mod tests {
         assert_eq!(l.contributors[0].label, "AdrenalineRush");
         assert_eq!(l.contributors[0].effect, "x1.05");
         assert_eq!(l.contributors[1].effect, "+3500");
+        // Mixed Mul+Add chain: order-sensitive, and each contributor carries its
+        // signed unit delta. x1.05 on 19400 adds 970; +3500 adds 3500; they sum to
+        // the 4470 total change (23870 - 19400).
+        assert!(l.order_sensitive);
+        assert_eq!(l.contributors[0].delta, "+970");
+        assert_eq!(l.contributors[1].delta, "+3500");
+        // Running waterfall absolutes: 19400 -> 20370 -> 23870 (= final value).
+        assert_eq!(l.contributors[0].value_after, "20370");
+        assert_eq!(l.contributors[1].value_after, "23870");
     }
 
     #[test]

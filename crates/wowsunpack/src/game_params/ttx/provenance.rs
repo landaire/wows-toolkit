@@ -73,6 +73,104 @@ pub struct StatAttribution {
     pub value: f32,
 }
 
+impl StatAttribution {
+    /// The stat value with ONLY `input` applied to the base: the base folded
+    /// through just this input's steps, in their recorded (game-formula) order.
+    /// Returns `None` when `input` contributes no step to this stat.
+    ///
+    /// This is the exact "with only this modifier equipped" value for every stat,
+    /// mixed chains included, because isolating one input simply runs the game's
+    /// fixed formula with that input's contribution alone present. It is NOT the
+    /// input's additive share of the full change when the chain interleaves Mul
+    /// and Add (see [`order_sensitive`](Self::order_sensitive)).
+    pub fn isolated(&self, input: &InputId) -> Option<f32> {
+        let mut matched = false;
+        let value = self.steps.iter().filter(|c| &c.input == input).fold(self.base_value, |acc, c| {
+            matched = true;
+            match c.op {
+                Op::Mul => acc * c.operand,
+                Op::Add => acc + c.operand,
+            }
+        });
+        matched.then_some(value)
+    }
+
+    /// The signed change each step makes to the running value, in the stat's
+    /// units, in game-formula order. Telescoping: `base_value + sum == value`.
+    /// A multiplicative step's delta is taken at its position (`running * (k-1)`),
+    /// so it reflects in-loadout compounding rather than an isolated effect.
+    pub fn step_deltas(&self) -> Vec<f32> {
+        let mut acc = self.base_value;
+        self.steps
+            .iter()
+            .map(|c| {
+                let next = match c.op {
+                    Op::Mul => acc * c.operand,
+                    Op::Add => acc + c.operand,
+                };
+                let delta = next - acc;
+                acc = next;
+                delta
+            })
+            .collect()
+    }
+
+    /// The running stat value after each step applies, in game-formula order
+    /// (a waterfall: `base -> after step 0 -> after step 1 -> ... -> value`). The
+    /// last element equals `value`. Pair with [`step_deltas`](Self::step_deltas)
+    /// to show "+970 -> 20370" per contributor.
+    pub fn running_values(&self) -> Vec<f32> {
+        let mut acc = self.base_value;
+        self.steps
+            .iter()
+            .map(|c| {
+                acc = match c.op {
+                    Op::Mul => acc * c.operand,
+                    Op::Add => acc + c.operand,
+                };
+                acc
+            })
+            .collect()
+    }
+
+    /// The total signed amount `input` contributed to the final value, in the
+    /// stat's units (the sum of its steps' [`step_deltas`](Self::step_deltas)).
+    /// `None` when `input` contributes no step. This is the "+1000 hp" /
+    /// "-1.2 deg/s" figure; the per-input contributions sum to `value -
+    /// base_value`. When an input stacks multiplicatively with others, its share
+    /// reflects the game's fixed application order (see
+    /// [`order_sensitive`](Self::order_sensitive)).
+    pub fn contribution(&self, input: &InputId) -> Option<f32> {
+        let deltas = self.step_deltas();
+        let mut total = 0.0;
+        let mut matched = false;
+        for (c, d) in self.steps.iter().zip(deltas) {
+            if &c.input == input {
+                total += d;
+                matched = true;
+            }
+        }
+        matched.then_some(total)
+    }
+
+    /// True when the step chain interleaves `Mul` and `Add` steps, so an input's
+    /// [`isolated`](Self::isolated) value is not its additive share of the full
+    /// change (an additive step applied before a later multiply gets amplified).
+    /// The fixed game formula is identical for every loadout; this only flags how
+    /// a per-input delta should be interpreted, not any equip-order dependence.
+    pub fn order_sensitive(&self) -> bool {
+        let mut has_mul = false;
+        let mut has_add = false;
+        for c in &self.steps {
+            match c.op {
+                Op::Mul => has_mul = true,
+                Op::Add => has_add = true,
+            }
+        }
+        has_mul && has_add
+    }
+}
+
 /// Provenance for a whole card: one `StatAttribution` per `StatRow`, in
 /// `ShipStats::rows()` order.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -264,6 +362,123 @@ mod tests {
         };
         // 19400 * 1.05 + 3500 = 23870.
         assert!((ShipStatsProvenance::replay(&attr) - 23870.0).abs() < 1e-3);
+    }
+
+    fn health_mixed(upgrade: &InputId, skill: &InputId) -> StatAttribution {
+        StatAttribution {
+            stat: TtxStat::Health,
+            qualifier: None,
+            base_value: 19400.0,
+            base_source: InputId::Module { slot: ModuleSlot::Hull, name: "H".to_string() },
+            steps: vec![
+                Contribution {
+                    input: upgrade.clone(),
+                    modifier_name: "healthHullCoeff".to_string(),
+                    op: Op::Mul,
+                    operand: 1.05,
+                },
+                Contribution {
+                    input: skill.clone(),
+                    modifier_name: "healthPerLevel".to_string(),
+                    op: Op::Add,
+                    operand: 3500.0,
+                },
+            ],
+            derived_from: Vec::new(),
+            value: 23870.0,
+        }
+    }
+
+    #[test]
+    fn isolated_is_base_with_only_that_input() {
+        let upgrade = InputId::Upgrade { name: "U".to_string() };
+        let skill = InputId::Skill { name: CrewSkillName::from("S") };
+        let attr = health_mixed(&upgrade, &skill);
+        // "With only the hull-coeff upgrade": base * 1.05, not the mixed final.
+        assert!((attr.isolated(&upgrade).unwrap() - 19400.0 * 1.05).abs() < 1e-3);
+        // "With only the per-level skill": base + 3500.
+        assert!((attr.isolated(&skill).unwrap() - (19400.0 + 3500.0)).abs() < 1e-3);
+        // An input that contributes no step returns None.
+        assert_eq!(attr.isolated(&InputId::Innate { skill_type: "none".into() }), None);
+    }
+
+    #[test]
+    fn contribution_is_in_context_signed_delta() {
+        let upgrade = InputId::Upgrade { name: "U".to_string() };
+        let skill = InputId::Skill { name: CrewSkillName::from("S") };
+        let attr = health_mixed(&upgrade, &skill);
+        // base 19400; x1.05 (upgrade) then +3500 (skill).
+        // upgrade's delta is taken at its position: 19400 * 0.05 = 970.
+        assert!((attr.contribution(&upgrade).unwrap() - 970.0).abs() < 1e-3);
+        // the additive skill contributes its raw +3500.
+        assert!((attr.contribution(&skill).unwrap() - 3500.0).abs() < 1e-3);
+        // Per-input contributions telescope to value - base.
+        let sum: f32 = attr.step_deltas().iter().sum();
+        assert!((sum - (attr.value - attr.base_value)).abs() < 1e-3);
+        // Running waterfall: 19400 -> 20370 -> 23870; last equals value.
+        let running = attr.running_values();
+        assert!((running[0] - 20370.0).abs() < 1e-3);
+        assert!((running[1] - attr.value).abs() < 1e-3);
+        // An input that contributes no step.
+        assert_eq!(attr.contribution(&InputId::Innate { skill_type: "none".into() }), None);
+    }
+
+    #[test]
+    fn order_sensitive_only_when_chain_mixes_mul_and_add() {
+        let upgrade = InputId::Upgrade { name: "U".to_string() };
+        let skill = InputId::Skill { name: CrewSkillName::from("S") };
+        // Mixed Mul+Add chain.
+        assert!(health_mixed(&upgrade, &skill).order_sensitive());
+
+        // Pure-Mul chain (e.g. range): not order sensitive; isolated is base * coef.
+        let pure = StatAttribution {
+            stat: TtxStat::ArtilleryRange,
+            qualifier: None,
+            base_value: 16.0,
+            base_source: InputId::Module { slot: ModuleSlot::Hull, name: "A".to_string() },
+            steps: vec![Contribution {
+                input: upgrade.clone(),
+                modifier_name: "GMMaxDist".to_string(),
+                op: Op::Mul,
+                operand: 1.16,
+            }],
+            derived_from: Vec::new(),
+            value: 16.0 * 1.16,
+        };
+        assert!(!pure.order_sensitive());
+        assert!((pure.isolated(&upgrade).unwrap() - 16.0 * 1.16).abs() < 1e-3);
+    }
+
+    #[test]
+    fn isolated_folds_all_steps_of_one_input() {
+        // A single input providing both a coef and a bonus to one stat: isolated
+        // applies both, in recorded order (base * 1.2 + 5).
+        let skill = InputId::Skill { name: CrewSkillName::from("S") };
+        let attr = StatAttribution {
+            stat: TtxStat::GunRotationSpeed,
+            qualifier: None,
+            base_value: 30.0,
+            base_source: InputId::Module { slot: ModuleSlot::Hull, name: "A".to_string() },
+            steps: vec![
+                Contribution {
+                    input: skill.clone(),
+                    modifier_name: "GMRotationSpeed".to_string(),
+                    op: Op::Mul,
+                    operand: 1.2,
+                },
+                Contribution {
+                    input: skill.clone(),
+                    modifier_name: "GMRotationSpeedBonus".to_string(),
+                    op: Op::Add,
+                    operand: 5.0,
+                },
+            ],
+            derived_from: Vec::new(),
+            value: 41.0,
+        };
+        assert!((attr.isolated(&skill).unwrap() - (30.0 * 1.2 + 5.0)).abs() < 1e-3);
+        // Contribution sums the input's step deltas: (30*0.2) + 5 = 11.
+        assert!((attr.contribution(&skill).unwrap() - 11.0).abs() < 1e-3);
     }
 }
 
