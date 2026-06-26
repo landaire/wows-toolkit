@@ -28,9 +28,15 @@ pub struct ContributorLine {
     /// `order_sensitive` stat a multiplicative step's delta reflects its position
     /// in the game formula.
     pub delta: String,
+    /// The raw signed delta in the stat's units (`delta` unformatted). Surfaced
+    /// so a caller can apply its own good/bad polarity and formatting; the model
+    /// does not encode whether higher or lower is better.
+    pub delta_raw: f32,
     /// The running stat value after this step applies, trimmed (the waterfall
     /// absolute; the last contributor's equals the final `value`).
     pub value_after: String,
+    /// The raw running value after this step (`value_after` unformatted).
+    pub value_after_raw: f32,
 }
 
 /// One stat's full attribution, rendered.
@@ -150,7 +156,9 @@ pub fn render_attributions(
                         label: input_label(&c.input, loader, provider),
                         effect: format_effect(c),
                         delta: format_delta(delta),
+                        delta_raw: delta,
                         value_after: trim(running),
+                        value_after_raw: running,
                     })
                     .collect(),
                 derived_from: a.derived_from.clone(),
@@ -169,6 +177,7 @@ mod tests {
     const HEALTH_COEFF: f32 = 1.05;
     const HEALTH_BONUS: f32 = 3500.0;
     const HEALTH_FINAL: f32 = 23870.0;
+    const RENDER_EPS: f32 = 1e-3;
 
     use crate::game_params::ttx::model::AmmoCount;
     use crate::game_params::ttx::model::Hp;
@@ -257,6 +266,11 @@ mod tests {
         // Running waterfall absolutes: 19400 -> 20370 -> 23870 (= final value).
         assert_eq!(l.contributors[0].value_after, "20370");
         assert_eq!(l.contributors[1].value_after, "23870");
+        // Raw numeric fields let a caller apply its own polarity/formatting.
+        assert!((l.contributors[0].delta_raw - BASE_HEALTH * (HEALTH_COEFF - 1.0)).abs() < RENDER_EPS);
+        assert!((l.contributors[1].delta_raw - HEALTH_BONUS).abs() < RENDER_EPS);
+        assert!((l.contributors[0].value_after_raw - BASE_HEALTH * HEALTH_COEFF).abs() < RENDER_EPS);
+        assert!((l.contributors[1].value_after_raw - HEALTH_FINAL).abs() < RENDER_EPS);
     }
 
     #[test]
