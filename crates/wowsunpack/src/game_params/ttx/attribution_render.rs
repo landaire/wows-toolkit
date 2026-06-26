@@ -164,6 +164,12 @@ pub fn render_attributions(
 mod tests {
     use super::*;
     use crate::Rc;
+
+    const BASE_HEALTH: f32 = 19400.0;
+    const HEALTH_COEFF: f32 = 1.05;
+    const HEALTH_BONUS: f32 = 3500.0;
+    const HEALTH_FINAL: f32 = 23870.0;
+
     use crate::game_params::ttx::model::AmmoCount;
     use crate::game_params::ttx::model::Hp;
     use crate::game_params::ttx::model::StatValue;
@@ -210,27 +216,28 @@ mod tests {
             attributions: vec![StatAttribution {
                 stat: TtxStat::Health,
                 qualifier: None,
-                base_value: 19400.0,
+                base_value: BASE_HEALTH,
                 base_source: InputId::Module { slot: ModuleSlot::Hull, name: "PAUH911".into() },
                 steps: vec![
                     Contribution {
                         input: InputId::Skill { name: CrewSkillName::from("AdrenalineRush") },
                         modifier_name: "healthHullCoeff".into(),
                         op: Op::Mul,
-                        operand: 1.05,
+                        operand: HEALTH_COEFF,
                     },
                     Contribution {
                         input: InputId::Upgrade { name: "PCM030".into() },
                         modifier_name: "healthPerLevel".into(),
                         op: Op::Add,
-                        operand: 3500.0,
+                        operand: HEALTH_BONUS,
                     },
                 ],
                 derived_from: Vec::new(),
-                value: 23870.0,
+                value: HEALTH_FINAL,
             }],
         };
-        let rows = vec![StatRow { stat: TtxStat::Health, qualifier: None, value: StatValue::Hp(Hp::from(23870.0)) }];
+        let rows =
+            vec![StatRow { stat: TtxStat::Health, qualifier: None, value: StatValue::Hp(Hp::from(HEALTH_FINAL)) }];
         let lines = render_attributions(&prov, &rows, &EchoLoader, &EmptyProvider);
         assert_eq!(lines.len(), 1);
         let l = &lines[0];

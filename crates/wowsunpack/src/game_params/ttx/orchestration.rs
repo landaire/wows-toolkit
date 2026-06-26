@@ -682,6 +682,19 @@ fn artillery_armor_maps<'a>(
 mod tests {
     use super::*;
     use crate::Rc;
+
+    const SONAR_RELOAD_S: f32 = 90.0;
+    const SONAR_WORK_TIME_S: f32 = 100.0;
+    const SONAR_BASE_CHARGES: isize = 3;
+    const SUPERINTENDENT_BONUS: f32 = 1.0;
+    const SONAR_CHARGES_WITH_SUPER: f32 = 4.0;
+    const CONSUMABLE_RELOAD_COEFF: f32 = 0.9;
+    const SONAR_RELOAD_AFTER_MOD_S: f32 = 81.0;
+    const BIG_GUN_VISIBILITY_COEFF: f32 = 1.05;
+    const GEARING_SEA_DETECTION_KM: f32 = 7.33;
+    const FC_COEF: f32 = 1.2;
+    const GEARING_BASE_RANGE_KM: f32 = 11.13;
+
     use crate::game_params::ttx::components::ArtilleryComponentStats;
     use crate::game_params::ttx::components::ArtilleryGunStats;
     use crate::game_params::ttx::components::EngineComponentStats;
@@ -1011,8 +1024,8 @@ mod tests {
         let provider = gearing_provider();
         let stats = ship_stats_stock(&ship, &provider);
         let range = stats.artillery.expect("artillery").range.expect("range").value();
-        // 11.13 * 1.2 (fc coef) * 1.0 (GMMaxDist) = 13.356.
-        assert!((range - 13.356).abs() < 1e-2, "got {range}");
+        // GEARING_BASE_RANGE_KM * FC_COEF * 1.0 (GMMaxDist) = 13.356.
+        assert!((range - GEARING_BASE_RANGE_KM * FC_COEF).abs() < 1e-2, "got {range}");
     }
 
     #[test]
@@ -1049,8 +1062,8 @@ mod tests {
         let sel = ShipUpgradeSelection::stock(&ship);
         let stats = ship_stats(&ship, &sel, &bundle, 10, &provider);
         let sea = stats.visibility.expect("visibility").sea_detection.expect("sea").value();
-        // 7.33 * 1.05 (big-gun penalty applies because the gun is 152mm) = 7.6965.
-        assert!((sea - 7.6965).abs() < 1e-3, "got {sea}");
+        // GEARING_SEA_DETECTION_KM * BIG_GUN_VISIBILITY_COEFF = 7.6965.
+        assert!((sea - GEARING_SEA_DETECTION_KM * BIG_GUN_VISIBILITY_COEFF).abs() < 1e-3, "got {sea}");
     }
 
     #[test]
@@ -1258,10 +1271,10 @@ mod tests {
             .consumable_type("sonar".to_string())
             .group("ship".to_string())
             .icon_id(String::new())
-            .num_consumables(3)
+            .num_consumables(SONAR_BASE_CHARGES)
             .preparation_time(0.0)
-            .reload_time(90.0)
-            .work_time(100.0)
+            .reload_time(SONAR_RELOAD_S)
+            .work_time(SONAR_WORK_TIME_S)
             .effect_fields(fields)
             .build()
     }
@@ -1655,7 +1668,7 @@ mod tests {
             .find(|a| a.stat == TtxStat::ConsumableCharges && a.qualifier.as_deref() == Some(&label))
             .expect("ConsumableCharges attribution for sonar");
 
-        // base=3, final=4 after the +1 bonus.
+        // base=SONAR_BASE_CHARGES, final=SONAR_CHARGES_WITH_SUPER after the +SUPERINTENDENT_BONUS bonus.
         let replayed = ShipStatsProvenance::replay(charges_attr);
         assert!(
             (replayed - charges_attr.value).abs() <= 1e-2,
@@ -1664,8 +1677,10 @@ mod tests {
             charges_attr.value
         );
         assert!(
-            (charges_attr.value - 4.0).abs() < 1e-3,
-            "expected 4 charges after +1 bonus, got {}",
+            (charges_attr.value - SONAR_CHARGES_WITH_SUPER).abs() < 1e-3,
+            "expected {} charges after +{} bonus, got {}",
+            SONAR_CHARGES_WITH_SUPER,
+            SUPERINTENDENT_BONUS,
             charges_attr.value
         );
 
@@ -1695,11 +1710,15 @@ mod tests {
         let provider = sonar_consumables_provider();
         let sel = ShipUpgradeSelection::stock(&ship);
 
-        // ConsumableReloadTime 0.9 applied as a multiplicative coef: 90 * 0.9 = 81.
-        let mods = [uniform_modifier("ConsumableReloadTime", 0.9)];
+        // ConsumableReloadTime CONSUMABLE_RELOAD_COEFF applied as a multiplicative coef: SONAR_RELOAD_S * CONSUMABLE_RELOAD_COEFF = SONAR_RELOAD_AFTER_MOD_S.
+        let mods = [uniform_modifier("ConsumableReloadTime", CONSUMABLE_RELOAD_COEFF)];
         let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, test_version()).unwrap();
         let mut sources = ModifierSources::default();
-        sources.record("ConsumableReloadTime", InputId::Upgrade { name: "ConsumablesMod3".into() }, 0.9);
+        sources.record(
+            "ConsumableReloadTime",
+            InputId::Upgrade { name: "ConsumablesMod3".into() },
+            CONSUMABLE_RELOAD_COEFF,
+        );
 
         let (stats, prov) = ship_stats_explained(&ship, &sel, &bundle, &sources, 10, &provider);
 
@@ -1719,10 +1738,12 @@ mod tests {
             replayed,
             reload_attr.value
         );
-        // 90 * allConsumableReloadTime(1.0) * ConsumableReloadTime(0.9) * sonarReloadCoeff(1.0) = 81
+        // SONAR_RELOAD_S * allConsumableReloadTime(1.0) * CONSUMABLE_RELOAD_COEFF * sonarReloadCoeff(1.0) = SONAR_RELOAD_AFTER_MOD_S
         assert!(
-            (reload_attr.value - 81.0).abs() < 1e-2,
-            "expected 81 s reload after 0.9x modifier, got {}",
+            (reload_attr.value - SONAR_RELOAD_AFTER_MOD_S).abs() < 1e-2,
+            "expected {} s reload after {}x modifier, got {}",
+            SONAR_RELOAD_AFTER_MOD_S,
+            CONSUMABLE_RELOAD_COEFF,
             reload_attr.value
         );
 

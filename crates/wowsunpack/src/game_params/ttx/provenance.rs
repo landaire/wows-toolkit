@@ -336,56 +336,70 @@ impl Recorder for On {
 mod tests {
     use super::*;
 
+    const HULL_BASE_HEALTH: f32 = 19400.0;
+    const HULL_COEFF: f32 = 1.05;
+    const PER_LEVEL_BONUS: f32 = 3500.0;
+    const HEALTH_AFTER_COEFF: f32 = 20370.0;
+    const HEALTH_FINAL: f32 = 23870.0;
+    const BASE_RANGE: f32 = 16.0;
+    const RANGE_COEFF: f32 = 1.16;
+    const BASE_ROT_SPEED: f32 = 30.0;
+    const ROT_SPEED_COEFF: f32 = 1.2;
+    const ROT_SPEED_BONUS: f32 = 5.0;
+    const ROT_SPEED_FINAL: f32 = 41.0;
+    const ROT_SPEED_CONTRIBUTION: f32 = 11.0;
+    const EPS: f32 = 1e-3;
+
     #[test]
     fn replay_reconstructs_value() {
         let attr = StatAttribution {
             stat: TtxStat::Health,
             qualifier: None,
-            base_value: 19400.0,
+            base_value: HULL_BASE_HEALTH,
             base_source: InputId::Module { slot: ModuleSlot::Hull, name: "H".to_string() },
             steps: vec![
                 Contribution {
                     input: InputId::Upgrade { name: "U".to_string() },
                     modifier_name: "healthHullCoeff".to_string(),
                     op: Op::Mul,
-                    operand: 1.05,
+                    operand: HULL_COEFF,
                 },
                 Contribution {
                     input: InputId::Skill { name: CrewSkillName::from("S") },
                     modifier_name: "healthPerLevel".to_string(),
                     op: Op::Add,
-                    operand: 3500.0,
+                    operand: PER_LEVEL_BONUS,
                 },
             ],
             derived_from: Vec::new(),
-            value: 23870.0,
+            value: HEALTH_FINAL,
         };
-        // 19400 * 1.05 + 3500 = 23870.
-        assert!((ShipStatsProvenance::replay(&attr) - 23870.0).abs() < 1e-3);
+        // HULL_BASE_HEALTH * HULL_COEFF + PER_LEVEL_BONUS = HEALTH_FINAL.
+        assert!((ShipStatsProvenance::replay(&attr) - HEALTH_FINAL).abs() < EPS);
     }
 
     fn health_mixed(upgrade: &InputId, skill: &InputId) -> StatAttribution {
         StatAttribution {
             stat: TtxStat::Health,
             qualifier: None,
-            base_value: 19400.0,
+            base_value: HULL_BASE_HEALTH,
             base_source: InputId::Module { slot: ModuleSlot::Hull, name: "H".to_string() },
             steps: vec![
                 Contribution {
                     input: upgrade.clone(),
                     modifier_name: "healthHullCoeff".to_string(),
                     op: Op::Mul,
-                    operand: 1.05,
+                    operand: HULL_COEFF,
                 },
                 Contribution {
                     input: skill.clone(),
                     modifier_name: "healthPerLevel".to_string(),
                     op: Op::Add,
-                    operand: 3500.0,
+                    operand: PER_LEVEL_BONUS,
                 },
             ],
             derived_from: Vec::new(),
-            value: 23870.0,
+            value: HEALTH_FINAL,
         }
     }
 
@@ -394,10 +408,10 @@ mod tests {
         let upgrade = InputId::Upgrade { name: "U".to_string() };
         let skill = InputId::Skill { name: CrewSkillName::from("S") };
         let attr = health_mixed(&upgrade, &skill);
-        // "With only the hull-coeff upgrade": base * 1.05, not the mixed final.
-        assert!((attr.isolated(&upgrade).unwrap() - 19400.0 * 1.05).abs() < 1e-3);
-        // "With only the per-level skill": base + 3500.
-        assert!((attr.isolated(&skill).unwrap() - (19400.0 + 3500.0)).abs() < 1e-3);
+        // "With only the hull-coeff upgrade": base * HULL_COEFF, not the mixed final.
+        assert!((attr.isolated(&upgrade).unwrap() - HULL_BASE_HEALTH * HULL_COEFF).abs() < EPS);
+        // "With only the per-level skill": base + PER_LEVEL_BONUS.
+        assert!((attr.isolated(&skill).unwrap() - (HULL_BASE_HEALTH + PER_LEVEL_BONUS)).abs() < EPS);
         // An input that contributes no step returns None.
         assert_eq!(attr.isolated(&InputId::Innate { skill_type: "none".into() }), None);
     }
@@ -407,18 +421,19 @@ mod tests {
         let upgrade = InputId::Upgrade { name: "U".to_string() };
         let skill = InputId::Skill { name: CrewSkillName::from("S") };
         let attr = health_mixed(&upgrade, &skill);
-        // base 19400; x1.05 (upgrade) then +3500 (skill).
-        // upgrade's delta is taken at its position: 19400 * 0.05 = 970.
-        assert!((attr.contribution(&upgrade).unwrap() - 970.0).abs() < 1e-3);
-        // the additive skill contributes its raw +3500.
-        assert!((attr.contribution(&skill).unwrap() - 3500.0).abs() < 1e-3);
+        // base HULL_BASE_HEALTH; xHULL_COEFF (upgrade) then +PER_LEVEL_BONUS (skill).
+        // upgrade's delta is taken at its position: HULL_BASE_HEALTH * (HULL_COEFF - 1) = 970.
+        const UPGRADE_DELTA: f32 = 970.0;
+        assert!((attr.contribution(&upgrade).unwrap() - UPGRADE_DELTA).abs() < EPS);
+        // the additive skill contributes its raw +PER_LEVEL_BONUS.
+        assert!((attr.contribution(&skill).unwrap() - PER_LEVEL_BONUS).abs() < EPS);
         // Per-input contributions telescope to value - base.
         let sum: f32 = attr.step_deltas().iter().sum();
-        assert!((sum - (attr.value - attr.base_value)).abs() < 1e-3);
-        // Running waterfall: 19400 -> 20370 -> 23870; last equals value.
+        assert!((sum - (attr.value - attr.base_value)).abs() < EPS);
+        // Running waterfall: HULL_BASE_HEALTH -> HEALTH_AFTER_COEFF -> HEALTH_FINAL; last equals value.
         let running = attr.running_values();
-        assert!((running[0] - 20370.0).abs() < 1e-3);
-        assert!((running[1] - attr.value).abs() < 1e-3);
+        assert!((running[0] - HEALTH_AFTER_COEFF).abs() < EPS);
+        assert!((running[1] - attr.value).abs() < EPS);
         // An input that contributes no step.
         assert_eq!(attr.contribution(&InputId::Innate { skill_type: "none".into() }), None);
     }
@@ -434,57 +449,66 @@ mod tests {
         let pure = StatAttribution {
             stat: TtxStat::ArtilleryRange,
             qualifier: None,
-            base_value: 16.0,
+            base_value: BASE_RANGE,
             base_source: InputId::Module { slot: ModuleSlot::Hull, name: "A".to_string() },
             steps: vec![Contribution {
                 input: upgrade.clone(),
                 modifier_name: "GMMaxDist".to_string(),
                 op: Op::Mul,
-                operand: 1.16,
+                operand: RANGE_COEFF,
             }],
             derived_from: Vec::new(),
-            value: 16.0 * 1.16,
+            value: BASE_RANGE * RANGE_COEFF,
         };
         assert!(!pure.order_sensitive());
-        assert!((pure.isolated(&upgrade).unwrap() - 16.0 * 1.16).abs() < 1e-3);
+        assert!((pure.isolated(&upgrade).unwrap() - BASE_RANGE * RANGE_COEFF).abs() < EPS);
     }
 
     #[test]
     fn isolated_folds_all_steps_of_one_input() {
         // A single input providing both a coef and a bonus to one stat: isolated
-        // applies both, in recorded order (base * 1.2 + 5).
+        // applies both, in recorded order (base * ROT_SPEED_COEFF + ROT_SPEED_BONUS).
         let skill = InputId::Skill { name: CrewSkillName::from("S") };
         let attr = StatAttribution {
             stat: TtxStat::GunRotationSpeed,
             qualifier: None,
-            base_value: 30.0,
+            base_value: BASE_ROT_SPEED,
             base_source: InputId::Module { slot: ModuleSlot::Hull, name: "A".to_string() },
             steps: vec![
                 Contribution {
                     input: skill.clone(),
                     modifier_name: "GMRotationSpeed".to_string(),
                     op: Op::Mul,
-                    operand: 1.2,
+                    operand: ROT_SPEED_COEFF,
                 },
                 Contribution {
                     input: skill.clone(),
                     modifier_name: "GMRotationSpeedBonus".to_string(),
                     op: Op::Add,
-                    operand: 5.0,
+                    operand: ROT_SPEED_BONUS,
                 },
             ],
             derived_from: Vec::new(),
-            value: 41.0,
+            value: ROT_SPEED_FINAL,
         };
-        assert!((attr.isolated(&skill).unwrap() - (30.0 * 1.2 + 5.0)).abs() < 1e-3);
-        // Contribution sums the input's step deltas: (30*0.2) + 5 = 11.
-        assert!((attr.contribution(&skill).unwrap() - 11.0).abs() < 1e-3);
+        assert!((attr.isolated(&skill).unwrap() - (BASE_ROT_SPEED * ROT_SPEED_COEFF + ROT_SPEED_BONUS)).abs() < EPS);
+        // Contribution sums the input's step deltas: (base*0.2) + bonus = ROT_SPEED_CONTRIBUTION.
+        assert!((attr.contribution(&skill).unwrap() - ROT_SPEED_CONTRIBUTION).abs() < EPS);
     }
 }
 
 #[cfg(test)]
 mod recorder_tests {
     use super::*;
+
+    const BASE_SPEED: f32 = 36.0;
+    const SPEED_COEFF_U1: f32 = 1.05;
+    const SPEED_COEFF_S1: f32 = 1.10;
+    const SPEED_FINAL: f32 = 41.58;
+    const BASE_RANGE_FC: f32 = 11.13;
+    const SEA_DETECTION: f32 = 7.33;
+    const FIRE_PENALTY: f32 = 2.0;
+    const EPS: f32 = 1e-3;
 
     fn sources_with(name: &str, entries: &[(InputId, f32)]) -> ModifierSources {
         let mut s = ModifierSources::default();
@@ -500,9 +524,9 @@ mod recorder_tests {
         rec.record(
             TtxStat::Speed,
             None,
-            36.0,
+            BASE_SPEED,
             InputId::Module { slot: ModuleSlot::Hull, name: "H".into() },
-            37.8,
+            BASE_SPEED * SPEED_COEFF_U1,
             |b| {
                 b.coef(&ModifierSources::default(), "speedCoef");
             },
@@ -514,15 +538,15 @@ mod recorder_tests {
     fn on_records_base_and_per_source_steps() {
         let up = InputId::Upgrade { name: "U1".into() };
         let sk = InputId::Skill { name: CrewSkillName::from("S1") };
-        let sources = sources_with("speedCoef", &[(up.clone(), 1.05), (sk.clone(), 1.10)]);
+        let sources = sources_with("speedCoef", &[(up.clone(), SPEED_COEFF_U1), (sk.clone(), SPEED_COEFF_S1)]);
 
         let mut rec = On::default();
         rec.record(
             TtxStat::Speed,
             None,
-            36.0,
+            BASE_SPEED,
             InputId::Module { slot: ModuleSlot::Hull, name: "H".into() },
-            41.58,
+            SPEED_FINAL,
             |b| {
                 b.coef(&sources, "speedCoef");
             },
@@ -531,14 +555,14 @@ mod recorder_tests {
         let prov = rec.into_provenance();
         assert_eq!(prov.attributions.len(), 1);
         let a = &prov.attributions[0];
-        assert_eq!(a.base_value, 36.0);
+        assert_eq!(a.base_value, BASE_SPEED);
         assert_eq!(a.steps.len(), 2);
         assert_eq!(a.steps[0].input, up);
         assert_eq!(a.steps[0].op, Op::Mul);
-        assert!((a.steps[0].operand - 1.05).abs() < 1e-6);
+        assert!((a.steps[0].operand - SPEED_COEFF_U1).abs() < 1e-6);
         assert_eq!(a.steps[1].input, sk);
-        // Replay: 36 * 1.05 * 1.10 = 41.58.
-        assert!((ShipStatsProvenance::replay(a) - 41.58).abs() < 1e-3);
+        // Replay: BASE_SPEED * SPEED_COEFF_U1 * SPEED_COEFF_S1 = SPEED_FINAL.
+        assert!((ShipStatsProvenance::replay(a) - SPEED_FINAL).abs() < EPS);
     }
 
     #[test]
@@ -547,9 +571,9 @@ mod recorder_tests {
         rec.record(
             TtxStat::ArtilleryRange,
             None,
-            11.13,
+            BASE_RANGE_FC,
             InputId::Module { slot: ModuleSlot::Artillery, name: "A".into() },
-            11.13,
+            BASE_RANGE_FC,
             |b| {
                 b.module(InputId::Module { slot: ModuleSlot::FireControl, name: "FC".into() }, "maxDistCoef", 1.0);
             },
@@ -563,23 +587,30 @@ mod recorder_tests {
 
         // Zero value: no step recorded.
         let mut rec = On::default();
-        rec.record(TtxStat::SeaDetectionOnFire, None, 7.33, hull_src.clone(), 7.33, |b| {
+        rec.record(TtxStat::SeaDetectionOnFire, None, SEA_DETECTION, hull_src.clone(), SEA_DETECTION, |b| {
             b.module_add(hull_src.clone(), "visibilityCoefFire", 0.0);
         });
         assert!(rec.into_provenance().attributions[0].steps.is_empty(), "zero fire should record no step");
 
         // Non-zero value: one Op::Add step recorded.
         let mut rec = On::default();
-        rec.record(TtxStat::SeaDetectionOnFire, None, 7.33, hull_src.clone(), 9.33, |b| {
-            b.module_add(hull_src.clone(), "visibilityCoefFire", 2.0);
-        });
+        rec.record(
+            TtxStat::SeaDetectionOnFire,
+            None,
+            SEA_DETECTION,
+            hull_src.clone(),
+            SEA_DETECTION + FIRE_PENALTY,
+            |b| {
+                b.module_add(hull_src.clone(), "visibilityCoefFire", FIRE_PENALTY);
+            },
+        );
         let prov = rec.into_provenance();
         let a = &prov.attributions[0];
         assert_eq!(a.steps.len(), 1);
         assert_eq!(a.steps[0].op, Op::Add);
-        assert!((a.steps[0].operand - 2.0).abs() < 1e-6);
-        // Replay: 7.33 + 2.0 = 9.33.
-        assert!((ShipStatsProvenance::replay(a) - 9.33).abs() < 1e-4);
+        assert!((a.steps[0].operand - FIRE_PENALTY).abs() < 1e-6);
+        // Replay: SEA_DETECTION + FIRE_PENALTY.
+        assert!((ShipStatsProvenance::replay(a) - (SEA_DETECTION + FIRE_PENALTY)).abs() < 1e-4);
     }
 
     #[test]

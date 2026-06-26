@@ -1457,17 +1457,49 @@ mod tests {
     /// The version at which the toolkit's `MODIFIER_SETTINGS` table takes effect.
     const VERSION: crate::data::Version = crate::data::Version::base(15, 0, 0);
 
+    const GEARING_HULL_HEALTH: f32 = 19400.0;
+    const GEARING_SPEED_KN: f32 = 36.0;
+    const GEARING_RUDDER_S: f32 = 4.25;
+    const GEARING_TURNING_M: f32 = 640.0;
+    const BALAO_BATTERY_CAPACITY: f32 = 240.0;
+    const BALAO_BATTERY_REGEN: f32 = 1.2;
+    const HEALTH_PER_LEVEL: f32 = 350.0;
+    const HEALTH_COEFF: f32 = 1.05;
+    const HEALTH_AFTER_MOD: f32 = 24050.0;
+    const TORP_ALPHA: f32 = 53500.0;
+    const TORP_FLOOD: f32 = 1200.0;
+    const TORP_SPEED: f32 = 66.0;
+    const TORP_MAX_DIST_BW: f32 = 350.0;
+    const TORP_VISIBILITY: f32 = 1.4;
+    const TORP_RANGE_KM: f32 = 10.5;
+    const LAUNCHER_SHOT_DELAY: f32 = 103.0;
+    const LAUNCHER_ROT_SPEED: f32 = 25.0;
+    const LAUNCHER_BARRELS: f32 = 5.0;
+    const SPEED_BONUS: f32 = 5.0;
+    const SPEED_AFTER_BONUS: f32 = 71.0;
+    const DAMAGE_COEFF: f32 = 1.2;
+    const TORP_ROT_COEFF: f32 = 1.2;
+    const TORP_ROT_AFTER_COEFF: f32 = 30.0;
+    const TORP_ROT_BONUS: f32 = 5.0;
+    const ROT_TIME: f32 = 6.0;
+    const SPEED_COEFF: f32 = 1.05;
+    const SPEED_AFTER_COEFF: f32 = 37.8;
+    const SPEED_MULTIPLIER: f32 = 1.05;
+    const NORMAL_SPEED_MULTIPLIER: f32 = 1.1;
+    const SPEED_BONUS_PROV: f32 = 2.0;
+    const RANGE_COEFF_PROV: f32 = 1.15;
+
     /// Gearing's real default-hull base stats (GameParams `PASD013_Gearing_1945`
     /// `A_Hull`): health 19400, maxSpeed 36, speedCoef 1.0, turningRadius 640,
     /// rudderTime 4.25, visibilityFactor 7.33. `floodNodes[0][0]` is 0.333 (==
     /// DEFAULT_UW_DAMAGE_COEFF), so flood_prob is 0.0; no SubmarineBattery (DD).
     fn gearing_hull() -> HullComponentStats {
         HullComponentStats {
-            health: Some(Hp::from(19400.0)),
-            max_speed: Some(Knots::from(36.0)),
+            health: Some(Hp::from(GEARING_HULL_HEALTH)),
+            max_speed: Some(Knots::from(GEARING_SPEED_KN)),
             speed_coef: Some(1.0),
-            turning_radius: Some(Meters::from(640.0)),
-            rudder_time: Some(Seconds::from(4.25)),
+            turning_radius: Some(Meters::from(GEARING_TURNING_M)),
+            rudder_time: Some(Seconds::from(GEARING_RUDDER_S)),
             visibility_factor: Some(Km::from(7.33)),
             visibility_factor_by_plane: Some(Km::from(3.41)),
             visibility_coef_fire: Some(Km::from(2.0)),
@@ -1491,7 +1523,11 @@ mod tests {
     /// Balao's real submarine battery (GameParams `PASS110_Balao` `A_Hull`
     /// `SubmarineBattery`): capacity 240, regenRate 1.2.
     fn balao_hull() -> HullComponentStats {
-        HullComponentStats { battery_capacity: Some(240.0), battery_regen_rate: Some(1.2), ..Default::default() }
+        HullComponentStats {
+            battery_capacity: Some(BALAO_BATTERY_CAPACITY),
+            battery_regen_rate: Some(BALAO_BATTERY_REGEN),
+            ..Default::default()
+        }
     }
 
     /// Gearing's engine `speedCoef` is 0.0 (hull carries the full coef).
@@ -1522,8 +1558,8 @@ mod tests {
             10,
             &mut Off,
         );
-        // ceil(19400 / 50) * 50 = 19400 (healthPerLevel 0, healthHullCoeff 1).
-        assert_eq!(durability.health, Some(Hp::from(19400.0)));
+        // ceil(GEARING_HULL_HEALTH / 50) * 50 = GEARING_HULL_HEALTH (healthPerLevel 0, healthHullCoeff 1).
+        assert_eq!(durability.health, Some(Hp::from(GEARING_HULL_HEALTH)));
     }
 
     #[test]
@@ -1596,18 +1632,18 @@ mod tests {
             &ModifierSources::default(),
             &mut Off,
         );
-        // 36 * clamp(1.0 + 0.0) * 1.0 = 36.
-        assert_eq!(mobility.speed, Some(Knots::from(36.0)));
+        // GEARING_SPEED_KN * clamp(1.0 + 0.0) * 1.0 = GEARING_SPEED_KN.
+        assert_eq!(mobility.speed, Some(Knots::from(GEARING_SPEED_KN)));
         // turningRadius is a direct field.
-        assert_eq!(mobility.turning_radius, Some(Meters::from(640.0)));
-        // 4.25 * 1.0 (stock SGRudderTime) = 4.25.
-        assert_eq!(mobility.rudder_time, Some(Seconds::from(4.25)));
+        assert_eq!(mobility.turning_radius, Some(Meters::from(GEARING_TURNING_M)));
+        // GEARING_RUDDER_S * 1.0 (stock SGRudderTime) = GEARING_RUDDER_S.
+        assert_eq!(mobility.rudder_time, Some(Seconds::from(GEARING_RUDDER_S)));
     }
 
     #[test]
     fn speed_coef_modifier_applies() {
-        // speedCoef 1.05 -> 36 * 1.0 * 1.05 = 37.8.
-        let mods = [modifier("speedCoef", 1.05)];
+        // speedCoef SPEED_COEFF -> GEARING_SPEED_KN * 1.0 * SPEED_COEFF = SPEED_AFTER_COEFF.
+        let mods = [modifier("speedCoef", SPEED_COEFF)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let mobility = mobility(
@@ -1620,18 +1656,18 @@ mod tests {
             &mut Off,
         );
         let speed = mobility.speed.expect("speed computed").value();
-        assert!((speed - 37.8).abs() < 1e-4, "got {speed}");
+        assert!((speed - SPEED_AFTER_COEFF).abs() < 1e-4, "got {speed}");
     }
 
     #[test]
     fn health_modifier_applies() {
-        // healthPerLevel 350 (bonus, +) and healthHullCoeff 1.05 (coef, *):
-        // (19400 + 350*10) * 1.05 = 22900*1.05 = 24045 -> ceil(24045/50)*50 = 24050.
-        let mods = [modifier("healthPerLevel", 350.0), modifier("healthHullCoeff", 1.05)];
+        // healthPerLevel HEALTH_PER_LEVEL (bonus, +) and healthHullCoeff HEALTH_COEFF (coef, *):
+        // (GEARING_HULL_HEALTH + HEALTH_PER_LEVEL*10) * HEALTH_COEFF = 22900*1.05 = 24045 -> ceil(24045/50)*50 = HEALTH_AFTER_MOD.
+        let mods = [modifier("healthPerLevel", HEALTH_PER_LEVEL), modifier("healthHullCoeff", HEALTH_COEFF)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let durability = durability(&gearing_hull(), "H", &bundle, &ModifierSources::default(), 10, &mut Off);
-        assert_eq!(durability.health, Some(Hp::from(24050.0)));
+        assert_eq!(durability.health, Some(Hp::from(HEALTH_AFTER_MOD)));
     }
 
     #[test]
@@ -1675,7 +1711,7 @@ mod tests {
 
     #[test]
     fn balao_stock_battery() {
-        // capacity 240 * 1.0, regenRate 1.2 * 1.0 (stock battery coeffs).
+        // capacity BALAO_BATTERY_CAPACITY * 1.0, regenRate BALAO_BATTERY_REGEN * 1.0 (stock battery coeffs).
         let battery = battery(
             &balao_hull(),
             "H",
@@ -1684,8 +1720,8 @@ mod tests {
             &mut Off,
         )
         .expect("battery computed");
-        assert_eq!(battery.capacity, Some(240.0));
-        assert_eq!(battery.regeneration, Some(1.2));
+        assert_eq!(battery.capacity, Some(BALAO_BATTERY_CAPACITY));
+        assert_eq!(battery.regeneration, Some(BALAO_BATTERY_REGEN));
     }
 
     #[test]
@@ -1725,22 +1761,22 @@ mod tests {
         use crate::game_params::ttx::provenance::Op;
         use crate::game_params::ttx::provenance::Recorder;
         use crate::game_params::ttx::provenance::ShipStatsProvenance;
-        let mods = [modifier("healthPerLevel", 350.0), modifier("healthHullCoeff", 1.05)];
+        let mods = [modifier("healthPerLevel", HEALTH_PER_LEVEL), modifier("healthHullCoeff", HEALTH_COEFF)];
         let bundle = ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).unwrap();
         let mut sources = ModifierSources::default();
-        sources.record("healthPerLevel", InputId::Upgrade { name: "U".into() }, 350.0);
-        sources.record("healthHullCoeff", InputId::Skill { name: "S".into() }, 1.05);
+        sources.record("healthPerLevel", InputId::Upgrade { name: "U".into() }, HEALTH_PER_LEVEL);
+        sources.record("healthHullCoeff", InputId::Skill { name: "S".into() }, HEALTH_COEFF);
 
         let mut rec = On::default();
         let _ = durability(&gearing_hull(), "HULL", &bundle, &sources, 10, &mut rec);
         let prov = rec.into_provenance();
         let health = prov.attributions.iter().find(|a| a.stat == TtxStat::Health).unwrap();
-        assert_eq!(health.base_value, 19400.0);
+        assert_eq!(health.base_value, GEARING_HULL_HEALTH);
         assert!(
             matches!(&health.base_source, InputId::Module { slot, .. } if *slot == crate::game_params::ttx::module_options::ModuleSlot::Hull)
         );
-        // base + 350*10 (add), * 1.05 (mul): replay reproduces the pre-round raw.
-        let expected = (19400.0 + 350.0 * 10.0) * 1.05;
+        // base + HEALTH_PER_LEVEL*10 (add), * HEALTH_COEFF (mul): replay reproduces the pre-round raw.
+        let expected = (GEARING_HULL_HEALTH + HEALTH_PER_LEVEL * 10.0) * HEALTH_COEFF;
         assert!((ShipStatsProvenance::replay(health) - expected).abs() < 1e-1);
         assert_eq!(health.steps.iter().filter(|c| c.op == Op::Add).count(), 1);
         assert_eq!(health.steps.iter().filter(|c| c.op == Op::Mul).count(), 1);
@@ -1833,11 +1869,11 @@ mod tests {
     fn gearing_torpedo() -> Projectile {
         Projectile::builder()
             .ammo_type("torpedo".to_string())
-            .max_dist(crate::game_params::types::BigWorldDistance::from(350.0))
-            .speed(66.0)
-            .alpha_damage(53500.0)
-            .damage(1200.0)
-            .visibility_factor(1.4)
+            .max_dist(crate::game_params::types::BigWorldDistance::from(TORP_MAX_DIST_BW))
+            .speed(TORP_SPEED)
+            .alpha_damage(TORP_ALPHA)
+            .damage(TORP_FLOOD)
+            .visibility_factor(TORP_VISIBILITY)
             .torpedo_type(0)
             .build()
     }
@@ -1846,9 +1882,9 @@ mod tests {
     /// rotationSpeed[0] 25, numBarrels 5, one ammo PAPT027_Mk_16_mod_1.
     fn gearing_launcher() -> TorpedoLauncherStats {
         TorpedoLauncherStats {
-            shot_delay: Some(Seconds::from(103.0)),
-            rotation_speed: Some(DegreesPerSecond::from(25.0)),
-            num_barrels: Some(5.0),
+            shot_delay: Some(Seconds::from(LAUNCHER_SHOT_DELAY)),
+            rotation_speed: Some(DegreesPerSecond::from(LAUNCHER_ROT_SPEED)),
+            num_barrels: Some(LAUNCHER_BARRELS),
             ammo_switch_coeff: None,
             ammo: vec!["PAPT027_Mk_16_mod_1".to_string()],
         }
@@ -1903,16 +1939,16 @@ mod tests {
             &ModifierSources::default(),
             &mut Off,
         );
-        // damage: 53500/3 + 1200 = 19033.33 (alphaDamage/3 + flood, stock coeffs 1.0).
+        // damage: TORP_ALPHA/3 + TORP_FLOOD (alphaDamage/3 + flood, stock coeffs 1.0).
         let damage = stats.damage.expect("damage").value();
-        assert!(approx(damage, 53500.0 / 3.0 + 1200.0), "got {damage}");
-        // speed: 66 * 1.0 * 1.0 + 0 = 66.
-        assert_eq!(stats.speed, Some(Knots::from(66.0)));
-        // range: 350 * 1.0 * 30 / 1000 = 10.5.
+        assert!(approx(damage, TORP_ALPHA / 3.0 + TORP_FLOOD), "got {damage}");
+        // speed: TORP_SPEED * 1.0 * 1.0 + 0 = TORP_SPEED.
+        assert_eq!(stats.speed, Some(Knots::from(TORP_SPEED)));
+        // range: TORP_MAX_DIST_BW * 1.0 * 30 / 1000 = TORP_RANGE_KM.
         let range = stats.range.expect("range").value();
-        assert!(approx(range, 10.5), "got {range}");
-        // visibility: 1.4 * 1.0 = 1.4.
-        assert_eq!(stats.visibility, Some(Km::from(1.4)));
+        assert!(approx(range, TORP_RANGE_KM), "got {range}");
+        // visibility: TORP_VISIBILITY * 1.0 = TORP_VISIBILITY.
+        assert_eq!(stats.visibility, Some(Km::from(TORP_VISIBILITY)));
         // No distanceOfDamage on Gearing's torpedo -> is_damage_increasing None.
         assert!(stats.is_damage_increasing.is_none());
         // distanceOfMaxDamage needs armingTime/maneuverDist (absent) -> None.
@@ -1937,31 +1973,31 @@ mod tests {
         )
         .expect("torpedoes computed");
 
-        // reload_time: shotDelay 103 * GTShotDelay 1.0 = 103 (min over one mount).
-        assert_eq!(torps.reload_time, Some(Seconds::from(103.0)));
+        // reload_time: LAUNCHER_SHOT_DELAY * GTShotDelay 1.0 = LAUNCHER_SHOT_DELAY (min over one mount).
+        assert_eq!(torps.reload_time, Some(Seconds::from(LAUNCHER_SHOT_DELAY)));
 
-        // launcher: rotationSpeed 25 * 1.0 + 0 = 25; rotation_time = 180/25 = 7.2.
+        // launcher: LAUNCHER_ROT_SPEED * 1.0 + 0 = LAUNCHER_ROT_SPEED; rotation_time = 180/LAUNCHER_ROT_SPEED = 7.2.
         assert_eq!(torps.launchers.len(), 1);
         let launcher = &torps.launchers[0];
-        assert_eq!(launcher.rotation_speed, Some(DegreesPerSecond::from(25.0)));
+        assert_eq!(launcher.rotation_speed, Some(DegreesPerSecond::from(LAUNCHER_ROT_SPEED)));
         let rt = launcher.rotation_time.expect("rotation_time").value();
         assert!(approx(rt, 7.2), "got {rt}");
-        assert_eq!(launcher.num_barrels, Some(5));
+        assert_eq!(launcher.num_barrels, Some(LAUNCHER_BARRELS as u32));
 
         // per-ammo resolved by name.
         assert_eq!(torps.torpedoes.len(), 1);
         let torp = &torps.torpedoes[0];
         assert_eq!(torp.name, "PAPT027_Mk_16_mod_1");
-        assert!(approx(torp.damage.expect("damage").value(), 53500.0 / 3.0 + 1200.0));
-        assert_eq!(torp.speed, Some(Knots::from(66.0)));
-        assert!(approx(torp.range.expect("range").value(), 10.5));
-        assert_eq!(torp.visibility, Some(Km::from(1.4)));
+        assert!(approx(torp.damage.expect("damage").value(), TORP_ALPHA / 3.0 + TORP_FLOOD));
+        assert_eq!(torp.speed, Some(Knots::from(TORP_SPEED)));
+        assert!(approx(torp.range.expect("range").value(), TORP_RANGE_KM));
+        assert_eq!(torp.visibility, Some(Km::from(TORP_VISIBILITY)));
     }
 
     #[test]
     fn torpedo_speed_bonus_applies() {
-        // torpedoSpeedBonus +5 (additive): 66 + 5 = 71.
-        let mods = [modifier("torpedoSpeedBonus", 5.0)];
+        // torpedoSpeedBonus +SPEED_BONUS (additive): TORP_SPEED + SPEED_BONUS = SPEED_AFTER_BONUS.
+        let mods = [modifier("torpedoSpeedBonus", SPEED_BONUS)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let stats = torpedo_stats(
@@ -1973,13 +2009,13 @@ mod tests {
             &mut Off,
         );
         let speed = stats.speed.expect("speed").value();
-        assert!(approx(speed, 71.0), "got {speed}");
+        assert!(approx(speed, SPEED_AFTER_BONUS), "got {speed}");
     }
 
     #[test]
     fn torpedo_damage_coeff_applies() {
-        // torpedoDamageCoeff 1.2 (coef): (53500/3 + 1200) * 1.2.
-        let mods = [modifier("torpedoDamageCoeff", 1.2)];
+        // torpedoDamageCoeff DAMAGE_COEFF (coef): (TORP_ALPHA/3 + TORP_FLOOD) * DAMAGE_COEFF.
+        let mods = [modifier("torpedoDamageCoeff", DAMAGE_COEFF)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let stats = torpedo_stats(
@@ -1991,15 +2027,15 @@ mod tests {
             &mut Off,
         );
         let damage = stats.damage.expect("damage").value();
-        assert!(approx(damage, (53500.0 / 3.0 + 1200.0) * 1.2), "got {damage}");
+        assert!(approx(damage, (TORP_ALPHA / 3.0 + TORP_FLOOD) * DAMAGE_COEFF), "got {damage}");
     }
 
     #[test]
     fn torpedo_launcher_traverse_coef_applies() {
-        // GTRotationSpeed 1.2 (Torpedo_Mod_II, +20% traverse), real modifier name
+        // GTRotationSpeed TORP_ROT_COEFF (Torpedo_Mod_II, +20% traverse), real modifier name
         // mapped from GunRotationSpeedModifiersStruct.yawSpeedCoef
-        // (GunRotationSpeed.py:10-13, ModifiersApply.py:123). base 25 -> 30, time 180/30 = 6.
-        let mods = [modifier("GTRotationSpeed", 1.2)];
+        // (GunRotationSpeed.py:10-13, ModifiersApply.py:123). LAUNCHER_ROT_SPEED -> TORP_ROT_AFTER_COEFF, time 180/TORP_ROT_AFTER_COEFF = ROT_TIME.
+        let mods = [modifier("GTRotationSpeed", TORP_ROT_COEFF)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let launchers = [gearing_launcher()];
@@ -2008,15 +2044,15 @@ mod tests {
             .expect("torpedoes computed");
         let launcher = &torps.launchers[0];
         let rs = launcher.rotation_speed.expect("rotation_speed").value();
-        assert!(approx(rs, 30.0), "got {rs}");
+        assert!(approx(rs, TORP_ROT_AFTER_COEFF), "got {rs}");
         let rt = launcher.rotation_time.expect("rotation_time").value();
-        assert!(approx(rt, 6.0), "got {rt}");
+        assert!(approx(rt, ROT_TIME), "got {rt}");
     }
 
     #[test]
     fn torpedo_launcher_traverse_bonus_applies() {
-        // GTRotationSpeedBonus +5 (additive, base 0.0): 25 + 5 = 30, time 180/30 = 6.
-        let mods = [modifier("GTRotationSpeedBonus", 5.0)];
+        // GTRotationSpeedBonus +TORP_ROT_BONUS (additive, base 0.0): LAUNCHER_ROT_SPEED + TORP_ROT_BONUS = TORP_ROT_AFTER_COEFF, time 180/TORP_ROT_AFTER_COEFF = ROT_TIME.
+        let mods = [modifier("GTRotationSpeedBonus", TORP_ROT_BONUS)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let launchers = [gearing_launcher()];
@@ -2024,9 +2060,9 @@ mod tests {
         let torps = torpedoes(&launchers, &bundle, 1.0, None, &provider, "", &ModifierSources::default(), &mut Off)
             .expect("torpedoes computed");
         let launcher = &torps.launchers[0];
-        assert_eq!(launcher.rotation_speed, Some(DegreesPerSecond::from(30.0)));
+        assert_eq!(launcher.rotation_speed, Some(DegreesPerSecond::from(TORP_ROT_AFTER_COEFF)));
         let rt = launcher.rotation_time.expect("rotation_time").value();
-        assert!(approx(rt, 6.0), "got {rt}");
+        assert!(approx(rt, ROT_TIME), "got {rt}");
     }
 
     #[test]
@@ -2075,22 +2111,22 @@ mod tests {
         use crate::game_params::ttx::provenance::Op;
         use crate::game_params::ttx::provenance::ShipStatsProvenance;
 
-        // torpedoSpeedMultiplier 1.05, normalTorpedoSpeedMultiplier 1.1, torpedoSpeedBonus 2.0,
-        // torpedoRangeCoefficient 1.15. Gearing torpedo ammoType "torpedo" -> normal multiplier applies.
+        // SPEED_MULTIPLIER, NORMAL_SPEED_MULTIPLIER, SPEED_BONUS_PROV, RANGE_COEFF_PROV.
+        // Gearing torpedo ammoType "torpedo" -> normal multiplier applies.
         let mods = [
-            modifier("torpedoSpeedMultiplier", 1.05),
-            modifier("normalTorpedoSpeedMultiplier", 1.1),
-            modifier("torpedoSpeedBonus", 2.0),
-            modifier("torpedoRangeCoefficient", 1.15),
+            modifier("torpedoSpeedMultiplier", SPEED_MULTIPLIER),
+            modifier("normalTorpedoSpeedMultiplier", NORMAL_SPEED_MULTIPLIER),
+            modifier("torpedoSpeedBonus", SPEED_BONUS_PROV),
+            modifier("torpedoRangeCoefficient", RANGE_COEFF_PROV),
         ];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
 
         let mut sources = ModifierSources::default();
-        sources.record("torpedoSpeedMultiplier", InputId::Upgrade { name: "U1".into() }, 1.05);
-        sources.record("normalTorpedoSpeedMultiplier", InputId::Skill { name: "S1".into() }, 1.1);
-        sources.record("torpedoSpeedBonus", InputId::Skill { name: "S2".into() }, 2.0);
-        sources.record("torpedoRangeCoefficient", InputId::Upgrade { name: "U2".into() }, 1.15);
+        sources.record("torpedoSpeedMultiplier", InputId::Upgrade { name: "U1".into() }, SPEED_MULTIPLIER);
+        sources.record("normalTorpedoSpeedMultiplier", InputId::Skill { name: "S1".into() }, NORMAL_SPEED_MULTIPLIER);
+        sources.record("torpedoSpeedBonus", InputId::Skill { name: "S2".into() }, SPEED_BONUS_PROV);
+        sources.record("torpedoRangeCoefficient", InputId::Upgrade { name: "U2".into() }, RANGE_COEFF_PROV);
 
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
         let launchers = [gearing_launcher()];
@@ -2108,17 +2144,17 @@ mod tests {
             matches!(&speed_attr.base_source, InputId::Module { slot, .. } if *slot == ModuleSlot::Torpedoes),
             "base source must be the Torpedoes module"
         );
-        assert_eq!(speed_attr.base_value, 66.0, "base must be raw speed");
+        assert_eq!(speed_attr.base_value, TORP_SPEED, "base must be raw speed");
         let mul_steps: Vec<_> = speed_attr.steps.iter().filter(|c| c.op == Op::Mul).collect();
         let add_steps: Vec<_> = speed_attr.steps.iter().filter(|c| c.op == Op::Add).collect();
         assert_eq!(mul_steps.len(), 2, "two Mul steps: torpedoSpeedMultiplier and normalTorpedoSpeedMultiplier");
         assert_eq!(add_steps.len(), 1, "one Add step: torpedoSpeedBonus");
         let tsmul = mul_steps.iter().find(|c| c.modifier_name == "torpedoSpeedMultiplier");
         assert!(tsmul.is_some(), "torpedoSpeedMultiplier step present");
-        assert!((tsmul.unwrap().operand - 1.05).abs() < 1e-6);
+        assert!((tsmul.unwrap().operand - SPEED_MULTIPLIER).abs() < 1e-6);
         let ntsmul = mul_steps.iter().find(|c| c.modifier_name == "normalTorpedoSpeedMultiplier");
         assert!(ntsmul.is_some(), "normalTorpedoSpeedMultiplier step present");
-        assert!((ntsmul.unwrap().operand - 1.1).abs() < 1e-6);
+        assert!((ntsmul.unwrap().operand - NORMAL_SPEED_MULTIPLIER).abs() < 1e-6);
         let expected_speed = torps.torpedoes[0].speed.expect("speed").value();
         let replayed_speed = ShipStatsProvenance::replay(speed_attr);
         assert!(
@@ -2127,14 +2163,17 @@ mod tests {
         );
 
         // TorpedoRange: base = raw maxDist * BW_TO_BALLISTIC / KM_TO_M; replay exact.
-        // base = 350 * 30 / 1000 = 10.5; final = 10.5 * 1.15 = 12.075.
+        // base = TORP_MAX_DIST_BW * 30 / 1000 = TORP_RANGE_KM; final = TORP_RANGE_KM * RANGE_COEFF_PROV.
         let range_attr =
             prov.attributions.iter().find(|a| a.stat == TtxStat::TorpedoRange).expect("TorpedoRange recorded");
         assert_eq!(range_attr.qualifier.as_deref(), Some("PAPT027_Mk_16_mod_1"), "qualifier must be the torpedo name");
-        assert!((range_attr.base_value - 10.5).abs() < 1e-3, "range base must be maxDist*BW_TO_BALLISTIC/KM_TO_M");
+        assert!(
+            (range_attr.base_value - TORP_RANGE_KM).abs() < 1e-3,
+            "range base must be maxDist*BW_TO_BALLISTIC/KM_TO_M"
+        );
         let rc_step = range_attr.steps.iter().find(|c| c.modifier_name == "torpedoRangeCoefficient");
         assert!(rc_step.is_some(), "torpedoRangeCoefficient step present");
-        assert!((rc_step.unwrap().operand - 1.15).abs() < 1e-6);
+        assert!((rc_step.unwrap().operand - RANGE_COEFF_PROV).abs() < 1e-6);
         let expected_range = torps.torpedoes[0].range.expect("range").value();
         let replayed_range = ShipStatsProvenance::replay(range_attr);
         assert!(
