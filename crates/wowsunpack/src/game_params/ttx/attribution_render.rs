@@ -3,6 +3,7 @@
 //! its magnitude. Mirrors `render::render_stat_rows`.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::data::ResourceLoader;
 use crate::game_params::ttx::labels::TtxStat;
@@ -58,6 +59,28 @@ pub struct AttributionLine {
     /// reflects its position in the game formula (an additive input applied before
     /// a later multiply is amplified), so consumers may want to note that.
     pub order_sensitive: bool,
+    /// Causes inherited from the `derived_from` upstream stats (transitively): the
+    /// inputs that moved an upstream stat this value derives from (e.g. range
+    /// modifiers behind a dispersion stat, concealment behind on-fire detection).
+    /// Distinct from `contributors` because these do NOT sum into this stat's
+    /// change and their magnitudes are in the UPSTREAM stat's units (see
+    /// `via_stat`). Empty when no upstream stat is modified.
+    pub inherited: Vec<InheritedContributor>,
+}
+
+/// One contributor inherited from an upstream `derived_from` stat, labeled with
+/// the stat it came through. The `line`'s delta/value_after are in that upstream
+/// stat's units, not this stat's.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InheritedContributor {
+    /// Localized label of the upstream stat this cause comes through (e.g.
+    /// "Firing Range", "Surface Detectability").
+    pub via_stat: String,
+    /// The upstream stat's qualifier, if any.
+    pub via_qualifier: Option<String>,
+    /// The upstream stat's contributor (its input label, effect, and
+    /// upstream-unit delta/value_after).
+    pub line: ContributorLine,
 }
 
 /// The display label for an attribution input. Module/Upgrade names are resolved
@@ -121,7 +144,8 @@ pub fn render_attributions(
     let display: HashMap<(TtxStat, Option<String>), String> =
         rows.iter().map(|r| ((r.stat, r.qualifier.clone()), r.value.to_string())).collect();
 
-    prov.attributions
+    let mut lines: Vec<AttributionLine> = prov
+        .attributions
         .iter()
         .map(|a| {
             let key = (a.stat, a.qualifier.clone());
@@ -163,9 +187,42 @@ pub fn render_attributions(
                     .collect(),
                 derived_from: a.derived_from.clone(),
                 order_sensitive: a.order_sensitive(),
+                inherited: Vec::new(),
             }
         })
-        .collect()
+        .collect();
+
+    // Second pass: surface each line's transitive `derived_from` causes inline.
+    let index: HashMap<StatKey, usize> =
+        lines.iter().enumerate().map(|(i, l)| (StatKey { stat: l.stat, qualifier: l.qualifier.clone() }, i)).collect();
+    let all_inherited: Vec<Vec<InheritedContributor>> = (0..lines.len())
+        .map(|i| {
+            let mut out = Vec::new();
+            let mut visited: HashSet<StatKey> = HashSet::new();
+            visited.insert(StatKey { stat: lines[i].stat, qualifier: lines[i].qualifier.clone() });
+            let mut stack: Vec<StatKey> = lines[i].derived_from.clone();
+            while let Some(key) = stack.pop() {
+                if !visited.insert(key.clone()) {
+                    continue;
+                }
+                if let Some(&j) = index.get(&key) {
+                    for c in &lines[j].contributors {
+                        out.push(InheritedContributor {
+                            via_stat: lines[j].label.clone(),
+                            via_qualifier: lines[j].qualifier.clone(),
+                            line: c.clone(),
+                        });
+                    }
+                    stack.extend(lines[j].derived_from.clone());
+                }
+            }
+            out
+        })
+        .collect();
+    for (line, inherited) in lines.iter_mut().zip(all_inherited) {
+        line.inherited = inherited;
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -325,5 +382,63 @@ mod tests {
         let l = &lines[0];
         assert_eq!(l.value, "yes", "value should be 'yes', not '1'");
         assert_eq!(l.base_value, "yes", "base_value should also be 'yes' when steps is empty");
+    }
+
+    #[test]
+    fn derived_stat_surfaces_inherited_upstream_contributors() {
+        // Dispersion derives from range; a range modifier should appear on the
+        // dispersion line as an inherited cause, labeled via the range stat, with
+        // its magnitude in the upstream (range) units.
+        let range_mod = InputId::Upgrade { name: "ArtilleryPlottingRoomMod".into() };
+        let prov = ShipStatsProvenance {
+            attributions: vec![
+                StatAttribution {
+                    stat: TtxStat::ArtilleryRange,
+                    qualifier: None,
+                    base_value: 16.0,
+                    base_source: InputId::Module { slot: ModuleSlot::Hull, name: "A".into() },
+                    steps: vec![Contribution {
+                        input: range_mod.clone(),
+                        modifier_name: "GMMaxDist".into(),
+                        op: Op::Mul,
+                        operand: 1.16,
+                    }],
+                    derived_from: Vec::new(),
+                    value: 16.0 * 1.16,
+                },
+                StatAttribution {
+                    stat: TtxStat::ArtilleryDispersion,
+                    qualifier: None,
+                    base_value: 100.0,
+                    base_source: InputId::Module { slot: ModuleSlot::Hull, name: "A".into() },
+                    steps: vec![Contribution {
+                        input: InputId::Upgrade { name: "AimingSystemsMod".into() },
+                        modifier_name: "GMIdealRadius".into(),
+                        op: Op::Mul,
+                        operand: 0.95,
+                    }],
+                    derived_from: vec![StatKey { stat: TtxStat::ArtilleryRange, qualifier: None }],
+                    value: 95.0,
+                },
+            ],
+        };
+        let rows = vec![
+            StatRow { stat: TtxStat::ArtilleryRange, qualifier: None, value: StatValue::Float(16.0 * 1.16) },
+            StatRow { stat: TtxStat::ArtilleryDispersion, qualifier: None, value: StatValue::Float(95.0) },
+        ];
+        let lines = render_attributions(&prov, &rows, &EchoLoader, &EmptyProvider);
+        let disp = lines.iter().find(|l| l.stat == TtxStat::ArtilleryDispersion).expect("dispersion line");
+        let range = lines.iter().find(|l| l.stat == TtxStat::ArtilleryRange).expect("range line");
+        // Its own direct contributor is the aiming mod (in dispersion units).
+        assert_eq!(disp.contributors.len(), 1);
+        assert_eq!(disp.contributors[0].label, "AimingSystemsMod");
+        // The range mod is surfaced as an inherited cause via the range stat, with
+        // the range-unit magnitude (x1.16), NOT mixed into the direct contributors.
+        assert_eq!(disp.inherited.len(), 1);
+        assert_eq!(disp.inherited[0].via_stat, range.label);
+        assert_eq!(disp.inherited[0].line.label, "ArtilleryPlottingRoomMod");
+        assert_eq!(disp.inherited[0].line.effect, "x1.16");
+        // Range itself is not derived, so it has no inherited causes.
+        assert!(range.inherited.is_empty());
     }
 }
