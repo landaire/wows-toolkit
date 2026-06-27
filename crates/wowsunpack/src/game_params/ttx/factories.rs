@@ -951,8 +951,12 @@ pub fn artillery<R: Recorder>(
             };
             if R::ON {
                 let base_h = constants::dispersion_horizontal(min_r, ideal_r, ideal_d, Km::from(rng), 1.0).to_meters();
+                // Dispersion is evaluated at the FC-adjusted max range, so range
+                // modifiers (maxDistCoef/GMMaxDist/spotterDistCoeff) move it via the
+                // base; link to ArtilleryRange to carry that cause.
                 rec.record(TtxStat::ArtilleryDispersion, None, base_h.value(), arty_src(), h_m.value(), |b| {
-                    b.coef(sources, "GMIdealRadius")
+                    b.derived_from(TtxStat::ArtilleryRange, None);
+                    b.coef(sources, "GMIdealRadius");
                 });
                 if let Some((v, coeff)) = vertical {
                     // base_h * coeff absorbs the vertical scale so replay stays exact:
@@ -963,7 +967,10 @@ pub fn artillery<R: Recorder>(
                         base_h.value() * coeff,
                         arty_src(),
                         v.value(),
-                        |b| b.coef(sources, "GMIdealRadius"),
+                        |b| {
+                            b.derived_from(TtxStat::ArtilleryRange, None);
+                            b.coef(sources, "GMIdealRadius");
+                        },
                     );
                 }
             }
@@ -1223,7 +1230,10 @@ pub fn secondaries<R: Recorder>(
         let vertical_m = (h * coeff).to_meters();
         if R::ON {
             let base_h = constants::dispersion_horizontal(min_r, ideal_r, ideal_d, Km::from(range_km), 1.0).to_meters();
+            // Secondary dispersion is evaluated at the secondary range, so range
+            // modifiers move it via the base; link to SecondaryRange to carry that cause.
             rec.record(TtxStat::SecondaryDispersion, Some(q), base_h.value(), hull_src(), h_m.value(), |b| {
+                b.derived_from(TtxStat::SecondaryRange, None);
                 b.coef(sources, "GSIdealRadius");
             });
             rec.record(
@@ -1233,6 +1243,7 @@ pub fn secondaries<R: Recorder>(
                 hull_src(),
                 vertical_m.value(),
                 |b| {
+                    b.derived_from(TtxStat::SecondaryRange, None);
                     b.coef(sources, "GSIdealRadius");
                 },
             );
@@ -3395,6 +3406,15 @@ mod tests {
         assert!(
             rel_err < 1e-4,
             "vertical dispersion replay not exact: replay={replayed}, factory={expected_v}, rel_err={rel_err}"
+        );
+        // Dispersion is evaluated at max range, so it must link to ArtilleryRange
+        // for max-range modifiers to be attributed to it.
+        assert!(
+            v_attr.derived_from.contains(&crate::game_params::ttx::provenance::StatKey {
+                stat: TtxStat::ArtilleryRange,
+                qualifier: None,
+            }),
+            "ArtilleryDispersionVertical must derive from ArtilleryRange"
         );
     }
 
