@@ -1,6 +1,6 @@
 [package]
 name = "wows-replay-insights"
-version = "0.10.0"
+version = "0.11.0"
 authors = ["landaire"]
 description = "Derived, post-parse projections over a WoWs replay: build resolution, timeline events, etc."
 repository = "https://github.com/landaire/wows-toolkit"
