@@ -40,9 +40,9 @@ pub struct CpuAv1Encoder {
 impl CpuAv1Encoder {
     pub fn new(width: u32, height: u32, config: Cfg) -> rootcause::Result<Self, VideoError> {
         if !width.is_multiple_of(2) || !height.is_multiple_of(2) {
-            return Err(report!(VideoError::EncoderInit(format!(
-                "AV1 requires even dimensions; got {width}x{height}"
-            ))));
+            return Err(
+                report!(VideoError::EncoderInit).attach(format!("AV1 requires even dimensions; got {width}x{height}"))
+            );
         }
 
         // Preset 8 prioritizes encode speed (~2x faster than preset 6); the cost
@@ -87,7 +87,7 @@ impl CpuAv1Encoder {
 
         let config = Config::new().with_encoder_config(cfg);
         let ctx: Context<u8> =
-            config.new_context().map_err(|e| report!(VideoError::EncoderInit(format!("rav1e context: {e:?}"))))?;
+            config.new_context().context(VideoError::EncoderInit).attach("creating rav1e context")?;
 
         let y_size = (width * height) as usize;
         let chroma_size = ((width / 2) * (height / 2)) as usize;
@@ -116,9 +116,7 @@ impl CpuAv1Encoder {
         frame.planes[1].copy_from_raw_u8(&self.u_buf, chroma_w, 1);
         frame.planes[2].copy_from_raw_u8(&self.v_buf, chroma_w, 1);
 
-        self.ctx
-            .send_frame(frame)
-            .map_err(|e| report!(VideoError::EncodeFailed(format!("rav1e send_frame: {e:?}"))))?;
+        self.ctx.send_frame(frame).context(VideoError::EncodeFailed).attach("rav1e send_frame")?;
         self.frames_sent += 1;
 
         self.drain(false)
@@ -143,7 +141,7 @@ impl CpuAv1Encoder {
                 }
                 Err(EncoderStatus::LimitReached) => return Ok(out),
                 Err(other) => {
-                    return Err(report!(VideoError::EncodeFailed(format!("rav1e receive_packet: {other:?}"))));
+                    return Err(report!(other).context(VideoError::EncodeFailed).attach("rav1e receive_packet"));
                 }
             }
         }
@@ -174,7 +172,8 @@ impl CpuAv1Encoder {
             YuvStandardMatrix::Bt709,
             YuvConversionMode::Balanced,
         )
-        .map_err(|e| report!(VideoError::EncodeFailed(format!("RGB->I420: {e:?}"))))?;
+        .context(VideoError::EncodeFailed)
+        .attach("RGB->I420 conversion")?;
         let _ = chroma_h;
         Ok(())
     }

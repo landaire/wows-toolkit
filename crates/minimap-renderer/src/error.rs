@@ -1,12 +1,18 @@
 use std::fmt;
 
-/// Typed error for video encoding and muxing operations.
+/// Typed error categories for video encoding and muxing operations.
+///
+/// These are head-of-chain context markers, not string-encoded errors: the
+/// underlying library error (muxide, gpu-video, openh264, rav1e, I/O, ...) is
+/// preserved as a child in the rootcause report via `.context(...)`, and any
+/// diagnostic detail is added with `.attach(...)`. Callers match on these
+/// variants structurally rather than parsing a message.
 #[derive(Debug)]
 pub enum VideoError {
-    EncoderInit(String),
-    EncodeFailed(String),
-    MuxFailed(String),
-    Io(std::io::Error),
+    EncoderInit,
+    EncodeFailed,
+    MuxFailed,
+    Io,
     /// Requested codec is not supported by any compiled-in backend or
     /// available device for the chosen execution mode.
     UnsupportedCodec {
@@ -19,10 +25,10 @@ pub enum VideoError {
 impl fmt::Display for VideoError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::EncoderInit(msg) => write!(f, "encoder initialization failed: {msg}"),
-            Self::EncodeFailed(msg) => write!(f, "encode failed: {msg}"),
-            Self::MuxFailed(msg) => write!(f, "MP4 mux failed: {msg}"),
-            Self::Io(e) => write!(f, "I/O error: {e}"),
+            Self::EncoderInit => write!(f, "encoder initialization failed"),
+            Self::EncodeFailed => write!(f, "encode failed"),
+            Self::MuxFailed => write!(f, "MP4 mux failed"),
+            Self::Io => write!(f, "I/O error"),
             Self::UnsupportedCodec { codec, backend, reason } => {
                 write!(f, "{backend} backend does not support codec {codec}: {reason}")
             }
@@ -30,11 +36,4 @@ impl fmt::Display for VideoError {
     }
 }
 
-impl std::error::Error for VideoError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(e) => Some(e),
-            _ => None,
-        }
-    }
-}
+impl std::error::Error for VideoError {}

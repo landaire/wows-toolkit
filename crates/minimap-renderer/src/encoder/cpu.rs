@@ -29,17 +29,15 @@ impl CpuEncoder {
             .bitrate(BitRate::from_bps(bitrate))
             .complexity(Complexity::High);
         let encoder = Encoder::with_api_config(OpenH264API::from_source(), config)
-            .map_err(|e| report!(VideoError::EncoderInit(format!("Failed to create H.264 encoder: {e:?}"))))?;
+            .context(VideoError::EncoderInit)
+            .attach("creating openh264 H.264 encoder")?;
         Ok(Self { encoder })
     }
 
     pub fn encode_frame(&mut self, rgb: &[u8], width: usize, height: usize) -> rootcause::Result<Vec<u8>, VideoError> {
         let rgb_slice = RgbSliceU8::new(rgb, (width, height));
         let yuv = YUVBuffer::from_rgb_source(rgb_slice);
-        let bitstream = self
-            .encoder
-            .encode(&yuv)
-            .map_err(|e| report!(VideoError::EncodeFailed(format!("H.264 encode error: {e:?}"))))?;
+        let bitstream = self.encoder.encode(&yuv).context(VideoError::EncodeFailed).attach("openh264 encode")?;
         Ok(bitstream.to_vec())
     }
 }

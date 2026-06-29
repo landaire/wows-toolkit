@@ -72,7 +72,7 @@ pub struct VideoEncoder {
     start_clock: GameClock,
     last_rendered_frame: i64,
     worker: Option<EncoderWorker>,
-    encoder_error: Option<String>,
+    encoder_error: Option<rootcause::Report<VideoError>>,
     codec_choice: CodecChoice,
     mode: Mode,
     encoder_config: crate::encoder::EncoderConfig,
@@ -313,7 +313,7 @@ impl VideoEncoder {
             } else {
                 if let Err(e) = self.ensure_encoder() {
                     error!(error = %e, "Encoder initialization failed");
-                    self.encoder_error = Some(format!("{e}"));
+                    self.encoder_error = Some(e);
                     return;
                 }
 
@@ -327,7 +327,7 @@ impl VideoEncoder {
                 let worker = self.worker.as_ref().expect("worker is Some after ensure_encoder succeeded");
                 if let Err(e) = worker.submit(frame) {
                     error!(error = %e, "Frame submission failed");
-                    self.encoder_error = Some(format!("{e}"));
+                    self.encoder_error = Some(e);
                     return;
                 }
 
@@ -434,35 +434,43 @@ impl VideoEncoder {
         self.mux_to_mp4(&output.samples, output.codec)
     }
 
-    fn mux_to_mp4(&self, samples: &[EncodedSample], codec: VideoCodec) -> rootcause::Result<(), VideoError> {
+    fn mux_to_mp4(&mut self, samples: &[EncodedSample], codec: VideoCodec) -> rootcause::Result<(), VideoError> {
         if samples.is_empty() {
-            if let Some(ref err) = self.encoder_error {
-                bail!(VideoError::MuxFailed(format!("No frames were encoded. Encoder failed earlier: {err}")));
+            // Surface the earlier streaming failure as the cause, re-headed with
+            // mux context, so the original encoder error chain is preserved.
+            if let Some(err) = self.encoder_error.take() {
+                return Err(err
+                    .context(VideoError::MuxFailed)
+                    .attach("no frames were encoded; encoder failed earlier"));
             }
-            bail!(VideoError::MuxFailed("No frames to mux".into()));
+            return Err(report!(VideoError::MuxFailed).attach("no frames to mux"));
         }
 
         let output_path = self.output_path.as_ref().expect("output path required for video mode");
-        let file = File::create(output_path).context_transform(VideoError::Io)?;
+        let file = File::create(output_path)
+            .context(VideoError::Io)
+            .attach_with(|| format!("creating output file {output_path}"))?;
         let writer = BufWriter::new(file);
 
         let mut muxer = MuxerBuilder::new(writer)
             .video(map_codec(codec), self.canvas_width, self.canvas_height, FPS)
             .build()
-            .map_err(|e| report!(VideoError::MuxFailed(format!("muxer init: {e:?}"))))?;
+            .context(VideoError::MuxFailed)
+            .attach("initializing MP4 muxer")?;
 
         let total = samples.len() as u64;
         for (idx, sample) in samples.iter().enumerate() {
             muxer
                 .write_video(sample.pts_seconds, &sample.data, sample.is_keyframe)
-                .map_err(|e| report!(VideoError::MuxFailed(format!("write_video frame {idx}: {e:?}"))))?;
+                .context(VideoError::MuxFailed)
+                .attach_with(|| format!("writing video frame {idx}"))?;
 
             if let Some(ref cb) = self.progress_callback {
                 cb(RenderProgress { stage: RenderStage::Muxing, current: (idx + 1) as u64, total });
             }
         }
 
-        muxer.finish().map_err(|e| report!(VideoError::MuxFailed(format!("finish: {e:?}"))))?;
+        muxer.finish().context(VideoError::MuxFailed).attach("finalizing MP4 container")?;
         info!(path = %output_path, codec = %codec, "Video saved");
         Ok(())
     }
