@@ -34,16 +34,18 @@ jobs:
             -Destination ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\minimap_renderer_cpu.exe
           cargo build --release --target x86_64-pc-windows-msvc -p wows_minimap_renderer
 
-      - name: Collect artifacts
+      - name: Package artifacts
         run: |
           New-Item -ItemType Directory -Path ${{ github.workspace }}\artifacts
           Move-Item -Path ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\*.exe `
           -Destination ${{ github.workspace }}\artifacts\
+          Compress-Archive -Path ${{ github.workspace }}\artifacts\*.exe `
+          -DestinationPath ${{ github.workspace }}\wows_toolkit_tools_${{ github.ref_name }}_windows.zip
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.exe
+          files: wows_toolkit_tools_${{ github.ref_name }}_windows.zip
 
   build-linux:
     runs-on: ubuntu-latest
@@ -58,9 +60,9 @@ jobs:
           toolchain: 1.92.0
           targets: x86_64-unknown-linux-gnu
 
-      - name: Install NASM
-        # rav1e's `asm` feature (default in our cpu-av1 path) requires nasm.
-        run: sudo apt-get update && sudo apt-get install -y nasm
+      - name: Install NASM and zip
+        # rav1e's `asm` feature (default in our cpu-av1 path) requires nasm; zip bundles the release tools.
+        run: sudo apt-get update && sudo apt-get install -y nasm zip
 
       - name: Build release binary
         run: |
@@ -72,7 +74,7 @@ jobs:
           ./target/x86_64-unknown-linux-gnu/release/minimap_renderer_cpu
           cargo build --release --target x86_64-unknown-linux-gnu -p wows_minimap_renderer
 
-      - name: Collect artifacts
+      - name: Package artifacts
         run: |
           mkdir ${{ github.workspace }}/artifacts
           mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/wowsunpack ${{ github.workspace }}/artifacts/
@@ -80,9 +82,11 @@ jobs:
           mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/wows-data-mgr ${{ github.workspace }}/artifacts/
           mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/minimap_renderer_cpu ${{ github.workspace }}/artifacts/
           mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/minimap_renderer ${{ github.workspace }}/artifacts/
-          mv ${{ github.workspace }}/game_versions.toml ${{ github.workspace }}/artifacts/
+          zip -j ${{ github.workspace }}/wows_toolkit_tools_${{ github.ref_name }}_linux.zip ${{ github.workspace }}/artifacts/*
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*
+          files: |
+            wows_toolkit_tools_${{ github.ref_name }}_linux.zip
+            game_versions.toml
