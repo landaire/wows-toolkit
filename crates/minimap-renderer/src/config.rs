@@ -69,7 +69,7 @@ impl Default for RenderOptions {
             show_advantage: true,
             show_score_timer: true,
             show_stats_panel: true,
-            show_team_rosters: true,
+            show_team_rosters: false,
             ship_config_visibility: ShipConfigVisibility::default(),
         }
     }
