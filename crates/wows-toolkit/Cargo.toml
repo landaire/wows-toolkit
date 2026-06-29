@@ -42,7 +42,7 @@ wowsunpack = { workspace = true, features = [
     "vfs-mmap",
 ] }
 bytemuck = { workspace = true }
-wows_minimap_renderer = { workspace = true, features = ["vulkan", "videotoolbox", "cpu", "arc", "rkyv"] }
+wows_minimap_renderer = { workspace = true, features = ["vulkan", "videotoolbox", "cpu", "cpu-av1", "arc", "rkyv"] }
 wows-battle-world = { workspace = true }
 wt-translations = { workspace = true }
 rfd = "0.17"
@@ -130,3 +130,8 @@ mod_manager = ["dep:tar", "dep:scopeguard"]
 logging = ["dep:tracing-subscriber", "dep:tracing-appender"]
 panic_handler = []
 dhat-heap = ["dep:dhat"]
+# Opt in to rav1e's hand-tuned x86 SIMD for AV1 (~3x faster encode). Requires
+# NASM at build time, so it's off by default to keep local builds NASM-free;
+# the release CI enables it. Plain (non-asm) AV1 is always available via the
+# `cpu-av1` feature wired on the dependency above.
+av1-asm = ["wows_minimap_renderer/cpu-av1-asm"]
