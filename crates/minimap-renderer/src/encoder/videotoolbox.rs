@@ -101,13 +101,14 @@ impl VideoToolboxEncoder {
             unsafe {
                 drop(Box::from_raw(output_buffer));
             }
-            bail!(VideoError::EncoderInit(format!("VTCompressionSessionCreate failed with status {status}")));
+            return Err(report!(VideoError::EncoderInit)
+                .attach(format!("VTCompressionSessionCreate failed with OSStatus {status}")));
         }
 
         let session = unsafe {
             Retained::retain(session_out).ok_or_else(|| {
                 drop(Box::from_raw(output_buffer));
-                report!(VideoError::EncoderInit("VTCompressionSession is null".into()))
+                report!(VideoError::EncoderInit).attach("VTCompressionSession was null")
             })?
         };
 
@@ -156,7 +157,8 @@ impl VideoToolboxEncoder {
             let status = session.prepare_to_encode_frames();
             if status != 0 {
                 drop(Box::from_raw(output_buffer));
-                bail!(VideoError::EncoderInit(format!("prepareToEncodeFrames failed: {status}")));
+                return Err(report!(VideoError::EncoderInit)
+                    .attach(format!("prepareToEncodeFrames failed with OSStatus {status}")));
             }
         }
 
@@ -193,7 +195,8 @@ impl VideoToolboxEncoder {
                 YuvStandardMatrix::Bt709,
                 YuvConversionMode::Balanced,
             )
-            .map_err(|e| report!(VideoError::EncodeFailed(format!("RGB→NV12 conversion failed: {e:?}"))))?;
+            .context(VideoError::EncodeFailed)
+            .attach("RGB->NV12 conversion")?;
         }
 
         // Create CVPixelBuffer from NV12 data
@@ -204,7 +207,8 @@ impl VideoToolboxEncoder {
             let lock_flags = CVPixelBufferLockFlags::empty();
             let status = CVPixelBufferLockBaseAddress(&pixel_buffer, lock_flags);
             if status != 0 {
-                bail!(VideoError::EncodeFailed(format!("CVPixelBufferLockBaseAddress failed: {status}")));
+                return Err(report!(VideoError::EncodeFailed)
+                    .attach(format!("CVPixelBufferLockBaseAddress failed with OSStatus {status}")));
             }
 
             // Copy Y plane
@@ -270,14 +274,18 @@ impl VideoToolboxEncoder {
                 &mut info_flags,
             );
             if status != 0 {
-                bail!(VideoError::EncodeFailed(format!("encodeFrame failed: {status}")));
+                return Err(
+                    report!(VideoError::EncodeFailed).attach(format!("encodeFrame failed with OSStatus {status}"))
+                );
             }
 
             // Force completion to ensure callback has been called
             let complete_time = CMTime { value: i64::MAX, timescale: 1, flags: CMTimeFlags(1), epoch: 0 };
             let status = self.session.complete_frames(complete_time);
             if status != 0 {
-                bail!(VideoError::EncodeFailed(format!("completeFrames failed: {status}")));
+                return Err(
+                    report!(VideoError::EncodeFailed).attach(format!("completeFrames failed with OSStatus {status}"))
+                );
             }
         }
 
@@ -290,7 +298,7 @@ impl VideoToolboxEncoder {
         };
 
         if output.is_empty() {
-            bail!(VideoError::EncodeFailed("No encoded data received from VideoToolbox".into()));
+            return Err(report!(VideoError::EncodeFailed).attach("no encoded data received from VideoToolbox"));
         }
 
         Ok(output)
@@ -311,7 +319,9 @@ impl VideoToolboxEncoder {
         };
 
         if status != 0 || pixel_buffer_out.is_null() {
-            bail!(VideoError::EncodeFailed(format!("CVPixelBufferCreate failed: {status}")));
+            return Err(
+                report!(VideoError::EncodeFailed).attach(format!("CVPixelBufferCreate failed with OSStatus {status}"))
+            );
         }
 
         // Safety: CVPixelBufferCreate returns a retained object, we take ownership

@@ -63,6 +63,7 @@ fn open_device() -> Result<(Arc<VulkanInstance>, Arc<VulkanDevice>, String), Vul
     Ok((instance, device, name))
 }
 
+#[derive(Debug)]
 enum VulkanInitError {
     Instance(String),
     Adapter(String),
@@ -80,6 +81,8 @@ impl std::fmt::Display for VulkanInitError {
         }
     }
 }
+
+impl std::error::Error for VulkanInitError {}
 
 /// Populate `status.gpu_*` fields by trying each codec encoder against this host's Vulkan device.
 pub fn probe_status(status: &mut EncoderStatus) {
@@ -142,7 +145,7 @@ impl GpuEncoder {
         codec: VideoCodec,
         config: EncoderConfig,
     ) -> rootcause::Result<Self, VideoError> {
-        let (_instance, device, _name) = open_device().map_err(|e| report!(VideoError::EncoderInit(e.to_string())))?;
+        let (_instance, device, _name) = open_device().context(VideoError::EncoderInit)?;
 
         let input_parameters = VideoParameters {
             width: NonZeroU32::new(width).expect("non-zero width"),
@@ -154,19 +157,23 @@ impl GpuEncoder {
             VideoCodec::H264 => {
                 let output_parameters = device
                     .encoder_output_parameters_h264_high_quality(rate_control_for_h264(config))
-                    .map_err(|e| report!(VideoError::EncoderInit(format!("H.264 encoder params: {e:?}"))))?;
+                    .context(VideoError::EncoderInit)
+                    .attach("resolving H.264 encoder output parameters")?;
                 let encoder = device
                     .create_bytes_encoder_h264(EncoderParametersH264 { input_parameters, output_parameters })
-                    .map_err(|e| report!(VideoError::EncoderInit(format!("H.264 encoder create: {e:?}"))))?;
+                    .context(VideoError::EncoderInit)
+                    .attach("creating H.264 encoder")?;
                 CodecEncoder::H264(encoder)
             }
             VideoCodec::H265 => {
                 let output_parameters = device
                     .encoder_output_parameters_h265_high_quality(rate_control_for_h265(config))
-                    .map_err(|e| report!(VideoError::EncoderInit(format!("H.265 encoder params: {e:?}"))))?;
+                    .context(VideoError::EncoderInit)
+                    .attach("resolving H.265 encoder output parameters")?;
                 let encoder = device
                     .create_bytes_encoder_h265(EncoderParametersH265 { input_parameters, output_parameters })
-                    .map_err(|e| report!(VideoError::EncoderInit(format!("H.265 encoder create: {e:?}"))))?;
+                    .context(VideoError::EncoderInit)
+                    .attach("creating H.265 encoder")?;
                 CodecEncoder::H265(encoder)
             }
             VideoCodec::Av1 => {
@@ -204,7 +211,8 @@ impl GpuEncoder {
                 YuvStandardMatrix::Bt709,
                 YuvConversionMode::Balanced,
             )
-            .map_err(|e| report!(VideoError::EncodeFailed(format!("RGB->NV12: {e:?}"))))?;
+            .context(VideoError::EncodeFailed)
+            .attach("RGB->NV12 conversion")?;
         }
 
         let force_keyframe = self.frame_count == 0;
@@ -214,12 +222,12 @@ impl GpuEncoder {
         };
 
         let chunk = match &mut self.inner {
-            CodecEncoder::H264(enc) => enc
-                .encode(&frame, force_keyframe)
-                .map_err(|e| report!(VideoError::EncodeFailed(format!("H.264 encode: {e:?}"))))?,
-            CodecEncoder::H265(enc) => enc
-                .encode(&frame, force_keyframe)
-                .map_err(|e| report!(VideoError::EncodeFailed(format!("H.265 encode: {e:?}"))))?,
+            CodecEncoder::H264(enc) => {
+                enc.encode(&frame, force_keyframe).context(VideoError::EncodeFailed).attach("H.264 encode")?
+            }
+            CodecEncoder::H265(enc) => {
+                enc.encode(&frame, force_keyframe).context(VideoError::EncodeFailed).attach("H.265 encode")?
+            }
         };
 
         self.frame_count += 1;
