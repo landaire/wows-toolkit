@@ -14,20 +14,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract changelog section for this tag
+      - name: Extract release notes for this tag
         id: notes
-        # Pull the CHANGELOG.md section for the tag (## [x.y.z] ... up to the
-        # next ## [ heading) and use it as the release body. Fall back to
-        # auto-generated notes if the tag has no changelog entry.
+        # Pull the RELEASE_NOTES.md section for the tag (## x.y.z - <date> ...
+        # up to the next ## heading) and use it as the release body. Fall back
+        # to auto-generated notes if the tag has no release-notes entry.
         run: |
           version="${GITHUB_REF_NAME#v}"
-          # index() over a regex match so the literal [ ] in the heading need no
-          # escaping (gawk mishandles \[ in a dynamic regex).
+          # Match "## <version> " by prefix (trailing space disambiguates
+          # 0.1.6 from 0.1.69); stop at the next "## " section heading.
           awk -v ver="$version" '
-            index($0, "## [" ver "]") == 1 { flag = 1; next }
-            flag && index($0, "## [") == 1 { exit }
+            index($0, "## " ver " ") == 1 { flag = 1; next }
+            flag && index($0, "## ") == 1 { exit }
             flag { print }
-          ' CHANGELOG.md | sed -e '/./,$!d' > release_notes.md
+          ' RELEASE_NOTES.md | sed -e '/./,$!d' > release_notes.md
           if grep -q '[^[:space:]]' release_notes.md; then
             echo "found=true" >> "$GITHUB_OUTPUT"
           else
@@ -63,7 +63,7 @@ jobs:
         run: ./scripts/install-nasm-windows.ps1
 
       - name: Build release binary
-        run: cargo build --release --target x86_64-pc-windows-msvc -p wows_toolkit
+        run: cargo build --release --target x86_64-pc-windows-msvc -p wows_toolkit --features av1-asm
 
       - name: Azure login
         uses: azure/login@v2
@@ -141,7 +141,7 @@ jobs:
           targets: x86_64-unknown-linux-gnu
 
       - name: Build release binary
-        run: cargo build --release --target x86_64-unknown-linux-gnu -p wows_toolkit
+        run: cargo build --release --target x86_64-unknown-linux-gnu -p wows_toolkit --features av1-asm
 
       - name: Set up Flatpak
         run: |
@@ -213,8 +213,8 @@ jobs:
 
       - name: Build release binaries
         run: |
-          cargo build --release --target aarch64-apple-darwin -p wows_toolkit
-          cargo build --release --target x86_64-apple-darwin -p wows_toolkit
+          cargo build --release --target aarch64-apple-darwin -p wows_toolkit --features av1-asm
+          cargo build --release --target x86_64-apple-darwin -p wows_toolkit --features av1-asm
 
       - name: Create universal binary
         run: |
