@@ -31,21 +31,29 @@ pub struct EncodedSample {
     pub pts_seconds: f64,
 }
 
-/// Turn one backend output packet into a muxable sample. `next_index` is the
-/// number of samples already produced; AnnexB PTS is index-based while AV1
-/// carries its own frame number.
-pub fn build_sample(chunk: EncodedFrame, codec: VideoCodec, next_index: usize) -> EncodedSample {
-    match chunk {
+/// Turn one backend output packet into a muxable sample. `input_index` is the
+/// index of the input frame this packet was produced from; AnnexB PTS is keyed
+/// to it while AV1 carries its own frame number.
+///
+/// Returns `None` for a zero-byte packet. The Vulkan encoder can emit a
+/// zero-byte skip frame (for instance the first P-frame over the static
+/// pre-battle minimap, where the content is identical to the forced keyframe),
+/// and muxide rejects an empty sample with `EmptyVideoFrame`. Dropping it keeps
+/// the timeline intact: PTS is keyed to the input frame index rather than the
+/// emitted-sample count, so the gap left by a skipped frame simply extends the
+/// previous frame's on-screen duration instead of compressing the video.
+pub fn build_sample(chunk: EncodedFrame, codec: VideoCodec, input_index: usize) -> Option<EncodedSample> {
+    let (data, is_keyframe, pts_seconds) = match chunk {
         EncodedFrame::AnnexB(data) => {
-            let pts = next_index as f64 / FPS;
             let is_keyframe = is_annexb_keyframe(&data, codec);
-            EncodedSample { data, is_keyframe, pts_seconds: pts }
+            (data, is_keyframe, input_index as f64 / FPS)
         }
-        EncodedFrame::Av1Packet(packet) => {
-            let pts = packet.input_frameno as f64 / FPS;
-            EncodedSample { data: packet.data, is_keyframe: packet.is_keyframe, pts_seconds: pts }
-        }
+        EncodedFrame::Av1Packet(packet) => (packet.data, packet.is_keyframe, packet.input_frameno as f64 / FPS),
+    };
+    if data.is_empty() {
+        return None;
     }
+    Some(EncodedSample { data, is_keyframe, pts_seconds })
 }
 
 /// Walk an Annex B byte stream looking for a NAL that signals a random-access
@@ -157,7 +165,8 @@ impl EncoderWorker {
                 };
                 run_encoder(width, height, created.backend, created.codec, frame_rx, counter)
             })
-            .map_err(|e| report!(VideoError::EncodeFailed(format!("failed to spawn encoder thread: {e}"))))?;
+            .context(VideoError::EncodeFailed)
+            .attach("spawning encoder thread")?;
 
         match init_rx.recv() {
             Ok(Ok((resolved_codec, kind))) => {
@@ -165,9 +174,9 @@ impl EncoderWorker {
             }
             Ok(Err(())) => match handle.join() {
                 Ok(Err(e)) => Err(e),
-                _ => Err(report!(VideoError::EncodeFailed("encoder init failed".into()))),
+                _ => Err(report!(VideoError::EncodeFailed).attach("encoder thread failed to initialize")),
             },
-            Err(_) => Err(report!(VideoError::EncodeFailed("encoder thread disconnected during init".into()))),
+            Err(_) => Err(report!(VideoError::EncodeFailed).attach("encoder thread disconnected during init")),
         }
     }
 
@@ -175,7 +184,7 @@ impl EncoderWorker {
     /// (backpressure). Returns Err if the encoder thread has stopped; the real
     /// cause surfaces from [`EncoderWorker::finish`].
     pub fn submit(&self, frame: Vec<u8>) -> rootcause::Result<(), VideoError> {
-        self.sender.send(frame).map_err(|_| report!(VideoError::EncodeFailed("encoder thread stopped".into())))
+        self.sender.send(frame).map_err(|_| report!(VideoError::EncodeFailed).attach("encoder thread stopped"))
     }
 
     /// Number of frames the encoder thread has consumed so far.
@@ -189,7 +198,7 @@ impl EncoderWorker {
         drop(self.sender);
         match self.handle.join() {
             Ok(result) => result,
-            Err(_) => Err(report!(VideoError::EncodeFailed("encoder thread panicked".into()))),
+            Err(_) => Err(report!(VideoError::EncodeFailed).attach("encoder thread panicked")),
         }
     }
 }
@@ -205,16 +214,20 @@ fn run_encoder(
     encoded_count: Arc<AtomicU64>,
 ) -> rootcause::Result<EncoderOutput, VideoError> {
     let mut samples: Vec<EncodedSample> = Vec::new();
+    let mut input_index: usize = 0;
     while let Ok(frame) = frame_rx.recv() {
         for chunk in backend.encode_frame(&frame, width, height)? {
-            let idx = samples.len();
-            samples.push(build_sample(chunk, codec, idx));
+            if let Some(sample) = build_sample(chunk, codec, input_index) {
+                samples.push(sample);
+            }
         }
+        input_index += 1;
         encoded_count.fetch_add(1, Ordering::Relaxed);
     }
     for chunk in backend.finish()? {
-        let idx = samples.len();
-        samples.push(build_sample(chunk, codec, idx));
+        if let Some(sample) = build_sample(chunk, codec, input_index) {
+            samples.push(sample);
+        }
     }
     Ok(EncoderOutput { samples, codec })
 }
@@ -227,7 +240,7 @@ mod tests {
     fn annexb_idr_nal_is_keyframe() {
         // Start code 00 00 00 01 then an H.264 NAL with type 5 (IDR): 0x65.
         let data = [0x00, 0x00, 0x00, 0x01, 0x65, 0x11, 0x22];
-        let sample = build_sample(EncodedFrame::AnnexB(data.to_vec()), VideoCodec::H264, 30);
+        let sample = build_sample(EncodedFrame::AnnexB(data.to_vec()), VideoCodec::H264, 30).unwrap();
         assert!(sample.is_keyframe);
         assert_eq!(sample.pts_seconds, 30.0 / FPS);
     }
@@ -236,9 +249,28 @@ mod tests {
     fn annexb_non_idr_nal_is_not_keyframe() {
         // NAL type 1 (non-IDR slice): 0x41.
         let data = [0x00, 0x00, 0x00, 0x01, 0x41, 0x00];
-        let sample = build_sample(EncodedFrame::AnnexB(data.to_vec()), VideoCodec::H264, 0);
+        let sample = build_sample(EncodedFrame::AnnexB(data.to_vec()), VideoCodec::H264, 0).unwrap();
         assert!(!sample.is_keyframe);
         assert_eq!(sample.pts_seconds, 0.0);
+    }
+
+    #[test]
+    fn empty_annexb_packet_is_dropped() {
+        // A zero-byte skip frame from the GPU encoder must not become a sample;
+        // muxide rejects empty samples with EmptyVideoFrame.
+        assert!(build_sample(EncodedFrame::AnnexB(Vec::new()), VideoCodec::H264, 1).is_none());
+        assert!(build_sample(EncodedFrame::AnnexB(Vec::new()), VideoCodec::H265, 7).is_none());
+    }
+
+    #[test]
+    fn annexb_pts_is_keyed_to_input_index() {
+        // Dropping frame 1 leaves frames 0 and 2; their PTS must stay at the
+        // input cadence (0 and 2/FPS) so the skipped frame extends frame 0's
+        // duration instead of compressing the timeline.
+        let f0 = build_sample(EncodedFrame::AnnexB(vec![0x00, 0x00, 0x01, 0x65]), VideoCodec::H264, 0).unwrap();
+        let f2 = build_sample(EncodedFrame::AnnexB(vec![0x00, 0x00, 0x01, 0x41]), VideoCodec::H264, 2).unwrap();
+        assert_eq!(f0.pts_seconds, 0.0);
+        assert_eq!(f2.pts_seconds, 2.0 / FPS);
     }
 
     use crate::encoder::EncoderBackend;
@@ -264,15 +296,19 @@ mod tests {
         let mut created =
             EncoderBackend::create(64, 64, VideoCodec::H264, Mode::ForceCpu, EncoderConfig::default()).unwrap();
         let mut reference: Vec<EncodedSample> = Vec::new();
+        let mut input_index = 0;
         for f in &frames {
             for chunk in created.backend.encode_frame(f, 64, 64).unwrap() {
-                let idx = reference.len();
-                reference.push(build_sample(chunk, VideoCodec::H264, idx));
+                if let Some(sample) = build_sample(chunk, VideoCodec::H264, input_index) {
+                    reference.push(sample);
+                }
             }
+            input_index += 1;
         }
         for chunk in created.backend.finish().unwrap() {
-            let idx = reference.len();
-            reference.push(build_sample(chunk, VideoCodec::H264, idx));
+            if let Some(sample) = build_sample(chunk, VideoCodec::H264, input_index) {
+                reference.push(sample);
+            }
         }
 
         // Async: same frames through the worker.
