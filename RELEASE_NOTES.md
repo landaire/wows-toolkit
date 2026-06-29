@@ -10,12 +10,12 @@ per-commit history lives in `CHANGELOG.md`.
 
 **Highlights**
 
-- AV1 should now available as a video export codec (issue caused by automated builds did not surface it before).
+- AV1 should now be available as a video export codec (an issue with the automated builds kept it from surfacing before).
 - Old game-version data loads should not require administrator permissions/Windows Developer Mode to create symlinks. Instead uses pre-existing metadata to load from content-addressed storage.
 
 **Important fixes**
 
-- Video export should no longer fails partway through with some codecs (EmptyVideoFrame error)
+- Video export should no longer fail partway through with some codecs (EmptyVideoFrame error).
 - Single-replay renders default to the stats panel again; team rosters remain the default only for merged replays. This was an unintentional change previously.
 - Fix issue with not being able to see ship-specific context menu items in live replay renderer when player names were disabled.
 
