@@ -2,6 +2,145 @@
 
 All notable changes to this project will be documented in this file.
 
+## [unreleased]
+
+### 🚀 Features
+
+- *(wowsunpack)* Expose unit ucType + game-params min CBOR output
+- *(wows-data-mgr)* Add CasVfs read-only filesystem over manifest + CAS
+- *(wows-data-mgr)* Add BuildCas resolver with legacy fallback and conservative symlink pruning
+- *(wows-data-mgr)* Stop materializing symlink trees on download
+- *(wows-toolkit)* Load dumped builds through CasVfs instead of symlink tree
+- *(wows-toolkit)* Borrow GUI assets from dumped builds via CasVfs
+- *(wowsunpack)* Describable trait, return types, gap-safe modifier rendering
+- *(wowsunpack)* Describable for Modernization
+- *(wowsunpack)* Describable for Exterior; DRY translate_exterior core
+- *(wowsunpack)* Describable for CrewSkill
+- *(wowsunpack)* Describable name+description for Unit and Ability
+- *(wowsunpack)* Delegating Describable for Param
+- *(wowsunpack)* Retain raw consumable effect field map on AbilityCategory
+- *(wowsunpack)* Per-flavor consumable effect modifiers via AbilityCategory
+- *(wowsunpack)* Ttx unit constants and recovered BigWorld scales
+- *(wowsunpack)* Ttx ShipStats model and stat newtypes
+- *(wowsunpack)* Ttx ModifierBundle aggregation
+- *(wowsunpack)* Extract typed TTX hull/engine base stats at parse time
+- *(wowsunpack)* Ttx durability and mobility factories
+- *(wowsunpack)* Ttx torpedo-protection and submarine battery stats
+- *(wowsunpack)* Ttx armor min/max stat
+- *(wowsunpack)* Retain torpedo fields (speed/damage/visibility) on Projectile
+- *(wowsunpack)* Extract torpedo launcher base stats at parse time
+- *(wowsunpack)* Ttx torpedo factory (damage/speed/range/visibility/reload)
+- *(wowsunpack)* Extract artillery gun/component base stats at parse time
+- *(wowsunpack)* Recover BigWorld dispersion constants and dispersion formula
+- *(wowsunpack)* Shell projectile fields and weapon-type damage/burn tables
+- *(wowsunpack)* Ttx main-battery artillery factory
+- *(wowsunpack)* Ttx secondary-battery (ATBA) factory
+- *(wowsunpack)* Extract fire-control maxDistCoef at parse time
+- *(wowsunpack)* Extract visibility base fields; transcribe FactoryVisibility
+- *(wowsunpack)* Ttx visibility (concealment) factory
+- *(wowsunpack)* Ttx ship_stats orchestration entry point
+- *(wowsunpack)* Ttx stat label sourcing from global.mo
+- *(wowsunpack)* ATBA-specific stat labels for secondaries
+- *(wowsunpack)* Effective consumable stats with modifiers applied; ModifierBundle::apply
+- *(wowsunpack)* Surface per-type consumable effect fields (smoke/fighters/regen) with modifiers
+- *(wows-core)* Add Version::base_eq (friendly-only equality); matches reuses it
+- *(wowsunpack)* Display on stat newtypes; StatValue + ShipStats::rows() enumeration
+- *(wowsunpack)* Map shell muzzle speed (MetersPerSecond) and submarine battery into ShipStats::rows()
+- *(wows-replays)* Nested property-path update decoding + TUPLE arg support
+- *(wowsunpack)* Add TranslationKey newtype for IDS_* catalog keys
+- *(wowsunpack)* Typed dispersion ellipse API (horizontal + vertical semi-axes)
+- *(wowsunpack)* Parse gun dispersion-curve fields + dispersion_curve() builder
+- *(wowsunpack)* Surface vertical dispersion as a TTX stat
+- *(wowsunpack)* Loadout-level artillery_dispersion profile (ellipse at any range)
+- *(wowsunpack)* TTX stat render + diff layer (StatLine/StatDelta)
+- *(wowsunpack)* Per-module ShipStats enumeration (module_options)
+- *(wowsunpack)* Always-valid TTX stat labels (humanized field_key fallback)
+- *(wowsunpack)* Effects engine types (Loadout/Effects/EffectsState/EffectiveModifiers)
+- *(wowsunpack)* Enumerate a loadout's effects (skills/triggers/consumables)
+- *(wowsunpack)* Resolve effects to a modifier bundle (+ adrenaline formula)
+- *(wowsunpack)* Apply adrenaline reload + spotter range via EffectiveModifiers::stats
+- *(wowsunpack)* Parse damageValue/countToModifier/interpolators; bump cache to 12
+- *(wowsunpack)* Parse ship innate skills (HP-breakpoint adrenaline)
+- *(wowsunpack)* Add Stacks activation + stacking effect kinds
+- *(wowsunpack)* Enumerate stacking triggers (Furious + potential-damage)
+- *(wowsunpack)* Resolve stacking effects into the modifier bundle
+- *(wowsunpack)* Clamped piecewise-linear Interpolator::eval + max_x
+- *(wowsunpack)* Expose modifier_identity (per-name fold identity)
+- *(wowsunpack)* Heat activation/kind + enumerate atbaHeat
+- *(wowsunpack)* Resolve heat effects (lerp identity->configured by ratio)
+- *(wowsunpack)* InnateAdrenaline kind + enumerate ship innate skills
+- *(wowsunpack)* Resolve innate adrenaline (clamp/lerp HP breakpoints)
+- *(wowsunpack)* CrewSkillLogicTrigger consumable_type/duration accessors
+- *(wowsunpack)* Typed TriggerCondition on binary effects
+- *(wowsunpack)* SituationFacts + TriggerCondition::holds
+- *(wowsunpack)* Effects::situation_state derives state from SituationFacts
+- *(wowsunpack)* Split main-gun and secondary range detection into distinct visibility slots
+- *(wowsunpack)* Add TTX stat-attribution provenance data model
+- *(wowsunpack)* Add ModifierSources side-channel and zero-cost Recorder
+- *(wowsunpack)* Tag modifier sources per upgrade/skill in Effects::resolve
+- *(wowsunpack)* Record durability/mobility/battery stat provenance
+- *(wowsunpack)* Record armor stat provenance (hull module base)
+- *(wowsunpack)* Record main-battery artillery and shell provenance
+- *(wowsunpack)* Record secondary-battery provenance
+- *(wowsunpack)* Record torpedo armament provenance
+- *(wowsunpack)* Record visibility provenance
+- *(wowsunpack)* Add ship_stats_explained and provenance coverage/replay tests
+- *(wowsunpack)* Add TTX attribution render layer
+- *(wowsunpack)* Add SecondaryBattery/SecondaryMount types and secondary grouping helpers
+- *(wowsunpack)* Model secondaries as per-caliber sub-batteries
+- *(wowsunpack)* Add StatKey and derived_from upstream links to attribution
+- *(wowsunpack)* Link derived stats (rotation time, on-fire/range detection) to upstream
+- *(wowsunpack)* Attribute spotter and adrenaline-reload coefficients to their input
+- *(wowsunpack)* Surface derived_from in render and guard every changed stat is explained
+- *(wowsunpack)* Attribute shell damage and fire chance to real inputs (decompose net factors)
+- *(wowsunpack)* Add consumable TtxStat variants, ConsumableCard, and rows
+- *(wowsunpack)* Effective_consumable reports applied modifiers for attribution
+- *(wowsunpack)* Enumerate and attribute ship consumables in orchestration
+- *(wowsunpack)* Per-input stat contribution deltas, isolated values, and waterfall
+- *(wowsunpack)* Surface raw delta and running value on ContributorLine
+- *(wowsunpack)* Link dispersion provenance to max range
+- *(wowsunpack)* Surface inherited contributors from derived_from upstream stats
+- *(wows-toolkit)* Enable the AV1 video export codec
+
+### 🐛 Bug Fixes
+
+- *(wowsunpack)* Import game_params_to_pickle without vfs gate; bump to 0.36.1
+- *(wowsunpack)* Surface per-species modifiers without ship context as Unresolved
+- *(wowsunpack)* Include tacticalParams in consumable effect field map
+- *(wowsunpack)* Merge logic.modifiers into consumable effect fields
+- *(wowsunpack)* Render -1 consumable counts as infinity label via modifier translations
+- *(wowsunpack)* Guard ttx modifier classification for absent-additive names and accessor mismatch
+- *(wowsunpack)* Use real GTRotationSpeed modifier name for torpedo traverse
+- *(wowsunpack)* Parse shell timeFactor; document artillery deferrals
+- *(wowsunpack)* Match weapon hardpoints nation-agnostically
+- *(wowsunpack)* Bump cache FORMAT_VERSION for TTX schema; strip divider/arrow in types
+- *(wowsunpack)* Warn on dropped TTX ammo rows; drop guessed species default
+- *(wowsunpack)* Restore CrewPersonality/Crew getters dropped before 0.37.0
+- *(wowsunpack)* Fail-open modifier gating to latest; classify returns Result instead of defaulting to multiply
+- *(wows-core)* Normalize Account.def stripped versions to replay-header friendly form
+- *(wows-core)* Gate friendly_from_account_def_parts behind parsing feature
+- *(wowsunpack)* Classify 6 captain-skill modifier table gaps
+- *(wowsunpack)* Handle pickled Value::Weak in cbor/json converters
+- *(replays)* Entity spec sort order bug with nullable/dynamic sized payloads
+- *(wowsunpack)* Treat USER_TYPE as variable-size for exposed-method ordering
+- *(wowsunpack)* Tolerate absent crew-skill LogicTrigger fields
+- *(wowsunpack)* Dedup duplicate client methods to match engine exposed-method ids
+- *(wowsunpack)* Resolve <=0.11.x SHIP_CONFIG fixed-dict shape
+- *(wowsunpack)* Record secondary shells under Secondary* TtxStat variants
+- *(wowsunpack)* Drop inert visibilityFactor/visibilityFactorByPlane reads
+- *(wowsunpack)* Document consumable version assumption, species fallback, and warn on charge-kind mismatch
+- *(replay-renderer)* Make any ship right-clickable and keep its context menu open
+- *(minimap-renderer)* Drop zero-byte encoder packets when muxing
+- *(minimap-renderer)* Default single replays to the stats panel
+
+### ⚡ Performance
+
+- *(wowsunpack)* Intern VFS volume filenames to cut ~382K allocations
+- *(wowsunpack)* Shrink VFS directory child lists after dedup
+- *(wows-toolkit)* Build the file-browser file list lazily
+- *(wows-toolkit)* Memory-map CJK/Thai fallback fonts instead of reading them
+- *(wowsunpack)* Cut GameParams parse peak ~52% via pickled sorted-Vec Dict
+
 ## [0.1.69] - 2026-06-11
 
 ### 🚀 Features
