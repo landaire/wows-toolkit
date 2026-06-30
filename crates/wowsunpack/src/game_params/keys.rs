@@ -236,6 +236,7 @@ pub fn is_torpedo_hardpoint(key: &str) -> bool {
 pub const CAMOUFLAGE: &str = "camouflage";
 pub const PERMOFLAGES: &str = "permoflages";
 pub const TITLE: &str = "title";
+pub const IS_TILEFLAGE: &str = "isTileflage";
 
 // HP_ mount prefix
 pub const HP_PREFIX: &str = "HP_";

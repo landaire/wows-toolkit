@@ -976,6 +976,11 @@ pub struct Exterior {
     /// Empty for camos with no gameplay effect.
     #[cfg_attr(feature = "serde", serde(default))]
     modifiers: Vec<CrewSkillModifier>,
+    /// Whether this exterior is a tile camo. Universal (all-ship) camos are the
+    /// `MSkin`-species exteriors with this flag set; see `discover_universal_camo_schemes`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    #[builder(default)]
+    is_tileflage: bool,
 }
 
 impl Exterior {
@@ -989,6 +994,10 @@ impl Exterior {
 
     pub fn modifiers(&self) -> &[CrewSkillModifier] {
         &self.modifiers
+    }
+
+    pub fn is_tileflage(&self) -> bool {
+        self.is_tileflage
     }
 }
 
@@ -3471,5 +3480,16 @@ mod interpolator_tests {
         let empty = Interpolator::from_points(Vec::new());
         assert_eq!(empty.eval(5.0), 0.0, "empty -> 0.0");
         assert_eq!(empty.max_x(), 0.0, "empty -> 0.0");
+    }
+}
+
+#[cfg(test)]
+mod exterior_tests {
+    use super::Exterior;
+
+    #[test]
+    fn is_tileflage_defaults_false_and_roundtrips() {
+        assert!(!Exterior::builder().modifiers(vec![]).build().is_tileflage());
+        assert!(Exterior::builder().modifiers(vec![]).is_tileflage(true).build().is_tileflage());
     }
 }

@@ -1756,8 +1756,16 @@ impl GameMetadataProvider {
                     .and_then(|v| v.dict_or_object_dict())
                     .map(|d| build_skill_modifiers(&d.inner()))
                     .unwrap_or_default();
+                // Absent `isTileflage` means a non-tile exterior; `false` is the correct default.
+                let is_tileflage =
+                    game_param_to_type!(param_data, keys::IS_TILEFLAGE, Option<bool>).unwrap_or_default();
                 Some(ParamData::Exterior(
-                    Exterior::builder().maybe_camouflage(camouflage).maybe_title(title).modifiers(modifiers).build(),
+                    Exterior::builder()
+                        .maybe_camouflage(camouflage)
+                        .maybe_title(title)
+                        .modifiers(modifiers)
+                        .is_tileflage(is_tileflage)
+                        .build(),
                 ))
             }
             ParamType::Modernization => {
