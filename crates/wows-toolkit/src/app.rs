@@ -733,6 +733,29 @@ impl WowsToolkitApp {
                 .count();
             let mut shown_replay_spinner = false;
 
+            // Consolidate concurrent game-data downloads (Update-all or Repair
+            // across many builds) into a single status-bar entry with aggregate
+            // progress, rather than one spinner per build.
+            let mut downloading_count = 0usize;
+            let mut download_done = 0u64;
+            let mut download_total = 0u64;
+            for task in &mut self.tab_state.background_tasks {
+                if task.receiver.is_none() {
+                    continue;
+                }
+                if let BackgroundTaskKind::DownloadingGameData { rx, last_progress } = &mut task.kind {
+                    while let Ok(progress) = rx.try_recv() {
+                        *last_progress = Some(progress);
+                    }
+                    if let Some(progress) = last_progress {
+                        download_done += progress.downloaded;
+                        download_total += progress.total;
+                    }
+                    downloading_count += 1;
+                }
+            }
+            let mut shown_download_progress = false;
+
             for i in 0..self.tab_state.background_tasks.len() {
                 let task = &mut self.tab_state.background_tasks[i];
 
@@ -743,6 +766,22 @@ impl WowsToolkitApp {
                             shown_replay_spinner = true;
                             ui.spinner();
                             ui.label(t!("ui.labels.loading_replays", count = pending_replay_count));
+                        }
+                        task.check_completion()
+                    } else if matches!(task.kind, BackgroundTaskKind::DownloadingGameData { .. })
+                        && downloading_count > 1
+                    {
+                        if !shown_download_progress {
+                            shown_download_progress = true;
+                            if download_total > 0 {
+                                ui.add(
+                                    egui::ProgressBar::new(download_done as f32 / download_total as f32)
+                                        .text(t!("ui.messages.downloading_game_data")),
+                                );
+                            } else {
+                                ui.spinner();
+                                ui.label(t!("ui.messages.downloading_game_data"));
+                            }
                         }
                         task.check_completion()
                     } else {
@@ -2158,7 +2197,12 @@ impl WowsToolkitApp {
             let asset = latest_release
                 .assets
                 .iter()
-                .find(|asset| asset.name.contains("windows") && asset.name.ends_with(".zip"));
+                // Match the app archive only. The release also carries a
+                // `wows_toolkit_tools_*` CLI bundle; without the `tools` guard the
+                // updater could grab it and relaunch a console tool instead of the app.
+                .find(|asset| {
+                    asset.name.contains("windows") && asset.name.ends_with(".zip") && !asset.name.contains("tools")
+                });
             if let Some(asset) = asset {
                 egui::Window::new(t!("ui.windows.update_available")).open(&mut self.update_window_open).show(
                     ctx,

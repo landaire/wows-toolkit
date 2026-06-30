@@ -27,6 +27,9 @@ const REPO_TIP_API_URL: &str = "https://api.github.com/repos/landaire/wows-repla
 /// Maximum number of concurrent file downloads.
 const MAX_CONCURRENT_DOWNLOADS: usize = 16;
 
+/// Maximum number of attempts for a single GET before its error is surfaced.
+const MAX_GET_ATTEMPTS: u32 = 4;
+
 /// A locally-cached build whose remote data differs from the copy on disk.
 #[derive(Debug, Clone)]
 pub struct BuildUpdateStatus {
@@ -411,16 +414,36 @@ pub async fn download_build(
     Ok(entry.build)
 }
 
-/// Download a single content object and store it in the CAS, verifying its hash.
+/// Download a single content object, verify it against its expected hash, and
+/// store it in the CAS.
+///
+/// A hash mismatch is treated as transient corruption: the object is re-fetched
+/// with exponential backoff before the error is surfaced, so a one-off bad
+/// response does not abort a whole build's download. Genuinely corrupt remote
+/// content (a mismatch that persists across every attempt) still fails loudly,
+/// and only verified bytes are ever stored, so the CAS never holds an object
+/// that does not match its name.
 async fn download_object(client: &reqwest::Client, base_url: &str, cas_root: &Path, hash: &str) -> Result<(), Report> {
     let url = format!("{base_url}/{}/{}/{}", cas::CAS_DIR, &hash[..2], &hash[2..]);
-    let bytes = get_bytes(client, &url).await?.ok_or_else(|| report!("content object {hash} missing from remote"))?;
-    let actual = cas::hash_bytes(&bytes);
-    if actual != hash {
-        bail!("hash mismatch for {hash}: remote object hashed to {actual}");
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let bytes =
+            get_bytes(client, &url).await?.ok_or_else(|| report!("content object {hash} missing from remote"))?;
+        let actual = cas::hash_bytes(&bytes);
+        if actual == hash {
+            cas::store(cas_root, &bytes)?;
+            return Ok(());
+        }
+        if attempt >= MAX_GET_ATTEMPTS {
+            bail!("hash mismatch for {hash}: remote object hashed to {actual} after {attempt} attempts");
+        }
+        let delay = std::time::Duration::from_millis(500 * 2u64.pow(attempt - 1));
+        tracing::warn!(
+            "hash mismatch for {hash} (got {actual}, attempt {attempt}/{MAX_GET_ATTEMPTS}), retrying in {delay:?}"
+        );
+        tokio::time::sleep(delay).await;
     }
-    cas::store(cas_root, &bytes)?;
-    Ok(())
 }
 
 /// Add or update the build's entry in the local `builds.toml`.
@@ -439,14 +462,45 @@ fn write_file(path: &Path, data: &[u8]) -> Result<(), Report> {
     Ok(())
 }
 
-async fn get_bytes(client: &reqwest::Client, url: &str) -> Result<Option<Vec<u8>>, Report> {
-    let response = client.get(url).send().await.attach_with(|| format!("failed to request {url}"))?;
+/// Whether a request error is a transient failure worth retrying: connect and
+/// timeout errors, interrupted body reads, and server-side or rate-limit
+/// statuses. Client errors (e.g. a 404, handled separately) are not retried.
+fn is_retryable(err: &reqwest::Error) -> bool {
+    err.is_timeout()
+        || err.is_connect()
+        || err.is_request()
+        || err.is_body()
+        || err.is_decode()
+        || matches!(err.status(), Some(status) if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS)
+}
+
+/// One GET attempt: `Ok(None)` for a 404, otherwise the full response body.
+async fn get_bytes_once(client: &reqwest::Client, url: &str) -> reqwest::Result<Option<Vec<u8>>> {
+    let response = client.get(url).send().await?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
     }
-    let response = response.error_for_status().attach_with(|| format!("error status for {url}"))?;
-    let bytes = response.bytes().await.attach_with(|| format!("failed to read body of {url}"))?;
+    let bytes = response.error_for_status()?.bytes().await?;
     Ok(Some(bytes.to_vec()))
+}
+
+/// GET `url`, returning `None` for a 404. Transient failures are retried with
+/// exponential backoff so a single network blip does not abort a multi-object
+/// download; the final attempt's error is surfaced.
+async fn get_bytes(client: &reqwest::Client, url: &str) -> Result<Option<Vec<u8>>, Report> {
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        match get_bytes_once(client, url).await {
+            Ok(result) => return Ok(result),
+            Err(err) if attempt < MAX_GET_ATTEMPTS && is_retryable(&err) => {
+                let delay = std::time::Duration::from_millis(500 * 2u64.pow(attempt - 1));
+                tracing::warn!("GET {url} failed (attempt {attempt}/{MAX_GET_ATTEMPTS}), retrying in {delay:?}: {err}");
+                tokio::time::sleep(delay).await;
+            }
+            Err(err) => return Err(err).attach_with(|| format!("failed to GET {url}")).map_err(Into::into),
+        }
+    }
 }
 
 async fn get_text(client: &reqwest::Client, url: &str) -> Result<Option<String>, Report> {

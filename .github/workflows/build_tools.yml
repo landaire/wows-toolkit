@@ -40,12 +40,12 @@ jobs:
           Move-Item -Path ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\*.exe `
           -Destination ${{ github.workspace }}\artifacts\
           Compress-Archive -Path ${{ github.workspace }}\artifacts\*.exe `
-          -DestinationPath ${{ github.workspace }}\wows_toolkit_tools_${{ github.ref_name }}_windows.zip
+          -DestinationPath ${{ github.workspace }}\wows_toolkit_tools_${{ github.ref_name }}_win64.zip
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
-          files: wows_toolkit_tools_${{ github.ref_name }}_windows.zip
+          files: wows_toolkit_tools_${{ github.ref_name }}_win64.zip
 
   build-linux:
     runs-on: ubuntu-latest
@@ -82,11 +82,11 @@ jobs:
           mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/wows-data-mgr ${{ github.workspace }}/artifacts/
           mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/minimap_renderer_cpu ${{ github.workspace }}/artifacts/
           mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/minimap_renderer ${{ github.workspace }}/artifacts/
-          zip -j ${{ github.workspace }}/wows_toolkit_tools_${{ github.ref_name }}_linux.zip ${{ github.workspace }}/artifacts/*
+          zip -j ${{ github.workspace }}/wows_toolkit_tools_${{ github.ref_name }}_linux64.zip ${{ github.workspace }}/artifacts/*
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            wows_toolkit_tools_${{ github.ref_name }}_linux.zip
+            wows_toolkit_tools_${{ github.ref_name }}_linux64.zip
             game_versions.toml
