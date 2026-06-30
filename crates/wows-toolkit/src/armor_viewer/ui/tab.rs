@@ -44,6 +44,13 @@ use crate::viewport_3d::Vertex;
 use rust_i18n::t;
 use wowsunpack::game_params::types::AmmoType;
 
+/// MFM stem (filename without the `.mfm` suffix) from a full VFS mfm path.
+/// Camo textures are keyed by stem; hull meshes carry the full path.
+fn mfm_stem(mfm_path: &str) -> &str {
+    let base = mfm_path.rsplit(['/', '\\']).next().unwrap_or(mfm_path);
+    base.strip_suffix(".mfm").unwrap_or(base)
+}
+
 /// Per-frame viewer struct implementing `egui_dock::TabViewer` for armor panes.
 struct ArmorPaneViewer<'a> {
     render_state: &'a eframe::egui_wgpu::RenderState,
@@ -62,6 +69,8 @@ struct ArmorPaneViewer<'a> {
     hull_lod_signal: &'a std::cell::Cell<Option<(u64, usize)>>,
     /// Signal: pane_id when user changes hull upgrade selection in a popover.
     hull_change_signal: &'a std::cell::Cell<Option<u64>>,
+    /// Signal: pane_id when user changes the camo selection in a popover.
+    camo_change_signal: &'a std::cell::Cell<Option<u64>>,
 }
 
 impl TabViewer for ArmorPaneViewer<'_> {
@@ -584,6 +593,8 @@ impl ToolkitTabViewer<'_> {
         let hull_lod_ref = &hull_lod_cell;
         let hull_change_cell: std::cell::Cell<Option<u64>> = std::cell::Cell::new(None);
         let hull_change_ref = &hull_change_cell;
+        let camo_change_cell: std::cell::Cell<Option<u64>> = std::cell::Cell::new(None);
+        let camo_change_ref = &camo_change_cell;
         let comparison_ships_snapshot = &state.comparison_ships;
         let ifhe_snapshot = state.ifhe_enabled;
         {
@@ -602,6 +613,7 @@ impl ToolkitTabViewer<'_> {
                 comparison_ships_version: state.comparison_ships_version,
                 hull_lod_signal: hull_lod_ref,
                 hull_change_signal: hull_change_ref,
+                camo_change_signal: camo_change_ref,
             };
             let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(content_rect).id_salt("armor_content"));
             DockArea::new(&mut state.dock_state)
@@ -783,6 +795,42 @@ impl ToolkitTabViewer<'_> {
                 let display_name = pane.loaded_armor.as_ref().map(|a| a.display_name.clone()).unwrap_or_default();
                 load_ship_for_pane_with_lod(pane, &param_index, &display_name, &ship_assets, pane.hull_lod);
             }
+        }
+
+        // Camo change: decode the selected scheme to RGBA and re-upload hull meshes.
+        // No ship reload - all camo data is already resident in LoadedShipArmor.
+        if let Some(pane_id) = camo_change_cell.get()
+            && let Some((_, pane)) = state.dock_state.iter_all_tabs_mut().find(|(_, t)| t.id == pane_id)
+            && let Some(mut armor) = pane.loaded_armor.take()
+        {
+            armor.active_camo_textures.clear();
+            armor.active_camo_uvs.clear();
+            if let Some(name) = pane.selected_camo.clone() {
+                // Resolve into locals so the immutable borrow of armor.camo_schemes is released
+                // before mutating the active_* maps.
+                let resolved = armor.camo_schemes.iter().find(|s| s.name == name).map(|scheme| {
+                    let mut textures = std::collections::HashMap::new();
+                    for (stem, png) in &scheme.textures {
+                        match image::load_from_memory(png) {
+                            Ok(img) => {
+                                let rgba = img.to_rgba8();
+                                let (w, h) = (rgba.width(), rgba.height());
+                                textures.insert(stem.clone(), (w, h, rgba.into_raw()));
+                            }
+                            // A decode failure means the camo does not apply to this stem;
+                            // the mesh falls back to its base texture during upload.
+                            Err(e) => tracing::warn!("camo {name}: failed to decode texture for {stem}: {e}"),
+                        }
+                    }
+                    (textures, scheme.uv_transforms.clone())
+                });
+                if let Some((textures, uvs)) = resolved {
+                    armor.active_camo_textures = textures;
+                    armor.active_camo_uvs = uvs;
+                }
+            }
+            upload_hull_meshes_to_viewport(pane, &armor, &render_state.device, &render_state.queue, &gpu_pipeline);
+            pane.loaded_armor = Some(armor);
         }
 
         // Handle trajectory/splash mode activation -> open panel and switch tab
@@ -1296,7 +1344,12 @@ pub(crate) fn upload_hull_meshes_to_viewport(
         }
 
         let has_uvs = mesh.uvs.len() == mesh.positions.len();
-        let texture_data = mesh.mfm_path.as_ref().and_then(|p| armor.hull_textures.get(p));
+        let stem = mesh.mfm_path.as_deref().map(mfm_stem);
+        // Active camo texture for this stem takes precedence; otherwise the base albedo.
+        let texture_data = stem
+            .and_then(|s| armor.active_camo_textures.get(s))
+            .or_else(|| mesh.mfm_path.as_ref().and_then(|p| armor.hull_textures.get(p)));
+        let camo_uv = stem.and_then(|s| armor.active_camo_uvs.get(s));
         let has_texture = texture_data.is_some() && has_uvs;
 
         // Vertex-color brightness boost for hull meshes. The lighting shader multiplies
@@ -1317,7 +1370,15 @@ pub(crate) fn upload_hull_meshes_to_viewport(
                 norm = transform_normal(t, norm);
             }
 
-            let uv = if has_uvs { mesh.uvs[i] } else { [0.0, 0.0] };
+            let uv = if has_uvs {
+                let base_uv = mesh.uvs[i];
+                match camo_uv {
+                    Some(t) => [base_uv[0] * t.scale[0] + t.offset[0], base_uv[1] * t.scale[1] + t.offset[1]],
+                    None => base_uv,
+                }
+            } else {
+                [0.0, 0.0]
+            };
             let color = if has_texture {
                 [tex_brightness, tex_brightness, tex_brightness, hull_alpha]
             } else if has_baked_colors {
@@ -1413,6 +1474,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
     let comparison_ships_version = ctx.comparison_ships_version;
     let hull_lod_signal = ctx.hull_lod_signal;
     let hull_change_signal = ctx.hull_change_signal;
+    let camo_change_signal = ctx.camo_change_signal;
     let pane_id = pane.id;
 
     // Full viewport area (no sidebar)
@@ -1470,6 +1532,9 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                 }
                                 if hull_result.hull_changed || hull_result.module_changed {
                                     hull_change_signal.set(Some(pane_id));
+                                }
+                                if hull_result.camo_changed {
+                                    camo_change_signal.set(Some(pane_id));
                                 }
                             });
                     }
@@ -3088,6 +3153,33 @@ pub(crate) fn draw_hull_visibility_popover(
                 }
             });
         }
+    }
+
+    // Camo selector
+    if !armor.camo_schemes.is_empty() {
+        ui.horizontal(|ui| {
+            ui.label(t!("ui.armor.camo").as_ref());
+            let none_label = t!("ui.armor.camo_none");
+            let selected_text = pane.selected_camo.clone().unwrap_or_else(|| none_label.as_ref().to_string());
+            egui::ComboBox::from_id_salt(("armor_camo_select", pane.id)).selected_text(selected_text).show_ui(
+                ui,
+                |ui| {
+                    if ui.selectable_label(pane.selected_camo.is_none(), none_label.as_ref()).clicked()
+                        && pane.selected_camo.is_some()
+                    {
+                        pane.selected_camo = None;
+                        result.camo_changed = true;
+                    }
+                    for scheme in &armor.camo_schemes {
+                        let is_selected = pane.selected_camo.as_deref() == Some(scheme.name.as_str());
+                        if ui.selectable_label(is_selected, &scheme.name).clicked() && !is_selected {
+                            pane.selected_camo = Some(scheme.name.clone());
+                            result.camo_changed = true;
+                        }
+                    }
+                },
+            );
+        });
     }
 
     // LOD selector

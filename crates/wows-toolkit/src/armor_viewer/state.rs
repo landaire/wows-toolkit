@@ -60,6 +60,8 @@ pub struct HullPopoverResult {
     pub hull_changed: bool,
     /// Whether a module alternative selection changed.
     pub module_changed: bool,
+    /// Whether the camo selection changed (requires a hull texture re-upload, not a reload).
+    pub camo_changed: bool,
 }
 
 /// Which tab is active in the unified analysis window.
