@@ -1234,6 +1234,7 @@ pub use video_export::BatchEncodeOptions;
 pub use video_export::BatchReplayInfo;
 pub use video_export::batch_render_to_clipboard;
 pub use video_export::batch_render_to_folder;
+pub use video_export::render_replay_to_file;
 use video_export::execute_video_export;
 
 mod shapes;

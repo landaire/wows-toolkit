@@ -1883,9 +1883,11 @@ impl WowsToolkitApp {
 
         self.tab_state.process_session_stats_reset();
 
-        if self.manual_update_requested
-            || (!self.checked_for_updates && self.tab_state.persisted.read().settings.app.check_for_updates)
-        {
+        // [FORK] Auto-update neutralisé : jamais de vérification automatique au démarrage,
+        // sinon la mise à jour officielle écrase ce build modifié (webhook + filtre Clan Wars).
+        // Le bouton manuel « Fichier → Vérifier les mises à jour » reste fonctionnel.
+        let _ = self.checked_for_updates;
+        if self.manual_update_requested {
             self.manual_update_requested = false;
             self.request_update_checks();
         }
@@ -2845,6 +2847,41 @@ impl eframe::App for WowsToolkitApp {
 
                 if ui.button(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.buttons.discord"))).clicked() {
                     ui.ctx().open_url(OpenUrl::new_tab(rot13("uggcf://qvfpbeq.tt/EWXjXHw7eu")));
+                }
+
+                // Contrôle d'envoi auto Discord, visible en permanence dans la barre du haut.
+                ui.add_space(16.0);
+                ui.separator();
+                {
+                    let (auto, clan_only) = {
+                        let p = self.tab_state.persisted.read();
+                        (p.settings.replay.discord_auto_post, p.settings.replay.discord_clan_only)
+                    };
+                    let label = if !auto {
+                        "📤 Discord : OFF"
+                    } else if clan_only {
+                        "📤 Discord : Clan Wars"
+                    } else {
+                        "📤 Discord : Toutes parties"
+                    };
+                    ui.menu_button(label, |ui| {
+                        let mut auto_m = auto;
+                        if ui
+                            .checkbox(&mut auto_m, "Envoi automatique")
+                            .on_hover_text("Poste vidéo + stats sur Discord en fin de partie.")
+                            .changed()
+                        {
+                            self.tab_state.persisted.write().settings.replay.discord_auto_post = auto_m;
+                        }
+                        ui.separator();
+                        ui.label("Parties à envoyer :");
+                        if ui.radio(clan_only, "Clan Wars uniquement").clicked() {
+                            self.tab_state.persisted.write().settings.replay.discord_clan_only = true;
+                        }
+                        if ui.radio(!clan_only, "Toutes les parties").clicked() {
+                            self.tab_state.persisted.write().settings.replay.discord_clan_only = false;
+                        }
+                    });
                 }
             });
         });

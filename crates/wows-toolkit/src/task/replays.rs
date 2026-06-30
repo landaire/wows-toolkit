@@ -672,10 +672,15 @@ fn parse_replay_data_in_background(
                     replay.game_constants = Some(gc);
                     replay.source_path = Some(path.to_path_buf());
                     let mut build_uploaded_successfully = false;
+                    let mut detected_clan = false;
                     match replay.parse(game_version.to_string().as_str()) {
                         Ok(report) => {
                             let battle_type =
                                 wowsunpack::game_types::BattleType::from_value(&game_type, replay_version);
+                            detected_clan = matches!(
+                                battle_type.known(),
+                                Some(wowsunpack::game_types::BattleType::Clan)
+                            );
                             let is_valid_game_type_for_shipbuilds = matches!(
                                 battle_type.known(),
                                 Some(
@@ -791,6 +796,89 @@ fn parse_replay_data_in_background(
                                 {
                                     // fail gracefully
                                     error!("failed to write data export file: {:?}", e);
+                                }
+                            }
+
+                            // === Envoi automatique Discord (vidéo + tableau stats) ===
+                            let (dc_webhook, dc_auto, dc_dir, dc_speed, dc_clan_only, saved_ro) =
+                                if let (Some(pool), Some(rt)) = (&data.db_pool, &data.tokio_runtime) {
+                                    let rs: Option<crate::data::settings::ReplaySettings> =
+                                        rt.block_on(crate::db::queries::get_setting(pool, "replay_settings"));
+                                    let ro: Option<crate::data::settings::SavedRenderOptions> =
+                                        rt.block_on(crate::db::queries::get_render_options(pool))
+                                            .ok()
+                                            .flatten()
+                                            .and_then(|j| serde_json::from_str(&j).ok());
+                                    match rs {
+                                        Some(rs) => (
+                                            rs.discord_webhook_url,
+                                            rs.discord_auto_post,
+                                            rs.discord_render_dir,
+                                            rs.discord_video_speed,
+                                            rs.discord_clan_only,
+                                            ro,
+                                        ),
+                                        None => (String::new(), false, String::new(), 20, true, ro),
+                                    }
+                                } else {
+                                    (String::new(), false, String::new(), 20, true, None)
+                                };
+
+                            // Filtre : si "Clan Wars uniquement" est actif, ne poster que les parties Clan.
+                            if dc_auto && !dc_webhook.is_empty() && (!dc_clan_only || detected_clan) {
+                                let options = crate::replay::renderer::render_options_from_saved(
+                                    &saved_ro.unwrap_or_default(),
+                                );
+                                let dir = if dc_dir.is_empty() {
+                                    data.data_export_settings.export_path.clone()
+                                } else {
+                                    std::path::PathBuf::from(&dc_dir)
+                                };
+                                let _ = std::fs::create_dir_all(&dir);
+                                let out_path = dir
+                                    .join(replay.better_file_name(&metadata_provider))
+                                    .with_extension("mp4");
+                                let out_str = out_path.to_string_lossy().to_string();
+
+                                // Stats + vraie duree de la partie (pour caler la qualite video)
+                                let m = Match::new(&replay, data.is_debug);
+                                let val = serde_json::to_value(&m).ok();
+                                let actual_secs = val
+                                    .as_ref()
+                                    .and_then(|v| v["metadata"]["played_duration"].as_f64())
+                                    .filter(|d| *d > 1.0)
+                                    .unwrap_or(0.0) as f32;
+
+                                match ReplayFile::from_file(path) {
+                                    Ok(rf) => {
+                                        let raw_meta = rf.raw_meta.clone().into_bytes();
+                                        let pkt = rf.packet_data.clone();
+                                        let map_name = rf.meta.mapName.clone();
+                                        let duration = rf.meta.duration as f32;
+                                        debug!("Auto-Discord: rendu vidéo vers {:?}", out_path);
+                                        match crate::replay::renderer::render_replay_to_file(
+                                            &out_str, &raw_meta, &pkt, &map_name, duration,
+                                            options, &wows_data_for_build, 9, dc_speed as f32, actual_secs,
+                                        ) {
+                                            Ok(()) => {
+                                                if let Err(e) = crate::discord::post_file(
+                                                    client, &dc_webhook, &out_path,
+                                                    "🎥 Replay de la partie",
+                                                ) {
+                                                    error!("Auto-Discord vidéo: {e}");
+                                                }
+                                            }
+                                            Err(e) => error!("Auto-Discord rendu échoué: {:?}", e),
+                                        }
+                                    }
+                                    Err(e) => error!("Auto-Discord relecture replay: {:?}", e),
+                                }
+
+                                if let Some(val) = val {
+                                    let table = crate::discord::format_team_table(&val);
+                                    if let Err(e) = crate::discord::post_text(client, &dc_webhook, &table) {
+                                        error!("Auto-Discord stats: {e}");
+                                    }
                                 }
                             }
                         }

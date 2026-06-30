@@ -82,6 +82,10 @@ pub struct VideoEncoder {
     progress_callback: Option<Box<dyn Fn(RenderProgress)>>,
     canvas_width: u32,
     canvas_height: u32,
+    /// Duree (en secondes) de la video de sortie. Plus elle est courte, plus la
+    /// partie est acceleree (vitesse = window_duration / output_duration).
+    /// Defaut: `OUTPUT_DURATION`.
+    output_duration: f64,
 }
 
 impl VideoEncoder {
@@ -111,7 +115,16 @@ impl VideoEncoder {
             progress_callback: None,
             canvas_width,
             canvas_height,
+            output_duration: OUTPUT_DURATION,
         }
+    }
+
+    /// Definit la duree de la video de sortie (en secondes). Utilise pour choisir
+    /// la vitesse d'acceleration (ex. partie de 1200s -> 60s = x20, -> 240s = x5).
+    pub fn set_output_duration(&mut self, secs: f64) {
+        self.output_duration = secs.max(1.0);
+        let total_frames = (self.output_duration * FPS) as u64;
+        self.expected_frames = total_frames;
     }
 
     /// Force the CPU encoder (Mode::ForceCpu). When combined with a CodecChoice
@@ -145,7 +158,7 @@ impl VideoEncoder {
     /// the target even for a maximum-length clip.
     pub fn target_max_file_size(&mut self, target_size_bytes: u64) {
         self.encoder_config =
-            crate::encoder::EncoderConfig::from_target_size(target_size_bytes, OUTPUT_DURATION as f32);
+            crate::encoder::EncoderConfig::from_target_size(target_size_bytes, self.output_duration as f32);
     }
 
     /// Begin the output video at `start`, skipping everything before it. Packets
@@ -177,7 +190,7 @@ impl VideoEncoder {
     }
 
     fn total_frames(&self) -> i64 {
-        (OUTPUT_DURATION * FPS) as i64
+        (self.output_duration * FPS) as i64
     }
 
     pub fn init(&mut self) -> rootcause::Result<(), VideoError> {

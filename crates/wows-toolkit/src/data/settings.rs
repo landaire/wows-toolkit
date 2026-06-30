@@ -50,6 +50,25 @@ pub struct ReplaySettings {
     pub auto_export_format: ReplayExportFormat,
     #[serde(default)]
     pub grouping: ReplayGrouping,
+    /// URL du webhook Discord pour l'envoi automatique (vide = desactive)
+    #[serde(default)]
+    pub discord_webhook_url: String,
+    /// Poster automatiquement video + stats en fin de partie
+    #[serde(default = "default_bool::<false>")]
+    pub discord_auto_post: bool,
+    /// Dossier ou sont enregistrees les videos rendues automatiquement
+    #[serde(default)]
+    pub discord_render_dir: String,
+    /// Vitesse d'acceleration de la video auto (5, 10, 15, 20)
+    #[serde(default = "default_video_speed")]
+    pub discord_video_speed: u32,
+    /// N'envoyer automatiquement que les parties Clan Wars (true) ou toutes (false)
+    #[serde(default = "default_bool::<true>")]
+    pub discord_clan_only: bool,
+}
+
+pub const fn default_video_speed() -> u32 {
+    20
 }
 
 impl Default for ReplaySettings {
@@ -65,6 +84,11 @@ impl Default for ReplaySettings {
             auto_export_path: String::new(),
             auto_export_format: ReplayExportFormat::default(),
             grouping: ReplayGrouping::default(),
+            discord_webhook_url: String::new(),
+            discord_auto_post: false,
+            discord_render_dir: String::new(),
+            discord_video_speed: 20,
+            discord_clan_only: true,
         }
     }
 }

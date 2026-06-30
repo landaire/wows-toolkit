@@ -4130,6 +4130,18 @@ impl ToolkitTabViewer<'_> {
             }
 
             {
+                // Interrupteur rapide envoi auto Discord (decoche en solo)
+                let mut val = self.tab_state.persisted.read().settings.replay.discord_auto_post;
+                if ui
+                    .checkbox(&mut val, "📤 Envoi Discord auto")
+                    .on_hover_text("Poste vidéo + stats en fin de partie. Décoche pour jouer en solo sans partager.")
+                    .changed()
+                {
+                    self.tab_state.persisted.write().settings.replay.discord_auto_post = val;
+                }
+            }
+
+            {
                 let mut grouping = self.tab_state.persisted.read().settings.replay.grouping;
                 ComboBox::from_id_salt("replay_grouping")
                     .selected_text(t!("ui.replay.group.prefix", label = grouping.label()))

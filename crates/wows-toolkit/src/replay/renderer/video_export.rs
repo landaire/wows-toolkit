@@ -87,6 +87,59 @@ pub(super) fn execute_video_export(
     }
 }
 
+/// Rendu headless SYNCHRONE d'un replay vers un fichier MP4 (envoi auto Discord).
+/// Reutilise `render_video_blocking` avec un cache d'assets neuf et un bitrate
+/// calcule pour tenir sous `target_size_mib`.
+pub fn render_replay_to_file(
+    output_path: &str,
+    raw_meta: &[u8],
+    packet_data: &[u8],
+    map_name: &str,
+    game_duration: f32,
+    options: RenderOptions,
+    wows_data: &SharedWoWsData,
+    target_size_mib: u32,
+    speed: f32,
+    actual_secs: f32,
+) -> rootcause::Result<()> {
+    let asset_cache = Arc::new(parking_lot::Mutex::new(RendererAssetCache::default()));
+    let progress = Arc::new(Mutex::new(None));
+    // Vitesse choisie (x5/x10/x15/x20) -> duree de sortie (scaling du temps).
+    let speed = if speed > 0.0 { speed as f64 } else { 20.0 };
+    let game_secs = if game_duration > 1.0 { game_duration as f64 } else { 60.0 };
+    let output_duration = (game_secs / speed).max(1.0);
+    // IMPORTANT : la vraie longueur de la video = duree REELLE de la partie / vitesse
+    // (pas la limite theorique). On cale le bitrate la-dessus pour une bonne
+    // qualite tout en restant sous target_size_mib.
+    let actual = if actual_secs > 1.0 { actual_secs as f64 } else { game_secs };
+    let video_len = (actual / speed).max(1.0);
+    let bits = (target_size_mib as f64) * 1024.0 * 1024.0 * 8.0 * 0.92;
+    let bitrate = (bits / video_len).clamp(400_000.0, 16_000_000.0) as u32;
+    let encoder_config = wows_minimap_renderer::EncoderConfig {
+        target_bitrate_bps: Some(bitrate),
+        max_bitrate_bps: None,
+        av1_quantizer: None,
+    };
+    render_video_blocking(
+        output_path,
+        raw_meta,
+        packet_data,
+        &[],
+        map_name,
+        game_duration,
+        options,
+        wows_data,
+        &asset_cache,
+        &progress,
+        false,
+        Some(wows_minimap_renderer::VideoCodec::H264),
+        None,
+        encoder_config,
+        false,
+        Some(output_duration),
+    )
+}
+
 /// Spawn a background thread that renders the replay to an MP4 video file
 /// using the software renderer (`ImageTarget`) and `VideoEncoder`.
 #[allow(clippy::too_many_arguments)]
@@ -128,6 +181,7 @@ pub(super) fn save_as_video(
             actual_game_duration,
             encoder_config,
             include_pre_battle,
+            None,
         );
 
         match result {
@@ -190,6 +244,7 @@ pub(super) fn render_video_to_clipboard(
             actual_game_duration,
             encoder_config,
             include_pre_battle,
+            None,
         );
 
         match result {
@@ -290,6 +345,7 @@ fn render_batch(
             None,
             wows_minimap_renderer::EncoderConfig::default(),
             encode.include_pre_battle,
+            None,
         );
 
         let estimated_frames = (replay.game_duration * 7.0) as u64;
@@ -427,6 +483,7 @@ pub(super) fn render_video_blocking(
     actual_game_duration: Option<f32>,
     encoder_config: wows_minimap_renderer::EncoderConfig,
     include_pre_battle: bool,
+    output_duration_secs: Option<f64>,
 ) -> rootcause::Result<()> {
     use wows_minimap_renderer::drawing::ImageTarget;
     use wows_minimap_renderer::video::VideoEncoder;
@@ -555,6 +612,9 @@ pub(super) fn render_video_blocking(
     target.set_text_resolver(std::sync::Arc::new(crate::LocalizedTextResolver));
     let (cw, ch) = target.canvas_size();
     let mut encoder = VideoEncoder::new(Some(output_path), None, false, game_duration, cw, ch);
+    if let Some(d) = output_duration_secs {
+        encoder.set_output_duration(d);
+    }
     encoder.set_prefer_cpu(prefer_cpu);
     encoder.set_codec(match codec {
         Some(c) => wows_minimap_renderer::video::CodecChoice::Explicit(c),

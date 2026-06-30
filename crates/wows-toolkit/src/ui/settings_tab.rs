@@ -378,6 +378,100 @@ impl ToolkitTabViewer<'_> {
 
             ui.add_space(12.0);
 
+            // ── Discord auto-post ─────────────────────────────────────
+            section_header(
+                ui,
+                icons::BROADCAST,
+                "Envoi automatique Discord",
+                "Poste la vidéo du replay + le tableau de stats sur un salon Discord en fin de partie.",
+            );
+            ui.group(|ui| {
+                ui.set_width(ui.available_width());
+                let mut p = self.tab_state.persisted.write();
+                let rs = &mut p.settings.replay;
+                ui.checkbox(
+                    &mut rs.discord_auto_post,
+                    "Poster automatiquement (vidéo + stats) en fin de partie",
+                );
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label("Parties à envoyer :");
+                    ui.radio_value(&mut rs.discord_clan_only, true, "Clan Wars uniquement");
+                    ui.radio_value(&mut rs.discord_clan_only, false, "Toutes les parties");
+                });
+                ui.add_space(4.0);
+                ui.label("Lien webhook Discord :");
+                ui.add_sized(
+                    ui.available_size_before_wrap(),
+                    egui::TextEdit::singleline(&mut rs.discord_webhook_url)
+                        .hint_text("https://discord.com/api/webhooks/..."),
+                );
+                ui.add_space(4.0);
+                ui.label("Dossier des vidéos rendues automatiquement :");
+                ui.horizontal(|ui| {
+                    if ui.button(t!("ui.buttons.choose")).clicked() {
+                        if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                            rs.discord_render_dir = folder.to_string_lossy().to_string();
+                        }
+                    }
+                    ui.add_sized(
+                        ui.available_size_before_wrap(),
+                        egui::TextEdit::singleline(&mut rs.discord_render_dir)
+                            .hint_text("dossier d'enregistrement des vidéos auto"),
+                    );
+                });
+
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label("Vitesse de la vidéo :");
+                    egui::ComboBox::from_id_salt("discord_video_speed")
+                        .selected_text(format!("x{}", rs.discord_video_speed))
+                        .show_ui(ui, |ui| {
+                            for s in [5u32, 10, 15, 20] {
+                                ui.selectable_value(&mut rs.discord_video_speed, s, format!("x{s}"));
+                            }
+                        });
+                    ui.label("(partie accélérée : x20 = vidéo courte, x5 = plus longue)");
+                });
+
+                // Gestion du dossier : taille + vidage proposé à 1 Go
+                ui.add_space(6.0);
+                let dir = std::path::PathBuf::from(&rs.discord_render_dir);
+                let (taille, nb): (u64, usize) = std::fs::read_dir(&dir)
+                    .map(|rd| {
+                        rd.flatten()
+                            .filter(|e| {
+                                e.path().extension().map(|x| x == "mp4").unwrap_or(false)
+                            })
+                            .fold((0u64, 0usize), |(s, c), e| {
+                                (s + e.metadata().map(|m| m.len()).unwrap_or(0), c + 1)
+                            })
+                    })
+                    .unwrap_or((0, 0));
+                let mo = taille as f64 / 1_048_576.0;
+                ui.horizontal(|ui| {
+                    if mo >= 1024.0 {
+                        ui.colored_label(
+                            Color32::from_rgb(210, 120, 0),
+                            format!("⚠️ Dossier : {nb} vidéo(s), {mo:.0} Mo — dépasse 1 Go, pense à le vider"),
+                        );
+                    } else {
+                        ui.label(format!("Dossier : {nb} vidéo(s), {mo:.0} Mo"));
+                    }
+                    if ui.button("Vider le dossier").clicked() {
+                        if let Ok(rd) = std::fs::read_dir(&dir) {
+                            for e in rd.flatten() {
+                                if e.path().extension().map(|x| x == "mp4").unwrap_or(false) {
+                                    let _ = std::fs::remove_file(e.path());
+                                }
+                            }
+                        }
+                    }
+                });
+            });
+
+            ui.add_space(12.0);
+
             // ── Session Settings ──────────────────────────────────────
             section_header(
                 ui,
