@@ -1252,83 +1252,7 @@ impl ShipModelContext {
             for sub in &sub_models {
                 all_mfm_infos.extend(collect_mfm_info(sub.visual, &db));
             }
-            let mut tex_set = build_texture_set(&all_mfm_infos, &self.vfs);
-            let per_ship_count = tex_set.camo_schemes.len();
-
-            // Merge material-based camo textures (mat_Steel, mat_Yamato_KoF, etc.).
-            if !self.mat_camo_schemes.is_empty() {
-                let stems: Vec<String> = {
-                    let mut s = HashSet::new();
-                    for info in &all_mfm_infos {
-                        s.insert(info.stem.clone());
-                    }
-                    s.into_iter().collect()
-                };
-
-                for scheme in &self.mat_camo_schemes {
-                    let mut png_bytes = None;
-
-                    if scheme.tiled {
-                        // Tiled camo: load tile DDS and bake with color scheme.
-                        if let Some(colors) = &scheme.color_scheme_colors {
-                            for path in &scheme.texture_paths {
-                                if let Some(dds) = texture::load_dds_from_vfs(&self.vfs, path) {
-                                    match texture::bake_tiled_camo_png(&dds, colors) {
-                                        Ok(png) => {
-                                            png_bytes = Some(png);
-                                            break;
-                                        }
-                                        Err(e) => {
-                                            eprintln!("  Warning: failed to bake tiled camo {}: {e}", path);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        // Non-tiled mat_camo: load DDS and convert to PNG.
-                        for path in &scheme.texture_paths {
-                            if let Some(dds) = texture::load_dds_from_vfs(&self.vfs, path) {
-                                match texture::dds_to_png(&dds) {
-                                    Ok(png) => {
-                                        png_bytes = Some(png);
-                                        break;
-                                    }
-                                    Err(e) => {
-                                        eprintln!("  Warning: failed to decode mat_camo texture {}: {e}", path);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if let Some(png) = png_bytes {
-                        let mut scheme_textures = HashMap::new();
-                        for stem in &stems {
-                            scheme_textures.insert(stem.clone(), png.clone());
-                        }
-                        let scheme_idx = tex_set.camo_schemes.len();
-                        tex_set.camo_schemes.push((scheme.display_name.clone(), scheme_textures));
-                        if scheme.tiled {
-                            // Store per-stem UV transforms for this tiled scheme.
-                            for stem in &stems {
-                                let cat = camouflage::classify_part_category(stem);
-                                if let Some(xform) = scheme.uv_transforms.get(cat) {
-                                    tex_set.tiled_uv_transforms.insert(
-                                        (scheme_idx, stem.clone()),
-                                        [xform.scale[0], xform.scale[1], xform.offset[0], xform.offset[1]],
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let mat_count = tex_set.camo_schemes.len() - per_ship_count;
-                eprintln!("  Texture variants: {} per-ship, {} material-based", per_ship_count, mat_count);
-            }
-
-            tex_set
+            self.texture_set_from_mfm_infos(&all_mfm_infos)
         } else {
             TextureSet::empty()
         };
@@ -1368,6 +1292,102 @@ impl ShipModelContext {
         .context("Failed to export ship GLB")?;
 
         Ok(())
+    }
+
+    /// Build the complete texture set (base albedo + per-ship, material, and universal
+    /// camo schemes, with tiled UV transforms) for this ship. Self-contained: re-parses
+    /// the prototype DB and collects MFM infos from the hull and mounted-turret visuals.
+    pub fn build_full_texture_set(&self) -> Result<TextureSet, Report> {
+        if !self.options.textures {
+            return Ok(TextureSet::empty());
+        }
+        let db = assets_bin::parse_assets_bin(&self.assets_bin_bytes).context("Failed to re-parse assets.bin")?;
+        let mut all_mfm_infos = Vec::new();
+        for d in &self.hull_parts {
+            all_mfm_infos.extend(collect_mfm_info(&d.visual, &db));
+        }
+        for mount in &self.mounts {
+            let turret = &self.turret_models[mount.turret_model_index];
+            all_mfm_infos.extend(collect_mfm_info(&turret.visual, &db));
+        }
+        Ok(self.texture_set_from_mfm_infos(&all_mfm_infos))
+    }
+
+    /// Build base albedo plus all camo schemes from pre-collected MFM infos.
+    fn texture_set_from_mfm_infos(&self, all_mfm_infos: &[MfmInfo]) -> TextureSet {
+        let mut tex_set = build_texture_set(all_mfm_infos, &self.vfs);
+        let per_ship_count = tex_set.camo_schemes.len();
+
+        if !self.mat_camo_schemes.is_empty() {
+            let stems: Vec<String> = {
+                let mut s = HashSet::new();
+                for info in all_mfm_infos {
+                    s.insert(info.stem.clone());
+                }
+                s.into_iter().collect()
+            };
+
+            for scheme in &self.mat_camo_schemes {
+                let mut png_bytes = None;
+
+                if scheme.tiled {
+                    if let Some(colors) = &scheme.color_scheme_colors {
+                        for path in &scheme.texture_paths {
+                            if let Some(dds) = texture::load_dds_from_vfs(&self.vfs, path) {
+                                match texture::bake_tiled_camo_png(&dds, colors) {
+                                    Ok(png) => {
+                                        png_bytes = Some(png);
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        eprintln!("  Warning: failed to bake tiled camo {}: {e}", path);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    for path in &scheme.texture_paths {
+                        if let Some(dds) = texture::load_dds_from_vfs(&self.vfs, path) {
+                            match texture::dds_to_png(&dds) {
+                                Ok(png) => {
+                                    png_bytes = Some(png);
+                                    break;
+                                }
+                                Err(e) => {
+                                    eprintln!("  Warning: failed to decode mat_camo texture {}: {e}", path);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let Some(png) = png_bytes {
+                    let mut scheme_textures = HashMap::new();
+                    for stem in &stems {
+                        scheme_textures.insert(stem.clone(), png.clone());
+                    }
+                    let scheme_idx = tex_set.camo_schemes.len();
+                    tex_set.camo_schemes.push((scheme.display_name.clone(), scheme_textures));
+                    if scheme.tiled {
+                        for stem in &stems {
+                            let cat = camouflage::classify_part_category(stem);
+                            if let Some(xform) = scheme.uv_transforms.get(cat) {
+                                tex_set.tiled_uv_transforms.insert(
+                                    (scheme_idx, stem.clone()),
+                                    [xform.scale[0], xform.scale[1], xform.offset[0], xform.offset[1]],
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            let mat_count = tex_set.camo_schemes.len() - per_ship_count;
+            eprintln!("  Texture variants: {} per-ship, {} material-based", per_ship_count, mat_count);
+        }
+
+        tex_set
     }
 }
 
