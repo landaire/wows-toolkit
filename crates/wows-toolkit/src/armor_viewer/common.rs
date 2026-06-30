@@ -8,6 +8,7 @@ use wowsunpack::game_params::types::Vehicle;
 
 use super::state::ArmorPane;
 use super::state::ArmorZone;
+use super::state::CamoScheme;
 use super::state::LoadedShipArmor;
 use super::state::VisibilitySnapshot;
 use super::state::ZonePart;
@@ -297,7 +298,7 @@ pub(crate) fn load_ship_armor(
                             )
                         })
                         .collect();
-                    crate::armor_viewer::state::CamoScheme { name, textures, uv_transforms }
+                    CamoScheme { name, textures, uv_transforms }
                 })
                 .collect()
         }

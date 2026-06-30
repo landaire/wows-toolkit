@@ -1349,7 +1349,10 @@ pub(crate) fn upload_hull_meshes_to_viewport(
         let texture_data = stem
             .and_then(|s| armor.active_camo_textures.get(s))
             .or_else(|| mesh.mfm_path.as_ref().and_then(|p| armor.hull_textures.get(p)));
-        let camo_uv = stem.and_then(|s| armor.active_camo_uvs.get(s));
+        // Only apply a tiled UV transform when this stem actually has an active camo
+        // texture; otherwise the mesh falls back to base albedo with its own UVs.
+        let camo_uv =
+            stem.filter(|s| armor.active_camo_textures.contains_key(*s)).and_then(|s| armor.active_camo_uvs.get(s));
         let has_texture = texture_data.is_some() && has_uvs;
 
         // Vertex-color brightness boost for hull meshes. The lighting shader multiplies
@@ -2357,6 +2360,7 @@ fn load_ship_for_pane_with_lod(
     pane.hover_highlight = None;
     pane.plate_visibility.clear();
     pane.part_visibility.clear();
+    pane.selected_camo = None;
     pane.trajectories.clear();
     pane.splash_mode = false;
     pane.splash_result = None;

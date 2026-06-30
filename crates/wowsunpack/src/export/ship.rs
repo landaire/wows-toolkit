@@ -349,7 +349,7 @@ impl ShipAssets {
             schemes.push(format!("{} ({})", scheme.display_name, tag));
         }
 
-        // Include universal camos (PCEC entries available to all ships).
+        // Include universal camos (available to all ships).
         let universal = self.discover_universal_camo_schemes(ship_idx);
         for scheme in &universal {
             let tag = if scheme.tiled { "tiled" } else { "mat_camo" };
@@ -536,10 +536,9 @@ impl ShipAssets {
         result
     }
 
-    /// Discover universal camouflage schemes (PCEC entries available to all ships).
-    ///
-    /// These are not referenced by any ship's `permoflages` list — they're
-    /// universally applicable. Deduplicated by camouflage name.
+    /// Discover universal camouflage schemes: MSkin-species exteriors flagged
+    /// isTileflage (the game's global tile-camo set, available to all ships).
+    /// Deduplicated by camouflage name.
     fn discover_universal_camo_schemes(&self, ship_index: Option<&str>) -> Vec<MatCamoScheme> {
         let camo_db = match &self.camo_db {
             Some(db) => db,
