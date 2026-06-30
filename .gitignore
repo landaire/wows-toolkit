@@ -20,3 +20,10 @@ strings.csv
 /55299*.txt
 # Superpowers planning docs (local only, not source-controlled)
 docs/superpowers/
+# Installeur team : binaires livres (regenerables depuis _INSTALLEUR-TEAM/installer-src)
+_INSTALLEUR-TEAM/Installateur-WoWsToolkit-Team.exe
+_INSTALLEUR-TEAM/wows_toolkit.exe
+# Logs de build locaux
+build_*.log
+# Sauvegardes patch locales
+BACKUPS/

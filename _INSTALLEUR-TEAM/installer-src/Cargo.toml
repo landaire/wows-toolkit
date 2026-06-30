@@ -1,0 +1,16 @@
+# Projet autonome (hors workspace principal) : installeur des potes.
+# Le [workspace] vide ci-dessous le declare independant du Cargo.toml racine du repo.
+[workspace]
+
+[package]
+name = "installateur-toolkit-team"
+version = "1.0.0"
+edition = "2021"
+
+[[bin]]
+name = "Installateur-WoWsToolkit-Team"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 2
+strip = true
