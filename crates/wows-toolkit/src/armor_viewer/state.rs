@@ -290,6 +290,17 @@ pub struct CameraRingHover {
     pub waterline_dy: f32,
 }
 
+/// A camouflage scheme resolved for a loaded ship: per-MFM-stem texture PNG bytes plus,
+/// for tiled camos, per-stem UV transforms. PNGs are kept compressed; only the selected
+/// scheme is decoded to RGBA (into `LoadedShipArmor::active_camo_textures`).
+pub struct CamoScheme {
+    pub name: String,
+    /// mfm stem -> PNG bytes.
+    pub textures: HashMap<String, Vec<u8>>,
+    /// mfm stem -> UV scale/offset for tiled schemes; absent means identity UVs.
+    pub uv_transforms: HashMap<String, wowsunpack::export::camouflage::UvTransform>,
+}
+
 /// Data for a loaded ship's armor.
 #[allow(dead_code)]
 pub struct LoadedShipArmor {
@@ -331,6 +342,13 @@ pub struct LoadedShipArmor {
     pub module_alternatives: Vec<(wowsunpack::game_params::keys::ComponentType, Vec<String>)>,
     /// Camera orbit trajectories (mode name -> trajectory) for this ship.
     pub camera_trajectories: Vec<(String, wowsunpack::game_params::types::CameraTrajectory)>,
+    /// All camo schemes available for this ship (Stock is the absence of a selection).
+    pub camo_schemes: Vec<CamoScheme>,
+    /// Decoded RGBA for the currently selected camo, keyed by mfm stem. Empty = Stock.
+    /// Recomputed on camo change; read by `upload_hull_meshes_to_viewport`.
+    pub active_camo_textures: HashMap<String, (u32, u32, Vec<u8>)>,
+    /// UV transforms for the currently selected camo, keyed by mfm stem. Empty = identity.
+    pub active_camo_uvs: HashMap<String, wowsunpack::export::camouflage::UvTransform>,
 }
 
 impl LoadedShipArmor {

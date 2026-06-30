@@ -273,6 +273,40 @@ pub(crate) fn load_ship_armor(
 
     let hull_lod_count = ctx.hull_lod_count();
 
+    // Resolve all camo schemes (base appearance stays in hull_textures; camos are applied
+    // on selection). An empty list simply hides the dropdown, so old game versions whose
+    // data yields no camos render exactly as before.
+    let camo_schemes = match ctx.build_full_texture_set() {
+        Ok(tex_set) => {
+            let tiled = tex_set.tiled_uv_transforms;
+            tex_set
+                .camo_schemes
+                .into_iter()
+                .enumerate()
+                .map(|(idx, (name, textures))| {
+                    let uv_transforms = tiled
+                        .iter()
+                        .filter(|((scheme_idx, _), _)| *scheme_idx == idx)
+                        .map(|((_, stem), xform)| {
+                            (
+                                stem.clone(),
+                                wowsunpack::export::camouflage::UvTransform {
+                                    scale: [xform[0], xform[1]],
+                                    offset: [xform[2], xform[3]],
+                                },
+                            )
+                        })
+                        .collect();
+                    crate::armor_viewer::state::CamoScheme { name, textures, uv_transforms }
+                })
+                .collect()
+        }
+        Err(e) => {
+            tracing::warn!("failed to resolve camo schemes: {e}");
+            Vec::new()
+        }
+    };
+
     let mut armor = LoadedShipArmor {
         display_name: options.display_name,
         meshes,
@@ -293,6 +327,9 @@ pub(crate) fn load_ship_armor(
         loaded_hull: options.selected_hull,
         module_alternatives: options.module_alternatives,
         camera_trajectories: options.camera_trajectories,
+        camo_schemes,
+        active_camo_textures: std::collections::HashMap::new(),
+        active_camo_uvs: std::collections::HashMap::new(),
     };
     armor.apply_waterline_offset();
     Ok(armor)
