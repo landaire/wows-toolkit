@@ -33,6 +33,7 @@ use crate::game_params::provider::GameMetadataProvider;
 use crate::game_params::types::ArmorMap;
 use crate::game_params::types::GameParamProvider;
 use crate::game_params::types::MountPoint;
+use crate::game_params::types::Species;
 use crate::game_params::types::Vehicle;
 use crate::models::assets_bin;
 use crate::models::assets_bin::PrototypeDatabase;
@@ -40,6 +41,7 @@ use crate::models::geometry;
 use crate::models::model;
 use crate::models::visual;
 use crate::models::visual::VisualPrototype;
+use crate::recognized::Recognized;
 
 use super::camouflage;
 use super::camouflage::CamouflageDb;
@@ -470,6 +472,10 @@ impl ShipAssets {
             let Some(param) = param else {
                 continue;
             };
+            // ShipDestruction-species exteriors are death skins, not selectable camos.
+            if matches!(param.species(), Some(Recognized::Unknown(s)) if s == "ShipDestruction") {
+                continue;
+            }
             let Some(exterior) = param.exterior() else {
                 continue;
             };
@@ -545,12 +551,18 @@ impl ShipAssets {
 
         for param in self.metadata.params() {
             let name = param.name();
-            if !name.starts_with("PCEC") {
+            // Universal camos are MSkin-species exteriors flagged isTileflage (the game's
+            // global tileflage set); the legacy PCEC prefix is the wrong criterion and misses
+            // tile camos that lack a PCEC counterpart.
+            if !matches!(param.species(), Some(Recognized::Known(Species::MSkin))) {
                 continue;
             }
             let Some(exterior) = param.exterior() else {
                 continue;
             };
+            if !exterior.is_tileflage() {
+                continue;
+            }
             let Some(camo_name) = exterior.camouflage() else {
                 continue;
             };
