@@ -838,6 +838,16 @@ fn parse_replay_data_in_background(
                                 let out_path = dir
                                     .join(replay.better_file_name(&metadata_provider))
                                     .with_extension("mp4");
+
+                                // Anti-doublon : en fin de partie, le jeu re-modifie le fichier
+                                // replay (evenement ModifiedReplay) -> 2e parse. Si la video de ce
+                                // replay existe deja, c'est qu'on l'a deja poste : on ne re-poste pas.
+                                if out_path.exists() {
+                                    debug!(
+                                        "Auto-Discord: replay deja poste ({:?}), envoi ignore (anti-doublon)",
+                                        out_path
+                                    );
+                                } else {
                                 let out_str = out_path.to_string_lossy().to_string();
 
                                 // Stats + vraie duree de la partie (pour caler la qualite video)
@@ -880,6 +890,7 @@ fn parse_replay_data_in_background(
                                         error!("Auto-Discord stats: {e}");
                                     }
                                 }
+                                } // fin du else anti-doublon
                             }
                         }
                     }
