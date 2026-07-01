@@ -1600,8 +1600,10 @@ pub fn export_geometry_raw(geometry: &MergedGeometry, writer: &mut impl Write) -
 /// BigWorld ship visuals contain both intact and damaged geometry in the same
 /// file. Crack geometry (`_crack_`) shows jagged fracture edges for the damaged
 /// state, while patch geometry (`_patch_`) covers those seams when intact.
-/// The `_hide` geometry is context-dependent and hidden by default.
-const INTACT_EXCLUDE: &[&str] = &["_crack_", "_hide"];
+/// The `_hide` geometry is close-up detail (boats, davits, fittings) that the
+/// engine shows in the near LODs and removes when the section is destroyed, so
+/// it belongs in the intact model and is only dropped in the damaged state.
+const INTACT_EXCLUDE: &[&str] = &["_crack_"];
 
 /// Render set name substrings to exclude for damaged-state export.
 ///
@@ -1900,6 +1902,19 @@ fn apply_barrel_pitch(
     }
 }
 
+/// Where a camo scheme came from, for UI grouping.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CamoOrigin {
+    /// The ship's own permanent camo (permoflage/skin).
+    ShipSpecific,
+    /// Universal tile camo (MSkin + isTileflage), available to all ships.
+    Universal,
+    /// Expendable Camouflage-species camo, available to all ships.
+    Expendable,
+    /// Discovered by the legacy VFS filename scan.
+    LegacyScan,
+}
+
 /// All texture data for a ship export: base albedo + camouflage variants.
 pub struct TextureSet {
     /// Base albedo PNGs keyed by MFM stem — the default ship appearance.
@@ -1907,6 +1922,11 @@ pub struct TextureSet {
     /// Camouflage variant PNGs: scheme name → (MFM stem → PNG bytes).
     /// Only stems that have a texture for this scheme are included.
     pub camo_schemes: Vec<(String, HashMap<String, Vec<u8>>)>,
+    /// Origin of each camo scheme, index-aligned with `camo_schemes`.
+    pub camo_origins: Vec<CamoOrigin>,
+    /// Whether each camo scheme recolors over the base (preserving ship detail) vs pasting an
+    /// opaque texture. Index-aligned with `camo_schemes`.
+    pub camo_use_color_scheme: Vec<bool>,
     /// UV scale/offset for tiled camo schemes. Key = `(scheme_index, mfm_stem)`.
     /// Only present for tiled camos; non-tiled camos use default UVs.
     pub tiled_uv_transforms: HashMap<(usize, String), [f32; 4]>,
@@ -1914,7 +1934,13 @@ pub struct TextureSet {
 
 impl TextureSet {
     pub fn empty() -> Self {
-        Self { base: HashMap::new(), camo_schemes: Vec::new(), tiled_uv_transforms: HashMap::new() }
+        Self {
+            base: HashMap::new(),
+            camo_schemes: Vec::new(),
+            camo_origins: Vec::new(),
+            camo_use_color_scheme: Vec::new(),
+            tiled_uv_transforms: HashMap::new(),
+        }
     }
 }
 
@@ -2707,6 +2733,8 @@ pub struct InteractiveHullMesh {
     pub indices: Vec<u32>,
     /// Full VFS path to the .mfm material file (for texture lookup).
     pub mfm_path: Option<String>,
+    /// The material MFM path id (0 if none); used to bake TILEDLAND albedos.
+    pub mfm_path_id: u64,
     /// Baked per-vertex colors from albedo texture (same length as positions, or empty for fallback).
     pub colors: Vec<[f32; 4]>,
     /// Optional world-space transform (column-major 4x4) for turret mounts.
@@ -2852,6 +2880,7 @@ pub fn collect_hull_meshes(
             uvs: verts.uvs,
             indices,
             mfm_path,
+            mfm_path_id: rs.material_mfm_path_id,
             colors: Vec::new(),
             transform: None,
         });

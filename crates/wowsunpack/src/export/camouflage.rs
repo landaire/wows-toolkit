@@ -40,6 +40,10 @@ pub struct CamouflageEntry {
     pub name: String,
     /// Whether this camo uses UV tiling (tile texture + colorScheme).
     pub tiled: bool,
+    /// Whether the camo recolors the ship over its base albedo (preserving the ship's baked
+    /// detail like the hull number) rather than pasting an opaque texture. Drives whether a
+    /// tiled camo is composited as a detail-preserving recolor or a flat opaque replacement.
+    pub use_color_scheme: bool,
     /// Per-part albedo texture paths. Key = part category (lowercase, e.g. "hull"),
     /// Value = VFS path to the albedo DDS. For tiled camos, typically just "tile".
     pub textures: HashMap<String, String>,
@@ -49,6 +53,9 @@ pub struct CamouflageEntry {
     pub uv_transforms: HashMap<String, UvTransform>,
     /// Ship group names this entry applies to (empty = default/fallback).
     pub ship_groups: Vec<String>,
+    /// Ships this entry targets directly by full name (empty = none). Takes
+    /// priority over ship_groups when resolving a per-ship variant.
+    pub target_ships: Vec<String>,
 }
 
 /// Classify an MFM stem into a camouflage part category.
@@ -59,7 +66,7 @@ pub struct CamouflageEntry {
 pub fn classify_part_category(mfm_stem: &str) -> &'static str {
     // Check suffix-based patterns first (hull parts end with _Hull, _DeckHouse, etc.)
     let lower = mfm_stem.to_lowercase();
-    if lower.ends_with("_hull") || lower.ends_with("_hull_wire") {
+    if lower.ends_with("_hull") {
         return "tile"; // "Tile" in XML = hull
     }
     if lower.ends_with("_deckhouse") {
@@ -69,20 +76,38 @@ pub fn classify_part_category(mfm_stem: &str) -> &'static str {
         return "bulge";
     }
 
-    // Prefix-based patterns for turrets/equipment (2-letter nation + category code)
-    // Extract the category code (position 2..4 of the stem, e.g. "GA" from "JGA010...")
-    let bytes = mfm_stem.as_bytes();
-    if bytes.len() >= 4 && bytes[0].is_ascii_uppercase() {
-        let cat = &mfm_stem[1..3];
-        match cat {
-            // Main/secondary guns
-            "GM" | "GS" | "GA" => return "gun",
-            // Directors / fire control
-            "D0" | "D1" => return "director",
-            // Rangefinders
-            "F0" | "F1" => return "director",
-            // Radars / sensors
-            "RS" => return "misc",
+    // Non-hull fittings that camos rarely repaint. Give each its own category so that,
+    // absent an explicit camo texture for it, the part keeps its stock albedo rather than
+    // inheriting the whole-ship hull atlas (which uses an unrelated UV layout).
+    if lower.contains("glass") {
+        return "glass";
+    }
+    if lower.ends_with("_wire") {
+        return "wire";
+    }
+    // Alpha-cutout geometry (nets, grids, railings) is never the painted hull.
+    if lower.contains("_alpha") || lower.contains("razlom") {
+        return "net";
+    }
+
+    // Equipment MFM stems are `<nation><family><variant>...`, e.g. `BGM123_...` (nation B, family
+    // "GM"). The family's first letter identifies the equipment class across all nations and
+    // variants (verified against the full MFM set): G* weapons, D*/F* fire control, A* aircraft,
+    // R* radar/sensors. S* is the ship hull and falls through to the tile default (the hull/deckhouse/
+    // bulge/wire suffixes above already peel off its named sub-parts). M*/C* (masts, boats, cranes,
+    // decks, catapults) are a mixed bag that includes camouflaged deck surfaces, so they are left at
+    // the tile default rather than risk keeping a camouflaged deck stock.
+    let code = mfm_stem.as_bytes();
+    if code.len() >= 4 && code[0].is_ascii_uppercase() {
+        match code[1] {
+            // Weapons: main/secondary/AA guns, depth-charge throwers, missile launchers, torpedoes.
+            b'G' => return if &mfm_stem[1..3] == "GT" { "torpedo" } else { "gun" },
+            // Directors and rangefinders (fire control).
+            b'D' | b'F' => return "director",
+            // Aircraft.
+            b'A' => return "plane",
+            // Radar and sensors.
+            b'R' => return "misc",
             _ => {}
         }
     }
@@ -170,7 +195,11 @@ impl CamouflageDb {
             if name.is_empty() {
                 continue;
             }
-            let tiled = child_text(&camo_node, "tiled").map(|s| s.trim() == "true").unwrap_or(false);
+            // The XML writes booleans as both "true" and "True", so compare case-insensitively.
+            let tiled = child_text(&camo_node, "tiled").map(|s| s.trim().eq_ignore_ascii_case("true")).unwrap_or(false);
+            let use_color_scheme = child_text(&camo_node, "useColorScheme")
+                .map(|s| s.trim().eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
 
             let mut textures = HashMap::new();
             if let Some(tex_node) = camo_node.children().find(|n| n.has_tag_name("Textures")) {
@@ -200,6 +229,14 @@ impl CamouflageDb {
                 .map(|s| s.split_whitespace().map(|g| g.to_string()).collect())
                 .unwrap_or_default();
 
+            // Per-ship targeting: some entries target ships directly instead of via groups.
+            let target_ships: Vec<String> = camo_node
+                .children()
+                .filter(|n| n.has_tag_name("targetShip"))
+                .filter_map(|n| n.text().map(|t| t.trim().to_string()))
+                .filter(|s| !s.is_empty())
+                .collect();
+
             // Parse UV transforms per part category.
             let mut uv_transforms = HashMap::new();
             if let Some(uv_node) = camo_node.children().find(|n| n.has_tag_name("UV")) {
@@ -224,10 +261,12 @@ impl CamouflageDb {
             entries.entry(name.to_string()).or_default().push(CamouflageEntry {
                 name: name.to_string(),
                 tiled,
+                use_color_scheme,
                 textures,
                 color_scheme,
                 uv_transforms,
                 ship_groups: camo_ship_groups,
+                target_ships,
             });
         }
 
@@ -242,12 +281,17 @@ impl CamouflageDb {
     /// groups (default), or the first entry if no match.
     pub fn get(&self, name: &str, ship_index: Option<&str>) -> Option<&CamouflageEntry> {
         let variants = self.entries.get(name)?;
-        if variants.len() == 1 {
-            return variants.first();
-        }
 
-        // If we have a ship index, find the variant whose ship groups match.
+        // If we have a ship index, find the variant whose ship groups match. This must run even for
+        // a single variant: a lone entry can still <targetShip> a specific ship, and returning it
+        // for a different ship would paint that ship with the wrong per-ship texture.
         if let Some(idx) = ship_index {
+            // Exact per-ship targeting wins over group membership.
+            for entry in variants {
+                if entry.target_ships.iter().any(|t| t == idx) {
+                    return Some(entry);
+                }
+            }
             for entry in variants {
                 if entry.ship_groups.is_empty() {
                     continue;
@@ -260,10 +304,13 @@ impl CamouflageDb {
                     }
                 }
             }
+            // No per-ship match for this ship: only a truly universal entry (no groups, no targets)
+            // applies. Never fall back to another ship's targeted variant.
+            return variants.iter().find(|e| e.ship_groups.is_empty() && e.target_ships.is_empty());
         }
 
-        // Fallback: prefer entry with no ship groups (default), else first.
-        variants.iter().find(|e| e.ship_groups.is_empty()).or(variants.first())
+        // No ship context: prefer a truly universal entry, else the first.
+        variants.iter().find(|e| e.ship_groups.is_empty() && e.target_ships.is_empty()).or(variants.first())
     }
 
     /// Look up a color scheme by name.
@@ -289,4 +336,51 @@ impl CamouflageDb {
 
 fn child_text<'a>(node: &'a roxmltree::Node, tag: &str) -> Option<&'a str> {
     node.children().find(|n| n.has_tag_name(tag))?.text()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_part_category;
+
+    #[test]
+    fn classify_hull_and_named_subparts() {
+        // Ship hull families (S*) and suffix-named sub-parts.
+        assert_eq!(classify_part_category("WSD011_Smaland_1955"), "tile");
+        assert_eq!(classify_part_category("BSB011_Queen_Elizabeth_1942_Hull"), "tile");
+        assert_eq!(classify_part_category("BSC026_London_1943_DeckHouse"), "deckhouse");
+        assert_eq!(classify_part_category("BS401_Thunderer_HWA_Bulge"), "bulge");
+        assert_eq!(classify_part_category("WSD011_Smaland_1955_wire"), "wire");
+        // A hull rigging wire keeps stock (wire), not the hull atlas on wire UVs.
+        assert_eq!(classify_part_category("BSA004_Malta_1950_Hull_wire"), "wire");
+    }
+
+    #[test]
+    fn classify_equipment_families() {
+        // Weapons: main/secondary/AA guns, depth charges, missiles -> gun; torpedoes -> torpedo.
+        assert_eq!(classify_part_category("BGM123_7_5in45_BL_MkVI"), "gun");
+        assert_eq!(classify_part_category("BGS535_QF_5_2in_MkI"), "gun");
+        assert_eq!(classify_part_category("BGA597_40mm_Bofors_MK_VI"), "gun");
+        assert_eq!(classify_part_category("BGB110_Depth_Charge_Thrower"), "gun");
+        assert_eq!(classify_part_category("RGR2018_Uran_Launcher"), "gun");
+        assert_eq!(classify_part_category("BGT095_21in_5tube_Torpedo_Tube"), "torpedo");
+        // Fire control: directors D0-D9 and rangefinders F0-F9 (all variants) -> director.
+        assert_eq!(classify_part_category("BD059_HACS_MK_IV_RF15ft"), "director");
+        assert_eq!(classify_part_category("ZD2003_MRS3_Director"), "director");
+        assert_eq!(classify_part_category("BD3000_DCT_MK_XXl_with_finder"), "director");
+        assert_eq!(classify_part_category("BF056_Rangefinder_2_7m"), "director");
+        assert_eq!(classify_part_category("ZF3002_SPN_500_1_4m"), "director");
+        // Aircraft and radar.
+        assert_eq!(classify_part_category("BAB004_Fairey_Swordfish_MkII"), "plane");
+        assert_eq!(classify_part_category("BRS079_Radar_SM_1"), "misc");
+    }
+
+    #[test]
+    fn classify_never_camouflaged_fittings() {
+        // Glass, wire, and alpha-cutout nets/grids get their own categories (kept stock).
+        assert_eq!(classify_part_category("transparent_glass_alpha"), "glass");
+        assert_eq!(classify_part_category("C012_Glass_alpha_holographic"), "glass");
+        assert_eq!(classify_part_category("C004_Grid_1_alpha"), "net");
+        assert_eq!(classify_part_category("C002_Razlom"), "net");
+        assert_eq!(classify_part_category("MidBack_wireShape_wire"), "wire");
+    }
 }

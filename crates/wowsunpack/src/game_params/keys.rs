@@ -36,6 +36,8 @@ pub const COMP_DIRECTORS: &str = "directors";
 pub const COMP_FINDERS: &str = "finders";
 pub const COMP_RADARS: &str = "radars";
 pub const COMP_TORPEDOES: &str = "torpedoes";
+pub const COMP_DEPTH_CHARGES: &str = "depthCharges";
+pub const COMP_AIR_ARMAMENT: &str = "airArmament";
 pub const COMP_ENGINE: &str = "engine";
 pub const COMP_FIRE_CONTROL: &str = "fireControl";
 pub const COMP_INNATE_SKILLS: &str = "innateSkills";
@@ -62,6 +64,10 @@ pub enum ComponentType {
     Radars,
     #[cfg_attr(feature = "serde", serde(rename = "torpedoes"))]
     Torpedoes,
+    #[cfg_attr(feature = "serde", serde(rename = "depthCharges"))]
+    DepthCharges,
+    #[cfg_attr(feature = "serde", serde(rename = "airArmament"))]
+    AirArmament,
 }
 
 impl ComponentType {
@@ -75,6 +81,8 @@ impl ComponentType {
         Self::Finders,
         Self::Radars,
         Self::Torpedoes,
+        Self::DepthCharges,
+        Self::AirArmament,
     ];
 
     /// The raw string key used in GameParams dictionaries.
@@ -88,6 +96,8 @@ impl ComponentType {
             Self::Finders => "finders",
             Self::Radars => "radars",
             Self::Torpedoes => "torpedoes",
+            Self::DepthCharges => "depthCharges",
+            Self::AirArmament => "airArmament",
         }
     }
 
@@ -96,16 +106,21 @@ impl ComponentType {
     /// param's `ucType` field, distinct from the `components`-dict `key()`.
     /// Comparison is case-insensitive on the suffix because GameParams is not
     /// consistent in casing across versions (`_ATBA` vs `_Atba`).
-    pub fn uc_type(&self) -> &'static str {
+    ///
+    /// Returns `None` for component types that are not selectable modules and so
+    /// report no `ucType` of their own: `depthCharges` and `airArmament` are
+    /// fixed sub-components of the hull upgrade.
+    pub fn uc_type(&self) -> Option<&'static str> {
         match self {
-            Self::Hull => UC_TYPE_HULL,
-            Self::Artillery => UC_TYPE_ARTILLERY,
-            Self::Atba => UC_TYPE_ATBA,
-            Self::AirDefense => UC_TYPE_AIR_DEFENSE,
-            Self::Directors => UC_TYPE_DIRECTORS,
-            Self::Finders => UC_TYPE_FINDERS,
-            Self::Radars => UC_TYPE_RADARS,
-            Self::Torpedoes => UC_TYPE_TORPEDOES,
+            Self::Hull => Some(UC_TYPE_HULL),
+            Self::Artillery => Some(UC_TYPE_ARTILLERY),
+            Self::Atba => Some(UC_TYPE_ATBA),
+            Self::AirDefense => Some(UC_TYPE_AIR_DEFENSE),
+            Self::Directors => Some(UC_TYPE_DIRECTORS),
+            Self::Finders => Some(UC_TYPE_FINDERS),
+            Self::Radars => Some(UC_TYPE_RADARS),
+            Self::Torpedoes => Some(UC_TYPE_TORPEDOES),
+            Self::DepthCharges | Self::AirArmament => None,
         }
     }
 
@@ -115,7 +130,7 @@ impl ComponentType {
     /// caller's signal that the unit is not one of the modelled components. The
     /// match is case-insensitive to tolerate cross-version casing differences.
     pub fn from_uc_type(uc_type: &str) -> Option<ComponentType> {
-        Self::ALL.iter().copied().find(|ct| ct.uc_type().eq_ignore_ascii_case(uc_type))
+        Self::ALL.iter().copied().find(|ct| ct.uc_type().is_some_and(|u| u.eq_ignore_ascii_case(uc_type)))
     }
 }
 
@@ -130,6 +145,8 @@ impl std::fmt::Display for ComponentType {
             Self::Finders => write!(f, "Finders"),
             Self::Radars => write!(f, "Radars"),
             Self::Torpedoes => write!(f, "Torpedoes"),
+            Self::DepthCharges => write!(f, "Depth Charges"),
+            Self::AirArmament => write!(f, "Aircraft Armament"),
         }
     }
 }
@@ -144,6 +161,8 @@ pub const ALL_COMPONENT_TYPES: &[&str] = &[
     COMP_FINDERS,
     COMP_RADARS,
     COMP_TORPEDOES,
+    COMP_DEPTH_CHARGES,
+    COMP_AIR_ARMAMENT,
 ];
 
 /// Component types that have 3D models (mounted on hull hardpoints).
@@ -156,6 +175,8 @@ pub const MODEL_COMPONENT_TYPES: &[&str] = &[
     COMP_FINDERS,
     COMP_RADARS,
     COMP_TORPEDOES,
+    COMP_DEPTH_CHARGES,
+    COMP_AIR_ARMAMENT,
 ];
 
 // Data field keys
@@ -237,6 +258,8 @@ pub const CAMOUFLAGE: &str = "camouflage";
 pub const PERMOFLAGES: &str = "permoflages";
 pub const TITLE: &str = "title";
 pub const IS_TILEFLAGE: &str = "isTileflage";
+pub const HIDDEN: &str = "hidden";
+pub const UNPECULIAR_CAMOUFLAGE: &str = "unpeculiarCamouflage";
 
 // HP_ mount prefix
 pub const HP_PREFIX: &str = "HP_";
@@ -281,5 +304,29 @@ mod tests {
         assert!(!is_main_gun_hardpoint("AGM_1"));
         assert!(!is_main_gun_hardpoint("HP_AAGM_1"));
         assert!(!is_main_gun_hardpoint("HP_GM_1"));
+    }
+
+    #[test]
+    fn all_model_component_types_are_enumerated() {
+        // Every component key that carries HP_ model mounts must be in ALL, or
+        // its mounts never load (the depthCharges/airArmament gap that hid the
+        // Smaland ASW launchers and BB catapults). This guards that regression.
+        let keys: Vec<&str> = ComponentType::ALL.iter().map(|ct| ct.key()).collect();
+        for expected in [COMP_DEPTH_CHARGES, COMP_AIR_ARMAMENT] {
+            assert!(keys.contains(&expected), "ComponentType::ALL is missing {expected}");
+        }
+        assert!(MODEL_COMPONENT_TYPES.contains(&COMP_DEPTH_CHARGES));
+        assert!(MODEL_COMPONENT_TYPES.contains(&COMP_AIR_ARMAMENT));
+    }
+
+    #[test]
+    fn hull_subcomponents_have_no_uc_type() {
+        // depthCharges/airArmament are fixed sub-components of the hull upgrade,
+        // not selectable modules, so they report no ucType and never resolve via
+        // from_uc_type.
+        assert_eq!(ComponentType::DepthCharges.uc_type(), None);
+        assert_eq!(ComponentType::AirArmament.uc_type(), None);
+        assert_eq!(ComponentType::Artillery.uc_type(), Some(UC_TYPE_ARTILLERY));
+        assert_eq!(ComponentType::from_uc_type(UC_TYPE_ARTILLERY), Some(ComponentType::Artillery));
     }
 }

@@ -44,11 +44,8 @@ use crate::viewport_3d::Vertex;
 use rust_i18n::t;
 use wowsunpack::game_params::types::AmmoType;
 
-/// MFM stem (filename without the `.mfm` suffix) from a full VFS mfm path.
-/// Camo textures are keyed by stem; hull meshes carry the full path.
 fn mfm_stem(mfm_path: &str) -> &str {
-    let base = mfm_path.rsplit(['/', '\\']).next().unwrap_or(mfm_path);
-    base.strip_suffix(".mfm").unwrap_or(base)
+    crate::armor_viewer::common::mfm_stem(mfm_path)
 }
 
 /// Per-frame viewer struct implementing `egui_dock::TabViewer` for armor panes.
@@ -806,24 +803,11 @@ impl ToolkitTabViewer<'_> {
             armor.active_camo_textures.clear();
             armor.active_camo_uvs.clear();
             if let Some(name) = pane.selected_camo.clone() {
-                // Resolve into locals so the immutable borrow of armor.camo_schemes is released
-                // before mutating the active_* maps.
-                let resolved = armor.camo_schemes.iter().find(|s| s.name == name).map(|scheme| {
-                    let mut textures = std::collections::HashMap::new();
-                    for (stem, png) in &scheme.textures {
-                        match image::load_from_memory(png) {
-                            Ok(img) => {
-                                let rgba = img.to_rgba8();
-                                let (w, h) = (rgba.width(), rgba.height());
-                                textures.insert(stem.clone(), (w, h, rgba.into_raw()));
-                            }
-                            // A decode failure means the camo does not apply to this stem;
-                            // the mesh falls back to its base texture during upload.
-                            Err(e) => tracing::warn!("camo {name}: failed to decode texture for {stem}: {e}"),
-                        }
-                    }
-                    (textures, scheme.uv_transforms.clone())
-                });
+                let resolved = armor
+                    .camo_schemes
+                    .iter()
+                    .find(|s| s.name == name)
+                    .map(|scheme| crate::armor_viewer::common::build_active_camo(scheme, &armor.hull_textures));
                 if let Some((textures, uvs)) = resolved {
                     armor.active_camo_textures = textures;
                     armor.active_camo_uvs = uvs;
@@ -1359,7 +1343,27 @@ pub(crate) fn upload_hull_meshes_to_viewport(
         // this base by (flat + key*halfLambert); the boost keeps textured camo vivid.
         // Textured hulls use a stronger boost than baked-color hulls.
         let hull_brightness: f32 = 2.0;
-        let tex_brightness: f32 = 3.5;
+        // Per-texture brightness: scale a high luminance percentile toward a ceiling so the
+        // brightest regions (light camo stripes, snow) do not saturate to white, while dark
+        // textures still get boosted. A mean-based factor over-boosts a mostly-dark texture that
+        // has bright spots (e.g. Traditions' light stripes); keying off the P95 bright pixels
+        // caps the boost by the brightest regions directly.
+        let tex_brightness: f32 = texture_data
+            .map(|(_, _, rgba)| {
+                let mut lumas: Vec<f32> = rgba
+                    .chunks_exact(4)
+                    .step_by(37)
+                    .map(|px| (0.2126 * px[0] as f32 + 0.7152 * px[1] as f32 + 0.0722 * px[2] as f32) / 255.0)
+                    .collect();
+                if lumas.is_empty() {
+                    return 3.5;
+                }
+                lumas.sort_by(|a, b| a.total_cmp(b));
+                let p95 = lumas[(lumas.len() * 95 / 100).min(lumas.len() - 1)];
+                const TARGET_HI: f32 = 0.85;
+                (TARGET_HI / p95.max(0.05)).clamp(1.0, 4.0)
+            })
+            .unwrap_or(3.5);
         let fallback_color: [f32; 4] =
             [0.6 * hull_brightness, 0.6 * hull_brightness, 0.65 * hull_brightness, hull_alpha];
         let has_baked_colors = mesh.colors.len() == mesh.positions.len();
@@ -3159,35 +3163,65 @@ pub(crate) fn draw_hull_visibility_popover(
         }
     }
 
-    // Camo selector. Inline collapsing list rather than a ComboBox: a ComboBox opens its
-    // list in a separate layer, which this CloseOnClickOutside popover treats as an outside
-    // click and dismisses itself. Keeping the list inside the popover rect avoids that.
+    // Camo selector, grouped: Stock + ship-specific at top level; Universal and Expendable
+    // each in their own collapsible group. Inline list avoids ComboBox layer issues with
+    // CloseOnClickOutside popover.
     if !armor.camo_schemes.is_empty() {
+        use wowsunpack::export::gltf_export::CamoOrigin;
         let none_label = t!("ui.armor.camo_none");
-        let current = pane.selected_camo.clone().unwrap_or_else(|| none_label.as_ref().to_string());
-        let id = ui.make_persistent_id(("hull_camo", pane.id));
-        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
-            .show_header(ui, |ui| {
-                ui.label(t!("ui.armor.camo").as_ref());
-                ui.label(current);
-            })
-            .body(|ui| {
-                egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-                    if ui.selectable_label(pane.selected_camo.is_none(), none_label.as_ref()).clicked()
-                        && pane.selected_camo.is_some()
-                    {
-                        pane.selected_camo = None;
-                        result.camo_changed = true;
-                    }
-                    for scheme in &armor.camo_schemes {
-                        let is_selected = pane.selected_camo.as_deref() == Some(scheme.name.as_str());
-                        if ui.selectable_label(is_selected, &scheme.name).clicked() && !is_selected {
-                            pane.selected_camo = Some(scheme.name.clone());
-                            result.camo_changed = true;
+
+        ui.label(t!("ui.armor.camo").as_ref());
+
+        // Top-level: Stock (none) + ship-specific camos.
+        let none_clicked = ui.selectable_label(pane.selected_camo.is_none(), none_label.as_ref()).clicked();
+        if none_clicked && pane.selected_camo.is_some() {
+            pane.selected_camo = None;
+            result.camo_changed = true;
+        }
+        let mut ship_names: Vec<String> = armor
+            .camo_schemes
+            .iter()
+            .filter(|s| s.origin == CamoOrigin::ShipSpecific)
+            .map(|s| s.name.clone())
+            .collect();
+        ship_names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+        for name in &ship_names {
+            let is_selected = pane.selected_camo.as_deref() == Some(name.as_str());
+            if ui.selectable_label(is_selected, name.as_str()).clicked() && !is_selected {
+                pane.selected_camo = Some(name.clone());
+                result.camo_changed = true;
+            }
+        }
+
+        // Collapsible groups for Universal, Expendable, and legacy-scan camos.
+        for (origin, key) in [
+            (CamoOrigin::Universal, "ui.armor.camo_group_universal"),
+            (CamoOrigin::Expendable, "ui.armor.camo_group_expendable"),
+            (CamoOrigin::LegacyScan, "ui.armor.camo_group_other"),
+        ] {
+            let mut group: Vec<String> =
+                armor.camo_schemes.iter().filter(|s| s.origin == origin).map(|s| s.name.clone()).collect();
+            if group.is_empty() {
+                continue;
+            }
+            group.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+            let id = ui.make_persistent_id(("camo_group", pane.id, key));
+            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+                .show_header(ui, |ui| {
+                    ui.label(t!(key).as_ref());
+                })
+                .body(|ui| {
+                    egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                        for name in &group {
+                            let is_selected = pane.selected_camo.as_deref() == Some(name.as_str());
+                            if ui.selectable_label(is_selected, name.as_str()).clicked() && !is_selected {
+                                pane.selected_camo = Some(name.clone());
+                                result.camo_changed = true;
+                            }
                         }
-                    }
+                    });
                 });
-            });
+        }
     }
 
     // LOD selector

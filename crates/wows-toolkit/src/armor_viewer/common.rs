@@ -254,21 +254,14 @@ pub(crate) fn load_ship_armor(
 
     tracing::debug!("Ship loaded: bounds Y=[{:.4}, {:.4}]", min[1], max[1]);
 
-    // --- Hull albedo textures (DDS -> RGBA8) ---
+    // Hull albedo textures (base/stock skin). Bakes TILEDLAND underwater materials + force-opaque,
+    // so the underwater hull shows its stock skin and camos composite over it correctly.
     let mut hull_textures = std::collections::HashMap::new();
-    for mesh in &hull_meshes {
-        if let Some(mfm) = &mesh.mfm_path {
-            if hull_textures.contains_key(mfm) {
-                continue;
-            }
-            if let Some(dds_bytes) = wowsunpack::export::texture::load_base_albedo_bytes(ship_assets.vfs(), mfm)
-                && let Ok(dds) = image_dds::ddsfile::Dds::read(&mut std::io::Cursor::new(&dds_bytes))
-                && let Ok(img) = image_dds::image_from_dds(&dds, 0)
-            {
-                let w = img.width();
-                let h = img.height();
-                hull_textures.insert(mfm.clone(), (w, h, img.into_raw()));
-            }
+    for (mfm, png) in ctx.hull_base_albedos(&hull_meshes) {
+        if let Ok(img) = image::load_from_memory(&png) {
+            let rgba = img.to_rgba8();
+            let (w, h) = (rgba.width(), rgba.height());
+            hull_textures.insert(mfm, (w, h, rgba.into_raw()));
         }
     }
 
@@ -280,6 +273,8 @@ pub(crate) fn load_ship_armor(
     let camo_schemes = match ctx.build_full_texture_set() {
         Ok(tex_set) => {
             let tiled = tex_set.tiled_uv_transforms;
+            let origins = tex_set.camo_origins;
+            let use_color_scheme = tex_set.camo_use_color_scheme;
             tex_set
                 .camo_schemes
                 .into_iter()
@@ -298,7 +293,10 @@ pub(crate) fn load_ship_armor(
                             )
                         })
                         .collect();
-                    CamoScheme { name, textures, uv_transforms }
+                    let origin =
+                        origins.get(idx).copied().unwrap_or(wowsunpack::export::gltf_export::CamoOrigin::LegacyScan);
+                    let use_color_scheme = use_color_scheme.get(idx).copied().unwrap_or(false);
+                    CamoScheme { name, textures, uv_transforms, origin, use_color_scheme }
                 })
                 .collect()
         }
@@ -307,6 +305,20 @@ pub(crate) fn load_ship_armor(
             Vec::new()
         }
     };
+
+    // The camo picker selects and highlights by display name, so names must be unique. Localized
+    // names can collide across camos; disambiguate duplicates with a numeric suffix.
+    let mut camo_schemes: Vec<CamoScheme> = camo_schemes;
+    {
+        let mut counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        for scheme in &mut camo_schemes {
+            let n = counts.entry(scheme.name.clone()).or_insert(0);
+            *n += 1;
+            if *n > 1 {
+                scheme.name = format!("{} ({})", scheme.name, *n);
+            }
+        }
+    }
 
     let mut armor = LoadedShipArmor {
         display_name: options.display_name,
@@ -634,4 +646,216 @@ pub(crate) fn reupload_splash_overlays(
             pane.splash_mesh_ids.push(hl_mid);
         }
     }
+}
+
+// Camo composite helpers
+
+/// MFM stem (filename without the `.mfm` suffix) from a full VFS mfm path.
+pub(crate) fn mfm_stem(mfm_path: &str) -> &str {
+    let base = mfm_path.rsplit(['/', '\\']).next().unwrap_or(mfm_path);
+    base.strip_suffix(".mfm").unwrap_or(base)
+}
+
+/// Hermite smoothstep from 0 at `e0` to 1 at `e1`.
+fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Bilinear-sample RGBA `data` (`w` x `h`) at (`u`, `v`) in [0,1) with wrap. Returns `[f32; 4]`.
+fn bilinear_rgba(data: &[u8], w: u32, h: u32, u: f32, v: f32) -> [f32; 4] {
+    let fx = (u - u.floor()) * w as f32 - 0.5;
+    let fy = (v - v.floor()) * h as f32 - 0.5;
+    let (x0, y0) = (fx.floor(), fy.floor());
+    let (dx, dy) = (fx - x0, fy - y0);
+    let px = |xi: i64, yi: i64| -> [f32; 4] {
+        let x = xi.rem_euclid(w as i64) as usize;
+        let y = yi.rem_euclid(h as i64) as usize;
+        let i = (y * w as usize + x) * 4;
+        [data[i] as f32, data[i + 1] as f32, data[i + 2] as f32, data[i + 3] as f32]
+    };
+    let (x0i, y0i) = (x0 as i64, y0 as i64);
+    let c00 = px(x0i, y0i);
+    let c10 = px(x0i + 1, y0i);
+    let c01 = px(x0i, y0i + 1);
+    let c11 = px(x0i + 1, y0i + 1);
+    let mut o = [0.0f32; 4];
+    for k in 0..4 {
+        let a = c00[k] * (1.0 - dx) + c10[k] * dx;
+        let b = c01[k] * (1.0 - dx) + c11[k] * dx;
+        o[k] = a * (1.0 - dy) + b * dy;
+    }
+    o
+}
+
+/// A coarse (heavily downsampled) luminance grid used as a low-frequency background: sampling it
+/// and dividing the full-res luminance by it isolates fine albedo detail (the baked hull number,
+/// panel seams) from large-scale shading.
+struct LowFreqLuma {
+    w: u32,
+    h: u32,
+    data: Vec<f32>,
+}
+
+impl LowFreqLuma {
+    /// Bilinear-sample the grid at (`u`, `v`) in [0,1) with wrap. Bilinear (not nearest) keeps the
+    /// high-pass detail ratio smooth so a flat hull doesn't band at grid-cell boundaries.
+    fn sample(&self, u: f32, v: f32) -> f32 {
+        let fx = (u - u.floor()) * self.w as f32 - 0.5;
+        let fy = (v - v.floor()) * self.h as f32 - 0.5;
+        let (x0, y0) = (fx.floor(), fy.floor());
+        let (dx, dy) = (fx - x0, fy - y0);
+        let at = |xi: i64, yi: i64| -> f32 {
+            let x = xi.rem_euclid(self.w as i64) as usize;
+            let y = yi.rem_euclid(self.h as i64) as usize;
+            self.data[y * self.w as usize + x]
+        };
+        let (x0i, y0i) = (x0 as i64, y0 as i64);
+        let a = at(x0i, y0i) * (1.0 - dx) + at(x0i + 1, y0i) * dx;
+        let b = at(x0i, y0i + 1) * (1.0 - dx) + at(x0i + 1, y0i + 1) * dx;
+        a * (1.0 - dy) + b * dy
+    }
+}
+
+/// Box-downsample the luminance of RGBA `srgba` (`sw` x `sh`) into a ~32x-smaller grid.
+fn downsampled_luminance(srgba: &[u8], sw: u32, sh: u32) -> LowFreqLuma {
+    let (w, h) = ((sw / 32).max(1), (sh / 32).max(1));
+    let mut sum = vec![0f32; (w * h) as usize];
+    let mut cnt = vec![0u32; (w * h) as usize];
+    for y in 0..sh {
+        let ly = (y * h / sh).min(h - 1);
+        for x in 0..sw {
+            let i = ((y * sw + x) * 4) as usize;
+            let l = 0.2126 * srgba[i] as f32 + 0.7152 * srgba[i + 1] as f32 + 0.0722 * srgba[i + 2] as f32;
+            let lx = (x * w / sw).min(w - 1);
+            let li = (ly * w + lx) as usize;
+            sum[li] += l;
+            cnt[li] += 1;
+        }
+    }
+    for (s, c) in sum.iter_mut().zip(cnt.iter()) {
+        if *c > 0 {
+            *s /= *c as f32;
+        }
+    }
+    LowFreqLuma { w, h, data: sum }
+}
+
+/// Decode a camo scheme's per-stem textures into GPU-ready RGBA, compositing camos that carry a
+/// coverage alpha over the stock ship albedo (so the ship shows through the gaps and the hull is
+/// opaque). Opaque camos are passed through unchanged (they tile on the GPU via `active_camo_uvs`).
+/// Returns (active_camo_textures: stem -> (w,h,rgba), active_camo_uvs: stem -> UvTransform).
+///
+/// Zone-mask camos carry transparent (alpha 0) texels where the mask is black, which the game reads
+/// as "no camo": those texels composite through to the base albedo, so the red anti-fouling stays
+/// below the waterline and stock detail stays in the parts the camo does not paint. That is entirely
+/// a property of the camo texture, so there is no waterline geometry involved here.
+pub(crate) fn build_active_camo(
+    scheme: &super::state::CamoScheme,
+    hull_textures: &std::collections::HashMap<String, (u32, u32, Vec<u8>)>,
+) -> (
+    std::collections::HashMap<String, (u32, u32, Vec<u8>)>,
+    std::collections::HashMap<String, wowsunpack::export::camouflage::UvTransform>,
+) {
+    use std::collections::HashMap;
+    let stock_by_stem: HashMap<&str, &(u32, u32, Vec<u8>)> =
+        hull_textures.iter().map(|(p, t)| (mfm_stem(p), t)).collect();
+
+    let mut textures: HashMap<String, (u32, u32, Vec<u8>)> = HashMap::new();
+    let mut uvs = scheme.uv_transforms.clone();
+
+    for (stem, png) in &scheme.textures {
+        let Ok(img) = image::load_from_memory(png) else {
+            continue;
+        };
+        let camo = img.to_rgba8();
+        let (cw, ch) = (camo.width(), camo.height());
+        let has_coverage = camo.pixels().any(|p| p.0[3] < 250);
+
+        let t = scheme.uv_transforms.get(stem).cloned().unwrap_or_default();
+        let is_tiled = t.scale != [1.0, 1.0] || t.offset != [0.0, 0.0];
+        let stock = stock_by_stem.get(stem.as_str()).copied();
+
+        if has_coverage && stock.is_none() {
+            // A zone-mask camo carries alpha-0 passthrough texels but there is no base albedo to
+            // show through; the fallback below force-opaques them, losing the anti-fouling/stock
+            // reveal. Surface it instead of failing silently.
+            tracing::warn!("camo stem {stem} has passthrough texels but no base albedo; passthrough dropped");
+        }
+
+        let pixels: Vec<u8> = if has_coverage && let Some((sw, sh, srgba)) = stock {
+            // Zone-mask camo: composite camo over stock at camo resolution (baking the tiling
+            // transform), so alpha-0 (black-zone) texels pass through to the base albedo.
+            let mut out = vec![0u8; (cw * ch * 4) as usize];
+            for y in 0..ch {
+                for x in 0..cw {
+                    let bu = (x as f32 + 0.5) / cw as f32;
+                    let bv = (y as f32 + 0.5) / ch as f32;
+                    let stock_px = bilinear_rgba(srgba, *sw, *sh, bu, bv);
+                    let cu = bu * t.scale[0] + t.offset[0];
+                    let cv = bv * t.scale[1] + t.offset[1];
+                    let cc = bilinear_rgba(camo.as_raw(), cw, ch, cu, cv);
+                    let a = cc[3] / 255.0;
+                    let o = (y * cw + x) as usize * 4;
+                    out[o] = (stock_px[0] * (1.0 - a) + cc[0] * a) as u8;
+                    out[o + 1] = (stock_px[1] * (1.0 - a) + cc[1] * a) as u8;
+                    out[o + 2] = (stock_px[2] * (1.0 - a) + cc[2] * a) as u8;
+                    out[o + 3] = 255;
+                }
+            }
+            uvs.remove(stem);
+            out
+        } else if is_tiled
+            && scheme.use_color_scheme
+            && let Some((sw, sh, srgba)) = stock
+        {
+            // Recoloring tiled camo (useColorScheme=True, e.g. Patches): the game recolors the ship
+            // over its base rather than replacing it, so the base's fine detail (the baked hull
+            // number, panel lines) survives. Bake the tile over the base and modulate it by the
+            // base's high-frequency albedo detail: flat hull keeps the full camo color, while the
+            // number and seams show through the recolor. A tiled camo with useColorScheme=False
+            // (e.g. Spring Sky) is instead an opaque replacement (below).
+            //
+            // The flat hull is recolored with the camo; strong base-albedo markings (the hull
+            // number, hard painted decals) show in their TRUE color so they stay readable
+            // regardless of the pattern underneath, rather than being tinted/broken up by it.
+            // Blend toward the base where the local luminance deviates hard from its neighborhood.
+            let low = downsampled_luminance(srgba, *sw, *sh);
+            let mut out = vec![0u8; (cw * ch * 4) as usize];
+            for y in 0..ch {
+                for x in 0..cw {
+                    let bu = (x as f32 + 0.5) / cw as f32;
+                    let bv = (y as f32 + 0.5) / ch as f32;
+                    let base = bilinear_rgba(srgba, *sw, *sh, bu, bv);
+                    let base_l = 0.2126 * base[0] + 0.7152 * base[1] + 0.0722 * base[2];
+                    let smooth_l = low.sample(bu, bv).max(1.0);
+                    // Local contrast: ~0 on flat hull, large over a bright marking like the number.
+                    let dev = ((base_l - smooth_l).abs() / smooth_l).clamp(0.0, 1.0);
+                    // Reveal the true base only for strong markings; keep the flat hull fully camo.
+                    let reveal = smoothstep(0.22, 0.6, dev);
+                    let cu = bu * t.scale[0] + t.offset[0];
+                    let cv = bv * t.scale[1] + t.offset[1];
+                    let cc = bilinear_rgba(camo.as_raw(), cw, ch, cu, cv);
+                    let o = (y * cw + x) as usize * 4;
+                    for k in 0..3 {
+                        out[o + k] = (cc[k] * (1.0 - reveal) + base[k] * reveal).clamp(0.0, 255.0) as u8;
+                    }
+                    out[o + 3] = 255;
+                }
+            }
+            uvs.remove(stem);
+            out
+        } else {
+            // Opaque replacement camo (uniform painted, e.g. Steel; or no stock to composite):
+            // force alpha opaque, keep GPU tiling.
+            let mut rgba = camo.into_raw();
+            for px in rgba.chunks_exact_mut(4) {
+                px[3] = 255;
+            }
+            rgba
+        };
+
+        textures.insert(stem.clone(), (cw, ch, pixels));
+    }
+    (textures, uvs)
 }

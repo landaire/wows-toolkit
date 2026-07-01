@@ -123,37 +123,48 @@ pub fn dds_to_png(dds_bytes: &[u8]) -> Result<Vec<u8>, Report<TextureError>> {
     Ok(png_buf)
 }
 
-/// Bake a tiled camouflage tile texture with color scheme replacement.
+/// Bake a color-indexed camouflage mask into RGBA using a color scheme.
 ///
-/// The tile texture is a color-indexed mask where R/G/B/Black zones correspond
-/// to color1/color2/color3/color0 from the color scheme. This function replaces
-/// each zone with the appropriate color and returns the result as PNG.
-pub fn bake_tiled_camo_png(tile_dds_bytes: &[u8], colors: &[[f32; 4]; 4]) -> Result<Vec<u8>, Report<TextureError>> {
+/// The mask's R/G/B zones map to color1/color2/color3. The black zone maps to color0, but its
+/// meaning depends on `black_passthrough`:
+/// - A per-ship painted mask (the camo maps 1:1 to the ship's UV atlas, `tiled=false`) leaves the
+///   parts it does not paint black to mean "no camo here". Those texels pass through to the base
+///   albedo (keeping the red anti-fouling below the waterline and the stock detail in unpainted
+///   areas), so they are baked transparent (alpha 0) and the caller composites over the base. The
+///   RGB is left at color0 so DXT edge blends fringe with the camo's own dark tone, not black.
+/// - A repeating tile (`tiled=true`, e.g. an ERDL/dazzle pattern) uses black as a real pattern
+///   color: the whole ship is covered, so black bakes to opaque color0 with no passthrough.
+pub fn bake_tiled_camo_png(
+    tile_dds_bytes: &[u8],
+    colors: &[[f32; 4]; 4],
+    black_passthrough: bool,
+) -> Result<Vec<u8>, Report<TextureError>> {
     let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(tile_dds_bytes))
         .map_err(|e| Report::new(TextureError::DdsParse(e.to_string())))?;
 
     let mut rgba_image =
         image_dds::image_from_dds(&dds, 0).map_err(|e| Report::new(TextureError::DdsDecode(e.to_string())))?;
 
+    let black_alpha = if black_passthrough { 0 } else { 255 };
     for pixel in rgba_image.pixels_mut() {
         let [r, g, b, _a] = pixel.0;
         // Determine zone by dominant channel. DXT1 compression may blend
         // edge pixels, but dominant-channel detection handles this well.
-        let color = if r > g && r > b && r > 30 {
-            &colors[1] // Red zone → color1
+        let (color, alpha) = if r > g && r > b && r > 30 {
+            (&colors[1], 255) // Red zone → color1
         } else if g > r && g > b && g > 30 {
-            &colors[2] // Green zone → color2
+            (&colors[2], 255) // Green zone → color2
         } else if b > r && b > g && b > 30 {
-            &colors[3] // Blue zone → color3
+            (&colors[3], 255) // Blue zone → color3
         } else {
-            &colors[0] // Black/dark zone → color0
+            (&colors[0], black_alpha) // Black zone → color0 (opaque tile) or passthrough (per-ship mask)
         };
         // Convert linear float [0,1] to sRGB [0,255]
         pixel.0 = [
             (linear_to_srgb(color[0]) * 255.0) as u8,
             (linear_to_srgb(color[1]) * 255.0) as u8,
             (linear_to_srgb(color[2]) * 255.0) as u8,
-            (color[3].clamp(0.0, 1.0) * 255.0) as u8,
+            alpha,
         ];
     }
 
@@ -165,6 +176,33 @@ pub fn bake_tiled_camo_png(tile_dds_bytes: &[u8], colors: &[[f32; 4]; 4]) -> Res
     Ok(png_buf)
 }
 
+/// Fraction of pixels that look like a colorizable zone mask: red/green/blue-dominant
+/// (dominant channel > 30, the same dominance conditions as `bake_tiled_camo_png`) or
+/// near-black (all channels <= 30). A high fraction (>= 0.9) means the texture is a zone
+/// mask to colorize with a color scheme; a low fraction means a real painted albedo that
+/// must render raw.
+pub fn zone_mask_fraction(dds_bytes: &[u8]) -> Option<f32> {
+    let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(dds_bytes)).ok()?;
+    let img = image_dds::image_from_dds(&dds, 0).ok()?;
+    let mut total = 0usize;
+    let mut zone = 0usize;
+    for pixel in img.pixels() {
+        let [r, g, b, _a] = pixel.0;
+        total += 1;
+        let is_zone = (r > g && r > b && r > 30)
+            || (g > r && g > b && g > 30)
+            || (b > r && b > g && b > 30)
+            || (r <= 30 && g <= 30 && b <= 30);
+        if is_zone {
+            zone += 1;
+        }
+    }
+    if total == 0 {
+        return Some(0.0);
+    }
+    Some(zone as f32 / total as f32)
+}
+
 /// Convert a linear-space color component to sRGB.
 fn linear_to_srgb(c: f32) -> f32 {
     let c = c.clamp(0.0, 1.0);
@@ -174,11 +212,25 @@ fn linear_to_srgb(c: f32) -> f32 {
 const TEXTURE_BASE: &str = "content/gameplay/common/camouflage/textures";
 
 /// Load raw DDS bytes from an absolute VFS path.
+///
+/// Prefers the high-res .dd0 tier over the low-res .dds mip tail (mirrors load_base_albedo_bytes).
 pub fn load_dds_from_vfs(vfs: &vfs::VfsPath, path: &str) -> Option<Vec<u8>> {
-    let mut data = Vec::new();
-    let mut file = vfs.join(path).ok()?.open_file().ok()?;
-    std::io::Read::read_to_end(&mut file, &mut data).ok()?;
-    if data.is_empty() { None } else { Some(data) }
+    let mut candidates = Vec::new();
+    if let Some(stem) = path.strip_suffix(".dds") {
+        candidates.push(format!("{stem}.dd0"));
+    }
+    candidates.push(path.to_string());
+    for cand in &candidates {
+        if let Ok(vfs_path) = vfs.join(cand)
+            && let Ok(mut file) = vfs_path.open_file()
+        {
+            let mut data = Vec::new();
+            if std::io::Read::read_to_end(&mut file, &mut data).is_ok() && !data.is_empty() {
+                return Some(data);
+            }
+        }
+    }
+    None
 }
 
 /// MFM name suffixes that don't appear in texture filenames.
@@ -322,7 +374,11 @@ fn strip_channel_suffix(scheme: &str) -> &str {
 ///
 /// Multi-channel schemes (e.g. `GW_a` + `GW_mg`) are grouped into a single scheme
 /// name (`GW`). Returns sorted, deduplicated scheme names.
-pub fn discover_texture_schemes(vfs: &vfs::VfsPath, mfm_stems: &[String]) -> Vec<String> {
+pub fn discover_texture_schemes(
+    vfs: &vfs::VfsPath,
+    mfm_stems: &[String],
+    exclude_paths: &std::collections::HashSet<String>,
+) -> Vec<String> {
     let mut schemes = std::collections::BTreeSet::new();
 
     let Ok(tex_dir) = vfs.join(TEXTURE_BASE) else {
@@ -332,7 +388,7 @@ pub fn discover_texture_schemes(vfs: &vfs::VfsPath, mfm_stems: &[String]) -> Vec
         return Vec::new();
     };
 
-    // Collect filenames ending in .dds (base mip level — avoids counting .dd0/.dd1/.dd2 dupes).
+    // Collect filenames ending in .dds (base mip level - avoids counting .dd0/.dd1/.dd2 dupes).
     let dds_names: Vec<String> = entries
         .filter_map(|entry| {
             let name = entry.filename();
@@ -349,6 +405,15 @@ pub fn discover_texture_schemes(vfs: &vfs::VfsPath, mfm_stems: &[String]) -> Vec
                     && !raw_scheme.is_empty()
                 {
                     let scheme = strip_channel_suffix(raw_scheme);
+                    // Skip files that are camouflages.xml zone masks; the mat-camo path
+                    // surfaces those correctly (colorized), so a raw copy here is a wrong duplicate.
+                    // Check the albedo channel variant too, since the scheme name is channel-stripped
+                    // but camouflages.xml references the `_a` file directly.
+                    let base_path = format!("{TEXTURE_BASE}/{base}_{scheme}.dds");
+                    let albedo_path = format!("{TEXTURE_BASE}/{base}_{scheme}_a.dds");
+                    if exclude_paths.contains(&base_path) || exclude_paths.contains(&albedo_path) {
+                        continue;
+                    }
                     schemes.insert(scheme.to_string());
                 }
             }

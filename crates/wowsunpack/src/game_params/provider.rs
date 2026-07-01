@@ -1759,12 +1759,20 @@ impl GameMetadataProvider {
                 // Absent `isTileflage` means a non-tile exterior; `false` is the correct default.
                 let is_tileflage =
                     game_param_to_type!(param_data, keys::IS_TILEFLAGE, Option<bool>).unwrap_or_default();
+                let unpeculiar_camouflage = param_data
+                    .get(&pk(keys::UNPECULIAR_CAMOUFLAGE))
+                    .and_then(|v| v.string_ref())
+                    .map(|s| s.inner().to_string())
+                    .filter(|s| !s.is_empty());
+                let hidden = game_param_to_type!(param_data, keys::HIDDEN, Option<bool>).unwrap_or_default();
                 Some(ParamData::Exterior(
                     Exterior::builder()
                         .maybe_camouflage(camouflage)
                         .maybe_title(title)
                         .modifiers(modifiers)
                         .is_tileflage(is_tileflage)
+                        .maybe_unpeculiar_camouflage(unpeculiar_camouflage)
+                        .hidden(hidden)
                         .build(),
                 ))
             }

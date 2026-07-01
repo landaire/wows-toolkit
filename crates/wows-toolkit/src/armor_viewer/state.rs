@@ -301,6 +301,11 @@ pub struct CamoScheme {
     pub textures: HashMap<String, Vec<u8>>,
     /// mfm stem -> UV scale/offset for tiled schemes; absent means identity UVs.
     pub uv_transforms: HashMap<String, wowsunpack::export::camouflage::UvTransform>,
+    /// Origin group for the camo dropdown.
+    pub origin: wowsunpack::export::gltf_export::CamoOrigin,
+    /// Whether this camo recolors over the base albedo (preserving ship detail like the hull
+    /// number) rather than pasting an opaque texture. Gates the tiled recolor vs opaque path.
+    pub use_color_scheme: bool,
 }
 
 /// Data for a loaded ship's armor.

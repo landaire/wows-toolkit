@@ -9,4 +9,7 @@ pub mod splash;
 pub mod state;
 pub mod ui;
 
+#[cfg(test)]
+mod render_smoke;
+
 pub use state::ArmorViewerState;

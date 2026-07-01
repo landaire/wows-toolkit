@@ -338,22 +338,21 @@ impl ShipAssets {
             }
         }
 
-        let mut schemes = texture::discover_texture_schemes(&self.vfs, &all_stems);
+        let mut schemes = texture::discover_texture_schemes(&self.vfs, &all_stems, &HashSet::new());
 
         // Also include material-based camo scheme display names.
         let ship_index = self.find_ship_index(&info.model_dir);
         let ship_idx = ship_index.as_deref();
-        let mat_camos = self.discover_mat_camo_schemes(&info.model_dir, ship_idx);
+        let mut mat_camos = self.discover_mat_camo_schemes(&info.model_dir, ship_idx);
+        mat_camos.extend(self.discover_universal_camo_schemes(ship_idx));
+        mat_camos.extend(self.discover_expendable_camo_schemes(ship_idx));
+        {
+            let mut seen = HashSet::new();
+            mat_camos.retain(|s| seen.insert(s.camo_name.clone()));
+        }
         for scheme in &mat_camos {
             let tag = if scheme.tiled { "tiled" } else { "mat_camo" };
             schemes.push(format!("{} ({})", scheme.display_name, tag));
-        }
-
-        // Include universal camos (available to all ships).
-        let universal = self.discover_universal_camo_schemes(ship_idx);
-        for scheme in &universal {
-            let tag = if scheme.tiled { "tiled" } else { "mat_camo" };
-            schemes.push(format!("{} (universal/{})", scheme.display_name, tag));
         }
 
         Ok(schemes)
@@ -422,11 +421,16 @@ impl ShipAssets {
         let turret_models = loaded.turret_models;
         let mounts = loaded.mounts;
 
-        // Resolve material-based camouflage schemes (ship-specific + universal).
+        // Resolve material-based camouflage schemes (ship-specific + universal + expendable).
         let ship_index = self.find_ship_index(&info.model_dir);
         let ship_idx = ship_index.as_deref();
         let mut mat_camo_schemes = self.discover_mat_camo_schemes(&info.model_dir, ship_idx);
         mat_camo_schemes.extend(self.discover_universal_camo_schemes(ship_idx));
+        mat_camo_schemes.extend(self.discover_expendable_camo_schemes(ship_idx));
+        {
+            let mut seen = HashSet::new();
+            mat_camo_schemes.retain(|s| seen.insert(s.camo_name.clone()));
+        }
 
         // Extract armor thickness map and hit locations from GameParams.
         let armor_map = vehicle.and_then(|v| v.armor().cloned());
@@ -479,7 +483,10 @@ impl ShipAssets {
             let Some(exterior) = param.exterior() else {
                 continue;
             };
-            let Some(camo_name) = exterior.camouflage() else {
+            // Decorative Skin exteriors leave `camouflage` empty and name the texture in
+            // `unpeculiarCamouflage` (the unowned-peculiarity appearance); use it so the camo
+            // still enumerates instead of being dropped.
+            let Some(camo_name) = exterior.camouflage().or_else(|| exterior.unpeculiar_camouflage()) else {
                 continue;
             };
 
@@ -508,28 +515,20 @@ impl ShipAssets {
                 })
                 .unwrap_or_else(|| camo_name.to_string());
 
-            // Collect unique texture paths (most mat_camos reuse one texture for all parts).
-            let mut unique_paths: Vec<String> = Vec::new();
-            let mut seen_paths = HashSet::new();
-            for path in entry.textures.values() {
-                if seen_paths.insert(path.clone()) {
-                    unique_paths.push(path.clone());
-                }
-            }
-
-            // For tiled camos, resolve color scheme.
-            let color_scheme_colors = if entry.tiled {
-                entry.color_scheme.as_ref().and_then(|cs_name| camo_db.color_scheme(cs_name)).map(|cs| cs.colors)
-            } else {
-                None
-            };
+            // A color scheme means the texture is a zone mask that must be colorized,
+            // regardless of `tiled` (which only controls UV repetition).
+            let color_scheme_colors =
+                entry.color_scheme.as_ref().and_then(|cs_name| camo_db.color_scheme(cs_name)).map(|cs| cs.colors);
 
             result.push(MatCamoScheme {
                 display_name,
-                texture_paths: unique_paths,
+                textures: entry.textures.clone(),
                 tiled: entry.tiled,
+                use_color_scheme: entry.use_color_scheme,
                 color_scheme_colors,
                 uv_transforms: entry.uv_transforms.clone(),
+                camo_name: camo_name.to_string(),
+                origin: gltf_export::CamoOrigin::ShipSpecific,
             });
         }
 
@@ -581,29 +580,75 @@ impl ShipAssets {
                 .localized_name_from_id(&TranslationKey::new(format!("IDS_{}", name.to_uppercase())))
                 .unwrap_or_else(|| camo_name.to_string());
 
-            let color_scheme_colors = if entry.tiled {
-                entry.color_scheme.as_ref().and_then(|cs_name| camo_db.color_scheme(cs_name)).map(|cs| cs.colors)
-            } else {
-                None
-            };
-
-            let mut unique_paths: Vec<String> = Vec::new();
-            let mut seen_paths = HashSet::new();
-            for path in entry.textures.values() {
-                if seen_paths.insert(path.clone()) {
-                    unique_paths.push(path.clone());
-                }
-            }
+            // A color scheme means the texture is a zone mask that must be colorized,
+            // regardless of `tiled` (which only controls UV repetition).
+            let color_scheme_colors =
+                entry.color_scheme.as_ref().and_then(|cs_name| camo_db.color_scheme(cs_name)).map(|cs| cs.colors);
 
             result.push(MatCamoScheme {
                 display_name,
-                texture_paths: unique_paths,
+                textures: entry.textures.clone(),
                 tiled: entry.tiled,
+                use_color_scheme: entry.use_color_scheme,
                 color_scheme_colors,
                 uv_transforms: entry.uv_transforms.clone(),
+                camo_name: camo_name.to_string(),
+                origin: gltf_export::CamoOrigin::Universal,
             });
         }
 
+        result
+    }
+
+    /// Discover expendable (consumable) camouflages: species `Camouflage` (the PCEC* paint camos).
+    /// These are available to all ships via the exterior slot system, not `permoflages`.
+    fn discover_expendable_camo_schemes(&self, ship_index: Option<&str>) -> Vec<MatCamoScheme> {
+        let camo_db = match &self.camo_db {
+            Some(db) => db,
+            None => return Vec::new(),
+        };
+        let mut result = Vec::new();
+        let mut seen_camo_names = HashSet::new();
+        for param in self.metadata.params() {
+            if !matches!(param.species(), Some(Recognized::Known(Species::Camouflage))) {
+                continue;
+            }
+            let Some(exterior) = param.exterior() else {
+                continue;
+            };
+            // Skip hidden/legacy expendables (removed from the shop) to avoid a 100+ entry dump.
+            if exterior.hidden() {
+                continue;
+            }
+            let Some(camo_name) = exterior.camouflage() else {
+                continue;
+            };
+            if !seen_camo_names.insert(camo_name.to_string()) {
+                continue;
+            }
+            let Some(entry) = camo_db.get(camo_name, ship_index) else {
+                continue;
+            };
+            if entry.textures.is_empty() {
+                continue;
+            }
+            let display_name = self
+                .metadata
+                .localized_name_from_id(&TranslationKey::new(format!("IDS_{}", param.name().to_uppercase())))
+                .unwrap_or_else(|| camo_name.to_string());
+            let color_scheme_colors =
+                entry.color_scheme.as_ref().and_then(|cs| camo_db.color_scheme(cs)).map(|cs| cs.colors);
+            result.push(MatCamoScheme {
+                display_name,
+                textures: entry.textures.clone(),
+                tiled: entry.tiled,
+                use_color_scheme: entry.use_color_scheme,
+                color_scheme_colors,
+                uv_transforms: entry.uv_transforms.clone(),
+                camo_name: camo_name.to_string(),
+                origin: gltf_export::CamoOrigin::Expendable,
+            });
+        }
         result
     }
 
@@ -622,13 +667,13 @@ impl ShipAssets {
             .ok_or_else(|| rootcause::report!("Ship '{}' not found in GameParams", model_dir))
     }
 
-    /// Find the ship param's index name (e.g. "PJSB018_Yamato_1944") from model directory.
+    /// Find the ship param's full name (e.g. "PJSB018_Yamato_1944") from model directory.
     fn find_ship_index(&self, model_dir: &str) -> Option<String> {
         self.metadata
             .params()
             .iter()
             .find(|p| p.vehicle().and_then(|v| v.model_path()).map(|mp| mp.contains(model_dir)).unwrap_or(false))
-            .map(|p| p.index().to_string())
+            .map(|p| p.name().to_string())
     }
 
     /// Scan paths_storage for .visual files in a directory matching the name.
@@ -1198,6 +1243,29 @@ impl ShipModelContext {
         Ok(result)
     }
 
+    /// Base albedo PNGs for the given hull meshes, keyed by mfm_path. Bakes TILEDLAND
+    /// (underwater) materials and force-opaques, so the underwater hull gets its stock skin.
+    pub fn hull_base_albedos(&self, meshes: &[gltf_export::InteractiveHullMesh]) -> HashMap<String, Vec<u8>> {
+        let mut out = HashMap::new();
+        let db = match assets_bin::parse_assets_bin(&self.assets_bin_bytes) {
+            Ok(db) => db,
+            Err(_) => return out,
+        };
+        let self_id_index = db.build_self_id_index();
+        for mesh in meshes {
+            let Some(path) = &mesh.mfm_path else { continue };
+            if out.contains_key(path) {
+                continue;
+            }
+            if let Some(png) =
+                texture::load_or_bake_albedo(&self.vfs, path, mesh.mfm_path_id, Some(&db), Some(&self_id_index), None)
+            {
+                out.insert(path.clone(), png);
+            }
+        }
+        out
+    }
+
     /// Export the loaded ship model to GLB format.
     pub fn export_glb(&self, writer: &mut impl Write) -> Result<(), Report> {
         let db = assets_bin::parse_assets_bin(&self.assets_bin_bytes).context("Failed to re-parse assets.bin")?;
@@ -1314,7 +1382,11 @@ impl ShipModelContext {
 
     /// Build base albedo plus all camo schemes from pre-collected MFM infos.
     fn texture_set_from_mfm_infos(&self, all_mfm_infos: &[MfmInfo]) -> TextureSet {
-        let mut tex_set = build_texture_set(all_mfm_infos, &self.vfs);
+        // Exclude camo zone-mask files (referenced by camouflages.xml) from the raw VFS scan;
+        // the mat-camo path below surfaces those colorized.
+        let camo_texture_paths: HashSet<String> =
+            self.mat_camo_schemes.iter().flat_map(|s| s.textures.values().cloned()).collect();
+        let mut tex_set = build_texture_set(all_mfm_infos, &self.vfs, &camo_texture_paths);
         let per_ship_count = tex_set.camo_schemes.len();
 
         if !self.mat_camo_schemes.is_empty() {
@@ -1327,57 +1399,81 @@ impl ShipModelContext {
             };
 
             for scheme in &self.mat_camo_schemes {
-                let mut png_bytes = None;
-
-                if scheme.tiled {
-                    if let Some(colors) = &scheme.color_scheme_colors {
-                        for path in &scheme.texture_paths {
-                            if let Some(dds) = texture::load_dds_from_vfs(&self.vfs, path) {
-                                match texture::bake_tiled_camo_png(&dds, colors) {
-                                    Ok(png) => {
-                                        png_bytes = Some(png);
-                                        break;
-                                    }
-                                    Err(e) => {
-                                        eprintln!("  Warning: failed to bake tiled camo {}: {e}", path);
-                                    }
+                let mut decoded: HashMap<String, Vec<u8>> = HashMap::new();
+                let mut scheme_textures = HashMap::new();
+                for stem in &stems {
+                    let cat = camouflage::classify_part_category(stem);
+                    let Some(path) = resolve_part_texture(&scheme.textures, cat, scheme.tiled) else {
+                        continue;
+                    };
+                    if !decoded.contains_key(path) {
+                        let Some(dds) = texture::load_dds_from_vfs(&self.vfs, path) else {
+                            continue;
+                        };
+                        // Bake (colorize) only a zone mask that has a color scheme; a real painted
+                        // albedo (even one that carries a color scheme) must render raw.
+                        let bake = scheme.color_scheme_colors.is_some()
+                            && texture::zone_mask_fraction(&dds).unwrap_or(0.0) >= 0.90;
+                        let png = if bake {
+                            // A per-ship painted mask (tiled=false) uses black as passthrough to the
+                            // base; a repeating tile uses black as an opaque pattern color (full cover).
+                            let black_passthrough = !scheme.tiled;
+                            match texture::bake_tiled_camo_png(
+                                &dds,
+                                scheme.color_scheme_colors.as_ref().unwrap(),
+                                black_passthrough,
+                            ) {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    eprintln!("  Warning: failed to bake camo {}: {e}", path);
+                                    continue;
                                 }
                             }
-                        }
-                    }
-                } else {
-                    for path in &scheme.texture_paths {
-                        if let Some(dds) = texture::load_dds_from_vfs(&self.vfs, path) {
+                        } else {
+                            // A raw painted camo is a full opaque replacement; its DDS alpha holds
+                            // material data (gloss/height), not camo coverage. Force it opaque so
+                            // the only textures carrying sub-255 alpha are baked passthrough masks,
+                            // which lets the compositor identify passthrough reliably.
                             match texture::dds_to_png(&dds) {
-                                Ok(png) => {
-                                    png_bytes = Some(png);
-                                    break;
+                                Ok(mut p) => {
+                                    texture::force_png_opaque(&mut p);
+                                    p
                                 }
                                 Err(e) => {
-                                    eprintln!("  Warning: failed to decode mat_camo texture {}: {e}", path);
+                                    eprintln!("  Warning: failed to decode camo texture {}: {e}", path);
+                                    continue;
                                 }
                             }
-                        }
+                        };
+                        decoded.insert(path.clone(), png);
+                    }
+                    if let Some(png) = decoded.get(path) {
+                        scheme_textures.insert(stem.clone(), png.clone());
                     }
                 }
 
-                if let Some(png) = png_bytes {
-                    let mut scheme_textures = HashMap::new();
-                    for stem in &stems {
-                        scheme_textures.insert(stem.clone(), png.clone());
-                    }
-                    let scheme_idx = tex_set.camo_schemes.len();
-                    tex_set.camo_schemes.push((scheme.display_name.clone(), scheme_textures));
-                    if scheme.tiled {
-                        for stem in &stems {
-                            let cat = camouflage::classify_part_category(stem);
-                            if let Some(xform) = scheme.uv_transforms.get(cat) {
-                                tex_set.tiled_uv_transforms.insert(
-                                    (scheme_idx, stem.clone()),
-                                    [xform.scale[0], xform.scale[1], xform.offset[0], xform.offset[1]],
-                                );
-                            }
-                        }
+                if scheme_textures.is_empty() {
+                    continue;
+                }
+                let scheme_idx = tex_set.camo_schemes.len();
+                tex_set.camo_schemes.push((scheme.display_name.clone(), scheme_textures));
+                tex_set.camo_origins.push(scheme.origin);
+                tex_set.camo_use_color_scheme.push(scheme.use_color_scheme);
+                for stem in &stems {
+                    let cat = camouflage::classify_part_category(stem);
+                    // Tiled camos tile every part; a reclassified fitting that samples the tile
+                    // via the resolve fallback must also inherit the tile's UV transform.
+                    let xform = scheme
+                        .uv_transforms
+                        .get(cat)
+                        .or_else(|| if scheme.tiled { scheme.uv_transforms.get("tile") } else { None });
+                    if let Some(xform) = xform
+                        && (xform.scale != [1.0, 1.0] || xform.offset != [0.0, 0.0])
+                    {
+                        tex_set.tiled_uv_transforms.insert(
+                            (scheme_idx, stem.clone()),
+                            [xform.scale[0], xform.scale[1], xform.offset[0], xform.offset[1]],
+                        );
                     }
                 }
             }
@@ -1431,19 +1527,49 @@ struct ResolvedMount {
 struct MatCamoScheme {
     /// Display name for the variant (translated or fallback).
     display_name: String,
-    /// Albedo texture VFS paths from camouflages.xml.
-    texture_paths: Vec<String>,
-    /// Whether this is a tiled camo (uses UV tiling via KHR_texture_transform).
+    /// Per-part albedo texture VFS paths (category to path), from camouflages.xml.
+    textures: HashMap<String, String>,
+    /// Whether this is a tiled camo (UV tiling via KHR_texture_transform).
     tiled: bool,
-    /// Resolved color scheme colors for tiled camos (4 RGBA colors, linear space).
+    /// Whether the camo recolors over the base albedo (preserving ship detail) vs pasting opaque.
+    use_color_scheme: bool,
+    /// Resolved color scheme colors when the camo references one (4 RGBA, linear).
     color_scheme_colors: Option<[[f32; 4]; 4]>,
     /// Per-part UV transforms for tiled camos. Key = part category (lowercase).
     uv_transforms: HashMap<String, camouflage::UvTransform>,
+    /// The camouflages.xml camo name (for de-duplication across discovery sources).
+    camo_name: String,
+    /// Where this scheme came from (for UI grouping).
+    origin: gltf_export::CamoOrigin,
 }
 
 // ---------------------------------------------------------------------------
 // Shared helpers (pub so main.rs export-model can use them too)
 // ---------------------------------------------------------------------------
+
+/// Resolve the camo texture path for a stem's part category. `classify_part_category` returns
+/// "tile" for hull stems, but an explicit hull texture is keyed "hull".
+///
+/// A tiled camo defines only a `tile` texture and is designed to cover the whole ship (with
+/// per-category UV transforms), so it falls back to that tile for any part. A painted camo maps
+/// each part category to its own albedo and covers only the categories it names; a part whose
+/// category the camo does not define keeps its stock albedo (returns None), matching the game
+/// (the whole-ship hull atlas has a different UV layout than fittings like glass or radars).
+///
+/// `glass` and `net` are never camouflaged in any mode: transparent glass is excluded from camo at
+/// the engine level, and alpha-cutout nets/grids would lose their cutout under an opaque tile. They
+/// keep their stock texture even under a whole-ship tiled camo (returns None).
+fn resolve_part_texture<'a>(textures: &'a HashMap<String, String>, category: &str, tiled: bool) -> Option<&'a String> {
+    if matches!(category, "glass" | "net") {
+        return None;
+    }
+    let explicit_key = if category == "tile" { "hull" } else { category };
+    let explicit = textures.get(explicit_key);
+    if explicit.is_some() || !tiled {
+        return explicit;
+    }
+    textures.get("tile").or_else(|| textures.get("hull"))
+}
 
 /// Resolved MFM info: stem (leaf name without `.mfm`) and full VFS path.
 pub struct MfmInfo {
@@ -1477,7 +1603,7 @@ pub fn collect_mfm_info(visual: &VisualPrototype, db: &PrototypeDatabase<'_>) ->
 }
 
 /// Build a `TextureSet` from MFM infos: base albedo + all camo schemes.
-pub fn build_texture_set(mfm_infos: &[MfmInfo], vfs: &VfsPath) -> TextureSet {
+pub fn build_texture_set(mfm_infos: &[MfmInfo], vfs: &VfsPath, exclude_paths: &HashSet<String>) -> TextureSet {
     let mut base = HashMap::new();
 
     let mut seen_stems = HashSet::new();
@@ -1504,9 +1630,11 @@ pub fn build_texture_set(mfm_infos: &[MfmInfo], vfs: &VfsPath) -> TextureSet {
 
     // Discover camo schemes.
     let stems: Vec<String> = unique_infos.iter().map(|i| i.stem.clone()).collect();
-    let schemes = texture::discover_texture_schemes(vfs, &stems);
+    let schemes = texture::discover_texture_schemes(vfs, &stems, exclude_paths);
 
     let mut camo_schemes = Vec::new();
+    let mut camo_origins = Vec::new();
+    let mut camo_use_color_scheme = Vec::new();
     for scheme in &schemes {
         let mut scheme_textures = HashMap::new();
         for info in &unique_infos {
@@ -1523,10 +1651,13 @@ pub fn build_texture_set(mfm_infos: &[MfmInfo], vfs: &VfsPath) -> TextureSet {
         }
         if !scheme_textures.is_empty() {
             camo_schemes.push((scheme.clone(), scheme_textures));
+            camo_origins.push(gltf_export::CamoOrigin::LegacyScan);
+            // Filename-scanned schemes are pre-colored textures with no color-scheme recolor.
+            camo_use_color_scheme.push(false);
         }
     }
 
-    TextureSet { base, camo_schemes, tiled_uv_transforms: HashMap::new() }
+    TextureSet { base, camo_schemes, camo_origins, camo_use_color_scheme, tiled_uv_transforms: HashMap::new() }
 }
 
 /// Resolve a compound hardpoint (e.g. `HP_AGM_3_HP_AGA_1`) by finding the

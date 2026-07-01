@@ -1577,7 +1577,7 @@ fn run_export_model(params: &ExportModelParams<'_>) -> Result<(), Report> {
         if list_textures {
             let mfm_infos = collect_mfm_info(vp, db);
             let stems: Vec<String> = mfm_infos.iter().map(|i| i.stem.clone()).collect();
-            let schemes = texture::discover_texture_schemes(vfs, &stems);
+            let schemes = texture::discover_texture_schemes(vfs, &stems, &HashSet::new());
             if schemes.is_empty() {
                 println!("No camouflage textures found for this model.");
             } else {
@@ -1593,7 +1593,7 @@ fn run_export_model(params: &ExportModelParams<'_>) -> Result<(), Report> {
             gltf_export::TextureSet::empty()
         } else {
             let mfm_infos = collect_mfm_info(vp, db);
-            build_texture_set(&mfm_infos, vfs)
+            build_texture_set(&mfm_infos, vfs, &HashSet::new())
         };
 
         let mut out_file = std::fs::File::create(output).context("Failed to create output file")?;

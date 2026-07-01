@@ -981,11 +981,23 @@ pub struct Exterior {
     #[cfg_attr(feature = "serde", serde(default))]
     #[builder(default)]
     is_tileflage: bool,
+    /// Fallback camouflage texture used when the peculiarity is not owned. Some decorative
+    /// `Skin`/`MSkin` exteriors leave `camouflage` empty and carry the texture name here.
+    #[cfg_attr(feature = "serde", serde(default))]
+    unpeculiar_camouflage: Option<String>,
+    /// Whether this exterior is hidden from the shop/offering (legacy/removed items).
+    #[cfg_attr(feature = "serde", serde(default))]
+    #[builder(default)]
+    hidden: bool,
 }
 
 impl Exterior {
     pub fn camouflage(&self) -> Option<&str> {
         self.camouflage.as_deref()
+    }
+
+    pub fn unpeculiar_camouflage(&self) -> Option<&str> {
+        self.unpeculiar_camouflage.as_deref()
     }
 
     pub fn title(&self) -> Option<&str> {
@@ -998,6 +1010,10 @@ impl Exterior {
 
     pub fn is_tileflage(&self) -> bool {
         self.is_tileflage
+    }
+
+    pub fn hidden(&self) -> bool {
+        self.hidden
     }
 }
 

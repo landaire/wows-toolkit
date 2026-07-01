@@ -874,7 +874,68 @@ impl Viewport3D {
         }
         self.needs_redraw = false;
 
-        // Create/update uniform buffer
+        // Build the three per-frame uniform sets (model-lit, world, model-unlit).
+        let (uniforms, world_uniforms, model_unlit_uniforms) = self.scene_uniforms(size);
+
+        if let (Some(ub), Some(wub), Some(mub)) =
+            (self.uniform_buffer.as_ref(), self.world_uniform_buffer.as_ref(), self.model_unlit_uniform_buffer.as_ref())
+        {
+            queue.write_buffer(ub, 0, bytemuck::bytes_of(&uniforms));
+            queue.write_buffer(wub, 0, bytemuck::bytes_of(&world_uniforms));
+            queue.write_buffer(mub, 0, bytemuck::bytes_of(&model_unlit_uniforms));
+        } else {
+            use wgpu::util::DeviceExt;
+            let make = |contents: &[u8], label: &str| {
+                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(label),
+                    layout: &pipeline.uniform_bind_group_layout,
+                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
+                });
+                (buffer, bind_group)
+            };
+            let (b0, g0) = make(bytemuck::bytes_of(&uniforms), "viewport_3d_uniforms");
+            let (b1, g1) = make(bytemuck::bytes_of(&world_uniforms), "viewport_3d_world_uniforms");
+            let (b2, g2) = make(bytemuck::bytes_of(&model_unlit_uniforms), "viewport_3d_model_unlit_uniforms");
+            self.uniform_buffer = Some(b0);
+            self.uniform_bind_group = Some(g0);
+            self.world_uniform_buffer = Some(b1);
+            self.world_uniform_bind_group = Some(g1);
+            self.model_unlit_uniform_buffer = Some(b2);
+            self.model_unlit_uniform_bind_group = Some(g2);
+        }
+
+        // Render
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("viewport_3d_encoder") });
+
+        let model_lit_bg = self.uniform_bind_group.as_ref().unwrap();
+        let model_unlit_bg = self.model_unlit_uniform_bind_group.as_ref().unwrap();
+        let world_bg = self.world_uniform_bind_group.as_ref().unwrap();
+        self.encode_scene_pass(
+            &mut encoder,
+            pipeline,
+            &offscreen.msaa_color_view,
+            &offscreen.color_view,
+            &offscreen.depth_view,
+            model_lit_bg,
+            model_unlit_bg,
+            world_bg,
+        );
+
+        queue.submit(std::iter::once(encoder.finish()));
+
+        offscreen.egui_texture_id
+    }
+
+    /// Build the three per-frame uniform sets from the current camera, model
+    /// rotation, and lighting: `(model_lit, world, model_unlit)`. Shared by the
+    /// on-screen `render` and the offscreen readback path so both draw identically.
+    fn scene_uniforms(&self, size: (u32, u32)) -> (Uniforms, Uniforms, Uniforms) {
         let aspect = size.0 as f32 / size.1 as f32;
         let model_mat = {
             let has_roll = self.model_roll.abs() > 1e-6;
@@ -941,129 +1002,239 @@ impl Viewport3D {
 
         let model_unlit_uniforms = Uniforms { light_dir: [light_dir[0], light_dir[1], light_dir[2], 0.0], ..uniforms };
 
-        if let (Some(ub), Some(wub), Some(mub)) =
-            (self.uniform_buffer.as_ref(), self.world_uniform_buffer.as_ref(), self.model_unlit_uniform_buffer.as_ref())
-        {
-            queue.write_buffer(ub, 0, bytemuck::bytes_of(&uniforms));
-            queue.write_buffer(wub, 0, bytemuck::bytes_of(&world_uniforms));
-            queue.write_buffer(mub, 0, bytemuck::bytes_of(&model_unlit_uniforms));
-        } else {
-            use wgpu::util::DeviceExt;
-            let make = |contents: &[u8], label: &str| {
-                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(label),
-                    contents,
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(label),
-                    layout: &pipeline.uniform_bind_group_layout,
-                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
-                });
-                (buffer, bind_group)
+        (uniforms, world_uniforms, model_unlit_uniforms)
+    }
+
+    /// Record the scene draw into `encoder` against the given MSAA color, resolve
+    /// color, and depth views. Sorts meshes by layer and binds the matching
+    /// pipeline/uniform group per mesh. Shared by `render` and `render_offscreen_rgba`.
+    #[allow(clippy::too_many_arguments)]
+    fn encode_scene_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pipeline: &GpuPipeline,
+        msaa_color_view: &wgpu::TextureView,
+        resolve_color_view: &wgpu::TextureView,
+        depth_view: &wgpu::TextureView,
+        model_lit_bg: &wgpu::BindGroup,
+        model_unlit_bg: &wgpu::BindGroup,
+        world_bg: &wgpu::BindGroup,
+    ) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("viewport_3d_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: msaa_color_view,
+                resolve_target: Some(resolve_color_view),
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(self.clear_color), store: wgpu::StoreOp::Store },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_view,
+                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        });
+
+        pass.set_bind_group(0, model_unlit_bg, &[]);
+        // Start with fallback texture; per-mesh textures override below.
+        pass.set_bind_group(1, &pipeline.fallback_texture_bind_group, &[]);
+
+        // Sort meshes by layer: armor (opaque, depth-write) first, then hull + overlays (transparent, no depth-write).
+        let mut sorted: Vec<(MeshId, &GpuMesh)> =
+            self.meshes.iter().filter(|(_, m)| m.visible && m.index_count > 0).map(|(id, m)| (*id, m)).collect();
+        sorted.sort_by_key(|(_, m)| m.layer);
+
+        let mut current_layer_kind: i32 = -1; // force first set_pipeline
+        let mut has_custom_texture = false; // track whether we need to rebind fallback
+        let mut current_bind = BindKind::ModelUnlit;
+        for (_id, mesh) in sorted {
+            let layer_kind = if mesh.layer <= LAYER_OPAQUE_MAX {
+                0 // opaque
+            } else if mesh.layer < LAYER_OVERLAY {
+                1 // transparent (hull)
+            } else {
+                2 // overlay (always on top)
             };
-            let (b0, g0) = make(bytemuck::bytes_of(&uniforms), "viewport_3d_uniforms");
-            let (b1, g1) = make(bytemuck::bytes_of(&world_uniforms), "viewport_3d_world_uniforms");
-            let (b2, g2) = make(bytemuck::bytes_of(&model_unlit_uniforms), "viewport_3d_model_unlit_uniforms");
-            self.uniform_buffer = Some(b0);
-            self.uniform_bind_group = Some(g0);
-            self.world_uniform_buffer = Some(b1);
-            self.world_uniform_bind_group = Some(g1);
-            self.model_unlit_uniform_buffer = Some(b2);
-            self.model_unlit_uniform_bind_group = Some(g2);
-        }
-
-        // Render
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("viewport_3d_encoder") });
-
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("viewport_3d_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &offscreen.msaa_color_view,
-                    resolve_target: Some(&offscreen.color_view),
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(self.clear_color), store: wgpu::StoreOp::Store },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &offscreen.depth_view,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
-                    stencil_ops: None,
-                }),
-                ..Default::default()
-            });
-
-            let model_lit_bg = self.uniform_bind_group.as_ref().unwrap();
-            let model_unlit_bg = self.model_unlit_uniform_bind_group.as_ref().unwrap();
-            let world_bg = self.world_uniform_bind_group.as_ref().unwrap();
-            pass.set_bind_group(0, model_unlit_bg, &[]);
-            // Start with fallback texture; per-mesh textures override below.
-            pass.set_bind_group(1, &pipeline.fallback_texture_bind_group, &[]);
-
-            // Sort meshes by layer: armor (opaque, depth-write) first, then hull + overlays (transparent, no depth-write).
-            let mut sorted: Vec<(MeshId, &GpuMesh)> =
-                self.meshes.iter().filter(|(_, m)| m.visible && m.index_count > 0).map(|(id, m)| (*id, m)).collect();
-            sorted.sort_by_key(|(_, m)| m.layer);
-
-            let mut current_layer_kind: i32 = -1; // force first set_pipeline
-            let mut has_custom_texture = false; // track whether we need to rebind fallback
-            let mut current_bind = BindKind::ModelUnlit;
-            for (_id, mesh) in sorted {
-                let layer_kind = if mesh.layer <= LAYER_OPAQUE_MAX {
-                    0 // opaque
-                } else if mesh.layer < LAYER_OVERLAY {
-                    1 // transparent (hull)
-                } else {
-                    2 // overlay (always on top)
-                };
-                if layer_kind != current_layer_kind {
-                    match layer_kind {
-                        0 => pass.set_pipeline(&pipeline.pipeline),
-                        1 => pass.set_pipeline(&pipeline.pipeline_no_depth_write),
-                        _ => pass.set_pipeline(&pipeline.pipeline_overlay),
-                    }
-                    current_layer_kind = layer_kind;
+            if layer_kind != current_layer_kind {
+                match layer_kind {
+                    0 => pass.set_pipeline(&pipeline.pipeline),
+                    1 => pass.set_pipeline(&pipeline.pipeline_no_depth_write),
+                    _ => pass.set_pipeline(&pipeline.pipeline_overlay),
                 }
-
-                // Pick the uniform bind group: world-space (always unlit), model-space lit
-                // (hull), or model-space unlit (armor/overlays).
-                let desired_bg = if mesh.world_space {
-                    BindKind::World
-                } else if mesh.lit {
-                    BindKind::ModelLit
-                } else {
-                    BindKind::ModelUnlit
-                };
-                if desired_bg != current_bind {
-                    let bg = match desired_bg {
-                        BindKind::World => world_bg,
-                        BindKind::ModelLit => model_lit_bg,
-                        BindKind::ModelUnlit => model_unlit_bg,
-                    };
-                    pass.set_bind_group(0, bg, &[]);
-                    current_bind = desired_bg;
-                }
-
-                // Bind per-mesh texture or fallback
-                if let Some(ref tex_bg) = mesh.texture_bind_group {
-                    pass.set_bind_group(1, tex_bg, &[]);
-                    has_custom_texture = true;
-                } else if has_custom_texture {
-                    // Rebind fallback after a textured mesh
-                    pass.set_bind_group(1, &pipeline.fallback_texture_bind_group, &[]);
-                    has_custom_texture = false;
-                }
-
-                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+                current_layer_kind = layer_kind;
             }
+
+            // Pick the uniform bind group: world-space (always unlit), model-space lit
+            // (hull), or model-space unlit (armor/overlays).
+            let desired_bg = if mesh.world_space {
+                BindKind::World
+            } else if mesh.lit {
+                BindKind::ModelLit
+            } else {
+                BindKind::ModelUnlit
+            };
+            if desired_bg != current_bind {
+                let bg = match desired_bg {
+                    BindKind::World => world_bg,
+                    BindKind::ModelLit => model_lit_bg,
+                    BindKind::ModelUnlit => model_unlit_bg,
+                };
+                pass.set_bind_group(0, bg, &[]);
+                current_bind = desired_bg;
+            }
+
+            // Bind per-mesh texture or fallback
+            if let Some(ref tex_bg) = mesh.texture_bind_group {
+                pass.set_bind_group(1, tex_bg, &[]);
+                has_custom_texture = true;
+            } else if has_custom_texture {
+                // Rebind fallback after a textured mesh
+                pass.set_bind_group(1, &pipeline.fallback_texture_bind_group, &[]);
+                has_custom_texture = false;
+            }
+
+            pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+            pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..mesh.index_count, 0, 0..1);
         }
+    }
+
+    /// Render the current scene to an offscreen target and read the pixels back as
+    /// tightly-packed sRGB RGBA8 (`width * height * 4`). Mirrors `render` exactly
+    /// (same MSAA count, color format, uniforms, and draw loop) but runs without
+    /// egui, so it is usable headless. Returns `(width, height, rgba)`.
+    pub fn render_offscreen_rgba(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pipeline: &GpuPipeline,
+        size: (u32, u32),
+    ) -> Option<(u32, u32, Vec<u8>)> {
+        if size.0 == 0 || size.1 == 0 {
+            return None;
+        }
+
+        // Local render targets (not self.offscreen) so the egui path is undisturbed.
+        let msaa_color = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewport_3d_offscreen_msaa_color"),
+            size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: MSAA_SAMPLE_COUNT,
+            dimension: wgpu::TextureDimension::D2,
+            format: COLOR_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let msaa_color_view = msaa_color.create_view(&Default::default());
+
+        // Resolve target is COPY_SRC (not TEXTURE_BINDING) since we read it back.
+        let resolve_color = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewport_3d_offscreen_color"),
+            size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: COLOR_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let resolve_color_view = resolve_color.create_view(&Default::default());
+
+        let depth = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewport_3d_offscreen_depth"),
+            size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: MSAA_SAMPLE_COUNT,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let depth_view = depth.create_view(&Default::default());
+
+        // Local uniform buffers + bind groups (self's are left untouched).
+        let (uniforms, world_uniforms, model_unlit_uniforms) = self.scene_uniforms(size);
+        use wgpu::util::DeviceExt;
+        let make = |contents: &[u8], label: &str| {
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &pipeline.uniform_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
+            })
+        };
+        let model_lit_bg = make(bytemuck::bytes_of(&uniforms), "viewport_3d_offscreen_uniforms");
+        let world_bg = make(bytemuck::bytes_of(&world_uniforms), "viewport_3d_offscreen_world_uniforms");
+        let model_unlit_bg = make(bytemuck::bytes_of(&model_unlit_uniforms), "viewport_3d_offscreen_model_unlit");
+
+        let mut encoder = device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("viewport_3d_offscreen_encoder") });
+
+        self.encode_scene_pass(
+            &mut encoder,
+            pipeline,
+            &msaa_color_view,
+            &resolve_color_view,
+            &depth_view,
+            &model_lit_bg,
+            &model_unlit_bg,
+            &world_bg,
+        );
+
+        // Copy the resolved color into a readback buffer. bytes_per_row must be a
+        // multiple of 256, so pad each row and strip the padding after mapping.
+        let unpadded_bpr = size.0 * 4;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT; // 256
+        let padded_bpr = unpadded_bpr.div_ceil(align) * align;
+        let buffer_size = (padded_bpr * size.1) as u64;
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewport_3d_offscreen_readback"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &resolve_color,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bpr),
+                    rows_per_image: Some(size.1),
+                },
+            },
+            wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+        );
 
         queue.submit(std::iter::once(encoder.finish()));
 
-        offscreen.egui_texture_id
+        // Map and block until the GPU work completes.
+        let slice = readback.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+
+        let mapped = slice.get_mapped_range();
+        let mut rgba = vec![0u8; (unpadded_bpr * size.1) as usize];
+        for row in 0..size.1 as usize {
+            let src = row * padded_bpr as usize;
+            let dst = row * unpadded_bpr as usize;
+            rgba[dst..dst + unpadded_bpr as usize].copy_from_slice(&mapped[src..src + unpadded_bpr as usize]);
+        }
+        drop(mapped);
+        readback.unmap();
+
+        Some((size.0, size.1, rgba))
     }
 
     /// Transform a world-space ray into model space (inverse of model matrix).
