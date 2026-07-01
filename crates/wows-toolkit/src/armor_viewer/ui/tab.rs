@@ -3159,15 +3159,20 @@ pub(crate) fn draw_hull_visibility_popover(
         }
     }
 
-    // Camo selector
+    // Camo selector. Inline collapsing list rather than a ComboBox: a ComboBox opens its
+    // list in a separate layer, which this CloseOnClickOutside popover treats as an outside
+    // click and dismisses itself. Keeping the list inside the popover rect avoids that.
     if !armor.camo_schemes.is_empty() {
-        ui.horizontal(|ui| {
-            ui.label(t!("ui.armor.camo").as_ref());
-            let none_label = t!("ui.armor.camo_none");
-            let selected_text = pane.selected_camo.clone().unwrap_or_else(|| none_label.as_ref().to_string());
-            egui::ComboBox::from_id_salt(("armor_camo_select", pane.id)).selected_text(selected_text).show_ui(
-                ui,
-                |ui| {
+        let none_label = t!("ui.armor.camo_none");
+        let current = pane.selected_camo.clone().unwrap_or_else(|| none_label.as_ref().to_string());
+        let id = ui.make_persistent_id(("hull_camo", pane.id));
+        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+            .show_header(ui, |ui| {
+                ui.label(t!("ui.armor.camo").as_ref());
+                ui.label(current);
+            })
+            .body(|ui| {
+                egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
                     if ui.selectable_label(pane.selected_camo.is_none(), none_label.as_ref()).clicked()
                         && pane.selected_camo.is_some()
                     {
@@ -3181,9 +3186,8 @@ pub(crate) fn draw_hull_visibility_popover(
                             result.camo_changed = true;
                         }
                     }
-                },
-            );
-        });
+                });
+            });
     }
 
     // LOD selector
