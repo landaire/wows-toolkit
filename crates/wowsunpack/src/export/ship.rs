@@ -1296,10 +1296,10 @@ impl ShipModelContext {
     /// Build the complete texture set (base albedo + per-ship, material, and universal
     /// camo schemes, with tiled UV transforms) for this ship. Self-contained: re-parses
     /// the prototype DB and collects MFM infos from the hull and mounted-turret visuals.
+    ///
+    /// Independent of `options.textures` (which only controls GLB texture embedding):
+    /// callers that ask for the texture set want the camo schemes regardless.
     pub fn build_full_texture_set(&self) -> Result<TextureSet, Report> {
-        if !self.options.textures {
-            return Ok(TextureSet::empty());
-        }
         let db = assets_bin::parse_assets_bin(&self.assets_bin_bytes).context("Failed to re-parse assets.bin")?;
         let mut all_mfm_infos = Vec::new();
         for d in &self.hull_parts {
