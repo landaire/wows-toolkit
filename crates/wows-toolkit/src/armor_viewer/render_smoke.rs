@@ -98,32 +98,34 @@ fn render_smaland_camos() {
     eprintln!(
         "loaded Smaland: {} hull meshes, {} camo schemes: {:?}",
         armor.hull_meshes.len(),
-        armor.camo_schemes.len(),
-        armor.camo_schemes.iter().map(|s| s.name.as_str()).collect::<Vec<_>>()
+        armor.camo_scheme_infos.len(),
+        armor.camo_scheme_infos.iter().map(|i| i.display_name.as_str()).collect::<Vec<_>>()
     );
 
     for (raw, label) in SCHEMES {
         // Match by exact name or a contains() either way (localized vs raw names).
         let matched = armor
-            .camo_schemes
+            .camo_scheme_infos
             .iter()
-            .position(|s| s.name == *raw || s.name.contains(raw) || raw.contains(s.name.as_str()));
-        let Some(idx) = matched else {
+            .find(|i| i.display_name == *raw || i.display_name.contains(raw) || raw.contains(i.display_name.as_str()));
+        let Some(info) = matched else {
             eprintln!("scheme {raw} ({label}) not found - skipping");
             continue;
         };
 
-        let scheme = &armor.camo_schemes[idx];
-        let scheme_name = scheme.name.clone();
+        let id = info.id;
+        let textures = armor.camo_source.decode(id).expect("decode scheme");
+        let uv = info.uv_transforms.clone();
+        let use_color_scheme = info.use_color_scheme;
         let (active_camo_textures, active_camo_uvs) =
-            crate::armor_viewer::common::build_active_camo(scheme, &armor.hull_textures);
+            crate::armor_viewer::common::build_active_camo(&textures, &uv, use_color_scheme, &armor.hull_textures);
         armor.active_camo_textures = active_camo_textures;
         armor.active_camo_uvs = active_camo_uvs;
 
         // Build a pane with this camo selected and all hull parts visible + opaque.
         let mut pane = ArmorPane::empty(0);
         pane.hull_opaque = true;
-        pane.selected_camo = Some(scheme_name);
+        pane.selected_camo = Some(id);
         for (_group, names) in &armor.hull_part_groups {
             for name in names {
                 pane.hull_visibility.insert(name.clone(), true);

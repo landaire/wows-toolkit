@@ -292,22 +292,6 @@ pub struct CameraRingHover {
     pub waterline_dy: f32,
 }
 
-/// A camouflage scheme resolved for a loaded ship: per-MFM-stem texture PNG bytes plus,
-/// for tiled camos, per-stem UV transforms. PNGs are kept compressed; only the selected
-/// scheme is decoded to RGBA (into `LoadedShipArmor::active_camo_textures`).
-pub struct CamoScheme {
-    pub name: String,
-    /// mfm stem -> PNG bytes.
-    pub textures: HashMap<String, Vec<u8>>,
-    /// mfm stem -> UV scale/offset for tiled schemes; absent means identity UVs.
-    pub uv_transforms: HashMap<String, wowsunpack::export::camouflage::UvTransform>,
-    /// Origin group for the camo dropdown.
-    pub origin: wowsunpack::export::gltf_export::CamoOrigin,
-    /// Whether this camo recolors over the base albedo (preserving ship detail like the hull
-    /// number) rather than pasting an opaque texture. Gates the tiled recolor vs opaque path.
-    pub use_color_scheme: bool,
-}
-
 /// Data for a loaded ship's armor.
 #[allow(dead_code)]
 pub struct LoadedShipArmor {
@@ -349,8 +333,10 @@ pub struct LoadedShipArmor {
     pub module_alternatives: Vec<(wowsunpack::game_params::keys::ComponentType, Vec<String>)>,
     /// Camera orbit trajectories (mode name -> trajectory) for this ship.
     pub camera_trajectories: Vec<(String, wowsunpack::game_params::types::CameraTrajectory)>,
-    /// All camo schemes available for this ship (Stock is the absence of a selection).
-    pub camo_schemes: Vec<CamoScheme>,
+    /// Cheap camo scheme metadata for the picker (no textures decoded).
+    pub camo_scheme_infos: Vec<wowsunpack::export::camo_textures::CamoSchemeInfo>,
+    /// Decodes a scheme's textures on demand when it is selected.
+    pub camo_source: wowsunpack::export::camo_textures::CamoTextureSource,
     /// Decoded RGBA for the currently selected camo, keyed by mfm stem. Empty = Stock.
     /// Recomputed on camo change; read by `upload_hull_meshes_to_viewport`.
     pub active_camo_textures: HashMap<String, (u32, u32, Vec<u8>)>,
@@ -446,8 +432,11 @@ pub struct ArmorPane {
     pub hull_visibility: HashMap<String, bool>,
     /// When true, hull renders fully opaque with depth writes (like armor plates).
     pub hull_opaque: bool,
-    /// Selected camouflage (future).
-    pub selected_camo: Option<String>,
+    /// Selected camouflage scheme, identified by its stable per-ship id.
+    pub selected_camo: Option<wowsunpack::export::camo_textures::CamoSchemeId>,
+    /// Decoded textures per selected scheme, cached so re-selecting is instant.
+    pub camo_texture_cache:
+        HashMap<wowsunpack::export::camo_textures::CamoSchemeId, wowsunpack::export::camo_textures::SchemeTextures>,
     /// Maps MeshId -> per-triangle tooltip data for picking.
     pub mesh_triangle_info: Vec<(MeshId, Vec<ArmorTriangleTooltip>)>,
     /// Hover highlight: plate key (zone, material_name, thickness_mm rounded) and its overlay mesh.
@@ -698,6 +687,7 @@ impl ArmorPane {
             hull_visibility: HashMap::new(),
             hull_opaque: defaults.hull_opaque,
             selected_camo: None,
+            camo_texture_cache: HashMap::new(),
             mesh_triangle_info: Vec::new(),
             hover_highlight: None,
             sidebar_highlight: None,

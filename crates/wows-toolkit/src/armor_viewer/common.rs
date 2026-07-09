@@ -8,7 +8,6 @@ use wowsunpack::game_params::types::Vehicle;
 
 use super::state::ArmorPane;
 use super::state::ArmorZone;
-use super::state::CamoScheme;
 use super::state::LoadedShipArmor;
 use super::state::VisibilitySnapshot;
 use super::state::ZonePart;
@@ -267,55 +266,20 @@ pub(crate) fn load_ship_armor(
 
     let hull_lod_count = ctx.hull_lod_count();
 
-    // Resolve all camo schemes (base appearance stays in hull_textures; camos are applied
-    // on selection). An empty list simply hides the dropdown, so old game versions whose
-    // data yields no camos render exactly as before.
-    let camo_schemes = match ctx.build_full_texture_set() {
-        Ok(tex_set) => {
-            let tiled = tex_set.tiled_uv_transforms;
-            let origins = tex_set.camo_origins;
-            let use_color_scheme = tex_set.camo_use_color_scheme;
-            tex_set
-                .camo_schemes
-                .into_iter()
-                .enumerate()
-                .map(|(idx, (name, textures))| {
-                    let uv_transforms = tiled
-                        .iter()
-                        .filter(|((scheme_idx, _), _)| *scheme_idx == idx)
-                        .map(|((_, stem), xform)| {
-                            (
-                                stem.clone(),
-                                wowsunpack::export::camouflage::UvTransform {
-                                    scale: [xform[0], xform[1]],
-                                    offset: [xform[2], xform[3]],
-                                },
-                            )
-                        })
-                        .collect();
-                    let origin =
-                        origins.get(idx).copied().unwrap_or(wowsunpack::export::gltf_export::CamoOrigin::LegacyScan);
-                    let use_color_scheme = use_color_scheme.get(idx).copied().unwrap_or(false);
-                    CamoScheme { name, textures, uv_transforms, origin, use_color_scheme }
-                })
-                .collect()
-        }
-        Err(e) => {
-            tracing::warn!("failed to resolve camo schemes: {e}");
-            Vec::new()
-        }
-    };
-
-    // The camo picker selects and highlights by display name, so names must be unique. Localized
-    // names can collide across camos; disambiguate duplicates with a numeric suffix.
-    let mut camo_schemes: Vec<CamoScheme> = camo_schemes;
+    // Resolve cheap camo scheme metadata (base appearance stays in hull_textures; a scheme's
+    // textures are decoded on demand when it is selected). An empty list simply hides the
+    // dropdown, so old game versions whose data yields no camos render exactly as before.
+    let camo_source = ctx.camo_texture_source().map_err(|e| format!("{e:?}"))?;
+    let mut camo_scheme_infos = camo_source.scheme_infos();
+    // The picker selects and highlights by display name, so labels must be unique;
+    // disambiguate duplicates with a numeric suffix. Ids are unaffected.
     {
         let mut counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
-        for scheme in &mut camo_schemes {
-            let n = counts.entry(scheme.name.clone()).or_insert(0);
+        for info in &mut camo_scheme_infos {
+            let n = counts.entry(info.display_name.clone()).or_insert(0);
             *n += 1;
             if *n > 1 {
-                scheme.name = format!("{} ({})", scheme.name, *n);
+                info.display_name = format!("{} ({})", info.display_name, *n);
             }
         }
     }
@@ -340,7 +304,8 @@ pub(crate) fn load_ship_armor(
         loaded_hull: options.selected_hull,
         module_alternatives: options.module_alternatives,
         camera_trajectories: options.camera_trajectories,
-        camo_schemes,
+        camo_scheme_infos,
+        camo_source,
         active_camo_textures: std::collections::HashMap::new(),
         active_camo_uvs: std::collections::HashMap::new(),
     };
@@ -751,7 +716,9 @@ fn downsampled_luminance(srgba: &[u8], sw: u32, sh: u32) -> LowFreqLuma {
 /// below the waterline and stock detail stays in the parts the camo does not paint. That is entirely
 /// a property of the camo texture, so there is no waterline geometry involved here.
 pub(crate) fn build_active_camo(
-    scheme: &super::state::CamoScheme,
+    textures: &wowsunpack::export::camo_textures::SchemeTextures,
+    uv_transforms: &std::collections::HashMap<String, wowsunpack::export::camouflage::UvTransform>,
+    use_color_scheme: bool,
     hull_textures: &std::collections::HashMap<String, (u32, u32, Vec<u8>)>,
 ) -> (
     std::collections::HashMap<String, (u32, u32, Vec<u8>)>,
@@ -761,10 +728,10 @@ pub(crate) fn build_active_camo(
     let stock_by_stem: HashMap<&str, &(u32, u32, Vec<u8>)> =
         hull_textures.iter().map(|(p, t)| (mfm_stem(p), t)).collect();
 
-    let mut textures: HashMap<String, (u32, u32, Vec<u8>)> = HashMap::new();
-    let mut uvs = scheme.uv_transforms.clone();
+    let mut out_textures: HashMap<String, (u32, u32, Vec<u8>)> = HashMap::new();
+    let mut uvs = uv_transforms.clone();
 
-    for (stem, png) in &scheme.textures {
+    for (stem, png) in textures {
         let Ok(img) = image::load_from_memory(png) else {
             continue;
         };
@@ -772,7 +739,7 @@ pub(crate) fn build_active_camo(
         let (cw, ch) = (camo.width(), camo.height());
         let has_coverage = camo.pixels().any(|p| p.0[3] < 250);
 
-        let t = scheme.uv_transforms.get(stem).cloned().unwrap_or_default();
+        let t = uv_transforms.get(stem).cloned().unwrap_or_default();
         let is_tiled = t.scale != [1.0, 1.0] || t.offset != [0.0, 0.0];
         let stock = stock_by_stem.get(stem.as_str()).copied();
 
@@ -806,7 +773,7 @@ pub(crate) fn build_active_camo(
             uvs.remove(stem);
             out
         } else if is_tiled
-            && scheme.use_color_scheme
+            && use_color_scheme
             && let Some((sw, sh, srgba)) = stock
         {
             // Recoloring tiled camo (useColorScheme=True, e.g. Patches): the game recolors the ship
@@ -829,10 +796,13 @@ pub(crate) fn build_active_camo(
                     let base = bilinear_rgba(srgba, *sw, *sh, bu, bv);
                     let base_l = 0.2126 * base[0] + 0.7152 * base[1] + 0.0722 * base[2];
                     let smooth_l = low.sample(bu, bv).max(1.0);
-                    // Local contrast: ~0 on flat hull, large over a bright marking like the number.
-                    let dev = ((base_l - smooth_l).abs() / smooth_l).clamp(0.0, 1.0);
-                    // Reveal the true base only for strong markings; keep the flat hull fully camo.
-                    let reveal = smoothstep(0.22, 0.6, dev);
+                    // The hull number/insignia are bright markings painted over the ship; the game
+                    // keeps them on top of the recolor. Reveal the true base where it is brighter
+                    // than its local neighborhood (signed, positive only) at full strength, so the
+                    // number sits on top of the camo. Dark base detail (panel lines, shadows) stays
+                    // camo, and the flat hull (dev ~ 0) stays fully recolored.
+                    let dev = ((base_l - smooth_l) / smooth_l).clamp(0.0, 1.0);
+                    let reveal = smoothstep(0.10, 0.30, dev);
                     let cu = bu * t.scale[0] + t.offset[0];
                     let cv = bv * t.scale[1] + t.offset[1];
                     let cc = bilinear_rgba(camo.as_raw(), cw, ch, cu, cv);
@@ -855,7 +825,7 @@ pub(crate) fn build_active_camo(
             rgba
         };
 
-        textures.insert(stem.clone(), (cw, ch, pixels));
+        out_textures.insert(stem.clone(), (cw, ch, pixels));
     }
-    (textures, uvs)
+    (out_textures, uvs)
 }

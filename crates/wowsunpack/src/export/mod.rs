@@ -2,6 +2,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 #[cfg(feature = "models")]
+pub mod camo_textures;
+#[cfg(feature = "models")]
 pub mod camouflage;
 #[cfg(feature = "models")]
 pub mod gltf_export;

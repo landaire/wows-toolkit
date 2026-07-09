@@ -802,15 +802,44 @@ impl ToolkitTabViewer<'_> {
         {
             armor.active_camo_textures.clear();
             armor.active_camo_uvs.clear();
-            if let Some(name) = pane.selected_camo.clone() {
-                let resolved = armor
-                    .camo_schemes
-                    .iter()
-                    .find(|s| s.name == name)
-                    .map(|scheme| crate::armor_viewer::common::build_active_camo(scheme, &armor.hull_textures));
-                if let Some((textures, uvs)) = resolved {
-                    armor.active_camo_textures = textures;
-                    armor.active_camo_uvs = uvs;
+            if let Some(id) = pane.selected_camo {
+                let decoded = match pane.camo_texture_cache.get(&id) {
+                    Some(t) => Some(t.clone()),
+                    None => match armor.camo_source.decode(id) {
+                        Ok(t) => {
+                            if t.is_empty() {
+                                tracing::warn!(
+                                    "camo scheme {id:?} decoded to zero textures for this ship; rendering as stock"
+                                );
+                            }
+                            pane.camo_texture_cache.insert(id, t.clone());
+                            Some(t)
+                        }
+                        Err(e) => {
+                            tracing::warn!("failed to decode camo scheme {id:?}: {e}");
+                            None
+                        }
+                    },
+                };
+                if let Some(textures) = decoded {
+                    let info = armor.camo_scheme_infos.iter().find(|i| i.id == id);
+                    let (uv, use_color_scheme) = match info {
+                        Some(i) => (i.uv_transforms.clone(), i.use_color_scheme),
+                        None => {
+                            tracing::warn!(
+                                "camo scheme {id:?} decoded successfully but has no matching entry in camo_scheme_infos; falling back to identity UVs and no color scheme"
+                            );
+                            (Default::default(), false)
+                        }
+                    };
+                    let (t, u) = crate::armor_viewer::common::build_active_camo(
+                        &textures,
+                        &uv,
+                        use_color_scheme,
+                        &armor.hull_textures,
+                    );
+                    armor.active_camo_textures = t;
+                    armor.active_camo_uvs = u;
                 }
             }
             upload_hull_meshes_to_viewport(pane, &armor, &render_state.device, &render_state.queue, &gpu_pipeline);
@@ -2365,6 +2394,7 @@ fn load_ship_for_pane_with_lod(
     pane.plate_visibility.clear();
     pane.part_visibility.clear();
     pane.selected_camo = None;
+    pane.camo_texture_cache.clear();
     pane.trajectories.clear();
     pane.splash_mode = false;
     pane.splash_result = None;
@@ -3166,7 +3196,7 @@ pub(crate) fn draw_hull_visibility_popover(
     // Camo selector, grouped: Stock + ship-specific at top level; Universal and Expendable
     // each in their own collapsible group. Inline list avoids ComboBox layer issues with
     // CloseOnClickOutside popover.
-    if !armor.camo_schemes.is_empty() {
+    if !armor.camo_scheme_infos.is_empty() {
         use wowsunpack::export::gltf_export::CamoOrigin;
         let none_label = t!("ui.armor.camo_none");
 
@@ -3178,17 +3208,13 @@ pub(crate) fn draw_hull_visibility_popover(
             pane.selected_camo = None;
             result.camo_changed = true;
         }
-        let mut ship_names: Vec<String> = armor
-            .camo_schemes
-            .iter()
-            .filter(|s| s.origin == CamoOrigin::ShipSpecific)
-            .map(|s| s.name.clone())
-            .collect();
-        ship_names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
-        for name in &ship_names {
-            let is_selected = pane.selected_camo.as_deref() == Some(name.as_str());
-            if ui.selectable_label(is_selected, name.as_str()).clicked() && !is_selected {
-                pane.selected_camo = Some(name.clone());
+        let mut ship_infos: Vec<&wowsunpack::export::camo_textures::CamoSchemeInfo> =
+            armor.camo_scheme_infos.iter().filter(|i| i.origin == CamoOrigin::ShipSpecific).collect();
+        ship_infos.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+        for info in &ship_infos {
+            let is_selected = pane.selected_camo == Some(info.id);
+            if ui.selectable_label(is_selected, info.display_name.as_str()).clicked() && !is_selected {
+                pane.selected_camo = Some(info.id);
                 result.camo_changed = true;
             }
         }
@@ -3199,12 +3225,12 @@ pub(crate) fn draw_hull_visibility_popover(
             (CamoOrigin::Expendable, "ui.armor.camo_group_expendable"),
             (CamoOrigin::LegacyScan, "ui.armor.camo_group_other"),
         ] {
-            let mut group: Vec<String> =
-                armor.camo_schemes.iter().filter(|s| s.origin == origin).map(|s| s.name.clone()).collect();
+            let mut group: Vec<&wowsunpack::export::camo_textures::CamoSchemeInfo> =
+                armor.camo_scheme_infos.iter().filter(|i| i.origin == origin).collect();
             if group.is_empty() {
                 continue;
             }
-            group.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+            group.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
             let id = ui.make_persistent_id(("camo_group", pane.id, key));
             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
                 .show_header(ui, |ui| {
@@ -3212,10 +3238,10 @@ pub(crate) fn draw_hull_visibility_popover(
                 })
                 .body(|ui| {
                     egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
-                        for name in &group {
-                            let is_selected = pane.selected_camo.as_deref() == Some(name.as_str());
-                            if ui.selectable_label(is_selected, name.as_str()).clicked() && !is_selected {
-                                pane.selected_camo = Some(name.clone());
+                        for info in &group {
+                            let is_selected = pane.selected_camo == Some(info.id);
+                            if ui.selectable_label(is_selected, info.display_name.as_str()).clicked() && !is_selected {
+                                pane.selected_camo = Some(info.id);
                                 result.camo_changed = true;
                             }
                         }

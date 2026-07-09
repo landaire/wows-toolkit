@@ -1380,6 +1380,38 @@ impl ShipModelContext {
         Ok(self.texture_set_from_mfm_infos(&all_mfm_infos))
     }
 
+    /// Build a lazy [`camo_textures::CamoTextureSource`] for this ship: cheap scheme
+    /// metadata enumeration plus on-demand single-scheme decode. Reuses the same
+    /// assets.bin parse and mfm collection `build_full_texture_set` does, plus the
+    /// already-populated `mat_camo_schemes`.
+    pub fn camo_texture_source(&self) -> Result<crate::export::camo_textures::CamoTextureSource, Report> {
+        let db = assets_bin::parse_assets_bin(&self.assets_bin_bytes)
+            .context("Failed to parse assets.bin for camo source")?;
+        let mut all_mfm_infos = Vec::new();
+        for d in &self.hull_parts {
+            all_mfm_infos.extend(collect_mfm_info(&d.visual, &db));
+        }
+        for mount in &self.mounts {
+            let turret = &self.turret_models[mount.turret_model_index];
+            all_mfm_infos.extend(collect_mfm_info(&turret.visual, &db));
+        }
+        let mut seen = HashSet::new();
+        let unique_infos: Vec<MfmInfo> = all_mfm_infos.into_iter().filter(|i| seen.insert(i.stem.clone())).collect();
+
+        let stems: Vec<String> = unique_infos.iter().map(|i| i.stem.clone()).collect();
+        let camo_texture_paths: HashSet<String> =
+            self.mat_camo_schemes.iter().flat_map(|s| s.textures.values().cloned()).collect();
+        let legacy_schemes = texture::discover_texture_schemes(&self.vfs, &stems, &camo_texture_paths);
+        let mat_schemes = self.mat_camo_schemes.iter().map(|s| s.to_owned_scheme()).collect();
+
+        Ok(crate::export::camo_textures::CamoTextureSource::new(
+            self.vfs.clone(),
+            unique_infos,
+            legacy_schemes,
+            mat_schemes,
+        ))
+    }
+
     /// Build base albedo plus all camo schemes from pre-collected MFM infos.
     fn texture_set_from_mfm_infos(&self, all_mfm_infos: &[MfmInfo]) -> TextureSet {
         // Exclude camo zone-mask files (referenced by camouflages.xml) from the raw VFS scan;
@@ -1399,58 +1431,13 @@ impl ShipModelContext {
             };
 
             for scheme in &self.mat_camo_schemes {
-                let mut decoded: HashMap<String, Vec<u8>> = HashMap::new();
-                let mut scheme_textures = HashMap::new();
-                for stem in &stems {
-                    let cat = camouflage::classify_part_category(stem);
-                    let Some(path) = resolve_part_texture(&scheme.textures, cat, scheme.tiled) else {
-                        continue;
-                    };
-                    if !decoded.contains_key(path) {
-                        let Some(dds) = texture::load_dds_from_vfs(&self.vfs, path) else {
-                            continue;
-                        };
-                        // Bake (colorize) only a zone mask that has a color scheme; a real painted
-                        // albedo (even one that carries a color scheme) must render raw.
-                        let bake = scheme.color_scheme_colors.is_some()
-                            && texture::zone_mask_fraction(&dds).unwrap_or(0.0) >= 0.90;
-                        let png = if bake {
-                            // A per-ship painted mask (tiled=false) uses black as passthrough to the
-                            // base; a repeating tile uses black as an opaque pattern color (full cover).
-                            let black_passthrough = !scheme.tiled;
-                            match texture::bake_tiled_camo_png(
-                                &dds,
-                                scheme.color_scheme_colors.as_ref().unwrap(),
-                                black_passthrough,
-                            ) {
-                                Ok(p) => p,
-                                Err(e) => {
-                                    eprintln!("  Warning: failed to bake camo {}: {e}", path);
-                                    continue;
-                                }
-                            }
-                        } else {
-                            // A raw painted camo is a full opaque replacement; its DDS alpha holds
-                            // material data (gloss/height), not camo coverage. Force it opaque so
-                            // the only textures carrying sub-255 alpha are baked passthrough masks,
-                            // which lets the compositor identify passthrough reliably.
-                            match texture::dds_to_png(&dds) {
-                                Ok(mut p) => {
-                                    texture::force_png_opaque(&mut p);
-                                    p
-                                }
-                                Err(e) => {
-                                    eprintln!("  Warning: failed to decode camo texture {}: {e}", path);
-                                    continue;
-                                }
-                            }
-                        };
-                        decoded.insert(path.clone(), png);
-                    }
-                    if let Some(png) = decoded.get(path) {
-                        scheme_textures.insert(stem.clone(), png.clone());
-                    }
-                }
+                let view = crate::export::camo_textures::MatCamoSchemeView {
+                    textures: &scheme.textures,
+                    tiled: scheme.tiled,
+                    color_scheme_colors: scheme.color_scheme_colors.as_ref(),
+                    uv_transforms: &scheme.uv_transforms,
+                };
+                let scheme_textures = crate::export::camo_textures::decode_mat_scheme(&self.vfs, &view, &stems);
 
                 if scheme_textures.is_empty() {
                     continue;
@@ -1543,6 +1530,20 @@ struct MatCamoScheme {
     origin: gltf_export::CamoOrigin,
 }
 
+impl MatCamoScheme {
+    fn to_owned_scheme(&self) -> crate::export::camo_textures::OwnedMatScheme {
+        crate::export::camo_textures::OwnedMatScheme {
+            display_name: self.display_name.clone(),
+            textures: self.textures.clone(),
+            tiled: self.tiled,
+            use_color_scheme: self.use_color_scheme,
+            color_scheme_colors: self.color_scheme_colors,
+            uv_transforms: self.uv_transforms.clone(),
+            origin: self.origin,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Shared helpers (pub so main.rs export-model can use them too)
 // ---------------------------------------------------------------------------
@@ -1559,7 +1560,11 @@ struct MatCamoScheme {
 /// `glass` and `net` are never camouflaged in any mode: transparent glass is excluded from camo at
 /// the engine level, and alpha-cutout nets/grids would lose their cutout under an opaque tile. They
 /// keep their stock texture even under a whole-ship tiled camo (returns None).
-fn resolve_part_texture<'a>(textures: &'a HashMap<String, String>, category: &str, tiled: bool) -> Option<&'a String> {
+pub(crate) fn resolve_part_texture<'a>(
+    textures: &'a HashMap<String, String>,
+    category: &str,
+    tiled: bool,
+) -> Option<&'a String> {
     if matches!(category, "glass" | "net") {
         return None;
     }
@@ -1636,19 +1641,7 @@ pub fn build_texture_set(mfm_infos: &[MfmInfo], vfs: &VfsPath, exclude_paths: &H
     let mut camo_origins = Vec::new();
     let mut camo_use_color_scheme = Vec::new();
     for scheme in &schemes {
-        let mut scheme_textures = HashMap::new();
-        for info in &unique_infos {
-            if let Some((_base_name, dds_bytes)) = texture::load_texture_bytes(vfs, &info.stem, scheme) {
-                match texture::dds_to_png(&dds_bytes) {
-                    Ok(png_bytes) => {
-                        scheme_textures.insert(info.stem.clone(), png_bytes);
-                    }
-                    Err(e) => {
-                        eprintln!("  Warning: failed to decode camo texture {}_{}: {e}", info.stem, scheme);
-                    }
-                }
-            }
-        }
+        let scheme_textures = crate::export::camo_textures::decode_legacy_scheme(vfs, &unique_infos, scheme);
         if !scheme_textures.is_empty() {
             camo_schemes.push((scheme.clone(), scheme_textures));
             camo_origins.push(gltf_export::CamoOrigin::LegacyScan);
