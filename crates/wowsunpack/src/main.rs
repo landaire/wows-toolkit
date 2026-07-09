@@ -2005,10 +2005,12 @@ fn run_export_ship(
     let ctx = assets.load_ship(name, &options)?;
 
     println!(
-        "Found {} hull parts, {} mounts ({} unique turrets)",
+        "Found {} hull parts, {} mounts ({} unique turrets), {} misc parts ({} unique models)",
         ctx.hull_part_names().len(),
         ctx.mount_count(),
-        ctx.unique_turret_count()
+        ctx.unique_turret_count(),
+        ctx.misc_count(),
+        ctx.unique_misc_count()
     );
 
     let has_armor = ctx.armor_map().is_some() || ctx.hull_splash_bytes().is_some();

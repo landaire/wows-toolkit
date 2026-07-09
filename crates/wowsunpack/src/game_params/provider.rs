@@ -650,6 +650,28 @@ fn read_string(dict: &pickled::Dict, key: &str) -> Option<String> {
     dict.get(&pk(key)).and_then(|v| v.string_ref()).map(|s| s.inner().to_string())
 }
 
+/// Read a list-or-tuple of strings into a `Vec<String>` (empty for other types).
+fn read_string_seq(val: &Value) -> Vec<String> {
+    let items = if let Some(l) = val.list_ref() {
+        l.inner().to_vec()
+    } else if let Some(t) = val.tuple_ref() {
+        t.inner().to_vec()
+    } else {
+        return Vec::new();
+    };
+    items.iter().filter_map(|v| v.string_ref().map(|s| s.inner().clone())).collect()
+}
+
+/// Parse a `customMiscs` dict (preset name -> list of misc names).
+fn parse_custom_miscs(dict: &pickled::Dict) -> HashMap<String, Vec<String>> {
+    dict.iter()
+        .filter_map(|(k, v)| {
+            let key = k.string_ref()?.inner().clone();
+            Some((key, read_string_seq(v)))
+        })
+        .collect()
+}
+
 fn value_f32(v: &Value) -> Option<f32> {
     v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32))
 }
@@ -894,7 +916,20 @@ fn extract_mounts(ship_data: &pickled::Dict, component_name: &str) -> Vec<MountP
             // Extract pitchDeadZones: list of [yaw_min, yaw_max, pitch_min, pitch_max].
             let pitch_dead_zones: Vec<[f32; 4]> = parse_pitch_dead_zones(&mount_inner);
 
-            Some(MountPoint::with_armor(key_str.clone(), model_path, mount_armor, species, pitch_dead_zones))
+            // Misc-part selection: a whitelist of node names (`miscFilter`) plus a
+            // preset-keyed extra set (`customMiscs`). Applied when rendering the
+            // mount model's own misc nodes.
+            let misc_filter = mount_inner.get(&pk("miscFilter")).map(read_string_seq).unwrap_or_default();
+            let custom_miscs = mount_inner
+                .get(&pk("customMiscs"))
+                .and_then(|v| v.dict_or_object_dict())
+                .map(|d| parse_custom_miscs(&d.inner()))
+                .unwrap_or_default();
+
+            Some(
+                MountPoint::with_armor(key_str.clone(), model_path, mount_armor, species, pitch_dead_zones)
+                    .with_miscs(misc_filter, custom_miscs),
+            )
         })
         .collect()
 }

@@ -10,6 +10,8 @@ pub mod merged_models;
 #[cfg(feature = "models")]
 pub mod model;
 #[cfg(feature = "models")]
+pub mod skeleton_extender;
+#[cfg(feature = "models")]
 pub mod speedtree;
 #[cfg(feature = "models")]
 pub mod terrain;

@@ -39,6 +39,7 @@ use crate::models::assets_bin;
 use crate::models::assets_bin::PrototypeDatabase;
 use crate::models::geometry;
 use crate::models::model;
+use crate::models::skeleton_extender;
 use crate::models::visual;
 use crate::models::visual::VisualPrototype;
 use crate::recognized::Recognized;
@@ -421,6 +422,13 @@ impl ShipAssets {
         let turret_models = loaded.turret_models;
         let mounts = loaded.mounts;
 
+        // Load misc parts (propellers, boats, deck fittings) from the hull's skeleton
+        // extenders and place them at their `MP_` node transforms.
+        let skel_ext_paths = self.find_skel_ext_paths(&db, &self_id_index, &info.model_dir);
+        let hull_skel_exts = self.load_skeleton_extenders(&db, &self_id_index, &skel_ext_paths);
+        let (misc_models, miscs) =
+            self.collect_miscs(&db, &self_id_index, &hull_skel_exts, &hull_parts, &mounts, &turret_models);
+
         // Resolve material-based camouflage schemes (ship-specific + universal + expendable).
         let ship_index = self.find_ship_index(&info.model_dir);
         let ship_idx = ship_index.as_deref();
@@ -442,6 +450,8 @@ impl ShipAssets {
             hull_parts,
             turret_models,
             mounts,
+            misc_models,
+            miscs,
             info,
             options: options.clone(),
             mat_camo_schemes,
@@ -759,6 +769,225 @@ impl ShipAssets {
         Ok(result)
     }
 
+    /// Scan paths_storage for `.skel_ext` files in a directory matching the name.
+    ///
+    /// Returns `(sub_name, full_path)` pairs. Both the per-section `<Section>.skel_ext`
+    /// and `<Section>_ep.skel_ext` files are returned; misc (`MP_`) nodes live in the
+    /// former, effect (`EP_`) nodes in the latter, so callers scan node prefixes rather
+    /// than relying on the filename.
+    fn find_skel_ext_paths(
+        &self,
+        db: &PrototypeDatabase<'_>,
+        self_id_index: &HashMap<u64, usize>,
+        model_dir: &str,
+    ) -> Vec<(String, String)> {
+        let needle = format!("/{model_dir}/");
+        let mut result = Vec::new();
+
+        for (i, entry) in db.paths_storage.iter().enumerate() {
+            if !entry.name.ends_with(".skel_ext") {
+                continue;
+            }
+            let full_path = db.reconstruct_path(i, self_id_index);
+            if full_path.contains(&needle) {
+                let sub_name = entry.name.strip_suffix(".skel_ext").unwrap_or(&entry.name).to_string();
+                result.push((sub_name, full_path));
+            }
+        }
+
+        result.sort_by(|a, b| a.0.cmp(&b.0));
+        result
+    }
+
+    /// Resolve and parse a ship's skeleton-extender records.
+    ///
+    /// Skips (with a warning) any extender that fails to resolve or parse rather than
+    /// aborting the whole ship load.
+    fn load_skeleton_extenders(
+        &self,
+        db: &PrototypeDatabase<'_>,
+        self_id_index: &HashMap<u64, usize>,
+        skel_ext_paths: &[(String, String)],
+    ) -> Vec<skeleton_extender::SkeletonExtender> {
+        let mut result = Vec::new();
+        for (sub_name, _) in skel_ext_paths {
+            let suffix = format!("{sub_name}.skel_ext");
+            let location = match db.resolve_path(&suffix, self_id_index) {
+                Ok((loc, _)) => loc,
+                Err(e) => {
+                    eprintln!("Warning: could not resolve skel_ext '{suffix}': {e}");
+                    continue;
+                }
+            };
+            let record = match db.get_prototype_data(location, skeleton_extender::SKELETON_EXTENDER_ITEM_SIZE) {
+                Ok(data) => data,
+                Err(e) => {
+                    eprintln!("Warning: could not read skel_ext '{suffix}': {e}");
+                    continue;
+                }
+            };
+            match skeleton_extender::parse_skeleton_extender(record) {
+                Ok(ext) => result.push(ext),
+                Err(e) => eprintln!("Warning: could not parse skel_ext '{suffix}': {e}"),
+            }
+        }
+        result
+    }
+
+    /// Resolve (and deduplicate) a misc model by name, loading and validating its
+    /// geometry so downstream render/export paths cannot fail on it.
+    ///
+    /// Returns the index into `misc_models`, or `None` if the model failed to load or
+    /// has unparseable geometry (warned and remembered so repeats are cheap).
+    fn resolve_misc_model(
+        &self,
+        db: &PrototypeDatabase<'_>,
+        self_id_index: &HashMap<u64, usize>,
+        misc_name: &str,
+        node_name: &str,
+        acc: &mut MiscModelSet,
+    ) -> Option<usize> {
+        if let Some(&idx) = acc.index.get(misc_name) {
+            return Some(idx);
+        }
+        if acc.load_failed.contains(misc_name) {
+            return None;
+        }
+        // Misc models resolve by leaf `<miscName>.visual`, exactly like turret mounts;
+        // the game's `<nation>/misc/<miscName>/` directory rule is not needed because the
+        // leaf name is unique across the path store. Geometry is parsed here (not lazily
+        // at export) so a model with malformed geometry is warn+skipped, keeping the
+        // export/render paths panic-free.
+        match self.load_single_turret(db, self_id_index, &format!("{misc_name}.model")) {
+            Ok(smd) if geometry::parse_geometry(&smd.geom_bytes).is_ok() => {
+                let idx = acc.models.len();
+                acc.index.insert(misc_name.to_string(), idx);
+                acc.models.push(smd);
+                Some(idx)
+            }
+            Ok(_) => {
+                eprintln!("Warning: misc '{misc_name}' (node {node_name}) has unparseable geometry; skipping");
+                acc.load_failed.insert(misc_name.to_string());
+                None
+            }
+            Err(e) => {
+                eprintln!("Warning: could not load misc '{misc_name}' (node {node_name}): {e}");
+                acc.load_failed.insert(misc_name.to_string());
+                None
+            }
+        }
+    }
+
+    /// Collect misc-part placements (`MP_` nodes) from the hull and from mounted models.
+    ///
+    /// Hull miscs (from the hull section skeleton extenders) all show: the game's
+    /// `HullMiscsController` applies no `miscFilter`. Mount miscs come from each mounted
+    /// model's own skeleton extenders and are gated by that mount's `miscFilter`
+    /// whitelist plus the `battle`-preset `customMiscs`, matching the base
+    /// `MiscsController`. Models are deduplicated across all placements; placements are
+    /// never deduplicated (the same node name recurs with different transforms). Returns
+    /// `(unique_misc_models, placements)`.
+    fn collect_miscs(
+        &self,
+        db: &PrototypeDatabase<'_>,
+        self_id_index: &HashMap<u64, usize>,
+        hull_skel_exts: &[skeleton_extender::SkeletonExtender],
+        hull_parts: &[OwnedSubModel],
+        mounts: &[ResolvedMount],
+        turret_models: &[OwnedSubModel],
+    ) -> (Vec<OwnedSubModel>, Vec<ResolvedMisc>) {
+        let mut acc = MiscModelSet::default();
+        let mut placements = Vec::new();
+
+        // Hull miscs: every MP_ node shows (HullMiscsController applies no filter).
+        // Zip the three index-aligned arrays so a corrupt record with mismatched lengths
+        // truncates to the shortest rather than panicking on `[i]`.
+        for ext in hull_skel_exts {
+            for ((&name_id, &parent_id), matrix) in ext.name_ids.iter().zip(&ext.parent_name_ids).zip(&ext.matrices) {
+                let Some(node_name) = db.strings.get_string_by_id(name_id) else {
+                    continue;
+                };
+                if !node_name.starts_with(MISC_NODE_PREFIX) {
+                    continue;
+                }
+                let misc_name = misc_name_from_node(node_name);
+                let Some(model_idx) = self.resolve_misc_model(db, self_id_index, &misc_name, node_name, &mut acc)
+                else {
+                    continue;
+                };
+                let parent_name = db.strings.get_string_by_id(parent_id);
+                let transform = compose_misc_transform(parent_name, &matrix.0, hull_parts, &db.strings);
+                placements.push(ResolvedMisc {
+                    node_name: node_name.to_string(),
+                    misc_model_index: model_idx,
+                    transform: Some(transform),
+                });
+            }
+        }
+
+        // Mount miscs: the mount model's own MP_ nodes, whitelisted by miscFilter or by
+        // the battle-preset customMiscs. Skeleton extenders are loaded once per model.
+        let mut turret_skel_exts: HashMap<String, Vec<skeleton_extender::SkeletonExtender>> = HashMap::new();
+        for mount in mounts {
+            let has_battle_customs = mount.custom_miscs.contains_key(MISC_PRESET_BATTLE);
+            if mount.misc_filter.is_empty() && !has_battle_customs {
+                continue;
+            }
+            let turret = &turret_models[mount.turret_model_index];
+            let exts = turret_skel_exts.entry(turret.name.clone()).or_insert_with(|| {
+                let paths = self.find_skel_ext_paths(db, self_id_index, &turret.name);
+                self.load_skeleton_extenders(db, self_id_index, &paths)
+            });
+
+            let whitelist: HashSet<&str> = mount.misc_filter.iter().map(String::as_str).collect();
+            let battle_customs: HashSet<&str> =
+                mount.custom_miscs.get(MISC_PRESET_BATTLE).into_iter().flatten().map(String::as_str).collect();
+
+            // Snapshot the parsed extenders so `self` is free for resolve_misc_model.
+            let nodes: Vec<(String, u32, [f32; 16])> = exts
+                .iter()
+                .flat_map(|ext| ext.name_ids.iter().zip(&ext.parent_name_ids).zip(&ext.matrices))
+                .filter_map(|((&name_id, &parent_id), matrix)| {
+                    let node_name = db.strings.get_string_by_id(name_id)?;
+                    node_name.starts_with(MISC_NODE_PREFIX).then(|| (node_name.to_string(), parent_id, matrix.0))
+                })
+                .collect();
+
+            for (node_name, parent_id, local_matrix) in nodes {
+                let misc_name = misc_name_from_node(&node_name);
+                if !whitelist.contains(node_name.as_str()) && !battle_customs.contains(misc_name.as_str()) {
+                    continue;
+                }
+                let Some(model_idx) = self.resolve_misc_model(db, self_id_index, &misc_name, &node_name, &mut acc)
+                else {
+                    continue;
+                };
+                // Position the misc in the turret model's own space (compose through its
+                // parent chain, e.g. `Rotate_Y`), then attach at the raw hardpoint exactly
+                // as the game does (`Model(..., node=parentModel.node(name))`). Use
+                // `armor_transform` (the raw hardpoint transform), NOT `transform`: the
+                // latter carries an `inv(Rotate_Y_BlendBone)` correction that un-reflects
+                // the turret *geometry* (authored in the BlendBone frame). Misc nodes hang
+                // off `Rotate_Y`, above that reflecting bone, so applying it would mirror
+                // the misc model (an improper, det -1 transform).
+                let parent_name = db.strings.get_string_by_id(parent_id);
+                let local =
+                    compose_misc_transform(parent_name, &local_matrix, std::slice::from_ref(turret), &db.strings);
+                let transform = match mount.armor_transform {
+                    Some(m) => mat4_mul_col_major(&m, &local),
+                    None => local,
+                };
+                placements.push(ResolvedMisc {
+                    node_name: format!("{node_name} [{}]", mount.hp_name),
+                    misc_model_index: model_idx,
+                    transform: Some(transform),
+                });
+            }
+        }
+
+        (acc.models, placements)
+    }
+
     /// Select mount points for the chosen hull upgrade, with optional module overrides.
     fn select_hull_mount_points(
         &self,
@@ -893,6 +1122,8 @@ impl ShipAssets {
                 mount_armor: mi.mount_armor().cloned(),
                 species: mi.species(),
                 barrel_pitch,
+                misc_filter: mi.misc_filter().to_vec(),
+                custom_miscs: mi.custom_miscs().clone(),
             });
         }
 
@@ -987,6 +1218,10 @@ pub struct ShipModelContext {
     hull_parts: Vec<OwnedSubModel>,
     turret_models: Vec<OwnedSubModel>,
     mounts: Vec<ResolvedMount>,
+    /// Unique misc-part models (propellers, boats, deck fittings), deduplicated by name.
+    misc_models: Vec<OwnedSubModel>,
+    /// Misc-part placements: one per `MP_` skeleton node.
+    miscs: Vec<ResolvedMisc>,
     info: ShipInfo,
     options: ShipExportOptions,
     mat_camo_schemes: Vec<MatCamoScheme>,
@@ -1076,6 +1311,16 @@ impl ShipModelContext {
     /// Number of unique turret/mount 3D models.
     pub fn unique_turret_count(&self) -> usize {
         self.turret_models.len()
+    }
+
+    /// Number of misc-part placements (propellers, boats, deck fittings).
+    pub fn misc_count(&self) -> usize {
+        self.miscs.len()
+    }
+
+    /// Number of unique misc-part 3D models.
+    pub fn unique_misc_count(&self) -> usize {
+        self.misc_models.len()
     }
 
     /// Armor thickness map from GameParams.  See [`ArmorMap`].
@@ -1195,6 +1440,26 @@ impl ShipModelContext {
             result.extend(meshes);
         }
 
+        // Misc parts (propellers, boats, deck fittings), instanced per placement.
+        let misc_geoms: Vec<_> = self
+            .misc_models
+            .iter()
+            .map(|part| {
+                geometry::parse_geometry(&part.geom_bytes).context("Failed to parse misc geometry for hull meshes")
+            })
+            .collect::<Result<_, _>>()?;
+
+        for misc in &self.miscs {
+            let part = &self.misc_models[misc.misc_model_index];
+            let geom = &misc_geoms[misc.misc_model_index];
+            let mut meshes = gltf_export::collect_hull_meshes(&part.visual, geom, &db, lod, damaged, None)?;
+            for mesh in &mut meshes {
+                mesh.transform = misc.transform.map(gltf_export::negate_z_transform);
+                mesh.name = format!("{} [{}]", mesh.name, misc.node_name);
+            }
+            result.extend(meshes);
+        }
+
         // Bake base albedo textures into per-vertex colors.
         // Cache decoded images by MFM path to avoid re-loading the same texture.
         let mut texture_cache: HashMap<String, Option<image_dds::image::RgbaImage>> = HashMap::new();
@@ -1283,6 +1548,12 @@ impl ShipModelContext {
             .map(|d| geometry::parse_geometry(&d.geom_bytes).expect("Failed to parse turret geometry"))
             .collect();
 
+        let misc_geoms: Vec<geometry::MergedGeometry<'_>> = self
+            .misc_models
+            .iter()
+            .map(|d| geometry::parse_geometry(&d.geom_bytes).expect("Failed to parse misc geometry"))
+            .collect();
+
         // Build SubModel list.
         let mut sub_models: Vec<SubModel<'_>> = Vec::new();
 
@@ -1310,6 +1581,21 @@ impl ShipModelContext {
                 transform: mount.transform,
                 group: mount_group(mount.species),
                 barrel_pitch: mount.barrel_pitch.clone(),
+            });
+        }
+
+        // Misc parts (propellers, boats, deck fittings), instanced per placement.
+        for misc in &self.miscs {
+            let misc_data = &self.misc_models[misc.misc_model_index];
+            let misc_geom = &misc_geoms[misc.misc_model_index];
+
+            sub_models.push(SubModel {
+                name: format!("{} ({})", misc.node_name, misc_data.name),
+                visual: &misc_data.visual,
+                geometry: misc_geom,
+                transform: misc.transform,
+                group: "Misc",
+                barrel_pitch: None,
             });
         }
 
@@ -1377,6 +1663,9 @@ impl ShipModelContext {
             let turret = &self.turret_models[mount.turret_model_index];
             all_mfm_infos.extend(collect_mfm_info(&turret.visual, &db));
         }
+        for misc in &self.misc_models {
+            all_mfm_infos.extend(collect_mfm_info(&misc.visual, &db));
+        }
         Ok(self.texture_set_from_mfm_infos(&all_mfm_infos))
     }
 
@@ -1394,6 +1683,9 @@ impl ShipModelContext {
         for mount in &self.mounts {
             let turret = &self.turret_models[mount.turret_model_index];
             all_mfm_infos.extend(collect_mfm_info(&turret.visual, &db));
+        }
+        for misc in &self.misc_models {
+            all_mfm_infos.extend(collect_mfm_info(&misc.visual, &db));
         }
         let mut seen = HashSet::new();
         let unique_infos: Vec<MfmInfo> = all_mfm_infos.into_iter().filter(|i| seen.insert(i.stem.clone())).collect();
@@ -1508,6 +1800,109 @@ struct ResolvedMount {
     species: Option<crate::game_params::types::MountSpecies>,
     /// Per-vertex barrel pitch configuration (if pitchDeadZones applies).
     barrel_pitch: Option<super::gltf_export::BarrelPitch>,
+    /// Whitelist of misc node names on this mount's model that are visible.
+    misc_filter: Vec<String>,
+    /// Preset-keyed extra misc names for this mount (`battle`/`dock` -> names).
+    custom_miscs: HashMap<String, Vec<String>>,
+}
+
+/// Accumulates the deduplicated set of misc models while collecting placements.
+#[derive(Default)]
+struct MiscModelSet {
+    /// Unique misc models, indexed by [`ResolvedMisc::misc_model_index`].
+    models: Vec<OwnedSubModel>,
+    /// Misc name -> index into `models`.
+    index: HashMap<String, usize>,
+    /// Misc names that failed to load or parse (warned once, then skipped).
+    load_failed: HashSet<String>,
+}
+
+/// A misc-part placement: one instance of a misc model at a skeleton `MP_` node.
+struct ResolvedMisc {
+    /// Full skeleton node name, e.g. "MP_BM509_Liferaft_type_20_10ft.001".
+    node_name: String,
+    /// Index into [`ShipModelContext::misc_models`].
+    misc_model_index: usize,
+    /// Ship-space transform (column-major 4x4).
+    transform: Option<[f32; 16]>,
+}
+
+/// Skeleton node-name prefix marking a misc part (propeller, boat, deck fitting).
+/// Style-variant miscs use `SP_` and are out of scope.
+const MISC_NODE_PREFIX: &str = "MP_";
+
+/// The `customMiscs` preset key the game shows in battle (`MiscPresets.battle`);
+/// the armor viewer renders the battle configuration, excluding `dock`-only extras.
+const MISC_PRESET_BATTLE: &str = "battle";
+
+/// Derive the misc model name from a `MP_` skeleton node name.
+///
+/// Faithfully mirrors the game's `MiscFinder.__findMiscsForNodes`: split on `_` and
+/// drop the first segment (the `MP` prefix), then remove a trailing instance suffix.
+/// A `.NNN` suffix (a dot followed by three digits, matched anywhere) drops the last
+/// dot-segment; otherwise a legacy `INDEX_<n>` ending drops the last two `_` segments.
+/// E.g. both `MP_BM509_Liferaft_type_20_10ft.001` and
+/// `MP_BM509_Liferaft_type_20_10ft_INDEX_1` yield `BM509_Liferaft_type_20_10ft`.
+fn misc_name_from_node(node_name: &str) -> String {
+    let mut segments = node_name.split('_');
+    segments.next(); // drop the `MP` prefix segment
+    let rest: String = segments.collect::<Vec<_>>().join("_");
+
+    if contains_dot_three_digits(&rest) {
+        if let Some(pos) = rest.rfind('.') {
+            return rest[..pos].to_string();
+        }
+    } else if ends_with_legacy_index(&rest) {
+        let segs: Vec<&str> = rest.split('_').collect();
+        if segs.len() >= 2 {
+            return segs[..segs.len() - 2].join("_");
+        }
+    }
+    rest
+}
+
+/// Whether `s` contains a `.` immediately followed by at least three ASCII digits
+/// (the game's `.*?\.(\d\d\d)` instance-suffix pattern).
+fn contains_dot_three_digits(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    bytes
+        .iter()
+        .enumerate()
+        .any(|(i, &b)| b == b'.' && bytes.get(i + 1..i + 4).is_some_and(|d| d.iter().all(u8::is_ascii_digit)))
+}
+
+/// Whether `s` ends with `INDEX_<digits>` (the game's `^.*INDEX_\d+$` legacy pattern).
+fn ends_with_legacy_index(s: &str) -> bool {
+    match s.rfind("INDEX_") {
+        Some(pos) => {
+            let tail = &s[pos + "INDEX_".len()..];
+            !tail.is_empty() && tail.bytes().all(|b| b.is_ascii_digit())
+        }
+        None => false,
+    }
+}
+
+/// Compose a misc node's ship-space transform from its parent node's world transform
+/// and its own local matrix.
+///
+/// The parent is referenced by name into the base model skeleton. When it resolves to
+/// a hull node (e.g. the model root "Scene Root", which is identity), the composed
+/// transform is `parent_world * local`. When the parent name is absent from the loaded
+/// hull skeleton the local matrix is already ship-space, so it is used directly.
+fn compose_misc_transform(
+    parent_name: Option<&str>,
+    local: &[f32; 16],
+    hull_parts: &[OwnedSubModel],
+    strings: &assets_bin::StringsSection<'_>,
+) -> [f32; 16] {
+    if let Some(pname) = parent_name {
+        for part in hull_parts {
+            if let Some(parent_world) = part.visual.find_hardpoint_transform(pname, strings) {
+                return mat4_mul_col_major(&parent_world, local);
+            }
+        }
+    }
+    *local
 }
 
 /// Pre-resolved material-based camouflage scheme (owned data, no lifetimes).
@@ -1825,4 +2220,41 @@ pub fn export_ship_glb(
     let info = ctx.info().clone();
     ctx.export_glb(writer)?;
     Ok(info)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn misc_name_strips_prefix_and_dot_index() {
+        assert_eq!(misc_name_from_node("MP_BM509_Liferaft_type_20_10ft"), "BM509_Liferaft_type_20_10ft");
+        assert_eq!(misc_name_from_node("MP_BM509_Liferaft_type_20_10ft.001"), "BM509_Liferaft_type_20_10ft");
+        // Only the last dot-segment is dropped when a `.NNN` group is present.
+        assert_eq!(misc_name_from_node("MP_Foo.001.999"), "Foo.001");
+    }
+
+    #[test]
+    fn misc_name_strips_legacy_index() {
+        assert_eq!(misc_name_from_node("MP_BM509_Liferaft_type_20_10ft_INDEX_1"), "BM509_Liferaft_type_20_10ft");
+        assert_eq!(misc_name_from_node("MP_BM800_Ventilators_mushroom_INDEX_16"), "BM800_Ventilators_mushroom");
+    }
+
+    #[test]
+    fn misc_name_keeps_non_instance_suffixes() {
+        // A two-digit dotted tail is not the `.NNN` instance pattern.
+        assert_eq!(misc_name_from_node("MP_Foo.01"), "Foo.01");
+        // `INDEX_` with a non-numeric tail is not the legacy pattern.
+        assert_eq!(misc_name_from_node("MP_Foo_INDEX_x"), "Foo_INDEX_x");
+        // Propeller shares the same rule.
+        assert_eq!(misc_name_from_node("MP_CM003_Propeller5_L"), "CM003_Propeller5_L");
+    }
+
+    #[test]
+    fn contains_dot_three_digits_matches_game_pattern() {
+        assert!(contains_dot_three_digits("Foo.001"));
+        assert!(contains_dot_three_digits("Foo.0012")); // >=3 digits after the dot
+        assert!(!contains_dot_three_digits("Foo.01"));
+        assert!(!contains_dot_three_digits("Foo_1"));
+    }
 }

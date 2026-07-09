@@ -521,6 +521,69 @@ Offset  Size  Type   Field
 
 ---
 
+# SkeletonExtenderPrototype Format (blob index 2)
+
+Reverse-engineered from live build 12668706 (`assets.bin`).
+
+A skeleton extender adds named nodes to a model's skeleton at runtime
+(`Model.addSkeletonExtender`). Ship hulls carry one extender per section
+(`<ship>_<Section>.skel_ext` plus a `..._ep.skel_ext` variant). The misc-part
+nodes (propellers, boats, deck fittings) are the `MP_`-prefixed entries in the
+non-`_ep` files; the `_ep` files hold `EP_` effect points. Style-variant miscs
+use the `SP_` prefix.
+
+- **Magic:** `0x1AE023FF` (MurmurHash3_x86_32 of `"SkeletonExtenderPrototype"`)
+- **Item size:** `0x20` (32 bytes)
+- **Blob index:** 2
+- **Registration function:** `sub_140035cb0`
+
+## SkeletonExtenderPrototype Record (0x20 bytes)
+
+```
+Offset  Size  Type   Field
+------  ----  ----   -----
+0x00    2     u16    flag                # 1 when the extender carries a skeleton, else 0
+0x02    2     u16    nodeCount           # number of nodes
+0x04    4     ---    (padding)
+0x08    8     i64    nameIdsPtr          # relptr -> u32[nodeCount] (node name string hashes)
+0x10    8     i64    parentNameIdsPtr    # relptr -> u32[nodeCount] (parent node name hashes)
+0x18    8     i64    matricesPtr         # relptr -> Matrix4x4[nodeCount] (node-local transforms)
+```
+
+The three arrays are index-aligned. Unlike `VisualPrototype`'s `VisualNodes`,
+parents are referenced by **name hash** into the base model skeleton (e.g. the
+model root `"Scene Root"`), not by an array index. A node's world transform is
+`parentWorldTransform * localMatrix`; misc nodes parented to the identity root
+therefore use their local matrix directly as the ship-space placement.
+
+Misc model resolution: strip the `MP_` prefix and a trailing instance suffix
+(`.NNN` or `_INDEX_N`) from the node name to get the `miscName`, then resolve
+`<miscName>.visual` by leaf path in `pathsStorage` (the same lookup turret mounts
+use). The game's `TypeIndexation.getPath` builds `content/gameplay/<nation>/misc/`
+paths, but the leaf name is unique across the path store so the directory rule is
+not needed.
+
+## Which miscs are visible (GameParams selection)
+
+Two model sources carry misc nodes, filtered differently in the decompiled game code:
+
+- **Hull sections.** `HullMiscsController._miscsPreparationFunction` shows every `MP_`
+  node the finder returns (no `miscFilter` applied). These are the deck fittings,
+  boats, propellers, and ammo boxes.
+- **Mounted models (guns, directors, secondaries, ...).** The base
+  `MiscsController._miscsPreparationFunction` shows a mounted model's own `MP_` node
+  only if its full node name is in that mount's `miscFilter`, or its `miscName` is in
+  the active preset's `customMiscs`. Each `HP_*` mount in GameParams carries
+  `miscFilter` (list of node names), `customMiscs` (preset -> misc names), and
+  `miscFilterMode` (a bool that is defined but not read by the selection logic).
+
+Presets are `MiscPresets.dock()` and `MiscPresets.battle()`; the armor viewer uses the
+`battle` preset, so `dock`-only `customMiscs` are excluded. Graphics-quality gating
+(`MISC_TYPE` vs the `MISC_SETTING`) and MSkin-camo `filterIsWhitelist` filtering also
+exist in the engine but do not apply to the plain (highest-detail, no-camo) export.
+
+---
+
 # Armor System Reverse Engineering
 
 ## Collision Material Name Table

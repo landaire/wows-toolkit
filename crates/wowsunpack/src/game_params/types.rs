@@ -886,11 +886,29 @@ pub struct MountPoint {
     /// to `[pitch_min, pitch_max]`.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     pitch_dead_zones: Vec<[f32; 4]>,
+    /// Whitelist of misc-part node names (`MP_*`) from this mount's model that are
+    /// visible when the mount is equipped. The game's `MiscsController` shows a
+    /// mount model's misc node only if its full node name is in this list (or its
+    /// misc name is in an active `custom_miscs` preset).
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
+    misc_filter: Vec<String>,
+    /// Preset-keyed extra misc names shown for this mount (e.g. `"battle"` or
+    /// `"dock"` -> misc names). The armor viewer applies the `battle` preset.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "HashMap::is_empty"))]
+    custom_miscs: HashMap<String, Vec<String>>,
 }
 
 impl MountPoint {
     pub fn new(hp_name: String, model_path: String) -> Self {
-        Self { hp_name, model_path, mount_armor: None, species: None, pitch_dead_zones: Vec::new() }
+        Self {
+            hp_name,
+            model_path,
+            mount_armor: None,
+            species: None,
+            pitch_dead_zones: Vec::new(),
+            misc_filter: Vec::new(),
+            custom_miscs: HashMap::new(),
+        }
     }
 
     pub fn with_armor(
@@ -900,7 +918,30 @@ impl MountPoint {
         species: Option<MountSpecies>,
         pitch_dead_zones: Vec<[f32; 4]>,
     ) -> Self {
-        Self { hp_name, model_path, mount_armor, species, pitch_dead_zones }
+        Self {
+            hp_name,
+            model_path,
+            mount_armor,
+            species,
+            pitch_dead_zones,
+            misc_filter: Vec::new(),
+            custom_miscs: HashMap::new(),
+        }
+    }
+
+    /// Attach misc-part selection data (`miscFilter` / `customMiscs`) to this mount.
+    pub fn with_miscs(mut self, misc_filter: Vec<String>, custom_miscs: HashMap<String, Vec<String>>) -> Self {
+        self.misc_filter = misc_filter;
+        self.custom_miscs = custom_miscs;
+        self
+    }
+
+    pub fn misc_filter(&self) -> &[String] {
+        &self.misc_filter
+    }
+
+    pub fn custom_miscs(&self) -> &HashMap<String, Vec<String>> {
+        &self.custom_miscs
     }
 
     pub fn hp_name(&self) -> &str {
