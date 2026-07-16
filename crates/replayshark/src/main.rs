@@ -1,3 +1,5 @@
+mod battle_results_cmd;
+
 use anyhow::Context;
 use anyhow::anyhow;
 use clap::Parser;
