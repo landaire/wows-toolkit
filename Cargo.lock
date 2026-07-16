@@ -7418,6 +7418,7 @@ dependencies = [
  "walkdir",
  "wows-battle-world",
  "wows-data-mgr",
+ "wows-replay-insights",
  "wows_replays",
  "wowsunpack",
 ]

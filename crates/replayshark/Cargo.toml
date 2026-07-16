@@ -21,3 +21,4 @@ wowsunpack = { workspace = true, features = ["json", "vfs-mmap", "rkyv"] }
 anyhow = { workspace = true }
 toml = { workspace = true }
 gettext = { workspace = true }
+wows-replay-insights = { workspace = true, features = ["battle-report"] }

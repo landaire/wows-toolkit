@@ -1,5 +1,7 @@
 mod battle_results_cmd;
 
+use battle_results_cmd::ResultsFormat;
+
 use anyhow::Context;
 use anyhow::anyhow;
 use clap::Parser;
@@ -142,6 +144,25 @@ enum Commands {
 
         /// The replay file to use
         replay: PathBuf,
+    },
+    /// Dump battle results (raw, merged, or normalized) for one or more replays.
+    BattleResults {
+        #[arg(long, value_enum, default_value_t = ResultsFormat::Normalized)]
+        format: ResultsFormat,
+        /// Write one auto-named <stem>.json per replay into this directory.
+        #[arg(long, conflicts_with = "out_file")]
+        out_dir: Option<PathBuf>,
+        /// Write a single JSON file (object for one replay, array for many).
+        #[arg(long, conflicts_with = "out_dir")]
+        out_file: Option<PathBuf>,
+        /// Use nearest-available constants when the exact build is missing (merged/normalized).
+        #[arg(long)]
+        allow_approximate_constants: bool,
+        /// Optional PR expected-values JSON to populate personal_rating (normalized only).
+        #[arg(long)]
+        pr_expected_values: Option<PathBuf>,
+        #[arg(required = true)]
+        replays: Vec<PathBuf>,
     },
 }
 
@@ -1057,6 +1078,27 @@ fn main() {
                     replays[idx].1.playerVehicle
                 );
             }
+        }
+        Commands::BattleResults {
+            format,
+            out_dir,
+            out_file,
+            allow_approximate_constants,
+            pr_expected_values,
+            replays,
+        } => {
+            battle_results_cmd::run(
+                game_dir,
+                extracted,
+                constants_path,
+                format,
+                out_dir,
+                out_file,
+                allow_approximate_constants,
+                pr_expected_values,
+                replays,
+            )
+            .expect("battle-results command failed");
         }
         Commands::Query { command } => match command {
             QueryCommands::ArenaId { replays } => {
