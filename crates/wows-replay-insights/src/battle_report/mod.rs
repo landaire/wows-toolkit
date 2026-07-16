@@ -315,19 +315,20 @@ fn extract_server_results(pr: &Value, is_air_carrier: bool) -> ServerResults {
         damage_breakdown(|k| pr.get(format!("received_{k}").as_str()).and_then(|v| v.as_u64()));
 
     let mut damage_interactions: HashMap<AccountId, DamageInteraction> = HashMap::new();
-    let mut fires_dealt = 0u64;
-    let mut floods_dealt = 0u64;
-    let mut citadels_dealt = 0u64;
-    let mut crits_dealt = 0u64;
+    let mut fires_dealt = None;
+    let mut floods_dealt = None;
+    let mut citadels_dealt = None;
+    let mut crits_dealt = None;
 
     if let Some(interactions) = pr.get("interactions").and_then(|v| v.as_object()) {
+        let (mut fires, mut floods, mut cits, mut crits) = (0u64, 0u64, 0u64, 0u64);
         for (victim, victim_data) in interactions {
             let victim_id = AccountId(victim.parse::<i64>().unwrap_or_default());
 
-            fires_dealt += victim_data.get("fires").and_then(|v| v.as_u64()).unwrap_or(0);
-            floods_dealt += victim_data.get("floods").and_then(|v| v.as_u64()).unwrap_or(0);
-            citadels_dealt += victim_data.get("citadels").and_then(|v| v.as_u64()).unwrap_or(0);
-            crits_dealt += victim_data.get("crits").and_then(|v| v.as_u64()).unwrap_or(0);
+            fires += victim_data.get("fires").and_then(|v| v.as_u64()).unwrap_or(0);
+            floods += victim_data.get("floods").and_then(|v| v.as_u64()).unwrap_or(0);
+            cits += victim_data.get("citadels").and_then(|v| v.as_u64()).unwrap_or(0);
+            crits += victim_data.get("crits").and_then(|v| v.as_u64()).unwrap_or(0);
 
             let mut interaction = DamageInteraction::default();
             let mut all_damage = 0u64;
@@ -350,6 +351,11 @@ fn extract_server_results(pr: &Value, is_air_carrier: bool) -> ServerResults {
 
             damage_interactions.insert(victim_id, interaction);
         }
+
+        fires_dealt = Some(fires);
+        floods_dealt = Some(floods);
+        citadels_dealt = Some(cits);
+        crits_dealt = Some(crits);
     }
 
     ServerResults {
@@ -766,8 +772,10 @@ mod tests {
         assert_eq!(sr.received_damage_details.fire, Some(1000));
         assert_eq!(sr.distance_traveled, Some(42.5));
         assert_eq!(sr.kills, Some(2));
-        assert_eq!(sr.fires_dealt, 3);
-        assert_eq!(sr.citadels_dealt, 1);
+        assert_eq!(sr.fires_dealt, Some(3));
+        assert_eq!(sr.floods_dealt, Some(0));
+        assert_eq!(sr.citadels_dealt, Some(1));
+        assert_eq!(sr.crits_dealt, Some(0));
 
         // Full per-type breakdown maps carry the DAMAGE_/HITS_ constant keys.
         assert_eq!(sr.damage_by_type.get(DAMAGE_MAIN_AP), Some(&30000));
@@ -813,7 +821,10 @@ mod tests {
         assert_eq!(interaction.damage_dealt_by_type_full.get(DAMAGE_MAIN_HE), Some(&1200));
         // With no total `damage`, the dealt percentage stays 0 (matches original).
         assert_eq!(interaction.damage_dealt_percentage, 0.0);
-        assert_eq!(sr.fires_dealt, 2);
+        assert_eq!(sr.fires_dealt, Some(2));
+        assert_eq!(sr.floods_dealt, Some(0));
+        assert_eq!(sr.citadels_dealt, Some(0));
+        assert_eq!(sr.crits_dealt, Some(0));
     }
 
     #[test]
@@ -829,6 +840,11 @@ mod tests {
 
         let carrier = extract_server_results(&pr, true);
         assert_eq!(carrier.hits, Some(10), "rocket + skip + skip_airsupport");
+        // No `interactions` key on this fixture: all four dealt fields stay None.
+        assert_eq!(carrier.fires_dealt, None);
+        assert_eq!(carrier.floods_dealt, None);
+        assert_eq!(carrier.citadels_dealt, None);
+        assert_eq!(carrier.crits_dealt, None);
 
         let surface = extract_server_results(&pr, false);
         assert_eq!(surface.hits, Some(3), "main-battery HE only for non-carriers");

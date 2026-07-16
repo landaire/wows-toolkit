@@ -279,10 +279,14 @@ pub struct ServerResults {
     /// Full received breakdown keyed by the `DAMAGE_*` constant, only entries
     /// > 0 (values read from the `received_*` keys).
     pub received_damage_by_type: BTreeMap<String, u64>,
-    pub fires_dealt: u64,
-    pub floods_dealt: u64,
-    pub citadels_dealt: u64,
-    pub crits_dealt: u64,
+    /// `None` when the resolved object omits the `interactions` key.
+    pub fires_dealt: Option<u64>,
+    /// `None` when the resolved object omits the `interactions` key.
+    pub floods_dealt: Option<u64>,
+    /// `None` when the resolved object omits the `interactions` key.
+    pub citadels_dealt: Option<u64>,
+    /// `None` when the resolved object omits the `interactions` key.
+    pub crits_dealt: Option<u64>,
     pub distance_traveled: Option<f64>,
     pub kills: Option<i64>,
     pub damage_interactions: HashMap<AccountId, DamageInteraction>,
