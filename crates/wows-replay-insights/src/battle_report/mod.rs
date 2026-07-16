@@ -9,6 +9,7 @@ pub use build::*;
 pub use resolve::resolve_battle_results;
 pub use results::*;
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 use serde_json::Value;
@@ -21,6 +22,7 @@ use wows_replays::analyzer::decoder::DamageStatEntry;
 use wows_replays::types::AccountId;
 use wows_replays::types::Relation;
 use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::TranslationKey;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -53,6 +55,9 @@ pub struct MatchMetadata {
 pub struct NormalizedPlayer {
     pub db_id: AccountId,
     pub name: String,
+    /// Display name: the raw `name` for humans, or the translated bot name when
+    /// the username is an `IDS_` key. Export keeps the raw `name`.
+    pub display_name: String,
     pub clan: String,
     /// Clan-league color as packed `0xRRGGBB`; `0` when clanless. Computed
     /// identically to the export's `Player::from`.
@@ -69,11 +74,20 @@ pub struct NormalizedPlayer {
     pub ship_name: String,
     pub ship_nation: String,
     pub ship_class: Species,
-    pub ship_tier: u32,
+    /// Ship tier from the vehicle ref. `None` when the entity carries no vehicle
+    /// ref (spectator or malformed), matching the original's non-panicking read.
+    pub ship_tier: Option<u32>,
     pub is_test_ship: bool,
-    /// Server-provided results. `Some` only when the resolved player object
-    /// carries a `damage` key (mirrors the export's server-results gate).
+    /// Server-provided results. `Some` whenever the resolved player object
+    /// exists; individual fields carry their own `Option`-ness (e.g. `damage`
+    /// is `None` on old-format results that omit the key).
     pub server_results: Option<ServerResults>,
+    /// Self-player controller spotting total (`Spot` category), the fallback the
+    /// UI uses when the server omits `scouting_damage`. `None` for non-self.
+    pub controller_spotting_damage: Option<u64>,
+    /// Self-player controller potential total (`Agro` category), the fallback the
+    /// UI uses when there is no resolved results object. `None` for non-self.
+    pub controller_potential_damage: Option<u64>,
     pub observed_results: ObservedResults,
     pub skill_info: SkillInfo,
     pub build: Option<TranslatedBuild>,
@@ -177,9 +191,10 @@ fn clan_color_rgb(player: &Player) -> u32 {
     }
 }
 
-/// Sum of self-player controller damage for a category, used as the spotting
-/// fallback when the server results omit `scouting_damage`. Ported from the
-/// numeric part of the toolkit's `build_damage_stat_total`.
+/// Sum of self-player controller damage for a category, used as the controller
+/// fallback (spotting for `Spot`, potential for `Agro`) when the server results
+/// omit or lack the value. Ported from the numeric part of the toolkit's
+/// `build_damage_stat_total`/`build_damage_stat_fallback`.
 fn damage_stat_total(stats: &[DamageStatEntry], category: DamageStatCategory) -> Option<u64> {
     let mut total = 0.0f64;
     for entry in stats {
@@ -214,13 +229,29 @@ fn get_u64_or_f64(v: &Value, key: &str) -> Option<u64> {
     field.as_u64().or_else(|| field.as_f64().map(|f| f as u64))
 }
 
-/// Purely-JSON per-player numeric extraction. Returns `Some` only when the
-/// resolved player object carries a `damage` key (the server-results gate).
-/// Needs no game data, so it is unit-testable offline.
-fn extract_server_results(pr: &Value) -> Option<ServerResults> {
-    let damage_number = pr.get("damage").and_then(|v| v.as_u64())?;
+/// Purely-JSON per-player numeric extraction. Built for any resolved player
+/// object; individual fields carry their own `Option`-ness (e.g. `damage` is
+/// `None` when the key is absent). `is_air_carrier` selects the relevant-hits
+/// rule. Needs no game data, so it is unit-testable offline.
+fn extract_server_results(pr: &Value, is_air_carrier: bool) -> ServerResults {
+    let damage = pr.get("damage").and_then(|v| v.as_u64());
 
-    let damage_details = damage_breakdown(|k| pr.get(k).and_then(|v| v.as_u64()));
+    // The per-type dealt breakdown is gated on the damage key, mirroring the
+    // original hover block that only ran when `damage` was present.
+    let (damage_details, damage_by_type) = if damage.is_some() {
+        let details = damage_breakdown(|k| pr.get(k).and_then(|v| v.as_u64()));
+        let mut by_type = BTreeMap::new();
+        for (key, _) in DAMAGE_DESCRIPTIONS {
+            if let Some(num) = pr.get(key).and_then(|v| v.as_u64())
+                && num > 0
+            {
+                by_type.insert(key.to_string(), num);
+            }
+        }
+        (details, by_type)
+    } else {
+        (Damage::default(), BTreeMap::new())
+    };
 
     let hit = |key: &str| pr.get(key).and_then(|v| v.as_u64()).filter(|n| *n > 0);
     let hits_details = Hits {
@@ -234,6 +265,27 @@ fn extract_server_results(pr: &Value) -> Option<ServerResults> {
         sap_secondaries_manual: hit(HITS_ATBA_CS_MANUAL),
         torps: hit(HITS_TPD_NORMAL),
     };
+
+    let mut hits_by_type = BTreeMap::new();
+    for (key, _) in HITS_DESCRIPTIONS {
+        if let Some(num) = pr.get(key).and_then(|v| v.as_u64())
+            && num > 0
+        {
+            hits_by_type.insert(key.to_string(), num);
+        }
+    }
+
+    // Relevant hits: carriers count rocket/skip strikes, everyone else counts
+    // main-battery shell hits. Mirrors mod.rs relevant_hits_number.
+    let main_hits = hits_by_type.get(HITS_MAIN_HE).copied().unwrap_or(0)
+        + hits_by_type.get(HITS_MAIN_CS).copied().unwrap_or(0)
+        + hits_by_type.get(HITS_MAIN_AP).copied().unwrap_or(0);
+    let plane_hits = hits_by_type.get(HITS_ROCKET).copied().unwrap_or(0)
+        + hits_by_type.get(HITS_ROCKET_AIRSUPPORT).copied().unwrap_or(0)
+        + hits_by_type.get(HITS_SKIP).copied().unwrap_or(0)
+        + hits_by_type.get(HITS_SKIP_ALT).copied().unwrap_or(0)
+        + hits_by_type.get(HITS_SKIP_AIRSUPPORT).copied().unwrap_or(0);
+    let hits = Some(if is_air_carrier { plane_hits } else { main_hits });
 
     let mut potential_damage = 0u64;
     for (key, _) in POTENTIAL_DAMAGE_DESCRIPTIONS {
@@ -250,11 +302,13 @@ fn extract_server_results(pr: &Value) -> Option<ServerResults> {
     };
 
     let mut received_damage = 0u64;
+    let mut received_damage_by_type = BTreeMap::new();
     for (key, _) in RECEIVED_DAMAGE_DESCRIPTIONS {
         if let Some(num) = pr.get(format!("received_{key}").as_str()).and_then(|v| v.as_u64())
             && num > 0
         {
             received_damage += num;
+            received_damage_by_type.insert(key.to_string(), num);
         }
     }
     let received_damage_details =
@@ -276,39 +330,51 @@ fn extract_server_results(pr: &Value) -> Option<ServerResults> {
             crits_dealt += victim_data.get("crits").and_then(|v| v.as_u64()).unwrap_or(0);
 
             let mut interaction = DamageInteraction::default();
-            let all_damage: u64 = DAMAGE_DESCRIPTIONS
-                .iter()
-                .map(|(key, _)| victim_data.get(*key).and_then(|v| v.as_u64()).unwrap_or(0))
-                .sum();
+            let mut all_damage = 0u64;
+            let mut full = BTreeMap::new();
+            for (key, _) in DAMAGE_DESCRIPTIONS {
+                let num = victim_data.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
+                all_damage += num;
+                if num > 0 {
+                    full.insert(key.to_string(), num);
+                }
+            }
             interaction.damage_dealt = all_damage;
             interaction.damage_dealt_by_type = damage_breakdown(|k| victim_data.get(k).and_then(|v| v.as_u64()));
-            if interaction.damage_dealt > 0 {
-                interaction.damage_dealt_percentage = (all_damage as f64 / damage_number as f64) * 100.0;
+            interaction.damage_dealt_by_type_full = full;
+            if interaction.damage_dealt > 0
+                && let Some(total_damage) = damage
+            {
+                interaction.damage_dealt_percentage = (all_damage as f64 / total_damage as f64) * 100.0;
             }
 
             damage_interactions.insert(victim_id, interaction);
         }
     }
 
-    Some(ServerResults {
-        xp: pr.get("exp").and_then(|v| v.as_i64()).unwrap_or_default(),
-        raw_xp: pr.get("raw_exp").and_then(|v| v.as_i64()).unwrap_or_default(),
-        damage: damage_number,
+    ServerResults {
+        xp: pr.get("exp").and_then(|v| v.as_i64()),
+        raw_xp: pr.get("raw_exp").and_then(|v| v.as_i64()),
+        damage,
         damage_details,
+        damage_by_type,
         hits_details,
-        spotting_damage: pr.get("scouting_damage").and_then(|v| v.as_u64()).unwrap_or_default(),
+        hits,
+        hits_by_type,
+        spotting_damage: pr.get("scouting_damage").and_then(|v| v.as_u64()),
         potential_damage,
         potential_damage_details,
         received_damage,
         received_damage_details,
+        received_damage_by_type,
         fires_dealt,
         floods_dealt,
         citadels_dealt,
         crits_dealt,
-        distance_traveled: pr.get("distance").and_then(|v| v.as_f64()).unwrap_or_default(),
-        kills: pr.get("ships_killed").and_then(|v| v.as_i64()).unwrap_or_default(),
+        distance_traveled: pr.get("distance").and_then(|v| v.as_f64()),
+        kills: pr.get("ships_killed").and_then(|v| v.as_i64()),
         damage_interactions,
-    })
+    }
 }
 
 /// Resolve a player's equipped consumables and tally activations against each
@@ -412,14 +478,20 @@ fn build_player(
         .unwrap_or((0, 0, 0, 0));
     let skill_info = SkillInfo { skill_points, num_skills, highest_tier, num_tier_1_skills };
 
-    let mut server_results = player_results.and_then(extract_server_results);
-    if let Some(sr) = server_results.as_mut() {
-        // Self-player spotting falls back to controller totals when the server
-        // results omit the scouting_damage key.
-        if is_self && player_results.and_then(|pr| pr.get("scouting_damage")?.as_u64()).is_none() {
-            sr.spotting_damage = damage_stat_total(report.self_damage_stats(), DamageStatCategory::Spot).unwrap_or(0);
-        }
-    }
+    let is_air_carrier = species == Species::AirCarrier;
+    let server_results = player_results.map(|pr| extract_server_results(pr, is_air_carrier));
+
+    // Self-player controller fallbacks: the UI shows these when the server omits
+    // scouting_damage (spotting) or when there is no resolved results object
+    // (potential). Computed regardless of whether server_results is present.
+    let (controller_spotting_damage, controller_potential_damage) = if is_self {
+        (
+            damage_stat_total(report.self_damage_stats(), DamageStatCategory::Spot),
+            damage_stat_total(report.self_damage_stats(), DamageStatCategory::Agro),
+        )
+    } else {
+        (None, None)
+    };
 
     let achievements = player_results
         .and_then(|pr| pr.get("achievements")?.as_array())
@@ -503,9 +575,20 @@ fn build_player(
     let division_label = report.divisions().get(&state.entity_id()).copied().map(|div| format!("({div})"));
     let division_id = if state.division_id() > 0 { Some(state.division_id() as u32) } else { None };
 
+    // Bots whose username is an IDS_ key translate to a readable name; humans
+    // keep their raw username. Mirrors mod.rs display_name.
+    let display_name = if state.is_bot() && state.username().starts_with("IDS_") {
+        provider
+            .localized_name_from_id(&TranslationKey::new(state.username()))
+            .unwrap_or_else(|| state.username().to_string())
+    } else {
+        state.username().to_string()
+    };
+
     NormalizedPlayer {
         db_id: state.db_id(),
         name: state.username().to_string(),
+        display_name,
         clan: state.clan().to_string(),
         clan_color_rgb: clan_color_rgb(player),
         realm: state.realm().map(str::to_owned),
@@ -520,9 +603,11 @@ fn build_player(
         ship_name,
         ship_nation: vehicle_param.nation().to_string(),
         ship_class: species,
-        ship_tier: vehicle_param.data().vehicle_ref().expect("no vehicle ref").level(),
+        ship_tier: vehicle_param.data().vehicle_ref().map(|vehicle| vehicle.level()),
         is_test_ship,
         server_results,
+        controller_spotting_damage,
+        controller_potential_damage,
         observed_results: ObservedResults { damage: observed_damage, kills: observed_kills },
         skill_info,
         build: TranslatedBuild::new(player, provider, &report.version()),
@@ -539,8 +624,8 @@ fn build_player(
 /// interactions the attackers recorded, filling the received side and its
 /// per-type breakdown. Mirrors the two received-damage passes in `UiReport::new`.
 fn attribute_received_damage(players: &mut [NormalizedPlayer]) {
-    // victim db_id -> attacker db_id -> (damage dealt to victim, per-type breakdown)
-    let mut all_received: HashMap<AccountId, HashMap<AccountId, (u64, Damage)>> = HashMap::new();
+    // victim db_id -> attacker db_id -> (damage dealt to victim, 9-field breakdown, full breakdown)
+    let mut all_received: HashMap<AccountId, HashMap<AccountId, (u64, Damage, BTreeMap<String, u64>)>> = HashMap::new();
 
     for this in players.iter() {
         let this_id = this.db_id;
@@ -558,10 +643,14 @@ fn attribute_received_damage(players: &mut [NormalizedPlayer]) {
             if interaction.damage_dealt == 0 {
                 continue;
             }
-            all_received
-                .entry(this_id)
-                .or_default()
-                .insert(attacker_id, (interaction.damage_dealt, interaction.damage_dealt_by_type.clone()));
+            all_received.entry(this_id).or_default().insert(
+                attacker_id,
+                (
+                    interaction.damage_dealt,
+                    interaction.damage_dealt_by_type.clone(),
+                    interaction.damage_dealt_by_type_full.clone(),
+                ),
+            );
         }
     }
 
@@ -576,12 +665,13 @@ fn attribute_received_damage(players: &mut [NormalizedPlayer]) {
 
         // Sum from per-interaction attacker data so all damage types are
         // counted consistently in both numerator and denominator.
-        let total_received: u64 = received_map.values().map(|(dmg, _)| *dmg).sum();
+        let total_received: u64 = received_map.values().map(|(dmg, _, _)| *dmg).sum();
 
-        for (attacker_id, (received_damage, by_type)) in received_map {
+        for (attacker_id, (received_damage, by_type, by_type_full)) in received_map {
             let interaction = sr.damage_interactions.entry(attacker_id).or_default();
             interaction.damage_received = received_damage;
             interaction.damage_received_by_type = by_type;
+            interaction.damage_received_by_type_full = by_type_full;
             if total_received > 0 {
                 interaction.damage_received_percentage = (received_damage as f64 / total_received as f64) * 100.0;
             }
@@ -596,7 +686,7 @@ fn compute_inverse_percentages(players: &mut [NormalizedPlayer]) {
     let totals: HashMap<AccountId, (u64, u64)> = players
         .iter()
         .map(|player| {
-            let dealt = player.server_results.as_ref().map(|sr| sr.damage).unwrap_or_default();
+            let dealt = player.server_results.as_ref().and_then(|sr| sr.damage).unwrap_or_default();
             let received: u64 = player
                 .server_results
                 .as_ref()
@@ -655,16 +745,18 @@ mod tests {
             }
         });
 
-        let sr = extract_server_results(&pr).expect("damage key present should yield Some");
+        let sr = extract_server_results(&pr, false);
 
-        assert_eq!(sr.damage, 50000);
-        assert_eq!(sr.xp, 1500);
-        assert_eq!(sr.raw_xp, 1200);
+        assert_eq!(sr.damage, Some(50000));
+        assert_eq!(sr.xp, Some(1500));
+        assert_eq!(sr.raw_xp, Some(1200));
         assert_eq!(sr.damage_details.ap, Some(30000));
         assert_eq!(sr.damage_details.he, Some(20000));
         assert_eq!(sr.hits_details.ap, Some(12));
         assert_eq!(sr.hits_details.he, Some(34));
-        assert_eq!(sr.spotting_damage, 8000);
+        // Non-carrier relevant hits: main-battery AP + SAP + HE.
+        assert_eq!(sr.hits, Some(46));
+        assert_eq!(sr.spotting_damage, Some(8000));
         assert_eq!(sr.potential_damage, 105000);
         assert_eq!(sr.potential_damage_details.artillery, 100000);
         assert_eq!(sr.potential_damage_details.torpedoes, 5000);
@@ -672,21 +764,73 @@ mod tests {
         assert_eq!(sr.received_damage, 5000);
         assert_eq!(sr.received_damage_details.he, Some(4000));
         assert_eq!(sr.received_damage_details.fire, Some(1000));
-        assert_eq!(sr.distance_traveled, 42.5);
-        assert_eq!(sr.kills, 2);
+        assert_eq!(sr.distance_traveled, Some(42.5));
+        assert_eq!(sr.kills, Some(2));
         assert_eq!(sr.fires_dealt, 3);
         assert_eq!(sr.citadels_dealt, 1);
+
+        // Full per-type breakdown maps carry the DAMAGE_/HITS_ constant keys.
+        assert_eq!(sr.damage_by_type.get(DAMAGE_MAIN_AP), Some(&30000));
+        assert_eq!(sr.damage_by_type.get(DAMAGE_MAIN_HE), Some(&20000));
+        assert_eq!(sr.hits_by_type.get(HITS_MAIN_AP), Some(&12));
+        assert_eq!(sr.hits_by_type.get(HITS_MAIN_HE), Some(&34));
+        assert_eq!(sr.received_damage_by_type.get(DAMAGE_MAIN_HE), Some(&4000));
+        assert_eq!(sr.received_damage_by_type.get(DAMAGE_FIRE), Some(&1000));
 
         let interaction = sr.damage_interactions.get(&AccountId(111)).expect("victim 111 interaction present");
         assert_eq!(interaction.damage_dealt, 32000);
         assert_eq!(interaction.damage_dealt_by_type.ap, Some(30000));
         assert_eq!(interaction.damage_dealt_by_type.fire, Some(2000));
+        assert_eq!(interaction.damage_dealt_by_type_full.get(DAMAGE_MAIN_AP), Some(&30000));
+        assert_eq!(interaction.damage_dealt_by_type_full.get(DAMAGE_FIRE), Some(&2000));
         assert!((interaction.damage_dealt_percentage - 64.0).abs() < 1e-9);
     }
 
     #[test]
-    fn extract_server_results_requires_damage_key() {
-        let pr = json!({ "exp": 10, "interactions": {} });
-        assert!(extract_server_results(&pr).is_none());
+    fn extract_server_results_without_damage_key_still_populates() {
+        // Old-format results can omit `damage` yet carry hits, received damage,
+        // and interactions; these must survive the object-existence gate (I1).
+        let pr = json!({
+            "exp": 10,
+            "hits_main_he": 5u64,
+            "received_damage_fire": 700u64,
+            "interactions": {
+                "222": { "damage_main_he": 1200u64, "fires": 2 }
+            }
+        });
+
+        let sr = extract_server_results(&pr, false);
+
+        assert_eq!(sr.damage, None);
+        assert!(sr.damage_by_type.is_empty(), "no dealt breakdown without a damage key");
+        assert_eq!(sr.hits, Some(5));
+        assert_eq!(sr.hits_details.he, Some(5));
+        assert_eq!(sr.received_damage, 700);
+        assert_eq!(sr.received_damage_by_type.get(DAMAGE_FIRE), Some(&700));
+
+        let interaction = sr.damage_interactions.get(&AccountId(222)).expect("victim 222 interaction present");
+        assert_eq!(interaction.damage_dealt, 1200);
+        assert_eq!(interaction.damage_dealt_by_type_full.get(DAMAGE_MAIN_HE), Some(&1200));
+        // With no total `damage`, the dealt percentage stays 0 (matches original).
+        assert_eq!(interaction.damage_dealt_percentage, 0.0);
+        assert_eq!(sr.fires_dealt, 2);
+    }
+
+    #[test]
+    fn extract_server_results_carrier_relevant_hits_count_air_strikes() {
+        // Carriers report relevant hits as rocket/skip strikes, not main battery.
+        let pr = json!({
+            "damage": 40000u64,
+            "hits_main_he": 3u64,
+            "hits_rocket": 7u64,
+            "hits_skip": 2u64,
+            "hits_skip_airsupport": 1u64,
+        });
+
+        let carrier = extract_server_results(&pr, true);
+        assert_eq!(carrier.hits, Some(10), "rocket + skip + skip_airsupport");
+
+        let surface = extract_server_results(&pr, false);
+        assert_eq!(surface.hits, Some(3), "main-battery HE only for non-carriers");
     }
 }

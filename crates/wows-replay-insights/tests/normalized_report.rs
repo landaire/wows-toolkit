@@ -114,7 +114,7 @@ fn normalized_report_populates_server_results_and_interactions() {
     let self_player = normalized.players.iter().find(|p| p.is_self).expect("self player present");
 
     let sr = self_player.server_results.as_ref().expect("self player has server_results");
-    assert!(sr.damage > 0, "self player dealt nonzero damage");
+    assert!(sr.damage.unwrap_or(0) > 0, "self player dealt nonzero damage");
 
     assert!(
         sr.damage_interactions.values().any(|i| i.damage_dealt_by_type.ap.is_some()

@@ -5,6 +5,7 @@
 //! the resolved-results key names shared by the builder and the toolkit UI (the
 //! UI re-imports them to rebuild hover text).
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 use wows_replays::types::AccountId;
@@ -230,10 +231,16 @@ pub struct PotentialDamage {
 pub struct DamageInteraction {
     pub damage_dealt: u64,
     pub damage_dealt_by_type: Damage,
+    /// Full per-type dealt breakdown keyed by the `DAMAGE_*` constant, only
+    /// entries > 0. Carries the types the 9-field `Damage` projection drops.
+    pub damage_dealt_by_type_full: BTreeMap<String, u64>,
     pub damage_dealt_percentage: f64,
     pub damage_dealt_inverse_percentage: f64,
     pub damage_received: u64,
     pub damage_received_by_type: Damage,
+    /// Full per-type received breakdown keyed by the `DAMAGE_*` constant,
+    /// attributed from the attacker's dealt breakdown.
+    pub damage_received_by_type_full: BTreeMap<String, u64>,
     pub damage_received_percentage: f64,
     pub damage_received_inverse_percentage: f64,
 }
@@ -246,21 +253,37 @@ pub struct ObservedResults {
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ServerResults {
-    pub xp: i64,
-    pub raw_xp: i64,
-    pub damage: u64,
+    /// Base XP. `None` when the resolved object omits the `exp` key.
+    pub xp: Option<i64>,
+    pub raw_xp: Option<i64>,
+    /// Total damage dealt. `None` when the resolved object omits the `damage`
+    /// key (old-format results still carry hits/received/interactions).
+    pub damage: Option<u64>,
     pub damage_details: Damage,
+    /// Full dealt breakdown keyed by the `DAMAGE_*` constant, only entries > 0.
+    /// Empty when `damage` is absent, mirroring the original hover gate.
+    pub damage_by_type: BTreeMap<String, u64>,
     pub hits_details: Hits,
-    pub spotting_damage: u64,
+    /// Species-aware relevant-hits scalar: rocket/skip hits for carriers,
+    /// otherwise main-battery AP+SAP+HE. Matches the UI hits column.
+    pub hits: Option<u64>,
+    /// Full hit breakdown keyed by the `HITS_*` constant, only entries > 0.
+    pub hits_by_type: BTreeMap<String, u64>,
+    /// Server-reported spotting (`scouting_damage`). `None` when absent; the
+    /// self-player controller fallback lives on `NormalizedPlayer`.
+    pub spotting_damage: Option<u64>,
     pub potential_damage: u64,
     pub potential_damage_details: PotentialDamage,
     pub received_damage: u64,
     pub received_damage_details: Damage,
+    /// Full received breakdown keyed by the `DAMAGE_*` constant, only entries
+    /// > 0 (values read from the `received_*` keys).
+    pub received_damage_by_type: BTreeMap<String, u64>,
     pub fires_dealt: u64,
     pub floods_dealt: u64,
     pub citadels_dealt: u64,
     pub crits_dealt: u64,
-    pub distance_traveled: f64,
-    pub kills: i64,
+    pub distance_traveled: Option<f64>,
+    pub kills: Option<i64>,
     pub damage_interactions: HashMap<AccountId, DamageInteraction>,
 }
