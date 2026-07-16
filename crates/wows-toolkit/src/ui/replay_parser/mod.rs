@@ -529,20 +529,18 @@ impl UiReport {
             &constants_inner,
         );
 
-        // Entity lookup for the presentation-only reads that stay entity-sourced
-        // (class icon, species text, clan color, commander skills for the hover).
-        let entity_by_id: HashMap<AccountId, &Arc<Player>> =
-            players.iter().map(|player| (player.initial_state().db_id(), player)).collect();
-
         let self_normalized = normalized.players.iter().find(|np| np.is_self);
         let self_division_id = self_normalized.and_then(|np| np.division_id);
         let self_db_id = self_normalized.map(|np| np.db_id);
 
-        let player_reports: Vec<PlayerReport> = normalized
-            .players
+        // normalized.players is built positionally from report.players() (plain
+        // .map(), no filter/reorder), so zip it against `players` instead of
+        // joining on db_id, which is not unique (bots are all AccountId(0)).
+        let player_reports: Vec<PlayerReport> = players
             .iter()
-            .filter_map(|np| {
-                let player = entity_by_id.get(&np.db_id).copied()?;
+            .zip(normalized.players.iter())
+            .filter_map(|(player, np)| {
+                debug_assert_eq!(player.initial_state().db_id(), np.db_id, "normalized/entity player order drifted");
                 let vehicle = player.vehicle_entity();
                 let vehicle_param = player.vehicle();
                 let server = np.server_results.as_ref();
