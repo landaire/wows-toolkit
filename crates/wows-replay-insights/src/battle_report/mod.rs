@@ -633,6 +633,13 @@ fn build_player(
 type ReceivedByAttacker = HashMap<AccountId, (u64, Damage, BTreeMap<String, u64>)>;
 
 fn attribute_received_damage(players: &mut [NormalizedPlayer]) {
+    // Attributes received damage to a victim from every attacker's dealt-interaction
+    // data as long as the victim has server_results, regardless of whether the
+    // victim's own resolved object carried an "interactions" key. This differs from
+    // the old toolkit gate (which required that key) only for legacy/truncated-format
+    // replays; the toolkit re-gates its own PlayerReport.damage_interactions, so the
+    // byte-compat export/UI are unaffected. The divergence is confined to this
+    // insights ServerResults surface, as consumed by the CLI `normalized` dump.
     // victim db_id -> received-by-attacker map
     let mut all_received: HashMap<AccountId, ReceivedByAttacker> = HashMap::new();
 

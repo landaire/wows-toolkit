@@ -123,7 +123,6 @@ impl PersonalRatingData {
     }
 
     /// Load expected values from the given data
-    #[allow(dead_code)]
     pub fn load_from_bytes(&mut self, bytes: &[u8]) -> Result<(), serde_json::Error> {
         let data: ExpectedValuesData = serde_json::from_slice(bytes)?;
         self.data = Some(data);
