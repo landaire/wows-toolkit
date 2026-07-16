@@ -32,7 +32,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
 
 use rootcause::Report;
-use wowsunpack::game_params::types::ParamData;
 
 use crate::collab::Permissions;
 use crate::collab::SessionCommand;
@@ -98,7 +97,6 @@ use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
-use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::recognized::Recognized;
 
@@ -440,71 +438,6 @@ fn resolve_battle_results(results: serde_json::Value, constants: &serde_json::Va
     wows_replay_insights::battle_report::resolve_battle_results(results, constants)
 }
 
-/// Resolve a player's equipped consumables and tally activations against each
-/// slot. Returns an empty inventory and `None` heal count when the build can't
-/// be resolved (no vehicle entity yet, unknown ship, missing species). Heal
-/// count is `None` for ships that don't carry a Repair Party slot, and `Some`
-/// otherwise (summed across all RepairParty slots on the ship).
-fn resolve_player_consumables(
-    player: &Player,
-    metadata_provider: &GameMetadataProvider,
-    version: wowsunpack::data::Version,
-    activations: &[wows_replays::analyzer::battle_controller::state::ActiveConsumable],
-) -> (Vec<models::PlayerConsumable>, Option<u32>) {
-    let Some(build) = wows_replay_insights::build::ResolvedBuild::from_player(player, metadata_provider, version)
-    else {
-        return (Vec::new(), None);
-    };
-
-    let mut charges_used: Vec<u32> = vec![0; build.slots.len()];
-    for activation in activations {
-        let pick = build.slots.iter().enumerate().find(|(idx, slot)| {
-            if slot.consumable_type.known() != activation.consumable.known() {
-                return false;
-            }
-            match slot.total_charges {
-                wowsunpack::game_types::ChargeCount::Unlimited => true,
-                wowsunpack::game_types::ChargeCount::Finite(total) => charges_used[*idx] < total,
-            }
-        });
-        if let Some((idx, _)) = pick {
-            charges_used[idx] = charges_used[idx].saturating_add(1);
-        }
-    }
-
-    let mut heal_count: Option<u32> = None;
-    for (slot, used) in build.slots.iter().zip(charges_used.iter()) {
-        if slot.consumable_type.known() == Some(&wowsunpack::game_types::Consumable::RepairParty) {
-            heal_count = Some(heal_count.unwrap_or(0).saturating_add(*used));
-        }
-    }
-
-    let consumables = build
-        .slots
-        .iter()
-        .zip(charges_used)
-        .map(|(slot, used)| {
-            let display_name =
-                wowsunpack::game_params::translations::translate_consumable(&slot.icon_key, metadata_provider)
-                    .unwrap_or_else(|| slot.consumable_type_raw.clone());
-            let description = wowsunpack::game_params::translations::translate_consumable_description(
-                &slot.icon_key,
-                metadata_provider,
-            )
-            .unwrap_or_default();
-            models::PlayerConsumable {
-                display_name,
-                description,
-                icon_key: slot.icon_key.clone(),
-                charges_used: used,
-                total_charges: slot.total_charges,
-            }
-        })
-        .collect();
-
-    (consumables, heal_count)
-}
-
 #[allow(non_camel_case_types)]
 pub struct UiReport {
     match_timestamp: Timestamp,
@@ -565,10 +498,6 @@ impl UiReport {
 
         let players = report.players().to_vec();
 
-        // Division labels (A, B, C...) keyed by vehicle entity id, reconstructed by the
-        // battle world to match the in-game per-team labelling.
-        let divisions = report.divisions();
-
         let self_player = players.iter().find(|player| player.relation().is_self()).cloned();
 
         let resolved_results: Option<serde_json::Value> = report
@@ -591,737 +520,342 @@ impl UiReport {
 
         let locale = "en-US";
 
-        let player_reports = players.iter().map(|player| {
-            // Get the VehicleEntity for this player (may be None if they never spawned)
-            let vehicle = player.vehicle_entity();
-            let player_state = player.initial_state();
-            let mut player_color = player_color_for_team_relation(player.relation());
-
-            if let Some(self_player) = self_player.as_ref() {
-                let self_state = self_player.initial_state();
-                if self_state.db_id() != player_state.db_id()
-                    && self_state.division_id() > 0
-                    && player_state.division_id() == self_state.division_id()
-                {
-                    player_color = Color32::GOLD;
-                }
-            }
-
-            let vehicle_param = player.vehicle();
-
-            let known_species = vehicle_param.species().and_then(|r| r.known().cloned());
-
-            let ship_species_text: String = known_species
-                .as_ref()
-                .and_then(|species| {
-                    metadata_provider
-                        .localized_name_from_id(&TranslationKey::new(species.translation_id()))
-                        .or_else(|| Some(species.name().to_string()))
-                })
-                .unwrap_or_default();
-
-            let icon = known_species.as_ref().and_then(|species| {
-                ship_class_icon_from_species(*species, &wows_data_inner)
-                    .or_else(|| fallback_ship_icons.get(species).cloned())
-            });
-
-            let name_color = if player_state.is_abuser() {
-                Color32::from_rgb(0xFF, 0xC0, 0xCB) // pink
-            } else {
-                player_color
-            };
-
-            // Assign division
-            let division_char = divisions.get(&player_state.entity_id()).copied();
-
-            let div_text = division_char.map(|div| format!("({div})"));
-
-            let clan_text = if !player_state.clan().is_empty() {
-                Some(RichText::new(format!("[{}]", player_state.clan())).color(clan_color_for_player(player).unwrap()))
-            } else {
-                None
-            };
-            let display_name = if player_state.is_bot() && player_state.username().starts_with("IDS_") {
-                metadata_provider
-                    .localized_name_from_id(&TranslationKey::new(player_state.username()))
-                    .unwrap_or_else(|| player_state.username().to_string())
-            } else {
-                player_state.username().to_string()
-            };
-            let name_text = RichText::new(&display_name).color(name_color);
-
-            // Look up this player's resolved results by db_id
-            let player_results = resolved_results
-                .as_ref()
-                .and_then(|r| r.pointer(&format!("/playersPublicInfo/{}", player_state.db_id())));
-
-            let (base_xp, base_xp_text) = if let Some(base_xp) = player_results.and_then(|pr| pr.get("exp")?.as_i64()) {
-                let label_text = separate_number(base_xp, Some(locale));
-                (Some(base_xp), Some(RichText::new(label_text).color(player_color)))
-            } else {
-                (None, None)
-            };
-
-            let (raw_xp, raw_xp_text) = if let Some(raw_xp) = player_results.and_then(|pr| pr.get("raw_exp")?.as_i64())
-            {
-                let label_text = separate_number(raw_xp, Some(locale));
-                (Some(raw_xp), Some(label_text))
-            } else {
-                (None, None)
-            };
-
-            let ship_name = metadata_provider
-                .localized_name_from_param(vehicle_param)
-                .unwrap_or_else(|| format!("{}", vehicle_param.id()));
-
-            let observed_damage = vehicle.map(|v| v.damage().ceil() as u64).unwrap_or(0);
-            let observed_damage_text = separate_number(observed_damage, Some(locale));
-
-            // Actual damage done to other players
-            let (damage, damage_text, damage_hover_text, damage_report) = player_results
-                .and_then(|pr| {
-                    let damage_number = pr.get("damage")?.as_u64()?;
-
-                    let longest_width = DAMAGE_DESCRIPTIONS
-                        .iter()
-                        .filter_map(|(key, description)| {
-                            let num = pr.get(*key)?.as_u64()?;
-                            if num > 0 { Some(description.len()) } else { None }
-                        })
-                        .max()
-                        .unwrap_or_default()
-                        + 1;
-
-                    let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = DAMAGE_DESCRIPTIONS
-                        .iter()
-                        .filter_map(|(key, description)| {
-                            let num = pr.get(*key)?.as_u64()?;
-                            if num > 0 {
-                                let num_str = separate_number(num, Some(locale));
-                                Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-
-                    let all_damage: HashMap<String, u64> = HashMap::from_iter(all_damage);
-
-                    let damage_report_text = separate_number(damage_number, Some(locale));
-                    let damage_report_text = RichText::new(damage_report_text).color(player_color);
-                    let damage_report_hover_text = RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0));
-
-                    Some((
-                        Some(damage_number),
-                        Some(damage_report_text),
-                        Some(damage_report_hover_text),
-                        Some(Damage {
-                            ap: all_damage.get(DAMAGE_MAIN_AP).copied(),
-                            sap: all_damage.get(DAMAGE_MAIN_CS).copied(),
-                            he: all_damage.get(DAMAGE_MAIN_HE).copied(),
-                            he_secondaries: all_damage.get(DAMAGE_ATBA_HE).copied(),
-                            sap_secondaries: all_damage.get(DAMAGE_ATBA_CS).copied(),
-                            torps: all_damage.get(DAMAGE_TPD_NORMAL).copied(),
-                            deep_water_torps: all_damage.get(DAMAGE_TPD_DEEP).copied(),
-                            fire: all_damage.get(DAMAGE_FIRE).copied(),
-                            flooding: all_damage.get(DAMAGE_FLOOD).copied(),
-                        }),
-                    ))
-                })
-                .unwrap_or_default();
-
-            // Armament hit information
-            let (hits, hits_text, hits_hover_text, hits_report) = player_results
-                .map(|pr| {
-                    let longest_width = HITS_DESCRIPTIONS
-                        .iter()
-                        .filter_map(|(key, description)| {
-                            let num = pr.get(*key)?.as_u64()?;
-                            if num > 0 { Some(description.len()) } else { None }
-                        })
-                        .max()
-                        .unwrap_or_default()
-                        + 1;
-
-                    let (all_hits, breakdowns): (Vec<(String, u64)>, Vec<String>) = HITS_DESCRIPTIONS
-                        .iter()
-                        .filter_map(|(key, description)| {
-                            let num = pr.get(*key)?.as_u64()?;
-                            if num > 0 {
-                                let num_str = separate_number(num, Some(locale));
-                                Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-
-                    let all_hits: HashMap<String, u64> = HashMap::from_iter(all_hits);
-
-                    let main_hits = all_hits.get(HITS_MAIN_HE).copied().unwrap_or(0)
-                        + all_hits.get(HITS_MAIN_CS).copied().unwrap_or(0)
-                        + all_hits.get(HITS_MAIN_AP).copied().unwrap_or(0);
-
-                    let plane_hits = all_hits.get(HITS_ROCKET).copied().unwrap_or(0)
-                        + all_hits.get(HITS_ROCKET_AIRSUPPORT).copied().unwrap_or(0)
-                        + all_hits.get(HITS_SKIP).copied().unwrap_or(0)
-                        + all_hits.get(HITS_SKIP_ALT).copied().unwrap_or(0)
-                        + all_hits.get(HITS_SKIP_AIRSUPPORT).copied().unwrap_or(0);
-
-                    let relevant_hits_number = if vehicle_param
-                        .species()
-                        .and_then(|r| r.known())
-                        .map(|s| *s == Species::AirCarrier)
-                        .unwrap_or(false)
-                    {
-                        plane_hits
-                    } else {
-                        main_hits
-                    };
-
-                    let main_hits_text = separate_number(relevant_hits_number, Some(locale));
-                    let main_hits_text = RichText::new(main_hits_text).color(player_color);
-                    let hits_hover_text = RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0));
-
-                    (
-                        Some(relevant_hits_number),
-                        Some(main_hits_text),
-                        Some(hits_hover_text),
-                        Some(Hits {
-                            ap: all_hits.get(HITS_MAIN_AP).copied(),
-                            sap: all_hits.get(HITS_MAIN_CS).copied(),
-                            he: all_hits.get(HITS_MAIN_HE).copied(),
-                            he_secondaries: all_hits.get(HITS_ATBA_HE).copied(),
-                            sap_secondaries: all_hits.get(HITS_ATBA_CS).copied(),
-                            ap_secondaries_manual: all_hits.get(HITS_ATBA_AP_MANUAL).copied(),
-                            he_secondaries_manual: all_hits.get(HITS_ATBA_HE_MANUAL).copied(),
-                            sap_secondaries_manual: all_hits.get(HITS_ATBA_CS_MANUAL).copied(),
-                            torps: all_hits.get(HITS_TPD_NORMAL).copied(),
-                        }),
-                    )
-                })
-                .unwrap_or_default();
-
-            // Received damage
-            let (received_damage, received_damage_text, received_damage_hover_text, received_damage_report) =
-                player_results
-                    .map(|pr| {
-                        let longest_width = RECEIVED_DAMAGE_DESCRIPTIONS
-                            .iter()
-                            .filter_map(|(key, description)| {
-                                let num = pr.get(format!("received_{key}"))?.as_u64()?;
-                                if num > 0 { Some(description.len()) } else { None }
-                            })
-                            .max()
-                            .unwrap_or_default()
-                            + 1;
-
-                        let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = RECEIVED_DAMAGE_DESCRIPTIONS
-                            .iter()
-                            .filter_map(|(key, description)| {
-                                let num = pr.get(format!("received_{key}"))?.as_u64()?;
-                                if num > 0 {
-                                    let num_str = separate_number(num, Some(locale));
-                                    Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-
-                        let all_damage: HashMap<String, u64> = HashMap::from_iter(all_damage);
-                        let total_received: u64 = all_damage.values().sum();
-
-                        let received_damage_report_text = separate_number(total_received, Some(locale));
-                        let received_damage_report_text =
-                            RichText::new(received_damage_report_text).color(player_color);
-                        let received_damage_report_hover_text =
-                            RichText::new(breakdowns.iter().join("\n")).font(FontId::monospace(12.0));
-
-                        (
-                            Some(total_received),
-                            Some(received_damage_report_text),
-                            Some(received_damage_report_hover_text),
-                            Some(Damage {
-                                ap: all_damage.get(DAMAGE_MAIN_AP).copied(),
-                                sap: all_damage.get(DAMAGE_MAIN_CS).copied(),
-                                he: all_damage.get(DAMAGE_MAIN_HE).copied(),
-                                he_secondaries: all_damage.get(DAMAGE_ATBA_HE).copied(),
-                                sap_secondaries: all_damage.get(DAMAGE_ATBA_CS).copied(),
-                                torps: all_damage.get(DAMAGE_TPD_NORMAL).copied(),
-                                deep_water_torps: all_damage.get(DAMAGE_TPD_DEEP).copied(),
-                                fire: all_damage.get(DAMAGE_FIRE).copied(),
-                                flooding: all_damage.get(DAMAGE_FLOOD).copied(),
-                            }),
-                        )
-                    })
-                    .unwrap_or_default();
-
-            // Spotting damage — prefer battle results, fall back to controller for self player
-            let (spotting_damage, spotting_damage_text, spotting_damage_hover_text) =
-                if let Some(damage_number) = player_results.and_then(|pr| pr.get("scouting_damage")?.as_u64()) {
-                    let hover = if player.relation().is_self() {
-                        build_damage_stat_hover_text(report.self_damage_stats(), DamageStatCategory::Spot, locale)
-                    } else {
-                        None
-                    };
-                    (Some(damage_number), Some(separate_number(damage_number, Some(locale))), hover)
-                } else if player.relation().is_self() {
-                    // Fallback: build from controller data
-                    let (total, text, hover) =
-                        build_damage_stat_total(report.self_damage_stats(), DamageStatCategory::Spot, locale);
-                    (total, text, hover)
-                } else {
-                    (None, None, None)
-                };
-
-            let (potential_damage, potential_damage_text, potential_damage_hover_text, potential_damage_report) =
-                player_results
-                    .map(|pr| {
-                        let longest_width = POTENTIAL_DAMAGE_DESCRIPTIONS
-                            .iter()
-                            .filter_map(|(key, description)| {
-                                let num =
-                                    pr.get(*key)?.as_u64().or_else(|| pr.get(*key)?.as_f64().map(|f| f as u64))?;
-                                if num > 0 { Some(description.len()) } else { None }
-                            })
-                            .max()
-                            .unwrap_or_default()
-                            + 1;
-
-                        let (all_agro, breakdowns): (Vec<(String, u64)>, Vec<String>) = POTENTIAL_DAMAGE_DESCRIPTIONS
-                            .iter()
-                            .filter_map(|(key, description)| {
-                                let num =
-                                    pr.get(*key)?.as_u64().or_else(|| pr.get(*key)?.as_f64().map(|f| f as u64))?;
-                                if num > 0 {
-                                    let num_str = separate_number(num, Some(locale));
-                                    Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
-                                } else {
-                                    None
-                                }
-                            })
-                            .unzip();
-                        let all_agro: HashMap<String, u64> = HashMap::from_iter(all_agro);
-
-                        let total_agro = all_agro.values().sum();
-                        let damage_report_text = separate_number(total_agro, Some(locale));
-                        let damage_report_hover_text =
-                            RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0));
-
-                        (
-                            Some(total_agro),
-                            Some(damage_report_text),
-                            Some(damage_report_hover_text),
-                            Some(PotentialDamage {
-                                artillery: all_agro.get("agro_art").copied().unwrap_or_default(),
-                                torpedoes: all_agro.get("agro_tpd").copied().unwrap_or_default(),
-                                planes: all_agro.get("agro_air").copied().unwrap_or_default(),
-                            }),
-                        )
-                    })
-                    .unwrap_or_else(|| {
-                        // Fallback: for self player, build potential from battle controller data
-                        if player.relation().is_self() {
-                            build_damage_stat_fallback(report.self_damage_stats(), DamageStatCategory::Agro, locale)
-                        } else {
-                            Default::default()
-                        }
-                    });
-
-            let (time_lived, time_lived_text) = vehicle
-                .and_then(|v| v.death_info())
-                .map(|death_info| {
-                    let secs = death_info.time_lived().as_secs();
-                    (Some(secs), Some(format!("{}:{:02}", secs / 60, secs % 60)))
-                })
-                .unwrap_or_default();
-
-            let species = vehicle_param.species().and_then(|r| r.known()).cloned().expect("ship has no species?");
-            let (skill_points, num_skills, highest_tier, num_tier_1_skills) = vehicle
-                .and_then(|v| v.commander_skills(species))
-                .map(|skills| {
-                    let points = skills
-                        .iter()
-                        .fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species).get() as usize);
-                    let highest_tier =
-                        skills.iter().map(|skill| skill.tier().get_for_species(species).get() as usize).max();
-                    let num_tier_1_skills = skills.iter().fold(0, |mut accum, skill| {
-                        if skill.tier().get_for_species(species).get() as usize == 1 {
-                            accum += 1;
-                        }
-                        accum
-                    });
-
-                    (points, skills.len(), highest_tier.unwrap_or(0), num_tier_1_skills)
-                })
-                .unwrap_or((0, 0, 0, 0));
-
-            let (label, hover_text) = util::colorize_captain_points(
-                skill_points,
-                num_skills,
-                highest_tier,
-                num_tier_1_skills,
-                vehicle.and_then(|v| v.commander_skills(species)),
-            );
-
-            let skill_info =
-                SkillInfo { skill_points, num_skills, highest_tier, num_tier_1_skills, hover_text, label_text: label };
-
-            let (damage_interactions, fires, floods, cits, crits) = player_results
-                .and_then(|pr| pr.get("interactions")?.as_object())
-                .map(|interactions| {
-                    let mut damage_interactions = HashMap::new();
-                    let mut fires = 0u64;
-                    let mut floods = 0u64;
-                    let mut cits = 0u64;
-                    let mut crits = 0u64;
-
-                    for (victim, victim_data) in interactions {
-                        let victim_id = AccountId(victim.parse::<i64>().unwrap_or_default());
-
-                        fires += victim_data.get("fires").and_then(|v| v.as_u64()).unwrap_or(0);
-                        floods += victim_data.get("floods").and_then(|v| v.as_u64()).unwrap_or(0);
-                        cits += victim_data.get("citadels").and_then(|v| v.as_u64()).unwrap_or(0);
-                        crits += victim_data.get("crits").and_then(|v| v.as_u64()).unwrap_or(0);
-
-                        let mut damage_interaction = DamageInteraction::default();
-
-                        let longest_width = DAMAGE_DESCRIPTIONS
-                            .iter()
-                            .filter(|(key, _)| victim_data.get(*key).and_then(|v| v.as_u64()).is_some_and(|n| n > 0))
-                            .map(|(_, desc)| desc.len())
-                            .max()
-                            .unwrap_or_default()
-                            + 1;
-
-                        let mut per_type = Vec::new();
-                        let (all_damage, breakdowns): (u64, Vec<String>) = DAMAGE_DESCRIPTIONS.iter().fold(
-                            (0u64, Vec::new()),
-                            |(sum, mut lines), (key, description)| {
-                                let num = victim_data.get(*key).and_then(|v| v.as_u64()).unwrap_or(0);
-                                if num > 0 {
-                                    per_type.push((key.to_string(), num));
-                                    let num_str = separate_number(num, Some(locale));
-                                    lines.push(format!("{description:<longest_width$}: {num_str}"));
-                                }
-                                (sum + num, lines)
-                            },
-                        );
-
-                        damage_interaction.damage_dealt = all_damage;
-                        if damage_interaction.damage_dealt > 0 {
-                            damage_interaction.damage_dealt_text =
-                                separate_number(damage_interaction.damage_dealt, Some(locale));
-                            damage_interaction.damage_dealt_hover_text = breakdowns.join("\n");
-
-                            if let Some(total_damage) = damage {
-                                damage_interaction.damage_dealt_percentage =
-                                    (all_damage as f64 / total_damage as f64) * 100.0;
-                                damage_interaction.damage_dealt_percentage_text =
-                                    format!("{:.0}%", damage_interaction.damage_dealt_percentage);
-                            }
-                        }
-
-                        damage_interactions.insert(victim_id, damage_interaction);
-                    }
-
-                    (Some(damage_interactions), Some(fires), Some(floods), Some(cits), Some(crits))
-                })
-                .unwrap_or_default();
-
-            let distance_traveled = player_results.and_then(|pr| pr.get("distance")?.as_f64());
-
-            let kills = player_results.and_then(|pr| pr.get("ships_killed")?.as_i64());
-            let observed_kills = vehicle.map(|v| v.frags().len() as i64).unwrap_or(0);
-
-            let is_test_ship = vehicle_param
-                .data()
-                .vehicle_ref()
-                .map(|vehicle| vehicle.group().starts_with("demo"))
-                .unwrap_or_default();
-
-            let achievements = player_results
-                .and_then(|pr| pr.get("achievements")?.as_array())
-                .map(|achievements_array| {
-                    achievements_array
-                        .iter()
-                        .filter_map(|achievement_info| {
-                            // Each entry is expected to be `[id, count]`, but some result
-                            // formats (e.g. older clients) carry empty or short arrays --
-                            // index defensively so a malformed entry is skipped, not panicked on.
-                            let achievement_info = achievement_info.as_array()?;
-                            let achievement_id = achievement_info.first()?.as_u64()?;
-                            let achievement_count = achievement_info.get(1)?.as_u64()?;
-
-                            // Look this achievement up from game params
-                            let game_param = <GameMetadataProvider as GameParamProvider>::game_param_by_id(
-                                metadata_provider,
-                                (achievement_id as u32).into(),
-                            )?;
-
-                            let ParamData::Achievement(achievement_data) = game_param.data() else {
-                                return None;
-                            };
-
-                            let ui_name = achievement_data.ui_name().to_string();
-                            let achievement_name = wowsunpack::game_params::translations::translate_achievement_name(
-                                &ui_name,
-                                metadata_provider.as_ref(),
-                            )?;
-
-                            let achievement_description =
-                                wowsunpack::game_params::translations::translate_achievement_description(
-                                    &ui_name,
-                                    metadata_provider.as_ref(),
-                                )?;
-
-                            Some(Achievement {
-                                game_param,
-                                display_name: achievement_name,
-                                description: achievement_description,
-                                icon_key: ui_name,
-                                count: achievement_count as usize,
-                            })
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-
-            // Extract ribbons from resolved player results
-            // Ribbon keys start with RIBBON_ in the resolved object
-            let ribbons = player_results
-                .and_then(|pr| pr.as_object())
-                .map(|pr_obj| {
-                    let mut ribbons = HashMap::new();
-
-                    for (key, value) in pr_obj {
-                        if !key.starts_with("RIBBON_") {
-                            continue;
-                        }
-
-                        let count = value.as_u64().unwrap_or(0);
-                        if count == 0 {
-                            continue;
-                        }
-
-                        // Look up the display name and description via shared translation helper.
-                        let Some(ribbon_translation) =
-                            wowsunpack::game_params::translations::translate_ribbon(key, metadata_provider.as_ref())
-                        else {
-                            continue;
-                        };
-
-                        let display_name = ribbon_translation.display_name;
-                        let is_subribbon = ribbon_translation.is_subribbon;
-                        let description = ribbon_translation.description;
-                        let icon_key = ribbon_translation.icon_key;
-
-                        ribbons.insert(
-                            key.to_string(),
-                            models::Ribbon {
-                                name: key.to_string(),
-                                display_name,
-                                description,
-                                icon_key,
-                                is_subribbon,
-                                count,
-                            },
-                        );
-                    }
-
-                    ribbons
-                })
-                .unwrap_or_default();
-
-            let (consumables, heal_count) = resolve_player_consumables(
-                player,
-                metadata_provider.as_ref(),
-                report.version(),
-                report.active_consumables().get(&player_state.entity_id()).map(Vec::as_slice).unwrap_or(&[]),
-            );
-
-            PlayerReport {
-                player: Arc::clone(player),
-                color: player_color,
-                name_text,
-                clan_text,
-                icon,
-                division_label: div_text,
-                base_xp,
-                base_xp_text,
-                raw_xp,
-                raw_xp_text,
-                observed_damage,
-                observed_damage_text,
-                actual_damage: damage,
-                actual_damage_report: damage_report,
-                actual_damage_text: damage_text,
-                actual_damage_hover_text: damage_hover_text,
-                ship_name,
-                spotting_damage,
-                spotting_damage_text,
-                spotting_damage_hover_text,
-                potential_damage,
-                potential_damage_hover_text,
-                potential_damage_report,
-                time_lived_secs: time_lived,
-                time_lived_text,
-                skill_info,
-                potential_damage_text,
-                ship_species_text,
-                received_damage,
-                received_damage_text,
-                received_damage_hover_text,
-                fires,
-                floods,
-                citadels: cits,
-                crits,
-                distance_traveled,
-                is_test_ship,
-                relation: player.relation(),
-                manual_stat_hide_toggle: false,
-                received_damage_report,
-                kills,
-                observed_kills,
-                translated_build: TranslatedBuild::new(player, metadata_provider, &report.version()),
-                hits,
-                hits_report,
-                hits_text,
-                hits_hover_text,
-                damage_interactions,
-                achievements,
-                ribbons,
-                consumables,
-                heal_count,
-                personal_rating: None,
-                has_vehicle_entity: vehicle.is_some(),
-            }
-        });
-
-        let mut player_reports: Vec<PlayerReport> = player_reports.collect();
-        let mut all_received_damages: HashMap<AccountId, HashMap<AccountId, (u64, String, String)>> = HashMap::new();
-
-        // For each player, scan ALL other players to find anyone who dealt damage
-        // to this player. The old logic only checked mutual combatants (players
-        // this player also damaged), missing one-directional attackers.
-        for report in &player_reports {
-            let this_id = report.player().initial_state().db_id();
-
-            for attacker in &player_reports {
-                let attacker_id = attacker.player().initial_state().db_id();
-                if attacker_id == this_id {
-                    continue;
-                }
-
-                let Some(attacker_interactions) = attacker.damage_interactions.as_ref() else {
-                    continue;
-                };
-                let Some(interaction) = attacker_interactions.get(&this_id) else {
-                    continue;
-                };
-                if interaction.damage_dealt == 0 {
-                    continue;
-                }
-
-                all_received_damages.entry(this_id).or_default().insert(
-                    attacker_id,
-                    (
-                        interaction.damage_dealt,
-                        interaction.damage_dealt_text.clone(),
-                        interaction.damage_dealt_hover_text.clone(),
-                    ),
-                );
-            }
-        }
-
-        for report in &mut player_reports {
-            let this_player = report.player();
-            let this_player_state = this_player.initial_state();
-
-            let Some(this_player_received_damages) = all_received_damages.remove(&this_player_state.db_id()) else {
-                continue;
-            };
-
-            let Some(interaction_report) = report.damage_interactions.as_mut() else {
-                continue;
-            };
-
-            // Sum from per-interaction attacker data so all damage types (including
-            // depth charges) are consistently counted in both numerator and denominator.
-            let total_received_damage: u64 = this_player_received_damages.values().map(|(dmg, _, _)| *dmg).sum();
-
-            for (interacted_player_id, (received_damage, received_damage_text, received_damage_hover_text)) in
-                this_player_received_damages
-            {
-                let interacted_player = interaction_report.entry(interacted_player_id).or_default();
-                interacted_player.damage_received = received_damage;
-                interacted_player.damage_received_text = received_damage_text;
-                interacted_player.damage_received_hover_text = received_damage_hover_text;
-
-                if total_received_damage > 0 {
-                    interacted_player.damage_received_percentage =
-                        (received_damage as f64 / total_received_damage as f64) * 100.0;
-                    interacted_player.damage_received_percentage_text =
-                        format!("{:.0}%", interacted_player.damage_received_percentage);
-                }
-            }
-        }
-
-        // Third pass: compute inverse percentages using the other player's totals.
-        // dealt_inverse = damage_dealt / victim's total received damage
-        // received_inverse = damage_received / attacker's total dealt damage
-        {
-            // Collect totals first to avoid borrow issues.
-            // For received damage, sum per-interaction values so all damage types
-            // (including depth charges) are counted consistently.
-            let totals: HashMap<AccountId, (u64, u64)> = player_reports
-                .iter()
-                .map(|r| {
-                    let id = r.player().initial_state().db_id();
-                    let dealt = r.actual_damage().unwrap_or_default();
-                    let received: u64 = r
-                        .damage_interactions
-                        .as_ref()
-                        .map(|interactions| interactions.values().map(|i| i.damage_received).sum())
-                        .unwrap_or_default();
-                    (id, (dealt, received))
-                })
-                .collect();
-
-            for report in &mut player_reports {
-                let Some(interactions) = report.damage_interactions.as_mut() else {
-                    continue;
-                };
-
-                for (other_id, interaction) in interactions.iter_mut() {
-                    let Some(&(other_dealt, other_received)) = totals.get(other_id) else {
-                        continue;
-                    };
-
-                    if other_received > 0 && interaction.damage_dealt > 0 {
-                        interaction.damage_dealt_inverse_percentage =
-                            (interaction.damage_dealt as f64 / other_received as f64) * 100.0;
-                        interaction.damage_dealt_inverse_percentage_text =
-                            format!("{:.0}%", interaction.damage_dealt_inverse_percentage);
-                    }
-
-                    if other_dealt > 0 && interaction.damage_received > 0 {
-                        interaction.damage_received_inverse_percentage =
-                            (interaction.damage_received as f64 / other_dealt as f64) * 100.0;
-                        interaction.damage_received_inverse_percentage_text =
-                            format!("{:.0}%", interaction.damage_received_inverse_percentage);
-                    }
-                }
-            }
-        }
-
+        // Single source of truth for per-player numbers: the egui-free normalized
+        // report. PlayerReport below is presentation rebuilt over these values.
         let normalized = wows_replay_insights::battle_report::NormalizedBattleReport::from_battle_report(
             report,
             &replay_file.meta,
             metadata_provider,
             &constants_inner,
         );
+
+        // Entity lookup for the presentation-only reads that stay entity-sourced
+        // (class icon, species text, clan color, commander skills for the hover).
+        let entity_by_id: HashMap<AccountId, &Arc<Player>> =
+            players.iter().map(|player| (player.initial_state().db_id(), player)).collect();
+
+        let self_normalized = normalized.players.iter().find(|np| np.is_self);
+        let self_division_id = self_normalized.and_then(|np| np.division_id);
+        let self_db_id = self_normalized.map(|np| np.db_id);
+
+        let player_reports: Vec<PlayerReport> = normalized
+            .players
+            .iter()
+            .filter_map(|np| {
+                let player = entity_by_id.get(&np.db_id).copied()?;
+                let vehicle = player.vehicle_entity();
+                let vehicle_param = player.vehicle();
+                let server = np.server_results.as_ref();
+
+                let mut player_color = player_color_for_team_relation(np.relation);
+                if let (Some(self_div), Some(self_id)) = (self_division_id, self_db_id)
+                    && self_id != np.db_id
+                    && np.division_id == Some(self_div)
+                {
+                    player_color = Color32::GOLD;
+                }
+                let name_color = if np.is_abuser {
+                    Color32::from_rgb(0xFF, 0xC0, 0xCB) // pink
+                } else {
+                    player_color
+                };
+
+                let known_species = vehicle_param.species().and_then(|r| r.known().cloned());
+                let ship_species_text: String = known_species
+                    .as_ref()
+                    .and_then(|species| {
+                        metadata_provider
+                            .localized_name_from_id(&TranslationKey::new(species.translation_id()))
+                            .or_else(|| Some(species.name().to_string()))
+                    })
+                    .unwrap_or_default();
+                let icon = known_species.as_ref().and_then(|species| {
+                    ship_class_icon_from_species(*species, &wows_data_inner)
+                        .or_else(|| fallback_ship_icons.get(species).cloned())
+                });
+
+                let clan_text = if !np.clan.is_empty() {
+                    Some(RichText::new(format!("[{}]", np.clan)).color(clan_color_for_player(player).unwrap()))
+                } else {
+                    None
+                };
+                let name_text = RichText::new(&np.display_name).color(name_color);
+
+                let (base_xp, base_xp_text) = match server.and_then(|sr| sr.xp) {
+                    Some(base_xp) => {
+                        (Some(base_xp), Some(RichText::new(separate_number(base_xp, Some(locale))).color(player_color)))
+                    }
+                    None => (None, None),
+                };
+
+                let (raw_xp, raw_xp_text) = match server.and_then(|sr| sr.raw_xp) {
+                    Some(raw_xp) => (Some(raw_xp), Some(separate_number(raw_xp, Some(locale)))),
+                    None => (None, None),
+                };
+
+                let observed_damage = np.observed_results.damage;
+                let observed_damage_text = separate_number(observed_damage, Some(locale));
+
+                let (actual_damage, actual_damage_report, actual_damage_text, actual_damage_hover_text) = match server {
+                    Some(sr) if sr.damage.is_some() => {
+                        let damage_number = sr.damage.expect("damage present");
+                        let text = RichText::new(separate_number(damage_number, Some(locale))).color(player_color);
+                        let hover = RichText::new(breakdown_hover_string(&DAMAGE_DESCRIPTIONS, locale, |key| {
+                            sr.damage_by_type.get(key).copied().unwrap_or(0)
+                        }))
+                        .font(FontId::monospace(12.0));
+                        (Some(damage_number), Some(sr.damage_details.clone()), Some(text), Some(hover))
+                    }
+                    _ => (None, None, None, None),
+                };
+
+                let (hits, hits_report, hits_text, hits_hover_text) = match server {
+                    Some(sr) => {
+                        let hits_number = sr.hits.unwrap_or(0);
+                        let text = RichText::new(separate_number(hits_number, Some(locale))).color(player_color);
+                        let hover = RichText::new(breakdown_hover_string(&HITS_DESCRIPTIONS, locale, |key| {
+                            sr.hits_by_type.get(key).copied().unwrap_or(0)
+                        }))
+                        .font(FontId::monospace(12.0));
+                        (sr.hits, Some(sr.hits_details.clone()), Some(text), Some(hover))
+                    }
+                    None => (None, None, None, None),
+                };
+
+                let (received_damage, received_damage_text, received_damage_hover_text, received_damage_report) =
+                    match server {
+                        Some(sr) => {
+                            let total = sr.received_damage;
+                            let text = RichText::new(separate_number(total, Some(locale))).color(player_color);
+                            let hover =
+                                RichText::new(breakdown_hover_string(&RECEIVED_DAMAGE_DESCRIPTIONS, locale, |key| {
+                                    sr.received_damage_by_type.get(key).copied().unwrap_or(0)
+                                }))
+                                .font(FontId::monospace(12.0));
+                            (Some(total), Some(text), Some(hover), Some(sr.received_damage_details.clone()))
+                        }
+                        None => (None, None, None, None),
+                    };
+
+                // Spotting: prefer server scouting_damage, fall back to the self
+                // player's controller total. Hover is always the controller breakdown.
+                let (spotting_damage, spotting_damage_text, spotting_damage_hover_text) = if let Some(damage_number) =
+                    server.and_then(|sr| sr.spotting_damage)
+                {
+                    let hover = if np.is_self {
+                        build_damage_stat_hover_text(report.self_damage_stats(), DamageStatCategory::Spot, locale)
+                    } else {
+                        None
+                    };
+                    (Some(damage_number), Some(separate_number(damage_number, Some(locale))), hover)
+                } else if np.is_self {
+                    match np.controller_spotting_damage {
+                        Some(total) => (
+                            Some(total),
+                            Some(separate_number(total, Some(locale))),
+                            build_damage_stat_hover_text(report.self_damage_stats(), DamageStatCategory::Spot, locale),
+                        ),
+                        None => (None, None, None),
+                    }
+                } else {
+                    (None, None, None)
+                };
+
+                let (potential_damage, potential_damage_text, potential_damage_hover_text, potential_damage_report) =
+                    match server {
+                        Some(sr) => {
+                            let total = sr.potential_damage;
+                            let art = sr.potential_damage_details.artillery;
+                            let tpd = sr.potential_damage_details.torpedoes;
+                            let air = sr.potential_damage_details.planes;
+                            // Depth-charge agro is the only potential key the 3-field
+                            // report drops; recover it from the total so the hover keeps
+                            // its line (total == art + tpd + air + dbomb by construction).
+                            let dbomb = total.saturating_sub(art + tpd + air);
+                            let hover =
+                                RichText::new(breakdown_hover_string(&POTENTIAL_DAMAGE_DESCRIPTIONS, locale, |key| {
+                                    match key {
+                                        "agro_art" => art,
+                                        "agro_tpd" => tpd,
+                                        "agro_air" => air,
+                                        "agro_dbomb" => dbomb,
+                                        _ => 0,
+                                    }
+                                }))
+                                .font(FontId::monospace(12.0));
+                            (
+                                Some(total),
+                                Some(separate_number(total, Some(locale))),
+                                Some(hover),
+                                Some(sr.potential_damage_details.clone()),
+                            )
+                        }
+                        None => {
+                            if np.is_self {
+                                match np.controller_potential_damage {
+                                    Some(total) => (
+                                        Some(total),
+                                        Some(separate_number(total, Some(locale))),
+                                        build_damage_stat_hover_text(
+                                            report.self_damage_stats(),
+                                            DamageStatCategory::Agro,
+                                            locale,
+                                        ),
+                                        None,
+                                    ),
+                                    None => (None, None, None, None),
+                                }
+                            } else {
+                                (None, None, None, None)
+                            }
+                        }
+                    };
+
+                let time_lived_secs = np.time_lived_secs;
+                let time_lived_text = time_lived_secs.map(|secs| format!("{}:{:02}", secs / 60, secs % 60));
+
+                // Skill counts come from the normalized report; the colored label and
+                // hover still need the entity's commander-skill list.
+                let species = vehicle_param.species().and_then(|r| r.known()).cloned().expect("ship has no species?");
+                let (label_text, hover_text) = util::colorize_captain_points(
+                    np.skill_info.skill_points,
+                    np.skill_info.num_skills,
+                    np.skill_info.highest_tier,
+                    np.skill_info.num_tier_1_skills,
+                    vehicle.and_then(|v| v.commander_skills(species)),
+                );
+                let skill_info = SkillInfo {
+                    skill_points: np.skill_info.skill_points,
+                    num_skills: np.skill_info.num_skills,
+                    highest_tier: np.skill_info.highest_tier,
+                    num_tier_1_skills: np.skill_info.num_tier_1_skills,
+                    hover_text,
+                    label_text,
+                };
+
+                // `fires_dealt` is `Some` exactly when the resolved object carried an
+                // interactions map, matching the old `interactions`-key gate.
+                let (damage_interactions, fires, floods, citadels, crits) = match server {
+                    Some(sr) if sr.fires_dealt.is_some() => {
+                        let interactions: HashMap<AccountId, DamageInteraction> = sr
+                            .damage_interactions
+                            .iter()
+                            .map(|(id, interaction)| (*id, damage_interaction_from_normalized(interaction, locale)))
+                            .collect();
+                        (Some(interactions), sr.fires_dealt, sr.floods_dealt, sr.citadels_dealt, sr.crits_dealt)
+                    }
+                    _ => (None, None, None, None, None),
+                };
+
+                let distance_traveled = server.and_then(|sr| sr.distance_traveled);
+                let kills = server.and_then(|sr| sr.kills);
+
+                let achievements: Vec<Achievement> = np
+                    .achievements
+                    .iter()
+                    .filter_map(|achievement| {
+                        let game_param = <GameMetadataProvider as GameParamProvider>::game_param_by_name(
+                            metadata_provider,
+                            &achievement.name,
+                        )?;
+                        Some(Achievement {
+                            game_param,
+                            display_name: achievement.display_name.clone(),
+                            description: achievement.description.clone(),
+                            icon_key: achievement.icon_key.clone(),
+                            count: achievement.count,
+                        })
+                    })
+                    .collect();
+
+                let ribbons: HashMap<String, models::Ribbon> = np
+                    .ribbons
+                    .iter()
+                    .map(|ribbon| {
+                        (
+                            ribbon.name.clone(),
+                            models::Ribbon {
+                                name: ribbon.name.clone(),
+                                display_name: ribbon.display_name.clone(),
+                                description: ribbon.description.clone(),
+                                icon_key: ribbon.icon_key.clone(),
+                                is_subribbon: ribbon.is_subribbon,
+                                count: ribbon.count,
+                            },
+                        )
+                    })
+                    .collect();
+
+                let consumables: Vec<models::PlayerConsumable> = np
+                    .consumables
+                    .iter()
+                    .map(|consumable| models::PlayerConsumable {
+                        display_name: consumable.display_name.clone(),
+                        description: consumable.description.clone(),
+                        icon_key: consumable.icon_key.clone(),
+                        charges_used: consumable.charges_used,
+                        total_charges: consumable.total_charges,
+                    })
+                    .collect();
+
+                Some(PlayerReport {
+                    player: Arc::clone(player),
+                    color: player_color,
+                    name_text,
+                    clan_text,
+                    icon,
+                    division_label: np.division_label.clone(),
+                    base_xp,
+                    base_xp_text,
+                    raw_xp,
+                    raw_xp_text,
+                    observed_damage,
+                    observed_damage_text,
+                    actual_damage,
+                    actual_damage_report,
+                    actual_damage_text,
+                    actual_damage_hover_text,
+                    ship_name: np.ship_name.clone(),
+                    spotting_damage,
+                    spotting_damage_text,
+                    spotting_damage_hover_text,
+                    potential_damage,
+                    potential_damage_hover_text,
+                    potential_damage_report,
+                    time_lived_secs,
+                    time_lived_text,
+                    skill_info,
+                    potential_damage_text,
+                    ship_species_text,
+                    received_damage,
+                    received_damage_text,
+                    received_damage_hover_text,
+                    fires,
+                    floods,
+                    citadels,
+                    crits,
+                    distance_traveled,
+                    is_test_ship: np.is_test_ship,
+                    relation: np.relation,
+                    manual_stat_hide_toggle: false,
+                    received_damage_report,
+                    kills,
+                    observed_kills: np.observed_results.kills,
+                    translated_build: np.build.clone(),
+                    hits,
+                    hits_report,
+                    hits_text,
+                    hits_hover_text,
+                    damage_interactions,
+                    achievements,
+                    ribbons,
+                    consumables,
+                    heal_count: np.heal_count,
+                    personal_rating: None,
+                    has_vehicle_entity: vehicle.is_some(),
+                })
+            })
+            .collect();
 
         drop(constants_inner);
         drop(wows_data_inner);
@@ -5269,6 +4803,68 @@ impl egui_dock::TabViewer for ReplayTabViewer<'_> {
     }
 }
 
+/// Rebuilds a monospace breakdown block ("Label   : 1,234") from a per-type
+/// value lookup, in `descriptions` order, skipping zero entries. `get` reads the
+/// value for a key; the column width matches the widest present label + 1,
+/// reproducing the original inline hover formatting exactly.
+fn breakdown_hover_string<F: Fn(&str) -> u64>(descriptions: &[(&str, &str)], locale: &str, get: F) -> String {
+    let longest_width =
+        descriptions.iter().filter(|(key, _)| get(key) > 0).map(|(_, desc)| desc.len()).max().unwrap_or_default() + 1;
+    descriptions
+        .iter()
+        .filter_map(|(key, description)| {
+            let num = get(key);
+            if num > 0 {
+                let num_str = separate_number(num, Some(locale));
+                Some(format!("{description:<longest_width$}: {num_str}"))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Presentation view of a normalized per-victim interaction: the numeric fields
+/// are copied verbatim and the text/hover fields are formatted from them, gated
+/// on `> 0` exactly as the original inline extraction did.
+fn damage_interaction_from_normalized(
+    interaction: &wows_replay_insights::battle_report::DamageInteraction,
+    locale: &str,
+) -> DamageInteraction {
+    let mut out = DamageInteraction { damage_dealt: interaction.damage_dealt, ..Default::default() };
+    if interaction.damage_dealt > 0 {
+        out.damage_dealt_text = separate_number(interaction.damage_dealt, Some(locale));
+        out.damage_dealt_hover_text = breakdown_hover_string(&DAMAGE_DESCRIPTIONS, locale, |key| {
+            interaction.damage_dealt_by_type_full.get(key).copied().unwrap_or(0)
+        });
+    }
+    out.damage_dealt_percentage = interaction.damage_dealt_percentage;
+    if interaction.damage_dealt_percentage > 0.0 {
+        out.damage_dealt_percentage_text = format!("{:.0}%", interaction.damage_dealt_percentage);
+    }
+    out.damage_dealt_inverse_percentage = interaction.damage_dealt_inverse_percentage;
+    if interaction.damage_dealt_inverse_percentage > 0.0 {
+        out.damage_dealt_inverse_percentage_text = format!("{:.0}%", interaction.damage_dealt_inverse_percentage);
+    }
+    out.damage_received = interaction.damage_received;
+    if interaction.damage_received > 0 {
+        out.damage_received_text = separate_number(interaction.damage_received, Some(locale));
+        out.damage_received_hover_text = breakdown_hover_string(&DAMAGE_DESCRIPTIONS, locale, |key| {
+            interaction.damage_received_by_type_full.get(key).copied().unwrap_or(0)
+        });
+    }
+    out.damage_received_percentage = interaction.damage_received_percentage;
+    if interaction.damage_received_percentage > 0.0 {
+        out.damage_received_percentage_text = format!("{:.0}%", interaction.damage_received_percentage);
+    }
+    out.damage_received_inverse_percentage = interaction.damage_received_inverse_percentage;
+    if interaction.damage_received_inverse_percentage > 0.0 {
+        out.damage_received_inverse_percentage_text = format!("{:.0}%", interaction.damage_received_inverse_percentage);
+    }
+    out
+}
+
 /// Groups `DamageStatEntry` items by weapon for a given category, returning hover text.
 fn build_damage_stat_hover_text(
     stats: &[wows_replays::analyzer::decoder::DamageStatEntry],
@@ -5299,37 +4895,6 @@ fn build_damage_stat_hover_text(
         })
         .collect();
     Some(RichText::new(lines.join("\n")).font(FontId::monospace(12.0)))
-}
-
-/// Builds total + text + hover text from controller data for a damage stat category.
-/// Used as fallback when battle results are unavailable.
-fn build_damage_stat_total(
-    stats: &[wows_replays::analyzer::decoder::DamageStatEntry],
-    category: DamageStatCategory,
-    locale: &str,
-) -> (Option<u64>, Option<String>, Option<RichText>) {
-    let mut total = 0.0f64;
-    for entry in stats {
-        if entry.category == Recognized::Known(category) {
-            total += entry.total;
-        }
-    }
-    if total > 0.0 {
-        let hover = build_damage_stat_hover_text(stats, category, locale);
-        (Some(total as u64), Some(separate_number(total as u64, Some(locale))), hover)
-    } else {
-        (None, None, None)
-    }
-}
-
-/// Builds a full potential damage fallback tuple from controller data.
-fn build_damage_stat_fallback(
-    stats: &[wows_replays::analyzer::decoder::DamageStatEntry],
-    category: DamageStatCategory,
-    locale: &str,
-) -> (Option<u64>, Option<String>, Option<RichText>, Option<PotentialDamage>) {
-    let (total, text, hover) = build_damage_stat_total(stats, category, locale);
-    (total, text, hover, None)
 }
 
 /// Renders chat messages into a `Ui`. Used by both the inline chat view and the chat window.

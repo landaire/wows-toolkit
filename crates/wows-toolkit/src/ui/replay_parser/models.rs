@@ -36,41 +36,11 @@ pub struct SkillInfo {
     pub label_text: RichText,
 }
 
-/// Damage breakdown by type.
-#[derive(Clone, Serialize)]
-pub struct Damage {
-    pub ap: Option<u64>,
-    pub sap: Option<u64>,
-    pub he: Option<u64>,
-    pub he_secondaries: Option<u64>,
-    pub sap_secondaries: Option<u64>,
-    pub torps: Option<u64>,
-    pub deep_water_torps: Option<u64>,
-    pub fire: Option<u64>,
-    pub flooding: Option<u64>,
-}
-
-/// Hit counts by weapon type.
-#[derive(Clone, Serialize)]
-pub struct Hits {
-    pub ap: Option<u64>,
-    pub sap: Option<u64>,
-    pub he: Option<u64>,
-    pub he_secondaries: Option<u64>,
-    pub sap_secondaries: Option<u64>,
-    pub ap_secondaries_manual: Option<u64>,
-    pub he_secondaries_manual: Option<u64>,
-    pub sap_secondaries_manual: Option<u64>,
-    pub torps: Option<u64>,
-}
-
-/// Potential damage breakdown by source type.
-#[derive(Clone, Serialize)]
-pub struct PotentialDamage {
-    pub artillery: u64,
-    pub torpedoes: u64,
-    pub planes: u64,
-}
+// Per-type damage/hit/potential breakdowns are field-identical to the insights
+// numeric model; re-exported so the export and UI share one definition.
+pub use wows_replay_insights::battle_report::Damage;
+pub use wows_replay_insights::battle_report::Hits;
+pub use wows_replay_insights::battle_report::PotentialDamage;
 
 /// Damage interaction between two players.
 #[derive(Debug, Default)]
