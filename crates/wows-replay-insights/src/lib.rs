@@ -7,6 +7,9 @@
 #[cfg(feature = "battle-report")]
 pub mod battle_report;
 
+#[cfg(feature = "battle-report")]
+pub mod personal_rating;
+
 #[cfg(feature = "build")]
 pub mod build;
 
