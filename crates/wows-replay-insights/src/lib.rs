@@ -4,6 +4,9 @@
 //! the desktop app, the headless minimap renderer, the CLI, and external tools
 //! such as Discord bots.
 
+#[cfg(feature = "battle-report")]
+pub mod battle_report;
+
 #[cfg(feature = "build")]
 pub mod build;
 

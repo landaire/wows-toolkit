@@ -5,7 +5,8 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use wowsunpack::export::ship::{ShipAssets, ShipExportOptions};
+use wowsunpack::export::ship::ShipAssets;
+use wowsunpack::export::ship::ShipExportOptions;
 use wowsunpack::game_params::types::GameParamProvider;
 
 #[test]

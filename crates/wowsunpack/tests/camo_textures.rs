@@ -2,7 +2,8 @@
 
 use std::path::PathBuf;
 
-use wowsunpack::export::ship::{ShipAssets, ShipExportOptions};
+use wowsunpack::export::ship::ShipAssets;
+use wowsunpack::export::ship::ShipExportOptions;
 use wowsunpack::game_params::types::GameParamProvider;
 
 fn game_dir() -> PathBuf {

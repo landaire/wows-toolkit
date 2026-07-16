@@ -434,9 +434,9 @@ impl GroupedTreeMaps {
 
 /// Resolve raw battle results arrays into named JSON objects.
 ///
-/// Delegates to [`wowsunpack::battle_results::resolve_battle_results`].
+/// Delegates to [`wows_replay_insights::battle_report::resolve_battle_results`].
 fn resolve_battle_results(results: serde_json::Value, constants: &serde_json::Value) -> serde_json::Value {
-    wowsunpack::battle_results::resolve_battle_results(results, constants)
+    wows_replay_insights::battle_report::resolve_battle_results(results, constants)
 }
 
 /// Resolve a player's equipped consumables and tally activations against each

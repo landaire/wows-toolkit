@@ -4,9 +4,6 @@
 #[macro_use]
 mod variant_accessors;
 
-/// Utilities for resolving raw battle results arrays into named JSON objects.
-#[cfg(feature = "json")]
-pub mod battle_results;
 /// Per-version consumable id -> name tables recovered by static analysis of game scripts.
 #[cfg(feature = "parsing")]
 pub mod consumable_versions;

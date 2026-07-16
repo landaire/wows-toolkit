@@ -34,3 +34,8 @@ serde = ["dep:serde"]
 arc = ["wowsunpack/arc", "wows_replays/arc"]
 # wowssb URL helpers (long + short build URLs for app.wowssb.com).
 wowssb = ["build", "dep:serde_json", "dep:flate2", "dep:data-encoding"]
+# Egui-free normalized battle report + constants resolution. Pulls serde/serde_json
+# and enables serde on the crates whose newtypes appear in the report. wows_replays
+# has no `serde` feature (serde is a mandatory, non-optional dependency there), so
+# only wowsunpack needs the forward.
+battle-report = ["dep:serde_json", "serde", "wowsunpack/serde"]

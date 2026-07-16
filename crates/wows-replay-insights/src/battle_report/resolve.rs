@@ -36,18 +36,18 @@ use serde_json::Value;
 /// ```
 ///
 /// The `constants` argument must contain at least:
-/// - `/COMMON_RESULTS` — ordered field names for `commonList`
-/// - `/CLIENT_PUBLIC_RESULTS_INDICES` — `{ "field_name": index, ... }` for per-player arrays
-/// - `/CLIENT_VEH_INTERACTION_DETAILS` — ordered field names for per-victim interaction arrays
+/// - `/COMMON_RESULTS` - ordered field names for `commonList`
+/// - `/CLIENT_PUBLIC_RESULTS_INDICES` - `{ "field_name": index, ... }` for per-player arrays
+/// - `/CLIENT_VEH_INTERACTION_DETAILS` - ordered field names for per-victim interaction arrays
 pub fn resolve_battle_results(mut results: Value, constants: &Value) -> Value {
-    // Resolve commonList: array → object using COMMON_RESULTS names
+    // Resolve commonList: array -> object using COMMON_RESULTS names
     if let Some(common_names) = constants.pointer("/COMMON_RESULTS").and_then(|v| v.as_array())
         && let Some(common_arr) = results.get("commonList").and_then(|v| v.as_array())
     {
         results["commonList"] = Value::Object(resolve_array(common_names, common_arr));
     }
 
-    // Resolve each player in playersPublicInfo: array → object using CLIENT_PUBLIC_RESULTS_INDICES
+    // Resolve each player in playersPublicInfo: array -> object using CLIENT_PUBLIC_RESULTS_INDICES
     let indices = constants.pointer("/CLIENT_PUBLIC_RESULTS_INDICES").and_then(|v| v.as_object()).cloned();
     let interaction_fields = constants.pointer("/CLIENT_VEH_INTERACTION_DETAILS").and_then(|v| v.as_array()).cloned();
 
@@ -65,7 +65,7 @@ pub fn resolve_battle_results(mut results: Value, constants: &Value) -> Value {
                     }
                 }
 
-                // Resolve interactions: each victim's array → object
+                // Resolve interactions: each victim's array -> object
                 if let Some(fields) = interaction_fields.as_ref()
                     && let Some(interactions) = obj.get_mut("interactions").and_then(|v| v.as_object_mut())
                 {
@@ -96,4 +96,28 @@ fn resolve_array(names: &[Value], values: &[Value]) -> serde_json::Map<String, V
         }
     }
     map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn resolves_common_and_player_arrays() {
+        let constants = json!({
+            "COMMON_RESULTS": ["winner_team_id", "duration"],
+            "CLIENT_PUBLIC_RESULTS_INDICES": { "damage": 0, "interactions": 1 },
+            "CLIENT_VEH_INTERACTION_DETAILS": ["fires", "floods"]
+        });
+        let raw = json!({
+            "commonList": [1, 900],
+            "playersPublicInfo": { "42": [5000, { "7": [2, 1] }] }
+        });
+        let out = resolve_battle_results(raw, &constants);
+        assert_eq!(out["commonList"]["winner_team_id"], 1);
+        assert_eq!(out["playersPublicInfo"]["42"]["damage"], 5000);
+        assert_eq!(out["playersPublicInfo"]["42"]["interactions"]["7"]["fires"], 2);
+        assert_eq!(out["playersPublicInfo"]["42"]["interactions"]["7"]["floods"], 1);
+    }
 }
