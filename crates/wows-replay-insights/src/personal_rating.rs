@@ -41,7 +41,7 @@ impl ShipExpectedValuesEntry {
 }
 
 /// Personal Rating skill category
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 pub enum PersonalRatingCategory {
     Bad,
     BelowAverage,
@@ -84,7 +84,7 @@ impl PersonalRatingCategory {
 }
 
 /// Result of a PR calculation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct PersonalRatingResult {
     pub pr: f64,
     pub category: PersonalRatingCategory,

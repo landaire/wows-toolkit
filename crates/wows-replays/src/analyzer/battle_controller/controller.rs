@@ -380,7 +380,7 @@ impl std::str::FromStr for EntityType {
     }
 }
 
-#[derive(Copy, Clone, Serialize)]
+#[derive(Copy, Clone, Debug, Serialize)]
 #[serde(tag = "type", content = "team_id")]
 pub enum BattleResult {
     /// A win, and which team won (inferred to be the team of the player)

@@ -11170,6 +11170,7 @@ version = "0.11.0"
 dependencies = [
  "data-encoding",
  "flate2",
+ "jiff",
  "serde",
  "serde_json",
  "tracing",

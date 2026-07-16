@@ -15,6 +15,7 @@ wows-battle-world = { workspace = true, default-features = false }
 tracing = { workspace = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
+jiff = { workspace = true, features = ["serde"], optional = true }
 flate2 = { workspace = true, optional = true }
 data-encoding = { workspace = true, optional = true }
 
@@ -22,6 +23,7 @@ data-encoding = { workspace = true, optional = true }
 wows-data-mgr = { workspace = true }
 wows_replays = { workspace = true, features = ["vfs", "arc"] }
 wowsunpack = { workspace = true, features = ["arc", "vfs-mmap"] }
+serde_json = { workspace = true }
 
 [features]
 default = ["build", "arc"]
@@ -37,5 +39,6 @@ wowssb = ["build", "dep:serde_json", "dep:flate2", "dep:data-encoding"]
 # Egui-free normalized battle report + constants resolution. Pulls serde/serde_json
 # and enables serde on the crates whose newtypes appear in the report. wows_replays
 # has no `serde` feature (serde is a mandatory, non-optional dependency there), so
-# only wowsunpack needs the forward.
-battle-report = ["dep:serde_json", "serde", "wowsunpack/serde"]
+# only wowsunpack needs the forward. `build` powers consumable-slot resolution;
+# `jiff` carries the match timestamp.
+battle-report = ["dep:serde_json", "dep:jiff", "serde", "build", "wowsunpack/serde"]
