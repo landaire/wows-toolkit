@@ -17,6 +17,7 @@ use crate::tab_state::ChartableStat;
 use crate::tab_state::StatsSubTab;
 use crate::ui::session_stats_chart::render_bar_chart;
 use crate::ui::session_stats_chart::render_line_chart;
+use crate::util::personal_rating::PersonalRatingCategoryColor;
 use crate::util::separate_number;
 use rust_i18n::t;
 use std::cmp::Reverse;

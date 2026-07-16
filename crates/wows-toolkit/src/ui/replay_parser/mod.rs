@@ -111,6 +111,7 @@ use crate::util::build_ship_config_url;
 use crate::util::build_short_ship_config_url;
 use crate::util::build_wows_numbers_url;
 use crate::util::error::ToolkitError;
+use crate::util::personal_rating::PersonalRatingCategoryColor;
 use crate::util::player_color_for_team_relation;
 use crate::util::separate_number;
 
