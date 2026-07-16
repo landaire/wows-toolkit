@@ -629,9 +629,12 @@ fn build_player(
 /// Second pass: attribute each player's received damage from the per-victim
 /// interactions the attackers recorded, filling the received side and its
 /// per-type breakdown. Mirrors the two received-damage passes in `UiReport::new`.
+/// attacker db_id -> (damage dealt to victim, 9-field breakdown, full breakdown)
+type ReceivedByAttacker = HashMap<AccountId, (u64, Damage, BTreeMap<String, u64>)>;
+
 fn attribute_received_damage(players: &mut [NormalizedPlayer]) {
-    // victim db_id -> attacker db_id -> (damage dealt to victim, 9-field breakdown, full breakdown)
-    let mut all_received: HashMap<AccountId, HashMap<AccountId, (u64, Damage, BTreeMap<String, u64>)>> = HashMap::new();
+    // victim db_id -> received-by-attacker map
+    let mut all_received: HashMap<AccountId, ReceivedByAttacker> = HashMap::new();
 
     for this in players.iter() {
         let this_id = this.db_id;
