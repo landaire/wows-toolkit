@@ -18,8 +18,10 @@
 //! builder change, run with the game data present:
 //!   REGEN_GOLDENS=1 cargo test -p wows-replay-insights --features battle-report \
 //!     --test version_regression
-//! which overwrites `tests/fixtures/normalized/<build>.json` for every runnable
-//! entry without comparing. Commit the updated goldens.
+//! which overwrites `tests/fixtures/normalized/<version_label>.json` for every
+//! runnable entry without comparing. Commit the updated goldens. Goldens are
+//! keyed by `version_label`, not `build`, since more than one entry can share a
+//! build (a PvP entry and a co-op entry testing the same constants fixture).
 
 use std::path::PathBuf;
 
@@ -41,6 +43,12 @@ struct Entry {
     version_label: &'static str,
     replay_filename: &'static str,
     build: u32,
+    /// Co-op/operations entries battle BOTS. `db_id` is not guaranteed unique
+    /// across bots (the toolkit had a bug joining players by `db_id` instead
+    /// of positionally, which collapsed bots sharing `AccountId(0)`); this
+    /// gates the bot-specific structural assertions that guard the builder
+    /// against collapsing them.
+    expect_bots: bool,
 }
 
 const MATRIX: &[Entry] = &[
@@ -48,31 +56,43 @@ const MATRIX: &[Entry] = &[
         version_label: "13.11.0",
         replay_filename: "10000_1736020571_20250101_215420_PVSB018-Ipiranga_41_Conquest.wowsreplay",
         build: 9251401,
+        expect_bots: false,
     },
     Entry {
         version_label: "14.5.0",
         replay_filename: "1005_1751197418_20250629_132500_PHSC010-Utrecht_54_Faroe.wowsreplay",
         build: 10087791,
+        expect_bots: false,
     },
     Entry {
         version_label: "14.11.0",
         replay_filename: "10000_1767829698_20260107_182737_PJSB018-Yamato-1944_50_Gold_harbor.wowsreplay",
         build: 11189791,
+        expect_bots: false,
     },
     Entry {
         version_label: "15.1.0",
         replay_filename: "10000_1773241614_20260214_215653_PVSB719-Valparaiso_42_Neighbors.wowsreplay",
         build: 11965230,
+        expect_bots: false,
     },
     Entry {
         version_label: "15.4.0",
         replay_filename: "1003_1780609677_20260604_172336_PASD008-Benson-1945_52_Britain.wowsreplay",
         build: 12506899,
+        expect_bots: false,
     },
     Entry {
         version_label: "15.5.0",
         replay_filename: "1148_1782049673_20260619_175139_PRSB909-East-Navarin_44_Path_warrior.wowsreplay",
         build: 12668706,
+        expect_bots: false,
+    },
+    Entry {
+        version_label: "13.11.0-coop",
+        replay_filename: "1852_1736026132_20250104_225447_PRSD103-Derzky_04_Archipelago.wowsreplay",
+        build: 9251401,
+        expect_bots: true,
     },
 ];
 
@@ -182,6 +202,27 @@ fn assert_structural_invariants(entry: &Entry, report: &BattleReport, normalized
         });
         assert!(has_typed, "{ctx}: interactions present but no per-type damage breakdown");
     }
+
+    if entry.expect_bots {
+        let bot_entities = report.players().iter().filter(|p| p.initial_state().is_bot()).count();
+        assert!(bot_entities > 0, "{ctx}: expected bot entities in the underlying report");
+
+        // Every entity produces exactly one NormalizedPlayer (see
+        // `NormalizedBattleReport::from_battle_report`, a plain positional
+        // `.map()` over `report.players()`). Assert it holds for bots
+        // specifically, since bots commonly share `db_id == AccountId(0)` and a
+        // db_id-keyed join (rather than positional) would silently collapse them.
+        let bot_normalized = normalized.players.iter().filter(|p| p.is_bot).count();
+        assert_eq!(
+            bot_normalized, bot_entities,
+            "{ctx}: normalized bot player count must match bot entity count (builder must not collapse them)"
+        );
+        assert_eq!(
+            normalized.players.len(),
+            report.players().len(),
+            "{ctx}: normalized player count must match total entity count"
+        );
+    }
 }
 
 fn run_entry(entry: &Entry) {
@@ -198,20 +239,23 @@ fn run_entry(entry: &Entry) {
 
     let mut produced = serde_json::to_value(&normalized).expect("normalized report serializes");
     sort_players(&mut produced);
-    let golden_path = fixtures_dir().join("normalized").join(format!("{}.json", entry.build));
+    // Keyed by version_label, not build: a build can host more than one matrix
+    // entry (e.g. a PvP entry and a co-op entry sharing the same constants
+    // fixture), and version_label is unique across the matrix.
+    let golden_path = fixtures_dir().join("normalized").join(format!("{}.json", entry.version_label));
 
     if std::env::var_os("REGEN_GOLDENS").is_some() {
         std::fs::create_dir_all(golden_path.parent().unwrap()).unwrap();
         std::fs::write(&golden_path, serde_json::to_string_pretty(&produced).unwrap()).unwrap();
-        eprintln!("captured golden for build {} ({})", entry.build, entry.version_label);
+        eprintln!("captured golden for {} (build {})", entry.version_label, entry.build);
         return;
     }
 
     let golden_bytes = std::fs::read(&golden_path).unwrap_or_else(|_| {
         panic!(
-            "missing golden for build {} ({}); run REGEN_GOLDENS=1 cargo test -p wows-replay-insights \
+            "missing golden for {} (build {}); run REGEN_GOLDENS=1 cargo test -p wows-replay-insights \
              --features battle-report --test version_regression",
-            entry.build, entry.version_label
+            entry.version_label, entry.build
         )
     });
     let mut golden: serde_json::Value = serde_json::from_slice(&golden_bytes).expect("golden parses as JSON");
