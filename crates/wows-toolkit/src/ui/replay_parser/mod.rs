@@ -528,6 +528,10 @@ pub struct UiReport {
     merge_active: bool,
     battle_result: Option<BattleResult>,
     resolved_results: Option<serde_json::Value>,
+    /// Egui-free normalized report, built alongside the existing extraction.
+    /// Not yet consumed by rendering; landed here so the export/CLI work can
+    /// reach it before the presentation rebuild.
+    normalized: wows_replay_insights::battle_report::NormalizedBattleReport,
     /// Ribbon icons from the newest loaded build, used to fill gaps when this
     /// replay's own build ships none (Flash-era and older). See
     /// [`crate::data::wows_data::WoWsDataMap::newest_ribbon_icons`].
@@ -1311,11 +1315,19 @@ impl UiReport {
             }
         }
 
+        let normalized = wows_replay_insights::battle_report::NormalizedBattleReport::from_battle_report(
+            report,
+            &replay_file.meta,
+            metadata_provider,
+            &constants_inner,
+        );
+
         drop(constants_inner);
         drop(wows_data_inner);
 
         Self {
             match_timestamp,
+            normalized,
             version: report.version(),
             player_reports,
             self_player,
@@ -2605,6 +2617,10 @@ impl UiReport {
 
     pub fn battle_result(&self) -> Option<BattleResult> {
         self.battle_result
+    }
+
+    pub fn normalized(&self) -> &wows_replay_insights::battle_report::NormalizedBattleReport {
+        &self.normalized
     }
 
     /// Re-derive all translation-dependent display strings (ship names, species,
