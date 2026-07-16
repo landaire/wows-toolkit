@@ -9,7 +9,7 @@ game_mode: domination_3point
 game_type: Known(Random)
 match_group: pvp
 self_player: 1020639850
-battle_result: "{\"type\":\"Loss\",\"team_id\":1}"
+battle_result: "{\"type\":\"Loss\",\"team_id\":0}"
 finish_type: Known(Extermination)
 max_duration: 1200
 played_duration: 871.253

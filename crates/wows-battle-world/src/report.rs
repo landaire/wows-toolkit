@@ -332,7 +332,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
                 if team == self_team_id {
                     BattleResult::Win(team)
                 } else if team >= 0 {
-                    BattleResult::Loss(1)
+                    BattleResult::Loss(team)
                 } else {
                     BattleResult::Draw
                 }
