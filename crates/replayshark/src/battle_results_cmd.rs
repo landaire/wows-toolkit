@@ -82,6 +82,19 @@ pub enum ResultsFormat {
     Normalized,
 }
 
+type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
+
+/// Restores the previous panic hook on drop, including on early return via `?`.
+struct RestorePanicHook(Option<PanicHook>);
+
+impl Drop for RestorePanicHook {
+    fn drop(&mut self) {
+        if let Some(hook) = self.0.take() {
+            std::panic::set_hook(hook);
+        }
+    }
+}
+
 /// Run the `battle-results` command. Exits the process with a nonzero status
 /// if any replay in the batch failed, after writing every successful result.
 #[allow(clippy::too_many_arguments)]
@@ -98,6 +111,10 @@ pub fn run(
 ) -> anyhow::Result<()> {
     if out_dir.is_none() && out_file.is_none() {
         return Err(anyhow!("one of --out-dir or --out-file is required"));
+    }
+
+    if game_dir.is_none() && extracted_dir.is_none() {
+        return Err(anyhow!("one of -g/--game or -e/--extracted is required"));
     }
 
     let explicit_constants: Option<Value> = match constants_path {
@@ -129,6 +146,14 @@ pub fn run(
 
     let mut results: Vec<Result<(String, Value), (String, String)>> = Vec::new();
 
+    // Some replay inputs are expected to panic deep in the pipeline (e.g.
+    // pre-0.9 self-player resolution). Silence the default panic hook for the
+    // batch so a caught panic doesn't spam a backtrace; each caught panic is
+    // still reported as a normal one-line per-replay error below.
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let _restore_hook = RestorePanicHook(Some(previous_hook));
+
     for path in &replays {
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("replay").to_string();
 
@@ -136,21 +161,26 @@ pub fn run(
             resolver = Some(ConstantsResolver::new().context("failed to initialize constants resolver")?);
         }
 
-        let outcome = process_replay(
-            path,
-            game_dir,
-            extracted_dir,
-            format,
-            explicit_constants.as_ref(),
-            resolver.as_mut(),
-            allow_approximate_constants,
-            pr_data.as_ref(),
-            &stem,
-        );
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            process_replay(
+                path,
+                game_dir,
+                extracted_dir,
+                format,
+                explicit_constants.as_ref(),
+                resolver.as_mut(),
+                allow_approximate_constants,
+                pr_data.as_ref(),
+                &stem,
+            )
+        }));
 
         match outcome {
-            Ok(value) => results.push(Ok((stem, value))),
-            Err(e) => results.push(Err((stem, e))),
+            Ok(Ok(value)) => results.push(Ok((stem, value))),
+            Ok(Err(e)) => results.push(Err((stem, e))),
+            Err(_) => {
+                results.push(Err((stem, "panicked while processing (unsupported or corrupt replay)".to_string())))
+            }
         }
     }
 
@@ -172,12 +202,14 @@ pub fn run(
         }
     } else if let Some(file) = out_file {
         let oks: Vec<Value> = results.iter().filter_map(|r| r.as_ref().ok()).map(|(_, v)| v.clone()).collect();
-        if oks.is_empty() {
-            eprintln!("no replay produced output; not writing {}", file.display());
-        } else {
-            let out_value = assemble_out_file(&oks);
-            let text = serde_json::to_string_pretty(&out_value).context("failed to serialize battle results")?;
-            std::fs::write(&file, text).with_context(|| format!("failed to write {}", file.display()))?;
+        match assemble_out_file(replays.len(), oks) {
+            Some(out_value) => {
+                let text = serde_json::to_string_pretty(&out_value).context("failed to serialize battle results")?;
+                std::fs::write(&file, text).with_context(|| format!("failed to write {}", file.display()))?;
+            }
+            None => {
+                eprintln!("no replay produced output; not writing {}", file.display());
+            }
         }
     }
 
@@ -188,13 +220,13 @@ pub fn run(
     Ok(())
 }
 
-/// Decide the `--out-file` layout from the successful results: a single
-/// object for exactly one value, otherwise a JSON array.
-fn assemble_out_file(values: &[Value]) -> Value {
-    match values {
-        [single] => single.clone(),
-        _ => Value::Array(values.to_vec()),
-    }
+/// Decide the `--out-file` layout from the number of INPUT replays (not the
+/// number of successful results): a single bare object when exactly one
+/// replay was given, otherwise a JSON array of whatever succeeded (possibly
+/// empty). Returns `None` when nothing should be written: the single-replay
+/// case failed and there is no value to write.
+fn assemble_out_file(input_count: usize, oks: Vec<Value>) -> Option<Value> {
+    if input_count == 1 { oks.into_iter().next() } else { Some(Value::Array(oks)) }
 }
 
 /// Process one replay into the requested output format. All formats need
@@ -359,20 +391,68 @@ mod tests {
     }
 
     #[test]
-    fn assemble_out_file_single_value_is_bare_object() {
-        let values = vec![serde_json::json!({"a": 1})];
-        assert_eq!(assemble_out_file(&values), serde_json::json!({"a": 1}));
+    fn assemble_out_file_one_input_one_ok_is_bare_object() {
+        let oks = vec![serde_json::json!({"a": 1})];
+        assert_eq!(assemble_out_file(1, oks), Some(serde_json::json!({"a": 1})));
     }
 
     #[test]
-    fn assemble_out_file_many_values_is_array() {
-        let values = vec![serde_json::json!({"a": 1}), serde_json::json!({"a": 2})];
-        assert_eq!(assemble_out_file(&values), serde_json::json!([{"a": 1}, {"a": 2}]));
+    fn assemble_out_file_one_input_failed_writes_nothing() {
+        let oks: Vec<Value> = vec![];
+        assert_eq!(assemble_out_file(1, oks), None);
     }
 
     #[test]
-    fn assemble_out_file_empty_values_is_empty_array() {
-        let values: Vec<serde_json::Value> = vec![];
-        assert_eq!(assemble_out_file(&values), serde_json::json!([]));
+    fn assemble_out_file_two_inputs_two_oks_is_array_len_two() {
+        let oks = vec![serde_json::json!({"a": 1}), serde_json::json!({"a": 2})];
+        assert_eq!(assemble_out_file(2, oks), Some(serde_json::json!([{"a": 1}, {"a": 2}])));
+    }
+
+    /// C1 regression guard: 3 replays in, 2 fail, 1 succeeds. The shape is
+    /// still an array (keyed on the 3 inputs), not a bare object, even though
+    /// only one value made it into `oks`.
+    #[test]
+    fn assemble_out_file_three_inputs_one_ok_is_array_len_one() {
+        let oks = vec![serde_json::json!({"a": 1})];
+        assert_eq!(assemble_out_file(3, oks), Some(serde_json::json!([{"a": 1}])));
+    }
+
+    #[test]
+    fn assemble_out_file_many_inputs_all_failed_is_empty_array() {
+        let oks: Vec<Value> = vec![];
+        assert_eq!(assemble_out_file(3, oks), Some(serde_json::json!([])));
+    }
+
+    /// Process-unique temp dir name; no `Date`/random needed for uniqueness
+    /// across concurrent test runs.
+    fn unique_temp_dir(suffix: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("replayshark-test-{}-{}", std::process::id(), suffix))
+    }
+
+    #[test]
+    fn out_dir_writes_one_json_file_per_stem() {
+        let dir = unique_temp_dir("out-dir-write");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let pairs = vec![
+            ("replay_one".to_string(), serde_json::json!({"a": 1})),
+            ("replay_two".to_string(), serde_json::json!({"b": 2})),
+        ];
+
+        for (stem, value) in &pairs {
+            let out_path = dir.join(format!("{stem}.json"));
+            let text = serde_json::to_string_pretty(value).unwrap();
+            std::fs::write(&out_path, text).unwrap();
+        }
+
+        for (stem, value) in &pairs {
+            let out_path = dir.join(format!("{stem}.json"));
+            assert!(out_path.exists(), "missing {}", out_path.display());
+            let text = std::fs::read_to_string(&out_path).unwrap();
+            let parsed: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(&parsed, value);
+        }
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
