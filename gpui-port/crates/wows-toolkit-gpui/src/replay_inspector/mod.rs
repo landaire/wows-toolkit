@@ -16,7 +16,11 @@ pub mod model;
 #[cfg(test)]
 pub(crate) mod test_support;
 
+pub use columns::CellValue;
+pub use columns::ColorRole;
 pub use columns::ReplayColumn;
+pub use columns::cell_value;
+pub use columns::default_columns;
+pub use columns::separate_number;
 pub use model::PlayerRow;
 pub use model::ReplayReportModel;
-pub use model::separate_number;
