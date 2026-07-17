@@ -6,6 +6,7 @@ use gpui_component::slider::{Slider, SliderState};
 use gpui_component::tab::{Tab, TabBar};
 use gpui_component::{h_flex, v_flex};
 
+use crate::replay_inspector::{PlayerTable, sample_model};
 use crate::settings::{DEFAULT_ZOOM, GpuiSettings, MAX_ZOOM, MIN_ZOOM};
 use crate::theme;
 
@@ -43,13 +44,24 @@ pub struct App {
     /// Never written back to the DB.
     zoom: f32,
     zoom_slider: Entity<SliderState>,
+    /// Replay Inspector player table. Fed sample data; replaced by real parsing
+    /// in a later milestone.
+    replay_table: Entity<PlayerTable>,
 }
 
 impl App {
     pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
         let zoom_slider =
             cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(DEFAULT_ZOOM));
-        Self { active_tab: AppTab::Settings, settings: SettingsState::Loading, zoom: DEFAULT_ZOOM, zoom_slider }
+        // sample data; replaced by real parsing in a later milestone
+        let replay_table = cx.new(|cx| PlayerTable::new(sample_model(), cx));
+        Self {
+            active_tab: AppTab::Settings,
+            settings: SettingsState::Loading,
+            zoom: DEFAULT_ZOOM,
+            zoom_slider,
+            replay_table,
+        }
     }
 
     /// Store the settings snapshot loaded from the shared config DB. Called
@@ -228,7 +240,8 @@ impl Render for App {
 
         let body = match self.active_tab {
             AppTab::Settings => self.render_settings_tab(cx).into_any_element(),
-            AppTab::ReplayInspector | AppTab::ArmorViewer => {
+            AppTab::ReplayInspector => self.replay_table.clone().into_any_element(),
+            AppTab::ArmorViewer => {
                 h_flex().size_full().items_center().justify_center().child(self.active_tab.label()).into_any_element()
             }
         };

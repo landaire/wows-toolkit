@@ -12,7 +12,9 @@
 
 pub mod columns;
 pub mod model;
+pub mod sample;
 pub mod sort;
+pub mod table;
 
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -25,6 +27,8 @@ pub use columns::default_columns;
 pub use columns::separate_number;
 pub use model::PlayerRow;
 pub use model::ReplayReportModel;
+pub use sample::sample_model;
 pub use sort::SortColumn;
 pub use sort::SortOrder;
 pub use sort::sort_rows;
+pub use table::PlayerTable;
