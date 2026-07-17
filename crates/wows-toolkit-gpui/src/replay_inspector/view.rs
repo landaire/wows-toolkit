@@ -70,11 +70,11 @@ pub struct ReplayInspectorView {
     open_panels: HashMap<PathBuf, WeakEntity<ReplayPanel>>,
     /// Session debug-mode flag: seeded from `AppPreferences.debug_mode` (the
     /// shared config DB) in `apply_settings`, then flippable at runtime via
-    /// the header checkbox (`set_debug_mode`), which also pushes the new
-    /// value into every currently open `ReplayPanel` -- not just panels
-    /// opened afterward. This crate never writes settings back to the DB
-    /// (see `settings.rs`'s module doc), so the toggle only overrides the
-    /// setting for the running session.
+    /// `App`'s global Ctrl+Shift+D shortcut (`set_debug_mode`, called from
+    /// `app.rs`), which also pushes the new value into every currently open
+    /// `ReplayPanel` -- not just panels opened afterward. This crate never
+    /// writes settings back to the DB (see `settings.rs`'s module doc), so
+    /// the toggle only overrides the setting for the running session.
     debug_mode: bool,
     /// Session-local copy of the persisted `ReplaySettings`, seeded from the
     /// shared config DB in `apply_settings`. The header toolbar's
@@ -221,8 +221,10 @@ impl ReplayInspectorView {
     /// currently open replay tab (`open_panels`'s live entries; closed tabs'
     /// stale weak handles just fail to upgrade and are skipped), so toggling
     /// debug mode takes effect immediately rather than only on the next
-    /// replay opened.
-    fn set_debug_mode(&mut self, debug_mode: bool, cx: &mut Context<Self>) {
+    /// replay opened. Called from `App::toggle_debug_mode` (the app-wide
+    /// Ctrl+Shift+D shortcut, `app.rs`) -- this crate has no enable UI of its
+    /// own for debug mode.
+    pub(crate) fn set_debug_mode(&mut self, debug_mode: bool, cx: &mut Context<Self>) {
         self.debug_mode = debug_mode;
         for panel in self.open_panels.values() {
             if let Some(panel) = panel.upgrade() {
@@ -421,21 +423,9 @@ impl Render for ReplayInspectorView {
                     )),
             );
 
-        // Mirrors `AppPreferences.debug_mode`: unhides NDA-hidden stats
-        // (threaded into every open tab's table) and reveals the per-replay
-        // raw-metadata/raw-results viewers. Session-only override; see
-        // `debug_mode`'s doc comment.
-        let debug_toggle = h_flex().flex_none().px_2().py_1().items_center().child(
-            Checkbox::new("replay-inspector-debug-toggle")
-                .label("Debug Mode")
-                .checked(self.debug_mode)
-                .on_click(cx.listener(|this, checked: &bool, _window, cx| this.set_debug_mode(*checked, cx))),
-        );
-
         v_flex()
             .size_full()
             .child(replay_header)
-            .child(debug_toggle)
             .when_some(status_banner, |this, banner| this.child(h_flex().flex_none().px_2().py_1().child(banner)))
             .child(
                 div().flex_1().min_h(px(0.)).child(

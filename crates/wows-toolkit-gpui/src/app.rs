@@ -1,5 +1,9 @@
+use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui_component::ActiveTheme;
 use gpui_component::Disableable;
+use gpui_component::Icon;
+use gpui_component::IconName;
 use gpui_component::button::Button;
 use gpui_component::checkbox::Checkbox;
 use gpui_component::slider::{Slider, SliderState};
@@ -48,6 +52,20 @@ pub struct App {
     /// Starts its background directory scan once `apply_settings` knows the
     /// WoWs directory.
     replay_inspector: Entity<ReplayInspectorView>,
+    /// App-wide debug-mode flag, seeded from `AppPreferences.debug_mode` in
+    /// `apply_settings`, then flippable at runtime via the global Ctrl+Shift+D
+    /// shortcut (`toggle_debug_mode`), matching the egui app's
+    /// `app.rs:1898-1909`. Never written back to the DB -- the toggle only
+    /// overrides the setting for the running session. Pushed down into
+    /// `replay_inspector` on every change; there is no per-tab enable UI.
+    debug_mode: bool,
+    /// Root focus target for the global Ctrl+Shift+D handler
+    /// (`Self::render`'s `on_key_down`): focused once at startup so the
+    /// shortcut works before any other element claims focus. Key events from
+    /// a later-focused descendant (e.g. an open replay tab) still bubble up
+    /// through this element, so the shortcut keeps working regardless of
+    /// what has focus -- matching egui's window-wide shortcut.
+    focus_handle: FocusHandle,
 }
 
 impl App {
@@ -55,12 +73,16 @@ impl App {
         let zoom_slider =
             cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(DEFAULT_ZOOM));
         let replay_inspector = cx.new(|cx| ReplayInspectorView::new(window, cx));
+        let focus_handle = cx.focus_handle();
+        window.focus(&focus_handle, cx);
         Self {
             active_tab: AppTab::Settings,
             settings: SettingsState::Loading,
             zoom: DEFAULT_ZOOM,
             zoom_slider,
             replay_inspector,
+            debug_mode: false,
+            focus_handle,
         }
     }
 
@@ -77,6 +99,7 @@ impl App {
         let debug_mode = settings.debug_mode;
         let replay_settings = settings.replay.clone();
         let auto_load_latest_replay = settings.auto_load_latest_replay;
+        self.debug_mode = debug_mode;
         self.replay_inspector.update(cx, |view, cx| {
             view.apply_settings(wows_dir, debug_mode, replay_settings, auto_load_latest_replay, cx)
         });
@@ -87,6 +110,16 @@ impl App {
     /// `apply_settings` when either the DB open or the settings load errors.
     pub fn mark_settings_failed(&mut self, reason: String) {
         self.settings = SettingsState::Failed(reason);
+    }
+
+    /// The global Ctrl+Shift+D handler (`Self::render`'s `on_key_down`):
+    /// flips `debug_mode` and pushes the new value into the replay inspector,
+    /// matching the egui app's `app.rs:1898-1909` toggle.
+    fn toggle_debug_mode(&mut self, cx: &mut Context<Self>) {
+        self.debug_mode = !self.debug_mode;
+        let debug_mode = self.debug_mode;
+        self.replay_inspector.update(cx, |view, cx| view.set_debug_mode(debug_mode, cx));
+        cx.notify();
     }
 }
 
@@ -255,6 +288,36 @@ impl Render for App {
             }
         };
 
-        v_flex().size_full().child(tabs).child(div().flex_1().child(body))
+        // Reproduces the egui app's `app.rs:720-722` bottom-panel notice: a
+        // small warn-colored strip flanked by a warning-triangle icon, shown
+        // only while `debug_mode` is on. The egui version renders one
+        // leading and one trailing "warning" glyph around the text; this
+        // mirrors that with rendered `IconName::TriangleAlert` glyphs
+        // instead of a unicode character in source.
+        let warning_color = cx.theme().warning;
+        let debug_notice = h_flex()
+            .flex_none()
+            .gap_1()
+            .items_center()
+            .justify_center()
+            .px_2()
+            .py_1()
+            .child(Icon::new(IconName::TriangleAlert).text_color(warning_color))
+            .child(div().text_sm().font_weight(FontWeight::BOLD).text_color(warning_color).child("Debug build"))
+            .child(Icon::new(IconName::TriangleAlert).text_color(warning_color));
+
+        v_flex()
+            .id("app-root")
+            .track_focus(&self.focus_handle)
+            .size_full()
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                let modifiers = event.keystroke.modifiers;
+                if !event.is_held && modifiers.control && modifiers.shift && event.keystroke.key == "d" {
+                    this.toggle_debug_mode(cx);
+                }
+            }))
+            .child(tabs)
+            .child(div().flex_1().child(body))
+            .when(self.debug_mode, |this| this.child(debug_notice))
     }
 }
