@@ -17,7 +17,7 @@ members = [
     "crates/wgcheck",
     "crates/wows-battle-world",
 ]
-exclude = ["gpui-port"]
+exclude = ["crates/wows-toolkit-gpui"]
 
 [workspace.package]
 version = "0.1.70"

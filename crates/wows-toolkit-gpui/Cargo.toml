@@ -1,6 +1,34 @@
+[package]
+name = "wows-toolkit-gpui"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+gpui.workspace = true
+gpui_platform.workspace = true
+gpui_tokio.workspace = true
+gpui-component.workspace = true
+gpui-component-assets.workspace = true
+anyhow.workspace = true
+wows-toolkit-config = { path = "../wows-toolkit-config" }
+wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing"] }
+wows_replays = { path = "../wows-replays", default-features = false, features = ["arc", "parsing"] }
+wows-replay-insights = { path = "../wows-replay-insights", default-features = false, features = ["arc", "battle-report"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
+tracing = "0.1"
+
+[dev-dependencies]
+# vfs-mmap: only the ignored `from_normalized_resolves_species_text_from_a_real_provider`
+# test loads a real GameMetadataProvider from a game directory; not needed by
+# the main dependency above.
+wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap"] }
+jiff = "0.2"
+
 [workspace]
 resolver = "3"
-members = ["crates/wows-toolkit-gpui"]
 
 [workspace.package]
 edition = "2024"
@@ -39,4 +67,3 @@ anyhow = "1"
 # gpui_platform = { git = "https://github.com/gpui-ce/gpui-ce", rev = "6c799b8e994266233014cea66d7769675ec1967c" }
 # gpui_web      = { git = "https://github.com/gpui-ce/gpui-ce", rev = "6c799b8e994266233014cea66d7769675ec1967c" }
 # gpui_macros   = { git = "https://github.com/gpui-ce/gpui-ce", rev = "6c799b8e994266233014cea66d7769675ec1967c" }
-# gpui_tokio    = { git = "https://github.com/gpui-ce/gpui-ce", rev = "6c799b8e994266233014cea66d7769675ec1967c" }
