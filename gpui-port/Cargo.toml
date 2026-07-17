@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/wows-toolkit-gpui"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.92"
+
+[workspace.dependencies]
+gpui           = { git = "https://github.com/zed-industries/zed" }
+gpui_platform  = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_tokio     = { git = "https://github.com/zed-industries/zed" }
+gpui-component        = { git = "https://github.com/longbridge/gpui-component", rev = "031555662e99a1b5a549990b47f246d475b8288a" }
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "031555662e99a1b5a549990b47f246d475b8288a" }
+anyhow = "1"
+
+# Dormant: flip to gpui-ce here once a gpui-component <-> gpui-ce pairing compiles.
+# The HEAD pairing failed on flex/Styled API drift (container_query, flex_grow arity,
+# flex_grow_1/flex_shrink_1). See docs/superpowers/specs/2026-07-16-gpui-port-design.md.
+# [patch."https://github.com/zed-industries/zed.git"]
+# gpui          = { git = "https://github.com/gpui-ce/gpui-ce", rev = "6c799b8e994266233014cea66d7769675ec1967c" }
+# gpui_platform = { git = "https://github.com/gpui-ce/gpui-ce", rev = "6c799b8e994266233014cea66d7769675ec1967c" }
+# gpui_web      = { git = "https://github.com/gpui-ce/gpui-ce", rev = "6c799b8e994266233014cea66d7769675ec1967c" }
+# gpui_macros   = { git = "https://github.com/gpui-ce/gpui-ce", rev = "6c799b8e994266233014cea66d7769675ec1967c" }
+# gpui_tokio    = { git = "https://github.com/gpui-ce/gpui-ce", rev = "6c799b8e994266233014cea66d7769675ec1967c" }
