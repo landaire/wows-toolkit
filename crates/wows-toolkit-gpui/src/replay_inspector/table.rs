@@ -6,8 +6,14 @@
 //! so they stay aligned. This layer adds the per-column cell parity pass on
 //! top of Task 4's scaffold: colors, NDA text, the multi-segment Name cell
 //! (ship-class icon, division, clan tag, player name), Skills tier icons, and
-//! hover tooltips for the stat cells that carry a breakdown. Row expansion is
-//! a later milestone; this layer still draws collapsed rows only.
+//! hover tooltips for the stat cells that carry a breakdown. A row also
+//! carries an expand/collapse state (`expanded`, keyed by `db_id` so it
+//! survives re-sorting): the Name cell's caret and a double-click on the
+//! collapsed row toggle it, growing the row to show a detail panel
+//! underneath (a placeholder for now; a later task fills it in with
+//! achievements, ribbons, build, consumables, and damage breakdowns).
+
+use std::collections::HashSet;
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -34,6 +40,7 @@ use super::sort::SortColumn;
 use super::sort::SortOrder;
 use super::sort::sort_rows;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
+use wows_replays::types::AccountId;
 
 /// Overdraw for the virtualized list: how far past the viewport to render so
 /// scrolling reveals already-laid-out rows instead of blank space.
@@ -188,6 +195,12 @@ pub struct PlayerTable {
     /// the egui app's debug flag. Always `false` until a settings toggle wires
     /// it in a later milestone.
     debug: bool,
+    /// Rows currently showing their expanded detail, keyed by `db_id` rather
+    /// than list index so a row's expanded state survives a re-sort (which
+    /// changes indices but not identities). Mirrors the egui app's
+    /// `is_row_expanded: BTreeMap<u64, bool>`, minus the closed/`false`
+    /// entries it also keeps around (a `HashSet` has no use for them).
+    expanded: HashSet<AccountId>,
 }
 
 impl PlayerTable {
@@ -196,7 +209,15 @@ impl PlayerTable {
         let debug = false;
         sort_rows(&mut model.rows, model.self_team, sort, debug);
         let list_state = ListState::new(model.rows.len(), ListAlignment::Top, LIST_OVERDRAW);
-        Self { model, list_state, sort, h_scroll: ScrollHandle::new(), icons: IconCache::new(), debug }
+        Self {
+            model,
+            list_state,
+            sort,
+            h_scroll: ScrollHandle::new(),
+            icons: IconCache::new(),
+            debug,
+            expanded: HashSet::new(),
+        }
     }
 
     /// Applies a header click: toggles the sort order for `column`, re-sorts
@@ -205,6 +226,20 @@ impl PlayerTable {
         self.sort.update_column(column);
         sort_rows(&mut self.model.rows, self.model.self_team, self.sort, self.debug);
         self.list_state.reset(self.model.rows.len());
+        cx.notify();
+    }
+
+    /// Toggles row `ix`'s expanded state and remeasures just that row.
+    /// `remeasure_items` (unlike `sort_by`'s `reset`) preserves the list's
+    /// current scroll position, so expanding a row on-screen doesn't jump the
+    /// viewport. Mirrors the egui app's `is_row_expanded`/`row_heights`
+    /// toggle in `cell_content_ui`.
+    fn toggle_expanded(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let db_id = self.model.rows[ix].db_id;
+        if !self.expanded.remove(&db_id) {
+            self.expanded.insert(db_id);
+        }
+        self.list_state.remeasure_items(ix..ix + 1);
         cx.notify();
     }
 
@@ -283,20 +318,41 @@ fn cell_element(ix: usize, col: ReplayColumn, cell: CellValue, width: f32) -> An
     }
 }
 
-/// The Name column's cell: ship-class icon (or a plain species-text label
-/// when no icon is cached yet) + division label + colored clan tag + colored
-/// player name. Bypasses `cell_value`'s single joined-string Name arm because
-/// each segment needs its own color (the clan tag uses the clan-league color,
-/// not the player color; abuser pink applies only to the name, not the
-/// icon/division/clan segments), mirroring the egui app's `cell_content_ui`
-/// `ReplayColumn::Name` arm, which makes one separate `ui.add`/`ui.label`
-/// call per segment.
-fn name_cell(ix: usize, row: &PlayerRow, icons: &IconCache, width: f32) -> AnyElement {
+/// The expand/collapse caret shown at the start of the Name cell (the egui
+/// app's `col_nr == 1` case in `cell_content_ui`, which prepends the same
+/// caret to whichever column happens to sit at index 1 -- always Name, since
+/// `default_columns` always puts Actions/Name/ShipName first in that order).
+/// A click toggles `PlayerTable::expanded` for this row via the entity handle
+/// (this closure runs inside the virtualized list's render callback, which
+/// only has `&mut App`, not `Context<PlayerTable>`).
+fn expand_caret(ix: usize, entity: Entity<PlayerTable>, is_expanded: bool) -> AnyElement {
+    let icon = if is_expanded { IconName::ChevronDown } else { IconName::ChevronRight };
+    div()
+        .id(("replay-row-caret", ix))
+        .flex_none()
+        .cursor_pointer()
+        .on_click(move |_event: &ClickEvent, _window, cx: &mut App| {
+            entity.update(cx, |this, cx| this.toggle_expanded(ix, cx));
+        })
+        .child(Icon::new(icon))
+        .into_any_element()
+}
+
+/// The Name column's cell: the expand caret + ship-class icon (or a plain
+/// species-text label when no icon is cached yet) + division label + colored
+/// clan tag + colored player name. Bypasses `cell_value`'s single
+/// joined-string Name arm because each segment needs its own color (the clan
+/// tag uses the clan-league color, not the player color; abuser pink applies
+/// only to the name, not the icon/division/clan segments), mirroring the
+/// egui app's `cell_content_ui` `ReplayColumn::Name` arm, which makes one
+/// separate `ui.add`/`ui.label` call per segment.
+fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
     let name_color = resolve_color(ColorRole::Player(name_color_kind(row)));
 
     let mut cell = h_flex().w(px(width)).flex_none().gap_1().px_1().items_center().overflow_hidden();
+    cell = cell.child(expand_caret(ix, layout.entity.clone(), layout.is_expanded));
 
-    cell = match icons.get(row.ship_class) {
+    cell = match layout.icons.get(row.ship_class) {
         Some(image) => {
             let icon_el = div().flex_none().child(img(image).w(px(16.)).h(px(16.)));
             if row.ship_species_text.is_empty() {
@@ -389,19 +445,20 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElemen
 
 /// One column cell, dispatching to the Name/Skills special-cased layouts and
 /// falling back to the generic `cell_element` for everything else.
-fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, icons: &IconCache, debug: bool) -> AnyElement {
+fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout) -> AnyElement {
     match col {
-        ReplayColumn::Name => name_cell(ix, row, icons, column_width(col)),
-        ReplayColumn::Skills => skills_cell(ix, row, debug, column_width(col)),
-        _ => cell_element(ix, col, cell_value(row, col, debug), column_width(col)),
+        ReplayColumn::Name => name_cell(ix, row, layout, column_width(col)),
+        ReplayColumn::Skills => skills_cell(ix, row, layout.debug, column_width(col)),
+        _ => cell_element(ix, col, cell_value(row, col, layout.debug), column_width(col)),
     }
 }
 
 /// Per-frame layout shared by every row and the header's scrolling portion:
 /// the sticky/scrolling column split, the scrolling section's total width,
-/// the shared horizontal scroll handle, the icon cache, and the debug flag.
-/// Bundled into one struct so `render_row` stays under clippy's argument-count
-/// limit.
+/// the shared horizontal scroll handle, the icon cache, the debug flag, and
+/// this row's expanded state and entity handle (for the caret/double-click
+/// toggle). Bundled into one struct so `render_row` stays under clippy's
+/// argument-count limit.
 struct RowLayout<'a> {
     sticky_columns: &'a [ReplayColumn],
     scroll_columns: &'a [ReplayColumn],
@@ -409,29 +466,41 @@ struct RowLayout<'a> {
     icons: &'a IconCache,
     debug: bool,
     h_scroll: &'a ScrollHandle,
+    entity: Entity<PlayerTable>,
+    is_expanded: bool,
 }
 
 /// One collapsed row: `layout.sticky_columns` (Actions/Name/ShipName) render
 /// as fixed cells outside the horizontal scroll; `layout.scroll_columns`
 /// render inside a nested scroll container tracking `layout.h_scroll`, the
 /// same handle the header's scrolling portion tracks, so both stay aligned.
-/// Mirrors the egui app's `num_sticky_cols(3)`.
+/// Mirrors the egui app's `num_sticky_cols(3)`. When `layout.is_expanded`,
+/// stacks a detail panel underneath (a placeholder for now; a later task
+/// fills it in with the real expanded content); a double-click anywhere on
+/// the collapsed row also toggles expansion, mirroring the egui app's
+/// whole-row double-click handler in `cell_content_ui`.
 fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla) -> AnyElement {
     let mut sticky = h_flex().flex_none();
     for &col in layout.sticky_columns {
-        sticky = sticky.child(render_cell(ix, col, row, layout.icons, layout.debug));
+        sticky = sticky.child(render_cell(ix, col, row, layout));
     }
 
     let mut scrolling = h_flex().w(px(layout.scroll_width)).flex_none();
     for &col in layout.scroll_columns {
-        scrolling = scrolling.child(render_cell(ix, col, row, layout.icons, layout.debug));
+        scrolling = scrolling.child(render_cell(ix, col, row, layout));
     }
 
-    h_flex()
+    let entity = layout.entity.clone();
+    let collapsed = h_flex()
         .id(ix)
         .w_full()
         .py_0p5()
         .hover(move |style| style.bg(hover_bg))
+        .on_click(move |event: &ClickEvent, _window, cx: &mut App| {
+            if event.click_count() >= 2 {
+                entity.update(cx, |this, cx| this.toggle_expanded(ix, cx));
+            }
+        })
         .child(sticky)
         .child(
             div()
@@ -441,8 +510,20 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla) ->
                 .overflow_x_scroll()
                 .track_scroll(layout.h_scroll)
                 .child(scrolling),
-        )
-        .into_any_element()
+        );
+
+    if !layout.is_expanded {
+        return collapsed.into_any_element();
+    }
+
+    // Placeholder detail panel: proves the expand mechanism grows the row
+    // (remeasure + taller layout) without yet reproducing the egui app's
+    // achievements/ribbons/build/consumables/damage-breakdown content. A
+    // later task replaces this with that real content.
+    let detail =
+        div().w_full().px_2().py_2().text_xs().opacity(0.6).child(format!("Row {ix} expanded ({})", row.display_name));
+
+    v_flex().w_full().child(collapsed).child(detail).into_any_element()
 }
 
 impl Render for PlayerTable {
@@ -479,6 +560,8 @@ impl Render for PlayerTable {
         let h_scroll = self.h_scroll.clone();
         let render_item = move |ix: usize, _window: &mut Window, cx: &mut App| -> AnyElement {
             let table = entity.read(cx);
+            let row = &table.model.rows[ix];
+            let is_expanded = table.expanded.contains(&row.db_id);
             let layout = RowLayout {
                 sticky_columns: &sticky_columns,
                 scroll_columns: &scroll_columns,
@@ -486,8 +569,10 @@ impl Render for PlayerTable {
                 icons: &table.icons,
                 debug: table.debug,
                 h_scroll: &h_scroll,
+                entity: entity.clone(),
+                is_expanded,
             };
-            render_row(ix, &table.model.rows[ix], &layout, hover_bg)
+            render_row(ix, row, &layout, hover_bg)
         };
 
         div()
