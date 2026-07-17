@@ -10,6 +10,7 @@
 // in this milestone's crate consumes them yet.
 #![allow(unused_imports)]
 
+pub mod browser;
 pub mod columns;
 pub mod expanded;
 pub mod icons;
@@ -21,6 +22,9 @@ pub mod table;
 #[cfg(test)]
 pub(crate) mod test_support;
 
+pub use browser::BrowserNode;
+pub use browser::ReplayLite;
+pub use browser::build_browser_tree;
 pub use columns::CellValue;
 pub use columns::ColorRole;
 pub use columns::ReplayColumn;
