@@ -11,6 +11,11 @@ gpui_tokio.workspace = true
 gpui-component.workspace = true
 gpui-component-assets.workspace = true
 anyhow.workspace = true
+# Matches gpui's own `image` version (0.25.1, see the workspace.dependencies
+# comment below) so Cargo unifies both into one crate instance instead of
+# resolving two. Only "png" is enabled: the game ships ship-class icons as
+# PNG, and that is the only format `icons.rs` decodes.
+image = { version = "0.25", default-features = false, features = ["png"] }
 wows-toolkit-config = { path = "../wows-toolkit-config" }
 wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing"] }
 wows_replays = { path = "../wows-replays", default-features = false, features = ["arc", "parsing"] }

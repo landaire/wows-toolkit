@@ -9314,6 +9314,7 @@ dependencies = [
  "gpui-component-assets",
  "gpui_platform",
  "gpui_tokio",
+ "image",
  "jiff",
  "serde_json",
  "sqlx",

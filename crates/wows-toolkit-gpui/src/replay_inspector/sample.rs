@@ -106,9 +106,14 @@ fn stat_row(
     skill_points: usize,
 ) -> PlayerRow {
     let sep = |n: u64| separate(n);
+    // A plausible clan-league color, so the sample table demonstrates the
+    // Name cell's clan-tag coloring (`ColorRole::Fixed`) even though the
+    // fixture has no real `clanColor` to read.
+    const SAMPLE_CLAN_COLOR: u32 = 0x4fc3f7;
     PlayerRow {
         display_name: name.to_string(),
         clan_tag: clan.map(|c| format!("[{c}]")),
+        clan_color_rgb: if clan.is_some() { SAMPLE_CLAN_COLOR } else { 0 },
         ship_name: ship.to_string(),
         ship_class: species,
         base_xp: Some(1500),
@@ -147,62 +152,84 @@ fn separate(n: u64) -> String {
 /// shows self/ally/enemy coloring, PR tiers, and sort behavior.
 pub fn sample_model() -> ReplayReportModel {
     let rows = vec![
-        stat_row(
-            1,
-            0,
-            Relation::new(0),
-            true,
-            "You",
-            Some("WTK"),
-            "Shimakaze",
-            Species::Destroyer,
-            74_500,
-            3,
-            1820.0,
-            21,
-        ),
-        stat_row(
-            2,
-            0,
-            Relation::new(1),
-            false,
-            "Ally_Alpha",
-            Some("WTK"),
-            "Des Moines",
-            Species::Cruiser,
-            112_300,
-            2,
-            2410.0,
-            19,
-        ),
-        stat_row(
-            3,
-            0,
-            Relation::new(1),
-            false,
-            "Ally_Bravo",
-            None,
-            "Montana",
-            Species::Battleship,
-            96_800,
-            1,
-            1340.0,
-            14,
-        ),
-        stat_row(
-            4,
-            0,
-            Relation::new(1),
-            false,
-            "Ally_Charlie",
-            Some("REL"),
-            "Midway",
-            Species::AirCarrier,
-            61_200,
-            0,
-            980.0,
-            10,
-        ),
+        // Division label on the self row and a gold "division-mate" ally
+        // row, so the sample table demonstrates both Name-cell cases.
+        PlayerRow {
+            division_label: Some("(A)".to_string()),
+            ..stat_row(
+                1,
+                0,
+                Relation::new(0),
+                true,
+                "You",
+                Some("WTK"),
+                "Shimakaze",
+                Species::Destroyer,
+                74_500,
+                3,
+                1820.0,
+                21,
+            )
+        },
+        // Incoming Fire Alert skill marker demo (Skills cell siren icon).
+        PlayerRow {
+            has_ifa: true,
+            ..stat_row(
+                2,
+                0,
+                Relation::new(1),
+                false,
+                "Ally_Alpha",
+                Some("WTK"),
+                "Des Moines",
+                Species::Cruiser,
+                112_300,
+                2,
+                2410.0,
+                19,
+            )
+        },
+        // Tower-defense skill-warning demo: the Skills cell forces the "bad"
+        // tier color and a warning icon even though this row's raw point
+        // count would otherwise land in the "caution" tier.
+        PlayerRow {
+            division_label: Some("(A)".to_string()),
+            is_self_division_mate: true,
+            skill_warning: true,
+            num_tier_1_skills: 6,
+            ..stat_row(
+                3,
+                0,
+                Relation::new(1),
+                false,
+                "Ally_Bravo",
+                None,
+                "Montana",
+                Species::Battleship,
+                96_800,
+                1,
+                1340.0,
+                14,
+            )
+        },
+        // Dazzle skill marker demo (Skills cell star icon).
+        PlayerRow {
+            has_dazzle: true,
+            ..stat_row(
+                4,
+                0,
+                Relation::new(1),
+                false,
+                "Ally_Charlie",
+                Some("REL"),
+                "Midway",
+                Species::AirCarrier,
+                61_200,
+                0,
+                980.0,
+                10,
+            )
+        },
         stat_row(
             5,
             1,
@@ -217,21 +244,44 @@ pub fn sample_model() -> ReplayReportModel {
             2680.0,
             21,
         ),
-        stat_row(6, 1, Relation::new(2), false, "Enemy_Echo", None, "Gearing", Species::Destroyer, 48_900, 1, 640.0, 7),
-        stat_row(
-            7,
-            1,
-            Relation::new(2),
-            false,
-            "Enemy_Foxtrot",
-            Some("RED"),
-            "Zao",
-            Species::Cruiser,
-            88_100,
-            2,
-            1560.0,
-            17,
-        ),
+        // A test/demo-ship enemy row, so the sample table demonstrates the
+        // NDA gating on the damage/hits columns (`should_hide_stats`).
+        PlayerRow {
+            is_test_ship: true,
+            ..stat_row(
+                6,
+                1,
+                Relation::new(2),
+                false,
+                "Enemy_Echo",
+                None,
+                "Gearing",
+                Species::Destroyer,
+                48_900,
+                1,
+                640.0,
+                7,
+            )
+        },
+        // An abuser row, so the sample table demonstrates the Name cell's
+        // pink override.
+        PlayerRow {
+            is_abuser: true,
+            ..stat_row(
+                7,
+                1,
+                Relation::new(2),
+                false,
+                "Enemy_Foxtrot",
+                Some("RED"),
+                "Zao",
+                Species::Cruiser,
+                88_100,
+                2,
+                1560.0,
+                17,
+            )
+        },
         stat_row(
             8,
             1,

@@ -160,8 +160,11 @@ impl CellValue {
 }
 
 /// The team/division-relative color for stat cells (not the name cell, which
-/// additionally turns pink for abusers via `name_color_kind`).
-fn player_color_kind(row: &PlayerRow) -> PlayerColorKind {
+/// additionally turns pink for abusers via `name_color_kind`). `pub(crate)`
+/// so the render layer (`table.rs`) can reuse it for the multi-segment Name
+/// cell, which colors its ship-icon/name segments individually instead of
+/// through a single `cell_value` string.
+pub(crate) fn player_color_kind(row: &PlayerRow) -> PlayerColorKind {
     if row.is_self_division_mate {
         return PlayerColorKind::DivisionMate;
     }
@@ -175,8 +178,8 @@ fn player_color_kind(row: &PlayerRow) -> PlayerColorKind {
 }
 
 /// The name cell's color: pink for abusers, otherwise the same team/division
-/// color as the stat cells.
-fn name_color_kind(row: &PlayerRow) -> PlayerColorKind {
+/// color as the stat cells. `pub(crate)`; see `player_color_kind`.
+pub(crate) fn name_color_kind(row: &PlayerRow) -> PlayerColorKind {
     if row.is_abuser { PlayerColorKind::Abuser } else { player_color_kind(row) }
 }
 
