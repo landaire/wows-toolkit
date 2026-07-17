@@ -43,6 +43,7 @@ use gpui_component::Selectable;
 use gpui_component::button::Button;
 use gpui_component::h_flex;
 use gpui_component::list::ListItem;
+use gpui_component::menu::PopupMenuItem;
 use gpui_component::tree::TreeEntry;
 use gpui_component::tree::TreeItem;
 use gpui_component::tree::TreeState;
@@ -74,7 +75,18 @@ enum ScanStatus {
     Loading,
     Loaded,
     Empty,
-    Failed(String),
+    Failed(ScanError),
+}
+
+/// Reasons `start_scan` can fail before it ever reaches the background
+/// thread. Only the case `start_scan` actually produces is represented; the
+/// per-file read failures inside `scan_replay_files` are logged and skipped
+/// rather than aborting the scan (see that function's doc comment), so they
+/// never reach `ScanStatus::Failed`.
+#[derive(Debug, thiserror::Error)]
+enum ScanError {
+    #[error("World of Warships directory is not set")]
+    WowsDirMissing,
 }
 
 /// Event emitted when the user double-clicks a replay leaf. Milestone 5's
@@ -130,7 +142,7 @@ impl ReplayBrowser {
     /// whatever the previous scan found.
     pub fn start_scan(&mut self, wows_dir: String, cx: &mut Context<Self>) {
         if wows_dir.is_empty() {
-            self.status = ScanStatus::Failed("World of Warships directory is not set".to_string());
+            self.status = ScanStatus::Failed(ScanError::WowsDirMissing);
             cx.notify();
             return;
         }
@@ -222,13 +234,6 @@ fn leaf_label_color(battle_result: Option<BattleResult>) -> Option<Hsla> {
     Some(resolve_color(ColorRole::WinLoss(outcome)))
 }
 
-/// Selected-item color override: white text (egui `Color32::WHITE`) on a
-/// dark-gray background (egui `Color32::DARK_GRAY`, `from_gray(96)`),
-/// matching `colorize_label`'s `is_selected` branch exactly, regardless of
-/// the leaf's win/loss/draw color.
-const SELECTED_TEXT: u32 = 0xffffff;
-const SELECTED_BG: u32 = 0x606060;
-
 fn render_browser_item(
     browser: Entity<ReplayBrowser>,
     ix: usize,
@@ -240,9 +245,7 @@ fn render_browser_item(
     let is_folder = entry.is_folder();
 
     let mut label_el = div().flex_1().overflow_hidden().text_ellipsis().whitespace_nowrap();
-    if selected {
-        label_el = label_el.text_color(rgb(SELECTED_TEXT)).bg(rgb(SELECTED_BG));
-    } else if !is_folder && let Some(leaf) = leaf_info.get(&item.id) {
+    if !is_folder && let Some(leaf) = leaf_info.get(&item.id) {
         label_el = label_el.when_some(leaf_label_color(leaf.battle_result), |el, color| el.text_color(color));
     }
     label_el = label_el.child(item.label.clone());
@@ -302,13 +305,28 @@ impl Render for ReplayBrowser {
 
         let body = match &self.status {
             ScanStatus::Loading => div().p_2().text_sm().opacity(0.6).child("Scanning replays...").into_any_element(),
-            ScanStatus::Failed(reason) => div().p_2().text_sm().opacity(0.6).child(reason.clone()).into_any_element(),
+            ScanStatus::Failed(reason) => {
+                div().p_2().text_sm().opacity(0.6).child(reason.to_string()).into_any_element()
+            }
             ScanStatus::Empty => div().p_2().text_sm().opacity(0.6).child("No replays found").into_any_element(),
             ScanStatus::Loaded => {
                 let entity = entity.clone();
                 let leaf_info = self.leaf_info.clone();
+                let context_menu_leaf_info = self.leaf_info.clone();
                 tree(&self.tree_state, move |ix, entry, selected, _window, _cx| {
                     render_browser_item(entity.clone(), ix, entry, selected, &leaf_info)
+                })
+                .context_menu(move |_ix, entry, menu, _window, _cx| {
+                    if entry.is_folder() {
+                        return menu;
+                    }
+                    let Some(leaf) = context_menu_leaf_info.get(&entry.item().id) else {
+                        return menu;
+                    };
+                    let path = leaf.path.clone();
+                    menu.item(PopupMenuItem::new("Copy Path").on_click(move |_event, _window, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(path.to_string_lossy().into_owned()));
+                    }))
                 })
                 .flex_1()
                 .into_any_element()

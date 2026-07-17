@@ -24,6 +24,8 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2.0"
 
 [dev-dependencies]
 # vfs-mmap: only the ignored `from_normalized_resolves_species_text_from_a_real_provider`

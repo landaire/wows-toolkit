@@ -34,6 +34,13 @@ fn window_bounds_from_settings(saved: Option<wows_toolkit_config::WindowSettings
 }
 
 fn main() {
+    // `RUST_LOG` overrides; absent that, `info` is the default so the crate's
+    // `tracing::info!`/`warn!`/`error!` calls (scan errors, open-intent logs,
+    // settings-load failures) show up on stderr without extra setup.
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+
     let app = gpui_platform::application().with_assets(Assets);
     app.run(move |cx| {
         gpui_component::init(cx);
