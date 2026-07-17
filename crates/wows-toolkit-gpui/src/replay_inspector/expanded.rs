@@ -22,6 +22,7 @@
 //! egui app's own icon-texture-missing fallback branches.
 
 use gpui::*;
+use gpui_component::ActiveTheme;
 use gpui_component::h_flex;
 use gpui_component::separator::Separator;
 use gpui_component::tooltip::Tooltip;
@@ -81,6 +82,7 @@ pub fn render_detail(
     all_rows: &[PlayerRow],
     icons: &IconCache,
     debug: bool,
+    cx: &App,
 ) -> Option<AnyElement> {
     let mut sections: Vec<AnyElement> = Vec::new();
     if let Some(section) = render_name_section(ix, row, debug, icons) {
@@ -89,10 +91,10 @@ pub fn render_detail(
     if let Some(section) = render_build_section(ix, row, debug, icons) {
         sections.push(section);
     }
-    if let Some(section) = render_damage_section(ix, row, all_rows, debug, DamageDirection::Dealt) {
+    if let Some(section) = render_damage_section(ix, row, all_rows, debug, DamageDirection::Dealt, cx) {
         sections.push(section);
     }
-    if let Some(section) = render_damage_section(ix, row, all_rows, debug, DamageDirection::Received) {
+    if let Some(section) = render_damage_section(ix, row, all_rows, debug, DamageDirection::Received, cx) {
         sections.push(section);
     }
 
@@ -277,24 +279,24 @@ fn render_build_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Ico
             col = col.child(Separator::horizontal());
         }
         if build.modernization_slots.is_empty() {
-            col = col.child(body_text("No modules installed"));
+            col = col.child(body_text("No Modules"));
         } else {
-            col = col.child(section_heading("Modules"));
+            col = col.child(section_heading("Modules:"));
             col = col.child(modernization_slots_view(row_ix, &build.modernization_slots, icons));
         }
         has_content = true;
 
         if !build.signals.is_empty() {
             col = col.child(Separator::horizontal());
-            col = col.child(section_heading("Signals"));
+            col = col.child(section_heading("Signals:"));
             col = col.child(signals_view(row_ix, &build.signals, icons));
         }
 
         col = col.child(Separator::horizontal());
         if build.loadout.is_empty() {
-            col = col.child(body_text("No loadout"));
+            col = col.child(body_text("No Loadout"));
         } else {
-            col = col.child(section_heading("Loadout"));
+            col = col.child(section_heading("Loadout:"));
             for (idx, module) in build.loadout.iter().enumerate() {
                 if let Some(name) = module.name.as_ref() {
                     col = col.child(text_row("replay-loadout", row_ix, idx, name.clone(), module.description.clone()));
@@ -304,12 +306,16 @@ fn render_build_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Ico
 
         col = col.child(Separator::horizontal());
         match build.captain_skills.as_ref() {
-            Some(skills) if !skills.is_empty() => {
-                col = col.child(section_heading("Captain Skills"));
-                col = col.child(captain_skill_grid_view(row_ix, skills, icons));
+            Some(skills) => {
+                col = col.child(section_heading("Captain Skills:"));
+                if skills.is_empty() {
+                    col = col.child(body_text("No Captain Skills"));
+                } else {
+                    col = col.child(captain_skill_grid_view(row_ix, skills, icons));
+                }
             }
-            _ => {
-                col = col.child(body_text("No captain skills"));
+            None => {
+                col = col.child(body_text("No Captain Skills"));
             }
         }
     }
@@ -318,7 +324,7 @@ fn render_build_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Ico
         if has_content {
             col = col.child(Separator::horizontal());
         }
-        col = col.child(section_heading("Consumables"));
+        col = col.child(section_heading("Consumables:"));
         col = col.child(consumables_view(row_ix, &row.consumables, icons));
         has_content = true;
     } else if let Some(build) = row.translated_build.as_ref()
@@ -327,7 +333,7 @@ fn render_build_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Ico
         if has_content {
             col = col.child(Separator::horizontal());
         }
-        col = col.child(section_heading("Consumables"));
+        col = col.child(section_heading("Consumables:"));
         for (idx, ability) in build.abilities.iter().enumerate() {
             if let Some(name) = ability.name.as_ref() {
                 col = col.child(text_row("replay-ability", row_ix, idx, name.clone(), None));
@@ -521,20 +527,23 @@ fn consumable_row(row_ix: usize, idx: usize, consumable: &ConsumableResult, icon
         .into_any_element()
 }
 
-/// ActualDamage/ReceivedDamage expanded content: per-victim (or per-attacker)
-/// interaction lines, `"{ship}: {amount} ({pct}%)"`, sorted by amount
-/// descending, skipping zero entries. NDA-gated like the collapsed cell
-/// (`should_hide_stats() && !debug`), mirroring `dealt_damage_details` /
-/// `received_damage_details`. Unlike the egui app, this does not repeat the
-/// per-ammo-type breakdown block here -- that is already available as the
-/// collapsed cell's hover tooltip (`table.rs`'s `cell_element`), so this
-/// section covers only the interaction rows the brief calls for.
+/// ActualDamage/ReceivedDamage expanded content: the per-ammo-type breakdown
+/// paragraph (`row.actual_damage_hover_text`/`received_damage_hover_text`),
+/// then per-victim (or per-attacker) interaction lines,
+/// `"{ship}: {amount} ({pct}%)"`, sorted by amount descending, skipping zero
+/// entries. NDA-gated like the collapsed cell (`should_hide_stats() &&
+/// !debug`), mirroring `dealt_damage_details`/`received_damage_details`,
+/// which render both pieces together in one panel. The "Damage Dealt To"/
+/// "Damage Received From" heading is a port-only addition: egui puts each
+/// side in its own table column so no heading is needed there, but this
+/// port's side-by-side sections need one to tell them apart.
 fn render_damage_section(
     ix: usize,
     row: &PlayerRow,
     all_rows: &[PlayerRow],
     debug: bool,
     direction: DamageDirection,
+    cx: &App,
 ) -> Option<AnyElement> {
     let heading = match direction {
         DamageDirection::Dealt => "Damage Dealt To",
@@ -553,30 +562,59 @@ fn render_damage_section(
         );
     }
 
-    let interactions = row.damage_interactions.as_ref()?;
-    let mut entries: Vec<_> = interactions.iter().collect();
-    entries.sort_by_key(|(_, interaction)| std::cmp::Reverse(interaction_amount(interaction, direction)));
-
-    let mut col = v_flex().gap_1().min_w(px(200.)).flex_none().child(section_heading(heading));
-    let mut any = false;
-    for (idx, (account_id, interaction)) in entries.into_iter().enumerate() {
-        let amount = interaction_amount(interaction, direction);
-        if amount == 0 {
-            continue;
-        }
-        let Some(other) = all_rows.iter().find(|r| r.db_id == *account_id) else {
-            continue;
-        };
-        let pct = interaction_percentage(interaction, direction);
-        any = true;
-        col = col.child(div().id(("replay-interaction", ix * DETAIL_ID_STRIDE + idx)).text_xs().child(format!(
-            "{}: {} ({pct:.0}%)",
-            other.ship_name,
-            separate_number(amount)
-        )));
+    let hover_text = match direction {
+        DamageDirection::Dealt => row.actual_damage_hover_text.as_ref(),
+        DamageDirection::Received => row.received_damage_hover_text.as_ref(),
+    };
+    let interactions = row.damage_interactions.as_ref();
+    if hover_text.is_none() && interactions.is_none() {
+        return None;
     }
 
-    if any { Some(col.into_any_element()) } else { None }
+    let mut col = v_flex().gap_1().min_w(px(200.)).flex_none().child(section_heading(heading));
+
+    if let Some(text) = hover_text {
+        col = col.child(hover_paragraph(text, cx));
+        if interactions.is_some() {
+            col = col.child(Separator::horizontal());
+        }
+    }
+
+    if let Some(interactions) = interactions {
+        let mut entries: Vec<_> = interactions.iter().collect();
+        entries.sort_by_key(|(_, interaction)| std::cmp::Reverse(interaction_amount(interaction, direction)));
+        for (idx, (account_id, interaction)) in entries.into_iter().enumerate() {
+            let amount = interaction_amount(interaction, direction);
+            if amount == 0 {
+                continue;
+            }
+            let Some(other) = all_rows.iter().find(|r| r.db_id == *account_id) else {
+                continue;
+            };
+            let pct = interaction_percentage(interaction, direction);
+            col = col.child(div().id(("replay-interaction", ix * DETAIL_ID_STRIDE + idx)).text_xs().child(format!(
+                "{}: {} ({pct:.0}%)",
+                other.ship_name,
+                separate_number(amount)
+            )));
+        }
+    }
+
+    Some(col.into_any_element())
+}
+
+/// The ammo-type damage breakdown as a monospace paragraph, one line per
+/// `\n`-separated entry, matching the mono styling `table.rs`'s
+/// `hover_tooltip` uses for the same text when it shows as the collapsed
+/// cell's hover tooltip.
+fn hover_paragraph(text: &str, cx: &App) -> AnyElement {
+    let mono_font_family = cx.theme().mono_font_family.clone();
+    v_flex()
+        .gap_0()
+        .text_xs()
+        .font_family(mono_font_family)
+        .children(text.split('\n').map(|line| div().child(line.to_string())))
+        .into_any_element()
 }
 
 fn interaction_amount(interaction: &DamageInteraction, direction: DamageDirection) -> u64 {

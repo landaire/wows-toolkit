@@ -334,6 +334,11 @@ fn expand_caret(ix: usize, entity: Entity<PlayerTable>, is_expanded: bool) -> An
         .cursor_pointer()
         .on_click(move |_event: &ClickEvent, _window, cx: &mut App| {
             entity.update(cx, |this, cx| this.toggle_expanded(ix, cx));
+            // Without this, a double-click landing on the caret fires this
+            // handler twice (once per click) plus the row's own
+            // double-click handler once, netting an odd (3) toggle count
+            // instead of the even (2) egui nets for the same gesture.
+            cx.stop_propagation();
         })
         .child(Icon::new(icon))
         .into_any_element()
@@ -482,7 +487,7 @@ struct RowLayout<'a> {
 /// a double-click anywhere on the collapsed row also toggles expansion,
 /// mirroring the egui app's whole-row double-click handler in
 /// `cell_content_ui`.
-fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla) -> AnyElement {
+fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx: &App) -> AnyElement {
     let mut sticky = h_flex().flex_none();
     for &col in layout.sticky_columns {
         sticky = sticky.child(render_cell(ix, col, row, layout));
@@ -519,7 +524,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla) ->
         return collapsed.into_any_element();
     }
 
-    match expanded::render_detail(ix, row, layout.all_rows, layout.icons, layout.debug) {
+    match expanded::render_detail(ix, row, layout.all_rows, layout.icons, layout.debug, cx) {
         Some(detail) => v_flex().w_full().child(collapsed).child(detail).into_any_element(),
         None => collapsed.into_any_element(),
     }
@@ -572,7 +577,7 @@ impl Render for PlayerTable {
                 is_expanded,
                 all_rows: &table.model.rows,
             };
-            render_row(ix, row, &layout, hover_bg)
+            render_row(ix, row, &layout, hover_bg, cx)
         };
 
         div()
