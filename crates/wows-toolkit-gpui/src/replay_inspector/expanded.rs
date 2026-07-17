@@ -7,13 +7,12 @@
 //! `render_modernization_slots`/`render_signals`/`render_consumable_inventory`/
 //! `dealt_damage_details`/`received_damage_details` helpers.
 //!
-//! The egui original nests each column's expanded content inside that
-//! column's own table cell, so the row grows to the tallest cell height
-//! across columns. This port instead collects every section into one
-//! side-by-side panel below the collapsed row (`table.rs`'s `render_row`
-//! stacks it in a `v_flex`), which keeps the `list`/`ListState` row-height
-//! model simple (one measured height per row, not one per cell) while
-//! reproducing the same content grouped the same way.
+//! Like the egui original, this port nests each column's expanded content
+//! inside that column's own cell: `render_column_detail` returns just one
+//! column's detail, and `table.rs`'s per-column cell stacks it (in a
+//! `v_flex`) under that column's collapsed content, so the Name column's
+//! achievements sit under Name, the Skills build under Skills, and so on.
+//! The row grows to the tallest column cell (flex), matching egui.
 //!
 //! Icons come from `IconCache::get_keyed` (see that module's key-convention
 //! doc). Nothing calls `set_keyed` until a later milestone's replay-loading
@@ -37,6 +36,7 @@ use wowsunpack::game_params::skill_grid_data::SkillGridSkill;
 use wowsunpack::game_types::ChargeCount;
 
 use super::columns::NDA;
+use super::columns::ReplayColumn;
 use super::icons::IconCache;
 use super::model::PlayerRow;
 use super::model::separate_number;
@@ -66,49 +66,52 @@ enum DamageDirection {
     Received,
 }
 
-/// The whole expanded-row detail panel for `row` at list index `ix`: the
-/// Name-column content (achievements, ribbons, damage events), the
-/// Skills-column content (modernizations, signals, loadout, captain skills,
-/// consumables), and the ActualDamage/ReceivedDamage per-victim interaction
-/// breakdowns, laid out as side-by-side sections. `all_rows` is the full row
-/// list, needed to resolve a damage interaction's victim/attacker `db_id`
-/// into a ship name. Returns `None` when every section is empty, so
-/// `table.rs` can skip growing the row at all, matching the egui app's own
-/// "nothing renders" behavior for a row with no achievements, ribbons,
-/// damage events, build, consumables, or interactions.
-pub fn render_detail(
+/// One column's expanded detail for `row` at list index `ix`, or `None` when
+/// that column has nothing to show (so `table.rs` leaves the column's cell at
+/// its collapsed height). Mirrors the egui app's per-column
+/// `if 0.0 < expandedness { match column { ... } }` arms (`mod.rs:1834-2088`):
+/// each column draws its own detail under its own cell -- Name's achievements/
+/// ribbons/damage-events under Name, Skills' build under Skills, the damage
+/// breakdowns under ActualDamage/ReceivedDamage, and the Potential/Spotting/
+/// Hits hover text under those columns. `all_rows` resolves a damage
+/// interaction's victim/attacker `db_id` into a ship name.
+pub fn render_column_detail(
     ix: usize,
+    col: ReplayColumn,
     row: &PlayerRow,
     all_rows: &[PlayerRow],
     icons: &IconCache,
     debug: bool,
     cx: &App,
 ) -> Option<AnyElement> {
-    let mut sections: Vec<AnyElement> = Vec::new();
-    if let Some(section) = render_name_section(ix, row, debug, icons) {
-        sections.push(section);
+    match col {
+        ReplayColumn::Name => render_name_section(ix, row, debug, icons),
+        ReplayColumn::Skills => render_build_section(ix, row, debug, icons),
+        ReplayColumn::ActualDamage => render_damage_section(ix, row, all_rows, debug, DamageDirection::Dealt, cx),
+        ReplayColumn::ReceivedDamage => render_damage_section(ix, row, all_rows, debug, DamageDirection::Received, cx),
+        ReplayColumn::PotentialDamage => render_nda_gated_hover(row.potential_damage_hover_text.as_deref(), row, debug),
+        ReplayColumn::Hits => render_nda_gated_hover(row.hits_hover_text.as_deref(), row, debug),
+        ReplayColumn::SpottingDamage => row.spotting_damage_hover_text.as_deref().map(multiline_body),
+        _ => None,
     }
-    if let Some(section) = render_build_section(ix, row, debug, icons) {
-        sections.push(section);
-    }
-    if let Some(section) = render_damage_section(ix, row, all_rows, debug, DamageDirection::Dealt, cx) {
-        sections.push(section);
-    }
-    if let Some(section) = render_damage_section(ix, row, all_rows, debug, DamageDirection::Received, cx) {
-        sections.push(section);
-    }
+}
 
-    if sections.is_empty() {
-        return None;
+/// Potential-damage / Hits expanded content: the column's hover text shown
+/// inline, NDA-gated exactly like the egui arms (`mod.rs:1983-1989, 2077-2082`)
+/// -- an NDA placeholder when the row's stats are hidden and debug is off,
+/// otherwise the hover text (or nothing when there is none).
+fn render_nda_gated_hover(text: Option<&str>, row: &PlayerRow, debug: bool) -> Option<AnyElement> {
+    if row.should_hide_stats() && !debug {
+        return Some(nda_text());
     }
+    text.map(multiline_body)
+}
 
-    Some(
-        v_flex()
-            .w_full()
-            .child(Separator::horizontal())
-            .child(h_flex().w_full().items_start().flex_wrap().gap_4().px_2().py_2().children(sections))
-            .into_any_element(),
-    )
+/// Plain multi-line body text (one `div` per `\n`-separated line), matching
+/// the egui app's `ui.label(hover_text)` for the Potential/Spotting/Hits
+/// expanded arms, which render newlines as separate lines.
+fn multiline_body(text: &str) -> AnyElement {
+    v_flex().gap_0().text_xs().children(text.split('\n').map(|line| div().child(line.to_string()))).into_any_element()
 }
 
 fn section_heading(text: &'static str) -> AnyElement {
@@ -172,11 +175,11 @@ fn icon_label_row(
     icons: &IconCache,
 ) -> AnyElement {
     let tooltip: SharedString = tooltip_text.into();
-    let mut row = h_flex().gap(px(8.)).items_center();
+    let mut row = h_flex().w_full().gap(px(8.)).items_center();
     if let Some(image) = icons.get_keyed(key) {
         row = row.child(img(image).w(px(size)).h(px(size)).flex_none());
     }
-    row = row.child(div().text_xs().child(label));
+    row = row.child(div().flex_1().min_w(px(0.)).text_xs().child(label));
     row.id((tag, row_ix * DETAIL_ID_STRIDE + idx))
         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
         .into_any_element()
@@ -202,7 +205,7 @@ fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Icon
     // egui original, so they all share that one gap -- not a larger gap at
     // this level and a tighter one nested inside `achievements_view`/
     // `ribbons_view`.
-    let mut col = v_flex().gap(px(3.)).min_w(px(220.)).flex_none();
+    let mut col = v_flex().gap(px(3.));
 
     if has_achievements {
         col = col.child(section_heading("Achievements"));
@@ -328,7 +331,7 @@ fn render_build_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Ico
         return None;
     }
 
-    let mut col = v_flex().gap_1().min_w(px(260.)).flex_none();
+    let mut col = v_flex().gap_1();
     let mut has_content = false;
 
     if let Some(hover) = row.skill_hover_text.as_ref() {
@@ -594,11 +597,10 @@ fn consumable_row(row_ix: usize, idx: usize, consumable: &ConsumableResult, icon
 /// then per-victim (or per-attacker) interaction lines,
 /// `"{ship}: {amount} ({pct}%)"`, sorted by amount descending, skipping zero
 /// entries. NDA-gated like the collapsed cell (`should_hide_stats() &&
-/// !debug`), mirroring `dealt_damage_details`/`received_damage_details`,
-/// which render both pieces together in one panel. The "Damage Dealt To"/
-/// "Damage Received From" heading is a port-only addition: egui puts each
-/// side in its own table column so no heading is needed there, but this
-/// port's side-by-side sections need one to tell them apart.
+/// !debug`), mirroring the egui app's `dealt_damage_details`/
+/// `received_damage_details`. No heading: each side sits under its own column
+/// (ActualDamage/ReceivedDamage), so the column header already names it, just
+/// as in egui.
 fn render_damage_section(
     ix: usize,
     row: &PlayerRow,
@@ -607,21 +609,8 @@ fn render_damage_section(
     direction: DamageDirection,
     cx: &App,
 ) -> Option<AnyElement> {
-    let heading = match direction {
-        DamageDirection::Dealt => "Damage Dealt To",
-        DamageDirection::Received => "Damage Received From",
-    };
-
     if row.should_hide_stats() && !debug {
-        return Some(
-            v_flex()
-                .gap_1()
-                .min_w(px(200.))
-                .flex_none()
-                .child(section_heading(heading))
-                .child(nda_text())
-                .into_any_element(),
-        );
+        return Some(nda_text());
     }
 
     let hover_text = match direction {
@@ -633,7 +622,7 @@ fn render_damage_section(
         return None;
     }
 
-    let mut col = v_flex().gap_1().min_w(px(200.)).flex_none().child(section_heading(heading));
+    let mut col = v_flex().gap_1();
 
     if let Some(text) = hover_text {
         col = col.child(hover_paragraph(text, cx));

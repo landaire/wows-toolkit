@@ -8,10 +8,11 @@
 //! (ship-class icon, division, clan tag, player name), Skills tier icons, and
 //! hover tooltips for the stat cells that carry a breakdown. A row also
 //! carries an expand/collapse state (`expanded`, keyed by `db_id` so it
-//! survives re-sorting): the Name cell's caret and a double-click on the
-//! collapsed row toggle it, growing the row to show `expanded::render_detail`
-//! underneath (achievements, ribbons, build, consumables, damage
-//! breakdowns; see `expanded.rs`).
+//! survives re-sorting): the Name cell's caret and a double-click on the row
+//! toggle it, growing each column's own cell downward to show that column's
+//! `expanded::render_column_detail` under its own header (achievements/
+//! ribbons/damage-events under Name, the build under Skills, the damage
+//! breakdowns under ActualDamage/ReceivedDamage; see `expanded.rs`).
 
 use std::collections::HashSet;
 
@@ -380,7 +381,7 @@ impl PlayerTable {
     /// Applies a runtime debug-mode toggle (see `panel.rs::ReplayPanel::set_debug`):
     /// re-sorts, since a column's NDA-hidden sort key changes between debug
     /// on/off (`sort_rows`'s `debug` gate), then notifies so every cell's
-    /// `cell_value`/`expanded::render_detail` call picks up the new flag on
+    /// `cell_value`/`expanded::render_column_detail` call picks up the new flag on
     /// its next render. Also re-triggers `measure_column_widths`: NDA hiding
     /// swaps cell text for the shorter "NDA" placeholder, so the fit widths
     /// computed while hidden are too narrow for the real numbers debug mode
@@ -764,9 +765,9 @@ fn actions_cell(ix: usize, row: &PlayerRow, debug: bool, entity: Entity<PlayerTa
     div().w(px(width)).flex_none().px_1().child(menu_button).into_any_element()
 }
 
-/// One column cell, dispatching to the Name/Skills/Actions special-cased
-/// layouts and falling back to the generic `cell_element` for everything
-/// else.
+/// One column's collapsed cell, dispatching to the Name/Skills/Actions
+/// special-cased layouts and falling back to the generic `cell_element` for
+/// everything else.
 fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout) -> AnyElement {
     let width = layout.column_widths[col as usize].as_f32();
     match col {
@@ -774,6 +775,35 @@ fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
         ReplayColumn::Skills => skills_cell(ix, row, layout.debug, width),
         ReplayColumn::Actions => actions_cell(ix, row, layout.debug, layout.entity.clone(), width),
         _ => cell_element(ix, col, cell_value(row, col, layout.debug), width),
+    }
+}
+
+/// One column's full cell: the collapsed content and, when the row is
+/// expanded and this column has expanded detail, that detail stacked
+/// underneath -- so each column's expansion grows downward under its own
+/// header (`expanded::render_column_detail`). The cell is a fixed-width
+/// `v_flex` clamped to the column's content-fit width so the collapsed table
+/// stays aligned and the detail (text wraps to the column width; a dense
+/// build/consumable sub-table clips at the column edge) never bleeds into the
+/// neighbouring column, matching egui_table's per-cell clip with
+/// `AutoSizeMode::Never`. Row height comes from the tallest such cell (flex).
+/// Collapsed rows return the bare cell (no wrapping `v_flex`), keeping the
+/// non-expanded layout byte-for-byte what it was.
+fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout, cx: &App) -> AnyElement {
+    let collapsed = render_cell(ix, col, row, layout);
+    if !layout.is_expanded {
+        return collapsed;
+    }
+    match expanded::render_column_detail(ix, col, row, layout.all_rows, layout.icons, layout.debug, cx) {
+        Some(detail) => v_flex()
+            .w(layout.column_widths[col as usize])
+            .flex_none()
+            .gap_1()
+            .overflow_hidden()
+            .child(collapsed)
+            .child(detail)
+            .into_any_element(),
+        None => collapsed,
     }
 }
 
@@ -799,31 +829,35 @@ struct RowLayout<'a> {
     all_rows: &'a [PlayerRow],
 }
 
-/// One collapsed row: `layout.sticky_columns` (Actions/Name/ShipName) render
-/// as fixed cells outside the horizontal scroll; `layout.scroll_columns`
+/// One row: `layout.sticky_columns` (Actions/Name/ShipName) render as fixed
+/// per-column cells outside the horizontal scroll; `layout.scroll_columns`
 /// render inside a nested scroll container tracking `layout.h_scroll`, the
 /// same handle the header's scrolling portion tracks, so both stay aligned.
-/// Mirrors the egui app's `num_sticky_cols(3)`. When `layout.is_expanded`,
-/// stacks `expanded::render_detail`'s content underneath (see `expanded.rs`);
-/// a double-click anywhere on the collapsed row also toggles expansion,
+/// Mirrors the egui app's `num_sticky_cols(3)`. Each cell is a
+/// `render_column_cell`, so when `layout.is_expanded` every column's detail
+/// grows downward under its own column (achievements under Name, the build
+/// under Skills, the damage breakdowns under ActualDamage/ReceivedDamage);
+/// the row's `items_start` top-aligns the columns and its height is the
+/// tallest column. A double-click anywhere on the row toggles expansion,
 /// mirroring the egui app's whole-row double-click handler in
 /// `cell_content_ui`.
 fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx: &App) -> AnyElement {
-    let mut sticky = h_flex().flex_none();
+    let mut sticky = h_flex().flex_none().items_start();
     for &col in layout.sticky_columns {
-        sticky = sticky.child(render_cell(ix, col, row, layout));
+        sticky = sticky.child(render_column_cell(ix, col, row, layout, cx));
     }
 
-    let mut scrolling = h_flex().w(px(layout.scroll_width)).flex_none();
+    let mut scrolling = h_flex().w(px(layout.scroll_width)).flex_none().items_start();
     for &col in layout.scroll_columns {
-        scrolling = scrolling.child(render_cell(ix, col, row, layout));
+        scrolling = scrolling.child(render_column_cell(ix, col, row, layout, cx));
     }
 
     let entity = layout.entity.clone();
-    let collapsed = h_flex()
+    h_flex()
         .id(ix)
         .w_full()
         .py_0p5()
+        .items_start()
         .hover(move |style| style.bg(hover_bg))
         .on_click(move |event: &ClickEvent, _window, cx: &mut App| {
             if event.click_count() >= 2 {
@@ -839,16 +873,8 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
                 .overflow_x_scroll()
                 .track_scroll(layout.h_scroll)
                 .child(scrolling),
-        );
-
-    if !layout.is_expanded {
-        return collapsed.into_any_element();
-    }
-
-    match expanded::render_detail(ix, row, layout.all_rows, layout.icons, layout.debug, cx) {
-        Some(detail) => v_flex().w_full().child(collapsed).child(detail).into_any_element(),
-        None => collapsed.into_any_element(),
-    }
+        )
+        .into_any_element()
 }
 
 impl Render for PlayerTable {
