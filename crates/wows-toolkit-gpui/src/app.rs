@@ -74,7 +74,8 @@ impl App {
         self.zoom_slider =
             cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(settings.zoom));
         let wows_dir = settings.wows_dir.clone();
-        self.replay_inspector.update(cx, |view, cx| view.apply_settings(wows_dir, cx));
+        let debug_mode = settings.debug_mode;
+        self.replay_inspector.update(cx, |view, cx| view.apply_settings(wows_dir, debug_mode, cx));
         self.settings = SettingsState::Loaded(settings);
     }
 

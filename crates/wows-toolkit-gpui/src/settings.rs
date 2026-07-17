@@ -23,6 +23,12 @@ pub struct GpuiSettings {
     pub wows_dir: String,
     pub current_replay_path: PathBuf,
     pub replay: ReplaySettings,
+    /// `AppPreferences.debug_mode` in the egui app: unhides NDA-hidden stats
+    /// in the Replay Inspector and reveals its raw-metadata/raw-results
+    /// viewers. Read-only seed for the RI's session debug toggle (see
+    /// `replay_inspector::view::ReplayInspectorView::set_debug_mode`); this
+    /// crate never writes it back.
+    pub debug_mode: bool,
     /// `None` when the `armor_viewer_defaults` table has no row yet (fresh DB),
     /// or when the read failed (logged via `tracing::warn!` in `load`).
     pub armor_defaults: Option<ArmorViewerDefaultsRow>,
@@ -37,6 +43,7 @@ impl GpuiSettings {
         let current_replay_path =
             queries::get_setting::<PathBuf>(pool, "current_replay_path").await.unwrap_or_default();
         let replay = queries::get_setting::<ReplaySettings>(pool, "replay_settings").await.unwrap_or_default();
+        let debug_mode = queries::get_setting::<bool>(pool, "debug_mode").await.unwrap_or(false);
         let armor_defaults = match queries::get_armor_viewer_defaults(pool).await {
             Ok(defaults) => defaults,
             Err(e) => {
@@ -45,6 +52,6 @@ impl GpuiSettings {
             }
         };
 
-        Self { zoom, wows_dir, current_replay_path, replay, armor_defaults }
+        Self { zoom, wows_dir, current_replay_path, replay, debug_mode, armor_defaults }
     }
 }

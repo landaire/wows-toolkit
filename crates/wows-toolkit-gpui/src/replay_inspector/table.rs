@@ -194,8 +194,9 @@ pub struct PlayerTable {
     /// text label) until then; never blocks entity construction.
     icons: IconCache,
     /// Debug mode lifts NDA hiding and the enemy-only Skills gate, mirroring
-    /// the egui app's debug flag. Always `false` until a settings toggle wires
-    /// it in a later milestone.
+    /// the egui app's `AppPreferences.debug_mode`. Seeded from `new`'s `debug`
+    /// argument and kept live afterward by `set_debug` (see `panel.rs`'s
+    /// runtime toggle).
     debug: bool,
     /// Rows currently showing their expanded detail, keyed by `db_id` rather
     /// than list index so a row's expanded state survives a re-sort (which
@@ -215,9 +216,8 @@ impl PlayerTable {
     /// cell falls back to its text label, per `name_cell`/`expanded.rs`), then
     /// re-renders with real icons once the spawned task's decode completes and
     /// applies its result back via `cx.notify()`.
-    pub fn new(mut model: ReplayReportModel, vfs: VfsPath, cx: &mut Context<Self>) -> Self {
+    pub fn new(mut model: ReplayReportModel, vfs: VfsPath, debug: bool, cx: &mut Context<Self>) -> Self {
         let sort = SortOrder::default();
-        let debug = false;
         sort_rows(&mut model.rows, model.self_team, sort, debug);
         let list_state = ListState::new(model.rows.len(), ListAlignment::Top, LIST_OVERDRAW);
 
@@ -258,6 +258,21 @@ impl PlayerTable {
     /// the rows in place, and resets the list to the new row count.
     fn sort_by(&mut self, column: SortColumn, cx: &mut Context<Self>) {
         self.sort.update_column(column);
+        sort_rows(&mut self.model.rows, self.model.self_team, self.sort, self.debug);
+        self.list_state.reset(self.model.rows.len());
+        cx.notify();
+    }
+
+    /// Applies a runtime debug-mode toggle (see `panel.rs::ReplayPanel::set_debug`):
+    /// re-sorts, since a column's NDA-hidden sort key changes between debug
+    /// on/off (`sort_rows`'s `debug` gate), then notifies so every cell's
+    /// `cell_value`/`expanded::render_detail` call picks up the new flag on
+    /// its next render.
+    pub fn set_debug(&mut self, debug: bool, cx: &mut Context<Self>) {
+        if self.debug == debug {
+            return;
+        }
+        self.debug = debug;
         sort_rows(&mut self.model.rows, self.model.self_team, self.sort, self.debug);
         self.list_state.reset(self.model.rows.len());
         cx.notify();

@@ -377,6 +377,29 @@ fn load_versioned_constants(build: u32) -> Value {
 pub struct ParsedReplay {
     pub model: ReplayReportModel,
     pub game_data: Arc<LoadedGameData>,
+    /// Pretty-printed replay header/metadata JSON (`ReplayFile::raw_meta`),
+    /// for the debug-mode raw-metadata viewer (mirrors the egui app's
+    /// `ui.replay.debug.raw_metadata` button, `ui/replay_parser/mod.rs`
+    /// ~3018-3034). Falls back to the unparsed raw string when it does not
+    /// parse as JSON, rather than panicking like the egui app's `.expect()`.
+    pub raw_metadata_json: String,
+    /// Pretty-printed battle-results JSON (`BattleReport::battle_results`),
+    /// for the debug-mode raw-results viewer (mirrors the egui app's
+    /// `ui.replay.debug.raw_json`, `mod.rs` ~3039-3060). `None` when the
+    /// replay carries no battle-results packet (e.g. the player left before
+    /// the server sent one).
+    pub raw_results_json: Option<String>,
+}
+
+/// Pretty-prints `raw` as JSON when it parses, falling back to the original
+/// string unchanged otherwise. Used for the debug-mode raw viewers; unlike
+/// the egui app's equivalent `serde_json::from_str(...).expect(...)` calls,
+/// this never panics on a malformed payload.
+fn pretty_json_or_raw(raw: &str) -> String {
+    serde_json::from_str::<Value>(raw)
+        .ok()
+        .and_then(|value| serde_json::to_string_pretty(&value).ok())
+        .unwrap_or_else(|| raw.to_string())
 }
 
 /// Reads and parses one replay file into a presentation-ready
@@ -416,6 +439,7 @@ fn parse_replay(path: &Path, game_data: &GameDataCache) -> Result<ParsedReplay, 
     world.finish();
 
     let report = world.into_report();
+    let raw_results_json = report.battle_results().map(pretty_json_or_raw);
     let normalized =
         NormalizedBattleReport::from_battle_report(&report, meta, loaded.provider.as_ref(), &constants_json);
     let model = ReplayReportModel::from_normalized(
@@ -425,8 +449,9 @@ fn parse_replay(path: &Path, game_data: &GameDataCache) -> Result<ParsedReplay, 
         &constants_json,
         report.game_chat(),
     );
+    let raw_metadata_json = pretty_json_or_raw(&replay_file.raw_meta);
 
-    Ok(ParsedReplay { model, game_data: loaded })
+    Ok(ParsedReplay { model, game_data: loaded, raw_metadata_json, raw_results_json })
 }
 
 /// Parses `path` into a [`ParsedReplay`] on the background executor

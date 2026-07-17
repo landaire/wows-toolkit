@@ -23,6 +23,15 @@
 //! replay's chat log is empty. The note is a hardcoded string literal matching
 //! the egui original's `ui.replay.no_chat` translation value verbatim; this
 //! crate has no `t!()`/i18n lookup wired for it.
+//!
+//! **Debug mode.** `debug` (seeded from `ReplayInspectorView`'s session flag,
+//! itself seeded from `AppPreferences.debug_mode` in the shared config DB)
+//! lifts NDA hiding in `table` and reveals two buttons mirroring the egui
+//! app's debug menu (`mod.rs` ~3018-3060): "Raw Metadata" (the replay
+//! header/metadata JSON) and "Raw Results" (the battle-results JSON,
+//! disabled when the replay carries none). Both share the chat button's side
+//! panel slot (`SidePanel`) rather than opening a standalone window, the same
+//! v1 tradeoff as chat.
 
 use std::path::PathBuf;
 
@@ -43,6 +52,7 @@ use wows_replays::analyzer::battle_controller::BattleResult;
 use super::chat::ChatPanel;
 use super::columns::BattleOutcome;
 use super::columns::ColorRole;
+use super::debug_view::RawJsonPanel;
 use super::load::GameDataCache;
 use super::load::ParsedReplay;
 use super::load::ReplayLoadError;
@@ -52,17 +62,33 @@ use super::table::resolve_color;
 
 const LOADING_TITLE: &str = "Loading...";
 const FAILED_TITLE: &str = "Failed to load replay";
-const CHAT_PANEL_WIDTH: Pixels = px(360.);
+const SIDE_PANEL_WIDTH: Pixels = px(360.);
 
-/// A loaded replay's tab title and outcome, plus the real player table and,
-/// when the replay's chat log is non-empty, its chat panel. `chat_panel` is
-/// `None` for a chat-less replay so the toggle button can be disabled rather
-/// than opening onto an empty panel, matching the egui app.
+/// Which entity (if any) occupies the panel's single side-panel slot. Chat
+/// and the two debug-mode raw viewers share the slot rather than each having
+/// their own, since only one is useful to look at at a time and the egui app
+/// itself only ever shows one debug viewer window at once.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SidePanel {
+    None,
+    Chat,
+    RawMetadata,
+    RawResults,
+}
+
+/// A loaded replay's tab title and outcome, plus the real player table, the
+/// chat panel (`None` for a chat-less replay so its toggle button can be
+/// disabled rather than opening onto an empty panel, matching the egui app),
+/// and the two debug-mode raw-JSON viewers (`raw_results_panel` is `None`
+/// when the replay carries no battle-results packet; see
+/// `load::ParsedReplay::raw_results_json`).
 struct LoadedReplay {
     title: SharedString,
     battle_result: Option<BattleResult>,
     table: Entity<PlayerTable>,
     chat_panel: Option<Entity<ChatPanel>>,
+    raw_metadata_panel: Entity<RawJsonPanel>,
+    raw_results_panel: Option<Entity<RawJsonPanel>>,
 }
 
 enum LoadState {
@@ -74,15 +100,21 @@ enum LoadState {
 pub struct ReplayPanel {
     focus_handle: FocusHandle,
     state: LoadState,
-    /// Whether the chat side panel is open. Mirrors the egui app's
-    /// `show_game_chat` temp-data flag; irrelevant (and never shown) while
-    /// `state` has no chat, since the toggle button is disabled in that case.
-    show_chat: bool,
+    /// Which entity occupies the side-panel slot; mirrors the egui app's
+    /// `show_game_chat` temp-data flag for `SidePanel::Chat`, plus this
+    /// port's own state for the two debug viewers egui opens as standalone
+    /// windows instead (see the module doc).
+    side_panel: SidePanel,
+    /// Debug mode lifts NDA hiding (threaded into `table`'s `debug` flag) and
+    /// reveals the raw-metadata/raw-results viewer buttons. Seeded from
+    /// `ReplayInspectorView`'s session debug flag at construction, kept live
+    /// afterward by `set_debug` (the RI's runtime toggle; see `view.rs`).
+    debug: bool,
     _parse_task: Task<()>,
 }
 
 impl ReplayPanel {
-    pub fn new(path: PathBuf, game_data: GameDataCache, cx: &mut Context<Self>) -> Self {
+    pub fn new(path: PathBuf, game_data: GameDataCache, debug: bool, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
         let parse_task = spawn_parse(path, game_data, cx);
         let parse_task = cx.spawn(async move |this, cx| {
@@ -90,12 +122,27 @@ impl ReplayPanel {
             let _ = this.update(cx, |this, cx| this.apply_result(result, cx));
         });
 
-        Self { focus_handle, state: LoadState::Loading, show_chat: false, _parse_task: parse_task }
+        Self { focus_handle, state: LoadState::Loading, side_panel: SidePanel::None, debug, _parse_task: parse_task }
+    }
+
+    /// Applies a runtime debug-mode toggle from `ReplayInspectorView`:
+    /// updates `debug`, threads it into the already-loaded table (if any),
+    /// and closes a debug-only side panel that just lost its gate rather than
+    /// leaving it stranded open with no way to reopen it.
+    pub fn set_debug(&mut self, debug: bool, cx: &mut Context<Self>) {
+        self.debug = debug;
+        if !debug && matches!(self.side_panel, SidePanel::RawMetadata | SidePanel::RawResults) {
+            self.side_panel = SidePanel::None;
+        }
+        if let LoadState::Loaded(loaded) = &self.state {
+            loaded.table.update(cx, |table, cx| table.set_debug(debug, cx));
+        }
+        cx.notify();
     }
 
     fn apply_result(&mut self, result: Result<ParsedReplay, ReplayLoadError>, cx: &mut Context<Self>) {
         self.state = match result {
-            Ok(ParsedReplay { mut model, game_data }) => {
+            Ok(ParsedReplay { mut model, game_data, raw_metadata_json, raw_results_json }) => {
                 let ship_name =
                     model.rows.iter().find(|row| row.is_self).map(|row| row.ship_name.clone()).unwrap_or_default();
                 let title: SharedString =
@@ -105,8 +152,17 @@ impl ReplayPanel {
                 let chat = std::mem::take(&mut model.chat);
                 let chat_panel = (!chat.is_empty()).then(|| cx.new(|cx| ChatPanel::new(chat, cx)));
                 let vfs = game_data.vfs().clone();
-                let table = cx.new(|cx| PlayerTable::new(model, vfs, cx));
-                LoadState::Loaded(LoadedReplay { title, battle_result, table, chat_panel })
+                let table = cx.new(|cx| PlayerTable::new(model, vfs, self.debug, cx));
+                let raw_metadata_panel = cx.new(|cx| RawJsonPanel::new(raw_metadata_json.into(), cx));
+                let raw_results_panel = raw_results_json.map(|json| cx.new(|cx| RawJsonPanel::new(json.into(), cx)));
+                LoadState::Loaded(LoadedReplay {
+                    title,
+                    battle_result,
+                    table,
+                    chat_panel,
+                    raw_metadata_panel,
+                    raw_results_panel,
+                })
             }
             Err(err) => LoadState::Failed(err),
         };
@@ -166,27 +222,90 @@ fn outcome_badge(battle_result: Option<BattleResult>) -> AnyElement {
         .into_any_element()
 }
 
-/// The header row: the outcome badge on the left, the chat toggle button on
-/// the right. Mirrors the egui app's Row 1 layout (see the module doc);
-/// `has_chat` disables the button exactly like `ui.add_enabled(has_chat,
-/// ...)` there, since a chat-less replay has nothing to toggle.
+/// One side-panel toggle button's static shape, bundled into a struct so
+/// `side_panel_button` stays under clippy's argument-count limit (mirrors
+/// `table.rs::RowLayout`'s reason for existing).
+struct SidePanelButtonSpec {
+    id: &'static str,
+    icon: IconName,
+    label: &'static str,
+    panel: SidePanel,
+    enabled: bool,
+    disabled_tooltip: Option<&'static str>,
+}
+
+/// One side-panel toggle button: selected while `spec.panel` is the active
+/// `SidePanel`, disabled when `spec.enabled` is false (with
+/// `spec.disabled_tooltip` shown on hover), clicking toggles between
+/// `spec.panel` and `SidePanel::None` via `ReplayPanel::toggle_side_panel`.
+fn side_panel_button(spec: SidePanelButtonSpec, current: SidePanel, cx: &mut Context<ReplayPanel>) -> AnyElement {
+    let panel = spec.panel;
+    Button::new(spec.id)
+        .icon(spec.icon)
+        .label(spec.label)
+        .compact()
+        .selected(current == panel)
+        .disabled(!spec.enabled)
+        .when_some((!spec.enabled).then_some(spec.disabled_tooltip).flatten(), |this, tooltip| this.tooltip(tooltip))
+        .on_click(cx.listener(move |this, _event, _window, cx| this.toggle_side_panel(panel, cx)))
+        .into_any_element()
+}
+
+/// The header row: the outcome badge on the left, the chat toggle and (when
+/// `debug` is on) the raw-metadata/raw-results debug viewer toggles on the
+/// right. Mirrors the egui app's Row 1 layout plus its debug-mode buttons
+/// (see the module doc); `has_chat`/`has_results` disable their respective
+/// buttons exactly like `ui.add_enabled(...)` there, since a chat-less or
+/// results-less replay has nothing to show.
 fn header_row(
     battle_result: Option<BattleResult>,
     has_chat: bool,
-    show_chat: bool,
+    has_results: bool,
+    debug: bool,
+    side_panel: SidePanel,
     cx: &mut Context<ReplayPanel>,
 ) -> AnyElement {
-    let chat_button = Button::new("replay-chat-toggle")
-        .icon(IconName::PanelRight)
-        .label("Chat")
-        .compact()
-        .selected(show_chat)
-        .disabled(!has_chat)
-        .when(!has_chat, |this| this.tooltip("No chat messages were sent in this replay"))
-        .on_click(cx.listener(|this, _event, _window, cx| {
-            this.show_chat = !this.show_chat;
-            cx.notify();
-        }));
+    let chat_button = side_panel_button(
+        SidePanelButtonSpec {
+            id: "replay-chat-toggle",
+            icon: IconName::PanelRight,
+            label: "Chat",
+            panel: SidePanel::Chat,
+            enabled: has_chat,
+            disabled_tooltip: Some("No chat messages were sent in this replay"),
+        },
+        side_panel,
+        cx,
+    );
+
+    let mut buttons = h_flex().flex_none().items_center().gap_1().child(chat_button);
+    if debug {
+        buttons = buttons
+            .child(side_panel_button(
+                SidePanelButtonSpec {
+                    id: "replay-debug-raw-metadata",
+                    icon: IconName::File,
+                    label: "Raw Metadata",
+                    panel: SidePanel::RawMetadata,
+                    enabled: true,
+                    disabled_tooltip: None,
+                },
+                side_panel,
+                cx,
+            ))
+            .child(side_panel_button(
+                SidePanelButtonSpec {
+                    id: "replay-debug-raw-results",
+                    icon: IconName::File,
+                    label: "Raw Results",
+                    panel: SidePanel::RawResults,
+                    enabled: has_results,
+                    disabled_tooltip: Some("This replay has no battle-results packet"),
+                },
+                side_panel,
+                cx,
+            ));
+    }
 
     h_flex()
         .flex_none()
@@ -194,8 +313,17 @@ fn header_row(
         .justify_between()
         .pr_2()
         .child(outcome_badge(battle_result))
-        .child(chat_button)
+        .child(buttons)
         .into_any_element()
+}
+
+impl ReplayPanel {
+    /// Toggles the side-panel slot: switching to whichever of `panel`
+    /// is not already showing, or closing it if `panel` is already active.
+    fn toggle_side_panel(&mut self, panel: SidePanel, cx: &mut Context<Self>) {
+        self.side_panel = if self.side_panel == panel { SidePanel::None } else { panel };
+        cx.notify();
+    }
 }
 
 impl Render for ReplayPanel {
@@ -210,29 +338,35 @@ impl Render for ReplayPanel {
                 .into_any_element(),
             LoadState::Loaded(loaded) => {
                 let has_chat = loaded.chat_panel.is_some();
-                let show_chat = self.show_chat && has_chat;
+                let has_results = loaded.raw_results_panel.is_some();
                 let table = loaded.table.clone();
-                let chat_panel = loaded.chat_panel.clone();
                 let battle_result = loaded.battle_result;
                 let border = cx.theme().border;
 
+                let side_panel_entity: Option<AnyView> = match self.side_panel {
+                    SidePanel::None => None,
+                    SidePanel::Chat => loaded.chat_panel.clone().map(|panel| panel.into()),
+                    SidePanel::RawMetadata => Some(loaded.raw_metadata_panel.clone().into()),
+                    SidePanel::RawResults => loaded.raw_results_panel.clone().map(|panel| panel.into()),
+                };
+
                 v_flex()
                     .size_full()
-                    .child(header_row(battle_result, has_chat, show_chat, cx))
+                    .child(header_row(battle_result, has_chat, has_results, self.debug, self.side_panel, cx))
                     .child(
                         h_flex()
                             .flex_1()
                             .min_h(px(0.))
                             .child(div().flex_1().min_w(px(0.)).h_full().child(table))
-                            .when_some(show_chat.then_some(chat_panel).flatten(), |row, chat_panel| {
+                            .when_some(side_panel_entity, |row, side_panel| {
                                 row.child(
                                     div()
                                         .flex_none()
-                                        .w(CHAT_PANEL_WIDTH)
+                                        .w(SIDE_PANEL_WIDTH)
                                         .h_full()
                                         .border_l_1()
                                         .border_color(border)
-                                        .child(chat_panel),
+                                        .child(side_panel),
                                 )
                             }),
                     )

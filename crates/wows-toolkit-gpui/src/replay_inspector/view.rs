@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui_component::checkbox::Checkbox;
 use gpui_component::dock::DockArea;
 use gpui_component::dock::DockItem;
 use gpui_component::dock::DockPlacement;
@@ -60,6 +61,14 @@ pub struct ReplayInspectorView {
     /// closed until the next open for that same path notices the weak
     /// handle no longer upgrades and replaces the entry.
     open_panels: HashMap<PathBuf, WeakEntity<ReplayPanel>>,
+    /// Session debug-mode flag: seeded from `AppPreferences.debug_mode` (the
+    /// shared config DB) in `apply_settings`, then flippable at runtime via
+    /// the header checkbox (`set_debug_mode`), which also pushes the new
+    /// value into every currently open `ReplayPanel` -- not just panels
+    /// opened afterward. This crate never writes settings back to the DB
+    /// (see `settings.rs`'s module doc), so the toggle only overrides the
+    /// setting for the running session.
+    debug_mode: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -76,18 +85,21 @@ impl ReplayInspectorView {
             game_data_status: GameDataStatus::Loading,
             has_opened_replay: false,
             open_panels: HashMap::new(),
+            debug_mode: false,
             _subscriptions: vec![subscription],
         }
     }
 
     /// Starts the browser's directory scan, (re)builds the game-data cache
-    /// for `wows_dir`, and kicks off the startup preload of the current
-    /// installed build through that same cache -- so a later `spawn_parse`
-    /// for a replay on that build (see `panel.rs`) finds the slot already
-    /// warm instead of reloading it. Called from `App::apply_settings`,
-    /// which itself runs without a `Window` (see `main.rs`), so this cannot
-    /// take one either.
-    pub fn apply_settings(&mut self, wows_dir: String, cx: &mut Context<Self>) {
+    /// for `wows_dir`, seeds the session debug-mode flag from
+    /// `debug_mode` (`AppPreferences.debug_mode`), and kicks off the startup
+    /// preload of the current installed build through that same cache -- so
+    /// a later `spawn_parse` for a replay on that build (see `panel.rs`)
+    /// finds the slot already warm instead of reloading it. Called from
+    /// `App::apply_settings`, which itself runs without a `Window` (see
+    /// `main.rs`), so this cannot take one either.
+    pub fn apply_settings(&mut self, wows_dir: String, debug_mode: bool, cx: &mut Context<Self>) {
+        self.debug_mode = debug_mode;
         if wows_dir.is_empty() {
             self.game_data = None;
             self.game_data_status = GameDataStatus::Failed("World of Warships directory is not set".to_string());
@@ -158,7 +170,7 @@ impl ReplayInspectorView {
             return;
         }
 
-        let panel = cx.new(|cx| ReplayPanel::new(path.clone(), game_data, cx));
+        let panel = cx.new(|cx| ReplayPanel::new(path.clone(), game_data, self.debug_mode, cx));
         self.open_panels.insert(path, panel.downgrade());
         self.dock_area.update(cx, |dock_area, cx| {
             dock_area.add_panel(Arc::new(panel), DockPlacement::Center, None, window, cx);
@@ -166,10 +178,25 @@ impl ReplayInspectorView {
         self.has_opened_replay = true;
         cx.notify();
     }
+
+    /// Flips the session debug-mode flag and pushes the new value into every
+    /// currently open replay tab (`open_panels`'s live entries; closed tabs'
+    /// stale weak handles just fail to upgrade and are skipped), so toggling
+    /// debug mode takes effect immediately rather than only on the next
+    /// replay opened.
+    fn set_debug_mode(&mut self, debug_mode: bool, cx: &mut Context<Self>) {
+        self.debug_mode = debug_mode;
+        for panel in self.open_panels.values() {
+            if let Some(panel) = panel.upgrade() {
+                panel.update(cx, |panel, cx| panel.set_debug(debug_mode, cx));
+            }
+        }
+        cx.notify();
+    }
 }
 
 impl Render for ReplayInspectorView {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dock_content: AnyElement = if self.has_opened_replay {
             self.dock_area.clone().into_any_element()
         } else {
@@ -191,8 +218,20 @@ impl Render for ReplayInspectorView {
             GameDataStatus::Ready(_) => None,
         };
 
+        // Mirrors `AppPreferences.debug_mode`: unhides NDA-hidden stats
+        // (threaded into every open tab's table) and reveals the per-replay
+        // raw-metadata/raw-results viewers. Session-only override; see
+        // `debug_mode`'s doc comment.
+        let debug_toggle = h_flex().flex_none().px_2().py_1().items_center().child(
+            Checkbox::new("replay-inspector-debug-toggle")
+                .label("Debug Mode")
+                .checked(self.debug_mode)
+                .on_click(cx.listener(|this, checked: &bool, _window, cx| this.set_debug_mode(*checked, cx))),
+        );
+
         v_flex()
             .size_full()
+            .child(debug_toggle)
             .when_some(status_banner, |this, banner| this.child(h_flex().flex_none().px_2().py_1().child(banner)))
             .child(
                 div().flex_1().min_h(px(0.)).child(
