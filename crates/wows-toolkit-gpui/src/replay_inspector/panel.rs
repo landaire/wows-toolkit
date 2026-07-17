@@ -31,7 +31,11 @@
 //! header/metadata JSON) and "Raw Results" (the battle-results JSON,
 //! disabled when the replay carries none). Both share the chat button's side
 //! panel slot (`SidePanel`) rather than opening a standalone window, the same
-//! v1 tradeoff as chat.
+//! v1 tradeoff as chat. The Actions column's per-row "View Raw Player
+//! Metadata" item (`table.rs::build_actions_menu`) shares the same slot:
+//! `table` emits `PlayerTableEvent::ViewRawJson` on click, `on_table_event`
+//! (subscribed in `apply_result`) builds a `RawJsonPanel` for that row's JSON
+//! and opens it as `SidePanel::RawPlayerMetadata`.
 
 use std::path::PathBuf;
 
@@ -59,6 +63,7 @@ use super::load::ParsedReplay;
 use super::load::ReplayLoadError;
 use super::load::spawn_parse;
 use super::table::PlayerTable;
+use super::table::PlayerTableEvent;
 use super::table::resolve_color;
 
 const LOADING_TITLE: &str = "Loading...";
@@ -66,7 +71,7 @@ const FAILED_TITLE: &str = "Failed to load replay";
 const SIDE_PANEL_WIDTH: Pixels = px(360.);
 
 /// Which entity (if any) occupies the panel's single side-panel slot. Chat
-/// and the two debug-mode raw viewers share the slot rather than each having
+/// and the debug-mode raw viewers share the slot rather than each having
 /// their own, since only one is useful to look at at a time and the egui app
 /// itself only ever shows one debug viewer window at once.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -75,14 +80,21 @@ enum SidePanel {
     Chat,
     RawMetadata,
     RawResults,
+    /// The Actions menu's "View Raw Player Metadata" item (`table.rs`'s
+    /// `PlayerTableEvent::ViewRawJson`); backed by
+    /// `LoadedReplay::raw_player_metadata_panel`, rebuilt with the clicked
+    /// row's JSON each time the event fires (see `on_table_event`).
+    RawPlayerMetadata,
 }
 
 /// A loaded replay's tab title and outcome, plus the real player table, the
 /// chat panel (`None` for a chat-less replay so its toggle button can be
 /// disabled rather than opening onto an empty panel, matching the egui app),
-/// and the two debug-mode raw-JSON viewers (`raw_results_panel` is `None`
-/// when the replay carries no battle-results packet; see
-/// `load::ParsedReplay::raw_results_json`).
+/// and the debug-mode raw-JSON viewers (`raw_results_panel` is `None` when
+/// the replay carries no battle-results packet, see
+/// `load::ParsedReplay::raw_results_json`; `raw_player_metadata_panel` is
+/// `None` until the Actions menu's "View Raw Player Metadata" item is
+/// clicked at least once, see `on_table_event`).
 struct LoadedReplay {
     title: SharedString,
     battle_result: Option<BattleResult>,
@@ -90,6 +102,7 @@ struct LoadedReplay {
     chat_panel: Option<Entity<ChatPanel>>,
     raw_metadata_panel: Entity<RawJsonPanel>,
     raw_results_panel: Option<Entity<RawJsonPanel>>,
+    raw_player_metadata_panel: Option<Entity<RawJsonPanel>>,
 }
 
 enum LoadState {
@@ -119,6 +132,11 @@ pub struct ReplayPanel {
     /// checkboxes; see `view.rs`).
     columns: Vec<ReplayColumn>,
     _parse_task: Task<()>,
+    /// Subscription to `table`'s `PlayerTableEvent`s, live once the replay
+    /// finishes loading (`apply_result` creates both `table` and this
+    /// together). `None` while still loading, since there is no `table` yet
+    /// to subscribe to.
+    _table_subscription: Option<Subscription>,
 }
 
 impl ReplayPanel {
@@ -143,6 +161,7 @@ impl ReplayPanel {
             debug,
             columns,
             _parse_task: parse_task,
+            _table_subscription: None,
         }
     }
 
@@ -186,6 +205,7 @@ impl ReplayPanel {
                 let chat_panel = (!chat.is_empty()).then(|| cx.new(|cx| ChatPanel::new(chat, cx)));
                 let vfs = game_data.vfs().clone();
                 let table = cx.new(|cx| PlayerTable::new(model, vfs, self.debug, cx));
+                self._table_subscription = Some(cx.subscribe(&table, Self::on_table_event));
                 let raw_metadata_panel = cx.new(|cx| RawJsonPanel::new(raw_metadata_json.into(), cx));
                 let raw_results_panel = raw_results_json.map(|json| cx.new(|cx| RawJsonPanel::new(json.into(), cx)));
                 LoadState::Loaded(LoadedReplay {
@@ -195,6 +215,7 @@ impl ReplayPanel {
                     chat_panel,
                     raw_metadata_panel,
                     raw_results_panel,
+                    raw_player_metadata_panel: None,
                 })
             }
             Err(err) => LoadState::Failed(err),
@@ -357,6 +378,21 @@ impl ReplayPanel {
         self.side_panel = if self.side_panel == panel { SidePanel::None } else { panel };
         cx.notify();
     }
+
+    /// Handles `table`'s `PlayerTableEvent`s: on `ViewRawJson` (the Actions
+    /// menu's "View Raw Player Metadata" item), builds a fresh `RawJsonPanel`
+    /// for the clicked row's JSON and opens it in the side-panel slot.
+    /// Unlike `toggle_side_panel`, this always opens rather than toggling --
+    /// clicking a different row's "View Raw Player Metadata" while the panel
+    /// is already showing should swap its content, not close it.
+    fn on_table_event(&mut self, _table: Entity<PlayerTable>, event: &PlayerTableEvent, cx: &mut Context<Self>) {
+        let PlayerTableEvent::ViewRawJson(json) = event;
+        if let LoadState::Loaded(loaded) = &mut self.state {
+            loaded.raw_player_metadata_panel = Some(cx.new(|cx| RawJsonPanel::new(json.clone(), cx)));
+        }
+        self.side_panel = SidePanel::RawPlayerMetadata;
+        cx.notify();
+    }
 }
 
 impl Render for ReplayPanel {
@@ -381,6 +417,7 @@ impl Render for ReplayPanel {
                     SidePanel::Chat => loaded.chat_panel.clone().map(|panel| panel.into()),
                     SidePanel::RawMetadata => Some(loaded.raw_metadata_panel.clone().into()),
                     SidePanel::RawResults => loaded.raw_results_panel.clone().map(|panel| panel.into()),
+                    SidePanel::RawPlayerMetadata => loaded.raw_player_metadata_panel.clone().map(|panel| panel.into()),
                 };
 
                 v_flex()

@@ -183,6 +183,17 @@ pub(crate) fn resolve_color(role: ColorRole) -> Hsla {
     rgb(packed).into()
 }
 
+/// Events `PlayerTable` emits for its owner (`panel.rs::ReplayPanel`) to act
+/// on. Currently just the Actions menu's "View Raw Player Metadata" item,
+/// which has no direct handle to the panel's side-panel state from inside
+/// the row-menu closure (see `build_actions_menu`), so it emits instead of
+/// mutating directly.
+pub enum PlayerTableEvent {
+    /// A row's raw metadata JSON, pretty-printed, to show in the debug raw-
+    /// JSON viewer (`panel.rs`'s `SidePanel::RawPlayerMetadata`).
+    ViewRawJson(SharedString),
+}
+
 /// The player table view: the presentation model, the virtualized list state,
 /// the active sort order, the ship-class icon cache, and the horizontal
 /// scroll handle shared between the header and the body.
@@ -339,6 +350,8 @@ impl PlayerTable {
         }
     }
 }
+
+impl EventEmitter<PlayerTableEvent> for PlayerTable {}
 
 /// Builds the `.tooltip()` callback for a cell's hover text: one line per
 /// `\n`-separated entry, monospace, matching the egui app's
@@ -526,22 +539,25 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElemen
 /// missing config (`PlayerRow::ship_config_url`'s field doc). "Open"/"WoWS
 /// numbers" use `PopupMenuItem::link`, which opens via `cx.open_url`
 /// (gpui's own OS-opener, no `open`-crate dependency needed) and renders the
-/// external-link glyph the egui app's SHARE icon stood in for; the copy/raw
+/// external-link glyph the egui app's SHARE icon stood in for; the copy
 /// items write to the clipboard via `cx.write_to_clipboard`, matching
-/// `ui.ctx().copy_text` and the browser_view.rs "Copy Path" precedent.
-fn build_actions_menu(mut menu: PopupMenu, row: &PlayerRow, debug: bool) -> PopupMenu {
+/// `ui.ctx().copy_text` and the browser_view.rs "Copy Path" precedent. "View
+/// Raw Player Metadata" instead emits `PlayerTableEvent::ViewRawJson` on
+/// `entity`, matching the egui app's behavior of opening a viewer (not
+/// copying) -- `panel.rs` subscribes to that event and shows the payload in
+/// the same `RawJsonPanel`/`SidePanel` side-panel slot the debug header's
+/// "Raw Metadata"/"Raw Results" buttons use.
+fn build_actions_menu(mut menu: PopupMenu, row: &PlayerRow, debug: bool, entity: Entity<PlayerTable>) -> PopupMenu {
     let show_ship_config = (!row.relation.is_enemy() || debug) && row.has_vehicle_entity;
 
     if show_ship_config {
         let mut added_any = false;
         if let Some(url) = row.ship_config_url.clone() {
-            menu = menu.item(PopupMenuItem::link("Open Build in Browser", url));
-            added_any = true;
-        }
-        if let Some(url) = row.ship_config_url.clone() {
+            menu = menu.item(PopupMenuItem::link("Open Build in Browser", url.clone()));
+            let copy_url = url;
             menu = menu.item(PopupMenuItem::new("Copy Build Link").icon(IconName::Copy).on_click(
                 move |_event, _window, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
+                    cx.write_to_clipboard(ClipboardItem::new_string(copy_url.clone()));
                 },
             ));
             added_any = true;
@@ -567,7 +583,8 @@ fn build_actions_menu(mut menu: PopupMenu, row: &PlayerRow, debug: bool) -> Popu
         menu = menu.separator();
         menu = menu.item(PopupMenuItem::new("View Raw Player Metadata").icon(IconName::File).on_click(
             move |_event, _window, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(json.clone()));
+                let json = json.clone();
+                entity.update(cx, |_this, cx| cx.emit(PlayerTableEvent::ViewRawJson(json.into())));
             },
         ));
     }
@@ -578,10 +595,13 @@ fn build_actions_menu(mut menu: PopupMenu, row: &PlayerRow, debug: bool) -> Popu
 /// The Actions column's cell: a ghost icon-only `...` button that opens
 /// `build_actions_menu`'s per-row popup menu on click. `ix` keys the
 /// trigger's `ElementId` so every row's button/popover state is independent.
-fn actions_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElement {
+/// `entity` is threaded through to `build_actions_menu` so its "View Raw
+/// Player Metadata" item can emit `PlayerTableEvent::ViewRawJson` on it.
+fn actions_cell(ix: usize, row: &PlayerRow, debug: bool, entity: Entity<PlayerTable>, width: f32) -> AnyElement {
     let row = row.clone();
     let trigger = Button::new(("replay-row-actions", ix)).ghost().xsmall().icon(IconName::Ellipsis);
-    let menu_button = trigger.dropdown_menu(move |menu, _window, _cx| build_actions_menu(menu, &row, debug));
+    let menu_button =
+        trigger.dropdown_menu(move |menu, _window, _cx| build_actions_menu(menu, &row, debug, entity.clone()));
 
     div().w(px(width)).flex_none().px_1().child(menu_button).into_any_element()
 }
@@ -593,7 +613,7 @@ fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
     match col {
         ReplayColumn::Name => name_cell(ix, row, layout, column_width(col)),
         ReplayColumn::Skills => skills_cell(ix, row, layout.debug, column_width(col)),
-        ReplayColumn::Actions => actions_cell(ix, row, layout.debug, column_width(col)),
+        ReplayColumn::Actions => actions_cell(ix, row, layout.debug, layout.entity.clone(), column_width(col)),
         _ => cell_element(ix, col, cell_value(row, col, layout.debug), column_width(col)),
     }
 }

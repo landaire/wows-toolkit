@@ -1,8 +1,8 @@
 //! Icon cache: resolves the game's GUI icon assets (ship-class, captain-skill,
-//! achievement, ribbon/subribbon, consumable, modernization, signal, nation
-//! flag) from the preloaded VFS, decodes them into `gpui::RenderImage`s, and
-//! caches the decoded result so repeated renders of the same icon reuse one
-//! image. Mirrors the egui app's per-kind icon maps on `WorldOfWarshipsData`
+//! achievement, ribbon/subribbon, consumable, modernization, signal) from the
+//! preloaded VFS, decodes them into `gpui::RenderImage`s, and caches the
+//! decoded result so repeated renders of the same icon reuse one image.
+//! Mirrors the egui app's per-kind icon maps on `WorldOfWarshipsData`
 //! (`data/wows_data.rs`: `ship_icons`, `ribbon_icons`, `subribbon_icons`,
 //! `achievement_icons`, `consumable_icons`, `crew_skill_icons`,
 //! `modernization_icons`, `signal_flag_icons`) and its `icon_texture` decode
@@ -19,20 +19,18 @@
 //! asset.
 //!
 //! `table.rs`/`expanded.rs`/`browser_view.rs` treat a cache miss (an asset
-//! absent from this build, or one `populate_from_rows`/`populate_nation_flags`
-//! has not been asked to resolve) the same way the egui app treats a missing
-//! icon texture: fall back to a plain text label.
+//! absent from this build, or one `populate_from_rows` has not been asked to
+//! resolve) the same way the egui app treats a missing icon texture: fall
+//! back to a plain text label.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::io::Read;
 use std::sync::Arc;
 
 use gpui::RenderImage;
 use gpui::SvgRenderer;
 use image::Frame;
 use wowsunpack::game_assets::GuiAsset;
-use wowsunpack::game_assets::GuiAssetDir;
 use wowsunpack::game_assets::ShipIconState;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
@@ -231,28 +229,6 @@ impl IconCache {
                 let key = format!("skill:{}", skill.internal_name.as_str());
                 self.load_keyed(&mut keys_seen, vfs, key, GuiAsset::CrewSkill { name: &skill.internal_name });
             }
-        }
-    }
-
-    /// Bulk-loads every nation flag under `gui/nation_flags/tiny/` (mirrors
-    /// the egui app's `load_ribbon_icons` directory-bulk-load pattern), keyed
-    /// by the nation name embedded in each file's name
-    /// (`flag_{nation}.png` -> `"nation:{nation}"`). A build with no nation
-    /// flags directory (or one that fails to read) leaves the cache
-    /// untouched rather than erroring.
-    pub fn populate_nation_flags(&mut self, vfs: &VfsPath) {
-        let Some(dir) = GuiAssetDir::NationFlags.resolve(vfs, None) else { return };
-        let Ok(entries) = dir.read_dir() else { return };
-
-        for entry in entries {
-            let filename = entry.filename();
-            let Some(stem) = std::path::Path::new(&filename).file_stem().and_then(|s| s.to_str()) else { continue };
-            let Some(nation) = stem.strip_prefix("flag_") else { continue };
-            let mut data = Vec::new();
-            if entry.open_file().and_then(|mut f| f.read_to_end(&mut data).map_err(Into::into)).is_err() {
-                continue;
-            }
-            self.set_keyed(format!("nation:{nation}"), &data);
         }
     }
 

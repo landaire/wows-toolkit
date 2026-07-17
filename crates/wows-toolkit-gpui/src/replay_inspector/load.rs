@@ -155,10 +155,9 @@ impl LoadedGameData {
         &self.base_constants
     }
 
-    /// This build's VFS -- the handle `icons::IconCache::populate_from_rows`/
-    /// `populate_nation_flags` read GUI asset bytes (ship-class, captain-skill,
-    /// achievement, ribbon, consumable, nation flag) from, without a second
-    /// game-data load.
+    /// This build's VFS -- the handle `icons::IconCache::populate_from_rows`
+    /// reads GUI asset bytes (ship-class, captain-skill, achievement, ribbon,
+    /// consumable) from, without a second game-data load.
     pub fn vfs(&self) -> &VfsPath {
         &self.vfs
     }

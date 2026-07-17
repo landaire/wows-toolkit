@@ -303,7 +303,12 @@ fn grouping_button(
 /// One column-filter checkbox in the header toolbar: `checked` reflects
 /// `replay_settings`, clicking applies `apply` to it via `set_column_filter`
 /// and recomputes the visible columns. A free function for the same reason as
-/// `grouping_button` -- built five times, once per optional column.
+/// `grouping_button` -- built three times, once per optional column the egui
+/// app's `build_replay_header` (`ui/replay_parser/mod.rs:3697-3711`) exposes a
+/// toggle for and that has a live column in this port: Raw XP, Observed
+/// Damage, Heals. Received Damage and Distance Traveled are not exposed here
+/// either -- the egui app never lets the user toggle those, so they stay at
+/// `ReplaySettings`'s config defaults.
 fn column_filter_checkbox(
     entity: Entity<ReplayInspectorView>,
     id: &'static str,
@@ -368,6 +373,7 @@ impl Render for ReplayInspectorView {
                 Checkbox::new("replay-header-auto-load-latest")
                     .label("Autoload Latest Replay")
                     .checked(self.auto_load_latest_replay)
+                    .tooltip("Not yet wired: toggling this has no effect until the replays-directory watcher is ported")
                     .on_click(
                         cx.listener(|this, checked: &bool, _window, cx| this.set_auto_load_latest_replay(*checked, cx)),
                     ),
@@ -402,24 +408,10 @@ impl Render for ReplayInspectorView {
                     ))
                     .child(column_filter_checkbox(
                         entity.clone(),
-                        "replay-header-filter-received-damage",
-                        "Received Damage",
-                        self.replay_settings.show_received_damage,
-                        |settings, value| settings.show_received_damage = value,
-                    ))
-                    .child(column_filter_checkbox(
-                        entity.clone(),
                         "replay-header-filter-heals",
                         "Heals",
                         self.replay_settings.show_heals,
                         |settings, value| settings.show_heals = value,
-                    ))
-                    .child(column_filter_checkbox(
-                        entity.clone(),
-                        "replay-header-filter-distance-traveled",
-                        "Distance Traveled",
-                        self.replay_settings.show_distance_traveled,
-                        |settings, value| settings.show_distance_traveled = value,
                     )),
             );
 
