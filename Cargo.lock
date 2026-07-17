@@ -11183,6 +11183,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "wows-toolkit-config"
+version = "0.1.0"
+dependencies = [
+ "home",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "wows_minimap_renderer"
 version = "0.37.0"
 dependencies = [
@@ -11325,6 +11338,7 @@ dependencies = [
  "wows-battle-world",
  "wows-data-mgr",
  "wows-replay-insights",
+ "wows-toolkit-config",
  "wows_minimap_renderer",
  "wows_replays",
  "wowsunpack",

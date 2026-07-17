@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/wows-toolkit",
+    "crates/wows-toolkit-config",
     "crates/wows-core",
     "crates/wowsunpack",
     "crates/wows-replays",
@@ -39,6 +40,7 @@ wows-replay-insights = { version = "0.11.0", path = "crates/wows-replay-insights
 wt-collab-protocol = { path = "crates/wt-collab-protocol" }
 wt-collab-egui = { path = "crates/wt-collab-egui" }
 wt-translations = { version = "0.14.0", path = "crates/wt-translations" }
+wows-toolkit-config = { path = "crates/wows-toolkit-config" }
 # Shared UI dependencies
 egui = "0.34.1"
 egui-phosphor = "0.12"
