@@ -17,12 +17,23 @@
 //!
 //! **Caching.** Building the game VFS and [`GameMetadataProvider`] for one
 //! build loads that whole build's data and is expensive; [`GameDataCache`]
-//! loads each build once, lazily, on the first replay that needs it, and
-//! reuses it for every later replay recorded on the same build. The load
-//! itself runs outside any cache-wide lock, so opening replays from two
-//! different builds concurrently does not serialize one behind the other;
-//! only same-build opens dedupe onto one load. Clone the cache (cheap: an
-//! `Arc` around a lock) to share it across views.
+//! loads each build once -- either from [`spawn_startup_preload`] at app
+//! startup for the current install's build, or lazily on the first replay
+//! that needs some other build -- and reuses it for every later replay
+//! recorded on the same build. The load itself runs outside any cache-wide
+//! lock, so opening replays from two different builds concurrently does not
+//! serialize one behind the other; only same-build opens dedupe onto one
+//! load. Clone the cache (cheap: an `Arc` around a lock) to share it across
+//! views.
+//!
+//! **GameParams disk cache.** Parsing `GameParams.data` out of the game
+//! files is most of a build's load cost. [`GameMetadataProvider::from_vfs`]
+//! is only called once per build ever, the first time any install parses it;
+//! the parsed params are then written to `game_params_{build}.bin` under
+//! [`wows_toolkit_config::storage_dir`] (see [`game_params_bin_path`]), and
+//! every later load -- this session or a future one, from either this app or
+//! the egui app, since both write the identical cache file -- deserializes
+//! that file instead of re-walking the VFS.
 //!
 //! **Versioned constants.** Per-build `CONSUMABLE_IDS`/`BATTLE_STAGES`
 //! overrides (fetched from the wows-constants repo by the egui app and cached
@@ -53,7 +64,10 @@ use wows_replays::game_constants::GameConstants;
 use wows_replays::packet2::Parser;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
+use wowsunpack::game_params::cache as game_params_cache;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::vfs::VfsPath;
 
 use super::model::ReplayReportModel;
 
@@ -79,15 +93,40 @@ pub enum ReplayLoadError {
     Parse(String),
 }
 
+/// Path to the versioned GameParams cache for `build`, matching the egui
+/// app's `game_params_bin_path` (`util/game_params.rs`) exactly -- same file
+/// name, same directory -- so both apps share one on-disk cache.
+fn game_params_bin_path(build: u32) -> PathBuf {
+    let filename = format!("game_params_{build}.bin");
+    if let Some(storage_dir) = wows_toolkit_config::storage_dir() {
+        storage_dir.join(filename)
+    } else {
+        PathBuf::from(filename)
+    }
+}
+
 /// One installed build's `GameMetadataProvider` and base `GameConstants`
 /// (before a replay's own versioned-constants overrides are merged in).
 /// Building this loads that whole build's game data; see [`GameDataCache`].
-struct LoadedGameData {
+pub struct LoadedGameData {
     provider: Arc<GameMetadataProvider>,
     base_constants: GameConstants,
 }
 
 impl LoadedGameData {
+    /// The loaded build's metadata provider (ship/module/consumable
+    /// GameParams, entity specs, asset lookups) -- the handle later
+    /// milestones use to translate listing labels and resolve icons.
+    pub fn provider(&self) -> &Arc<GameMetadataProvider> {
+        &self.provider
+    }
+
+    /// This build's base `GameConstants`, before a specific replay's own
+    /// versioned-constants overrides are merged in (see `parse_replay`).
+    pub fn base_constants(&self) -> &GameConstants {
+        &self.base_constants
+    }
+
     /// Loads `build`'s game data from `wows_dir`. Callers are expected to
     /// have already checked `build` is present under `bin/` (see
     /// [`GameDataCache::get_or_load_build`]); this only reports the errors
@@ -95,11 +134,35 @@ impl LoadedGameData {
     fn load_build(wows_dir: &Path, build: u32) -> Result<Self, ReplayLoadError> {
         let vfs = wowsunpack::game_data::build_game_vfs_for_build(wows_dir, build)
             .map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
-        let provider =
-            Arc::new(GameMetadataProvider::from_vfs(&vfs).map_err(|e| ReplayLoadError::GameData(e.to_string()))?);
+        let provider = Arc::new(Self::load_provider(&vfs, build)?);
         let base_constants = GameConstants::from_vfs(&vfs);
 
         Ok(Self { provider, base_constants })
+    }
+
+    /// Loads `build`'s `GameMetadataProvider`, preferring the on-disk
+    /// GameParams cache (see the module doc) over a full VFS parse. A cache
+    /// miss (first load ever for this build, on either app) parses from the
+    /// VFS and writes the cache for next time; a write failure is logged but
+    /// not fatal, since the freshly parsed provider is still usable this
+    /// session.
+    fn load_provider(vfs: &VfsPath, build: u32) -> Result<GameMetadataProvider, ReplayLoadError> {
+        let cache_path = game_params_bin_path(build);
+
+        if let Some(params) = game_params_cache::load(&cache_path) {
+            tracing::debug!(build, path = %cache_path.display(), "loaded GameParams from disk cache");
+            return GameMetadataProvider::from_params_with_vfs(params, vfs)
+                .map_err(|e| ReplayLoadError::GameData(e.to_string()));
+        }
+
+        tracing::info!(build, "no GameParams disk cache; parsing from game files");
+        let provider = GameMetadataProvider::from_vfs(vfs).map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
+        let params: Vec<_> = provider.params().iter().map(|param| Arc::unwrap_or_clone(Arc::clone(param))).collect();
+        if let Err(e) = game_params_cache::save(&cache_path, &params) {
+            tracing::warn!(build, path = %cache_path.display(), error = %e, "failed to write GameParams disk cache");
+        }
+
+        Ok(provider)
     }
 }
 
@@ -181,6 +244,47 @@ impl GameDataCache {
             Err(panic) => Err(ReplayLoadError::GameData(format!("game data load panicked: {}", panic_message(&panic)))),
         }
     }
+}
+
+/// Outcome of [`spawn_startup_preload`]: the current installed build's game
+/// data, loaded once at app startup rather than on the first replay click.
+/// The browser and every [`ReplayPanel`](super::panel::ReplayPanel) consume
+/// this once it settles into `Ready`/`Failed`; `spawn_parse` itself does not
+/// need it directly, since preloading through the shared [`GameDataCache`]
+/// already warms the same per-build slot it reads from.
+#[derive(Clone)]
+pub enum GameDataStatus {
+    Loading,
+    Ready(Arc<LoadedGameData>),
+    Failed(String),
+}
+
+/// Determines the current installed build (the highest build number under
+/// `wows_dir/bin`, matching [`wowsunpack::game_data::build_game_vfs`]'s own
+/// "latest build" choice) and loads it through `game_data`. Loading through
+/// the shared cache -- rather than a separate one-off load -- is what lets
+/// `spawn_parse` skip straight to an already-warm slot for replays recorded
+/// on this build.
+fn preload_current_build(wows_dir: &Path, game_data: &GameDataCache) -> Result<Arc<LoadedGameData>, String> {
+    let available = wowsunpack::game_data::list_available_builds(wows_dir).map_err(|e| e.to_string())?;
+    let build =
+        *available.last().ok_or_else(|| format!("no installed builds found under {}/bin", wows_dir.display()))?;
+    game_data.get_or_load_build(build).map_err(|e| e.to_string())
+}
+
+/// Kicks off the startup game-data preload on the background executor.
+/// Callers await the returned task (typically via `cx.spawn`, to fold the
+/// result back into an entity's state) rather than blocking on it.
+pub fn spawn_startup_preload(wows_dir: PathBuf, game_data: GameDataCache, cx: &App) -> Task<GameDataStatus> {
+    cx.background_spawn(async move {
+        match preload_current_build(&wows_dir, &game_data) {
+            Ok(loaded) => GameDataStatus::Ready(loaded),
+            Err(reason) => {
+                tracing::warn!(wows_dir = %wows_dir.display(), %reason, "startup game-data preload failed");
+                GameDataStatus::Failed(reason)
+            }
+        }
+    })
 }
 
 /// Extracts a human-readable message out of a caught panic payload, falling
