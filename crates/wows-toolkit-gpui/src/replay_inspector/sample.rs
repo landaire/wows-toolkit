@@ -11,7 +11,9 @@ use wows_replay_insights::battle_report::RibbonResult;
 use wows_replay_insights::battle_report::TranslatedBuild;
 use wows_replay_insights::battle_report::TranslatedModule;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
+use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::types::AccountId;
+use wows_replays::types::GameClock;
 use wows_replays::types::Relation;
 use wows_replays::types::TeamId;
 use wowsunpack::game_params::skill_grid_data::SkillGridRow;
@@ -23,6 +25,7 @@ use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::ChargeCount;
 
 use super::columns::ReplayColumn;
+use super::model::ChatMessage;
 use super::model::PlayerRow;
 use super::model::ReplayReportModel;
 
@@ -495,5 +498,51 @@ pub fn sample_model() -> ReplayReportModel {
         battle_result: None,
         columns: ReplayColumn::ALL.to_vec(),
         map: "Fault Line".to_string(),
+        chat: sample_chat_messages(),
     }
+}
+
+/// A short chat log covering every rendered variation: a division/team/global
+/// message from clanned allies and enemies, a clanless message, and a bot
+/// message with no team relation (the gray, untranslated fallback path since
+/// the sample has no real `GameMetadataProvider` to translate through).
+fn sample_chat_messages() -> Vec<ChatMessage> {
+    vec![
+        ChatMessage {
+            clock: GameClock(12.0),
+            sender_relation: Some(Relation::new(0)),
+            sender_name: "You".to_string(),
+            channel: ChatChannel::Division,
+            message: "focus the Yamato".to_string(),
+            clan_tag: Some("WTK".to_string()),
+            clan_color_rgb: Some(0x3399ff),
+        },
+        ChatMessage {
+            clock: GameClock(45.0),
+            sender_relation: Some(Relation::new(1)),
+            sender_name: "Ally_Bravo".to_string(),
+            channel: ChatChannel::Team,
+            message: "cap is contested".to_string(),
+            clan_tag: None,
+            clan_color_rgb: None,
+        },
+        ChatMessage {
+            clock: GameClock(90.0),
+            sender_relation: Some(Relation::new(2)),
+            sender_name: "Enemy_Delta".to_string(),
+            channel: ChatChannel::Global,
+            message: "gg well played".to_string(),
+            clan_tag: Some("RED".to_string()),
+            clan_color_rgb: Some(0xff3333),
+        },
+        ChatMessage {
+            clock: GameClock(150.0),
+            sender_relation: None,
+            sender_name: "Bot_Reinforcement".to_string(),
+            channel: ChatChannel::System,
+            message: "IDS_BATTLE_MESSAGE_REINFORCEMENT".to_string(),
+            clan_tag: None,
+            clan_color_rgb: None,
+        },
+    ]
 }

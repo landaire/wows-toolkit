@@ -15,6 +15,7 @@
 
 pub mod browser;
 pub mod browser_view;
+pub mod chat;
 pub mod columns;
 pub mod expanded;
 pub mod icons;
@@ -34,6 +35,7 @@ pub use browser::ReplayLite;
 pub use browser::build_browser_tree;
 pub use browser_view::ReplayBrowser;
 pub use browser_view::ReplayBrowserEvent;
+pub use chat::ChatPanel;
 pub use columns::CellValue;
 pub use columns::ColorRole;
 pub use columns::ReplayColumn;
@@ -43,6 +45,7 @@ pub use columns::separate_number;
 pub use load::GameDataCache;
 pub use load::ReplayLoadError;
 pub use load::spawn_parse;
+pub use model::ChatMessage;
 pub use model::PlayerRow;
 pub use model::ReplayReportModel;
 pub use panel::ReplayPanel;

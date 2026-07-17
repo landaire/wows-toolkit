@@ -34,7 +34,11 @@ use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_replay_insights::personal_rating::ShipBattleStats;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::battle_controller::BattleResult;
+use wows_replays::analyzer::battle_controller::ChatChannel;
+use wows_replays::analyzer::battle_controller::GameMessage;
+use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::types::AccountId;
+use wows_replays::types::GameClock;
 use wows_replays::types::GameParamId;
 use wows_replays::types::Relation;
 use wows_replays::types::TeamId;
@@ -198,6 +202,109 @@ impl PlayerRow {
     }
 }
 
+/// One in-game chat message, presentation-ready: bot/no-relation sender name
+/// and message text are already translated, the message body is already
+/// HTML-decoded, and the clan tag/color are plain (no brackets, no
+/// `Rc<Player>`). Mirrors the field list the egui app reads off
+/// `wows_replays::analyzer::battle_controller::GameMessage` in
+/// `build_replay_chat_content` (`ui/replay_parser/mod.rs` ~4893-4960), minus
+/// `entity_id` (never read there) and the `Rc<Player>` handle itself (not
+/// `Send`; every field the render layer needs is copied out of it here,
+/// during the background parse, before the model crosses back to the UI
+/// thread).
+#[derive(Clone, Debug)]
+pub struct ChatMessage {
+    pub clock: GameClock,
+    /// `None` for a message with no resolvable team relation to the self
+    /// player (matches `GameMessage::sender_relation`); rendered gray.
+    pub sender_relation: Option<Relation>,
+    /// Already translated when the sender is a bot or has no relation
+    /// (`metadata_provider.localized_name_from_id`); otherwise the raw
+    /// in-game name, exactly as `build_replay_chat_content` resolves it.
+    pub sender_name: String,
+    pub channel: ChatChannel,
+    /// Already HTML-decoded, and already translated when the sender is a bot
+    /// or has no relation, same gating as `sender_name`.
+    pub message: String,
+    /// The sender's clan tag with no surrounding brackets (`Player::clan()`);
+    /// `None` when the sender is clanless or has no resolved `Player`.
+    pub clan_tag: Option<String>,
+    /// Packed `0xRRGGBB` clan-league color; `Some` exactly when `clan_tag`
+    /// is. Read from the player's raw `clanColor` property, falling back to
+    /// the player's team-relation color for older replays that omit it
+    /// (mirrors `clan_color_for_player`).
+    pub clan_color_rgb: Option<u32>,
+}
+
+/// Team-relation color packed as `0xRRGGBB`, matching
+/// `util::formatting::player_color_for_team_relation`: self = white, ally =
+/// light green, enemy = light red.
+fn team_relation_rgb(relation: Relation) -> u32 {
+    if relation.is_self() {
+        0xffffff
+    } else if relation.is_ally() {
+        0x90ee90
+    } else {
+        0xff8080
+    }
+}
+
+/// Mirrors `clan_color_for_player`: the clan-league color packed as
+/// `0xRRGGBB`, read from the player's raw `clanColor` property. Older
+/// replays omit that property; this falls back to the player's own
+/// team-relation color (via `Player::relation`, not the message's
+/// `sender_relation`, matching the egui original) rather than panicking.
+fn clan_color_for_player(player: &Player) -> u32 {
+    match player.initial_state().raw_with_names().get("clanColor").and_then(|c| c.as_i64()) {
+        Some(clan_color) => (clan_color & 0xFF_FFFF) as u32,
+        None => team_relation_rgb(player.relation()),
+    }
+}
+
+/// Builds the presentation-ready chat log from a battle report's raw
+/// `&[GameMessage]` (`wows_battle_world::report::BattleReport::game_chat`).
+/// Ports `build_replay_chat_content`'s translation/decode logic
+/// (`ui/replay_parser/mod.rs` ~4893-4933) field-for-field, dropping only the
+/// rendering itself (Milestone 6's `chat.rs`).
+pub fn build_chat_messages(messages: &[GameMessage], metadata_provider: &GameMetadataProvider) -> Vec<ChatMessage> {
+    messages.iter().map(|message| chat_message_from_game_message(message, metadata_provider)).collect()
+}
+
+fn chat_message_from_game_message(message: &GameMessage, metadata_provider: &GameMetadataProvider) -> ChatMessage {
+    let GameMessage { clock, sender_relation, sender_name, channel, message: text, entity_id: _, player } = message;
+
+    // Bots and senders with no resolvable relation get their name and
+    // message translated as localization keys; everyone else's text is used
+    // verbatim (aside from the HTML decode below), exactly matching
+    // `build_replay_chat_content`.
+    let is_bot_or_unrelated = sender_relation.is_none() || player.as_ref().is_some_and(|p| p.is_bot());
+    let translated_name = is_bot_or_unrelated
+        .then(|| metadata_provider.localized_name_from_id(&TranslationKey::new(sender_name.as_str())))
+        .flatten();
+    let translated_text = is_bot_or_unrelated
+        .then(|| metadata_provider.localized_name_from_id(&TranslationKey::new(text.as_str())))
+        .flatten();
+
+    let decoded_text = escaper::decode_html(text.as_str()).unwrap_or_else(|_| text.clone());
+
+    let (clan_tag, clan_color_rgb) = match player {
+        Some(player) if !player.initial_state().clan().is_empty() => {
+            (Some(player.initial_state().clan().to_string()), Some(clan_color_for_player(player)))
+        }
+        _ => (None, None),
+    };
+
+    ChatMessage {
+        clock: *clock,
+        sender_relation: *sender_relation,
+        sender_name: translated_name.unwrap_or_else(|| sender_name.clone()),
+        channel: channel.clone(),
+        message: translated_text.unwrap_or(decoded_text),
+        clan_tag,
+        clan_color_rgb,
+    }
+}
+
 /// A replay's player table: rows plus the outcome and the active column set.
 /// `columns` starts as every `ReplayColumn` (mirroring `UiReport::new`'s
 /// initial full list); callers apply `columns::default_columns(&settings)` to
@@ -210,6 +317,9 @@ pub struct ReplayReportModel {
     /// Translated map name (`NormalizedBattleReport::metadata.map`), used by
     /// the per-replay dock panel's tab title ("{ship} - {map}").
     pub map: String,
+    /// The replay's in-game chat log, presentation-ready. Empty for a replay
+    /// with no chat activity.
+    pub chat: Vec<ChatMessage>,
 }
 
 impl ReplayReportModel {
@@ -217,14 +327,17 @@ impl ReplayReportModel {
     /// and `constants` are accepted for parity with the background-load
     /// bundle the Milestone 5 loader already has on hand; both are fully
     /// folded into `normalized` by the time this runs, so neither is read
-    /// here.
+    /// here. `chat_messages` is the battle report's raw chat log
+    /// (`BattleReport::game_chat`), translated into `ReplayReportModel::chat`
+    /// via `build_chat_messages`.
     pub fn from_normalized(
         normalized: &NormalizedBattleReport,
         _meta: &ReplayMeta,
         metadata_provider: &GameMetadataProvider,
         _constants: &Value,
+        chat_messages: &[GameMessage],
     ) -> Self {
-        Self::build(
+        let mut model = Self::build(
             normalized,
             |species| {
                 metadata_provider
@@ -232,7 +345,9 @@ impl ReplayReportModel {
                     .unwrap_or_else(|| species.name().to_string())
             },
             |ship_index| metadata_provider.game_param_by_index(ship_index).map(|param| param.id()),
-        )
+        );
+        model.chat = build_chat_messages(chat_messages, metadata_provider);
+        model
     }
 
     /// Provider-free core of `from_normalized`. Split out so the row-mapping
@@ -271,6 +386,7 @@ impl ReplayReportModel {
             battle_result: normalized.metadata.battle_result,
             columns: ReplayColumn::ALL.to_vec(),
             map: normalized.metadata.map.clone(),
+            chat: Vec::new(),
         }
     }
 
@@ -767,6 +883,7 @@ mod tests {
             battle_result: Some(BattleResult::Win(0)),
             columns: ReplayColumn::ALL.to_vec(),
             map: "Test Map".to_string(),
+            chat: Vec::new(),
         };
 
         // Unloaded PR data would make `calculate_pr` return `None` for any
@@ -813,7 +930,7 @@ mod tests {
         let meta = test_support::fixture_replay_meta();
         let constants = serde_json::Value::Null;
 
-        let model = ReplayReportModel::from_normalized(&normalized, &meta, &provider, &constants);
+        let model = ReplayReportModel::from_normalized(&normalized, &meta, &provider, &constants, &[]);
 
         assert_eq!(model.rows.len(), normalized.players.len());
         let self_row = model.rows.iter().find(|r| r.is_self).expect("self row present");

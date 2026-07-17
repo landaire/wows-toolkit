@@ -264,7 +264,13 @@ fn parse_replay(path: &Path, game_data: &GameDataCache) -> Result<ReplayReportMo
     let report = world.into_report();
     let normalized =
         NormalizedBattleReport::from_battle_report(&report, meta, loaded.provider.as_ref(), &constants_json);
-    let model = ReplayReportModel::from_normalized(&normalized, meta, loaded.provider.as_ref(), &constants_json);
+    let model = ReplayReportModel::from_normalized(
+        &normalized,
+        meta,
+        loaded.provider.as_ref(),
+        &constants_json,
+        report.game_chat(),
+    );
 
     Ok(model)
 }
@@ -313,10 +319,11 @@ mod tests {
         assert!(!model.rows.is_empty(), "expected at least one player row");
         let self_row = model.rows.iter().find(|r| r.is_self).expect("expected a self player row");
         println!(
-            "parsed {} rows; self player {:?} observed_damage={}",
+            "parsed {} rows; self player {:?} observed_damage={}; {} chat messages",
             model.rows.len(),
             self_row.display_name,
-            self_row.observed_damage
+            self_row.observed_damage,
+            model.chat.len()
         );
         let any_nonzero_damage =
             model.rows.iter().any(|r| r.observed_damage > 0 || r.actual_damage.is_some_and(|d| d > 0));
