@@ -33,7 +33,8 @@ use super::columns::PlayerColorKind;
 use super::columns::ReplayColumn;
 use super::columns::cell_value;
 use super::columns::name_color_kind;
-use super::columns::relation_color_rgb;
+use super::columns::player_color_kind;
+use super::columns::player_color_kind_rgb;
 use super::expanded;
 use super::icons::IconCache;
 use super::model::PlayerRow;
@@ -43,7 +44,6 @@ use super::sort::SortOrder;
 use super::sort::sort_rows;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replays::types::AccountId;
-use wows_replays::types::Relation;
 use wowsunpack::vfs::VfsPath;
 
 /// Overdraw for the virtualized list: how far past the viewport to render so
@@ -150,13 +150,7 @@ fn sort_caret_icon(order: SortOrder) -> IconName {
 /// `util::personal_rating`, and the win/loss header colors).
 pub(crate) fn resolve_color(role: ColorRole) -> Hsla {
     let packed = match role {
-        ColorRole::Player(kind) => match kind {
-            PlayerColorKind::SelfPlayer => relation_color_rgb(Relation::new(0)),
-            PlayerColorKind::Ally => relation_color_rgb(Relation::new(1)),
-            PlayerColorKind::Enemy => relation_color_rgb(Relation::new(2)),
-            PlayerColorKind::DivisionMate => 0xffd700,
-            PlayerColorKind::Abuser => 0xffc0cb,
-        },
+        ColorRole::Player(kind) => player_color_kind_rgb(kind),
         ColorRole::PrTier(category) => match category {
             PersonalRatingCategory::Bad => 0xff0000,
             PersonalRatingCategory::BelowAverage => 0xfe7903,
@@ -194,9 +188,10 @@ pub struct PlayerTable {
     /// Decoded icons (ship-class for the Name cell; achievement/ribbon/
     /// consumable/modernization/signal/captain-skill for `expanded.rs`),
     /// resolved from the parsed replay's own build VFS by
-    /// `IconCache::populate_from_rows` in `new`. `name_cell`/`expanded.rs`
-    /// fall back to a plain text label for any key this build has no asset
-    /// for.
+    /// `IconCache::populate_from_rows`, decoded on the background executor and
+    /// applied back once `new`'s spawned task completes (see `new`). Empty
+    /// (every lookup a miss, so `name_cell`/`expanded.rs` fall back to a plain
+    /// text label) until then; never blocks entity construction.
     icons: IconCache,
     /// Debug mode lifts NDA hiding and the enemy-only Skills gate, mirroring
     /// the egui app's debug flag. Always `false` until a settings toggle wires
@@ -211,26 +206,52 @@ pub struct PlayerTable {
 }
 
 impl PlayerTable {
-    /// Builds the table for `model`, resolving every icon its rows reference
-    /// from `vfs` (the exact VFS `model` was parsed against; see
-    /// `load::ParsedReplay`) before the first render, so the table never
-    /// shows a flash of text-fallback cells that then pop to icons.
+    /// Builds the table for `model` and kicks off resolving every icon its
+    /// rows reference from `vfs` (the exact VFS `model` was parsed against;
+    /// see `load::ParsedReplay`) on the background executor -- the VFS reads
+    /// and PNG/SVG decodes underneath `IconCache::populate_from_rows` are too
+    /// slow (dozens of icons per replay) to run on the UI thread without
+    /// stalling it. The table renders immediately with `icons` empty (every
+    /// cell falls back to its text label, per `name_cell`/`expanded.rs`), then
+    /// re-renders with real icons once the spawned task's decode completes and
+    /// applies its result back via `cx.notify()`.
     pub fn new(mut model: ReplayReportModel, vfs: VfsPath, cx: &mut Context<Self>) -> Self {
         let sort = SortOrder::default();
         let debug = false;
         sort_rows(&mut model.rows, model.self_team, sort, debug);
         let list_state = ListState::new(model.rows.len(), ListAlignment::Top, LIST_OVERDRAW);
 
-        let mut icons = IconCache::new();
         let svg_renderer = cx.svg_renderer();
-        icons.populate_from_rows(&model.rows, &vfs, &svg_renderer);
-        tracing::info!(
-            ship_class_icons = icons.ship_class_count(),
-            keyed_icons = icons.keyed_count(),
-            "replay inspector: resolved player-table icons"
-        );
+        let rows_for_icons = model.rows.clone();
+        cx.spawn(async move |this, cx| {
+            let icons = cx
+                .background_spawn(async move {
+                    let mut icons = IconCache::new();
+                    icons.populate_from_rows(&rows_for_icons, &vfs, &svg_renderer);
+                    icons
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                tracing::info!(
+                    ship_class_icons = icons.ship_class_count(),
+                    keyed_icons = icons.keyed_count(),
+                    "replay inspector: resolved player-table icons"
+                );
+                this.icons = icons;
+                cx.notify();
+            });
+        })
+        .detach();
 
-        Self { model, list_state, sort, h_scroll: ScrollHandle::new(), icons, debug, expanded: HashSet::new() }
+        Self {
+            model,
+            list_state,
+            sort,
+            h_scroll: ScrollHandle::new(),
+            icons: IconCache::new(),
+            debug,
+            expanded: HashSet::new(),
+        }
     }
 
     /// Applies a header click: toggles the sort order for `column`, re-sorts
@@ -366,11 +387,12 @@ fn expand_caret(ix: usize, entity: Entity<PlayerTable>, is_expanded: bool) -> An
 /// separate `ui.add`/`ui.label` call per segment.
 fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
     let name_color = resolve_color(ColorRole::Player(name_color_kind(row)));
+    let icon_tint = player_color_kind_rgb(player_color_kind(row));
 
     let mut cell = h_flex().w(px(width)).flex_none().gap_1().px_1().items_center().overflow_hidden();
     cell = cell.child(expand_caret(ix, layout.entity.clone(), layout.is_expanded));
 
-    cell = match layout.icons.get(row.ship_class) {
+    cell = match layout.icons.get(row.ship_class, icon_tint) {
         Some(image) => {
             let icon_el = div().flex_none().child(img(image).w(px(16.)).h(px(16.)));
             if row.ship_species_text.is_empty() {

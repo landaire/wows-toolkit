@@ -69,14 +69,12 @@ use wowsunpack::data::TranslationKey;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::translations::translate_map_name;
-use wowsunpack::game_params::types::GameParamProvider;
 
 use super::browser::BrowserNode;
 use super::browser::ReplayLite;
 use super::browser::build_browser_tree;
 use super::columns::BattleOutcome;
 use super::columns::ColorRole;
-use super::icons::IconCache;
 use super::load::GameDataStatus;
 use super::table::resolve_color;
 
@@ -102,19 +100,14 @@ struct RawReplay {
     game_time: String,
 }
 
-/// A leaf's path, (usually absent, see the module doc) battle result, and
-/// nation (for its flag icon), looked up by tree-item id during rendering.
-/// Groups need no side table: their label already encodes everything they
-/// display.
+/// A leaf's path and (usually absent, see the module doc) battle result,
+/// looked up by tree-item id during rendering. Groups need no side table:
+/// their label already encodes everything they display.
 #[derive(Clone)]
 struct LeafInfo {
     path: PathBuf,
     battle_result: Option<BattleResult>,
-    nation: Option<String>,
 }
-
-/// Nation-flag icon size, in pixels, shown before each leaf's label.
-const NATION_FLAG_SIZE: f32 = 12.0;
 
 /// Background scan progress, driving the panel's content below the header.
 enum ScanStatus {
@@ -159,11 +152,6 @@ pub struct ReplayBrowser {
     /// `Ready` (see `set_game_data`). `None` translates every label to its
     /// untranslated raw fallback (see `translate_replay`).
     game_data: Option<Arc<GameMetadataProvider>>,
-    /// Nation-flag icons, bulk-loaded from the preloaded build's VFS the
-    /// first time `set_game_data` sees `GameDataStatus::Ready` (see
-    /// `IconCache::populate_nation_flags`). Empty (every lookup a miss, so
-    /// `render_browser_item` falls back to no icon) until then.
-    icons: IconCache,
 }
 
 impl EventEmitter<ReplayBrowserEvent> for ReplayBrowser {}
@@ -180,7 +168,6 @@ impl ReplayBrowser {
             selected_path: None,
             open_requested: None,
             game_data: None,
-            icons: IconCache::new(),
         }
     }
 
@@ -216,10 +203,6 @@ impl ReplayBrowser {
             return;
         }
         self.game_data = new_provider;
-        if let GameDataStatus::Ready(loaded) = status {
-            self.icons.populate_nation_flags(loaded.vfs());
-            tracing::info!(nation_flags = self.icons.keyed_count(), "replay browser: resolved nation flag icons");
-        }
         self.rebuild_tree(cx);
         cx.notify();
     }
@@ -302,9 +285,9 @@ fn node_to_tree_item(
                 children.into_iter().map(|child| node_to_tree_item(child, next_group_id, leaf_info)).collect();
             TreeItem::new(id, label).children(children).expanded(true)
         }
-        BrowserNode::Leaf { label, path, battle_result, nation } => {
+        BrowserNode::Leaf { label, path, battle_result } => {
             let id: SharedString = path.to_string_lossy().into_owned().into();
-            leaf_info.insert(id.clone(), LeafInfo { path, battle_result, nation });
+            leaf_info.insert(id.clone(), LeafInfo { path, battle_result });
             TreeItem::new(id, label)
         }
     }
@@ -329,7 +312,6 @@ fn render_browser_item(
     entry: &TreeEntry,
     selected: bool,
     leaf_info: &HashMap<SharedString, LeafInfo>,
-    icons: &IconCache,
 ) -> ListItem {
     let item = entry.item();
     let is_folder = entry.is_folder();
@@ -347,11 +329,6 @@ fn render_browser_item(
         row = row.child(Icon::new(chevron));
     } else {
         row = row.child(div().w(px(16.)));
-    }
-    let flag =
-        leaf.and_then(|leaf| leaf.nation.as_ref()).and_then(|nation| icons.get_keyed(&format!("nation:{nation}")));
-    if let Some(flag) = flag {
-        row = row.child(img(flag).w(px(NATION_FLAG_SIZE)).h(px(NATION_FLAG_SIZE)).flex_none());
     }
     row = row.child(label_el);
 
@@ -409,9 +386,8 @@ impl Render for ReplayBrowser {
                 let entity = entity.clone();
                 let leaf_info = self.leaf_info.clone();
                 let context_menu_leaf_info = self.leaf_info.clone();
-                let icons = self.icons.clone();
                 tree(&self.tree_state, move |ix, entry, selected, _window, _cx| {
-                    render_browser_item(entity.clone(), ix, entry, selected, &leaf_info, &icons)
+                    render_browser_item(entity.clone(), ix, entry, selected, &leaf_info)
                 })
                 .context_menu(move |_ix, entry, menu, _window, _cx| {
                     if entry.is_folder() {
@@ -532,8 +508,7 @@ fn translate_replay(raw: &RawReplay, provider: Option<&GameMetadataProvider>) ->
         Some(provider) => translate_map_name(&raw.raw_map, provider),
         None => raw.raw_map.clone(),
     };
-    let nation = translate_ship_nation(raw.ship_id, provider);
-    ReplayLite { path: raw.path.clone(), ship, map, game_time: raw.game_time.clone(), battle_result: None, nation }
+    ReplayLite { path: raw.path.clone(), ship, map, game_time: raw.game_time.clone(), battle_result: None }
 }
 
 /// Mirrors `Replay::vehicle_name` (`mod.rs:2580`): resolves `ship_id`'s
@@ -553,17 +528,6 @@ fn translate_ship_name(
         .param_localization_id(ship_id)
         .and_then(|translation_id| provider.localized_name_from_id(&TranslationKey::new(translation_id)))
         .unwrap_or_else(|| SPECTATOR_LABEL.to_string())
-}
-
-/// The relation-0 vehicle's nation (e.g. `"usa"`, `"japan"`), for the leaf's
-/// flag icon (see `IconCache::populate_nation_flags`'s `"nation:{nation}"`
-/// key). `None` when `provider` is not yet loaded or the replay names no
-/// relation-0 vehicle -- there is no raw-fallback nation string the way there
-/// is for the ship name, so an unresolved nation just shows no flag.
-fn translate_ship_nation(ship_id: Option<GameParamId>, provider: Option<&GameMetadataProvider>) -> Option<String> {
-    let provider = provider?;
-    let ship_id = ship_id?;
-    GameParamProvider::game_param_by_id(provider, ship_id).map(|param| param.nation().to_string())
 }
 
 #[cfg(test)]

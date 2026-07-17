@@ -19,10 +19,7 @@ use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_toolkit_config::ReplayGrouping;
 
 /// A replay file's minimal summary for the file browser: enough to sort,
-/// group, and label it without a full packet parse. `nation` is the
-/// relation-0 vehicle's nation (e.g. `"usa"`, `"japan"`), resolved the same
-/// way `ship` is (see `browser_view.rs::translate_replay`); `None` before
-/// game data loads or when the replay names no relation-0 vehicle.
+/// group, and label it without a full packet parse.
 #[derive(Debug, Clone)]
 pub struct ReplayLite {
     pub path: PathBuf,
@@ -30,17 +27,15 @@ pub struct ReplayLite {
     pub map: String,
     pub game_time: String,
     pub battle_result: Option<BattleResult>,
-    pub nation: Option<String>,
 }
 
 /// One row of the file-browser tree: a Date/Ship group with its children, or
 /// a single replay leaf. `Leaf::battle_result` drives the win/loss/draw label
-/// color; `Leaf::nation` drives its flag icon; `Group` carries neither (its
-/// label already encodes the win rate, and a group can span several nations).
+/// color; `Group` carries none (its label already encodes the win rate).
 #[derive(Debug, Clone)]
 pub enum BrowserNode {
     Group { label: String, children: Vec<BrowserNode> },
-    Leaf { label: String, path: PathBuf, battle_result: Option<BattleResult>, nation: Option<String> },
+    Leaf { label: String, path: PathBuf, battle_result: Option<BattleResult> },
 }
 
 /// Builds the file-browser tree for `grouping`. Sorts `files` by path
@@ -65,12 +60,7 @@ pub fn build_browser_tree(files: &[ReplayLite], grouping: ReplayGrouping) -> Vec
 /// the Date-grouping leaf format instead, so the ship/map/time content that
 /// IS available still renders in a single readable line.
 fn none_leaf(r: &ReplayLite) -> BrowserNode {
-    BrowserNode::Leaf {
-        label: date_leaf_label(r),
-        path: r.path.clone(),
-        battle_result: r.battle_result,
-        nation: r.nation.clone(),
-    }
+    BrowserNode::Leaf { label: date_leaf_label(r), path: r.path.clone(), battle_result: r.battle_result }
 }
 
 /// Date-mode leaf label: `"{ship} - {map} ({time})"`, where `{time}` is only
@@ -111,12 +101,7 @@ fn group_node(name: String, replays: Vec<&ReplayLite>, leaf_label: impl Fn(&Repl
     let label = format!("{} ({}){}", name, replays.len(), win_rate_label(&replays));
     let children = replays
         .into_iter()
-        .map(|r| BrowserNode::Leaf {
-            label: leaf_label(r),
-            path: r.path.clone(),
-            battle_result: r.battle_result,
-            nation: r.nation.clone(),
-        })
+        .map(|r| BrowserNode::Leaf { label: leaf_label(r), path: r.path.clone(), battle_result: r.battle_result })
         .collect();
     BrowserNode::Group { label, children }
 }
@@ -175,7 +160,6 @@ mod tests {
             map: map.to_string(),
             game_time: game_time.to_string(),
             battle_result,
-            nation: None,
         }
     }
 

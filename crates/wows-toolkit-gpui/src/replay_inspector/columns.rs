@@ -176,6 +176,20 @@ pub(crate) fn relation_color_rgb(relation: Relation) -> u32 {
     }
 }
 
+/// Packed `0xRRGGBB` color for a `PlayerColorKind`. The single source of
+/// truth `table.rs::resolve_color`'s `ColorRole::Player` arm resolves
+/// through; `icons.rs` also reads it directly to tint the Name cell's
+/// ship-class icon by the same color the name text and stat cells use.
+pub(crate) fn player_color_kind_rgb(kind: PlayerColorKind) -> u32 {
+    match kind {
+        PlayerColorKind::SelfPlayer => relation_color_rgb(Relation::new(0)),
+        PlayerColorKind::Ally => relation_color_rgb(Relation::new(1)),
+        PlayerColorKind::Enemy => relation_color_rgb(Relation::new(2)),
+        PlayerColorKind::DivisionMate => 0xffd700,
+        PlayerColorKind::Abuser => 0xffc0cb,
+    }
+}
+
 /// The team/division-relative color for stat cells (not the name cell, which
 /// additionally turns pink for abusers via `name_color_kind`). `pub(crate)`
 /// so the render layer (`table.rs`) can reuse it for the multi-segment Name
