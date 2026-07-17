@@ -2,12 +2,11 @@ use gpui::*;
 use gpui_component::Disableable;
 use gpui_component::button::Button;
 use gpui_component::checkbox::Checkbox;
-use gpui_component::resizable::{h_resizable, resizable_panel};
 use gpui_component::slider::{Slider, SliderState};
 use gpui_component::tab::{Tab, TabBar};
 use gpui_component::{h_flex, v_flex};
 
-use crate::replay_inspector::{PlayerTable, ReplayBrowser, sample_model};
+use crate::replay_inspector::ReplayInspectorView;
 use crate::settings::{DEFAULT_ZOOM, GpuiSettings, MAX_ZOOM, MIN_ZOOM};
 use crate::theme;
 
@@ -45,42 +44,37 @@ pub struct App {
     /// Never written back to the DB.
     zoom: f32,
     zoom_slider: Entity<SliderState>,
-    /// Replay Inspector player table. Fed sample data; replaced by real parsing
-    /// in a later milestone.
-    replay_table: Entity<PlayerTable>,
-    /// Replay Inspector left-panel file browser. Starts its background
-    /// directory scan once `apply_settings` knows the WoWs directory.
-    replay_browser: Entity<ReplayBrowser>,
+    /// Replay Inspector tab: the file browser plus the per-replay dock.
+    /// Starts its background directory scan once `apply_settings` knows the
+    /// WoWs directory.
+    replay_inspector: Entity<ReplayInspectorView>,
 }
 
 impl App {
-    pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let zoom_slider =
             cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(DEFAULT_ZOOM));
-        // sample data; replaced by real parsing in a later milestone
-        let replay_table = cx.new(|cx| PlayerTable::new(sample_model(), cx));
-        let replay_browser = cx.new(ReplayBrowser::new);
+        let replay_inspector = cx.new(|cx| ReplayInspectorView::new(window, cx));
         Self {
             active_tab: AppTab::Settings,
             settings: SettingsState::Loading,
             zoom: DEFAULT_ZOOM,
             zoom_slider,
-            replay_table,
-            replay_browser,
+            replay_inspector,
         }
     }
 
     /// Store the settings snapshot loaded from the shared config DB. Called
     /// once from `main.rs` after the async load completes; read-only for the
     /// lifetime of the session (no write-back). Also kicks off the replay
-    /// browser's background directory scan, now that the WoWs directory is
-    /// known.
+    /// inspector's background directory scan and game-data cache, now that
+    /// the WoWs directory is known.
     pub fn apply_settings(&mut self, settings: GpuiSettings, cx: &mut Context<Self>) {
         self.zoom = settings.zoom;
         self.zoom_slider =
             cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(settings.zoom));
         let wows_dir = settings.wows_dir.clone();
-        self.replay_browser.update(cx, |browser, cx| browser.start_scan(wows_dir, cx));
+        self.replay_inspector.update(cx, |view, cx| view.apply_settings(wows_dir, cx));
         self.settings = SettingsState::Loaded(settings);
     }
 
@@ -227,22 +221,6 @@ impl App {
             )
             .into_any_element()
     }
-
-    /// The Replay Inspector tab: the file browser in a resizable sidebar next
-    /// to the player table. Browser selection/open wiring lives in
-    /// `ReplayBrowser` itself; the table stays the sample-data table until
-    /// Milestone 5 wires the parse pipeline to the browser's open intent.
-    fn render_replay_inspector_tab(&self) -> impl IntoElement {
-        h_resizable("replay-inspector-split")
-            .child(
-                resizable_panel()
-                    .size(px(280.))
-                    .size_range(px(180.)..px(520.))
-                    .flex_none()
-                    .child(self.replay_browser.clone()),
-            )
-            .child(resizable_panel().child(self.replay_table.clone()))
-    }
 }
 
 impl Render for App {
@@ -266,7 +244,7 @@ impl Render for App {
 
         let body = match self.active_tab {
             AppTab::Settings => self.render_settings_tab(cx).into_any_element(),
-            AppTab::ReplayInspector => self.render_replay_inspector_tab().into_any_element(),
+            AppTab::ReplayInspector => self.replay_inspector.clone().into_any_element(),
             AppTab::ArmorViewer => {
                 h_flex().size_full().items_center().justify_center().child(self.active_tab.label()).into_any_element()
             }

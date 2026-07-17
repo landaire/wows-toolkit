@@ -4,12 +4,13 @@
 //! `table`/`expanded`). Colors are represented as `ColorRole` and resolved to
 //! real colors by the render layer (`table.rs`, `browser_view.rs`). `load`
 //! runs the background replay parse (`spawn_parse`) that produces a
-//! `ReplayReportModel` from a `.wowsreplay` file.
+//! `ReplayReportModel` from a `.wowsreplay` file; `panel`/`view` tie it all
+//! together into the dock tab `app.rs` mounts (one `ReplayPanel` per open
+//! replay inside a `ReplayInspectorView`).
 #![allow(dead_code)]
 // Re-exports below are the module's public surface; not every item is
 // consumed outside its own file yet (some are test-only or reserved for a
-// later milestone, e.g. the dock wiring that will consume
-// `ReplayBrowserEvent`).
+// later milestone).
 #![allow(unused_imports)]
 
 pub mod browser;
@@ -19,9 +20,11 @@ pub mod expanded;
 pub mod icons;
 pub mod load;
 pub mod model;
+pub mod panel;
 pub mod sample;
 pub mod sort;
 pub mod table;
+pub mod view;
 
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -42,8 +45,10 @@ pub use load::ReplayLoadError;
 pub use load::spawn_parse;
 pub use model::PlayerRow;
 pub use model::ReplayReportModel;
+pub use panel::ReplayPanel;
 pub use sample::sample_model;
 pub use sort::SortColumn;
 pub use sort::SortOrder;
 pub use sort::sort_rows;
 pub use table::PlayerTable;
+pub use view::ReplayInspectorView;

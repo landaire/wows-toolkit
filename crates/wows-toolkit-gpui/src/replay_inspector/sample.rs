@@ -489,5 +489,11 @@ pub fn sample_model() -> ReplayReportModel {
         ),
     ];
 
-    ReplayReportModel { self_team: TeamId::from(0i64), rows, battle_result: None, columns: ReplayColumn::ALL.to_vec() }
+    ReplayReportModel {
+        self_team: TeamId::from(0i64),
+        rows,
+        battle_result: None,
+        columns: ReplayColumn::ALL.to_vec(),
+        map: "Fault Line".to_string(),
+    }
 }

@@ -207,6 +207,9 @@ pub struct ReplayReportModel {
     pub rows: Vec<PlayerRow>,
     pub battle_result: Option<BattleResult>,
     pub columns: Vec<ReplayColumn>,
+    /// Translated map name (`NormalizedBattleReport::metadata.map`), used by
+    /// the per-replay dock panel's tab title ("{ship} - {map}").
+    pub map: String,
 }
 
 impl ReplayReportModel {
@@ -267,6 +270,7 @@ impl ReplayReportModel {
             rows,
             battle_result: normalized.metadata.battle_result,
             columns: ReplayColumn::ALL.to_vec(),
+            map: normalized.metadata.map.clone(),
         }
     }
 
@@ -762,6 +766,7 @@ mod tests {
             rows: vec![row],
             battle_result: Some(BattleResult::Win(0)),
             columns: ReplayColumn::ALL.to_vec(),
+            map: "Test Map".to_string(),
         };
 
         // Unloaded PR data would make `calculate_pr` return `None` for any
