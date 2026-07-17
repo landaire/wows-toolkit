@@ -1,11 +1,13 @@
 //! Custom virtualized player table (collapsed rows). Renders the M1
 //! presentation model with a fixed sortable header and a `gpui::list`-backed
-//! body sharing one horizontal scroll handle so header and rows stay aligned.
-//! This layer adds the per-column cell parity pass on top of Task 4's
-//! scaffold: colors, NDA text, the multi-segment Name cell (ship-class icon,
-//! division, clan tag, player name), Skills tier icons, and hover tooltips
-//! for the stat cells that carry a breakdown. Row expansion is a later
-//! milestone; this layer still draws collapsed rows only.
+//! body. The Actions/Name/ShipName columns stay pinned to the left edge
+//! (`STICKY_COLUMN_COUNT`); the remaining columns scroll horizontally inside
+//! a nested container per row and per header, all sharing one scroll handle
+//! so they stay aligned. This layer adds the per-column cell parity pass on
+//! top of Task 4's scaffold: colors, NDA text, the multi-segment Name cell
+//! (ship-class icon, division, clan tag, player name), Skills tier icons, and
+//! hover tooltips for the stat cells that carry a breakdown. Row expansion is
+//! a later milestone; this layer still draws collapsed rows only.
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -25,7 +27,6 @@ use super::columns::PlayerColorKind;
 use super::columns::ReplayColumn;
 use super::columns::cell_value;
 use super::columns::name_color_kind;
-use super::columns::player_color_kind;
 use super::icons::IconCache;
 use super::model::PlayerRow;
 use super::model::ReplayReportModel;
@@ -37,6 +38,19 @@ use wows_replay_insights::personal_rating::PersonalRatingCategory;
 /// Overdraw for the virtualized list: how far past the viewport to render so
 /// scrolling reveals already-laid-out rows instead of blank space.
 const LIST_OVERDRAW: Pixels = px(200.);
+
+/// Multiplier for a cell's `ElementId` (`ix * CELL_ID_STRIDE + col as usize`),
+/// spacing row indices apart enough that no two `(row, column)` pairs collide.
+/// Must exceed `ReplayColumn::ALL.len()`.
+const CELL_ID_STRIDE: usize = 32;
+const _: () = assert!(CELL_ID_STRIDE > ReplayColumn::ALL.len(), "CELL_ID_STRIDE must exceed the column count");
+
+/// Columns pinned to the left edge of the table while the rest scroll
+/// horizontally: Actions, Name, ShipName, in that order. Mirrors the egui
+/// app's `num_sticky_cols(3)` (`mod.rs:2808`). `default_columns` always
+/// includes these three first and unconditionally, so this always freezes
+/// exactly them.
+const STICKY_COLUMN_COUNT: usize = 3;
 
 /// Fixed pixel width for a column's header and body cells. Both use the same
 /// value so the shared horizontal scroll keeps them aligned.
@@ -232,12 +246,13 @@ impl PlayerTable {
 fn hover_tooltip(text: SharedString) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
     move |window, cx| {
         let text = text.clone();
+        let mono_font_family = cx.theme().mono_font_family.clone();
         Tooltip::element(move |_window, _cx| {
             let text = text.clone();
             v_flex()
                 .gap_0()
                 .text_xs()
-                .font_family("Consolas")
+                .font_family(mono_font_family.clone())
                 .children(text.split('\n').map(|line| div().child(line.to_string())))
         })
         .build(window, cx)
@@ -260,9 +275,10 @@ fn cell_element(ix: usize, col: ReplayColumn, cell: CellValue, width: f32) -> An
         .child(cell.text);
 
     match cell.hover {
-        Some(text) => {
-            base.id(("replay-cell", ix * 32 + col as usize)).tooltip(hover_tooltip(text.into())).into_any_element()
-        }
+        Some(text) => base
+            .id(("replay-cell", ix * CELL_ID_STRIDE + col as usize))
+            .tooltip(hover_tooltip(text.into()))
+            .into_any_element(),
         None => base.into_any_element(),
     }
 }
@@ -276,7 +292,6 @@ fn cell_element(ix: usize, col: ReplayColumn, cell: CellValue, width: f32) -> An
 /// `ReplayColumn::Name` arm, which makes one separate `ui.add`/`ui.label`
 /// call per segment.
 fn name_cell(ix: usize, row: &PlayerRow, icons: &IconCache, width: f32) -> AnyElement {
-    let icon_color = resolve_color(ColorRole::Player(player_color_kind(row)));
     let name_color = resolve_color(ColorRole::Player(name_color_kind(row)));
 
     let mut cell = h_flex().w(px(width)).flex_none().gap_1().px_1().items_center().overflow_hidden();
@@ -295,7 +310,7 @@ fn name_cell(ix: usize, row: &PlayerRow, icons: &IconCache, width: f32) -> AnyEl
                 )
             }
         }
-        None => cell.child(div().flex_none().text_xs().text_color(icon_color).child(row.ship_species_text.clone())),
+        None => cell.child(div().flex_none().text_xs().child(row.ship_species_text.clone())),
     };
 
     if let Some(div_label) = row.division_label.as_ref() {
@@ -365,65 +380,120 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElemen
 
     match cell.hover {
         Some(text) => base
-            .id(("replay-cell", ix * 32 + ReplayColumn::Skills as usize))
+            .id(("replay-cell", ix * CELL_ID_STRIDE + ReplayColumn::Skills as usize))
             .tooltip(hover_tooltip(text.into()))
             .into_any_element(),
         None => base.into_any_element(),
     }
 }
 
-/// One collapsed row: an `h_flex` of column cells with a hover highlight.
-fn render_row(
-    ix: usize,
-    row: &PlayerRow,
-    columns: &[ReplayColumn],
-    icons: &IconCache,
-    debug: bool,
-    hover_bg: Hsla,
-) -> AnyElement {
-    let mut row_el = h_flex().id(ix).w_full().py_0p5().hover(move |style| style.bg(hover_bg));
-    for &col in columns {
-        let cell_el = match col {
-            ReplayColumn::Name => name_cell(ix, row, icons, column_width(col)),
-            ReplayColumn::Skills => skills_cell(ix, row, debug, column_width(col)),
-            _ => cell_element(ix, col, cell_value(row, col, debug), column_width(col)),
-        };
-        row_el = row_el.child(cell_el);
+/// One column cell, dispatching to the Name/Skills special-cased layouts and
+/// falling back to the generic `cell_element` for everything else.
+fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, icons: &IconCache, debug: bool) -> AnyElement {
+    match col {
+        ReplayColumn::Name => name_cell(ix, row, icons, column_width(col)),
+        ReplayColumn::Skills => skills_cell(ix, row, debug, column_width(col)),
+        _ => cell_element(ix, col, cell_value(row, col, debug), column_width(col)),
     }
-    row_el.into_any_element()
+}
+
+/// Per-frame layout shared by every row and the header's scrolling portion:
+/// the sticky/scrolling column split, the scrolling section's total width,
+/// the shared horizontal scroll handle, the icon cache, and the debug flag.
+/// Bundled into one struct so `render_row` stays under clippy's argument-count
+/// limit.
+struct RowLayout<'a> {
+    sticky_columns: &'a [ReplayColumn],
+    scroll_columns: &'a [ReplayColumn],
+    scroll_width: f32,
+    icons: &'a IconCache,
+    debug: bool,
+    h_scroll: &'a ScrollHandle,
+}
+
+/// One collapsed row: `layout.sticky_columns` (Actions/Name/ShipName) render
+/// as fixed cells outside the horizontal scroll; `layout.scroll_columns`
+/// render inside a nested scroll container tracking `layout.h_scroll`, the
+/// same handle the header's scrolling portion tracks, so both stay aligned.
+/// Mirrors the egui app's `num_sticky_cols(3)`.
+fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla) -> AnyElement {
+    let mut sticky = h_flex().flex_none();
+    for &col in layout.sticky_columns {
+        sticky = sticky.child(render_cell(ix, col, row, layout.icons, layout.debug));
+    }
+
+    let mut scrolling = h_flex().w(px(layout.scroll_width)).flex_none();
+    for &col in layout.scroll_columns {
+        scrolling = scrolling.child(render_cell(ix, col, row, layout.icons, layout.debug));
+    }
+
+    h_flex()
+        .id(ix)
+        .w_full()
+        .py_0p5()
+        .hover(move |style| style.bg(hover_bg))
+        .child(sticky)
+        .child(
+            div()
+                .id(("replay-row-h-scroll", ix))
+                .flex_1()
+                .min_w(px(0.))
+                .overflow_x_scroll()
+                .track_scroll(layout.h_scroll)
+                .child(scrolling),
+        )
+        .into_any_element()
 }
 
 impl Render for PlayerTable {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let total_width: f32 = self.model.columns.iter().map(|col| column_width(*col)).sum();
         let border = cx.theme().border;
         let hover_bg = cx.theme().muted;
 
+        let sticky_columns: Vec<ReplayColumn> = self.model.columns.iter().copied().take(STICKY_COLUMN_COUNT).collect();
+        let scroll_columns: Vec<ReplayColumn> = self.model.columns.iter().copied().skip(STICKY_COLUMN_COUNT).collect();
+        let scroll_width: f32 = scroll_columns.iter().map(|col| column_width(*col)).sum();
+
         let header = h_flex()
-            .w(px(total_width))
+            .w_full()
             .flex_none()
             .border_b_1()
             .border_color(border)
-            .children(self.model.columns.clone().into_iter().map(|col| self.header_cell(col, cx)));
+            .child(h_flex().flex_none().children(sticky_columns.iter().map(|col| self.header_cell(*col, cx))))
+            .child(
+                div()
+                    .id("replay-header-h-scroll")
+                    .flex_1()
+                    .min_w(px(0.))
+                    .overflow_x_scroll()
+                    .track_scroll(&self.h_scroll)
+                    .child(
+                        h_flex()
+                            .w(px(scroll_width))
+                            .flex_none()
+                            .children(scroll_columns.iter().map(|col| self.header_cell(*col, cx))),
+                    ),
+            );
 
         let entity = cx.entity();
+        let h_scroll = self.h_scroll.clone();
         let render_item = move |ix: usize, _window: &mut Window, cx: &mut App| -> AnyElement {
             let table = entity.read(cx);
-            render_row(ix, &table.model.rows[ix], &table.model.columns, &table.icons, table.debug, hover_bg)
+            let layout = RowLayout {
+                sticky_columns: &sticky_columns,
+                scroll_columns: &scroll_columns,
+                scroll_width,
+                icons: &table.icons,
+                debug: table.debug,
+                h_scroll: &h_scroll,
+            };
+            render_row(ix, &table.model.rows[ix], &layout, hover_bg)
         };
 
         div()
             .size_full()
             .relative()
-            .child(
-                div().id("replay-table-h-scroll").size_full().overflow_x_scroll().track_scroll(&self.h_scroll).child(
-                    v_flex()
-                        .h_full()
-                        .w(px(total_width))
-                        .child(header)
-                        .child(list(self.list_state.clone(), render_item).flex_1()),
-                ),
-            )
+            .child(v_flex().size_full().child(header).child(list(self.list_state.clone(), render_item).flex_1()))
             .child(Scrollbar::vertical(&self.list_state))
     }
 }
