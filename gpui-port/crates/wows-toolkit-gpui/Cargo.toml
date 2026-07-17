@@ -11,3 +11,6 @@ gpui_tokio.workspace = true
 gpui-component.workspace = true
 gpui-component-assets.workspace = true
 anyhow.workspace = true
+wows-toolkit-config = { path = "../../../crates/wows-toolkit-config" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
