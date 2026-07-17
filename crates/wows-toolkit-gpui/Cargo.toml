@@ -33,6 +33,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2.0"
 escaper = "0.1.1"
 gettext = "0.4"
+rfd = "0.17"
 
 [dev-dependencies]
 jiff = "0.2"

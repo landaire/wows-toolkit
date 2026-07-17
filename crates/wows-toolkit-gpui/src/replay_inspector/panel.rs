@@ -52,6 +52,7 @@ use wows_replays::analyzer::battle_controller::BattleResult;
 use super::chat::ChatPanel;
 use super::columns::BattleOutcome;
 use super::columns::ColorRole;
+use super::columns::ReplayColumn;
 use super::debug_view::RawJsonPanel;
 use super::load::GameDataCache;
 use super::load::ParsedReplay;
@@ -110,11 +111,24 @@ pub struct ReplayPanel {
     /// `ReplayInspectorView`'s session debug flag at construction, kept live
     /// afterward by `set_debug` (the RI's runtime toggle; see `view.rs`).
     debug: bool,
+    /// The visible-column set to apply once this replay finishes loading
+    /// (`apply_result` overwrites the model's default `ReplayColumn::ALL` with
+    /// this), and to forward straight to `table` when already loaded. Seeded
+    /// from `columns::default_columns(&replay_settings)` at construction, kept
+    /// live afterward by `set_columns` (the header toolbar's column-filter
+    /// checkboxes; see `view.rs`).
+    columns: Vec<ReplayColumn>,
     _parse_task: Task<()>,
 }
 
 impl ReplayPanel {
-    pub fn new(path: PathBuf, game_data: GameDataCache, debug: bool, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        path: PathBuf,
+        game_data: GameDataCache,
+        debug: bool,
+        columns: Vec<ReplayColumn>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus_handle = cx.focus_handle();
         let parse_task = spawn_parse(path, game_data, cx);
         let parse_task = cx.spawn(async move |this, cx| {
@@ -122,7 +136,14 @@ impl ReplayPanel {
             let _ = this.update(cx, |this, cx| this.apply_result(result, cx));
         });
 
-        Self { focus_handle, state: LoadState::Loading, side_panel: SidePanel::None, debug, _parse_task: parse_task }
+        Self {
+            focus_handle,
+            state: LoadState::Loading,
+            side_panel: SidePanel::None,
+            debug,
+            columns,
+            _parse_task: parse_task,
+        }
     }
 
     /// Applies a runtime debug-mode toggle from `ReplayInspectorView`:
@@ -140,9 +161,21 @@ impl ReplayPanel {
         cx.notify();
     }
 
+    /// Applies a new visible-column set from the header toolbar's
+    /// column-filter checkboxes (`view.rs::ReplayInspectorView::set_column_filter`).
+    /// Remembered for `apply_result` (in case the parse has not finished yet)
+    /// and forwarded straight to `table` when it has.
+    pub fn set_columns(&mut self, columns: Vec<ReplayColumn>, cx: &mut Context<Self>) {
+        self.columns = columns.clone();
+        if let LoadState::Loaded(loaded) = &self.state {
+            loaded.table.update(cx, |table, cx| table.set_columns(columns, cx));
+        }
+    }
+
     fn apply_result(&mut self, result: Result<ParsedReplay, ReplayLoadError>, cx: &mut Context<Self>) {
         self.state = match result {
             Ok(ParsedReplay { mut model, game_data, raw_metadata_json, raw_results_json }) => {
+                model.columns = self.columns.clone();
                 let ship_name =
                     model.rows.iter().find(|row| row.is_self).map(|row| row.ship_name.clone()).unwrap_or_default();
                 let title: SharedString =

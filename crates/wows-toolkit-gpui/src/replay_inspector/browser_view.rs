@@ -50,8 +50,6 @@ use gpui::*;
 use gpui_component::ActiveTheme;
 use gpui_component::Icon;
 use gpui_component::IconName;
-use gpui_component::Selectable;
-use gpui_component::button::Button;
 use gpui_component::h_flex;
 use gpui_component::list::ListItem;
 use gpui_component::menu::PopupMenuItem;
@@ -181,6 +179,13 @@ impl ReplayBrowser {
         self.open_requested.as_deref()
     }
 
+    /// The currently active grouping strategy, read by `view.rs`'s header
+    /// toolbar (which owns the grouping control -- see `set_grouping`) to
+    /// highlight the selected option.
+    pub fn grouping(&self) -> ReplayGrouping {
+        self.grouping
+    }
+
     /// Adopts `status`'s game data (or drops it, if `status` is no longer
     /// `Ready`) and rebuilds the tree so labels reflect it -- called whenever
     /// `load::GameDataStatus` changes, most importantly on its `Loading` ->
@@ -232,7 +237,11 @@ impl ReplayBrowser {
         .detach();
     }
 
-    fn set_grouping(&mut self, grouping: ReplayGrouping, cx: &mut Context<Self>) {
+    /// Switches the grouping strategy and rebuilds the tree. Called from the
+    /// header toolbar's grouping buttons (`view.rs`), which own the control
+    /// itself -- matching the egui app's header placement -- and only reach
+    /// in here to apply it.
+    pub(crate) fn set_grouping(&mut self, grouping: ReplayGrouping, cx: &mut Context<Self>) {
         if self.grouping == grouping {
             return;
         }
@@ -344,20 +353,6 @@ fn render_browser_item(
     list_item
 }
 
-fn grouping_button(
-    entity: Entity<ReplayBrowser>,
-    grouping: ReplayGrouping,
-    current: ReplayGrouping,
-) -> impl IntoElement {
-    Button::new(("replay-browser-grouping", grouping as usize))
-        .label(grouping.label())
-        .compact()
-        .selected(grouping == current)
-        .on_click(move |_event: &ClickEvent, _window, cx: &mut App| {
-            entity.update(cx, |browser, cx| browser.set_grouping(grouping, cx));
-        })
-}
-
 impl Render for ReplayBrowser {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border = cx.theme().border;
@@ -371,10 +366,7 @@ impl Render for ReplayBrowser {
             .py_1()
             .border_b_1()
             .border_color(border)
-            .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child("Replays"))
-            .child(grouping_button(entity.clone(), ReplayGrouping::Date, self.grouping))
-            .child(grouping_button(entity.clone(), ReplayGrouping::Ship, self.grouping))
-            .child(grouping_button(entity.clone(), ReplayGrouping::None, self.grouping));
+            .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child("Replays"));
 
         let body = match &self.status {
             ScanStatus::Loading => div().p_2().text_sm().opacity(0.6).child("Scanning replays...").into_any_element(),

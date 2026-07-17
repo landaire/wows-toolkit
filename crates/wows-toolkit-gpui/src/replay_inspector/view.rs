@@ -12,6 +12,10 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui_component::ActiveTheme;
+use gpui_component::IconName;
+use gpui_component::Selectable;
+use gpui_component::button::Button;
 use gpui_component::checkbox::Checkbox;
 use gpui_component::dock::DockArea;
 use gpui_component::dock::DockItem;
@@ -20,9 +24,12 @@ use gpui_component::h_flex;
 use gpui_component::resizable::h_resizable;
 use gpui_component::resizable::resizable_panel;
 use gpui_component::v_flex;
+use wows_toolkit_config::ReplayGrouping;
+use wows_toolkit_config::ReplaySettings;
 
 use super::browser_view::ReplayBrowser;
 use super::browser_view::ReplayBrowserEvent;
+use super::columns::default_columns;
 use super::load::GameDataCache;
 use super::load::GameDataStatus;
 use super::load::spawn_startup_preload;
@@ -69,6 +76,20 @@ pub struct ReplayInspectorView {
     /// (see `settings.rs`'s module doc), so the toggle only overrides the
     /// setting for the running session.
     debug_mode: bool,
+    /// Session-local copy of the persisted `ReplaySettings`, seeded from the
+    /// shared config DB in `apply_settings`. The header toolbar's
+    /// column-filter checkboxes read/write this and drive `default_columns`
+    /// off it (`set_column_filter`); its `grouping` field is not consulted
+    /// here after the initial seed -- the live grouping selection lives on
+    /// `browser` (see `set_grouping`). Like `debug_mode`, this crate never
+    /// writes it back to the DB (see `settings.rs`'s module doc).
+    replay_settings: ReplaySettings,
+    /// `AppPreferences.auto_load_latest_replay` in the egui app: seeded from
+    /// the shared config DB in `apply_settings`, then flippable at runtime via
+    /// the header checkbox. Reflects the persisted intent only -- this port
+    /// has no replays-directory watcher yet, so toggling it does not
+    /// currently start or stop an auto-load; wiring that up is a follow-up.
+    auto_load_latest_replay: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -86,20 +107,36 @@ impl ReplayInspectorView {
             has_opened_replay: false,
             open_panels: HashMap::new(),
             debug_mode: false,
+            replay_settings: ReplaySettings::default(),
+            auto_load_latest_replay: true,
             _subscriptions: vec![subscription],
         }
     }
 
     /// Starts the browser's directory scan, (re)builds the game-data cache
     /// for `wows_dir`, seeds the session debug-mode flag from
-    /// `debug_mode` (`AppPreferences.debug_mode`), and kicks off the startup
-    /// preload of the current installed build through that same cache -- so
-    /// a later `spawn_parse` for a replay on that build (see `panel.rs`)
-    /// finds the slot already warm instead of reloading it. Called from
-    /// `App::apply_settings`, which itself runs without a `Window` (see
-    /// `main.rs`), so this cannot take one either.
-    pub fn apply_settings(&mut self, wows_dir: String, debug_mode: bool, cx: &mut Context<Self>) {
+    /// `debug_mode` (`AppPreferences.debug_mode`), seeds the session
+    /// `replay_settings`/`auto_load_latest_replay` flags and the browser's
+    /// initial grouping (`replay_settings.grouping`), and kicks off the
+    /// startup preload of the current installed build through that same cache
+    /// -- so a later `spawn_parse` for a replay on that build (see
+    /// `panel.rs`) finds the slot already warm instead of reloading it.
+    /// Called from `App::apply_settings`, which itself runs without a
+    /// `Window` (see `main.rs`), so this cannot take one either.
+    pub fn apply_settings(
+        &mut self,
+        wows_dir: String,
+        debug_mode: bool,
+        replay_settings: ReplaySettings,
+        auto_load_latest_replay: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.debug_mode = debug_mode;
+        self.auto_load_latest_replay = auto_load_latest_replay;
+        let grouping = replay_settings.grouping;
+        self.replay_settings = replay_settings;
+        self.browser.update(cx, |browser, cx| browser.set_grouping(grouping, cx));
+
         if wows_dir.is_empty() {
             self.game_data = None;
             self.game_data_status = GameDataStatus::Failed("World of Warships directory is not set".to_string());
@@ -170,7 +207,8 @@ impl ReplayInspectorView {
             return;
         }
 
-        let panel = cx.new(|cx| ReplayPanel::new(path.clone(), game_data, self.debug_mode, cx));
+        let columns = default_columns(&self.replay_settings);
+        let panel = cx.new(|cx| ReplayPanel::new(path.clone(), game_data, self.debug_mode, columns, cx));
         self.open_panels.insert(path, panel.downgrade());
         self.dock_area.update(cx, |dock_area, cx| {
             dock_area.add_panel(Arc::new(panel), DockPlacement::Center, None, window, cx);
@@ -193,6 +231,88 @@ impl ReplayInspectorView {
         }
         cx.notify();
     }
+
+    /// "Open manually": the header toolbar's file-picker button. Mirrors the
+    /// egui app's `build_replay_header` open-manually handler
+    /// (`ui/replay_parser/mod.rs:3659`) exactly -- same `rfd::FileDialog`
+    /// filter -- except the picked path opens through this port's own dock
+    /// flow (`open_replay`) rather than the egui app's
+    /// `parse_replay_from_path` background task. A cancelled dialog is a
+    /// no-op.
+    fn open_manually(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() else {
+            return;
+        };
+        self.open_replay(file, window, cx);
+    }
+
+    /// Flips the session "Autoload Latest Replay" flag. Reflects the
+    /// persisted intent only -- see the field's own doc comment for why this
+    /// does not yet start or stop an actual auto-load.
+    fn set_auto_load_latest_replay(&mut self, value: bool, cx: &mut Context<Self>) {
+        self.auto_load_latest_replay = value;
+        cx.notify();
+    }
+
+    /// Switches the browser's grouping strategy. The header toolbar owns this
+    /// control (matching the egui app's header placement); `browser` itself
+    /// just applies it and rebuilds its tree (`ReplayBrowser::set_grouping`).
+    fn set_grouping(&mut self, grouping: ReplayGrouping, cx: &mut Context<Self>) {
+        self.browser.update(cx, |browser, cx| browser.set_grouping(grouping, cx));
+        cx.notify();
+    }
+
+    /// Applies one column-filter checkbox's change: mutates `replay_settings`
+    /// via `apply`, recomputes the visible-column set
+    /// (`columns::default_columns`), and pushes it into every currently open
+    /// replay tab (mirroring `set_debug_mode`'s live-propagation pattern) so
+    /// the table(s) update immediately rather than only on the next replay
+    /// opened.
+    fn set_column_filter(&mut self, apply: impl FnOnce(&mut ReplaySettings), cx: &mut Context<Self>) {
+        apply(&mut self.replay_settings);
+        let columns = default_columns(&self.replay_settings);
+        for panel in self.open_panels.values() {
+            if let Some(panel) = panel.upgrade() {
+                panel.update(cx, |panel, cx| panel.set_columns(columns.clone(), cx));
+            }
+        }
+        cx.notify();
+    }
+}
+
+/// One grouping-selector button in the header toolbar: `.selected()` while
+/// `grouping` is the browser's current grouping, clicking applies it via
+/// `ReplayInspectorView::set_grouping`. A free function (rather than inline in
+/// `render`) since it is built three times, once per `ReplayGrouping` variant.
+fn grouping_button(
+    entity: Entity<ReplayInspectorView>,
+    grouping: ReplayGrouping,
+    current: ReplayGrouping,
+) -> impl IntoElement {
+    Button::new(("replay-header-grouping", grouping as usize))
+        .label(grouping.label())
+        .compact()
+        .selected(grouping == current)
+        .on_click(move |_event: &ClickEvent, _window, cx: &mut App| {
+            entity.update(cx, |view, cx| view.set_grouping(grouping, cx));
+        })
+}
+
+/// One column-filter checkbox in the header toolbar: `checked` reflects
+/// `replay_settings`, clicking applies `apply` to it via `set_column_filter`
+/// and recomputes the visible columns. A free function for the same reason as
+/// `grouping_button` -- built five times, once per optional column.
+fn column_filter_checkbox(
+    entity: Entity<ReplayInspectorView>,
+    id: &'static str,
+    label: &'static str,
+    checked: bool,
+    apply: impl Fn(&mut ReplaySettings, bool) + Copy + 'static,
+) -> impl IntoElement {
+    Checkbox::new(id).label(label).checked(checked).on_click(move |checked: &bool, _window, cx: &mut App| {
+        let checked = *checked;
+        entity.update(cx, |view, cx| view.set_column_filter(move |settings| apply(settings, checked), cx));
+    })
 }
 
 impl Render for ReplayInspectorView {
@@ -218,6 +338,89 @@ impl Render for ReplayInspectorView {
             GameDataStatus::Ready(_) => None,
         };
 
+        let entity = cx.entity();
+        let grouping = self.browser.read(cx).grouping();
+
+        // Header toolbar: mirrors the egui app's `build_replay_header`
+        // (`ui/replay_parser/mod.rs:3657`) -- manual file open, autoload
+        // checkbox, grouping selector, column-filter checkboxes -- in the
+        // same left-to-right order. The Tactics Board/session-popover
+        // controls `build_replay_header` also carries are out of scope (no
+        // collab session support in this port yet).
+        let replay_header = h_flex()
+            .flex_none()
+            .gap_3()
+            .items_center()
+            .px_2()
+            .py_1()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                Button::new("replay-header-open-manually")
+                    .icon(IconName::FolderOpen)
+                    .label("Manually Open Replay File...")
+                    .compact()
+                    .on_click(cx.listener(|this, _event: &ClickEvent, window, cx| this.open_manually(window, cx))),
+            )
+            .child(
+                Checkbox::new("replay-header-auto-load-latest")
+                    .label("Autoload Latest Replay")
+                    .checked(self.auto_load_latest_replay)
+                    .on_click(
+                        cx.listener(|this, checked: &bool, _window, cx| this.set_auto_load_latest_replay(*checked, cx)),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(div().text_xs().opacity(0.6).child("Group:"))
+                    .child(grouping_button(entity.clone(), ReplayGrouping::Date, grouping))
+                    .child(grouping_button(entity.clone(), ReplayGrouping::Ship, grouping))
+                    .child(grouping_button(entity.clone(), ReplayGrouping::None, grouping)),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(div().text_xs().opacity(0.6).child("Columns:"))
+                    .child(column_filter_checkbox(
+                        entity.clone(),
+                        "replay-header-filter-raw-xp",
+                        "Raw XP",
+                        self.replay_settings.show_raw_xp,
+                        |settings, value| settings.show_raw_xp = value,
+                    ))
+                    .child(column_filter_checkbox(
+                        entity.clone(),
+                        "replay-header-filter-observed-damage",
+                        "Observed Damage",
+                        self.replay_settings.show_observed_damage,
+                        |settings, value| settings.show_observed_damage = value,
+                    ))
+                    .child(column_filter_checkbox(
+                        entity.clone(),
+                        "replay-header-filter-received-damage",
+                        "Received Damage",
+                        self.replay_settings.show_received_damage,
+                        |settings, value| settings.show_received_damage = value,
+                    ))
+                    .child(column_filter_checkbox(
+                        entity.clone(),
+                        "replay-header-filter-heals",
+                        "Heals",
+                        self.replay_settings.show_heals,
+                        |settings, value| settings.show_heals = value,
+                    ))
+                    .child(column_filter_checkbox(
+                        entity.clone(),
+                        "replay-header-filter-distance-traveled",
+                        "Distance Traveled",
+                        self.replay_settings.show_distance_traveled,
+                        |settings, value| settings.show_distance_traveled = value,
+                    )),
+            );
+
         // Mirrors `AppPreferences.debug_mode`: unhides NDA-hidden stats
         // (threaded into every open tab's table) and reveals the per-replay
         // raw-metadata/raw-results viewers. Session-only override; see
@@ -231,6 +434,7 @@ impl Render for ReplayInspectorView {
 
         v_flex()
             .size_full()
+            .child(replay_header)
             .child(debug_toggle)
             .when_some(status_banner, |this, banner| this.child(h_flex().flex_none().px_2().py_1().child(banner)))
             .child(

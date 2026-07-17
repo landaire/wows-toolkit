@@ -278,6 +278,17 @@ impl PlayerTable {
         cx.notify();
     }
 
+    /// Applies a new visible-column set from the header toolbar's
+    /// column-filter checkboxes (`view.rs::ReplayInspectorView::set_column_filter`,
+    /// via `panel.rs::ReplayPanel::set_columns`). Row order/content is
+    /// untouched -- only which columns render -- so this just swaps the field
+    /// and notifies; `render`'s `sticky_columns`/`scroll_columns` split is
+    /// recomputed from `model.columns` fresh on every render.
+    pub fn set_columns(&mut self, columns: Vec<ReplayColumn>, cx: &mut Context<Self>) {
+        self.model.columns = columns;
+        cx.notify();
+    }
+
     /// Toggles row `ix`'s expanded state and remeasures just that row.
     /// `remeasure_items` (unlike `sort_by`'s `reset`) preserves the list's
     /// current scroll position, so expanding a row on-screen doesn't jump the

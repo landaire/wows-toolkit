@@ -29,6 +29,12 @@ pub struct GpuiSettings {
     /// `replay_inspector::view::ReplayInspectorView::set_debug_mode`); this
     /// crate never writes it back.
     pub debug_mode: bool,
+    /// `TabState.persisted.auto_load_latest_replay` in the egui app: a
+    /// top-level setting, not part of `ReplaySettings`. Read-only seed for the
+    /// RI header's "Autoload Latest Replay" checkbox; this crate never writes
+    /// it back, and does not yet act on it (see the checkbox's own doc
+    /// comment in `replay_inspector::view`).
+    pub auto_load_latest_replay: bool,
     /// `None` when the `armor_viewer_defaults` table has no row yet (fresh DB),
     /// or when the read failed (logged via `tracing::warn!` in `load`).
     pub armor_defaults: Option<ArmorViewerDefaultsRow>,
@@ -44,6 +50,8 @@ impl GpuiSettings {
             queries::get_setting::<PathBuf>(pool, "current_replay_path").await.unwrap_or_default();
         let replay = queries::get_setting::<ReplaySettings>(pool, "replay_settings").await.unwrap_or_default();
         let debug_mode = queries::get_setting::<bool>(pool, "debug_mode").await.unwrap_or(false);
+        let auto_load_latest_replay =
+            queries::get_setting::<bool>(pool, "auto_load_latest_replay").await.unwrap_or(true);
         let armor_defaults = match queries::get_armor_viewer_defaults(pool).await {
             Ok(defaults) => defaults,
             Err(e) => {
@@ -52,6 +60,6 @@ impl GpuiSettings {
             }
         };
 
-        Self { zoom, wows_dir, current_replay_path, replay, debug_mode, armor_defaults }
+        Self { zoom, wows_dir, current_replay_path, replay, debug_mode, auto_load_latest_replay, armor_defaults }
     }
 }
