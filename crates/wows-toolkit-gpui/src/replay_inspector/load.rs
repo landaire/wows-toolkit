@@ -18,8 +18,11 @@
 //! **Caching.** Building the game VFS and [`GameMetadataProvider`] for one
 //! build loads that whole build's data and is expensive; [`GameDataCache`]
 //! loads each build once, lazily, on the first replay that needs it, and
-//! reuses it for every later replay recorded on the same build. Clone the
-//! cache (cheap: an `Arc` around a lock) to share it across views.
+//! reuses it for every later replay recorded on the same build. The load
+//! itself runs outside any cache-wide lock, so opening replays from two
+//! different builds concurrently does not serialize one behind the other;
+//! only same-build opens dedupe onto one load. Clone the cache (cheap: an
+//! `Arc` around a lock) to share it across views.
 //!
 //! **Versioned constants.** Per-build `CONSUMABLE_IDS`/`BATTLE_STAGES`
 //! overrides (fetched from the wows-constants repo by the egui app and cached
@@ -34,6 +37,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 
 use gpui::App;
 use gpui::AppContext;
@@ -54,7 +58,7 @@ use wowsunpack::game_params::provider::GameMetadataProvider;
 use super::model::ReplayReportModel;
 
 /// Reasons a replay could not become a [`ReplayReportModel`].
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ReplayLoadError {
     /// Reading the replay file off disk failed (not found, permissions, truncated).
     #[error("failed to read replay file: {0}")]
@@ -99,15 +103,31 @@ impl LoadedGameData {
     }
 }
 
+/// One build's load outcome, filled in exactly once. `Arc`-shared so every
+/// caller waiting on the same build's slot (see [`GameDataCache::get_or_load_build`])
+/// observes the same result without holding any lock while the load itself
+/// runs.
+type BuildSlot = OnceLock<Result<Arc<LoadedGameData>, ReplayLoadError>>;
+
 /// Lazily loads and caches each installed build's game data, keyed by build
 /// number, so repeated [`spawn_parse`] calls for replays on the same build
 /// never reload that build's whole game VFS. Cheap to clone (an `Arc` around
 /// a lock); share one instance across every replay-inspector view that opens
 /// replays.
+///
+/// The map lock only ever guards inserting/looking up a build's [`BuildSlot`];
+/// it is released before the (multi-second) VFS + `GameParams` load runs, so
+/// opening two different builds concurrently does not serialize one behind
+/// the other. Same-build concurrent opens still dedupe onto that build's
+/// single `OnceLock`, which loads once and hands every waiter the same
+/// result. A poisoned map lock (some other panic while holding it very
+/// briefly) is recovered via the poisoned guard's inner value rather than
+/// propagated as a hard panic, so a single bad load can never take down every
+/// future open for the session.
 #[derive(Clone)]
 pub struct GameDataCache {
     wows_dir: PathBuf,
-    loaded: Arc<Mutex<HashMap<u32, Arc<LoadedGameData>>>>,
+    loaded: Arc<Mutex<HashMap<u32, Arc<BuildSlot>>>>,
 }
 
 impl GameDataCache {
@@ -120,21 +140,59 @@ impl GameDataCache {
     /// installed before attempting the (expensive) VFS build, so a replay
     /// from an uninstalled build reports [`ReplayLoadError::UnsupportedVersion`]
     /// rather than a generic [`ReplayLoadError::GameData`].
+    ///
+    /// A failed load is not cached permanently: its slot is dropped from the
+    /// map afterward so a later open (e.g. once a transient I/O error clears,
+    /// or the build gets installed mid-session) gets to retry instead of
+    /// replaying the same cached failure forever.
     fn get_or_load_build(&self, build: u32) -> Result<Arc<LoadedGameData>, ReplayLoadError> {
-        let mut guard = self.loaded.lock().expect("game data cache mutex poisoned");
-        if let Some(data) = guard.get(&build) {
-            return Ok(Arc::clone(data));
+        let slot = {
+            let mut guard = self.loaded.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            Arc::clone(guard.entry(build).or_insert_with(|| Arc::new(OnceLock::new())))
+        };
+
+        let result = slot.get_or_init(|| Self::load_build_checked(&self.wows_dir, build)).clone();
+
+        if result.is_err() {
+            let mut guard = self.loaded.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.remove(&build);
         }
 
-        let available = wowsunpack::game_data::list_available_builds(&self.wows_dir)
-            .map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
-        if !available.contains(&build) {
-            return Err(ReplayLoadError::UnsupportedVersion { build });
-        }
+        result
+    }
 
-        let data = Arc::new(LoadedGameData::load_build(&self.wows_dir, build)?);
-        guard.insert(build, Arc::clone(&data));
-        Ok(data)
+    /// Runs the actual (expensive) load for `build`, outside the map lock.
+    /// Wrapped in `catch_unwind` so a panic deep in VFS/`GameParams` parsing
+    /// (a malformed idx or params blob) surfaces as
+    /// [`ReplayLoadError::GameData`] instead of unwinding out of the
+    /// `OnceLock` initializer and the background task that runs this.
+    fn load_build_checked(wows_dir: &Path, build: u32) -> Result<Arc<LoadedGameData>, ReplayLoadError> {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let available = wowsunpack::game_data::list_available_builds(wows_dir)
+                .map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
+            if !available.contains(&build) {
+                return Err(ReplayLoadError::UnsupportedVersion { build });
+            }
+            LoadedGameData::load_build(wows_dir, build)
+        }));
+
+        match outcome {
+            Ok(result) => result.map(Arc::new),
+            Err(panic) => Err(ReplayLoadError::GameData(format!("game data load panicked: {}", panic_message(&panic)))),
+        }
+    }
+}
+
+/// Extracts a human-readable message out of a caught panic payload, falling
+/// back to a generic message for payloads that are neither `&str` nor
+/// `String` (the two types `panic!`/`.expect()` actually produce).
+fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = panic.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = panic.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic".to_string()
     }
 }
 
@@ -263,5 +321,76 @@ mod tests {
         let any_nonzero_damage =
             model.rows.iter().any(|r| r.observed_damage > 0 || r.actual_damage.is_some_and(|d| d > 0));
         assert!(any_nonzero_damage, "expected at least one row with nonzero damage");
+    }
+
+    /// A directory under the OS temp dir with an empty `bin/` subfolder, so
+    /// `list_available_builds` succeeds (no builds installed) instead of
+    /// failing outright on a missing `bin/` dir. Removed on drop.
+    struct EmptyGameDir(PathBuf);
+
+    impl EmptyGameDir {
+        fn new(unique: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("wt-gpui-load-test-{unique}"));
+            std::fs::create_dir_all(dir.join("bin")).expect("failed to create empty test bin/ dir");
+            Self(dir)
+        }
+    }
+
+    impl Drop for EmptyGameDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Fix under test: a panic that occurs while some other caller briefly
+    /// holds `GameDataCache`'s map-level lock must not turn every later
+    /// `get_or_load_build` call into a hard panic. Before the per-build
+    /// `OnceLock` restructuring, this cache used a single `Mutex` held across
+    /// the whole (expensive) load, and looked it up with
+    /// `.expect("game data cache mutex poisoned")`; poisoning it here would
+    /// have made this test's second call panic too.
+    #[test]
+    fn get_or_load_build_survives_a_poisoned_map_lock() {
+        let game_dir = EmptyGameDir::new("poison");
+        let cache = GameDataCache::new(game_dir.0.clone());
+
+        let loaded = Arc::clone(&cache.loaded);
+        let poisoned = std::thread::spawn(move || {
+            let _guard = loaded.lock().unwrap();
+            panic!("deliberately poisoning the cache lock for the test");
+        })
+        .join();
+        assert!(poisoned.is_err(), "the spawned thread was expected to panic");
+
+        match cache.get_or_load_build(1) {
+            Err(ReplayLoadError::UnsupportedVersion { build: 1 }) => {}
+            Err(other) => panic!("expected UnsupportedVersion despite the poisoned lock, got: {other}"),
+            Ok(_) => panic!("expected UnsupportedVersion despite the poisoned lock, got Ok"),
+        }
+    }
+
+    /// Fix under test: a failed build load is not cached forever -- the next
+    /// call for the same (still-uninstalled) build retries rather than
+    /// short-circuiting on a stale cached error.
+    #[test]
+    fn get_or_load_build_retries_after_a_failed_load() {
+        let game_dir = EmptyGameDir::new("retry");
+        let cache = GameDataCache::new(game_dir.0.clone());
+
+        assert!(matches!(cache.get_or_load_build(7), Err(ReplayLoadError::UnsupportedVersion { build: 7 })));
+        assert!(matches!(cache.get_or_load_build(7), Err(ReplayLoadError::UnsupportedVersion { build: 7 })));
+        assert!(cache.loaded.lock().unwrap().is_empty(), "a failed build's slot should not linger in the cache");
+    }
+
+    #[test]
+    fn panic_message_reads_str_and_string_payloads_and_falls_back_otherwise() {
+        let str_payload: Box<dyn std::any::Any + Send> = Box::new("boom");
+        assert_eq!(panic_message(&str_payload), "boom");
+
+        let string_payload: Box<dyn std::any::Any + Send> = Box::new(String::from("also boom"));
+        assert_eq!(panic_message(&string_payload), "also boom");
+
+        let other_payload: Box<dyn std::any::Any + Send> = Box::new(42_i32);
+        assert_eq!(panic_message(&other_payload), "unknown panic");
     }
 }

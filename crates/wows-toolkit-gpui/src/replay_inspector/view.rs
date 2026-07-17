@@ -3,8 +3,10 @@
 //! open replay. Double-clicking a replay in the browser
 //! (`ReplayBrowserEvent::OpenReplay`) starts a background parse and adds a
 //! tab; the tab itself shows "Loading..." until the parse completes (see
-//! `panel.rs`).
+//! `panel.rs`). A repeat double-click on an already-open replay is a no-op
+//! rather than adding a duplicate tab (see `open_replay`).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -40,6 +42,12 @@ pub struct ReplayInspectorView {
     /// case. Acceptable for this milestone: closing tabs back to zero and
     /// re-showing the placeholder is not part of the brief.
     has_opened_replay: bool,
+    /// Live replay panels keyed by the path they were opened from, so a
+    /// repeat open on an already-open replay can be deduped instead of
+    /// adding a second tab for it. Entries survive their panel's tab being
+    /// closed until the next open for that same path notices the weak
+    /// handle no longer upgrades and replaces the entry.
+    open_panels: HashMap<PathBuf, WeakEntity<ReplayPanel>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -49,7 +57,14 @@ impl ReplayInspectorView {
         let dock_area = cx.new(|cx| DockArea::new("replay-inspector-dock", None, window, cx));
         let subscription = cx.subscribe_in(&browser, window, Self::on_browser_event);
 
-        Self { browser, dock_area, game_data: None, has_opened_replay: false, _subscriptions: vec![subscription] }
+        Self {
+            browser,
+            dock_area,
+            game_data: None,
+            has_opened_replay: false,
+            open_panels: HashMap::new(),
+            _subscriptions: vec![subscription],
+        }
     }
 
     /// Starts the browser's directory scan and (re)builds the game-data
@@ -72,11 +87,17 @@ impl ReplayInspectorView {
         self.open_replay(path.clone(), window, cx);
     }
 
-    /// Opens `path` in a new dock tab. Every open, including a repeat
-    /// double-click on the same replay, adds another tab: focusing an
-    /// already-open replay's existing tab needs per-path panel identity
-    /// tracking this milestone does not add, so always-add is the simple,
-    /// correct-but-not-deduplicated behavior.
+    /// Opens `path` in a dock tab. A repeat double-click on a replay that is
+    /// already open is a no-op rather than adding a second tab for it:
+    /// `open_panels` tracks the live panel entity per path, checked here
+    /// before creating a new one.
+    ///
+    /// This does not re-focus the existing tab on a repeat open --
+    /// gpui-component's `TabPanel::add_panel` only dedups new-panel adds by
+    /// entity id (so re-adding the same entity is already a no-op) and
+    /// exposes no public API to change which tab is active from outside the
+    /// crate (`TabPanel::set_active_ix` is private). Skipping the duplicate
+    /// is the "do not over-engineer" fallback the milestone brief calls for.
     fn open_replay(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let Some(game_data) = self.game_data.clone() else {
             tracing::warn!(
@@ -86,7 +107,14 @@ impl ReplayInspectorView {
             return;
         };
 
-        let panel = cx.new(|cx| ReplayPanel::new(path, game_data, cx));
+        if let Some(existing) = self.open_panels.get(&path)
+            && existing.upgrade().is_some()
+        {
+            return;
+        }
+
+        let panel = cx.new(|cx| ReplayPanel::new(path.clone(), game_data, cx));
+        self.open_panels.insert(path, panel.downgrade());
         self.dock_area.update(cx, |dock_area, cx| {
             dock_area.add_panel(Arc::new(panel), DockPlacement::Center, None, window, cx);
         });
