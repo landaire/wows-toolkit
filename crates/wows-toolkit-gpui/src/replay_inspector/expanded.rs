@@ -153,6 +153,11 @@ fn icon_or_text_cell(
 /// `icons.get_keyed(key)` has one (no fallback text in its place, matching the
 /// egui app's `ui.horizontal` which only conditionally adds the image), then
 /// `label` always rendered alongside it. A hover tooltip covers the whole row.
+/// `items_center()` vertically centers the icon and label on a shared center
+/// line even when the icon (up to `RIBBON_ICON_SIZE`) is much taller than the
+/// text. The 8px icon-to-label gap matches egui's default
+/// `Spacing::item_spacing.x` (`egui::style::Spacing::default()`), the gap a
+/// `ui.horizontal` puts between the image and the label it adds next.
 /// `tag` keys the `ElementId` so different lists in the same row never
 /// collide (see `DETAIL_ID_STRIDE`'s doc).
 #[allow(clippy::too_many_arguments)]
@@ -167,7 +172,7 @@ fn icon_label_row(
     icons: &IconCache,
 ) -> AnyElement {
     let tooltip: SharedString = tooltip_text.into();
-    let mut row = h_flex().gap_1().items_center();
+    let mut row = h_flex().gap(px(8.)).items_center();
     if let Some(image) = icons.get_keyed(key) {
         row = row.child(img(image).w(px(size)).h(px(size)).flex_none());
     }
@@ -191,7 +196,13 @@ fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Icon
         return None;
     }
 
-    let mut col = v_flex().gap_1().min_w(px(220.)).flex_none();
+    // 3px matches egui's default `Spacing::item_spacing.y`: the section
+    // heading, each achievement/ribbon row, the separators, and the damage
+    // event lines are all top-level children of one `ui.vertical` in the
+    // egui original, so they all share that one gap -- not a larger gap at
+    // this level and a tighter one nested inside `achievements_view`/
+    // `ribbons_view`.
+    let mut col = v_flex().gap(px(3.)).min_w(px(220.)).flex_none();
 
     if has_achievements {
         col = col.child(section_heading("Achievements"));
@@ -251,9 +262,13 @@ fn reorder_bulge_after_main_caliber(ribbons: &mut Vec<&RibbonResult>) {
 
 /// A tight vertical list of achievement rows (icon + label side by side),
 /// matching the egui app's `ui.vertical` of per-achievement `ui.horizontal`
-/// rows -- one achievement per line, not a wrapping icon flow.
+/// rows -- one achievement per line, not a wrapping icon flow. The 3px gap
+/// matches egui's default `Spacing::item_spacing.y` and keeps the row-to-row
+/// rhythm identical to the outer section's heading-to-first-row gap
+/// (`render_name_section`'s `v_flex().gap(px(3.))`), instead of a different
+/// nested gap that would read uneven against it.
 fn achievements_view(row_ix: usize, achievements: &[AchievementResult], icons: &IconCache) -> AnyElement {
-    let mut col = v_flex().gap_0p5();
+    let mut col = v_flex().gap(px(3.));
     for (idx, achievement) in achievements.iter().enumerate() {
         col = col.child(achievement_row(row_ix, idx, achievement, icons));
     }
@@ -262,9 +277,10 @@ fn achievements_view(row_ix: usize, achievements: &[AchievementResult], icons: &
 
 /// A tight vertical list of ribbon rows (icon + label side by side), in the
 /// already-sorted/reordered display order. Matches the egui app's `ui.vertical`
-/// of per-ribbon `ui.horizontal` rows.
+/// of per-ribbon `ui.horizontal` rows; see `achievements_view`'s doc for why
+/// the row gap matches the outer section gap.
 fn ribbons_view(row_ix: usize, ribbons: Vec<&RibbonResult>, icons: &IconCache) -> AnyElement {
-    let mut col = v_flex().gap_0p5();
+    let mut col = v_flex().gap(px(3.));
     for (idx, ribbon) in ribbons.into_iter().enumerate() {
         col = col.child(ribbon_row(row_ix, idx, ribbon, icons));
     }
