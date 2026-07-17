@@ -32,6 +32,7 @@ use wows_replay_insights::battle_report::TranslatedBuild;
 use wows_replay_insights::personal_rating::PersonalRatingData;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_replay_insights::personal_rating::ShipBattleStats;
+use wows_replays::Rc as ReplayRc;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::analyzer::battle_controller::ChatChannel;
@@ -51,6 +52,7 @@ use wowsunpack::game_params::types::Species;
 
 use super::columns::ReplayColumn;
 use super::columns::relation_color_rgb;
+use super::links;
 
 /// One player's presentation-ready row: scalars and formatted strings pulled
 /// from `NormalizedPlayer`/`ServerResults`. Colors are not stored here; they
@@ -192,6 +194,34 @@ pub struct PlayerRow {
     /// after loading PR data (a later milestone wires that load into the
     /// gpui app) to fill this in.
     pub personal_rating: Option<PersonalRatingResult>,
+
+    /// The Actions column's ship-config "Open in browser"/"Copy link" menu
+    /// items' target URL, ported from `util::build_ship_config_url`. `None`
+    /// fresh out of `from_normalized_player` (building it needs the raw
+    /// `Player` + `GameMetadataProvider`, neither of which `NormalizedPlayer`
+    /// carries); filled in by `ReplayReportModel::populate_action_links`,
+    /// which `None`s it back out whenever the build can't be resolved (no
+    /// observed vehicle entity, unrecognized ship, etc.) rather than leaving
+    /// a stale value. `table.rs::actions_cell` hides the menu item entirely
+    /// when this is `None`.
+    pub ship_config_url: Option<String>,
+    /// The Actions column's "Copy short link" menu item's target URL, ported
+    /// from `util::build_short_ship_config_url`. Same `None`-until-populated
+    /// lifecycle as `ship_config_url`.
+    pub short_ship_config_url: Option<String>,
+    /// The Actions column's WoWS-numbers menu item's target URL, ported from
+    /// `util::build_wows_numbers_url`. Same `None`-until-populated lifecycle
+    /// as `ship_config_url`, though this one only needs a resolvable realm
+    /// (no ship build), so it is `Some` far more often.
+    pub wows_numbers_url: Option<String>,
+    /// Pretty-printed JSON of this row's raw `Player` (mirrors the egui
+    /// app's debug-only "View Raw Player Metadata" button, which
+    /// `serde_json::to_string_pretty`s the same type). `None` until
+    /// `populate_action_links` runs, and also when serialization fails (never
+    /// observed in practice; `Player`'s `Serialize` impl does not fail on any
+    /// data it accepts). `table.rs::actions_cell` gates the debug menu item
+    /// on both this and `PlayerTable::debug`.
+    pub raw_metadata_json: Option<String>,
 }
 
 impl PlayerRow {
@@ -319,13 +349,18 @@ impl ReplayReportModel {
     /// folded into `normalized` by the time this runs, so neither is read
     /// here. `chat_messages` is the battle report's raw chat log
     /// (`BattleReport::game_chat`), translated into `ReplayReportModel::chat`
-    /// via `build_chat_messages`.
+    /// via `build_chat_messages`. `players` is the same battle report's raw
+    /// `Player` list (`BattleReport::players`); `NormalizedPlayer` does not
+    /// carry the raw `Player` itself, so it is threaded straight through to
+    /// `populate_action_links` to fill in the Actions column's URLs/raw
+    /// metadata (see `PlayerRow::ship_config_url`'s field doc).
     pub fn from_normalized(
         normalized: &NormalizedBattleReport,
         _meta: &ReplayMeta,
         metadata_provider: &GameMetadataProvider,
         _constants: &Value,
         chat_messages: &[GameMessage],
+        players: &[ReplayRc<Player>],
     ) -> Self {
         let mut model = Self::build(
             normalized,
@@ -337,7 +372,32 @@ impl ReplayReportModel {
             |ship_index| metadata_provider.game_param_by_index(ship_index).map(|param| param.id()),
         );
         model.chat = build_chat_messages(chat_messages, metadata_provider);
+        model.populate_action_links(players, metadata_provider);
         model
+    }
+
+    /// Fills in each row's Actions-column URLs and raw-metadata JSON from the
+    /// battle report's raw `Player` list, matched to rows by `db_id`. Split
+    /// out from `from_normalized` (rather than folded into
+    /// `PlayerRow::from_normalized_player`) because building these needs the
+    /// raw `Player` + `GameMetadataProvider`, neither of which
+    /// `NormalizedPlayer` carries; mirrors `populate_personal_ratings`'s
+    /// separate-pass shape for the same "needs data `NormalizedPlayer`
+    /// doesn't have" reason. A `Player` with no matching row (should not
+    /// happen; `NormalizedBattleReport::from_battle_report` builds one row
+    /// per `BattleReport::players()` entry) is silently skipped rather than
+    /// panicking.
+    pub fn populate_action_links(&mut self, players: &[ReplayRc<Player>], metadata_provider: &GameMetadataProvider) {
+        for player in players {
+            let db_id = player.initial_state().db_id();
+            let Some(row) = self.rows.iter_mut().find(|row| row.db_id == db_id) else {
+                continue;
+            };
+            row.ship_config_url = links::build_ship_config_url(player, metadata_provider);
+            row.short_ship_config_url = links::build_short_ship_config_url(player, metadata_provider);
+            row.wows_numbers_url = links::build_wows_numbers_url(player);
+            row.raw_metadata_json = serde_json::to_string_pretty(player.as_ref()).ok();
+        }
     }
 
     /// Provider-free core of `from_normalized`. Split out so the row-mapping
@@ -746,6 +806,12 @@ impl PlayerRow {
             // PR data isn't loaded at report-construction time; see the
             // field doc and `ReplayReportModel::populate_personal_ratings`.
             personal_rating: None,
+            // Needs the raw `Player`, which `NormalizedPlayer` does not
+            // carry; see the field docs and `populate_action_links`.
+            ship_config_url: None,
+            short_ship_config_url: None,
+            wows_numbers_url: None,
+            raw_metadata_json: None,
         }
     }
 }
@@ -920,7 +986,7 @@ mod tests {
         let meta = test_support::fixture_replay_meta();
         let constants = serde_json::Value::Null;
 
-        let model = ReplayReportModel::from_normalized(&normalized, &meta, &provider, &constants, &[]);
+        let model = ReplayReportModel::from_normalized(&normalized, &meta, &provider, &constants, &[], &[]);
 
         assert_eq!(model.rows.len(), normalized.players.len());
         let self_row = model.rows.iter().find(|r| r.is_self).expect("self row present");

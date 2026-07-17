@@ -20,6 +20,7 @@ pub mod columns;
 pub mod debug_view;
 pub mod expanded;
 pub mod icons;
+pub mod links;
 pub mod load;
 pub mod model;
 pub mod panel;

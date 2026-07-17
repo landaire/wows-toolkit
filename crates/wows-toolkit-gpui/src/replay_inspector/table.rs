@@ -20,7 +20,13 @@ use gpui::*;
 use gpui_component::ActiveTheme;
 use gpui_component::Icon;
 use gpui_component::IconName;
+use gpui_component::Sizable;
+use gpui_component::button::Button;
+use gpui_component::button::ButtonVariants;
 use gpui_component::h_flex;
+use gpui_component::menu::DropdownMenu;
+use gpui_component::menu::PopupMenu;
+use gpui_component::menu::PopupMenuItem;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::v_flex;
@@ -509,12 +515,85 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElemen
     }
 }
 
-/// One column cell, dispatching to the Name/Skills special-cased layouts and
-/// falling back to the generic `cell_element` for everything else.
+/// Builds the Actions column's `...` menu items, mirroring the egui app's
+/// `ReplayColumn::Actions` arm (`ui/replay_parser/mod.rs` ~1681-1799)
+/// item-for-item: the ship-config "Open Build in Browser"/"Copy Build Link"/
+/// "Copy Short Build Link" trio (shown for non-enemy rows or in debug, and
+/// only once the replay observed a vehicle entity, matching the egui gate
+/// exactly), a separator, the WoWS-numbers link, and -- debug only -- "View
+/// Raw Player Metadata". Each item is omitted (not shown disabled) when its
+/// backing URL/JSON is `None`, per this port's "hidden, not a panic" rule for
+/// missing config (`PlayerRow::ship_config_url`'s field doc). "Open"/"WoWS
+/// numbers" use `PopupMenuItem::link`, which opens via `cx.open_url`
+/// (gpui's own OS-opener, no `open`-crate dependency needed) and renders the
+/// external-link glyph the egui app's SHARE icon stood in for; the copy/raw
+/// items write to the clipboard via `cx.write_to_clipboard`, matching
+/// `ui.ctx().copy_text` and the browser_view.rs "Copy Path" precedent.
+fn build_actions_menu(mut menu: PopupMenu, row: &PlayerRow, debug: bool) -> PopupMenu {
+    let show_ship_config = (!row.relation.is_enemy() || debug) && row.has_vehicle_entity;
+
+    if show_ship_config {
+        let mut added_any = false;
+        if let Some(url) = row.ship_config_url.clone() {
+            menu = menu.item(PopupMenuItem::link("Open Build in Browser", url));
+            added_any = true;
+        }
+        if let Some(url) = row.ship_config_url.clone() {
+            menu = menu.item(PopupMenuItem::new("Copy Build Link").icon(IconName::Copy).on_click(
+                move |_event, _window, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
+                },
+            ));
+            added_any = true;
+        }
+        if let Some(url) = row.short_ship_config_url.clone() {
+            menu = menu.item(PopupMenuItem::new("Copy Short Build Link").icon(IconName::Copy).on_click(
+                move |_event, _window, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
+                },
+            ));
+            added_any = true;
+        }
+        if added_any {
+            menu = menu.separator();
+        }
+    }
+
+    if let Some(url) = row.wows_numbers_url.clone() {
+        menu = menu.item(PopupMenuItem::link("Open WoWs Numbers Page", url));
+    }
+
+    if debug && let Some(json) = row.raw_metadata_json.clone() {
+        menu = menu.separator();
+        menu = menu.item(PopupMenuItem::new("View Raw Player Metadata").icon(IconName::File).on_click(
+            move |_event, _window, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(json.clone()));
+            },
+        ));
+    }
+
+    menu
+}
+
+/// The Actions column's cell: a ghost icon-only `...` button that opens
+/// `build_actions_menu`'s per-row popup menu on click. `ix` keys the
+/// trigger's `ElementId` so every row's button/popover state is independent.
+fn actions_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElement {
+    let row = row.clone();
+    let trigger = Button::new(("replay-row-actions", ix)).ghost().xsmall().icon(IconName::Ellipsis);
+    let menu_button = trigger.dropdown_menu(move |menu, _window, _cx| build_actions_menu(menu, &row, debug));
+
+    div().w(px(width)).flex_none().px_1().child(menu_button).into_any_element()
+}
+
+/// One column cell, dispatching to the Name/Skills/Actions special-cased
+/// layouts and falling back to the generic `cell_element` for everything
+/// else.
 fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout) -> AnyElement {
     match col {
         ReplayColumn::Name => name_cell(ix, row, layout, column_width(col)),
         ReplayColumn::Skills => skills_cell(ix, row, layout.debug, column_width(col)),
+        ReplayColumn::Actions => actions_cell(ix, row, layout.debug, column_width(col)),
         _ => cell_element(ix, col, cell_value(row, col, layout.debug), column_width(col)),
     }
 }

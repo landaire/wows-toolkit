@@ -102,6 +102,10 @@ fn base_row(db_id: i64, team_id: i64, relation: Relation, is_self: bool) -> Play
         ribbons: Vec::new(),
         consumables: Vec::new(),
         personal_rating: None,
+        ship_config_url: None,
+        short_ship_config_url: None,
+        wows_numbers_url: None,
+        raw_metadata_json: None,
     }
 }
 

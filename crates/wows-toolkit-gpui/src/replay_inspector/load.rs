@@ -448,6 +448,7 @@ fn parse_replay(path: &Path, game_data: &GameDataCache) -> Result<ParsedReplay, 
         loaded.provider.as_ref(),
         &constants_json,
         report.game_chat(),
+        report.players(),
     );
     let raw_metadata_json = pretty_json_or_raw(&replay_file.raw_meta);
 
