@@ -1,4 +1,5 @@
 mod app;
+mod replay_inspector;
 mod settings;
 mod theme;
 

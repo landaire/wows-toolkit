@@ -12,6 +12,17 @@ gpui-component.workspace = true
 gpui-component-assets.workspace = true
 anyhow.workspace = true
 wows-toolkit-config = { path = "../../../crates/wows-toolkit-config" }
+wowsunpack = { path = "../../../crates/wowsunpack", default-features = false, features = ["arc", "parsing"] }
+wows_replays = { path = "../../../crates/wows-replays", default-features = false, features = ["arc", "parsing"] }
+wows-replay-insights = { path = "../../../crates/wows-replay-insights", default-features = false, features = ["arc", "battle-report"] }
+serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 tracing = "0.1"
+
+[dev-dependencies]
+# vfs-mmap: only the ignored `from_normalized_resolves_species_text_from_a_real_provider`
+# test loads a real GameMetadataProvider from a game directory; not needed by
+# the main dependency above.
+wowsunpack = { path = "../../../crates/wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap"] }
+jiff = "0.2"
