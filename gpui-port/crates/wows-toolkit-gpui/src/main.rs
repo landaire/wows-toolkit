@@ -1,18 +1,9 @@
+mod app;
+
+use app::App;
 use gpui::*;
 use gpui_component::Root;
 use gpui_component_assets::Assets;
-
-struct Shell;
-
-impl Render for Shell {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        gpui_component::v_flex()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .child("wows-toolkit-gpui")
-    }
-}
 
 fn main() {
     let app = gpui_platform::application().with_assets(Assets);
@@ -31,7 +22,7 @@ fn main() {
 
         cx.spawn(async move |cx| {
             cx.open_window(window_options, |window, cx| {
-                let view = cx.new(|_cx| Shell);
+                let view = cx.new(|cx| App::new(window, cx));
                 cx.new(|cx| Root::new(view, window, cx))
             })
             .expect("failed to open window");
