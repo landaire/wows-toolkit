@@ -149,6 +149,34 @@ fn icon_or_text_cell(
         .into_any_element()
 }
 
+/// An `[icon | label]` row shared by achievements and ribbons: an icon when
+/// `icons.get_keyed(key)` has one (no fallback text in its place, matching the
+/// egui app's `ui.horizontal` which only conditionally adds the image), then
+/// `label` always rendered alongside it. A hover tooltip covers the whole row.
+/// `tag` keys the `ElementId` so different lists in the same row never
+/// collide (see `DETAIL_ID_STRIDE`'s doc).
+#[allow(clippy::too_many_arguments)]
+fn icon_label_row(
+    tag: &'static str,
+    row_ix: usize,
+    idx: usize,
+    key: &str,
+    label: String,
+    tooltip_text: String,
+    size: f32,
+    icons: &IconCache,
+) -> AnyElement {
+    let tooltip: SharedString = tooltip_text.into();
+    let mut row = h_flex().gap_1().items_center();
+    if let Some(image) = icons.get_keyed(key) {
+        row = row.child(img(image).w(px(size)).h(px(size)).flex_none());
+    }
+    row = row.child(div().text_xs().child(label));
+    row.id((tag, row_ix * DETAIL_ID_STRIDE + idx))
+        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+        .into_any_element()
+}
+
 /// Name-column expanded content: achievements ("name (Nx)" once a count
 /// exceeds 1), ribbons (sorted by name, with the RIBBON_BULGE-after-
 /// RIBBON_MAIN_CALIBER one-off reorder), and the fires/floods/citadels/crits
@@ -221,25 +249,26 @@ fn reorder_bulge_after_main_caliber(ribbons: &mut Vec<&RibbonResult>) {
     ribbons.insert(insert_idx, bulge);
 }
 
-/// A tight wrapping row of achievement chips, matching the egui app's compact
-/// icon flow (icon + "(Nx)" fallback text, wrapping to the next line instead
-/// of stacking one achievement per line).
+/// A tight vertical list of achievement rows (icon + label side by side),
+/// matching the egui app's `ui.vertical` of per-achievement `ui.horizontal`
+/// rows -- one achievement per line, not a wrapping icon flow.
 fn achievements_view(row_ix: usize, achievements: &[AchievementResult], icons: &IconCache) -> AnyElement {
-    let mut row = h_flex().flex_wrap().gap_1();
+    let mut col = v_flex().gap_0p5();
     for (idx, achievement) in achievements.iter().enumerate() {
-        row = row.child(achievement_row(row_ix, idx, achievement, icons));
+        col = col.child(achievement_row(row_ix, idx, achievement, icons));
     }
-    row.into_any_element()
+    col.into_any_element()
 }
 
-/// A tight wrapping row of ribbon chips, in the already-sorted/reordered
-/// display order. Matches the egui app's compact icon flow.
+/// A tight vertical list of ribbon rows (icon + label side by side), in the
+/// already-sorted/reordered display order. Matches the egui app's `ui.vertical`
+/// of per-ribbon `ui.horizontal` rows.
 fn ribbons_view(row_ix: usize, ribbons: Vec<&RibbonResult>, icons: &IconCache) -> AnyElement {
-    let mut row = h_flex().flex_wrap().gap_1();
+    let mut col = v_flex().gap_0p5();
     for (idx, ribbon) in ribbons.into_iter().enumerate() {
-        row = row.child(ribbon_row(row_ix, idx, ribbon, icons));
+        col = col.child(ribbon_row(row_ix, idx, ribbon, icons));
     }
-    row.into_any_element()
+    col.into_any_element()
 }
 
 fn achievement_row(row_ix: usize, idx: usize, achievement: &AchievementResult, icons: &IconCache) -> AnyElement {
@@ -249,7 +278,7 @@ fn achievement_row(row_ix: usize, idx: usize, achievement: &AchievementResult, i
     } else {
         achievement.display_name.clone()
     };
-    icon_or_text_cell(
+    icon_label_row(
         "replay-achievement",
         row_ix,
         idx,
@@ -269,7 +298,7 @@ fn ribbon_row(row_ix: usize, idx: usize, ribbon: &RibbonResult, icons: &IconCach
     };
     let size = if ribbon.is_subribbon { LARGE_ICON_SIZE } else { RIBBON_ICON_SIZE };
     let label = format!("{} ({}x)", ribbon.display_name, ribbon.count);
-    icon_or_text_cell("replay-ribbon", row_ix, idx, &key, label, ribbon.description.clone(), size, icons)
+    icon_label_row("replay-ribbon", row_ix, idx, &key, label, ribbon.description.clone(), size, icons)
 }
 
 /// Skills-column expanded content: the skill-tier hover text, then (when this
