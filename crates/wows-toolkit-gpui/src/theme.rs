@@ -11,6 +11,13 @@ use gpui_component::theme::{Theme, ThemeMode, ThemeTokens};
 /// - `widgets.inactive.bg_fill` (button/secondary surface background): `from_gray(60)`
 /// - `Selection::bg_fill`: `Color32::from_rgb(0, 92, 128)`
 /// - `widgets.noninteractive.corner_radius`: `2`
+///
+/// `list_active`/`list_active_border` (the tree's selected-row background)
+/// are pinned to the same `from_gray(60)` surface gray rather than
+/// gpui-component's default bright-blue `#1e40af` list-active token, matching
+/// egui's `colorize_label` selection style (`ui/replay_parser/mod.rs`'s
+/// white-on-`Color32::DARK_GRAY` selected label) -- a quiet dark highlight,
+/// not an accent color.
 pub fn apply_egui_dark_theme(zoom: f32, window: &mut Window, cx: &mut App) {
     Theme::change(ThemeMode::Dark, Some(window), cx);
 
@@ -21,6 +28,8 @@ pub fn apply_egui_dark_theme(zoom: f32, window: &mut Window, cx: &mut App) {
     theme.secondary = rgb(0x3c3c3c).into();
     theme.accent = rgb(0x005c80).into();
     theme.selection = rgb(0x005c80).into();
+    theme.list_active = rgb(0x3c3c3c).into();
+    theme.list_active_border = rgb(0x3c3c3c).into();
     theme.tokens = ThemeTokens::from(&theme.colors);
 
     // egui body text 12.5px, small rounding, scaled by zoom.
