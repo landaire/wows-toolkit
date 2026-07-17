@@ -4,7 +4,13 @@
 //! `ui/replay_parser/models.rs` (`PlayerReport` field list), with
 //! `RichText`/`Color32`/texture fields dropped or replaced by plain
 //! strings/`ColorRole` (colors live in `columns.rs`, resolved by cell, not
-//! stored per-row).
+//! stored per-row). The Dazzle/Incoming Fire Alert skill markers
+//! (`util::colorize_captain_points`'s star/siren glyphs) are kept as plain
+//! `has_dazzle`/`has_ifa` booleans rather than dropped, so the render layer
+//! can rebuild the glyphs without string-matching hover text. Personal
+//! Rating is left `None` here and filled in by a separate
+//! `populate_personal_ratings` call once PR reference data is loaded,
+//! mirroring `UiReport::populate_personal_ratings`.
 
 use std::collections::HashMap;
 
@@ -23,15 +29,19 @@ use wows_replay_insights::battle_report::PotentialDamage;
 use wows_replay_insights::battle_report::RECEIVED_DAMAGE_DESCRIPTIONS;
 use wows_replay_insights::battle_report::RibbonResult;
 use wows_replay_insights::battle_report::TranslatedBuild;
+use wows_replay_insights::personal_rating::PersonalRatingData;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
+use wows_replay_insights::personal_rating::ShipBattleStats;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::AccountId;
+use wows_replays::types::GameParamId;
 use wows_replays::types::Relation;
 use wows_replays::types::TeamId;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::KnownCrewSkill;
 use wowsunpack::game_params::types::Species;
 
@@ -68,10 +78,22 @@ pub struct PlayerRow {
     pub ship_name: String,
     pub ship_species_text: String,
     pub ship_class: Species,
+    /// The ship's `GameParams` id, resolved from `ship_index` via the
+    /// metadata provider (`GameParamProvider::game_param_by_index`). `None`
+    /// only if the index cannot be resolved against the loaded provider;
+    /// used to key `ShipBattleStats` in `populate_personal_ratings`.
+    pub ship_id: Option<GameParamId>,
     /// Proxy for "the replay's client observed this ship's vehicle entity"
     /// (`translated_build.is_some()`, which `TranslatedBuild::new` returns
     /// `None` for exactly when `player.vehicle_entity()` is `None`).
     /// `NormalizedPlayer` does not carry the raw flag directly.
+    /// `TranslatedBuild::new` also requires a known species, which makes this
+    /// proxy narrower than the egui original's plain `vehicle.is_some()` in
+    /// theory; in practice they are equivalent, because
+    /// `NormalizedBattleReport::from_battle_report` already resolves and
+    /// `.expect()`s a known species while building `NormalizedPlayer` (see
+    /// `battle_report/mod.rs`), so a row with an unrecognized species never
+    /// reaches this type at all.
     pub has_vehicle_entity: bool,
 
     pub base_xp: Option<i64>,
@@ -134,21 +156,36 @@ pub struct PlayerRow {
     pub num_skills: usize,
     pub highest_tier: usize,
     pub num_tier_1_skills: usize,
-    /// "{points}pts ({skills} skills)"; icon glyphs (tower-defense/warning
-    /// markers, Dazzle/IFA) are dropped here and rebuilt from `skill_warning`
-    /// by the render layer (Milestone 2).
+    /// "{points}pts ({skills} skills)"; the tower-defense/warning tier icon
+    /// is rebuilt from `skill_warning` and `skill_points` by the render layer
+    /// (Milestone 2). Dazzle/IFA star/siren markers are not encoded in this
+    /// text; see `has_dazzle`/`has_ifa`.
     pub skill_label_text: String,
     pub skill_hover_text: Option<String>,
     /// True for the "tower defense" (all tier-1 skills) and "no skills above
     /// tier 2" cases, which force the label to the "bad" color regardless of
     /// point tier. Mirrors `util::colorize_captain_points`.
     pub skill_warning: bool,
+    /// Learned captain skills include Dazzle. Mirrors the `has_dazzle` scan
+    /// in `util::colorize_captain_points`; the render layer (Milestone 2)
+    /// prepends a star glyph when true.
+    pub has_dazzle: bool,
+    /// Learned captain skills include Incoming Fire Alert. Mirrors the
+    /// `has_ifa` scan in `util::colorize_captain_points`; the render layer
+    /// (Milestone 2) prepends a siren glyph when true.
+    pub has_ifa: bool,
 
     pub translated_build: Option<TranslatedBuild>,
     pub achievements: Vec<AchievementResult>,
     pub ribbons: Vec<RibbonResult>,
     pub consumables: Vec<ConsumableResult>,
 
+    /// Always `None` fresh out of `from_normalized`: PR reference data isn't
+    /// loaded at report-construction time, so the egui app computes PR in a
+    /// separate step (`UiReport::populate_personal_ratings`) once that data
+    /// is available. Call `ReplayReportModel::populate_personal_ratings`
+    /// after loading PR data (a later milestone wires that load into the
+    /// gpui app) to fill this in.
     pub personal_rating: Option<PersonalRatingResult>,
 }
 
@@ -184,11 +221,15 @@ impl ReplayReportModel {
         metadata_provider: &GameMetadataProvider,
         _constants: &Value,
     ) -> Self {
-        Self::build(normalized, |species| {
-            metadata_provider
-                .localized_name_from_id(&TranslationKey::new(species.translation_id()))
-                .unwrap_or_else(|| species.name().to_string())
-        })
+        Self::build(
+            normalized,
+            |species| {
+                metadata_provider
+                    .localized_name_from_id(&TranslationKey::new(species.translation_id()))
+                    .unwrap_or_else(|| species.name().to_string())
+            },
+            |ship_index| metadata_provider.game_param_by_index(ship_index).map(|param| param.id()),
+        )
     }
 
     /// Provider-free core of `from_normalized`. Split out so the row-mapping
@@ -196,7 +237,11 @@ impl ReplayReportModel {
     /// fields, breakdown gating) is unit-testable without a real
     /// `GameMetadataProvider`, which needs loaded game data and cannot be
     /// cheaply fabricated in a test.
-    fn build(normalized: &NormalizedBattleReport, species_text: impl Fn(Species) -> String) -> Self {
+    fn build(
+        normalized: &NormalizedBattleReport,
+        species_text: impl Fn(Species) -> String,
+        ship_id: impl Fn(&str) -> Option<GameParamId>,
+    ) -> Self {
         let self_player = normalized.players.iter().find(|p| p.is_self);
         let self_team =
             self_player.map(|p| TeamId::from(p.team_id)).expect("normalized battle report carries no self player");
@@ -206,7 +251,15 @@ impl ReplayReportModel {
         let rows = normalized
             .players
             .iter()
-            .map(|np| PlayerRow::from_normalized_player(np, self_division_id, self_db_id, species_text(np.ship_class)))
+            .map(|np| {
+                PlayerRow::from_normalized_player(
+                    np,
+                    self_division_id,
+                    self_db_id,
+                    species_text(np.ship_class),
+                    ship_id(&np.ship_index),
+                )
+            })
             .collect();
 
         ReplayReportModel {
@@ -214,6 +267,39 @@ impl ReplayReportModel {
             rows,
             battle_result: normalized.metadata.battle_result,
             columns: ReplayColumn::ALL.to_vec(),
+        }
+    }
+
+    /// Populates Personal Rating for every row using externally loaded PR
+    /// reference data. Ports `UiReport::populate_personal_ratings`
+    /// (`ui/replay_parser/mod.rs:2217-2249`) exactly: build one
+    /// `ShipBattleStats` per row from that row's `ship_id`/`actual_damage`/
+    /// win-or-loss/`kills`, then hand it to `pr_data.calculate_pr`. A row
+    /// whose PR is already `Some`, or that lacks a resolved `ship_id` or
+    /// `actual_damage`, is left untouched.
+    pub fn populate_personal_ratings(&mut self, pr_data: &PersonalRatingData) {
+        let is_win = matches!(self.battle_result, Some(BattleResult::Win(_)));
+
+        for row in &mut self.rows {
+            if row.personal_rating.is_some() {
+                continue;
+            }
+            let Some(ship_id) = row.ship_id else {
+                continue;
+            };
+            let Some(actual_damage) = row.actual_damage else {
+                continue;
+            };
+
+            let stats = ShipBattleStats {
+                ship_id,
+                battles: 1,
+                damage: actual_damage,
+                wins: if is_win { 1 } else { 0 },
+                frags: row.kills.unwrap_or(0),
+            };
+
+            row.personal_rating = pr_data.calculate_pr(&[stats]);
         }
     }
 }
@@ -340,6 +426,7 @@ impl PlayerRow {
         self_division_id: Option<u32>,
         self_db_id: Option<AccountId>,
         ship_species_text: String,
+        ship_id: Option<GameParamId>,
     ) -> Self {
         let is_self_division_mate = match (self_division_id, self_db_id) {
             (Some(self_div), Some(self_id)) => self_id != np.db_id && np.division_id == Some(self_div),
@@ -495,6 +582,7 @@ impl PlayerRow {
             ship_name: np.ship_name.clone(),
             ship_species_text,
             ship_class: np.ship_class,
+            ship_id,
             has_vehicle_entity,
             base_xp,
             base_xp_text,
@@ -539,11 +627,15 @@ impl PlayerRow {
             skill_label_text: skill_label.text,
             skill_hover_text: skill_label.hover,
             skill_warning: skill_label.warning,
+            has_dazzle,
+            has_ifa,
             translated_build: np.build.clone(),
             achievements: np.achievements.clone(),
             ribbons: np.ribbons.clone(),
             consumables: np.consumables.clone(),
-            personal_rating: np.personal_rating.clone(),
+            // PR data isn't loaded at report-construction time; see the
+            // field doc and `ReplayReportModel::populate_personal_ratings`.
+            personal_rating: None,
         }
     }
 }
@@ -567,7 +659,7 @@ mod tests {
     fn from_normalized_builds_one_row_per_player_and_identifies_self() {
         let normalized = test_support::fixture_normalized_battle_report();
 
-        let model = ReplayReportModel::build(&normalized, |species| species.name().to_string());
+        let model = ReplayReportModel::build(&normalized, |species| species.name().to_string(), |_ship_index| None);
 
         assert_eq!(model.rows.len(), 2);
         assert_eq!(model.self_team, TeamId::from(0i64));
@@ -582,7 +674,7 @@ mod tests {
     #[test]
     fn from_normalized_populates_breakdowns_only_when_server_results_exist() {
         let normalized = test_support::fixture_normalized_battle_report();
-        let model = ReplayReportModel::build(&normalized, |species| species.name().to_string());
+        let model = ReplayReportModel::build(&normalized, |species| species.name().to_string(), |_ship_index| None);
 
         let self_row = model.rows.iter().find(|r| r.is_self).expect("self row present");
         assert!(self_row.actual_damage_report.is_some());
@@ -611,6 +703,73 @@ mod tests {
 
         let self_test_ship = PlayerRow { is_test_ship: true, ..test_support::base_row(1, Relation::new(0), true) };
         assert!(!self_test_ship.should_hide_stats(), "self player's own test ship is never hidden");
+    }
+
+    #[test]
+    fn populate_personal_ratings_computes_pr_from_row_ship_id_damage_and_win() {
+        use wows_replay_insights::personal_rating::ExpectedValuesData;
+        use wows_replay_insights::personal_rating::PersonalRatingCategory;
+        use wows_replay_insights::personal_rating::PersonalRatingData;
+        use wows_replay_insights::personal_rating::ShipExpectedValues;
+        use wows_replay_insights::personal_rating::ShipExpectedValuesEntry;
+
+        let normalized = test_support::fixture_normalized_battle_report();
+        let self_ship_id = GameParamId::from(3_374_266_064u64);
+        let mut model = ReplayReportModel::build(
+            &normalized,
+            |species| species.name().to_string(),
+            |_ship_index| Some(self_ship_id),
+        );
+        model.battle_result = Some(BattleResult::Win(0));
+
+        // Expected values exactly match the self row's fixture stats (50,000
+        // damage, 1 kill, a win), landing PR at the 700+300+150 baseline.
+        let mut expected = HashMap::new();
+        expected.insert(
+            self_ship_id.raw().to_string(),
+            ShipExpectedValuesEntry::Values(ShipExpectedValues {
+                average_damage_dealt: 50_000.0,
+                average_frags: 1.0,
+                win_rate: 100.0,
+            }),
+        );
+        let mut pr_data = PersonalRatingData::new();
+        pr_data.load(ExpectedValuesData { time: 0, data: expected });
+
+        model.populate_personal_ratings(&pr_data);
+
+        let self_row = model.rows.iter().find(|r| r.is_self).expect("self row present");
+        let pr = self_row.personal_rating.as_ref().expect("PR should be computed for the self row");
+        assert!((pr.pr - 1150.0).abs() < 1e-6, "expected PR 1150, got {}", pr.pr);
+        assert_eq!(pr.category, PersonalRatingCategory::Average);
+
+        // The enemy row has no `actual_damage` (no server results in the
+        // fixture), so `populate_personal_ratings` leaves it untouched.
+        let enemy_row = model.rows.iter().find(|r| !r.is_self).expect("enemy row present");
+        assert!(enemy_row.personal_rating.is_none());
+    }
+
+    #[test]
+    fn populate_personal_ratings_skips_rows_that_already_have_a_pr() {
+        use wows_replay_insights::personal_rating::PersonalRatingData;
+
+        let mut row = test_support::base_row(1, Relation::new(0), true);
+        row.ship_id = Some(GameParamId::from(1u64));
+        row.actual_damage = Some(10_000);
+        row.personal_rating = Some(PersonalRatingResult::new(999.0));
+        let mut model = ReplayReportModel {
+            self_team: TeamId::from(0i64),
+            rows: vec![row],
+            battle_result: Some(BattleResult::Win(0)),
+            columns: ReplayColumn::ALL.to_vec(),
+        };
+
+        // Unloaded PR data would make `calculate_pr` return `None` for any
+        // fresh computation, so a non-None result here proves the
+        // already-computed row was left alone rather than recomputed.
+        model.populate_personal_ratings(&PersonalRatingData::new());
+
+        assert_eq!(model.rows[0].personal_rating.as_ref().map(|pr| pr.pr), Some(999.0));
     }
 
     /// Needs local game data to build a real `GameMetadataProvider` (species

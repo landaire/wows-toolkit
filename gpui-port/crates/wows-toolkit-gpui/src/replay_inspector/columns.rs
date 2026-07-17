@@ -251,7 +251,7 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
             if nda_active {
                 CellValue::plain(NDA)
             } else {
-                CellValue::colored(row.observed_damage_text.clone(), ColorRole::Player(player_color_kind(row)))
+                CellValue::plain(row.observed_damage_text.clone())
             }
         }
         ReplayColumn::ActualDamage => match row.actual_damage_text.as_ref() {
@@ -434,6 +434,37 @@ mod tests {
         let cell = cell_value(&row, ReplayColumn::ActualDamage, false);
         assert_eq!(cell.text, "-");
     }
+
+    #[test]
+    fn cell_value_observed_damage_is_uncolored_unlike_actual_damage() {
+        let row = PlayerRow { observed_damage_text: "12,345".to_string(), ..base_row(1, Relation::new(1), false) };
+
+        let cell = cell_value(&row, ReplayColumn::ObservedDamage, false);
+
+        assert_eq!(cell.text, "12,345");
+        assert_eq!(cell.color, None, "ObservedDamage renders as a bare label in the egui original, never colored");
+    }
+
+    #[test]
+    fn cell_value_observed_damage_shows_nda_when_hidden_and_not_debug() {
+        let row = PlayerRow {
+            is_test_ship: true,
+            observed_damage_text: "12,345".to_string(),
+            ..base_row(1, Relation::new(2), false)
+        };
+
+        let hidden = cell_value(&row, ReplayColumn::ObservedDamage, false);
+        assert_eq!(hidden.text, "NDA");
+
+        let debug_visible = cell_value(&row, ReplayColumn::ObservedDamage, true);
+        assert_eq!(debug_visible.text, "12,345");
+    }
+
+    // The following two tests exercise only `cell_value`'s render mapping for
+    // an already-`Some` `PersonalRatingResult`; they say nothing about how
+    // `personal_rating` gets populated. `from_normalized` always leaves it
+    // `None` (see `model.rs`'s `PlayerRow::personal_rating` doc); a real PR
+    // value comes from `ReplayReportModel::populate_personal_ratings`.
 
     #[test]
     fn cell_value_personal_rating_shows_rounded_score_and_tier_color() {
