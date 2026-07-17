@@ -5,6 +5,7 @@
 //! render layer (Milestone 2); no `gpui`/`egui` color type appears here.
 
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
+use wows_replays::types::Relation;
 use wows_toolkit_config::ReplaySettings;
 
 use super::model::PlayerRow;
@@ -156,6 +157,22 @@ impl CellValue {
     fn with_hover(mut self, hover: impl Into<String>) -> Self {
         self.hover = Some(hover.into());
         self
+    }
+}
+
+/// Packed `0xRRGGBB` color for the self/ally/enemy team-relation triad:
+/// self = white, ally = light green, enemy = light red. The single source of
+/// truth for these three values; `table.rs::resolve_color` (the
+/// `PlayerColorKind::SelfPlayer`/`Ally`/`Enemy` arms), `chat.rs`'s sender-name
+/// color, and `model.rs`'s clan-color fallback all resolve through this
+/// instead of each re-deriving the same three branches.
+pub(crate) fn relation_color_rgb(relation: Relation) -> u32 {
+    if relation.is_self() {
+        0xffffff
+    } else if relation.is_ally() {
+        0x90ee90
+    } else {
+        0xff8080
     }
 }
 

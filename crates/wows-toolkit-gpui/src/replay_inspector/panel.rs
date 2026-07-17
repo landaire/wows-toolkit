@@ -20,7 +20,9 @@
 //! to the table instead (the brief's stated v1 tradeoff), built from
 //! `chat.rs`'s `ChatPanel`. The button itself mirrors the egui original:
 //! `.selected(show_chat)` while open, disabled with a "no chat" note when the
-//! replay's chat log is empty (`ui.replay.no_chat`).
+//! replay's chat log is empty. The note is a hardcoded string literal matching
+//! the egui original's `ui.replay.no_chat` translation value verbatim; this
+//! crate has no `t!()`/i18n lookup wired for it.
 
 use std::path::PathBuf;
 
@@ -179,7 +181,7 @@ fn header_row(
         .compact()
         .selected(show_chat)
         .disabled(!has_chat)
-        .when(!has_chat, |this| this.tooltip("No chat messages in this replay"))
+        .when(!has_chat, |this| this.tooltip("No chat messages were sent in this replay"))
         .on_click(cx.listener(|this, _event, _window, cx| {
             this.show_chat = !this.show_chat;
             cx.notify();

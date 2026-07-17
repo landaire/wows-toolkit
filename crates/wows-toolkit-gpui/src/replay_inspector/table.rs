@@ -33,6 +33,7 @@ use super::columns::PlayerColorKind;
 use super::columns::ReplayColumn;
 use super::columns::cell_value;
 use super::columns::name_color_kind;
+use super::columns::relation_color_rgb;
 use super::expanded;
 use super::icons::IconCache;
 use super::model::PlayerRow;
@@ -42,6 +43,7 @@ use super::sort::SortOrder;
 use super::sort::sort_rows;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replays::types::AccountId;
+use wows_replays::types::Relation;
 
 /// Overdraw for the virtualized list: how far past the viewport to render so
 /// scrolling reveals already-laid-out rows instead of blank space.
@@ -148,9 +150,9 @@ fn sort_caret_icon(order: SortOrder) -> IconName {
 pub(crate) fn resolve_color(role: ColorRole) -> Hsla {
     let packed = match role {
         ColorRole::Player(kind) => match kind {
-            PlayerColorKind::SelfPlayer => 0xffffff,
-            PlayerColorKind::Ally => 0x90ee90,
-            PlayerColorKind::Enemy => 0xff8080,
+            PlayerColorKind::SelfPlayer => relation_color_rgb(Relation::new(0)),
+            PlayerColorKind::Ally => relation_color_rgb(Relation::new(1)),
+            PlayerColorKind::Enemy => relation_color_rgb(Relation::new(2)),
             PlayerColorKind::DivisionMate => 0xffd700,
             PlayerColorKind::Abuser => 0xffc0cb,
         },

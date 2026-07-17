@@ -50,6 +50,7 @@ use wowsunpack::game_params::types::KnownCrewSkill;
 use wowsunpack::game_params::types::Species;
 
 use super::columns::ReplayColumn;
+use super::columns::relation_color_rgb;
 
 /// One player's presentation-ready row: scalars and formatted strings pulled
 /// from `NormalizedPlayer`/`ServerResults`. Colors are not stored here; they
@@ -236,28 +237,17 @@ pub struct ChatMessage {
     pub clan_color_rgb: Option<u32>,
 }
 
-/// Team-relation color packed as `0xRRGGBB`, matching
-/// `util::formatting::player_color_for_team_relation`: self = white, ally =
-/// light green, enemy = light red.
-fn team_relation_rgb(relation: Relation) -> u32 {
-    if relation.is_self() {
-        0xffffff
-    } else if relation.is_ally() {
-        0x90ee90
-    } else {
-        0xff8080
-    }
-}
-
 /// Mirrors `clan_color_for_player`: the clan-league color packed as
 /// `0xRRGGBB`, read from the player's raw `clanColor` property. Older
 /// replays omit that property; this falls back to the player's own
 /// team-relation color (via `Player::relation`, not the message's
 /// `sender_relation`, matching the egui original) rather than panicking.
+/// The fallback resolves through `relation_color_rgb`, the single source of
+/// truth for the self/ally/enemy triad.
 fn clan_color_for_player(player: &Player) -> u32 {
     match player.initial_state().raw_with_names().get("clanColor").and_then(|c| c.as_i64()) {
         Some(clan_color) => (clan_color & 0xFF_FFFF) as u32,
-        None => team_relation_rgb(player.relation()),
+        None => relation_color_rgb(player.relation()),
     }
 }
 

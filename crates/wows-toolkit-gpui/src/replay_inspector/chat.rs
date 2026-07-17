@@ -21,6 +21,7 @@ use gpui_component::v_flex;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::types::Relation;
 
+use super::columns::relation_color_rgb;
 use super::model::ChatMessage;
 
 /// No resolvable team relation: rendered gray, matching egui's `Color32::GRAY`
@@ -32,19 +33,16 @@ const ENEMY_LIGHT_RED: u32 = 0xff8080;
 const DIVISION_GOLD: u32 = 0xffd700;
 const CHANNEL_ORANGE: u32 = 0xffa500;
 
-/// Sender-name color packed as `0xRRGGBB`: mirrors
-/// `player_color_for_team_relation` (self = white, ally = light green,
-/// enemy = light red) plus the gray fallback for a message with no
-/// resolvable `sender_relation`. Split out from `sender_color` (which
-/// resolves this to an `Hsla`) so the palette mapping is unit-testable by
-/// plain `u32` equality; `Hsla` itself carries no `PartialEq` impl to test
-/// against directly.
+/// Sender-name color packed as `0xRRGGBB`: the self/ally/enemy triad via
+/// `relation_color_rgb` (the single source of truth for those three values),
+/// plus the gray fallback for a message with no resolvable `sender_relation`.
+/// Split out from `sender_color` (which resolves this to an `Hsla`) so the
+/// palette mapping is unit-testable by plain `u32` equality; `Hsla` itself
+/// carries no `PartialEq` impl to test against directly.
 fn sender_color_rgb(relation: Option<Relation>) -> u32 {
     match relation {
         None => NO_RELATION_GRAY,
-        Some(r) if r.is_self() => SELF_WHITE,
-        Some(r) if r.is_ally() => ALLY_LIGHT_GREEN,
-        Some(_) => ENEMY_LIGHT_RED,
+        Some(r) => relation_color_rgb(r),
     }
 }
 
