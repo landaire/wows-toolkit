@@ -11,6 +11,7 @@
 #![allow(unused_imports)]
 
 pub mod columns;
+pub mod expanded;
 pub mod icons;
 pub mod model;
 pub mod sample;

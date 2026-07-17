@@ -129,7 +129,7 @@ pub enum BattleOutcome {
     Draw,
 }
 
-const NDA: &str = "NDA";
+pub(crate) const NDA: &str = "NDA";
 const DASH: &str = "-";
 const HEALS_TOOLTIP: &str = "Number of Repair Party activations observed for this player. May be inaccurate for ships not rendered on screen (i.e. enemy ships that were never spotted).";
 const HEALS_NO_REPAIR_TOOLTIP: &str = "This ship does not have a Repair Party consumable.";

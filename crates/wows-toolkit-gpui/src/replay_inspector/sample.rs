@@ -2,11 +2,25 @@
 //! table before the real parse pipeline is wired. Replaced by real parsing in
 //! a later milestone; nothing here reflects a real replay.
 
+use std::collections::HashMap;
+
+use wows_replay_insights::battle_report::AchievementResult;
+use wows_replay_insights::battle_report::ConsumableResult;
+use wows_replay_insights::battle_report::DamageInteraction;
+use wows_replay_insights::battle_report::RibbonResult;
+use wows_replay_insights::battle_report::TranslatedBuild;
+use wows_replay_insights::battle_report::TranslatedModule;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_replays::types::AccountId;
 use wows_replays::types::Relation;
 use wows_replays::types::TeamId;
+use wowsunpack::game_params::skill_grid_data::SkillGridRow;
+use wowsunpack::game_params::skill_grid_data::SkillGridSkill;
+use wowsunpack::game_params::types::CrewSkillName;
+use wowsunpack::game_params::types::CrewSkillType;
+use wowsunpack::game_params::types::SkillPointCost;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::game_types::ChargeCount;
 
 use super::columns::ReplayColumn;
 use super::model::PlayerRow;
@@ -148,14 +162,191 @@ fn separate(n: u64) -> String {
     super::model::separate_number(n)
 }
 
+/// Sample achievements for the self row's expanded Name-column content, so
+/// `cargo run` shows the "icon (or fallback text) + name (Nx)" list without
+/// needing a real parsed replay.
+fn sample_achievements() -> Vec<AchievementResult> {
+    vec![
+        AchievementResult {
+            name: "dfc".to_string(),
+            display_name: "Dreadnought".to_string(),
+            description: "Deal damage exceeding your ship's hit points in a single battle.".to_string(),
+            icon_key: "dfc".to_string(),
+            count: 1,
+        },
+        AchievementResult {
+            name: "kraken".to_string(),
+            display_name: "Kraken Unleashed".to_string(),
+            description: "Destroy 5 or more enemy ships in one battle.".to_string(),
+            icon_key: "kraken".to_string(),
+            count: 2,
+        },
+    ]
+}
+
+/// Sample ribbons, including a MAIN_CALIBER/BULGE pair so the sample table
+/// demonstrates the one-off reorder in `expanded::reorder_bulge_after_main_caliber`.
+fn sample_ribbons() -> Vec<RibbonResult> {
+    vec![
+        RibbonResult {
+            name: "RIBBON_MAIN_CALIBER".to_string(),
+            display_name: "Main Caliber Hit".to_string(),
+            description: "Main battery hit.".to_string(),
+            icon_key: "main_caliber".to_string(),
+            is_subribbon: false,
+            count: 24,
+        },
+        RibbonResult {
+            name: "RIBBON_BULGE".to_string(),
+            display_name: "Torpedo Protection Hit".to_string(),
+            description: "Hit a torpedo protection bulge.".to_string(),
+            icon_key: "bulge".to_string(),
+            is_subribbon: false,
+            count: 3,
+        },
+        RibbonResult {
+            name: "RIBBON_DESTROYED".to_string(),
+            display_name: "Destroyed".to_string(),
+            description: "Destroyed an enemy ship.".to_string(),
+            icon_key: "destroyed".to_string(),
+            is_subribbon: false,
+            count: 3,
+        },
+    ]
+}
+
+/// Sample consumables: one unlimited (Damage Control Party), one finite
+/// (Repair Party), so the sample table demonstrates both branches of
+/// `expanded::consumable_row`'s `ChargeCount` match.
+fn sample_consumables() -> Vec<ConsumableResult> {
+    vec![
+        ConsumableResult {
+            display_name: "Damage Control Party".to_string(),
+            description: "Instantly extinguishes fires and stops flooding.".to_string(),
+            icon_key: "damage_control".to_string(),
+            charges_used: 1,
+            total_charges: ChargeCount::Unlimited,
+        },
+        ConsumableResult {
+            display_name: "Repair Party".to_string(),
+            description: "Restores a portion of the ship's hit points over time.".to_string(),
+            icon_key: "repair_party".to_string(),
+            charges_used: 1,
+            total_charges: ChargeCount::Finite(3),
+        },
+    ]
+}
+
+fn sample_module(name: &str, description: &str, game_params_name: &str) -> TranslatedModule {
+    TranslatedModule {
+        name: Some(name.to_string()),
+        description: Some(description.to_string()),
+        game_params_name: game_params_name.to_string(),
+    }
+}
+
+fn sample_skill(name: &str, internal_name: &str, cost: u8, learned: bool) -> SkillGridSkill {
+    SkillGridSkill {
+        internal_name: CrewSkillName::from(internal_name),
+        skill_type: CrewSkillType::new(0),
+        name: Some(name.to_string()),
+        description: Some(format!("{name} skill description.")),
+        point_cost: Some(SkillPointCost::new(cost)),
+        learned,
+    }
+}
+
+/// A sample captain build: two modernization slots filled and one empty, one
+/// signal, a two-module loadout, and a two-tier captain-skill grid with a
+/// learned/unlearned skill in each tier, so the sample table demonstrates
+/// every branch of `expanded::render_build_section`.
+fn sample_translated_build() -> TranslatedBuild {
+    TranslatedBuild {
+        modernization_slots: vec![
+            Some(sample_module("Main Battery Mod 1", "Improves main battery reload.", "PCM001_MainGun_Mod_I")),
+            Some(sample_module(
+                "Damage Control System Mod 1",
+                "Reduces Damage Control Party cooldown.",
+                "PCM042_DamageControl_Mod_I",
+            )),
+            None,
+        ],
+        signals: vec![sample_module(
+            "Zulu Hotel",
+            "Increases the chance of your crew earning extra experience points.",
+            "PCEF56_XP",
+        )],
+        loadout: vec![
+            sample_module("Hull (B)", "Standard hull upgrade.", "AB1_Hull"),
+            sample_module("Engine (B)", "Standard engine upgrade.", "AB2_Engine"),
+        ],
+        abilities: Vec::new(),
+        captain_skills: Some(vec![
+            SkillGridRow {
+                point_cost: Some(SkillPointCost::new(1)),
+                skills: vec![
+                    sample_skill("Priority Target", "PriorityTarget", 1, true),
+                    sample_skill("Incoming Fire Alert", "IncomingFireAlert", 1, false),
+                ],
+            },
+            SkillGridRow {
+                point_cost: Some(SkillPointCost::new(2)),
+                skills: vec![
+                    sample_skill("Concealment Expert", "ConcealmentExpert", 2, true),
+                    sample_skill("Demolition Expert", "DemolitionExpert", 2, false),
+                ],
+            },
+        ]),
+    }
+}
+
+/// Damage dealt to / received from two enemy rows (`Enemy_Delta`/`Enemy_Echo`,
+/// `db_id` 5 and 6 below), so the sample table demonstrates
+/// `expanded::render_damage_section`'s per-victim breakdown.
+fn sample_damage_interactions() -> HashMap<AccountId, DamageInteraction> {
+    HashMap::from([
+        (
+            AccountId(5),
+            DamageInteraction {
+                damage_dealt: 42_000,
+                damage_dealt_percentage: 56.4,
+                damage_received: 12_000,
+                damage_received_percentage: 38.1,
+                ..Default::default()
+            },
+        ),
+        (
+            AccountId(6),
+            DamageInteraction {
+                damage_dealt: 18_000,
+                damage_dealt_percentage: 24.2,
+                damage_received: 6_500,
+                damage_received_percentage: 20.6,
+                ..Default::default()
+            },
+        ),
+    ])
+}
+
 /// Eight fabricated players across two teams with varied stats, so the table
 /// shows self/ally/enemy coloring, PR tiers, and sort behavior.
 pub fn sample_model() -> ReplayReportModel {
     let rows = vec![
-        // Division label on the self row and a gold "division-mate" ally
-        // row, so the sample table demonstrates both Name-cell cases.
+        // Division label on the self row, plus achievements/ribbons/damage
+        // events/consumables/a captain build/damage interactions, so the
+        // sample table demonstrates the full expanded-row content
+        // (`expanded.rs`) without needing a real parsed replay.
         PlayerRow {
             division_label: Some("(A)".to_string()),
+            achievements: sample_achievements(),
+            ribbons: sample_ribbons(),
+            consumables: sample_consumables(),
+            translated_build: Some(sample_translated_build()),
+            fires: Some(2),
+            floods: Some(0),
+            citadels: Some(1),
+            crits: Some(3),
+            damage_interactions: Some(sample_damage_interactions()),
             ..stat_row(
                 1,
                 0,

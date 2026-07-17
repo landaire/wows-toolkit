@@ -9,9 +9,9 @@
 //! hover tooltips for the stat cells that carry a breakdown. A row also
 //! carries an expand/collapse state (`expanded`, keyed by `db_id` so it
 //! survives re-sorting): the Name cell's caret and a double-click on the
-//! collapsed row toggle it, growing the row to show a detail panel
-//! underneath (a placeholder for now; a later task fills it in with
-//! achievements, ribbons, build, consumables, and damage breakdowns).
+//! collapsed row toggle it, growing the row to show `expanded::render_detail`
+//! underneath (achievements, ribbons, build, consumables, damage
+//! breakdowns; see `expanded.rs`).
 
 use std::collections::HashSet;
 
@@ -33,6 +33,7 @@ use super::columns::PlayerColorKind;
 use super::columns::ReplayColumn;
 use super::columns::cell_value;
 use super::columns::name_color_kind;
+use super::expanded;
 use super::icons::IconCache;
 use super::model::PlayerRow;
 use super::model::ReplayReportModel;
@@ -455,10 +456,11 @@ fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
 
 /// Per-frame layout shared by every row and the header's scrolling portion:
 /// the sticky/scrolling column split, the scrolling section's total width,
-/// the shared horizontal scroll handle, the icon cache, the debug flag, and
-/// this row's expanded state and entity handle (for the caret/double-click
-/// toggle). Bundled into one struct so `render_row` stays under clippy's
-/// argument-count limit.
+/// the shared horizontal scroll handle, the icon cache, the debug flag, this
+/// row's expanded state and entity handle (for the caret/double-click
+/// toggle), and the full row list (for the expanded damage-interaction
+/// breakdowns, which look up other rows by `db_id`). Bundled into one struct
+/// so `render_row` stays under clippy's argument-count limit.
 struct RowLayout<'a> {
     sticky_columns: &'a [ReplayColumn],
     scroll_columns: &'a [ReplayColumn],
@@ -468,6 +470,7 @@ struct RowLayout<'a> {
     h_scroll: &'a ScrollHandle,
     entity: Entity<PlayerTable>,
     is_expanded: bool,
+    all_rows: &'a [PlayerRow],
 }
 
 /// One collapsed row: `layout.sticky_columns` (Actions/Name/ShipName) render
@@ -475,10 +478,10 @@ struct RowLayout<'a> {
 /// render inside a nested scroll container tracking `layout.h_scroll`, the
 /// same handle the header's scrolling portion tracks, so both stay aligned.
 /// Mirrors the egui app's `num_sticky_cols(3)`. When `layout.is_expanded`,
-/// stacks a detail panel underneath (a placeholder for now; a later task
-/// fills it in with the real expanded content); a double-click anywhere on
-/// the collapsed row also toggles expansion, mirroring the egui app's
-/// whole-row double-click handler in `cell_content_ui`.
+/// stacks `expanded::render_detail`'s content underneath (see `expanded.rs`);
+/// a double-click anywhere on the collapsed row also toggles expansion,
+/// mirroring the egui app's whole-row double-click handler in
+/// `cell_content_ui`.
 fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla) -> AnyElement {
     let mut sticky = h_flex().flex_none();
     for &col in layout.sticky_columns {
@@ -516,14 +519,10 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla) ->
         return collapsed.into_any_element();
     }
 
-    // Placeholder detail panel: proves the expand mechanism grows the row
-    // (remeasure + taller layout) without yet reproducing the egui app's
-    // achievements/ribbons/build/consumables/damage-breakdown content. A
-    // later task replaces this with that real content.
-    let detail =
-        div().w_full().px_2().py_2().text_xs().opacity(0.6).child(format!("Row {ix} expanded ({})", row.display_name));
-
-    v_flex().w_full().child(collapsed).child(detail).into_any_element()
+    match expanded::render_detail(ix, row, layout.all_rows, layout.icons, layout.debug) {
+        Some(detail) => v_flex().w_full().child(collapsed).child(detail).into_any_element(),
+        None => collapsed.into_any_element(),
+    }
 }
 
 impl Render for PlayerTable {
@@ -571,6 +570,7 @@ impl Render for PlayerTable {
                 h_scroll: &h_scroll,
                 entity: entity.clone(),
                 is_expanded,
+                all_rows: &table.model.rows,
             };
             render_row(ix, row, &layout, hover_bg)
         };
