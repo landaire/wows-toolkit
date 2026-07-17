@@ -1,10 +1,13 @@
 use gpui::*;
 use gpui_component::Disableable;
+use gpui_component::button::Button;
 use gpui_component::checkbox::Checkbox;
+use gpui_component::slider::{Slider, SliderState};
 use gpui_component::tab::{Tab, TabBar};
 use gpui_component::{h_flex, v_flex};
 
-use crate::settings::GpuiSettings;
+use crate::settings::{DEFAULT_ZOOM, GpuiSettings, MAX_ZOOM, MIN_ZOOM};
+use crate::theme;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum AppTab {
@@ -25,22 +28,44 @@ impl AppTab {
     }
 }
 
+/// Load status of the settings snapshot fetched from the shared config DB.
+enum SettingsState {
+    Loading,
+    Loaded(GpuiSettings),
+    Failed(String),
+}
+
 pub struct App {
     active_tab: AppTab,
-    /// `None` until the async DB load (see `main.rs`) completes.
-    settings: Option<GpuiSettings>,
+    settings: SettingsState,
+    /// Session-local zoom shown by the zoom slider. Seeded from `settings.zoom`
+    /// once the DB load completes, then updated live as the slider moves.
+    /// Never written back to the DB.
+    zoom: f32,
+    zoom_slider: Entity<SliderState>,
 }
 
 impl App {
-    pub fn new(_window: &mut Window, _cx: &mut Context<Self>) -> Self {
-        Self { active_tab: AppTab::Settings, settings: None }
+    pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let zoom_slider =
+            cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(DEFAULT_ZOOM));
+        Self { active_tab: AppTab::Settings, settings: SettingsState::Loading, zoom: DEFAULT_ZOOM, zoom_slider }
     }
 
     /// Store the settings snapshot loaded from the shared config DB. Called
     /// once from `main.rs` after the async load completes; read-only for the
     /// lifetime of the session (no write-back).
-    pub fn apply_settings(&mut self, settings: GpuiSettings) {
-        self.settings = Some(settings);
+    pub fn apply_settings(&mut self, settings: GpuiSettings, cx: &mut Context<Self>) {
+        self.zoom = settings.zoom;
+        self.zoom_slider =
+            cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(settings.zoom));
+        self.settings = SettingsState::Loaded(settings);
+    }
+
+    /// Record that the DB load failed. Called once from `main.rs` in place of
+    /// `apply_settings` when either the DB open or the settings load errors.
+    pub fn mark_settings_failed(&mut self, reason: String) {
+        self.settings = SettingsState::Failed(reason);
     }
 }
 
@@ -59,9 +84,47 @@ fn settings_row(label: &'static str, value: String) -> impl IntoElement {
 }
 
 impl App {
-    fn render_settings_tab(&self) -> impl IntoElement {
-        let Some(settings) = &self.settings else {
-            return v_flex().p_4().child(div().text_sm().opacity(0.6).child("Loading settings...")).into_any_element();
+    fn render_zoom_row(&self, cx: &Context<Self>) -> impl IntoElement {
+        h_flex()
+            .gap_2()
+            .items_center()
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Zoom Factor (Ctrl + and Ctrl - also changes this)"),
+            )
+            .child(Slider::new(&self.zoom_slider).w(px(160.)))
+            .child(div().text_sm().w(px(40.)).child(format!("{:.2}", self.zoom)))
+            .child(Button::new("reset-zoom").label("Reset").compact().on_click(cx.listener(
+                |this, _event: &ClickEvent, window, cx| {
+                    this.zoom = DEFAULT_ZOOM;
+                    theme::apply_egui_dark_theme(this.zoom, window, cx);
+                    this.zoom_slider.update(cx, |slider, slider_cx| {
+                        slider.set_value(DEFAULT_ZOOM, window, slider_cx);
+                    });
+                    cx.notify();
+                },
+            )))
+    }
+
+    fn render_settings_tab(&self, cx: &Context<Self>) -> impl IntoElement {
+        let settings = match &self.settings {
+            SettingsState::Loading => {
+                return v_flex()
+                    .p_4()
+                    .child(div().text_sm().opacity(0.6).child("Loading settings..."))
+                    .into_any_element();
+            }
+            SettingsState::Failed(reason) => {
+                return v_flex()
+                    .p_4()
+                    .gap_1()
+                    .child(div().text_sm().font_weight(FontWeight::BOLD).child("Failed to load settings"))
+                    .child(div().text_sm().opacity(0.6).child(reason.clone()))
+                    .into_any_element();
+            }
+            SettingsState::Loaded(settings) => settings,
         };
 
         v_flex()
@@ -72,10 +135,7 @@ impl App {
                 v_flex()
                     .gap_2()
                     .child(section_heading("Application Settings", "General application behavior and appearance"))
-                    .child(settings_row(
-                        "Zoom Factor (Ctrl + and Ctrl - also changes this)",
-                        format!("{:.2}", settings.zoom),
-                    )),
+                    .child(self.render_zoom_row(cx)),
             )
             .child(
                 v_flex()
@@ -148,7 +208,15 @@ impl App {
 }
 
 impl Render for App {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Pick up drag changes made directly on the zoom slider (the reset
+        // button applies the theme itself, so this only fires for drags).
+        let slider_zoom = self.zoom_slider.read(cx).value().start();
+        if (slider_zoom - self.zoom).abs() > f32::EPSILON {
+            self.zoom = slider_zoom;
+            theme::apply_egui_dark_theme(self.zoom, window, cx);
+        }
+
         let active_ix = AppTab::ALL.iter().position(|t| *t == self.active_tab).unwrap_or(0);
         let tabs = TabBar::new("app-tabs")
             .selected_index(active_ix)
@@ -159,12 +227,12 @@ impl Render for App {
             }));
 
         let body = match self.active_tab {
-            AppTab::Settings => self.render_settings_tab().into_any_element(),
+            AppTab::Settings => self.render_settings_tab(cx).into_any_element(),
             AppTab::ReplayInspector | AppTab::ArmorViewer => {
                 h_flex().size_full().items_center().justify_center().child(self.active_tab.label()).into_any_element()
             }
         };
 
-        v_flex().size_full().child(tabs).child(body)
+        v_flex().size_full().child(tabs).child(div().flex_1().child(body))
     }
 }

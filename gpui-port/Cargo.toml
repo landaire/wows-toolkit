@@ -7,6 +7,23 @@ edition = "2024"
 rust-version = "1.92"
 
 [workspace.dependencies]
+# gpui, gpui_platform, and gpui_tokio are deliberately left unpinned (no `rev`):
+# gpui-component's own Cargo.toml (github.com/longbridge/gpui-component, out of
+# our control) depends on gpui/gpui_platform from this same repo with no rev
+# either, and every zed-repo crate (including gpui_tokio) depends on `gpui`
+# internally. Cargo treats an explicit-rev git dependency and a floating
+# (default-branch) git dependency on the identical URL as two different sources,
+# so pinning any one of these three resolves a second, separate zed checkout and
+# two incompatible `gpui` crate instances in the same build (verified: `cargo
+# build` fails with "there are multiple different versions of crate `gpui`" as
+# soon as any of the three carries a `rev`). `[patch]` cannot fix this either --
+# Cargo refuses to patch a git source with a different rev of the same URL
+# ("patches must point to different sources"). The only clean fix would be
+# forking/vendoring gpui-component to pin its internal zed deps too, which is out
+# of scope here. Reproducibility instead comes from the committed Cargo.lock,
+# which already pins all zed-repo packages (gpui, gpui_platform, gpui_tokio, and
+# gpui-component's own gpui/gpui_platform/gpui_web/gpui_macros) to the same
+# commit: 058f01fa93503491a735bfded53e77bfaa276148.
 gpui           = { git = "https://github.com/zed-industries/zed" }
 gpui_platform  = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
 gpui_tokio     = { git = "https://github.com/zed-industries/zed" }

@@ -8690,6 +8690,7 @@ dependencies = [
  "gpui_tokio",
  "sqlx",
  "tokio",
+ "tracing",
  "wows-toolkit-config",
 ]
 

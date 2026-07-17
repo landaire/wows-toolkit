@@ -18,7 +18,6 @@ pub fn apply_egui_dark_theme(zoom: f32, window: &mut Window, cx: &mut App) {
     theme.background = rgb(0x1b1b1b).into();
     theme.foreground = rgb(0x8c8c8c).into();
     theme.border = rgb(0x3c3c3c).into();
-    theme.muted = rgb(0x2b2b2b).into();
     theme.secondary = rgb(0x3c3c3c).into();
     theme.accent = rgb(0x005c80).into();
     theme.selection = rgb(0x005c80).into();

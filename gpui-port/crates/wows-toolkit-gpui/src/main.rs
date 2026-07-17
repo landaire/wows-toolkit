@@ -57,6 +57,7 @@ fn main() {
                     app_entity = Some(view.clone());
                     cx.new(|cx| Root::new(view, window, cx))
                 })
+                .inspect_err(|err| tracing::error!("failed to open window: {err}"))
                 .expect("failed to open window");
             let app_entity = app_entity.expect("App entity created inside open_window's build_root_view");
 
@@ -66,11 +67,27 @@ fn main() {
             })
             .await;
 
-            let Ok(Ok(loaded)) = loaded else {
-                // No DB yet, or the load failed: keep the hardcoded default
-                // zoom/theme already applied above and leave the Settings tab
-                // showing its own defaults.
-                return;
+            let loaded = match loaded {
+                Ok(Ok(loaded)) => loaded,
+                Ok(Err(err)) => {
+                    // DB open or settings load failed: keep the hardcoded
+                    // default zoom/theme already applied above and let the
+                    // Settings tab report the failure instead of loading forever.
+                    tracing::error!("failed to load settings from the config DB: {err:#}");
+                    app_entity.update(cx, |app, cx| {
+                        app.mark_settings_failed(err.to_string());
+                        cx.notify();
+                    });
+                    return;
+                }
+                Err(err) => {
+                    tracing::error!("settings-load task did not complete: {err}");
+                    app_entity.update(cx, |app, cx| {
+                        app.mark_settings_failed(err.to_string());
+                        cx.notify();
+                    });
+                    return;
+                }
             };
 
             let zoom = loaded.zoom;
@@ -78,7 +95,7 @@ fn main() {
                 theme::apply_egui_dark_theme(zoom, window, cx);
             });
             app_entity.update(cx, |app, cx| {
-                app.apply_settings(loaded);
+                app.apply_settings(loaded, cx);
                 cx.notify();
             });
         })

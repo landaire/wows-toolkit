@@ -14,3 +14,4 @@ anyhow.workspace = true
 wows-toolkit-config = { path = "../../../crates/wows-toolkit-config" }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
+tracing = "0.1"

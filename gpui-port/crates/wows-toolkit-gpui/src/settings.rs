@@ -13,13 +13,18 @@ use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 /// matching the egui app's documented default.
 pub const DEFAULT_ZOOM: f32 = 1.15;
 
+/// Bounds for the zoom slider, mirroring the egui settings tab.
+pub const MIN_ZOOM: f32 = 0.5;
+pub const MAX_ZOOM: f32 = 2.0;
+
 /// Settings read from the shared config DB, applied once at startup.
 pub struct GpuiSettings {
     pub zoom: f32,
     pub wows_dir: String,
     pub current_replay_path: PathBuf,
     pub replay: ReplaySettings,
-    /// `None` when the `armor_viewer_defaults` table has no row yet (fresh DB).
+    /// `None` when the `armor_viewer_defaults` table has no row yet (fresh DB),
+    /// or when the read failed (logged via `tracing::warn!` in `load`).
     pub armor_defaults: Option<ArmorViewerDefaultsRow>,
 }
 
@@ -32,7 +37,13 @@ impl GpuiSettings {
         let current_replay_path =
             queries::get_setting::<PathBuf>(pool, "current_replay_path").await.unwrap_or_default();
         let replay = queries::get_setting::<ReplaySettings>(pool, "replay_settings").await.unwrap_or_default();
-        let armor_defaults = queries::get_armor_viewer_defaults(pool).await.ok().flatten();
+        let armor_defaults = match queries::get_armor_viewer_defaults(pool).await {
+            Ok(defaults) => defaults,
+            Err(e) => {
+                tracing::warn!("Failed to read armor viewer defaults from DB: {e}");
+                None
+            }
+        };
 
         Self { zoom, wows_dir, current_replay_path, replay, armor_defaults }
     }
