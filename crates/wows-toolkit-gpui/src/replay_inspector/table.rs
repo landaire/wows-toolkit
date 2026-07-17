@@ -44,6 +44,7 @@ use super::sort::sort_rows;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replays::types::AccountId;
 use wows_replays::types::Relation;
+use wowsunpack::vfs::VfsPath;
 
 /// Overdraw for the virtualized list: how far past the viewport to render so
 /// scrolling reveals already-laid-out rows instead of blank space.
@@ -190,9 +191,12 @@ pub struct PlayerTable {
     list_state: ListState,
     sort: SortOrder,
     h_scroll: ScrollHandle,
-    /// Decoded ship-class icons for the Name cell. Empty until a later
-    /// milestone's replay-loading pipeline feeds it real `GameAsset` bytes;
-    /// `name_cell` falls back to a plain species-text label while empty.
+    /// Decoded icons (ship-class for the Name cell; achievement/ribbon/
+    /// consumable/modernization/signal/captain-skill for `expanded.rs`),
+    /// resolved from the parsed replay's own build VFS by
+    /// `IconCache::populate_from_rows` in `new`. `name_cell`/`expanded.rs`
+    /// fall back to a plain text label for any key this build has no asset
+    /// for.
     icons: IconCache,
     /// Debug mode lifts NDA hiding and the enemy-only Skills gate, mirroring
     /// the egui app's debug flag. Always `false` until a settings toggle wires
@@ -207,20 +211,26 @@ pub struct PlayerTable {
 }
 
 impl PlayerTable {
-    pub fn new(mut model: ReplayReportModel, _cx: &mut Context<Self>) -> Self {
+    /// Builds the table for `model`, resolving every icon its rows reference
+    /// from `vfs` (the exact VFS `model` was parsed against; see
+    /// `load::ParsedReplay`) before the first render, so the table never
+    /// shows a flash of text-fallback cells that then pop to icons.
+    pub fn new(mut model: ReplayReportModel, vfs: VfsPath, cx: &mut Context<Self>) -> Self {
         let sort = SortOrder::default();
         let debug = false;
         sort_rows(&mut model.rows, model.self_team, sort, debug);
         let list_state = ListState::new(model.rows.len(), ListAlignment::Top, LIST_OVERDRAW);
-        Self {
-            model,
-            list_state,
-            sort,
-            h_scroll: ScrollHandle::new(),
-            icons: IconCache::new(),
-            debug,
-            expanded: HashSet::new(),
-        }
+
+        let mut icons = IconCache::new();
+        let svg_renderer = cx.svg_renderer();
+        icons.populate_from_rows(&model.rows, &vfs, &svg_renderer);
+        tracing::info!(
+            ship_class_icons = icons.ship_class_count(),
+            keyed_icons = icons.keyed_count(),
+            "replay inspector: resolved player-table icons"
+        );
+
+        Self { model, list_state, sort, h_scroll: ScrollHandle::new(), icons, debug, expanded: HashSet::new() }
     }
 
     /// Applies a header click: toggles the sort order for `column`, re-sorts

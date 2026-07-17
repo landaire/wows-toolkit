@@ -138,6 +138,7 @@ fn load_translations_catalog(wows_dir: &Path, build: u32) -> Option<Catalog> {
 pub struct LoadedGameData {
     provider: Arc<GameMetadataProvider>,
     base_constants: GameConstants,
+    vfs: VfsPath,
 }
 
 impl LoadedGameData {
@@ -154,6 +155,14 @@ impl LoadedGameData {
         &self.base_constants
     }
 
+    /// This build's VFS -- the handle `icons::IconCache::populate_from_rows`/
+    /// `populate_nation_flags` read GUI asset bytes (ship-class, captain-skill,
+    /// achievement, ribbon, consumable, nation flag) from, without a second
+    /// game-data load.
+    pub fn vfs(&self) -> &VfsPath {
+        &self.vfs
+    }
+
     /// Loads `build`'s game data from `wows_dir`. Callers are expected to
     /// have already checked `build` is present under `bin/` (see
     /// [`GameDataCache::get_or_load_build`]); this only reports the errors
@@ -168,7 +177,7 @@ impl LoadedGameData {
         let provider = Arc::new(provider);
         let base_constants = GameConstants::from_vfs(&vfs);
 
-        Ok(Self { provider, base_constants })
+        Ok(Self { provider, base_constants, vfs })
     }
 
     /// Loads `build`'s `GameMetadataProvider`, preferring the on-disk
@@ -360,12 +369,22 @@ fn load_versioned_constants(build: u32) -> Value {
     }
 }
 
+/// One parsed replay: the presentation model, plus the [`LoadedGameData`] it
+/// was parsed against. Callers that need to resolve icon bytes for the
+/// model's rows (ship-class, achievement, ribbon, captain-skill, consumable,
+/// nation flag) read them from `game_data.vfs()` -- the exact VFS the parse
+/// itself used, so resolving icons never triggers a second game-data load.
+pub struct ParsedReplay {
+    pub model: ReplayReportModel,
+    pub game_data: Arc<LoadedGameData>,
+}
+
 /// Reads and parses one replay file into a presentation-ready
 /// [`ReplayReportModel`], resolving `game_data` to the build the replay was
 /// actually recorded on (never a "latest installed" guess; see the module
 /// doc). Synchronous and CPU-bound; callers run it off the UI thread (see
 /// [`spawn_parse`]).
-fn parse_replay(path: &Path, game_data: &GameDataCache) -> Result<ReplayReportModel, ReplayLoadError> {
+fn parse_replay(path: &Path, game_data: &GameDataCache) -> Result<ParsedReplay, ReplayLoadError> {
     let replay_file = ReplayFile::from_file(path).map_err(|report| {
         let is_io = matches!(report.current_context(), ParseError::Io(_));
         let message = format!("{report:?}");
@@ -407,18 +426,14 @@ fn parse_replay(path: &Path, game_data: &GameDataCache) -> Result<ReplayReportMo
         report.game_chat(),
     );
 
-    Ok(model)
+    Ok(ParsedReplay { model, game_data: loaded })
 }
 
-/// Parses `path` into a [`ReplayReportModel`] on the background executor
+/// Parses `path` into a [`ParsedReplay`] on the background executor
 /// (`cx.background_spawn`, not the tokio bridge -- this work is CPU-bound, not
 /// async I/O). `game_data` lazily loads and caches each replay's own build's
 /// data on first use.
-pub fn spawn_parse(
-    path: PathBuf,
-    game_data: GameDataCache,
-    cx: &App,
-) -> Task<Result<ReplayReportModel, ReplayLoadError>> {
+pub fn spawn_parse(path: PathBuf, game_data: GameDataCache, cx: &App) -> Task<Result<ParsedReplay, ReplayLoadError>> {
     cx.background_spawn(async move { parse_replay(&path, &game_data) })
 }
 
@@ -449,7 +464,8 @@ mod tests {
 
         let game_data = GameDataCache::new(PathBuf::from(&wows_dir));
 
-        let model = parse_replay(Path::new(&replay_path), &game_data).expect("failed to parse the replay");
+        let parsed = parse_replay(Path::new(&replay_path), &game_data).expect("failed to parse the replay");
+        let model = &parsed.model;
 
         assert!(!model.rows.is_empty(), "expected at least one player row");
         let self_row = model.rows.iter().find(|r| r.is_self).expect("expected a self player row");

@@ -44,9 +44,9 @@ use super::chat::ChatPanel;
 use super::columns::BattleOutcome;
 use super::columns::ColorRole;
 use super::load::GameDataCache;
+use super::load::ParsedReplay;
 use super::load::ReplayLoadError;
 use super::load::spawn_parse;
-use super::model::ReplayReportModel;
 use super::table::PlayerTable;
 use super::table::resolve_color;
 
@@ -93,9 +93,9 @@ impl ReplayPanel {
         Self { focus_handle, state: LoadState::Loading, show_chat: false, _parse_task: parse_task }
     }
 
-    fn apply_result(&mut self, result: Result<ReplayReportModel, ReplayLoadError>, cx: &mut Context<Self>) {
+    fn apply_result(&mut self, result: Result<ParsedReplay, ReplayLoadError>, cx: &mut Context<Self>) {
         self.state = match result {
-            Ok(mut model) => {
+            Ok(ParsedReplay { mut model, game_data }) => {
                 let ship_name =
                     model.rows.iter().find(|row| row.is_self).map(|row| row.ship_name.clone()).unwrap_or_default();
                 let title: SharedString =
@@ -104,7 +104,8 @@ impl ReplayPanel {
                 let battle_result = model.battle_result;
                 let chat = std::mem::take(&mut model.chat);
                 let chat_panel = (!chat.is_empty()).then(|| cx.new(|cx| ChatPanel::new(chat, cx)));
-                let table = cx.new(|cx| PlayerTable::new(model, cx));
+                let vfs = game_data.vfs().clone();
+                let table = cx.new(|cx| PlayerTable::new(model, vfs, cx));
                 LoadState::Loaded(LoadedReplay { title, battle_result, table, chat_panel })
             }
             Err(err) => LoadState::Failed(err),
