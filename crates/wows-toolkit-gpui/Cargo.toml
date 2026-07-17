@@ -17,9 +17,13 @@ anyhow.workspace = true
 # PNG, and that is the only format `icons.rs` decodes.
 image = { version = "0.25", default-features = false, features = ["png"] }
 wows-toolkit-config = { path = "../wows-toolkit-config" }
-wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing"] }
-wows_replays = { path = "../wows-replays", default-features = false, features = ["arc", "parsing"] }
+# vfs-mmap: load.rs builds the game VFS directly from a live install
+# (wowsunpack::game_data::build_game_vfs_for_build) to run the background
+# replay parse; implies vfs + arc + parsing.
+wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap"] }
+wows_replays = { path = "../wows-replays", default-features = false, features = ["arc", "parsing", "vfs"] }
 wows-replay-insights = { path = "../wows-replay-insights", default-features = false, features = ["arc", "battle-report"] }
+wows-battle-world = { path = "../wows-battle-world", default-features = false }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
@@ -28,10 +32,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2.0"
 
 [dev-dependencies]
-# vfs-mmap: only the ignored `from_normalized_resolves_species_text_from_a_real_provider`
-# test loads a real GameMetadataProvider from a game directory; not needed by
-# the main dependency above.
-wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap"] }
 jiff = "0.2"
 
 [workspace]

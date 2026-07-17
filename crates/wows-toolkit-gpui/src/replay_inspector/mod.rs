@@ -2,7 +2,9 @@
 //! model and tree view (`browser`/`browser_view`), the row model, column
 //! formatting, sort, and the custom player table (`model`/`columns`/`sort`/
 //! `table`/`expanded`). Colors are represented as `ColorRole` and resolved to
-//! real colors by the render layer (`table.rs`, `browser_view.rs`).
+//! real colors by the render layer (`table.rs`, `browser_view.rs`). `load`
+//! runs the background replay parse (`spawn_parse`) that produces a
+//! `ReplayReportModel` from a `.wowsreplay` file.
 #![allow(dead_code)]
 // Re-exports below are the module's public surface; not every item is
 // consumed outside its own file yet (some are test-only or reserved for a
@@ -15,6 +17,7 @@ pub mod browser_view;
 pub mod columns;
 pub mod expanded;
 pub mod icons;
+pub mod load;
 pub mod model;
 pub mod sample;
 pub mod sort;
@@ -34,6 +37,9 @@ pub use columns::ReplayColumn;
 pub use columns::cell_value;
 pub use columns::default_columns;
 pub use columns::separate_number;
+pub use load::GameDataCache;
+pub use load::ReplayLoadError;
+pub use load::spawn_parse;
 pub use model::PlayerRow;
 pub use model::ReplayReportModel;
 pub use sample::sample_model;

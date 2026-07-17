@@ -9335,6 +9335,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "wows-battle-world",
  "wows-replay-insights",
  "wows-toolkit-config",
  "wows_replays",
