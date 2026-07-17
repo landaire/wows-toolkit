@@ -91,20 +91,30 @@ impl ReplayInspectorView {
         if wows_dir.is_empty() {
             self.game_data = None;
             self.game_data_status = GameDataStatus::Failed("World of Warships directory is not set".to_string());
-            self.browser.update(cx, |browser, cx| browser.start_scan(wows_dir, cx));
+            let status = self.game_data_status.clone();
+            self.browser.update(cx, |browser, cx| {
+                browser.start_scan(wows_dir, cx);
+                browser.set_game_data(&status, cx);
+            });
             return;
         }
 
         let game_data = GameDataCache::new(PathBuf::from(&wows_dir));
         self.game_data = Some(game_data.clone());
         self.game_data_status = GameDataStatus::Loading;
-        self.browser.update(cx, |browser, cx| browser.start_scan(wows_dir.clone(), cx));
+        let status = self.game_data_status.clone();
+        self.browser.update(cx, |browser, cx| {
+            browser.start_scan(wows_dir.clone(), cx);
+            browser.set_game_data(&status, cx);
+        });
 
         let preload = spawn_startup_preload(PathBuf::from(&wows_dir), game_data, cx);
         cx.spawn(async move |this, cx| {
             let status = preload.await;
             let _ = this.update(cx, |this, cx| {
-                this.game_data_status = status;
+                this.game_data_status = status.clone();
+                let browser = this.browser.clone();
+                browser.update(cx, |browser, cx| browser.set_game_data(&status, cx));
                 cx.notify();
             });
         })

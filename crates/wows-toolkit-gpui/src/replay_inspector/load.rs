@@ -50,6 +50,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
+use gettext::Catalog;
 use gpui::App;
 use gpui::AppContext;
 use gpui::Task;
@@ -105,6 +106,32 @@ fn game_params_bin_path(build: u32) -> PathBuf {
     }
 }
 
+/// Loads the English gettext translation catalog for `build` from the live
+/// install (`bin/{build}/res/texts/en/LC_MESSAGES/global.mo`), matching the
+/// egui app's `WowsData::reload_translations` (`data/wows_data.rs`) minus its
+/// locale-preference and dump-directory fallbacks -- this port has neither a
+/// locale setting nor dump-directory support yet, so English from the live
+/// install is the only path. A missing or unparsable catalog is not fatal:
+/// ship/map names simply keep showing their untranslated raw form (see
+/// `browser_view.rs`'s translation fallback), and this is only logged.
+fn load_translations_catalog(wows_dir: &Path, build: u32) -> Option<Catalog> {
+    let mo_path = wows_dir.join(format!("bin/{build}/res/texts/en/LC_MESSAGES/global.mo"));
+    let file = match std::fs::File::open(&mo_path) {
+        Ok(file) => file,
+        Err(e) => {
+            tracing::warn!(build, path = %mo_path.display(), error = %e, "no English translation catalog for this build");
+            return None;
+        }
+    };
+    match Catalog::parse(file) {
+        Ok(catalog) => Some(catalog),
+        Err(e) => {
+            tracing::warn!(build, path = %mo_path.display(), error = %e, "failed to parse translation catalog");
+            None
+        }
+    }
+}
+
 /// One installed build's `GameMetadataProvider` and base `GameConstants`
 /// (before a replay's own versioned-constants overrides are merged in).
 /// Building this loads that whole build's game data; see [`GameDataCache`].
@@ -134,7 +161,11 @@ impl LoadedGameData {
     fn load_build(wows_dir: &Path, build: u32) -> Result<Self, ReplayLoadError> {
         let vfs = wowsunpack::game_data::build_game_vfs_for_build(wows_dir, build)
             .map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
-        let provider = Arc::new(Self::load_provider(&vfs, build)?);
+        let provider = Self::load_provider(&vfs, build)?;
+        if let Some(catalog) = load_translations_catalog(wows_dir, build) {
+            provider.set_translations(catalog);
+        }
+        let provider = Arc::new(provider);
         let base_constants = GameConstants::from_vfs(&vfs);
 
         Ok(Self { provider, base_constants })

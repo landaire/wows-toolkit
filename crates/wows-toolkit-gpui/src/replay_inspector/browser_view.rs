@@ -13,15 +13,25 @@
 //! metadata only, no packet decryption/decompression, so this is safe to run
 //! for every file in the directory on every scan.
 //!
-//! **`ship`/`map` are untranslated.** The egui app resolves `Replay::vehicle_name`/
-//! `map_name` through a `GameMetadataProvider` (loaded game params + VFS),
-//! which this milestone's browser does not load (that pipeline is Milestone
-//! 5's `load.rs`). Instead `ship` is the replay's raw `playerVehicle` codename
-//! (e.g. `"PFSD110-Kleber"`) and `map` is the raw `mapName` key (e.g.
-//! `"spaces/00_CO_ocean"`) -- exactly the string `translate_map_name` itself
-//! falls back to when no translation is found, so this is the same text the
-//! egui app would show if translation were simply unavailable, not a new
-//! format.
+//! **`ship`/`map` translation.** The scan itself only reads a replay's raw
+//! header fields -- the relation-0 vehicle's `shipId` (mirroring
+//! `Replay::player_vehicle`, `mod.rs:2576`) and the raw `mapName` key (e.g.
+//! `"spaces/00_CO_ocean"`) -- into `RawReplay`, never the preloaded game data
+//! (a header read must stay cheap; see `scan_replay_files`). `translate_replay`
+//! then resolves each `RawReplay` into a `ReplayLite` against `ReplayBrowser`'s
+//! `game_data` (the shared preloaded `GameMetadataProvider`, adopted via
+//! `set_game_data` once `load::GameDataStatus` reaches `Ready`), mirroring the
+//! egui app's `Replay::vehicle_name`/`map_name` (`mod.rs:2580`/`2592`)
+//! exactly: `vehicle_name` via `param_localization_id` + `localized_name_from_id`
+//! on the relation-0 vehicle's `shipId`, falling back to "Spectator" (the
+//! egui app's `t!("ui.replay.spectator")` value, hardcoded here since this
+//! crate has no i18n lookup wired -- see `panel.rs`'s equivalent hardcoded
+//! chat-tooltip string) when no vehicle or no translation resolves; `map_name`
+//! via `translate_map_name`. Before `game_data` is adopted (`None`), both fall
+//! back to the untranslated raw string -- exactly what `translate_map_name`
+//! itself falls back to when no translation is found, so this is the same
+//! text the egui app would show if translation were simply unavailable, not a
+//! new format.
 //!
 //! **`battle_result` is always `None` from this scan.** The egui app only
 //! learns a replay's win/loss/draw outcome after a full packet parse resolves
@@ -33,6 +43,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -51,15 +62,43 @@ use gpui_component::tree::tree;
 use gpui_component::v_flex;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::battle_controller::BattleResult;
+use wows_replays::types::GameParamId;
 use wows_toolkit_config::ReplayGrouping;
+use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::TranslationKey;
 use wowsunpack::data::Version;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::translations::translate_map_name;
 
 use super::browser::BrowserNode;
 use super::browser::ReplayLite;
 use super::browser::build_browser_tree;
 use super::columns::BattleOutcome;
 use super::columns::ColorRole;
+use super::load::GameDataStatus;
 use super::table::resolve_color;
+
+/// The egui app's `t!("ui.replay.spectator")` value
+/// (`crates/wt-translations/translations/en.toml`'s `[ui.replay] spectator`
+/// key), hardcoded per this crate's no-i18n-wired convention (see the module
+/// doc and `panel.rs`'s equivalent chat-tooltip literal). Shown for a replay
+/// whose header names no relation-0 vehicle, or whose vehicle's ship id has
+/// no resolvable translation, once game data is loaded -- mirroring
+/// `Replay::vehicle_name`'s own fallback (`mod.rs:2580`).
+const SPECTATOR_LABEL: &str = "Spectator";
+
+/// One replay's header-only scan result, before ship/map translation (see the
+/// module doc). `ship_id` is the relation-0 vehicle's `shipId`, mirroring
+/// `Replay::player_vehicle` (`mod.rs:2576`); `raw_ship`/`raw_map` are the
+/// untranslated fallbacks `translate_replay` uses while `game_data` is not
+/// yet loaded.
+struct RawReplay {
+    path: PathBuf,
+    ship_id: Option<GameParamId>,
+    raw_ship: String,
+    raw_map: String,
+    game_time: String,
+}
 
 /// A leaf's path and (usually absent, see the module doc) battle result,
 /// looked up by tree-item id during rendering. Groups need no side table:
@@ -99,7 +138,7 @@ pub enum ReplayBrowserEvent {
 }
 
 pub struct ReplayBrowser {
-    files: Vec<ReplayLite>,
+    files: Vec<RawReplay>,
     grouping: ReplayGrouping,
     tree_state: Entity<TreeState>,
     status: ScanStatus,
@@ -109,6 +148,10 @@ pub struct ReplayBrowser {
     /// The most recently double-clicked leaf's path -- the "open" intent's
     /// minimal stand-in for Milestone 5's dock wiring (see the module doc).
     open_requested: Option<PathBuf>,
+    /// The shared preloaded game data, once `load::GameDataStatus` reaches
+    /// `Ready` (see `set_game_data`). `None` translates every label to its
+    /// untranslated raw fallback (see `translate_replay`).
+    game_data: Option<Arc<GameMetadataProvider>>,
 }
 
 impl EventEmitter<ReplayBrowserEvent> for ReplayBrowser {}
@@ -124,6 +167,7 @@ impl ReplayBrowser {
             leaf_info: HashMap::new(),
             selected_path: None,
             open_requested: None,
+            game_data: None,
         }
     }
 
@@ -135,6 +179,32 @@ impl ReplayBrowser {
     /// The path most recently opened via double-click, if any.
     pub fn open_requested(&self) -> Option<&Path> {
         self.open_requested.as_deref()
+    }
+
+    /// Adopts `status`'s game data (or drops it, if `status` is no longer
+    /// `Ready`) and rebuilds the tree so labels reflect it -- called whenever
+    /// `load::GameDataStatus` changes, most importantly on its `Loading` ->
+    /// `Ready` transition, so a browser built before game data preloaded gets
+    /// its raw-fallback labels replaced with real ship/map names once it
+    /// does. A no-op when the resolved provider is unchanged (comparing by
+    /// `Arc` identity), so polling the same settled status repeatedly does
+    /// not re-rebuild the tree for nothing.
+    pub fn set_game_data(&mut self, status: &GameDataStatus, cx: &mut Context<Self>) {
+        let new_provider = match status {
+            GameDataStatus::Ready(loaded) => Some(Arc::clone(loaded.provider())),
+            GameDataStatus::Loading | GameDataStatus::Failed(_) => None,
+        };
+        let unchanged = match (&self.game_data, &new_provider) {
+            (Some(current), Some(new)) => Arc::ptr_eq(current, new),
+            (None, None) => true,
+            _ => false,
+        };
+        if unchanged {
+            return;
+        }
+        self.game_data = new_provider;
+        self.rebuild_tree(cx);
+        cx.notify();
     }
 
     /// Kicks off the background directory scan for `wows_dir`. Safe to call
@@ -172,7 +242,9 @@ impl ReplayBrowser {
     }
 
     fn rebuild_tree(&mut self, cx: &mut Context<Self>) {
-        let nodes = build_browser_tree(&self.files, self.grouping);
+        let provider = self.game_data.as_deref();
+        let translated: Vec<ReplayLite> = self.files.iter().map(|raw| translate_replay(raw, provider)).collect();
+        let nodes = build_browser_tree(&translated, self.grouping);
         self.leaf_info.clear();
         let mut next_group_id = 0usize;
         let items: Vec<TreeItem> =
@@ -379,7 +451,7 @@ fn last_server_version(data: &str) -> Option<String> {
 /// `ReplayFile::meta_from_file` read. A file that fails to parse (corrupt,
 /// mid-write, or from a format this parser does not understand) is logged
 /// and skipped rather than aborting the whole scan.
-fn scan_replay_files(replays_dir: &Path) -> Vec<ReplayLite> {
+fn scan_replay_files(replays_dir: &Path) -> Vec<RawReplay> {
     let Ok(entries) = std::fs::read_dir(replays_dir) else {
         return Vec::new();
     };
@@ -399,13 +471,16 @@ fn scan_replay_files(replays_dir: &Path) -> Vec<ReplayLite> {
         }
 
         match ReplayFile::meta_from_file(&path) {
-            Ok(meta) => out.push(ReplayLite {
-                ship: meta.playerVehicle,
-                map: meta.mapName,
-                game_time: meta.dateTime,
-                battle_result: None,
-                path,
-            }),
+            Ok(meta) => {
+                let ship_id = meta.vehicles.iter().find(|vehicle| vehicle.relation == 0).map(|vehicle| vehicle.shipId);
+                out.push(RawReplay {
+                    ship_id,
+                    raw_ship: meta.playerVehicle,
+                    raw_map: meta.mapName,
+                    game_time: meta.dateTime,
+                    path,
+                })
+            }
             Err(err) => tracing::warn!(path = %path.display(), error = ?err, "failed to read replay meta"),
         }
     }
@@ -415,9 +490,43 @@ fn scan_replay_files(replays_dir: &Path) -> Vec<ReplayLite> {
 /// The full background-scan step: resolve the replays directory, then read
 /// every replay's header. Run on `cx.background_spawn` (see `start_scan`),
 /// never on the UI thread.
-fn scan_replays_dir(wows_dir: &str) -> Vec<ReplayLite> {
+fn scan_replays_dir(wows_dir: &str) -> Vec<RawReplay> {
     let replays_dir = resolve_replays_dir(Path::new(wows_dir));
     scan_replay_files(&replays_dir)
+}
+
+/// Resolves one `RawReplay` into a `ReplayLite` against `provider` (the
+/// browser's currently adopted game data, `None` before `set_game_data` first
+/// sees `GameDataStatus::Ready` -- see the module doc). Mirrors the egui
+/// app's `Replay::vehicle_name`/`map_name` (`mod.rs:2580`/`2592`) exactly
+/// when `provider` is present; falls back to the untranslated raw fields
+/// otherwise.
+fn translate_replay(raw: &RawReplay, provider: Option<&GameMetadataProvider>) -> ReplayLite {
+    let ship = translate_ship_name(raw.ship_id, &raw.raw_ship, provider);
+    let map = match provider {
+        Some(provider) => translate_map_name(&raw.raw_map, provider),
+        None => raw.raw_map.clone(),
+    };
+    ReplayLite { path: raw.path.clone(), ship, map, game_time: raw.game_time.clone(), battle_result: None }
+}
+
+/// Mirrors `Replay::vehicle_name` (`mod.rs:2580`): resolves `ship_id`'s
+/// translation id via `param_localization_id`, then looks that id up in the
+/// provider's catalog via `localized_name_from_id`. Falls back to
+/// `SPECTATOR_LABEL` when `provider` is present but either `ship_id` is
+/// absent (no relation-0 vehicle in the replay's header) or no translation
+/// resolves, and to `raw_ship` when `provider` itself is not yet loaded.
+fn translate_ship_name(
+    ship_id: Option<GameParamId>,
+    raw_ship: &str,
+    provider: Option<&GameMetadataProvider>,
+) -> String {
+    let Some(provider) = provider else { return raw_ship.to_string() };
+    let Some(ship_id) = ship_id else { return SPECTATOR_LABEL.to_string() };
+    provider
+        .param_localization_id(ship_id)
+        .and_then(|translation_id| provider.localized_name_from_id(&TranslationKey::new(translation_id)))
+        .unwrap_or_else(|| SPECTATOR_LABEL.to_string())
 }
 
 #[cfg(test)]
