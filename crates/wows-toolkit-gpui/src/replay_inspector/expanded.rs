@@ -167,9 +167,7 @@ fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Icon
 
     if has_achievements {
         col = col.child(section_heading("Achievements"));
-        for (idx, achievement) in row.achievements.iter().enumerate() {
-            col = col.child(achievement_row(row_ix, idx, achievement, icons));
-        }
+        col = col.child(achievements_view(row_ix, &row.achievements, icons));
     }
 
     if has_ribbons {
@@ -180,9 +178,7 @@ fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Icon
         let mut ribbons: Vec<&RibbonResult> = row.ribbons.iter().collect();
         ribbons.sort_by(|a, b| a.name.cmp(&b.name));
         reorder_bulge_after_main_caliber(&mut ribbons);
-        for (idx, ribbon) in ribbons.into_iter().enumerate() {
-            col = col.child(ribbon_row(row_ix, idx, ribbon, icons));
-        }
+        col = col.child(ribbons_view(row_ix, ribbons, icons));
     }
 
     if has_damage_events {
@@ -223,6 +219,27 @@ fn reorder_bulge_after_main_caliber(ribbons: &mut Vec<&RibbonResult>) {
     let bulge = ribbons.remove(bulge_idx);
     let insert_idx = if bulge_idx < main_caliber_idx { main_caliber_idx } else { main_caliber_idx + 1 };
     ribbons.insert(insert_idx, bulge);
+}
+
+/// A tight wrapping row of achievement chips, matching the egui app's compact
+/// icon flow (icon + "(Nx)" fallback text, wrapping to the next line instead
+/// of stacking one achievement per line).
+fn achievements_view(row_ix: usize, achievements: &[AchievementResult], icons: &IconCache) -> AnyElement {
+    let mut row = h_flex().flex_wrap().gap_1();
+    for (idx, achievement) in achievements.iter().enumerate() {
+        row = row.child(achievement_row(row_ix, idx, achievement, icons));
+    }
+    row.into_any_element()
+}
+
+/// A tight wrapping row of ribbon chips, in the already-sorted/reordered
+/// display order. Matches the egui app's compact icon flow.
+fn ribbons_view(row_ix: usize, ribbons: Vec<&RibbonResult>, icons: &IconCache) -> AnyElement {
+    let mut row = h_flex().flex_wrap().gap_1();
+    for (idx, ribbon) in ribbons.into_iter().enumerate() {
+        row = row.child(ribbon_row(row_ix, idx, ribbon, icons));
+    }
+    row.into_any_element()
 }
 
 fn achievement_row(row_ix: usize, idx: usize, achievement: &AchievementResult, icons: &IconCache) -> AnyElement {
