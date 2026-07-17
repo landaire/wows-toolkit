@@ -1,4 +1,5 @@
 mod app;
+mod theme;
 
 use app::App;
 use gpui::*;
@@ -22,6 +23,7 @@ fn main() {
 
         cx.spawn(async move |cx| {
             cx.open_window(window_options, |window, cx| {
+                theme::apply_egui_dark_theme(1.15, window, cx);
                 let view = cx.new(|cx| App::new(window, cx));
                 cx.new(|cx| Root::new(view, window, cx))
             })
