@@ -70,28 +70,111 @@ const _: () = assert!(CELL_ID_STRIDE > ReplayColumn::ALL.len(), "CELL_ID_STRIDE 
 /// exactly them.
 const STICKY_COLUMN_COUNT: usize = 3;
 
-/// Fixed pixel width for a column's header and body cells. Both use the same
-/// value so the shared horizontal scroll keeps them aligned.
-fn column_width(col: ReplayColumn) -> f32 {
-    match col {
-        ReplayColumn::Actions => 60.0,
-        ReplayColumn::Name => 220.0,
-        ReplayColumn::ShipName => 150.0,
-        ReplayColumn::Skills => 130.0,
-        ReplayColumn::PersonalRating => 70.0,
-        ReplayColumn::BaseXp => 80.0,
-        ReplayColumn::RawXp => 80.0,
-        ReplayColumn::Kills => 55.0,
-        ReplayColumn::ObservedDamage => 130.0,
-        ReplayColumn::ActualDamage => 120.0,
-        ReplayColumn::ReceivedDamage => 130.0,
-        ReplayColumn::SpottingDamage => 130.0,
-        ReplayColumn::PotentialDamage => 130.0,
-        ReplayColumn::Hits => 70.0,
-        ReplayColumn::Heals => 70.0,
-        ReplayColumn::DistanceTraveled => 120.0,
-        ReplayColumn::TimeLived => 90.0,
+/// Column width bounds, matching the egui app's
+/// `Column::new(100.0).range(10.0..=500.0)` (`mod.rs:2795`).
+const COLUMN_MIN_WIDTH: f32 = 10.0;
+const COLUMN_MAX_WIDTH: f32 = 500.0;
+
+/// Fixed pixel width of the Name column's ship-class `img` icon
+/// (`name_cell`'s `.w(px(16.))`), the one piece of cell furniture that does
+/// not scale with the theme font size.
+const SHIP_ICON_WIDTH: f32 = 16.0;
+
+/// Rendered pixel width of `text` at the window's current font and
+/// `window.rem_size()` (the theme's body font size; see `theme.rs`), with
+/// `bold` reproducing `header_cell`'s `.font_weight(FontWeight::BOLD)`.
+/// Backs `measure_column_widths`'s one-shot content pass -- never called on a
+/// per-frame path.
+fn text_width(text: SharedString, window: &mut Window, bold: bool) -> f32 {
+    if text.is_empty() {
+        return 0.0;
     }
+    let mut font = window.text_style().font();
+    if bold {
+        font.weight = FontWeight::BOLD;
+    }
+    let run = TextRun {
+        len: text.len(),
+        font,
+        color: Hsla { h: 0., s: 0., l: 0., a: 1. },
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    window.text_system().shape_line(text, window.rem_size(), &[run], None).width().as_f32()
+}
+
+/// Computes every column's content-fit width: the widest of the column's
+/// header label and every row's rendered cell text, plus that column's
+/// furniture (icons, marker glyphs, the `px_1()` cell padding both
+/// `header_cell` and `cell_element` apply), clamped to
+/// `COLUMN_MIN_WIDTH..=COLUMN_MAX_WIDTH`. Indexed by `ReplayColumn as usize`
+/// (unconditionally sized to `ReplayColumn::ALL.len()`; a column absent from
+/// `model.columns` keeps the placeholder `COLUMN_MIN_WIDTH` entry, since it
+/// isn't rendered until `set_columns` brings it back and re-triggers this
+/// pass).
+///
+/// The Name column reserves `max(ship-class icon, its species-text fallback)`
+/// for the icon slot regardless of whether `IconCache` has resolved the icon
+/// yet (`name_cell` shows the fallback text until the background decode in
+/// `PlayerTable::new` completes) -- so this one pass stays correct across
+/// that transition without needing a second recompute when the icons land.
+///
+/// Run once per data/column/debug change (`PlayerTable::new`, `set_columns`,
+/// `set_debug`), gated behind `PlayerTable::widths_dirty` in `render` -- never
+/// per frame.
+fn measure_column_widths(model: &ReplayReportModel, debug: bool, window: &mut Window) -> Vec<Pixels> {
+    let rem = window.rem_size().as_f32();
+    let gap_1 = rem * 0.25;
+    let gap_0p5 = rem * 0.125;
+    let cell_padding = rem * 0.5;
+    let icon_default = rem;
+
+    let mut widths = vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()];
+    for &col in &model.columns {
+        let header_w = text_width(column_label(col).into(), window, true);
+        let content_w = match col {
+            ReplayColumn::Actions => header_w,
+            ReplayColumn::Name => {
+                let mut max_w = header_w;
+                for row in &model.rows {
+                    let cell = cell_value(row, col, debug);
+                    let text_w = text_width(cell.text.into(), window, false);
+                    let species_w = text_width(row.ship_species_text.clone().into(), window, false);
+                    let icon_w = species_w.max(SHIP_ICON_WIDTH);
+                    max_w = max_w.max(icon_default + gap_1 + icon_w + gap_1 + text_w);
+                }
+                max_w
+            }
+            ReplayColumn::Skills => {
+                let mut max_w = header_w;
+                for row in &model.rows {
+                    let cell = cell_value(row, col, debug);
+                    let text_w = text_width(cell.text.into(), window, false);
+                    let marker_count = row.skill_warning as u32 + row.has_dazzle as u32 + row.has_ifa as u32;
+                    let row_w = if marker_count > 0 {
+                        let markers_w =
+                            marker_count as f32 * icon_default + marker_count.saturating_sub(1) as f32 * gap_0p5;
+                        markers_w + gap_1 + text_w
+                    } else {
+                        text_w
+                    };
+                    max_w = max_w.max(row_w);
+                }
+                max_w
+            }
+            _ => {
+                let mut max_w = header_w;
+                for row in &model.rows {
+                    let cell = cell_value(row, col, debug);
+                    max_w = max_w.max(text_width(cell.text.into(), window, false));
+                }
+                max_w
+            }
+        };
+        widths[col as usize] = px((content_w + cell_padding).clamp(COLUMN_MIN_WIDTH, COLUMN_MAX_WIDTH));
+    }
+    widths
 }
 
 /// Header label for a column, matching the egui app's `ui.replay.column.*`
@@ -222,6 +305,17 @@ pub struct PlayerTable {
     /// `is_row_expanded: BTreeMap<u64, bool>`, minus the closed/`false`
     /// entries it also keeps around (a `HashSet` has no use for them).
     expanded: HashSet<AccountId>,
+    /// Content-fit width per column, indexed by `ReplayColumn as usize`.
+    /// Recomputed by `measure_column_widths` whenever `widths_dirty` is set;
+    /// `render` is the only reader/writer of that flag, since computing a
+    /// width needs `&mut Window` (real text measurement), which only `render`
+    /// has.
+    column_widths: Vec<Pixels>,
+    /// Set on construction and whenever the columns/data/debug flag change
+    /// (`set_columns`, `set_debug`); cleared by `render` after it recomputes
+    /// `column_widths`. Keeps the (17-column x up-to-24-row) measurement pass
+    /// off the per-frame path.
+    widths_dirty: bool,
 }
 
 impl PlayerTable {
@@ -269,6 +363,8 @@ impl PlayerTable {
             icons: IconCache::new(),
             debug,
             expanded: HashSet::new(),
+            column_widths: vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()],
+            widths_dirty: true,
         }
     }
 
@@ -285,7 +381,10 @@ impl PlayerTable {
     /// re-sorts, since a column's NDA-hidden sort key changes between debug
     /// on/off (`sort_rows`'s `debug` gate), then notifies so every cell's
     /// `cell_value`/`expanded::render_detail` call picks up the new flag on
-    /// its next render.
+    /// its next render. Also re-triggers `measure_column_widths`: NDA hiding
+    /// swaps cell text for the shorter "NDA" placeholder, so the fit widths
+    /// computed while hidden are too narrow for the real numbers debug mode
+    /// reveals.
     pub fn set_debug(&mut self, debug: bool, cx: &mut Context<Self>) {
         if self.debug == debug {
             return;
@@ -293,6 +392,7 @@ impl PlayerTable {
         self.debug = debug;
         sort_rows(&mut self.model.rows, self.model.self_team, self.sort, self.debug);
         self.list_state.reset(self.model.rows.len());
+        self.widths_dirty = true;
         cx.notify();
     }
 
@@ -301,9 +401,12 @@ impl PlayerTable {
     /// via `panel.rs::ReplayPanel::set_columns`). Row order/content is
     /// untouched -- only which columns render -- so this just swaps the field
     /// and notifies; `render`'s `sticky_columns`/`scroll_columns` split is
-    /// recomputed from `model.columns` fresh on every render.
+    /// recomputed from `model.columns` fresh on every render. Marks
+    /// `widths_dirty` so a newly-shown column gets a real fit width instead
+    /// of its placeholder `COLUMN_MIN_WIDTH` entry.
     pub fn set_columns(&mut self, columns: Vec<ReplayColumn>, cx: &mut Context<Self>) {
         self.model.columns = columns;
+        self.widths_dirty = true;
         cx.notify();
     }
 
@@ -323,7 +426,7 @@ impl PlayerTable {
 
     fn header_cell(&self, col: ReplayColumn, cx: &mut Context<Self>) -> AnyElement {
         let base = div()
-            .w(px(column_width(col)))
+            .w(self.column_widths[col as usize])
             .flex_none()
             .px_1()
             .py_1()
@@ -665,25 +768,29 @@ fn actions_cell(ix: usize, row: &PlayerRow, debug: bool, entity: Entity<PlayerTa
 /// layouts and falling back to the generic `cell_element` for everything
 /// else.
 fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout) -> AnyElement {
+    let width = layout.column_widths[col as usize].as_f32();
     match col {
-        ReplayColumn::Name => name_cell(ix, row, layout, column_width(col)),
-        ReplayColumn::Skills => skills_cell(ix, row, layout.debug, column_width(col)),
-        ReplayColumn::Actions => actions_cell(ix, row, layout.debug, layout.entity.clone(), column_width(col)),
-        _ => cell_element(ix, col, cell_value(row, col, layout.debug), column_width(col)),
+        ReplayColumn::Name => name_cell(ix, row, layout, width),
+        ReplayColumn::Skills => skills_cell(ix, row, layout.debug, width),
+        ReplayColumn::Actions => actions_cell(ix, row, layout.debug, layout.entity.clone(), width),
+        _ => cell_element(ix, col, cell_value(row, col, layout.debug), width),
     }
 }
 
 /// Per-frame layout shared by every row and the header's scrolling portion:
 /// the sticky/scrolling column split, the scrolling section's total width,
-/// the shared horizontal scroll handle, the icon cache, the debug flag, this
-/// row's expanded state and entity handle (for the caret/double-click
-/// toggle), and the full row list (for the expanded damage-interaction
-/// breakdowns, which look up other rows by `db_id`). Bundled into one struct
-/// so `render_row` stays under clippy's argument-count limit.
+/// the content-fit column widths (`PlayerTable::column_widths`, indexed by
+/// `ReplayColumn as usize`), the shared horizontal scroll handle, the icon
+/// cache, the debug flag, this row's expanded state and entity handle (for
+/// the caret/double-click toggle), and the full row list (for the expanded
+/// damage-interaction breakdowns, which look up other rows by `db_id`).
+/// Bundled into one struct so `render_row` stays under clippy's
+/// argument-count limit.
 struct RowLayout<'a> {
     sticky_columns: &'a [ReplayColumn],
     scroll_columns: &'a [ReplayColumn],
     scroll_width: f32,
+    column_widths: &'a [Pixels],
     icons: &'a IconCache,
     debug: bool,
     h_scroll: &'a ScrollHandle,
@@ -745,13 +852,18 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
 }
 
 impl Render for PlayerTable {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.widths_dirty {
+            self.column_widths = measure_column_widths(&self.model, self.debug, window);
+            self.widths_dirty = false;
+        }
+
         let border = cx.theme().border;
         let hover_bg = cx.theme().muted;
 
         let sticky_columns: Vec<ReplayColumn> = self.model.columns.iter().copied().take(STICKY_COLUMN_COUNT).collect();
         let scroll_columns: Vec<ReplayColumn> = self.model.columns.iter().copied().skip(STICKY_COLUMN_COUNT).collect();
-        let scroll_width: f32 = scroll_columns.iter().map(|col| column_width(*col)).sum();
+        let scroll_width: f32 = scroll_columns.iter().map(|col| self.column_widths[*col as usize].as_f32()).sum();
 
         let header = h_flex()
             .w_full()
@@ -784,6 +896,7 @@ impl Render for PlayerTable {
                 sticky_columns: &sticky_columns,
                 scroll_columns: &scroll_columns,
                 scroll_width,
+                column_widths: &table.column_widths,
                 icons: &table.icons,
                 debug: table.debug,
                 h_scroll: &h_scroll,
