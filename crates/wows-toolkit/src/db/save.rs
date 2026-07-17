@@ -15,6 +15,7 @@ use crate::tab_state::SharedPersistedState;
 use crate::tab_state::SharedWindowSettings;
 use crate::tab_state::WindowKind;
 use crate::tab_state::WindowSettings;
+use crate::tab_state::WindowSettingsEguiExt;
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::SortOrder;
 

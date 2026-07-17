@@ -16,8 +16,6 @@ use parking_lot::Mutex;
 use parking_lot::RwLock;
 use rootcause::Report;
 use rootcause::prelude::*;
-use serde::Deserialize;
-use serde::Serialize;
 use tracing::debug;
 use tracing::error;
 use tracing::instrument;
@@ -812,37 +810,7 @@ fn parse_replay_data_in_background(
     Err(())
 }
 
-#[derive(Copy, Clone, Default, Debug, Serialize, Deserialize, Eq, PartialEq)]
-pub enum ReplayExportFormat {
-    #[default]
-    Json,
-    Cbor,
-    Csv,
-}
-
-impl ReplayExportFormat {
-    pub fn as_str(&self) -> &str {
-        self.as_ref()
-    }
-
-    pub fn extension(&self) -> &str {
-        match self {
-            ReplayExportFormat::Json => "json",
-            ReplayExportFormat::Cbor => "cbor",
-            ReplayExportFormat::Csv => "csv",
-        }
-    }
-}
-
-impl AsRef<str> for ReplayExportFormat {
-    fn as_ref(&self) -> &str {
-        match self {
-            ReplayExportFormat::Json => "JSON",
-            ReplayExportFormat::Cbor => "CBOR",
-            ReplayExportFormat::Csv => "CSV",
-        }
-    }
-}
+pub use wows_toolkit_config::ReplayExportFormat;
 
 pub struct DataExportSettings {
     pub should_auto_export: bool,

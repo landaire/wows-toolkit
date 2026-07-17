@@ -89,6 +89,7 @@ arboard = "3.6.1"
 iroh = { workspace = true, default-features = false, features = ["fast-apple-datapath", "portmapper"] }
 wt-collab-protocol = { workspace = true, features = ["egui"] }
 wt-collab-egui = { workspace = true }
+wows-toolkit-config = { workspace = true }
 web-time = { workspace = true }
 rand = "0.10"
 rkyv = { workspace = true }

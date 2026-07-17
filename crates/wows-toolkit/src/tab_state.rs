@@ -51,36 +51,25 @@ use crate::util::personal_rating::PersonalRatingData;
 
 pub type SharedToasts = Arc<parking_lot::Mutex<egui_notify::Toasts>>;
 
-// ---------------------------------------------------------------------------
-// Window settings persistence (modeled after egui_winit::WindowSettings)
-// ---------------------------------------------------------------------------
+pub use wows_toolkit_config::WindowKind;
+pub use wows_toolkit_config::WindowSettings;
 
-/// Identifies which type of window settings to persist.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum WindowKind {
-    Main,
-    ReplayRenderer,
-    TacticsBoard,
-    ArmorViewer,
+/// egui-specific constructors/appliers for the persisted [`WindowSettings`].
+///
+/// These live here rather than on the type itself because `WindowSettings` is
+/// defined in `wows-toolkit-config`, which has no egui dependency.
+pub trait WindowSettingsEguiExt {
+    fn from_viewport_info(info: &egui::ViewportInfo, zoom_compensation: Option<f32>) -> Self;
+    fn apply_to_builder(&self, builder: egui::ViewportBuilder, default_size: [f32; 2]) -> egui::ViewportBuilder;
 }
 
-/// Persisted window geometry, modeled after `egui_winit::WindowSettings`.
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct WindowSettings {
-    pub inner_size_points: Option<[f32; 2]>,
-    pub outer_position_pixels: Option<[f32; 2]>,
-    pub fullscreen: bool,
-    pub maximized: bool,
-}
-
-impl WindowSettings {
+impl WindowSettingsEguiExt for WindowSettings {
     /// Capture current viewport state from [`egui::ViewportInfo`].
     ///
     /// Pass `Some(ctx.zoom_factor())` for the main window to compensate for
     /// eframe applying the zoom again on restore. Secondary/deferred viewports
     /// should pass `None` since they already report sizes at the correct scale.
-    pub fn from_viewport_info(info: &egui::ViewportInfo, zoom_compensation: Option<f32>) -> Self {
+    fn from_viewport_info(info: &egui::ViewportInfo, zoom_compensation: Option<f32>) -> Self {
         let zoom = zoom_compensation.unwrap_or(1.0);
         Self {
             inner_size_points: info.inner_rect.map(|r| [r.width() * zoom, r.height() * zoom]),
@@ -92,7 +81,7 @@ impl WindowSettings {
 
     /// Apply these settings to a [`egui::ViewportBuilder`], falling back to
     /// `default_size` when no stored size is available.
-    pub fn apply_to_builder(&self, builder: egui::ViewportBuilder, default_size: [f32; 2]) -> egui::ViewportBuilder {
+    fn apply_to_builder(&self, builder: egui::ViewportBuilder, default_size: [f32; 2]) -> egui::ViewportBuilder {
         let size = self.inner_size_points.unwrap_or(default_size);
         let mut builder = builder.with_inner_size(size);
         if let Some([x, y]) = self.outer_position_pixels {

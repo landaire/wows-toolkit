@@ -5,9 +5,11 @@ use std::time::SystemTime;
 
 use tracing::instrument;
 
-pub use wows_replay_insights::personal_rating::{
-    ExpectedValuesData, PersonalRatingCategory, PersonalRatingData, PersonalRatingResult, ShipBattleStats,
-};
+pub use wows_replay_insights::personal_rating::ExpectedValuesData;
+pub use wows_replay_insights::personal_rating::PersonalRatingCategory;
+pub use wows_replay_insights::personal_rating::PersonalRatingData;
+pub use wows_replay_insights::personal_rating::PersonalRatingResult;
+pub use wows_replay_insights::personal_rating::ShipBattleStats;
 
 /// URL to fetch expected values from wows-numbers.com
 const EXPECTED_VALUES_URL: &str = "https://api.wows-numbers.com/personal/rating/expected/json/";

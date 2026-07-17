@@ -127,6 +127,7 @@ fn main() -> eframe::Result<()> {
     // Restore window position/size from the database before creating the window.
     // Position can only be set on the ViewportBuilder, not via viewport commands.
     if let Some(settings) = wows_toolkit::load_main_window_settings() {
+        use wows_toolkit::WindowSettingsEguiExt;
         viewport = settings.apply_to_builder(viewport, [600.0, 400.0]);
     } else {
         viewport = viewport.with_inner_size([600.0, 400.0]);

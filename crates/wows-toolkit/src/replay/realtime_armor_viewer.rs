@@ -35,6 +35,7 @@ use crate::armor_viewer::state::StoredTrajectory;
 use crate::icons;
 use crate::replay::renderer::RealtimeArmorBridge;
 use crate::replay::renderer::ReplayPlayerInfo;
+use crate::tab_state::WindowSettingsEguiExt;
 use crate::viewport_3d::GpuPipeline;
 use crate::viewport_3d::Vec3;
 use rust_i18n::t;

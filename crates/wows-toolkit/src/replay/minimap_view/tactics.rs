@@ -39,6 +39,7 @@ use crate::replay::minimap_view::send_annotation_full_sync;
 use crate::replay::minimap_view::send_annotation_remove;
 use crate::replay::minimap_view::send_annotation_update;
 use crate::replay::renderer::RendererAssetCache;
+use crate::tab_state::WindowSettingsEguiExt;
 
 use super::Annotation;
 use super::AnnotationState;

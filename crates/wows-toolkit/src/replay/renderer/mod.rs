@@ -17,6 +17,7 @@ use egui::Vec2;
 use parking_lot::Mutex;
 
 use crate::LocalizedTextResolver;
+use crate::tab_state::WindowSettingsEguiExt;
 use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::GameFonts;
 use wows_minimap_renderer::HUD_HEIGHT;
