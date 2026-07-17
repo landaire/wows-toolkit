@@ -50,6 +50,7 @@ use super::sort::SortOrder;
 use super::sort::sort_rows;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replays::types::AccountId;
+use wows_replays::types::Relation;
 use wowsunpack::vfs::VfsPath;
 
 /// Overdraw for the virtualized list: how far past the viewport to render so
@@ -547,7 +548,59 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElemen
 /// copying) -- `panel.rs` subscribes to that event and shows the payload in
 /// the same `RawJsonPanel`/`SidePanel` side-panel slot the debug header's
 /// "Raw Metadata"/"Raw Results" buttons use.
-fn build_actions_menu(mut menu: PopupMenu, row: &PlayerRow, debug: bool, entity: Entity<PlayerTable>) -> PopupMenu {
+/// The handful of `PlayerRow` fields `build_actions_menu` actually reads,
+/// cloned out in `actions_cell` instead of the whole row: `PlayerRow` also
+/// carries achievements/ribbons/consumables/build/damage-interaction data
+/// (and `raw_metadata_json`, a full pretty-printed JSON dump) that the menu
+/// never touches, so cloning the whole struct there was a real per-visible-
+/// row, every-render cost for data the dropdown discards.
+struct ActionsMenuData {
+    relation: Relation,
+    has_vehicle_entity: bool,
+    ship_config_url: Option<String>,
+    short_ship_config_url: Option<String>,
+    wows_numbers_url: Option<String>,
+    raw_metadata_json: Option<String>,
+}
+
+impl ActionsMenuData {
+    fn from_row(row: &PlayerRow) -> Self {
+        Self {
+            relation: row.relation,
+            has_vehicle_entity: row.has_vehicle_entity,
+            ship_config_url: row.ship_config_url.clone(),
+            short_ship_config_url: row.short_ship_config_url.clone(),
+            wows_numbers_url: row.wows_numbers_url.clone(),
+            raw_metadata_json: row.raw_metadata_json.clone(),
+        }
+    }
+}
+
+/// Builds the Actions column's `...` menu items, mirroring the egui app's
+/// `ReplayColumn::Actions` arm (`ui/replay_parser/mod.rs` ~1681-1799)
+/// item-for-item: the ship-config "Open Build in Browser"/"Copy Build Link"/
+/// "Copy Short Build Link" trio (shown for non-enemy rows or in debug, and
+/// only once the replay observed a vehicle entity, matching the egui gate
+/// exactly), a separator, the WoWS-numbers link, and -- debug only -- "View
+/// Raw Player Metadata". Each item is omitted (not shown disabled) when its
+/// backing URL/JSON is `None`, per this port's "hidden, not a panic" rule for
+/// missing config (`PlayerRow::ship_config_url`'s field doc). "Open"/"WoWS
+/// numbers" use `PopupMenuItem::link`, which opens via `cx.open_url`
+/// (gpui's own OS-opener, no `open`-crate dependency needed) and renders the
+/// external-link glyph the egui app's SHARE icon stood in for; the copy
+/// items write to the clipboard via `cx.write_to_clipboard`, matching
+/// `ui.ctx().copy_text` and the browser_view.rs "Copy Path" precedent. "View
+/// Raw Player Metadata" instead emits `PlayerTableEvent::ViewRawJson` on
+/// `entity`, matching the egui app's behavior of opening a viewer (not
+/// copying) -- `panel.rs` subscribes to that event and shows the payload in
+/// the same `RawJsonPanel`/`SidePanel` side-panel slot the debug header's
+/// "Raw Metadata"/"Raw Results" buttons use.
+fn build_actions_menu(
+    mut menu: PopupMenu,
+    row: &ActionsMenuData,
+    debug: bool,
+    entity: Entity<PlayerTable>,
+) -> PopupMenu {
     let show_ship_config = (!row.relation.is_enemy() || debug) && row.has_vehicle_entity;
 
     if show_ship_config {
@@ -596,9 +649,11 @@ fn build_actions_menu(mut menu: PopupMenu, row: &PlayerRow, debug: bool, entity:
 /// `build_actions_menu`'s per-row popup menu on click. `ix` keys the
 /// trigger's `ElementId` so every row's button/popover state is independent.
 /// `entity` is threaded through to `build_actions_menu` so its "View Raw
-/// Player Metadata" item can emit `PlayerTableEvent::ViewRawJson` on it.
+/// Player Metadata" item can emit `PlayerTableEvent::ViewRawJson` on it. Only
+/// the menu's own small `ActionsMenuData` is cloned out of `row` (see its doc
+/// comment), not the whole `PlayerRow`.
 fn actions_cell(ix: usize, row: &PlayerRow, debug: bool, entity: Entity<PlayerTable>, width: f32) -> AnyElement {
-    let row = row.clone();
+    let row = ActionsMenuData::from_row(row);
     let trigger = Button::new(("replay-row-actions", ix)).ghost().xsmall().icon(IconName::Ellipsis);
     let menu_button =
         trigger.dropdown_menu(move |menu, _window, _cx| build_actions_menu(menu, &row, debug, entity.clone()));

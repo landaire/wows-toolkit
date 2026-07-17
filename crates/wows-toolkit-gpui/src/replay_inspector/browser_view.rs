@@ -43,6 +43,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
@@ -140,7 +141,11 @@ pub struct ReplayBrowser {
     grouping: ReplayGrouping,
     tree_state: Entity<TreeState>,
     status: ScanStatus,
-    leaf_info: HashMap<SharedString, LeafInfo>,
+    /// Rebuilt only by `rebuild_tree` (on scan/grouping/game-data changes),
+    /// never per render: `render` clones this `Rc` (a pointer bump) instead
+    /// of the map itself, which would otherwise deep-clone every leaf's
+    /// owned `PathBuf` on every render of the browser.
+    leaf_info: Rc<HashMap<SharedString, LeafInfo>>,
     /// The most recently single- or double-clicked leaf's path.
     selected_path: Option<PathBuf>,
     /// The most recently double-clicked leaf's path -- the "open" intent's
@@ -162,7 +167,7 @@ impl ReplayBrowser {
             grouping: ReplayGrouping::default(),
             tree_state,
             status: ScanStatus::Loading,
-            leaf_info: HashMap::new(),
+            leaf_info: Rc::new(HashMap::new()),
             selected_path: None,
             open_requested: None,
             game_data: None,
@@ -254,10 +259,11 @@ impl ReplayBrowser {
         let provider = self.game_data.as_deref();
         let translated: Vec<ReplayLite> = self.files.iter().map(|raw| translate_replay(raw, provider)).collect();
         let nodes = build_browser_tree(&translated, self.grouping);
-        self.leaf_info.clear();
+        let mut leaf_info = HashMap::new();
         let mut next_group_id = 0usize;
         let items: Vec<TreeItem> =
-            nodes.into_iter().map(|node| node_to_tree_item(node, &mut next_group_id, &mut self.leaf_info)).collect();
+            nodes.into_iter().map(|node| node_to_tree_item(node, &mut next_group_id, &mut leaf_info)).collect();
+        self.leaf_info = Rc::new(leaf_info);
         self.tree_state.update(cx, |state, cx| state.set_items(items, cx));
     }
 

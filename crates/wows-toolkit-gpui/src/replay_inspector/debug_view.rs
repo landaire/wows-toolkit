@@ -18,20 +18,26 @@ use gpui_component::v_flex;
 /// `table.rs::hover_tooltip`'s per-line-`div` convention for the same
 /// reason).
 pub struct RawJsonPanel {
-    content: SharedString,
+    /// Split into lines once, at construction, rather than on every render:
+    /// `content` never changes after `new` (this panel is rebuilt, not
+    /// mutated, on a new payload -- see `panel.rs`), so re-splitting it and
+    /// heap-allocating a fresh `String` per line on every repaint (a JSON
+    /// payload can run thousands of lines) was pure per-frame waste. Cloning
+    /// a `SharedString` in `render` is a refcount bump, not a copy.
+    lines: Vec<SharedString>,
     scroll: ScrollHandle,
 }
 
 impl RawJsonPanel {
     pub fn new(content: SharedString, _cx: &mut Context<Self>) -> Self {
-        Self { content, scroll: ScrollHandle::new() }
+        let lines = content.split('\n').map(|line| SharedString::from(line.to_string())).collect();
+        Self { lines, scroll: ScrollHandle::new() }
     }
 }
 
 impl Render for RawJsonPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let mono_font_family = cx.theme().mono_font_family.clone();
-        let content = self.content.clone();
 
         let body = div().id("raw-json-body").size_full().overflow_y_scroll().track_scroll(&self.scroll).child(
             v_flex()
@@ -40,7 +46,7 @@ impl Render for RawJsonPanel {
                 .gap_0()
                 .text_xs()
                 .font_family(mono_font_family)
-                .children(content.split('\n').map(|line| div().child(line.to_string()))),
+                .children(self.lines.iter().cloned().map(|line| div().child(line))),
         );
 
         div().relative().size_full().child(body).child(Scrollbar::vertical(&self.scroll))
