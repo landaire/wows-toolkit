@@ -145,7 +145,7 @@ fn sort_caret_icon(order: SortOrder) -> IconName {
 /// Resolves a color role to a concrete `Hsla`, reproducing the egui app's
 /// palette exactly (values verified against `util::formatting`,
 /// `util::personal_rating`, and the win/loss header colors).
-fn resolve_color(role: ColorRole) -> Hsla {
+pub(crate) fn resolve_color(role: ColorRole) -> Hsla {
     let packed = match role {
         ColorRole::Player(kind) => match kind {
             PlayerColorKind::SelfPlayer => 0xffffff,
