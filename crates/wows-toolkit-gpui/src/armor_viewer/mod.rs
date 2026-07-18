@@ -21,6 +21,7 @@
 
 pub mod assets;
 pub mod catalog;
+pub mod legend;
 pub mod load_ship;
 pub mod pane;
 pub mod sidebar;

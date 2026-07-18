@@ -8,6 +8,11 @@
 //!
 //! Multi-pane comparison (Milestone 5) does not exist yet, so there is
 //! exactly one sidebar and one viewport for the whole tab.
+//!
+//! Also owns the floating Armor Thickness legend (`legend.rs`): its state
+//! (`legend: LegendState`) and drag mouse handlers live here rather than on
+//! the legend panel itself, since dragging must keep tracking the pointer
+//! past the panel's own small bounds -- see `legend.rs`'s module doc.
 
 use std::sync::Arc;
 
@@ -17,12 +22,16 @@ use gpui_component::h_flex;
 use gpui_component::resizable::h_resizable;
 use gpui_component::resizable::resizable_panel;
 use gpui_component::v_flex;
+use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 
 use crate::replay_inspector::load::LoadedGameData;
 
 use super::assets::ArmorAssetsBundle;
 use super::assets::ArmorAssetsError;
 use super::assets::spawn_load_armor_assets;
+use super::legend;
+use super::legend::LegendDrag;
+use super::legend::LegendState;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::ShipLoadError;
 use super::load_ship::spawn_load_ship_armor;
@@ -56,6 +65,13 @@ pub struct ArmorViewerPane {
     viewport: Entity<ViewportView>,
     bundle: BundleState,
     ship_load: ShipLoadState,
+    /// Set once a ship's armor has been shown in `viewport` at least once,
+    /// gating the legend overlay exactly like the egui app's `any_ship_loaded`
+    /// check (`ui/tab.rs`'s `tab.loaded_armor.is_some()`).
+    ship_loaded: bool,
+    /// The floating Armor Thickness legend's visibility/collapsed/position
+    /// state; see the module doc and `legend.rs`.
+    legend: LegendState,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -70,8 +86,18 @@ impl ArmorViewerPane {
             viewport,
             bundle: BundleState::NotStarted,
             ship_load: ShipLoadState::Idle,
+            ship_loaded: false,
+            legend: LegendState::default(),
             _subscriptions: vec![subscription],
         }
+    }
+
+    /// Seeds the legend's initial visibility/collapsed/position from the
+    /// persisted `armor_viewer_defaults` row, the same way `app.rs` threads
+    /// the rest of `GpuiSettings` into its child views on startup.
+    pub fn apply_armor_defaults(&mut self, defaults: Option<&ArmorViewerDefaultsRow>, cx: &mut Context<Self>) {
+        self.legend = LegendState::from_defaults(defaults);
+        cx.notify();
     }
 
     /// Kicks off the Armor Viewer's ship-data load against `loaded` -- the
@@ -146,6 +172,7 @@ impl ArmorViewerPane {
         match result {
             Ok(armor) => {
                 self.ship_load = ShipLoadState::Idle;
+                self.ship_loaded = true;
                 self.viewport.update(cx, |viewport, cx| viewport.show_armor(Arc::new(armor), cx));
             }
             Err(e) => {
@@ -173,30 +200,96 @@ impl ArmorViewerPane {
             },
         }
     }
+
+    /// Header button handler (`legend::render_panel`): flips the legend
+    /// between expanded and collapsed, matching the egui window's own
+    /// collapse-triangle toggle.
+    pub(crate) fn toggle_legend_collapsed(
+        &mut self,
+        _event: &ClickEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.legend.collapsed = !self.legend.collapsed;
+        cx.notify();
+    }
+
+    /// Header button handler (`legend::render_panel`): hides the legend,
+    /// matching the egui window's own close (`open`) toggle.
+    pub(crate) fn close_legend(&mut self, _event: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        self.legend.visible = false;
+        cx.notify();
+    }
+
+    /// Drag-handle mouse-down (`legend::render_panel`): captures the pointer
+    /// and panel position so `drag_legend` can compute the new panel position
+    /// from the pointer's total displacement.
+    pub(crate) fn start_legend_drag(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        self.legend.drag = Some(LegendDrag { pointer_start: event.position, panel_start: self.legend.pos });
+        cx.notify();
+    }
+
+    /// Registered on the pane's full-size wrapping div (see `Render`) rather
+    /// than the small legend panel, so the drag keeps tracking the pointer
+    /// even once it moves past the panel's own bounds -- mirrors
+    /// `viewport_view::ViewportView::handle_mouse_move`'s gizmo-drag pattern.
+    fn drag_legend(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(drag) = self.legend.drag else { return };
+        let dx = event.position.x - drag.pointer_start.x;
+        let dy = event.position.y - drag.pointer_start.y;
+        self.legend.pos = point(drag.panel_start.x + dx, drag.panel_start.y + dy);
+        cx.notify();
+    }
+
+    fn end_legend_drag(&mut self, _event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.legend.drag.take().is_some() {
+            cx.notify();
+        }
+        // TODO: persist `self.legend.pos`/`visible`/`collapsed` here once a
+        // general settings write-back path exists. `settings.rs` is
+        // documented read-only (the port has no shared DB pool handle this
+        // pane could reuse, and `save_armor_viewer_defaults` writes the
+        // whole `armor_viewer_defaults` row, not just the legend fields), so
+        // legend placement/visibility is in-session only for now: it resets
+        // to the persisted (or default) position/state on every restart.
+    }
 }
 
 impl Render for ArmorViewerPane {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let status_banner = self
             .status_text()
             .map(|text| h_flex().flex_none().px_2().py_1().child(div().text_xs().opacity(0.6).child(text)));
 
-        v_flex()
+        let content = v_flex().size_full().when_some(status_banner, |this, banner| this.child(banner)).child(
+            div().flex_1().min_h(px(0.)).child(
+                h_resizable("armor-viewer-split")
+                    .child(
+                        resizable_panel()
+                            .size(SIDEBAR_WIDTH)
+                            .size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)
+                            .flex_none()
+                            .child(self.sidebar.clone()),
+                    )
+                    .child(resizable_panel().child(self.viewport.clone())),
+            ),
+        );
+
+        // Legend floats over the whole pane (not just the viewport), gated
+        // on a ship being loaded, matching the egui app's `any_ship_loaded`
+        // window gate (`ui/tab.rs` ~627-628).
+        let show_legend = self.ship_loaded && self.legend.visible;
+        let legend_panel = show_legend.then(|| legend::render_panel(&self.legend, cx));
+
+        div()
+            .id("armor-viewer-pane")
+            .relative()
             .size_full()
-            .when_some(status_banner, |this, banner| this.child(banner))
-            .child(
-                div().flex_1().min_h(px(0.)).child(
-                    h_resizable("armor-viewer-split")
-                        .child(
-                            resizable_panel()
-                                .size(SIDEBAR_WIDTH)
-                                .size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)
-                                .flex_none()
-                                .child(self.sidebar.clone()),
-                        )
-                        .child(resizable_panel().child(self.viewport.clone())),
-                ),
-            )
+            .on_mouse_move(cx.listener(Self::drag_legend))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::end_legend_drag))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::end_legend_drag))
+            .child(content)
+            .when_some(legend_panel, |this, panel| this.child(panel))
             .into_any_element()
     }
 }

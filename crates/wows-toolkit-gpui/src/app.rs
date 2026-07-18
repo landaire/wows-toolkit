@@ -146,6 +146,7 @@ impl App {
         self.replay_inspector.update(cx, |view, cx| {
             view.apply_settings(wows_dir, debug_mode, replay_settings, auto_load_latest_replay, cx)
         });
+        self.armor_pane.update(cx, |pane, cx| pane.apply_armor_defaults(settings.armor_defaults.as_ref(), cx));
         self.poll_armor_game_data(cx);
         self.settings = SettingsState::Loaded(settings);
     }
