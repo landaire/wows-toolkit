@@ -45,7 +45,7 @@ use super::catalog::ShipCatalog;
 /// sidebar has no per-row team context, so this renders the icon undyed
 /// (`0xffffff` leaves every channel at full intensity in `decode_ship_class_svg`'s
 /// tint multiply -- see `icons.rs`), matching the icon's own white source art.
-const CLASS_ICON_TINT: u32 = 0xffffff;
+pub(crate) const CLASS_ICON_TINT: u32 = 0xffffff;
 
 /// Reasons the Armor Viewer's ship data failed to load. Wraps `ShipAssets`'
 /// `rootcause::Report` errors (the same convention `ReplayLoadError` in

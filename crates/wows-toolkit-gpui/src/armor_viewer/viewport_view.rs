@@ -17,6 +17,9 @@ use std::time::Duration;
 use gpui::*;
 use gpui_component::h_flex;
 
+use crate::armor_viewer::load_ship::ArmorTriangleTooltip;
+use crate::armor_viewer::load_ship::LoadedShipArmor;
+use crate::armor_viewer::upload::upload_armor_to_viewport;
 use crate::viewport::camera;
 use crate::viewport::camera::ArcballCamera;
 use crate::viewport::camera::Axis;
@@ -27,6 +30,7 @@ use crate::viewport::gizmo;
 use crate::viewport::renderer::GpuPipeline;
 use crate::viewport::renderer::LAYER_DEFAULT;
 use crate::viewport::renderer::Viewport3D;
+use crate::viewport::types::MeshId;
 use crate::viewport::types::Vec2;
 use crate::viewport::types::Vec3;
 use crate::viewport::types::ViewRect;
@@ -134,6 +138,14 @@ pub struct ViewportView {
     /// Whether the held-key movement ticker is currently running, so a
     /// second key-down does not stack a duplicate ticker.
     key_ticking: bool,
+    /// A ship picked in the sidebar before the owned wgpu device finished
+    /// initializing. `apply_gpu_result` uploads this instead of the
+    /// placeholder cube once the device becomes ready, then clears it.
+    pending_armor: Option<Arc<LoadedShipArmor>>,
+    /// Per-mesh triangle tooltip data from the most recent armor upload, for
+    /// a future milestone's hover/click picking. Nothing reads this yet.
+    #[allow(dead_code)]
+    mesh_triangle_info: Vec<(MeshId, Vec<ArmorTriangleTooltip>)>,
 }
 
 impl ViewportView {
@@ -152,9 +164,37 @@ impl ViewportView {
             animating: false,
             held_keys: HashSet::new(),
             key_ticking: false,
+            pending_armor: None,
+            mesh_triangle_info: Vec::new(),
         };
         this.start_gpu_init(cx);
         this
+    }
+
+    /// Shows `armor`'s armor meshes in this viewport: clears any previous
+    /// meshes, uploads the new ones (`upload::upload_armor_to_viewport`,
+    /// which also frames the camera on the model's bounds and marks the
+    /// viewport dirty), and updates `model_bounds` so double-click-to-reset
+    /// frames the new ship. If the owned wgpu device has not finished
+    /// initializing yet, stashes `armor` in `pending_armor` instead;
+    /// `apply_gpu_result` uploads it as soon as the device becomes ready.
+    pub fn show_armor(&mut self, armor: Arc<LoadedShipArmor>, cx: &mut Context<Self>) {
+        if matches!(self.gpu, GpuState::Ready { .. }) {
+            self.upload_armor_now(&armor);
+            self.pending_armor = None;
+        } else {
+            self.pending_armor = Some(armor);
+        }
+        cx.notify();
+    }
+
+    /// Uploads `armor` into the viewport. Callers must have already checked
+    /// `self.gpu` is `Ready`; a no-op otherwise.
+    fn upload_armor_now(&mut self, armor: &LoadedShipArmor) {
+        let GpuState::Ready { ctx, .. } = &self.gpu else { return };
+        let device = ctx.device.clone();
+        self.mesh_triangle_info = upload_armor_to_viewport(&mut self.viewport, &device, armor);
+        self.model_bounds = Some(armor.bounds);
     }
 
     /// Creates the owned wgpu device off the UI thread (device/adapter
@@ -177,13 +217,20 @@ impl ViewportView {
     fn apply_gpu_result(&mut self, result: anyhow::Result<(GpuContext, GpuPipeline)>, cx: &mut Context<Self>) {
         match result {
             Ok((ctx, pipeline)) => {
-                let (vertices, indices) = unit_cube(PLACEHOLDER_COLOR);
-                self.viewport.add_mesh(&ctx.device, &vertices, &indices, LAYER_DEFAULT);
-                let (min, max) = (Vec3::new(-0.5, -0.5, -0.5), Vec3::new(0.5, 0.5, 0.5));
-                self.viewport.camera = ArcballCamera::from_bounds(min, max);
-                self.model_bounds = Some((min, max));
-                self.viewport.mark_dirty();
                 self.gpu = GpuState::Ready { ctx, pipeline };
+                // A ship picked in the sidebar while the device was still
+                // initializing takes priority over the placeholder cube.
+                if let Some(armor) = self.pending_armor.take() {
+                    self.upload_armor_now(&armor);
+                } else {
+                    let GpuState::Ready { ctx, .. } = &self.gpu else { unreachable!() };
+                    let (vertices, indices) = unit_cube(PLACEHOLDER_COLOR);
+                    self.viewport.add_mesh(&ctx.device, &vertices, &indices, LAYER_DEFAULT);
+                    let (min, max) = (Vec3::new(-0.5, -0.5, -0.5), Vec3::new(0.5, 0.5, 0.5));
+                    self.viewport.camera = ArcballCamera::from_bounds(min, max);
+                    self.model_bounds = Some((min, max));
+                }
+                self.viewport.mark_dirty();
             }
             Err(e) => {
                 tracing::error!("armor viewport: failed to create owned wgpu device: {e:#}");

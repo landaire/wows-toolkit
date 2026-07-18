@@ -10,7 +10,8 @@ use gpui_component::slider::{Slider, SliderState};
 use gpui_component::tab::{Tab, TabBar};
 use gpui_component::{h_flex, v_flex};
 
-use crate::armor_viewer::ViewportView;
+use crate::armor_viewer::ArmorViewerPane;
+use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::settings::{DEFAULT_ZOOM, GpuiSettings, MAX_ZOOM, MIN_ZOOM};
 use crate::theme;
@@ -67,9 +68,14 @@ pub struct App {
     /// through this element, so the shortcut keeps working regardless of
     /// what has focus -- matching egui's window-wide shortcut.
     focus_handle: FocusHandle,
-    /// The Armor Viewer tab's 3D viewport: owns the wgpu device, the arcball
-    /// camera, and the nav gizmo overlay. See `armor_viewer::ViewportView`.
-    armor_viewport: Entity<ViewportView>,
+    /// The Armor Viewer tab: ship sidebar + 3D viewport. See
+    /// `armor_viewer::ArmorViewerPane`.
+    armor_pane: Entity<ArmorViewerPane>,
+    /// Set once `armor_pane.load_game_data` has been kicked off, so the
+    /// `replay_inspector` game-data observer (`Self::new`) triggers it
+    /// exactly once -- see `Self::poll_armor_game_data`.
+    armor_game_data_requested: bool,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl App {
@@ -77,9 +83,19 @@ impl App {
         let zoom_slider =
             cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(DEFAULT_ZOOM));
         let replay_inspector = cx.new(|cx| ReplayInspectorView::new(window, cx));
-        let armor_viewport = cx.new(ViewportView::new);
+        let armor_pane = cx.new(|cx| ArmorViewerPane::new(window, cx));
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
+
+        // The Armor Viewer reuses the replay inspector's preloaded game data
+        // (see `poll_armor_game_data`'s doc comment) rather than running a
+        // second VFS/`GameParams` load for the same build; observing here
+        // catches the `Loading` -> `Ready` transition whenever it lands,
+        // including if it already landed before this tab is ever opened.
+        let subscription = cx.observe(&replay_inspector, |this, _replay_inspector, cx| {
+            this.poll_armor_game_data(cx);
+        });
+
         Self {
             active_tab: AppTab::Settings,
             settings: SettingsState::Loading,
@@ -88,7 +104,28 @@ impl App {
             replay_inspector,
             debug_mode: false,
             focus_handle,
-            armor_viewport,
+            armor_pane,
+            armor_game_data_requested: false,
+            _subscriptions: vec![subscription],
+        }
+    }
+
+    /// Forwards the replay inspector's preloaded game data to the Armor
+    /// Viewer pane the first time it reaches `GameDataStatus::Ready`, so
+    /// `ArmorViewerPane::load_game_data` runs exactly once per session with
+    /// the SAME `Arc<LoadedGameData>` the replay inspector already loaded --
+    /// never a second `GameDataCache`/VFS/`GameParams` load for the same
+    /// build. Called from the `cx.observe` subscription set up in `Self::new`
+    /// (which fires on every replay-inspector notification) and, redundantly
+    /// but harmlessly, from `apply_settings` in case the observer's first
+    /// notification races the settings load.
+    fn poll_armor_game_data(&mut self, cx: &mut Context<Self>) {
+        if self.armor_game_data_requested {
+            return;
+        }
+        if let GameDataStatus::Ready(loaded) = self.replay_inspector.read(cx).game_data_status() {
+            self.armor_game_data_requested = true;
+            self.armor_pane.update(cx, |pane, cx| pane.load_game_data(loaded, cx));
         }
     }
 
@@ -109,6 +146,7 @@ impl App {
         self.replay_inspector.update(cx, |view, cx| {
             view.apply_settings(wows_dir, debug_mode, replay_settings, auto_load_latest_replay, cx)
         });
+        self.poll_armor_game_data(cx);
         self.settings = SettingsState::Loaded(settings);
     }
 
@@ -289,7 +327,7 @@ impl Render for App {
         let body = match self.active_tab {
             AppTab::Settings => self.render_settings_tab(cx).into_any_element(),
             AppTab::ReplayInspector => self.replay_inspector.clone().into_any_element(),
-            AppTab::ArmorViewer => self.armor_viewport.clone().into_any_element(),
+            AppTab::ArmorViewer => self.armor_pane.clone().into_any_element(),
         };
 
         // Reproduces the egui app's `app.rs:720-722` bottom-panel notice: a

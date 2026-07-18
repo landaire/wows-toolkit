@@ -170,6 +170,15 @@ impl ReplayInspectorView {
         .detach();
     }
 
+    /// The current game-data preload status. Read by `App` so the Armor
+    /// Viewer tab can adopt the SAME `Arc<LoadedGameData>` once it reaches
+    /// `Ready` -- see `armor_viewer::pane::ArmorViewerPane::load_game_data` --
+    /// rather than running a second `GameDataCache`/VFS/`GameParams` load for
+    /// the same build.
+    pub fn game_data_status(&self) -> GameDataStatus {
+        self.game_data_status.clone()
+    }
+
     fn on_browser_event(
         &mut self,
         _browser: &Entity<ReplayBrowser>,
