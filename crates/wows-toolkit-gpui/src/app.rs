@@ -111,16 +111,24 @@ impl App {
     }
 
     /// Forwards the replay inspector's preloaded game data to the Armor
-    /// Viewer pane the first time it reaches `GameDataStatus::Ready`, so
-    /// `ArmorViewerPane::load_game_data` runs exactly once per session with
-    /// the SAME `Arc<LoadedGameData>` the replay inspector already loaded --
-    /// never a second `GameDataCache`/VFS/`GameParams` load for the same
-    /// build. Called from the `cx.observe` subscription set up in `Self::new`
-    /// (which fires on every replay-inspector notification) and, redundantly
-    /// but harmlessly, from `apply_settings` in case the observer's first
-    /// notification races the settings load.
+    /// Viewer pane the first time BOTH it has reached `GameDataStatus::Ready`
+    /// AND the Armor Viewer tab has been opened, so `ArmorViewerPane::
+    /// load_game_data` -- which reads the ~167 MiB `content/assets.bin` and
+    /// builds the ship catalog/icons -- runs exactly once per session, lazily
+    /// on first visit to the tab, with the SAME `Arc<LoadedGameData>` the
+    /// replay inspector already loaded (never a second `GameDataCache`/VFS/
+    /// `GameParams` load for the same build). A user who never opens the
+    /// Armor Viewer never pays that cost. Called from the `cx.observe`
+    /// subscription set up in `Self::new` (which fires on every
+    /// replay-inspector notification), from the tab bar's `on_click` handler
+    /// (`Self::render`) whenever the Armor Viewer tab is selected, and,
+    /// redundantly but harmlessly, from `apply_settings` in case the
+    /// observer's first notification races the settings load.
     fn poll_armor_game_data(&mut self, cx: &mut Context<Self>) {
         if self.armor_game_data_requested {
+            return;
+        }
+        if self.active_tab != AppTab::ArmorViewer {
             return;
         }
         if let GameDataStatus::Ready(loaded) = self.replay_inspector.read(cx).game_data_status() {
@@ -322,6 +330,7 @@ impl Render for App {
             .children(AppTab::ALL.iter().map(|t| Tab::new().label(t.label())))
             .on_click(cx.listener(|this, ix: &usize, _window, cx| {
                 this.active_tab = AppTab::ALL[*ix];
+                this.poll_armor_game_data(cx);
                 cx.notify();
             }));
 

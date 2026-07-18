@@ -90,9 +90,10 @@ impl LegendState {
 
 /// Converts one legend entry's `[f32; 4]` 0..1 RGBA (`ArmorLegendEntry::color`)
 /// to a gpui `Hsla`, matching the egui original's `Color32::from_rgba_unmultiplied`
-/// conversion (`armor_viewer/ui/legend.rs`): each channel times 255, rounded to u8.
+/// conversion (`armor_viewer/ui/legend.rs`): each channel times 255, cast to u8,
+/// which truncates toward zero and saturates to 0..=255 (Rust's float-to-int cast).
 fn swatch_color(color: [f32; 4]) -> Hsla {
-    let to_u8 = |c: f32| (c * 255.0).round().clamp(0.0, 255.0) as u8;
+    let to_u8 = |c: f32| (c * 255.0) as u8;
     let bytes = [to_u8(color[0]), to_u8(color[1]), to_u8(color[2]), to_u8(color[3])];
     rgba(u32::from_be_bytes(bytes)).into()
 }
@@ -221,11 +222,13 @@ mod tests {
 
     #[test]
     fn swatch_color_round_trips_rgba_channels() {
+        // 0.5 * 255.0 = 127.5, which truncates (not rounds) to 127, matching
+        // egui's `(c * 255.0) as u8` cast.
         let color = swatch_color([0.0, 1.0, 0.5, 0.8]);
         let rgba: Rgba = color.into();
         assert_eq!((rgba.r * 255.0).round() as u8, 0);
         assert_eq!((rgba.g * 255.0).round() as u8, 255);
-        assert_eq!((rgba.b * 255.0).round() as u8, 128);
+        assert_eq!((rgba.b * 255.0).round() as u8, 127);
         assert_eq!((rgba.a * 255.0).round() as u8, 204);
     }
 

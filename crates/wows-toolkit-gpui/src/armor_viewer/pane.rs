@@ -72,6 +72,14 @@ pub struct ArmorViewerPane {
     /// The floating Armor Thickness legend's visibility/collapsed/position
     /// state; see the module doc and `legend.rs`.
     legend: LegendState,
+    /// Bumped by every `start_ship_load` call and captured into that load's
+    /// background task; a completing task whose captured value no longer
+    /// matches this field was superseded by a later ship selection and its
+    /// result is discarded instead of overwriting `ship_load`/`viewport`.
+    /// Guards against rapid clicks (A then B) applying out of order, since
+    /// nothing otherwise constrains which of two in-flight loads finishes
+    /// last.
+    ship_load_generation: u64,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -88,6 +96,7 @@ impl ArmorViewerPane {
             ship_load: ShipLoadState::Idle,
             ship_loaded: false,
             legend: LegendState::default(),
+            ship_load_generation: 0,
             _subscriptions: vec![subscription],
         }
     }
@@ -152,23 +161,32 @@ impl ArmorViewerPane {
             return;
         };
 
+        self.ship_load_generation += 1;
+        let generation = self.ship_load_generation;
+
         self.ship_load = ShipLoadState::Loading { display_name: display_name.clone() };
         cx.notify();
 
         let task = spawn_load_ship_armor(Arc::clone(bundle), param_index, display_name.clone(), cx);
         cx.spawn(async move |this, cx| {
             let result = task.await;
-            let _ = this.update(cx, |this, cx| this.apply_ship_load_result(display_name, result, cx));
+            let _ = this.update(cx, |this, cx| this.apply_ship_load_result(generation, display_name, result, cx));
         })
         .detach();
     }
 
     fn apply_ship_load_result(
         &mut self,
+        generation: u64,
         display_name: String,
         result: Result<LoadedShipArmor, ShipLoadError>,
         cx: &mut Context<Self>,
     ) {
+        if generation != self.ship_load_generation {
+            // A newer ship selection superseded this load; discard the
+            // result instead of clobbering the current selection's state.
+            return;
+        }
         match result {
             Ok(armor) => {
                 self.ship_load = ShipLoadState::Idle;
