@@ -396,7 +396,6 @@ struct GpuMesh {
 /// through `render_offscreen_rgba` into a CPU-readback buffer.
 pub struct Viewport3D {
     pub camera: ArcballCamera,
-    pub gizmo: crate::viewport::gizmo::NavGizmo,
     meshes: HashMap<MeshId, GpuMesh>,
     pick_data: HashMap<MeshId, PickableMesh>,
     next_mesh_id: u64,
@@ -430,7 +429,6 @@ impl Viewport3D {
     pub fn new() -> Self {
         Self {
             camera: ArcballCamera::default(),
-            gizmo: crate::viewport::gizmo::NavGizmo::default(),
             meshes: HashMap::new(),
             pick_data: HashMap::new(),
             next_mesh_id: 0,

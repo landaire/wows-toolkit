@@ -10,6 +10,7 @@
 //! it never blocks the UI thread; the view shows a brief status message
 //! until it is ready.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -38,6 +39,16 @@ const PLACEHOLDER_COLOR: [f32; 4] = [0.35, 0.55, 0.85, 1.0];
 /// stops re-rendering.
 const GIZMO_SNAP_DURATION_SECS: f32 = 0.35;
 
+/// Total pointer displacement (in pixels) since mouse-down before a drag
+/// counts as a real drag rather than a click, matching egui's own drag
+/// classification threshold. Below this, a mouse-up inside the gizmo box is
+/// treated as a click (snap fires); at or above it, it's an orbit/pan.
+const DRAG_THRESHOLD_PX: f32 = 4.0;
+
+/// How often the held-key movement ticker (`start_key_ticker`) advances the
+/// camera while a WASD/arrow key is held down.
+const KEY_TICK_HZ: f32 = 60.0;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DragKind {
     Orbit,
@@ -48,10 +59,42 @@ enum DragKind {
 struct DragState {
     kind: DragKind,
     last_position: Point<Pixels>,
-    /// Whether the pointer has moved since the button went down. Used to tell
-    /// a plain click on the gizmo (snap) apart from a drag-orbit that started
-    /// inside the gizmo box.
+    /// Origin position at mouse-down, used to accumulate total displacement
+    /// so small jitter doesn't get misclassified as a drag.
+    start_position: Point<Pixels>,
+    /// Whether accumulated displacement since mouse-down has exceeded
+    /// `DRAG_THRESHOLD_PX`. Used to tell a plain click on the gizmo (snap)
+    /// apart from a drag-orbit that started inside the gizmo box.
     moved: bool,
+}
+
+/// Movement keys tracked by the held-keys ticker for continuous camera motion.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum MoveKey {
+    Forward,
+    Back,
+    Left,
+    Right,
+    Up,
+    Down,
+    RotateLeft,
+    RotateRight,
+}
+
+impl MoveKey {
+    fn from_str(key: &str) -> Option<Self> {
+        match key {
+            "w" => Some(Self::Forward),
+            "s" => Some(Self::Back),
+            "a" => Some(Self::Left),
+            "d" => Some(Self::Right),
+            "up" => Some(Self::Up),
+            "down" => Some(Self::Down),
+            "left" => Some(Self::RotateLeft),
+            "right" => Some(Self::RotateRight),
+            _ => None,
+        }
+    }
 }
 
 /// Lifecycle of the owned wgpu device backing this viewport.
@@ -85,6 +128,12 @@ pub struct ViewportView {
     /// currently running, so a second snap click does not stack a duplicate
     /// ticker advancing the animation twice as fast.
     animating: bool,
+    /// Movement keys currently held down, driving the continuous-motion
+    /// ticker (`start_key_ticker`) while non-empty.
+    held_keys: HashSet<MoveKey>,
+    /// Whether the held-key movement ticker is currently running, so a
+    /// second key-down does not stack a duplicate ticker.
+    key_ticking: bool,
 }
 
 impl ViewportView {
@@ -101,6 +150,8 @@ impl ViewportView {
             gizmo_hover: None,
             gizmo_press_in_box: false,
             animating: false,
+            held_keys: HashSet::new(),
+            key_ticking: false,
         };
         this.start_gpu_init(cx);
         this
@@ -180,6 +231,9 @@ impl ViewportView {
 
     fn handle_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus_handle, cx);
+        if !self.is_gpu_ready() {
+            return;
+        }
         match event.button {
             MouseButton::Left => {
                 let pointer = point_to_vec2(event.position);
@@ -194,17 +248,30 @@ impl ViewportView {
                     self.drag = None;
                     return;
                 }
-                self.drag = Some(DragState { kind: DragKind::Orbit, last_position: event.position, moved: false });
+                self.drag = Some(DragState {
+                    kind: DragKind::Orbit,
+                    last_position: event.position,
+                    start_position: event.position,
+                    moved: false,
+                });
             }
             MouseButton::Middle => {
                 self.gizmo_press_in_box = false;
-                self.drag = Some(DragState { kind: DragKind::Pan, last_position: event.position, moved: false });
+                self.drag = Some(DragState {
+                    kind: DragKind::Pan,
+                    last_position: event.position,
+                    start_position: event.position,
+                    moved: false,
+                });
             }
             _ => {}
         }
     }
 
     fn handle_mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if !self.is_gpu_ready() {
+            return;
+        }
         let pointer = point_to_vec2(event.position);
         let hover = self.gizmo_rect().and_then(|r| gizmo::hit_test(r, &self.viewport.camera, pointer));
         let hover_changed = hover != self.gizmo_hover;
@@ -220,7 +287,10 @@ impl ViewportView {
                     DragKind::Orbit => self.viewport.camera.orbit((dx, dy), size),
                     DragKind::Pan => self.viewport.camera.pan((dx, dy), size),
                 }
-                self.drag = Some(DragState { last_position: event.position, moved: true, ..drag });
+                let total_dx = event.position.x.as_f32() - drag.start_position.x.as_f32();
+                let total_dy = event.position.y.as_f32() - drag.start_position.y.as_f32();
+                let moved = drag.moved || (total_dx * total_dx + total_dy * total_dy).sqrt() > DRAG_THRESHOLD_PX;
+                self.drag = Some(DragState { last_position: event.position, moved, ..drag });
                 camera_changed = true;
             }
         }
@@ -234,6 +304,10 @@ impl ViewportView {
 
     fn handle_mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let drag = self.drag.take();
+        if !self.is_gpu_ready() {
+            self.gizmo_press_in_box = false;
+            return;
+        }
         if event.button == MouseButton::Left && self.gizmo_press_in_box && drag.is_some_and(|d| !d.moved) {
             let pointer = point_to_vec2(event.position);
             if let Some(rect) = self.gizmo_rect()
@@ -253,6 +327,9 @@ impl ViewportView {
     }
 
     fn handle_scroll_wheel(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.is_gpu_ready() {
+            return;
+        }
         let delta = event.delta.pixel_delta(window.line_height());
         let dy = delta.y.as_f32();
         if dy != 0.0 {
@@ -263,25 +340,95 @@ impl ViewportView {
     }
 
     /// WASD moves the camera target; arrows move it vertically / orbit the
-    /// azimuth. Applied per key-down (including OS auto-repeat while held)
-    /// rather than a per-frame poll, since redraws only happen on demand.
+    /// azimuth. Tracks the key as held and (re)starts the ~60Hz movement
+    /// ticker (`start_key_ticker`), which applies the per-tick camera delta
+    /// every tick for smooth continuous motion with no OS auto-repeat delay,
+    /// for as long as any movement key remains held.
     fn handle_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        let mut changed = true;
-        match event.keystroke.key.as_str() {
-            "w" => self.viewport.camera.wasd(1.0, 0.0),
-            "s" => self.viewport.camera.wasd(-1.0, 0.0),
-            "a" => self.viewport.camera.wasd(0.0, -1.0),
-            "d" => self.viewport.camera.wasd(0.0, 1.0),
-            "up" => self.viewport.camera.move_vertical(1.0),
-            "down" => self.viewport.camera.move_vertical(-1.0),
-            "left" => self.viewport.camera.rotate_horizontal(1.0),
-            "right" => self.viewport.camera.rotate_horizontal(-1.0),
-            _ => changed = false,
+        if !self.is_gpu_ready() {
+            return;
         }
-        if changed {
-            self.viewport.mark_dirty();
-            cx.notify();
+        let Some(key) = MoveKey::from_str(event.keystroke.key.as_str()) else { return };
+        if self.held_keys.insert(key) {
+            self.start_key_ticker(cx);
         }
+    }
+
+    /// Removes a released movement key from the held set. The ticker itself
+    /// notices an empty set and stops (no idle cost once nothing is held).
+    fn handle_key_up(&mut self, event: &KeyUpEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+        if let Some(key) = MoveKey::from_str(event.keystroke.key.as_str()) {
+            self.held_keys.remove(&key);
+        }
+    }
+
+    /// Applies one tick's worth of camera movement for every currently held
+    /// movement key, mirroring the egui original's per-frame `key_down` poll
+    /// (`viewport_3d/camera.rs` `handle_input`).
+    fn apply_held_keys(&mut self) -> bool {
+        if self.held_keys.is_empty() {
+            return false;
+        }
+        let mut fwd = 0.0f32;
+        let mut right = 0.0f32;
+        let mut vert = 0.0f32;
+        let mut rot = 0.0f32;
+        for key in &self.held_keys {
+            match key {
+                MoveKey::Forward => fwd += 1.0,
+                MoveKey::Back => fwd -= 1.0,
+                MoveKey::Left => right -= 1.0,
+                MoveKey::Right => right += 1.0,
+                MoveKey::Up => vert += 1.0,
+                MoveKey::Down => vert -= 1.0,
+                MoveKey::RotateLeft => rot += 1.0,
+                MoveKey::RotateRight => rot -= 1.0,
+            }
+        }
+        if fwd != 0.0 || right != 0.0 {
+            self.viewport.camera.wasd(fwd, right);
+        }
+        if vert != 0.0 {
+            self.viewport.camera.move_vertical(vert);
+        }
+        if rot != 0.0 {
+            self.viewport.camera.rotate_horizontal(rot);
+        }
+        true
+    }
+
+    /// Runs a ~60Hz ticker that applies held-key camera movement each tick
+    /// and marks the viewport dirty, for smooth continuous motion. Stops
+    /// itself as soon as `held_keys` is empty, so there's no idle cost once
+    /// all movement keys are released.
+    fn start_key_ticker(&mut self, cx: &mut Context<Self>) {
+        if self.key_ticking {
+            return;
+        }
+        self.key_ticking = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs_f32(1.0 / KEY_TICK_HZ)).await;
+                let still_held = this.update(cx, |this, cx| {
+                    let moved = this.apply_held_keys();
+                    if moved {
+                        this.viewport.mark_dirty();
+                        cx.notify();
+                    }
+                    !this.held_keys.is_empty()
+                });
+                match still_held {
+                    Ok(true) => continue,
+                    _ => break,
+                }
+            }
+            let _ = this.update(cx, |this, _cx| this.key_ticking = false);
+        })
+        .detach();
+    }
+
+    fn is_gpu_ready(&self) -> bool {
+        matches!(self.gpu, GpuState::Ready { .. })
     }
 
     fn snap_camera(&mut self, axis: Axis, positive: bool, cx: &mut Context<Self>) {
@@ -379,6 +526,7 @@ impl Render for ViewportView {
             .on_mouse_move(cx.listener(Self::handle_mouse_move))
             .on_scroll_wheel(cx.listener(Self::handle_scroll_wheel))
             .on_key_down(cx.listener(Self::handle_key_down))
+            .on_key_up(cx.listener(Self::handle_key_up))
             .child(image_child)
             .child(overlay)
     }

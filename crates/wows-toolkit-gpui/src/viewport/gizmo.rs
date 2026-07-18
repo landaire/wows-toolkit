@@ -8,16 +8,6 @@ pub(crate) const ARM_LEN: f32 = 22.0;
 pub(crate) const BALL_R: f32 = 7.0;
 const MARGIN: f32 = 8.0;
 
-/// Navigation gizmo hover/drag state. The pointer-driven interaction and the
-/// ball/line/label drawing are reimplemented as gpui elements over the rendered
-/// image (see the armor-viewer tasks); this struct holds the state those
-/// overlays read and write, and the pure projection math below feeds them.
-#[derive(Default)]
-pub struct NavGizmo {
-    pub hovered: Option<(Axis, bool)>,
-    pub dragging: bool,
-}
-
 /// Top-right corner box for the gizmo, inset from the viewport edges.
 pub(crate) fn gizmo_rect(viewport: ViewRect) -> ViewRect {
     let max_x = viewport.right() - MARGIN;

@@ -127,6 +127,19 @@ pub fn render_test_cube_image(
 mod tests {
     use super::*;
 
+    /// `readback_to_render_image` swaps R and B in place so the RGBA readback
+    /// becomes BGRA (gpui's `RenderImage` pixel layout); alpha is untouched.
+    #[test]
+    fn readback_to_render_image_swaps_r_and_b_to_bgra() {
+        let rgba = vec![10u8, 20, 30, 40];
+        let image = readback_to_render_image(1, 1, rgba.clone());
+        let swapped = image.as_bytes(0).expect("single-frame image has frame 0");
+        assert_eq!(swapped[0], rgba[2]);
+        assert_eq!(swapped[1], rgba[1]);
+        assert_eq!(swapped[2], rgba[0]);
+        assert_eq!(swapped[3], rgba[3]);
+    }
+
     /// The risk gate: an owned wgpu-29 device renders a green cube offscreen, the
     /// pixels read back, and the center pixel is the mesh color (not the clear
     /// color), with an sRGB-plausible value.
