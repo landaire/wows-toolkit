@@ -749,6 +749,14 @@ impl Viewport3D {
         self.needs_redraw
     }
 
+    /// Clear the redraw flag after a frame has been presented. The egui
+    /// presentation path used to do this as part of its own `render`; the
+    /// gpui armor viewport calls it right after a successful on-demand
+    /// `render_offscreen_rgba` + image rebuild.
+    pub fn clear_dirty(&mut self) {
+        self.needs_redraw = false;
+    }
+
     /// Returns true if the viewport has any meshes to render.
     pub fn has_meshes(&self) -> bool {
         !self.meshes.is_empty()

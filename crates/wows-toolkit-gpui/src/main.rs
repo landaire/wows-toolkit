@@ -1,4 +1,5 @@
 mod app;
+mod armor_viewer;
 mod replay_inspector;
 mod settings;
 mod theme;

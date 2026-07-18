@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::ActiveTheme;
@@ -12,6 +10,7 @@ use gpui_component::slider::{Slider, SliderState};
 use gpui_component::tab::{Tab, TabBar};
 use gpui_component::{h_flex, v_flex};
 
+use crate::armor_viewer::ViewportView;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::settings::{DEFAULT_ZOOM, GpuiSettings, MAX_ZOOM, MIN_ZOOM};
 use crate::theme;
@@ -68,11 +67,9 @@ pub struct App {
     /// through this element, so the shortcut keeps working regardless of
     /// what has focus -- matching egui's window-wide shortcut.
     focus_handle: FocusHandle,
-    /// Task-1 risk-gate proof for the armor viewport: a colored test cube
-    /// rendered through the owned wgpu device, read back on the CPU, and cached
-    /// as a gpui image. Built lazily the first time the Armor Viewer tab is
-    /// shown. Task 2 replaces this with the live per-ship viewport.
-    armor_demo_image: Option<Arc<RenderImage>>,
+    /// The Armor Viewer tab's 3D viewport: owns the wgpu device, the arcball
+    /// camera, and the nav gizmo overlay. See `armor_viewer::ViewportView`.
+    armor_viewport: Entity<ViewportView>,
 }
 
 impl App {
@@ -80,6 +77,7 @@ impl App {
         let zoom_slider =
             cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(DEFAULT_ZOOM));
         let replay_inspector = cx.new(|cx| ReplayInspectorView::new(window, cx));
+        let armor_viewport = cx.new(ViewportView::new);
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
         Self {
@@ -90,32 +88,8 @@ impl App {
             replay_inspector,
             debug_mode: false,
             focus_handle,
-            armor_demo_image: None,
+            armor_viewport,
         }
-    }
-
-    /// Lazily render the armor-viewport risk-gate image (owned wgpu device ->
-    /// offscreen cube -> CPU readback -> gpui image) and cache it. Errors are
-    /// logged and leave the cache empty so the tab shows a fallback message.
-    fn armor_demo_image(&mut self) -> Option<Arc<RenderImage>> {
-        if self.armor_demo_image.is_none() {
-            match crate::viewport::device::GpuContext::new() {
-                Ok(ctx) => {
-                    let pipeline = ctx.pipeline();
-                    self.armor_demo_image = crate::viewport::device::render_test_cube_image(
-                        &ctx,
-                        &pipeline,
-                        (512, 512),
-                        [0.0, 0.8, 0.0, 1.0],
-                    );
-                    if self.armor_demo_image.is_none() {
-                        tracing::error!("armor viewport: offscreen render produced no image");
-                    }
-                }
-                Err(e) => tracing::error!("armor viewport: failed to create owned wgpu device: {e:#}"),
-            }
-        }
-        self.armor_demo_image.clone()
     }
 
     /// Store the settings snapshot loaded from the shared config DB. Called
@@ -315,13 +289,7 @@ impl Render for App {
         let body = match self.active_tab {
             AppTab::Settings => self.render_settings_tab(cx).into_any_element(),
             AppTab::ReplayInspector => self.replay_inspector.clone().into_any_element(),
-            AppTab::ArmorViewer => {
-                let content = match self.armor_demo_image() {
-                    Some(image) => img(image).w(px(512.)).h(px(512.)).into_any_element(),
-                    None => div().child("Armor viewport failed to render (see log)").into_any_element(),
-                };
-                h_flex().size_full().items_center().justify_center().child(content).into_any_element()
-            }
+            AppTab::ArmorViewer => self.armor_viewport.clone().into_any_element(),
         };
 
         // Reproduces the egui app's `app.rs:720-722` bottom-panel notice: a
