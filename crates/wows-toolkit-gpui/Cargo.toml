@@ -31,7 +31,10 @@ wows-toolkit-config = { path = "../wows-toolkit-config" }
 # (wowsunpack::game_data::build_game_vfs_for_build) to run the background
 # replay parse; implies vfs + arc + parsing. rkyv: the on-disk GameParams
 # cache (game_params::cache), shared with the egui app's identical cache file.
-wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap", "rkyv"] }
+# models: armor_viewer/assets.rs's ShipAssets (ship-export data: assets.bin,
+# camo DB) -- also pulls in wowsunpack's own `unidecode` dep, which is unused
+# here since armor_viewer/catalog.rs depends on the crate directly instead.
+wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap", "rkyv", "models"] }
 wows_replays = { path = "../wows-replays", default-features = false, features = ["arc", "parsing", "vfs"] }
 wows-replay-insights = { path = "../wows-replay-insights", default-features = false, features = ["arc", "battle-report", "wowssb"] }
 wows-battle-world = { path = "../wows-battle-world", default-features = false }
@@ -44,6 +47,9 @@ thiserror = "2.0"
 escaper = "0.1.1"
 gettext = "0.4"
 rfd = "0.17"
+# ASCII-folded search names for the armor viewer's ship catalog, matching the
+# egui app's `ShipCatalog::build` and wowsunpack's own pinned version.
+unidecode = "0.3"
 
 [dev-dependencies]
 jiff = "0.2"
