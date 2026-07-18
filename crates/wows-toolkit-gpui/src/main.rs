@@ -2,6 +2,7 @@ mod app;
 mod replay_inspector;
 mod settings;
 mod theme;
+mod viewport;
 
 use app::App;
 use gpui::*;

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::ActiveTheme;
@@ -66,6 +68,11 @@ pub struct App {
     /// through this element, so the shortcut keeps working regardless of
     /// what has focus -- matching egui's window-wide shortcut.
     focus_handle: FocusHandle,
+    /// Task-1 risk-gate proof for the armor viewport: a colored test cube
+    /// rendered through the owned wgpu device, read back on the CPU, and cached
+    /// as a gpui image. Built lazily the first time the Armor Viewer tab is
+    /// shown. Task 2 replaces this with the live per-ship viewport.
+    armor_demo_image: Option<Arc<RenderImage>>,
 }
 
 impl App {
@@ -83,7 +90,32 @@ impl App {
             replay_inspector,
             debug_mode: false,
             focus_handle,
+            armor_demo_image: None,
         }
+    }
+
+    /// Lazily render the armor-viewport risk-gate image (owned wgpu device ->
+    /// offscreen cube -> CPU readback -> gpui image) and cache it. Errors are
+    /// logged and leave the cache empty so the tab shows a fallback message.
+    fn armor_demo_image(&mut self) -> Option<Arc<RenderImage>> {
+        if self.armor_demo_image.is_none() {
+            match crate::viewport::device::GpuContext::new() {
+                Ok(ctx) => {
+                    let pipeline = ctx.pipeline();
+                    self.armor_demo_image = crate::viewport::device::render_test_cube_image(
+                        &ctx,
+                        &pipeline,
+                        (512, 512),
+                        [0.0, 0.8, 0.0, 1.0],
+                    );
+                    if self.armor_demo_image.is_none() {
+                        tracing::error!("armor viewport: offscreen render produced no image");
+                    }
+                }
+                Err(e) => tracing::error!("armor viewport: failed to create owned wgpu device: {e:#}"),
+            }
+        }
+        self.armor_demo_image.clone()
     }
 
     /// Store the settings snapshot loaded from the shared config DB. Called
@@ -284,7 +316,11 @@ impl Render for App {
             AppTab::Settings => self.render_settings_tab(cx).into_any_element(),
             AppTab::ReplayInspector => self.replay_inspector.clone().into_any_element(),
             AppTab::ArmorViewer => {
-                h_flex().size_full().items_center().justify_center().child(self.active_tab.label()).into_any_element()
+                let content = match self.armor_demo_image() {
+                    Some(image) => img(image).w(px(512.)).h(px(512.)).into_any_element(),
+                    None => div().child("Armor viewport failed to render (see log)").into_any_element(),
+                };
+                h_flex().size_full().items_center().justify_center().child(content).into_any_element()
             }
         };
 
