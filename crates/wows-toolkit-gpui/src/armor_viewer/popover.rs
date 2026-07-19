@@ -461,7 +461,11 @@ fn render_part_row(
     let toggle_entity = entity.clone();
     let toggle_zone_name = zone_name.to_string();
     let toggle_part_name = part.name.clone();
-    let toggle_plates = part.plates.clone();
+    // Matches the egui original (`tab.rs:4538-4540`, `4565-4567`): clearing
+    // overrides for the `show_zero_mm`-filtered plate set, not every plate
+    // on the part, so an override on a thickness currently hidden by the
+    // zero-mm filter survives a checkbox toggle.
+    let toggle_plates = visible_plates.clone();
 
     if visible_plates.len() <= 1 {
         let checked = part_visible && !any_plate_hidden;

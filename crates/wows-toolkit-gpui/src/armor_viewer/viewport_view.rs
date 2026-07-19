@@ -41,6 +41,7 @@ use crate::armor_viewer::picking_ui;
 use crate::armor_viewer::popover;
 use crate::armor_viewer::upload;
 use crate::armor_viewer::upload::upload_armor_to_viewport;
+use crate::armor_viewer::visibility;
 use crate::armor_viewer::visibility::SidebarHighlightKey;
 use crate::armor_viewer::visibility::VisibilityFilter;
 use crate::armor_viewer::visibility::VisibilitySnapshot;
@@ -1027,9 +1028,7 @@ impl ViewportView {
         cx: &mut Context<Self>,
     ) {
         self.snapshot_and_mutate(cx, move |this| {
-            for t in plate_thicknesses {
-                this.plate_visibility.remove(&(zone.clone(), part.clone(), t));
-            }
+            visibility::clear_plate_overrides(&mut this.plate_visibility, &zone, &part, &plate_thicknesses);
             this.part_visibility.insert((zone, part), checked);
         });
     }
@@ -1129,11 +1128,15 @@ impl ViewportView {
         // the fresh geometry.
         self.hover_highlight = None;
         if let Some(hover) = self.hovered.clone() {
-            let hidden = self.plate_visibility.get(&hover.key).copied().unwrap_or(false);
-            if hidden {
-                self.hovered = None;
-            } else {
+            let still_visible = self
+                .mesh_triangle_info
+                .iter()
+                .flat_map(|(_, tooltips)| tooltips)
+                .any(|t| picking_ui::plate_key_of(t) == hover.key);
+            if still_visible {
                 self.rebuild_hover_highlight(&hover.key);
+            } else {
+                self.hovered = None;
             }
         }
         if let Some((key, _)) = self.sidebar_highlight.take() {
@@ -1284,7 +1287,7 @@ impl Render for ViewportView {
             let element = picking_ui::tooltip_element(&hover.tooltip, background, border, radius, muted);
             let anchor_pos = point(hover.cursor.x + TOOLTIP_CURSOR_OFFSET, hover.cursor.y + TOOLTIP_CURSOR_OFFSET);
             deferred(anchored().position(anchor_pos).snap_to_window_with_margin(px(8.)).child(element))
-                .with_priority(2)
+                .with_priority(0)
                 .into_any_element()
         });
 

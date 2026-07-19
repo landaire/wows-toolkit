@@ -151,6 +151,23 @@ pub(crate) fn part_any_plate_hidden(
         .any(|t| plate_explicitly_hidden(plate_visibility, &(zone.to_string(), part.name.clone(), t)))
 }
 
+/// Clears any `plate_visibility` override for `(zone, part, thickness)` for
+/// each of `thicknesses`, on a part checkbox toggle. Callers pass only the
+/// `show_zero_mm`-filtered thickness set (not every plate on the part), so an
+/// override on a thickness currently filtered out by `show_zero_mm` (e.g. a
+/// hidden 0mm plate while the filter is off) survives the toggle. Ports the
+/// egui original's clear scope (`tab.rs:4538-4540`, `4565-4567`).
+pub(crate) fn clear_plate_overrides(
+    plate_visibility: &mut HashMap<PlateKey, bool>,
+    zone: &str,
+    part: &str,
+    thicknesses: &[i32],
+) {
+    for &t in thicknesses {
+        plate_visibility.remove(&(zone.to_string(), part.to_string(), t));
+    }
+}
+
 /// A checkbox's on/off/indeterminate state, driving both the checked value
 /// and whether the popover draws the partial-state dash.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -311,6 +328,24 @@ mod tests {
     fn part_any_plate_hidden_is_false_with_no_overrides() {
         let part = ZonePart { name: "Cit_Belt".to_string(), plates: vec![320] };
         assert!(!part_any_plate_hidden("Citadel", &part, &HashMap::new(), false));
+    }
+
+    #[test]
+    fn clear_plate_overrides_leaves_thicknesses_outside_the_given_set_untouched() {
+        let mut plate_visibility = HashMap::new();
+        plate_visibility.insert(("Citadel".to_string(), "Cit_Belt".to_string(), 0), true);
+        plate_visibility.insert(("Citadel".to_string(), "Cit_Belt".to_string(), 320), true);
+
+        // Toggling the part's checkbox while `show_zero_mm` is off passes only
+        // the filtered (non-zero) thickness set, matching `render_part_row`'s
+        // `visible_plates`.
+        clear_plate_overrides(&mut plate_visibility, "Citadel", "Cit_Belt", &[320]);
+
+        assert!(!plate_visibility.contains_key(&("Citadel".to_string(), "Cit_Belt".to_string(), 320)));
+        assert!(
+            plate_visibility.contains_key(&("Citadel".to_string(), "Cit_Belt".to_string(), 0)),
+            "a 0mm override should survive a show_zero_mm-filtered toggle"
+        );
     }
 
     #[test]
