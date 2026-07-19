@@ -130,6 +130,12 @@ fn measure_column_widths(model: &ReplayReportModel, debug: bool, window: &mut Wi
     let gap_0p5 = rem * 0.125;
     let cell_padding = rem * 0.5;
     let icon_default = rem;
+    // The cells clip with `text_ellipsis()`, which truncates (dropping several
+    // trailing characters to make room for the "...") the moment the content
+    // reaches the available width. A column measured to exactly its content
+    // width therefore still shows an ellipsis, so give the text a little
+    // breathing room beyond the measured content plus padding.
+    let content_slack = rem * 0.5;
 
     let mut widths = vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()];
     for &col in &model.columns {
@@ -173,7 +179,7 @@ fn measure_column_widths(model: &ReplayReportModel, debug: bool, window: &mut Wi
                 max_w
             }
         };
-        widths[col as usize] = px((content_w + cell_padding).clamp(COLUMN_MIN_WIDTH, COLUMN_MAX_WIDTH));
+        widths[col as usize] = px((content_w + cell_padding + content_slack).clamp(COLUMN_MIN_WIDTH, COLUMN_MAX_WIDTH));
     }
     widths
 }

@@ -152,13 +152,37 @@ fn icon_or_text_cell(
         .into_any_element()
 }
 
+/// Fitted `(width, height)` to render `image` within a `max` by `max` box
+/// while preserving its native aspect ratio. Matches the egui app's ribbon
+/// rendering, which uses `Image::fit_to_exact_size((64, 64))` -- a scale that
+/// keeps aspect ratio -- so a wide, short ribbon icon renders short (its row
+/// only as tall as the fitted icon) rather than being forced into a `max` by
+/// `max` square and inflating the row height. Square icons (achievements) are
+/// unaffected: they fit as `max` by `max`.
+fn fit_within_box(image: &RenderImage, max: f32) -> (f32, f32) {
+    let size = image.size(0);
+    fit_dims(size.width.0 as f32, size.height.0 as f32, max)
+}
+
+/// Scales native `(w, h)` to fit within a `max` by `max` box preserving aspect
+/// ratio. Degenerate (non-positive) dimensions fall back to a `max` square.
+fn fit_dims(w: f32, h: f32, max: f32) -> (f32, f32) {
+    if w <= 0.0 || h <= 0.0 {
+        return (max, max);
+    }
+    let scale = (max / w).min(max / h);
+    (w * scale, h * scale)
+}
+
 /// An `[icon | label]` row shared by achievements and ribbons: an icon when
 /// `icons.get_keyed(key)` has one (no fallback text in its place, matching the
 /// egui app's `ui.horizontal` which only conditionally adds the image), then
 /// `label` always rendered alongside it. A hover tooltip covers the whole row.
-/// `items_center()` vertically centers the icon and label on a shared center
-/// line even when the icon (up to `RIBBON_ICON_SIZE`) is much taller than the
-/// text. The 8px icon-to-label gap matches egui's default
+/// The icon is fitted within a `size` by `size` box preserving its aspect
+/// ratio (`fit_within_box`), so wide ribbon icons stay short and their row
+/// with them. `items_center()` vertically centers the icon and label on a
+/// shared center line when the icon is taller than the text (e.g. a square
+/// achievement icon). The 8px icon-to-label gap matches egui's default
 /// `Spacing::item_spacing.x` (`egui::style::Spacing::default()`), the gap a
 /// `ui.horizontal` puts between the image and the label it adds next.
 /// `tag` keys the `ElementId` so different lists in the same row never
@@ -177,7 +201,8 @@ fn icon_label_row(
     let tooltip: SharedString = tooltip_text.into();
     let mut row = h_flex().w_full().gap(px(8.)).items_center();
     if let Some(image) = icons.get_keyed(key) {
-        row = row.child(img(image).w(px(size)).h(px(size)).flex_none());
+        let (w, h) = fit_within_box(&image, size);
+        row = row.child(img(image).w(px(w)).h(px(h)).flex_none());
     }
     row = row.child(div().flex_1().min_w(px(0.)).text_xs().child(label));
     row.id((tag, row_ix * DETAIL_ID_STRIDE + idx))
@@ -694,9 +719,32 @@ mod tests {
     use wows_replay_insights::battle_report::RibbonResult;
 
     use super::DamageDirection;
+    use super::fit_dims;
     use super::interaction_amount;
     use super::interaction_percentage;
     use super::reorder_bulge_after_main_caliber;
+
+    #[test]
+    fn fit_dims_keeps_a_wide_ribbon_short() {
+        // A 220x60 ribbon fitted into a 64 box: 64 wide, proportionally short.
+        let (w, h) = fit_dims(220.0, 60.0, 64.0);
+        assert!((w - 64.0).abs() < 1e-4, "width should hit the box: {w}");
+        assert!((h - 64.0 * 60.0 / 220.0).abs() < 1e-4, "height should scale with aspect: {h}");
+        assert!(h < 20.0, "a wide ribbon must render short, got {h}");
+    }
+
+    #[test]
+    fn fit_dims_leaves_a_square_icon_square() {
+        assert_eq!(fit_dims(32.0, 32.0, 32.0), (32.0, 32.0));
+        let (w, h) = fit_dims(128.0, 128.0, 32.0);
+        assert!((w - 32.0).abs() < 1e-4 && (h - 32.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn fit_dims_falls_back_to_a_square_for_degenerate_sizes() {
+        assert_eq!(fit_dims(0.0, 10.0, 64.0), (64.0, 64.0));
+        assert_eq!(fit_dims(10.0, 0.0, 64.0), (64.0, 64.0));
+    }
 
     fn ribbon(name: &str) -> RibbonResult {
         RibbonResult {
