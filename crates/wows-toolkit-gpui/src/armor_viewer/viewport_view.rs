@@ -1,6 +1,14 @@
 //! Armor viewport view: wraps the offscreen-rendered `img()` (Task 1) with
 //! gpui mouse/scroll/key input driving the copied `viewport_3d` arcball
 //! camera, plus a gpui-native redraw of the navigation gizmo overlaid on top.
+//! Milestone 3 Task 6 adds CPU plate picking on top of the same mouse-move
+//! handler: hovering a plate shows a thickness tooltip (`picking_ui.rs`) and
+//! a highlight overlay; a plain click (not a camera drag) toggles that
+//! plate's visibility; right-click opens a context menu with hide/show and
+//! "disable material" actions. All of it shares this view's on-demand
+//! render discipline -- picking is CPU-only and cheap, so it runs on every
+//! mouse-move, but a highlight/geometry re-upload (GPU work) only happens
+//! when the hovered plate or `plate_visibility` actually changes.
 //!
 //! Rendering is on-demand: `Viewport3D::is_dirty()` (set by any camera
 //! mutation or mesh change) gates the expensive offscreen render + CPU
@@ -10,15 +18,23 @@
 //! it never blocks the UI thread; the view shows a brief status message
 //! until it is ready.
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui_component::ActiveTheme;
 use gpui_component::h_flex;
+use gpui_component::menu::ContextMenuExt;
+use gpui_component::menu::PopupMenuItem;
 
 use crate::armor_viewer::load_ship::ArmorTriangleTooltip;
 use crate::armor_viewer::load_ship::LoadedShipArmor;
+use crate::armor_viewer::load_ship::PlateKey;
+use crate::armor_viewer::picking_ui;
+use crate::armor_viewer::upload;
 use crate::armor_viewer::upload::upload_armor_to_viewport;
 use crate::viewport::camera;
 use crate::viewport::camera::ArcballCamera;
@@ -52,6 +68,10 @@ const DRAG_THRESHOLD_PX: f32 = 4.0;
 /// How often the held-key movement ticker (`start_key_ticker`) advances the
 /// camera while a WASD/arrow key is held down.
 const KEY_TICK_HZ: f32 = 60.0;
+
+/// Offset (in each axis) from the cursor to the thickness tooltip's anchor
+/// position, so the tooltip doesn't sit directly under the pointer.
+const TOOLTIP_CURSOR_OFFSET: Pixels = px(16.);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DragKind {
@@ -112,6 +132,18 @@ enum GpuState {
     Failed(String),
 }
 
+/// The currently hovered armor plate (CPU picking result), if any: its key
+/// (for click-to-hide and highlight matching), the tooltip content to show,
+/// and the cursor position the tooltip is anchored near. Cloned into a
+/// `.context_menu()` closure and a `cx.notify()`-triggered render pass, so it
+/// is cheap to clone (a `PlateKey`, an `ArmorTriangleTooltip`, and a `Point`).
+#[derive(Clone)]
+struct HoverInfo {
+    key: PlateKey,
+    tooltip: ArmorTriangleTooltip,
+    cursor: Point<Pixels>,
+}
+
 pub struct ViewportView {
     focus_handle: FocusHandle,
     viewport: Viewport3D,
@@ -142,9 +174,22 @@ pub struct ViewportView {
     /// initializing. `apply_gpu_result` uploads this instead of the
     /// placeholder cube once the device becomes ready, then clears it.
     pending_armor: Option<Arc<LoadedShipArmor>>,
-    /// Per-mesh triangle tooltip data from the most recent armor upload, for
-    /// a future milestone's hover/click picking. Nothing reads this yet.
-    #[allow(dead_code)]
+    /// The armor currently displayed, kept (beyond the initial upload) so a
+    /// `plate_visibility` change can re-upload without reloading the ship.
+    current_armor: Option<Arc<LoadedShipArmor>>,
+    /// Explicitly-hidden plates (click-to-hide / context-menu toggle,
+    /// `picking_ui.rs`); absent = visible. Reset whenever a new ship loads.
+    /// Mutations always go through `toggle_plate`/`set_plate_hidden`/
+    /// `show_all_plates`/`disable_material` -- TODO(Task 7): undo/redo will
+    /// wrap those with a `VisibilityUndoStack` snapshot.
+    plate_visibility: HashMap<PlateKey, bool>,
+    /// The currently hovered armor plate from CPU picking, if any.
+    hovered: Option<HoverInfo>,
+    /// The overlay mesh highlighting `hovered`'s plate, if any, so it can be
+    /// removed/replaced when the hovered plate changes.
+    hover_highlight: Option<(PlateKey, MeshId)>,
+    /// Per-mesh triangle tooltip data from the most recent armor upload, used
+    /// to map a `pick()` hit back to its `ArmorTriangleTooltip`.
     mesh_triangle_info: Vec<(MeshId, Vec<ArmorTriangleTooltip>)>,
 }
 
@@ -165,6 +210,10 @@ impl ViewportView {
             held_keys: HashSet::new(),
             key_ticking: false,
             pending_armor: None,
+            current_armor: None,
+            plate_visibility: HashMap::new(),
+            hovered: None,
+            hover_highlight: None,
             mesh_triangle_info: Vec::new(),
         };
         this.start_gpu_init(cx);
@@ -180,7 +229,7 @@ impl ViewportView {
     /// `apply_gpu_result` uploads it as soon as the device becomes ready.
     pub fn show_armor(&mut self, armor: Arc<LoadedShipArmor>, cx: &mut Context<Self>) {
         if matches!(self.gpu, GpuState::Ready { .. }) {
-            self.upload_armor_now(&armor);
+            self.upload_armor_now(armor);
             self.pending_armor = None;
         } else {
             self.pending_armor = Some(armor);
@@ -188,13 +237,22 @@ impl ViewportView {
         cx.notify();
     }
 
-    /// Uploads `armor` into the viewport. Callers must have already checked
-    /// `self.gpu` is `Ready`; a no-op otherwise.
-    fn upload_armor_now(&mut self, armor: &LoadedShipArmor) {
+    /// Uploads `armor` into the viewport and keeps it as `current_armor` for
+    /// later `plate_visibility`-only re-uploads (`reupload_current_armor`).
+    /// Resets `plate_visibility` and any hover state -- a freshly loaded ship
+    /// starts with every plate visible and nothing hovered, matching the
+    /// egui app's own reset on ship load (`tab.rs:1453`, `2393-2394`).
+    /// Callers must have already checked `self.gpu` is `Ready`; a no-op
+    /// otherwise.
+    fn upload_armor_now(&mut self, armor: Arc<LoadedShipArmor>) {
         let GpuState::Ready { ctx, .. } = &self.gpu else { return };
         let device = ctx.device.clone();
-        self.mesh_triangle_info = upload_armor_to_viewport(&mut self.viewport, &device, armor);
+        self.plate_visibility.clear();
+        self.hovered = None;
+        self.hover_highlight = None;
+        self.mesh_triangle_info = upload_armor_to_viewport(&mut self.viewport, &device, &armor, &self.plate_visibility);
         self.model_bounds = Some(armor.bounds);
+        self.current_armor = Some(armor);
     }
 
     /// Creates the owned wgpu device off the UI thread (device/adapter
@@ -221,7 +279,7 @@ impl ViewportView {
                 // A ship picked in the sidebar while the device was still
                 // initializing takes priority over the placeholder cube.
                 if let Some(armor) = self.pending_armor.take() {
-                    self.upload_armor_now(&armor);
+                    self.upload_armor_now(armor);
                 } else {
                     let GpuState::Ready { ctx, .. } = &self.gpu else { unreachable!() };
                     let (vertices, indices) = unit_cube(PLACEHOLDER_COLOR);
@@ -344,7 +402,15 @@ impl ViewportView {
         if camera_changed {
             self.viewport.mark_dirty();
         }
-        if camera_changed || hover_changed {
+
+        // Plate picking only runs while not dragging the camera/gizmo, so it
+        // doesn't fight with (or waste CPU during) an orbit/pan; any hover
+        // from before the drag started is cleared so the tooltip/highlight
+        // don't sit stale over a moving model.
+        let plate_hover_changed =
+            if self.drag.is_none() { self.update_plate_hover(event.position) } else { self.clear_plate_hover() };
+
+        if camera_changed || hover_changed || plate_hover_changed {
             cx.notify();
         }
     }
@@ -355,12 +421,20 @@ impl ViewportView {
             self.gizmo_press_in_box = false;
             return;
         }
-        if event.button == MouseButton::Left && self.gizmo_press_in_box && drag.is_some_and(|d| !d.moved) {
+        let plain_click = drag.is_some_and(|d| !d.moved);
+        if event.button == MouseButton::Left && self.gizmo_press_in_box && plain_click {
             let pointer = point_to_vec2(event.position);
             if let Some(rect) = self.gizmo_rect()
                 && let Some((axis, positive)) = gizmo::hit_test(rect, &self.viewport.camera, pointer)
             {
                 self.snap_camera(axis, positive, cx);
+            }
+        } else if event.button == MouseButton::Left && !self.gizmo_press_in_box && plain_click {
+            // A plain click (not a drag) on the model, outside the gizmo box:
+            // toggle the hovered plate's visibility, matching the egui app's
+            // `response.clicked()` click-to-hide (`tab.rs:5350-5362`).
+            if let Some(key) = self.hovered.as_ref().map(|h| h.key.clone()) {
+                self.toggle_plate(key, cx);
             }
         }
         self.gizmo_press_in_box = false;
@@ -478,6 +552,144 @@ impl ViewportView {
         matches!(self.gpu, GpuState::Ready { .. })
     }
 
+    /// CPU-picks at `position` (screen space) and updates `self.hovered` to
+    /// match, matching the egui app's own per-frame hover pick (`tab.rs:5326-5347`).
+    /// Rebuilds the hover-highlight overlay mesh only when the hovered plate
+    /// actually changed (an on-demand GPU upload); the cursor position is
+    /// still refreshed on every call so the floating tooltip element tracks
+    /// the pointer. Returns whether the caller should `cx.notify()`.
+    fn update_plate_hover(&mut self, position: Point<Pixels>) -> bool {
+        let Some(bounds) = self.last_bounds else { return self.clear_plate_hover() };
+        if self.current_armor.is_none() {
+            return self.clear_plate_hover();
+        }
+        let rect = view_rect_from_bounds(bounds);
+        let hit = self.viewport.pick(point_to_vec2(position), rect);
+        let found =
+            hit.as_ref().and_then(|h| picking_ui::tooltip_for_hit(h, &self.mesh_triangle_info)).map(|tooltip| {
+                let key = picking_ui::plate_key_of(tooltip);
+                (key, tooltip.clone())
+            });
+        let Some((key, tooltip)) = found else { return self.clear_plate_hover() };
+
+        let key_changed = self.hovered.as_ref().map(|h| h.key != key).unwrap_or(true);
+        self.hovered = Some(HoverInfo { key: key.clone(), tooltip, cursor: position });
+        if key_changed {
+            self.rebuild_hover_highlight(&key);
+        }
+        true
+    }
+
+    /// Clears any hovered plate, tooltip, and highlight overlay. Returns
+    /// whether anything actually changed (so callers only `cx.notify()` when
+    /// needed).
+    fn clear_plate_hover(&mut self) -> bool {
+        let had_hover = self.hovered.take().is_some();
+        if let Some((_, old_id)) = self.hover_highlight.take() {
+            self.viewport.remove_mesh(old_id);
+            self.viewport.mark_dirty();
+        }
+        had_hover
+    }
+
+    /// Replaces the hover-highlight overlay mesh with one for `key`, via
+    /// `picking_ui::upload_plate_highlight`. A no-op (leaves no highlight) if
+    /// the GPU device isn't ready or there is no armor loaded, which should
+    /// not happen in practice since `update_plate_hover` already checked both.
+    fn rebuild_hover_highlight(&mut self, key: &PlateKey) {
+        if let Some((_, old_id)) = self.hover_highlight.take() {
+            self.viewport.remove_mesh(old_id);
+        }
+        let GpuState::Ready { ctx, .. } = &self.gpu else { return };
+        let Some(armor) = self.current_armor.clone() else { return };
+        let mesh_id =
+            picking_ui::upload_plate_highlight(&mut self.viewport, &ctx.device, &armor, key, &self.plate_visibility);
+        self.hover_highlight = Some((key.clone(), mesh_id));
+        self.viewport.mark_dirty();
+    }
+
+    /// Toggles a single plate's visibility and re-uploads. The single seam
+    /// every visibility mutation goes through (along with `show_all_plates`/
+    /// `disable_material`) -- TODO(Task 7): undo/redo will snapshot
+    /// `plate_visibility` around this call.
+    fn toggle_plate(&mut self, key: PlateKey, cx: &mut Context<Self>) {
+        let hidden = self.plate_visibility.get(&key).copied().unwrap_or(false);
+        self.set_plate_hidden(key, !hidden, cx);
+    }
+
+    /// Sets one plate's hidden state. `plate_visibility` stores only
+    /// explicitly-hidden keys (absent = visible), so showing a plate removes
+    /// its entry rather than inserting `false`.
+    fn set_plate_hidden(&mut self, key: PlateKey, hidden: bool, cx: &mut Context<Self>) {
+        if hidden {
+            self.plate_visibility.insert(key, true);
+        } else {
+            self.plate_visibility.remove(&key);
+        }
+        self.reupload_current_armor(cx);
+    }
+
+    /// Clears every explicitly-hidden plate ("Show all hidden plates" context
+    /// menu action, `tab.rs:5393-5402`).
+    fn show_all_plates(&mut self, cx: &mut Context<Self>) {
+        if self.plate_visibility.is_empty() {
+            return;
+        }
+        self.plate_visibility.clear();
+        self.reupload_current_armor(cx);
+    }
+
+    /// Hides every plate thickness belonging to `(zone, material)` ("Disable
+    /// {material}" context menu action, `tab.rs:5406-5414`). The egui app
+    /// tracks this via a separate `part_visibility` map (Milestone 4's part
+    /// list); this port has no part-level state yet, so it reproduces the
+    /// same *effect* by hiding each of that part's known plate thicknesses
+    /// individually (`LoadedShipArmor::zone_part_plates`).
+    fn disable_material(&mut self, zone: &str, material: &str, cx: &mut Context<Self>) {
+        let Some(armor) = &self.current_armor else { return };
+        let thicknesses: Vec<i32> = armor
+            .zone_part_plates
+            .iter()
+            .find(|z| z.name == zone)
+            .and_then(|z| z.parts.iter().find(|p| p.name == material))
+            .map(|p| p.plates.clone())
+            .unwrap_or_default();
+        if thicknesses.is_empty() {
+            return;
+        }
+        for thickness in thicknesses {
+            self.plate_visibility.insert((zone.to_string(), material.to_string(), thickness), true);
+        }
+        self.reupload_current_armor(cx);
+    }
+
+    /// Re-uploads `current_armor` honoring the current `plate_visibility`,
+    /// without moving the camera (`upload::reupload_armor_plates`). If the
+    /// hovered plate is still visible its highlight is rebuilt against the
+    /// fresh geometry; if it just became hidden the hover/tooltip are cleared
+    /// outright rather than waiting for the next mouse-move.
+    fn reupload_current_armor(&mut self, cx: &mut Context<Self>) {
+        let GpuState::Ready { ctx, .. } = &self.gpu else { return };
+        let Some(armor) = self.current_armor.clone() else { return };
+        let device = ctx.device.clone();
+        self.mesh_triangle_info =
+            upload::reupload_armor_plates(&mut self.viewport, &device, &armor, &self.plate_visibility);
+        // `viewport.clear()` (inside the re-upload) already dropped the old
+        // highlight mesh; forget the stale id before rebuilding against the
+        // fresh geometry.
+        self.hover_highlight = None;
+        if let Some(hover) = self.hovered.clone() {
+            let hidden = self.plate_visibility.get(&hover.key).copied().unwrap_or(false);
+            if hidden {
+                self.hovered = None;
+            } else {
+                self.rebuild_hover_highlight(&hover.key);
+            }
+        }
+        self.viewport.mark_dirty();
+        cx.notify();
+    }
+
     fn snap_camera(&mut self, axis: Axis, positive: bool, cx: &mut Context<Self>) {
         let (az, el) = camera::ortho_view(axis, positive, self.viewport.camera.azimuth);
         self.viewport.camera.animate_to(az, el, GIZMO_SNAP_DURATION_SECS);
@@ -559,6 +771,34 @@ impl Render for ViewportView {
         .absolute()
         .size_full();
 
+        // Floating thickness tooltip, anchored near (not under) the cursor
+        // and snapped back inside the window if it would overflow -- reuses
+        // gpui's own `anchored()`/`deferred()` primitives (the same ones the
+        // context menu below and gpui-component's managed tooltips use)
+        // rather than hand-measuring the tooltip's size.
+        let tooltip_overlay = self.hovered.as_ref().map(|hover| {
+            let theme = cx.theme();
+            let (background, border, radius, muted) =
+                (theme.background, theme.border, theme.radius, theme.muted_foreground);
+            let element = picking_ui::tooltip_element(&hover.tooltip, background, border, radius, muted);
+            let anchor_pos = point(hover.cursor.x + TOOLTIP_CURSOR_OFFSET, hover.cursor.y + TOOLTIP_CURSOR_OFFSET);
+            deferred(anchored().position(anchor_pos).snap_to_window_with_margin(px(8.)).child(element))
+                .with_priority(2)
+                .into_any_element()
+        });
+
+        // Right-click context menu: hide/show the hovered plate, show all
+        // hidden plates, and disable the hovered part's material. Snapshots
+        // `self.hovered`/`plate_visibility` at render time (refreshed on
+        // every hover-driven `cx.notify()`, so effectively current by the
+        // time a right-click follows a real hover) since the menu-item click
+        // handlers only get `&mut App`, not this view's own `Context`.
+        let entity = cx.entity();
+        let hovered_for_menu = self.hovered.clone();
+        let hover_is_hidden =
+            hovered_for_menu.as_ref().is_some_and(|h| self.plate_visibility.get(&h.key).copied().unwrap_or(false));
+        let hidden_count = self.plate_visibility.len();
+
         div()
             .id("armor-viewport")
             .track_focus(&self.focus_handle)
@@ -576,6 +816,47 @@ impl Render for ViewportView {
             .on_key_up(cx.listener(Self::handle_key_up))
             .child(image_child)
             .child(overlay)
+            .when_some(tooltip_overlay, |this, t| this.child(t))
+            .context_menu(move |mut menu, _window, _cx| {
+                let Some(hover) = hovered_for_menu.clone() else { return menu };
+                let (zone, material, thickness_tenths) = hover.key.clone();
+                let thickness_mm = thickness_tenths as f32 / 10.0;
+
+                let toggle_key = hover.key.clone();
+                let toggle_entity = entity.clone();
+                let toggle_label = if hover_is_hidden {
+                    format!("Show {thickness_mm:.0} mm {material}")
+                } else {
+                    format!("Hide {thickness_mm:.0} mm {material}")
+                };
+                menu = menu.item(PopupMenuItem::new(toggle_label).on_click(move |_event, _window, cx| {
+                    let key = toggle_key.clone();
+                    toggle_entity.update(cx, |view, cx| view.toggle_plate(key, cx));
+                }));
+
+                if hidden_count > 0 {
+                    let show_all_entity = entity.clone();
+                    menu = menu.item(PopupMenuItem::new(format!("Show all hidden plates ({hidden_count})")).on_click(
+                        move |_event, _window, cx| {
+                            show_all_entity.update(cx, |view, cx| view.show_all_plates(cx));
+                        },
+                    ));
+                }
+
+                menu = menu.separator();
+
+                let disable_entity = entity.clone();
+                let disable_zone = zone.clone();
+                let disable_material_name = material.clone();
+                menu = menu.item(PopupMenuItem::new(format!("Disable {material}")).on_click(
+                    move |_event, _window, cx| {
+                        disable_entity
+                            .update(cx, |view, cx| view.disable_material(&disable_zone, &disable_material_name, cx));
+                    },
+                ));
+
+                menu
+            })
     }
 }
 

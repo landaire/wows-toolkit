@@ -1,22 +1,29 @@
 //! Uploads a [`LoadedShipArmor`] into a [`Viewport3D`]. Ports the egui app's
-//! `upload_armor_to_viewport` (`armor_viewer/ui/tab.rs:1147-1335`) plus the
-//! camera-framing half of `init_armor_viewport` (`tab.rs:1445-1495`) -- this
-//! milestone has no separate "reupload without recentering the camera" path
-//! (that only exists once visibility toggles exist, Milestone 3), so both are
-//! one function here.
+//! `upload_armor_to_viewport` (`armor_viewer/ui/tab.rs:1147-1335`), the
+//! camera-framing half of `init_armor_viewport` (`tab.rs:1445-1495`), and (as
+//! of Milestone 3 Task 6) the plain-triangle-visibility half of `pane.
+//! plate_visibility` filtering the egui original applies at the same call
+//! sites (`tab.rs:1178-1184`, `4025-4028`). [`upload_armor_to_viewport`] is
+//! the initial-load path (uploads + frames the camera, matching
+//! `init_armor_viewport`); [`reupload_armor_plates`] is the click-to-hide
+//! re-upload path added by that same task -- it shares the mesh-building
+//! logic via [`upload_armor_meshes`] but leaves the camera untouched, so
+//! toggling a plate's visibility does not reset the user's view.
 //!
 //! **v1 scope.** Armor meshes only. Hull meshes are loaded into
 //! [`LoadedShipArmor`] (see `load_ship.rs`) but never uploaded here -- hull
-//! display, camo, and the visibility toggles that gate them are Milestone 4.
-//! Camera-orbit-ellipse and ship-center overlays are likewise out of scope
-//! (their toggles do not exist yet). Every display setting this module
-//! applies is a fixed v1 default matching the egui app's own out-of-the-box
-//! defaults (`ArmorViewerDefaults::default()`, `armor_viewer/state.rs:95-113`;
-//! `PLATE_EDGE_*`/`EDGE_COLOR`, `armor_viewer/constants.rs:44-50`) -- there is
-//! no per-pane override yet (Milestone 3).
+//! display, camo, and the part-level visibility toggles that gate them are
+//! Milestone 4. Camera-orbit-ellipse and ship-center overlays are likewise
+//! out of scope (their toggles do not exist yet). `show_zero_mm`/
+//! `show_hidden_only`/part visibility are still fixed v1 defaults (no pane
+//! UI for them yet); only per-plate visibility (`plate_visibility`) is
+//! user-mutable so far (`picking_ui.rs`).
 
 use std::collections::HashMap;
 
+use wowsunpack::export::gltf_export::ArmorTriangleInfo;
+
+use crate::viewport::camera::ArcballCamera;
 use crate::viewport::renderer::LAYER_DEFAULT;
 use crate::viewport::renderer::LAYER_HULL;
 use crate::viewport::renderer::Viewport3D;
@@ -50,19 +57,41 @@ const EDGE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 
 /// Skip an armor triangle whose thickness rounds to (effectively) 0mm, unless
 /// `SHOW_ZERO_MM` is on. Matches the egui app's own `0.05` epsilon.
-fn is_zero_mm(thickness_mm: f32) -> bool {
+pub(crate) fn is_zero_mm(thickness_mm: f32) -> bool {
     thickness_mm.abs() < 0.05
 }
 
+/// Derives a triangle's [`PlateKey`] (zone, material_name, thickness rounded
+/// to tenths of mm). Matches the egui app's own inline key derivation at
+/// every `plate_visibility` check site (`tab.rs:1180`, `2911`, `4025`, ...).
+pub(crate) fn derive_plate_key(info: &ArmorTriangleInfo) -> PlateKey {
+    (info.zone.clone(), info.material_name.clone(), (info.thickness_mm * 10.0).round() as i32)
+}
+
+/// Whether triangle `info` should be included in an upload: not (effectively)
+/// 0mm (unless `SHOW_ZERO_MM`), and its plate is not in `plate_visibility`
+/// (which stores only explicitly-hidden plate keys -- absent means visible).
+/// Shared by the main mesh loop, plate boundary edges, and the hover
+/// highlight (`picking_ui.rs`) so all three treat a hidden plate identically.
+pub(crate) fn plate_is_visible(info: &ArmorTriangleInfo, plate_visibility: &HashMap<PlateKey, bool>) -> bool {
+    if !SHOW_ZERO_MM && is_zero_mm(info.thickness_mm) {
+        return false;
+    }
+    !plate_visibility.get(&derive_plate_key(info)).copied().unwrap_or(false)
+}
+
 /// Clears `viewport` and uploads `armor`'s armor meshes (thickness-colored,
-/// per the v1 fixed display defaults above), plate boundary edges, and the
-/// waterline plane, then frames the camera on `armor.bounds` and marks the
-/// viewport dirty. Returns the per-mesh triangle tooltip data for later
-/// picking (nothing reads it yet in this milestone; see the module doc).
-pub fn upload_armor_to_viewport(
+/// per the v1 fixed display defaults above, honoring `plate_visibility`),
+/// plate boundary edges, and the waterline plane. Does not touch the camera;
+/// shared by [`upload_armor_to_viewport`] (initial load, frames the camera
+/// afterward) and [`reupload_armor_plates`] (visibility-toggle re-upload,
+/// which must NOT move the camera). Returns the per-mesh triangle tooltip
+/// data for hover/click picking (`picking_ui.rs`).
+fn upload_armor_meshes(
     viewport: &mut Viewport3D,
     device: &wgpu::Device,
     armor: &LoadedShipArmor,
+    plate_visibility: &HashMap<PlateKey, bool>,
 ) -> Vec<(MeshId, Vec<ArmorTriangleTooltip>)> {
     viewport.clear();
 
@@ -73,7 +102,7 @@ pub fn upload_armor_to_viewport(
         let mut tooltips: Vec<ArmorTriangleTooltip> = Vec::new();
 
         for (tri_idx, info) in mesh.triangle_info.iter().enumerate() {
-            if !SHOW_ZERO_MM && is_zero_mm(info.thickness_mm) {
+            if !plate_is_visible(info, plate_visibility) {
                 continue;
             }
 
@@ -117,7 +146,7 @@ pub fn upload_armor_to_viewport(
     }
 
     if SHOW_PLATE_EDGES {
-        upload_plate_boundary_edges(viewport, armor, device);
+        upload_plate_boundary_edges(viewport, armor, device, plate_visibility);
     }
 
     if SHOW_WATERLINE {
@@ -125,11 +154,38 @@ pub fn upload_armor_to_viewport(
         viewport.add_world_space_mesh(device, &verts, &indices, LAYER_HULL);
     }
 
-    let (min, max) = armor.bounds;
-    viewport.camera = crate::viewport::camera::ArcballCamera::from_bounds(min, max);
     viewport.mark_dirty();
-
     mesh_triangle_info
+}
+
+/// Initial-load upload: builds `armor`'s meshes (see [`upload_armor_meshes`])
+/// and frames the camera on `armor.bounds`, matching the egui app's
+/// `init_armor_viewport` (`tab.rs:1445-1495`). Use [`reupload_armor_plates`]
+/// instead when only `plate_visibility` changed and the camera should stay
+/// put.
+pub fn upload_armor_to_viewport(
+    viewport: &mut Viewport3D,
+    device: &wgpu::Device,
+    armor: &LoadedShipArmor,
+    plate_visibility: &HashMap<PlateKey, bool>,
+) -> Vec<(MeshId, Vec<ArmorTriangleTooltip>)> {
+    let mesh_triangle_info = upload_armor_meshes(viewport, device, armor, plate_visibility);
+    let (min, max) = armor.bounds;
+    viewport.camera = ArcballCamera::from_bounds(min, max);
+    viewport.mark_dirty();
+    mesh_triangle_info
+}
+
+/// Re-upload after a `plate_visibility` change (click-to-hide / context-menu
+/// toggle, `picking_ui.rs`): rebuilds the meshes but leaves the camera alone,
+/// so hiding or showing a plate does not reset the user's view.
+pub fn reupload_armor_plates(
+    viewport: &mut Viewport3D,
+    device: &wgpu::Device,
+    armor: &LoadedShipArmor,
+    plate_visibility: &HashMap<PlateKey, bool>,
+) -> Vec<(MeshId, Vec<ArmorTriangleTooltip>)> {
+    upload_armor_meshes(viewport, device, armor, plate_visibility)
 }
 
 /// Create a water plane quad at the given Y height, extending beyond the hull
@@ -181,15 +237,20 @@ struct EdgeInfo {
 /// Upload plate boundary edge outlines where adjacent triangles have
 /// different thickness values, differing plates, or a sharp crease. Ports
 /// `armor_viewer::ui::tab::upload_plate_boundary_edges` verbatim (minus the
-/// `show_zero_mm`/hidden-plate/part-visibility filters -- v1 has no
-/// visibility state yet, see the module doc, so every triangle
-/// `upload_armor_to_viewport` itself uploaded is eligible here too).
-fn upload_plate_boundary_edges(viewport: &mut Viewport3D, armor: &LoadedShipArmor, device: &wgpu::Device) {
+/// `show_hidden_only`/part-visibility filters -- v1 has no pane UI for those
+/// yet, see the module doc; `plate_visibility` (Milestone 3 Task 6) is
+/// applied like the main mesh loop, via the shared `plate_is_visible`).
+fn upload_plate_boundary_edges(
+    viewport: &mut Viewport3D,
+    armor: &LoadedShipArmor,
+    device: &wgpu::Device,
+    plate_visibility: &HashMap<PlateKey, bool>,
+) {
     let mut edge_map: HashMap<EdgeKey, Vec<EdgeInfo>> = HashMap::new();
 
     for mesh in &armor.meshes {
         for (tri_idx, info) in mesh.triangle_info.iter().enumerate() {
-            if !SHOW_ZERO_MM && is_zero_mm(info.thickness_mm) {
+            if !plate_is_visible(info, plate_visibility) {
                 continue;
             }
 
@@ -198,8 +259,7 @@ fn upload_plate_boundary_edges(viewport: &mut Viewport3D, armor: &LoadedShipArmo
                 continue;
             }
 
-            let plate_key: PlateKey =
-                (info.zone.clone(), info.material_name.clone(), (info.thickness_mm * 10.0).round() as i32);
+            let plate_key: PlateKey = derive_plate_key(info);
 
             let mut tri_pos = [[0.0_f32; 3]; 3];
             for (k, vertex) in tri_pos.iter_mut().enumerate() {
@@ -345,6 +405,51 @@ mod tests {
         assert_eq!(quantize([0.12345, -0.12345, 1.0]), [1235, -1235, 10000]);
     }
 
+    fn test_triangle_info(zone: &str, material: &str, thickness_mm: f32) -> ArmorTriangleInfo {
+        ArmorTriangleInfo {
+            model_index: 1,
+            triangle_index: 0,
+            material_id: 0,
+            material_name: material.to_string(),
+            zone: zone.to_string(),
+            thickness_mm,
+            layers: vec![thickness_mm],
+            color: [0.0, 0.0, 0.0, 1.0],
+            hidden: false,
+        }
+    }
+
+    #[test]
+    fn derive_plate_key_rounds_thickness_to_tenths_of_a_mm() {
+        let info = test_triangle_info("Citadel", "Cit_Belt", 32.04);
+        assert_eq!(derive_plate_key(&info), ("Citadel".to_string(), "Cit_Belt".to_string(), 320));
+    }
+
+    #[test]
+    fn plate_is_visible_hides_zero_mm_triangles_by_default() {
+        let info = test_triangle_info("Hull", "Trans", 0.0);
+        assert!(!plate_is_visible(&info, &HashMap::new()));
+    }
+
+    #[test]
+    fn plate_is_visible_respects_an_explicitly_hidden_plate() {
+        let info = test_triangle_info("Citadel", "Cit_Belt", 32.0);
+        let key = derive_plate_key(&info);
+        assert!(plate_is_visible(&info, &HashMap::new()));
+
+        let mut hidden = HashMap::new();
+        hidden.insert(key, true);
+        assert!(!plate_is_visible(&info, &hidden));
+    }
+
+    #[test]
+    fn plate_is_visible_ignores_other_plates_in_the_visibility_map() {
+        let info = test_triangle_info("Citadel", "Cit_Belt", 32.0);
+        let mut hidden = HashMap::new();
+        hidden.insert(("Bow".to_string(), "Bow_Bottom".to_string(), 16), true);
+        assert!(plate_is_visible(&info, &hidden));
+    }
+
     /// Needs a local game install and a real GPU adapter: loads one real
     /// ship's armor (mirrors `load_ship.rs`'s own real-install test), uploads
     /// it into a fresh `Viewport3D` on an owned wgpu device (the same
@@ -405,10 +510,44 @@ mod tests {
         let pipeline = ctx.pipeline();
         let mut viewport = Viewport3D::new();
 
-        let mesh_triangle_info = upload_armor_to_viewport(&mut viewport, &ctx.device, &armor);
+        let plate_visibility = HashMap::new();
+        let mesh_triangle_info = upload_armor_to_viewport(&mut viewport, &ctx.device, &armor, &plate_visibility);
         assert!(!mesh_triangle_info.is_empty(), "expected at least one uploaded armor mesh");
         let total_triangles: usize = mesh_triangle_info.iter().map(|(_, tooltips)| tooltips.len()).sum();
         assert!(total_triangles > 0, "expected at least one uploaded armor triangle");
+
+        // Hiding one real plate and re-uploading (the click-to-hide path,
+        // `picking_ui.rs`) should drop exactly that plate's triangles and
+        // nothing else, without moving the camera.
+        let tooltip_key = |t: &ArmorTriangleTooltip| {
+            (t.zone.clone(), t.material_name.clone(), (t.thickness_mm * 10.0).round() as i32)
+        };
+        let hidden_key = mesh_triangle_info[0]
+            .1
+            .first()
+            .map(tooltip_key)
+            .expect("expected at least one tooltip to derive a plate key from");
+        let hidden_count_before =
+            mesh_triangle_info.iter().flat_map(|(_, t)| t).filter(|t| tooltip_key(t) == hidden_key).count();
+        let mut plate_visibility = HashMap::new();
+        plate_visibility.insert(hidden_key.clone(), true);
+        let (target_before, distance_before, azimuth_before, elevation_before) =
+            (viewport.camera.target, viewport.camera.distance, viewport.camera.azimuth, viewport.camera.elevation);
+        let reuploaded = reupload_armor_plates(&mut viewport, &ctx.device, &armor, &plate_visibility);
+        let total_after: usize = reuploaded.iter().map(|(_, tooltips)| tooltips.len()).sum();
+        assert_eq!(
+            total_triangles - total_after,
+            hidden_count_before,
+            "expected hiding one plate to drop exactly its own triangles"
+        );
+        assert!(
+            reuploaded.iter().flat_map(|(_, t)| t).all(|t| tooltip_key(t) != hidden_key),
+            "hidden plate's triangles should not reappear in the reuploaded tooltips"
+        );
+        assert_eq!(viewport.camera.target, target_before, "re-upload for a visibility toggle must not move the camera");
+        assert_eq!(viewport.camera.distance, distance_before, "re-upload for a visibility toggle must not zoom");
+        assert_eq!(viewport.camera.azimuth, azimuth_before, "re-upload for a visibility toggle must not rotate");
+        assert_eq!(viewport.camera.elevation, elevation_before, "re-upload for a visibility toggle must not rotate");
 
         let (w, h, rgba) = viewport
             .render_offscreen_rgba(&ctx.device, &ctx.queue, &pipeline, (512, 512))

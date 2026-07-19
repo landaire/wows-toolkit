@@ -92,7 +92,7 @@ impl LegendState {
 /// to a gpui `Hsla`, matching the egui original's `Color32::from_rgba_unmultiplied`
 /// conversion (`armor_viewer/ui/legend.rs`): each channel times 255, cast to u8,
 /// which truncates toward zero and saturates to 0..=255 (Rust's float-to-int cast).
-fn swatch_color(color: [f32; 4]) -> Hsla {
+pub(crate) fn swatch_color(color: [f32; 4]) -> Hsla {
     let to_u8 = |c: f32| (c * 255.0) as u8;
     let bytes = [to_u8(color[0]), to_u8(color[1]), to_u8(color[2]), to_u8(color[3])];
     rgba(u32::from_be_bytes(bytes)).into()
