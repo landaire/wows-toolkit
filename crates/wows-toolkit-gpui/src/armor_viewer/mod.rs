@@ -13,9 +13,13 @@
 //! the left, the 3D viewport on the right, wired so picking a ship loads and
 //! displays its armor. `picking_ui` adds CPU plate picking on top: hover
 //! highlight + thickness tooltip, and click/context-menu plate visibility
-//! toggles (`viewport_view.rs` owns the actual hover/`plate_visibility`
-//! state and wires it into the mouse handlers). Multi-pane comparison (M5),
-//! hull/camo display (M4), and visibility undo/redo (M3 Task 7) are later
+//! toggles. `visibility` holds the zone/part/plate override maps' shared
+//! types (`VisibilityFilter`, undo/redo snapshot stack, sidebar-highlight
+//! key) plus the tri-state tree's pure derivation logic; `popover` builds the
+//! toolbar button and the armor-visibility popover's gpui tree on top of it.
+//! `viewport_view.rs` owns the actual `part_visibility`/`plate_visibility`/
+//! undo-stack state and wires all of the above into the mouse and key
+//! handlers. Multi-pane comparison (M5) and hull/camo display (M4) are later
 //! milestones.
 #![allow(dead_code)]
 // Re-exports below are the module's public surface; not everything is
@@ -29,9 +33,11 @@ pub mod legend;
 pub mod load_ship;
 pub mod pane;
 pub mod picking_ui;
+pub mod popover;
 pub mod sidebar;
 pub mod upload;
 pub mod viewport_view;
+pub mod visibility;
 
 pub use assets::ArmorAssetsBundle;
 pub use assets::ArmorAssetsError;

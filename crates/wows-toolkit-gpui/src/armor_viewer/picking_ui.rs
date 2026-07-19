@@ -1,13 +1,13 @@
 //! CPU plate picking support: maps a [`HitResult`] to its tooltip data, ports
 //! the egui app's hover-highlight overlay upload (`upload_plate_highlight`,
-//! `armor_viewer/ui/tab.rs:2889-2960`), and builds the floating thickness
-//! tooltip element (`show_armor_tooltip`, `tab.rs:2778-2820` -- the V1 subset
-//! only; the penetration-check section, `tab.rs:2822-2884`, is deferred with
-//! the analysis subsystem and is never shown here). `viewport_view.rs` wires
-//! all three into the mouse-move/click handlers and owns the actual
-//! `plate_visibility`/hover state.
-
-use std::collections::HashMap;
+//! `armor_viewer/ui/tab.rs:2889-2960`), the sidebar-hover highlight uploads
+//! (`upload_zone_highlight`/`upload_part_highlight`, `tab.rs:2959-3080`), and
+//! builds the floating thickness tooltip element (`show_armor_tooltip`,
+//! `tab.rs:2778-2820` -- the V1 subset only; the penetration-check section,
+//! `tab.rs:2822-2884`, is deferred with the analysis subsystem and is never
+//! shown here). `viewport_view.rs` wires all of these into the mouse-move/
+//! click handlers and the visibility popover's row-hover callbacks, and owns
+//! the actual `part_visibility`/`plate_visibility`/hover state.
 
 use gpui::AnyElement;
 use gpui::FontWeight;
@@ -35,6 +35,7 @@ use super::load_ship::PlateKey;
 use super::load_ship::transform_normal;
 use super::load_ship::transform_point;
 use super::upload;
+use super::visibility::VisibilityFilter;
 
 /// `armor_viewer::constants::TRAJECTORY_NORMAL_OFFSET`: offsets the hover
 /// highlight overlay along each vertex normal so it renders in front of the
@@ -66,26 +67,78 @@ pub fn plate_key_of(tooltip: &ArmorTriangleTooltip) -> PlateKey {
 
 /// Uploads one overlay mesh containing every visible triangle whose plate key
 /// matches `key`, offset along its normal so it renders in front of the
-/// plate. Applies the same 0mm/`plate_visibility` filtering as `upload.rs`'s
-/// main upload (via `upload::plate_is_visible`), so a hidden plate highlights
-/// to an (empty) no-op mesh. Ports `armor_viewer::ui::tab::upload_plate_highlight`
+/// plate. Applies the same 0mm/part/plate filtering as `upload.rs`'s main
+/// upload (via `upload::plate_is_visible`), so a hidden plate highlights to
+/// an (empty) no-op mesh. Ports `armor_viewer::ui::tab::upload_plate_highlight`
 /// verbatim.
 pub fn upload_plate_highlight(
     viewport: &mut Viewport3D,
     device: &wgpu::Device,
     armor: &LoadedShipArmor,
     key: &PlateKey,
-    plate_visibility: &HashMap<PlateKey, bool>,
+    visibility: VisibilityFilter,
+) -> MeshId {
+    upload_highlight_mesh(viewport, device, armor, visibility, HOVER_HIGHLIGHT_COLOR, |info| {
+        &upload::derive_plate_key(info) == key
+    })
+}
+
+/// Fixed color for the sidebar-hover highlight (a popover row's Zone/Part/
+/// Plate hover), matching the egui call site's own constant
+/// (`ui::tab::SIDEBAR_HIGHLIGHT_COLOR`, `tab.rs:2956`) -- same value as
+/// `HOVER_HIGHLIGHT_COLOR` (the two highlights never overlap: one is
+/// raycast-driven, the other popover-hover-driven, tracked separately in
+/// `viewport_view.rs` as `hover_highlight`/`sidebar_highlight`).
+pub const SIDEBAR_HIGHLIGHT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.35];
+
+/// Uploads a highlight overlay for every visible armor triangle in `zone`.
+/// Ports `armor_viewer::ui::tab::upload_zone_highlight` verbatim.
+pub fn upload_zone_highlight(
+    viewport: &mut Viewport3D,
+    device: &wgpu::Device,
+    armor: &LoadedShipArmor,
+    zone: &str,
+    visibility: VisibilityFilter,
+) -> MeshId {
+    upload_highlight_mesh(viewport, device, armor, visibility, SIDEBAR_HIGHLIGHT_COLOR, |info| info.zone == zone)
+}
+
+/// Uploads a highlight overlay for every visible armor triangle matching
+/// `(zone, material)`. Ports `armor_viewer::ui::tab::upload_part_highlight` verbatim.
+pub fn upload_part_highlight(
+    viewport: &mut Viewport3D,
+    device: &wgpu::Device,
+    armor: &LoadedShipArmor,
+    zone: &str,
+    material: &str,
+    visibility: VisibilityFilter,
+) -> MeshId {
+    upload_highlight_mesh(viewport, device, armor, visibility, SIDEBAR_HIGHLIGHT_COLOR, |info| {
+        info.zone == zone && info.material_name == material
+    })
+}
+
+/// Shared highlight-mesh builder: every visible triangle (per `visibility`,
+/// same 0mm/part/plate filtering as the main upload) that also matches
+/// `matches`, offset along its normal so the overlay renders in front of the
+/// plate it highlights instead of z-fighting with it.
+fn upload_highlight_mesh(
+    viewport: &mut Viewport3D,
+    device: &wgpu::Device,
+    armor: &LoadedShipArmor,
+    visibility: VisibilityFilter,
+    color: [f32; 4],
+    matches: impl Fn(&wowsunpack::export::gltf_export::ArmorTriangleInfo) -> bool,
 ) -> MeshId {
     let mut vertices: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
     for mesh in &armor.meshes {
         for (tri_idx, info) in mesh.triangle_info.iter().enumerate() {
-            if !upload::plate_is_visible(info, plate_visibility) {
+            if !upload::plate_is_visible(info, visibility) {
                 continue;
             }
-            if &upload::derive_plate_key(info) != key {
+            if !matches(info) {
                 continue;
             }
 
@@ -110,7 +163,7 @@ pub fn upload_plate_highlight(
                     pos[1] += norm[1] * TRAJECTORY_NORMAL_OFFSET;
                     pos[2] += norm[2] * TRAJECTORY_NORMAL_OFFSET;
 
-                    vertices.push(Vertex { position: pos, normal: norm, color: HOVER_HIGHLIGHT_COLOR, uv: [0.0, 0.0] });
+                    vertices.push(Vertex { position: pos, normal: norm, color, uv: [0.0, 0.0] });
                 }
             }
             indices.extend_from_slice(&[new_base, new_base + 1, new_base + 2]);

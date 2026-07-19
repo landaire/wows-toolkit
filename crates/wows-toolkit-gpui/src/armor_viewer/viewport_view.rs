@@ -29,13 +29,19 @@ use gpui_component::ActiveTheme;
 use gpui_component::h_flex;
 use gpui_component::menu::ContextMenuExt;
 use gpui_component::menu::PopupMenuItem;
+use gpui_component::v_flex;
 
 use crate::armor_viewer::load_ship::ArmorTriangleTooltip;
 use crate::armor_viewer::load_ship::LoadedShipArmor;
 use crate::armor_viewer::load_ship::PlateKey;
 use crate::armor_viewer::picking_ui;
+use crate::armor_viewer::popover;
 use crate::armor_viewer::upload;
 use crate::armor_viewer::upload::upload_armor_to_viewport;
+use crate::armor_viewer::visibility::SidebarHighlightKey;
+use crate::armor_viewer::visibility::VisibilityFilter;
+use crate::armor_viewer::visibility::VisibilitySnapshot;
+use crate::armor_viewer::visibility::VisibilityUndoStack;
 use crate::viewport::camera;
 use crate::viewport::camera::ArcballCamera;
 use crate::viewport::camera::Axis;
@@ -175,19 +181,51 @@ pub struct ViewportView {
     /// placeholder cube once the device becomes ready, then clears it.
     pending_armor: Option<Arc<LoadedShipArmor>>,
     /// The armor currently displayed, kept (beyond the initial upload) so a
-    /// `plate_visibility` change can re-upload without reloading the ship.
-    current_armor: Option<Arc<LoadedShipArmor>>,
+    /// visibility change can re-upload without reloading the ship. `pub(crate)`
+    /// so `popover.rs` can read it while building the popover's tree.
+    pub(crate) current_armor: Option<Arc<LoadedShipArmor>>,
+    /// Explicit part-level visibility overrides from the armor-visibility
+    /// popover (`popover.rs`); absent = visible. Present value = is-visible
+    /// (matches the egui app's own sense, unlike `plate_visibility` below --
+    /// see `visibility.rs`'s module doc). Reset whenever a new ship loads.
+    /// Mutations always go through `snapshot_and_mutate`. `pub(crate)` so
+    /// `popover.rs` can read it while building the popover's tree.
+    pub(crate) part_visibility: HashMap<(String, String), bool>,
     /// Explicitly-hidden plates (click-to-hide / context-menu toggle,
-    /// `picking_ui.rs`); absent = visible. Reset whenever a new ship loads.
-    /// Mutations always go through `toggle_plate`/`set_plate_hidden`/
-    /// `show_all_plates`/`disable_material` -- TODO(Task 7): undo/redo will
-    /// wrap those with a `VisibilityUndoStack` snapshot.
-    plate_visibility: HashMap<PlateKey, bool>,
+    /// `picking_ui.rs`, and the popover's plate rows); absent = visible.
+    /// Present value = true means explicitly hidden (opposite sense from
+    /// `part_visibility`, see `visibility.rs`'s module doc). Reset whenever a
+    /// new ship loads. Mutations always go through `snapshot_and_mutate`.
+    /// `pub(crate)` so `popover.rs` can read it while building the popover's tree.
+    pub(crate) plate_visibility: HashMap<PlateKey, bool>,
+    /// Undo/redo history over `{part_visibility, plate_visibility}`. Every
+    /// mutator snapshots the pre-mutation state here via `snapshot_and_mutate`
+    /// before applying the change. Cleared whenever a new ship loads.
+    undo_stack: VisibilityUndoStack,
+    /// Which zone headers are expanded in the visibility popover's tree.
+    /// Purely local UI state (not visibility, not undo-tracked); collapsed by
+    /// default, matching egui's own `load_with_default_open(.., false)`.
+    /// `pub(crate)` so `popover.rs` can read it while building the popover's tree.
+    pub(crate) expanded_zones: HashSet<String>,
+    /// Which material/part headers are expanded in the visibility popover's
+    /// tree, keyed by (zone, material). Same defaults/scope as `expanded_zones`.
+    pub(crate) expanded_parts: HashSet<(String, String)>,
+    /// Scroll position of the visibility popover's zone/material/plate tree,
+    /// persisted across opens so the popover doesn't reset to the top every
+    /// time it's reopened. `pub(crate)` so `popover.rs` can clone a handle
+    /// into its lazily-rebuilt content closure.
+    pub(crate) popover_scroll: ScrollHandle,
     /// The currently hovered armor plate from CPU picking, if any.
     hovered: Option<HoverInfo>,
     /// The overlay mesh highlighting `hovered`'s plate, if any, so it can be
     /// removed/replaced when the hovered plate changes.
     hover_highlight: Option<(PlateKey, MeshId)>,
+    /// The overlay mesh highlighting a hovered Zone/Part/Plate row in the
+    /// visibility popover, if any. Tracked separately from `hover_highlight`
+    /// (raycast-driven) so the two don't fight each other; cleared when the
+    /// hovered row changes, the popover closes, or a visibility mutation
+    /// re-uploads the armor.
+    sidebar_highlight: Option<(SidebarHighlightKey, MeshId)>,
     /// Per-mesh triangle tooltip data from the most recent armor upload, used
     /// to map a `pick()` hit back to its `ArmorTriangleTooltip`.
     mesh_triangle_info: Vec<(MeshId, Vec<ArmorTriangleTooltip>)>,
@@ -211,9 +249,15 @@ impl ViewportView {
             key_ticking: false,
             pending_armor: None,
             current_armor: None,
+            part_visibility: HashMap::new(),
             plate_visibility: HashMap::new(),
+            undo_stack: VisibilityUndoStack::default(),
+            expanded_zones: HashSet::new(),
+            expanded_parts: HashSet::new(),
+            popover_scroll: ScrollHandle::new(),
             hovered: None,
             hover_highlight: None,
+            sidebar_highlight: None,
             mesh_triangle_info: Vec::new(),
         };
         this.start_gpu_init(cx);
@@ -238,19 +282,26 @@ impl ViewportView {
     }
 
     /// Uploads `armor` into the viewport and keeps it as `current_armor` for
-    /// later `plate_visibility`-only re-uploads (`reupload_current_armor`).
-    /// Resets `plate_visibility` and any hover state -- a freshly loaded ship
-    /// starts with every plate visible and nothing hovered, matching the
-    /// egui app's own reset on ship load (`tab.rs:1453`, `2393-2394`).
-    /// Callers must have already checked `self.gpu` is `Ready`; a no-op
-    /// otherwise.
+    /// later visibility-only re-uploads (`reupload_current_armor`). Resets
+    /// `part_visibility`/`plate_visibility`, the undo/redo history, the
+    /// popover's expanded-row state, and any hover state -- a freshly loaded
+    /// ship starts with every plate visible and nothing hovered/undoable,
+    /// matching the egui app's own reset on ship load (`tab.rs:1453-1454`,
+    /// `2393-2394`, `2741`). Callers must have already checked `self.gpu` is
+    /// `Ready`; a no-op otherwise.
     fn upload_armor_now(&mut self, armor: Arc<LoadedShipArmor>) {
         let GpuState::Ready { ctx, .. } = &self.gpu else { return };
         let device = ctx.device.clone();
+        self.part_visibility.clear();
         self.plate_visibility.clear();
+        self.undo_stack.clear();
+        self.expanded_zones.clear();
+        self.expanded_parts.clear();
         self.hovered = None;
         self.hover_highlight = None;
-        self.mesh_triangle_info = upload_armor_to_viewport(&mut self.viewport, &device, &armor, &self.plate_visibility);
+        self.sidebar_highlight = None;
+        let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
+        self.mesh_triangle_info = upload_armor_to_viewport(&mut self.viewport, &device, &armor, visibility);
         self.model_bounds = Some(armor.bounds);
         self.current_armor = Some(armor);
     }
@@ -460,14 +511,28 @@ impl ViewportView {
         }
     }
 
-    /// WASD moves the camera target; arrows move it vertically / orbit the
-    /// azimuth. Tracks the key as held and (re)starts the ~60Hz movement
-    /// ticker (`start_key_ticker`), which applies the per-tick camera delta
-    /// every tick for smooth continuous motion with no OS auto-repeat delay,
-    /// for as long as any movement key remains held.
+    /// Ctrl/Cmd+Z (no shift) undoes; Ctrl/Cmd+Shift+Z or Ctrl/Cmd+R redoes.
+    /// Otherwise WASD moves the camera target and arrows move it vertically /
+    /// orbit the azimuth, tracking the key as held and (re)starting the
+    /// ~60Hz movement ticker (`start_key_ticker`), which applies the
+    /// per-tick camera delta every tick for smooth continuous motion with no
+    /// OS auto-repeat delay, for as long as any movement key remains held.
+    /// Ports `armor_viewer::common::handle_undo_redo`'s key detection.
     fn handle_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         if !self.is_gpu_ready() {
             return;
+        }
+        if !event.is_held {
+            let modifiers = event.keystroke.modifiers;
+            let key = event.keystroke.key.as_str();
+            if modifiers.secondary() && !modifiers.shift && key == "z" {
+                self.undo_visibility(cx);
+                return;
+            }
+            if modifiers.secondary() && (key == "r" || (key == "z" && modifiers.shift)) {
+                self.redo_visibility(cx);
+                return;
+            }
         }
         let Some(key) = MoveKey::from_str(event.keystroke.key.as_str()) else { return };
         if self.held_keys.insert(key) {
@@ -602,31 +667,103 @@ impl ViewportView {
         }
         let GpuState::Ready { ctx, .. } = &self.gpu else { return };
         let Some(armor) = self.current_armor.clone() else { return };
-        let mesh_id =
-            picking_ui::upload_plate_highlight(&mut self.viewport, &ctx.device, &armor, key, &self.plate_visibility);
+        let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
+        let mesh_id = picking_ui::upload_plate_highlight(&mut self.viewport, &ctx.device, &armor, key, visibility);
         self.hover_highlight = Some((key.clone(), mesh_id));
         self.viewport.mark_dirty();
     }
 
-    /// Toggles a single plate's visibility and re-uploads. The single seam
-    /// every visibility mutation goes through (along with `show_all_plates`/
-    /// `disable_material`) -- TODO(Task 7): undo/redo will snapshot
-    /// `plate_visibility` around this call.
-    fn toggle_plate(&mut self, key: PlateKey, cx: &mut Context<Self>) {
-        let hidden = self.plate_visibility.get(&key).copied().unwrap_or(false);
-        self.set_plate_hidden(key, !hidden, cx);
+    /// Replaces the sidebar-hover highlight overlay mesh for `key`, via
+    /// `picking_ui::upload_zone_highlight`/`upload_part_highlight`/
+    /// `upload_plate_highlight`. A no-op (leaves no highlight) if the GPU
+    /// device isn't ready or there is no armor loaded. Also used by
+    /// `reupload_current_armor` to rebuild an already-active sidebar
+    /// highlight against fresh geometry after a visibility mutation.
+    fn rebuild_sidebar_highlight(&mut self, key: SidebarHighlightKey) {
+        if let Some((_, old_id)) = self.sidebar_highlight.take() {
+            self.viewport.remove_mesh(old_id);
+        }
+        let GpuState::Ready { ctx, .. } = &self.gpu else { return };
+        let Some(armor) = self.current_armor.clone() else { return };
+        let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
+        let mesh_id = match &key {
+            SidebarHighlightKey::Zone(zone) => {
+                picking_ui::upload_zone_highlight(&mut self.viewport, &ctx.device, &armor, zone, visibility)
+            }
+            SidebarHighlightKey::Part(zone, part) => {
+                picking_ui::upload_part_highlight(&mut self.viewport, &ctx.device, &armor, zone, part, visibility)
+            }
+            SidebarHighlightKey::Plate(pk) => {
+                picking_ui::upload_plate_highlight(&mut self.viewport, &ctx.device, &armor, pk, visibility)
+            }
+        };
+        self.sidebar_highlight = Some((key, mesh_id));
+        self.viewport.mark_dirty();
     }
 
-    /// Sets one plate's hidden state. `plate_visibility` stores only
-    /// explicitly-hidden keys (absent = visible), so showing a plate removes
-    /// its entry rather than inserting `false`.
-    fn set_plate_hidden(&mut self, key: PlateKey, hidden: bool, cx: &mut Context<Self>) {
+    /// Sets the visibility popover's row-hover highlight to `key`, rebuilding
+    /// the overlay mesh only when the hovered key actually changed. Called
+    /// from `popover.rs`'s row `on_hover(true)` handlers.
+    pub(crate) fn set_sidebar_hover(&mut self, key: SidebarHighlightKey, cx: &mut Context<Self>) {
+        if self.sidebar_highlight.as_ref().map(|(k, _)| k) == Some(&key) {
+            return;
+        }
+        self.rebuild_sidebar_highlight(key);
+        cx.notify();
+    }
+
+    /// Clears the sidebar-hover highlight unconditionally: the popover closed.
+    pub(crate) fn clear_sidebar_hover(&mut self, cx: &mut Context<Self>) {
+        if let Some((_, old_id)) = self.sidebar_highlight.take() {
+            self.viewport.remove_mesh(old_id);
+            self.viewport.mark_dirty();
+            cx.notify();
+        }
+    }
+
+    /// Clears the sidebar-hover highlight only if it currently matches `key`:
+    /// a row's mouse-leave firing after a different row's mouse-enter already
+    /// switched the highlight must not clobber the new one.
+    pub(crate) fn clear_sidebar_hover_if(&mut self, key: &SidebarHighlightKey, cx: &mut Context<Self>) {
+        if self.sidebar_highlight.as_ref().map(|(k, _)| k) == Some(key) {
+            self.clear_sidebar_hover(cx);
+        }
+    }
+
+    /// Snapshots `{part_visibility, plate_visibility}` onto the undo stack,
+    /// runs `mutate`, then re-uploads. The single seam every visibility
+    /// mutation goes through -- click-to-hide, the context menu, and every
+    /// popover action alike -- so no call site can forget to record an undo
+    /// step or a re-upload.
+    fn snapshot_and_mutate(&mut self, cx: &mut Context<Self>, mutate: impl FnOnce(&mut Self)) {
+        self.undo_stack.push(VisibilitySnapshot {
+            part_visibility: self.part_visibility.clone(),
+            plate_visibility: self.plate_visibility.clone(),
+        });
+        mutate(self);
+        self.reupload_current_armor(cx);
+    }
+
+    /// Toggles a single plate's visibility. Shared by the raycast click-to-
+    /// hide handler (`handle_mouse_up`), the context menu's hide/show item,
+    /// and the popover's plate rows.
+    pub(crate) fn toggle_plate(&mut self, key: PlateKey, cx: &mut Context<Self>) {
+        self.snapshot_and_mutate(cx, |this| {
+            let hidden = this.plate_visibility.get(&key).copied().unwrap_or(false);
+            this.set_plate_hidden_raw(key, !hidden);
+        });
+    }
+
+    /// Sets one plate's hidden state directly, with no snapshot/re-upload of
+    /// its own -- callers go through `snapshot_and_mutate`. `plate_visibility`
+    /// stores only explicitly-hidden keys (absent = visible), so showing a
+    /// plate removes its entry rather than inserting `false`.
+    fn set_plate_hidden_raw(&mut self, key: PlateKey, hidden: bool) {
         if hidden {
             self.plate_visibility.insert(key, true);
         } else {
             self.plate_visibility.remove(&key);
         }
-        self.reupload_current_armor(cx);
     }
 
     /// Clears every explicitly-hidden plate ("Show all hidden plates" context
@@ -635,48 +772,172 @@ impl ViewportView {
         if self.plate_visibility.is_empty() {
             return;
         }
-        self.plate_visibility.clear();
-        self.reupload_current_armor(cx);
+        self.snapshot_and_mutate(cx, |this| this.plate_visibility.clear());
     }
 
-    /// Hides every plate thickness belonging to `(zone, material)` ("Disable
-    /// {material}" context menu action, `tab.rs:5406-5414`). The egui app
-    /// tracks this via a separate `part_visibility` map (Milestone 4's part
-    /// list); this port has no part-level state yet, so it reproduces the
-    /// same *effect* by hiding each of that part's known plate thicknesses
-    /// individually (`LoadedShipArmor::zone_part_plates`).
+    /// Sets `(zone, material)`'s part-level visibility off ("Disable
+    /// {material}" context menu action, `tab.rs:5406-5414`; matches the
+    /// current egui behavior, which uses `part_visibility`, not per-plate
+    /// hides -- Task 6's version predated `part_visibility` and reproduced
+    /// the same effect by hiding every plate thickness individually).
     fn disable_material(&mut self, zone: &str, material: &str, cx: &mut Context<Self>) {
-        let Some(armor) = &self.current_armor else { return };
-        let thicknesses: Vec<i32> = armor
-            .zone_part_plates
-            .iter()
-            .find(|z| z.name == zone)
-            .and_then(|z| z.parts.iter().find(|p| p.name == material))
-            .map(|p| p.plates.clone())
-            .unwrap_or_default();
-        if thicknesses.is_empty() {
+        let key = (zone.to_string(), material.to_string());
+        self.snapshot_and_mutate(cx, |this| {
+            this.part_visibility.insert(key, false);
+        });
+    }
+
+    /// "All" popover button: every `(zone, part)` on, all plate overrides
+    /// cleared. Ports the egui `all_btn` handler (`tab.rs:4412-4424`).
+    pub(crate) fn set_all_parts_visible(&mut self, cx: &mut Context<Self>) {
+        let Some(armor) = self.current_armor.clone() else { return };
+        self.snapshot_and_mutate(cx, |this| {
+            for (zone, parts) in &armor.zone_parts {
+                for part in parts {
+                    this.part_visibility.insert((zone.clone(), part.clone()), true);
+                }
+            }
+            this.plate_visibility.clear();
+        });
+    }
+
+    /// "None" popover button: every `(zone, part)` off. Ports the egui
+    /// `none_btn` handler (`tab.rs:4425-4436`).
+    pub(crate) fn set_all_parts_hidden(&mut self, cx: &mut Context<Self>) {
+        let Some(armor) = self.current_armor.clone() else { return };
+        self.snapshot_and_mutate(cx, |this| {
+            for (zone, parts) in &armor.zone_parts {
+                for part in parts {
+                    this.part_visibility.insert((zone.clone(), part.clone()), false);
+                }
+            }
+        });
+    }
+
+    /// "Reset plates" popover button: clears plate-level overrides only,
+    /// leaving `part_visibility` untouched. Ports `tab.rs:4439-4446`.
+    pub(crate) fn reset_plate_overrides(&mut self, cx: &mut Context<Self>) {
+        if self.plate_visibility.is_empty() {
             return;
         }
-        for thickness in thicknesses {
-            self.plate_visibility.insert((zone.to_string(), material.to_string(), thickness), true);
+        self.snapshot_and_mutate(cx, |this| this.plate_visibility.clear());
+    }
+
+    /// Toggles one `(zone, part)`'s visibility from the popover: sets
+    /// `part_visibility[(zone,part)] = checked` and unconditionally clears
+    /// every one of `plate_thicknesses`' plate overrides for that part (not
+    /// gated on `checked`, matching egui's own part-row handlers,
+    /// `tab.rs:4529-4542` and `4559-4569`, both of which clear regardless of
+    /// the new checked state -- unlike the zone-level toggle below, which
+    /// only clears when turning ON).
+    pub(crate) fn toggle_part(
+        &mut self,
+        zone: String,
+        part: String,
+        plate_thicknesses: Vec<i32>,
+        checked: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.snapshot_and_mutate(cx, move |this| {
+            for t in plate_thicknesses {
+                this.plate_visibility.remove(&(zone.clone(), part.clone(), t));
+            }
+            this.part_visibility.insert((zone, part), checked);
+        });
+    }
+
+    /// Toggles an entire zone's parts from the popover's zone-header checkbox
+    /// (`checked`), or -- when `solo` is set (Ctrl/Cmd-click) -- solos this
+    /// zone: its parts on, every other zone's parts off, and every zone's
+    /// plate overrides cleared. Ports `tab.rs:4482-4511`.
+    pub(crate) fn toggle_zone(&mut self, zone: String, checked: bool, solo: bool, cx: &mut Context<Self>) {
+        let Some(armor) = self.current_armor.clone() else { return };
+        self.snapshot_and_mutate(cx, move |this| {
+            if solo {
+                for z in &armor.zone_part_plates {
+                    let on = z.name == zone;
+                    for p in &z.parts {
+                        this.part_visibility.insert((z.name.clone(), p.name.clone()), on);
+                        for &t in &p.plates {
+                            this.plate_visibility.remove(&(z.name.clone(), p.name.clone(), t));
+                        }
+                    }
+                }
+                return;
+            }
+            let Some(z) = armor.zone_part_plates.iter().find(|z| z.name == zone) else { return };
+            for p in &z.parts {
+                this.part_visibility.insert((zone.clone(), p.name.clone()), checked);
+                if checked {
+                    for &t in &p.plates {
+                        this.plate_visibility.remove(&(zone.clone(), p.name.clone(), t));
+                    }
+                }
+            }
+        });
+    }
+
+    /// Toggles a zone header's expanded/collapsed state in the popover tree.
+    /// Purely local UI state; not undo-tracked.
+    pub(crate) fn toggle_zone_expanded(&mut self, zone: String, cx: &mut Context<Self>) {
+        if !self.expanded_zones.remove(&zone) {
+            self.expanded_zones.insert(zone);
         }
+        cx.notify();
+    }
+
+    /// Toggles a material/part header's expanded/collapsed state in the
+    /// popover tree. Purely local UI state; not undo-tracked.
+    pub(crate) fn toggle_part_expanded(&mut self, key: (String, String), cx: &mut Context<Self>) {
+        if !self.expanded_parts.remove(&key) {
+            self.expanded_parts.insert(key);
+        }
+        cx.notify();
+    }
+
+    fn current_visibility_snapshot(&self) -> VisibilitySnapshot {
+        VisibilitySnapshot {
+            part_visibility: self.part_visibility.clone(),
+            plate_visibility: self.plate_visibility.clone(),
+        }
+    }
+
+    /// Ctrl/Cmd+Z: restores the previous visibility snapshot. Ports
+    /// `armor_viewer::common::handle_undo_redo`'s undo branch.
+    pub(crate) fn undo_visibility(&mut self, cx: &mut Context<Self>) {
+        let current = self.current_visibility_snapshot();
+        let Some(prev) = self.undo_stack.undo(current) else { return };
+        self.part_visibility = prev.part_visibility;
+        self.plate_visibility = prev.plate_visibility;
         self.reupload_current_armor(cx);
     }
 
-    /// Re-uploads `current_armor` honoring the current `plate_visibility`,
-    /// without moving the camera (`upload::reupload_armor_plates`). If the
-    /// hovered plate is still visible its highlight is rebuilt against the
-    /// fresh geometry; if it just became hidden the hover/tooltip are cleared
-    /// outright rather than waiting for the next mouse-move.
+    /// Ctrl/Cmd+Shift+Z or Ctrl/Cmd+R: re-applies the next visibility
+    /// snapshot. Ports `armor_viewer::common::handle_undo_redo`'s redo branch.
+    pub(crate) fn redo_visibility(&mut self, cx: &mut Context<Self>) {
+        let current = self.current_visibility_snapshot();
+        let Some(next) = self.undo_stack.redo(current) else { return };
+        self.part_visibility = next.part_visibility;
+        self.plate_visibility = next.plate_visibility;
+        self.reupload_current_armor(cx);
+    }
+
+    /// Re-uploads `current_armor` honoring the current `part_visibility`/
+    /// `plate_visibility`, without moving the camera
+    /// (`upload::reupload_armor_plates`). If the raycast-hovered plate is
+    /// still visible its highlight is rebuilt against the fresh geometry; if
+    /// it just became hidden the hover/tooltip are cleared outright rather
+    /// than waiting for the next mouse-move. The popover's sidebar-hover
+    /// highlight, if active, is likewise rebuilt against the fresh geometry.
     fn reupload_current_armor(&mut self, cx: &mut Context<Self>) {
         let GpuState::Ready { ctx, .. } = &self.gpu else { return };
         let Some(armor) = self.current_armor.clone() else { return };
         let device = ctx.device.clone();
-        self.mesh_triangle_info =
-            upload::reupload_armor_plates(&mut self.viewport, &device, &armor, &self.plate_visibility);
+        let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
+        self.mesh_triangle_info = upload::reupload_armor_plates(&mut self.viewport, &device, &armor, visibility);
         // `viewport.clear()` (inside the re-upload) already dropped the old
-        // highlight mesh; forget the stale id before rebuilding against the
-        // fresh geometry.
+        // highlight meshes; forget the stale ids before rebuilding against
+        // the fresh geometry.
         self.hover_highlight = None;
         if let Some(hover) = self.hovered.clone() {
             let hidden = self.plate_visibility.get(&hover.key).copied().unwrap_or(false);
@@ -685,6 +946,9 @@ impl ViewportView {
             } else {
                 self.rebuild_hover_highlight(&hover.key);
             }
+        }
+        if let Some((key, _)) = self.sidebar_highlight.take() {
+            self.rebuild_sidebar_highlight(key);
         }
         self.viewport.mark_dirty();
         cx.notify();
@@ -799,7 +1063,11 @@ impl Render for ViewportView {
             hovered_for_menu.as_ref().is_some_and(|h| self.plate_visibility.get(&h.key).copied().unwrap_or(false));
         let hidden_count = self.plate_visibility.len();
 
-        div()
+        // Toolbar row above the viewport: the armor-visibility popover
+        // trigger today, with room for Task 7b's display-settings button.
+        let toolbar = popover::render_toolbar(&*self, &entity, cx);
+
+        let viewport_area = div()
             .id("armor-viewport")
             .track_focus(&self.focus_handle)
             .relative()
@@ -856,7 +1124,9 @@ impl Render for ViewportView {
                 ));
 
                 menu
-            })
+            });
+
+        v_flex().size_full().child(toolbar).child(div().flex_1().min_h(px(0.)).child(viewport_area))
     }
 }
 
