@@ -31,15 +31,18 @@ use gpui_component::h_flex;
 use gpui_component::popover::Popover;
 use gpui_component::popover::PopoverState;
 use gpui_component::scroll::Scrollbar;
+use gpui_component::slider::Slider;
+use gpui_component::slider::SliderState;
 use gpui_component::v_flex;
 
 use wowsunpack::export::gltf_export::thickness_to_color;
+
+use crate::viewport::types::LightingSettings;
 
 use super::legend::swatch_color;
 use super::load_ship::ArmorZone;
 use super::load_ship::PlateKey;
 use super::load_ship::ZonePart;
-use super::upload::SHOW_ZERO_MM;
 use super::viewport_view::ViewportView;
 use super::visibility::SidebarHighlightKey;
 use super::visibility::TriState;
@@ -53,9 +56,10 @@ use super::visibility::zone_any_on;
 /// `checkbox.rs`'s own `size_4` = 1rem = 16px).
 const CHECKBOX_BOX: Pixels = px(16.);
 
-/// Toolbar row above the 3D viewport: currently just the visibility-popover
-/// trigger button. `viewport_view.rs`'s `Render` impl wraps this above the
-/// interactive viewport div.
+/// Toolbar row above the 3D viewport: the visibility-popover trigger button
+/// (Task 7a) and the display-settings trigger button (Task 7b).
+/// `viewport_view.rs`'s `Render` impl wraps this above the interactive
+/// viewport div.
 pub fn render_toolbar(
     view: &ViewportView,
     entity: &Entity<ViewportView>,
@@ -70,6 +74,7 @@ pub fn render_toolbar(
         .border_b_1()
         .border_color(cx.theme().border)
         .child(render_visibility_button(view, entity))
+        .child(render_display_button(view, entity))
 }
 
 fn render_visibility_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
@@ -102,7 +107,7 @@ fn render_popover_content(
     _window: &mut Window,
     cx: &mut Context<PopoverState>,
 ) -> AnyElement {
-    let (armor, part_visibility, plate_visibility, expanded_zones, expanded_parts, scroll) = {
+    let (armor, part_visibility, plate_visibility, expanded_zones, expanded_parts, scroll, show_zero_mm) = {
         let view = entity.read(cx);
         (
             view.current_armor.clone(),
@@ -111,6 +116,7 @@ fn render_popover_content(
             view.expanded_zones.clone(),
             view.expanded_parts.clone(),
             view.popover_scroll.clone(),
+            view.display_settings.show_zero_mm,
         )
     };
 
@@ -154,6 +160,7 @@ fn render_popover_content(
             &expanded_zones,
             &expanded_parts,
             warn,
+            show_zero_mm,
         ));
     }
 
@@ -169,6 +176,198 @@ fn render_popover_content(
         .into_any_element()
 }
 
+/// Toolbar trigger for the display-settings popover (Task 7b): plate edges,
+/// waterline, zero-mm plates, armor opacity, and hull lighting. Ports the
+/// egui app's `draw_display_settings_popover` V1 subset (`tab.rs:4875-5144`)
+/// -- see `render_display_popover_content`'s doc for the exact deferrals.
+fn render_display_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
+    let has_armor = view.current_armor.is_some();
+    let content_entity = entity.clone();
+
+    Popover::new("armor-display-settings-popover")
+        .trigger(
+            Button::new("armor-display-settings-popover-trigger")
+                .icon(IconName::Settings)
+                .label("Display")
+                .compact()
+                .tooltip("Display settings")
+                .disabled(!has_armor),
+        )
+        .content(move |_state, window, cx| render_display_popover_content(&content_entity, window, cx))
+}
+
+/// Builds the display-settings popover's content from a snapshot of
+/// `entity`'s current state (same lazy-`.content()` rationale as
+/// `render_popover_content`'s doc). Reproduces the egui app's
+/// `draw_display_settings_popover` V1 subset in order: plate edges,
+/// waterline (+ its own opacity slider when on), zero-mm plates, armor
+/// opacity, then the Hull Lighting section (enabled, In-Game/Flat/Studio
+/// presets, and the flat/key intensity, azimuth, elevation, rim, specular,
+/// and shininess sliders). Every slider here is a persistent `Entity<
+/// SliderState>` already wired (in `viewport_view.rs`'s `build_display_
+/// sliders`/`build_lighting_sliders`) to mutate the right field on its own
+/// `SliderEvent::Change`, so this function only needs to render each one
+/// alongside a live numeric readout -- it never attaches its own change
+/// handler to a slider the way the checkboxes below attach `on_click`.
+///
+/// **Deferred** (later milestones or out of this task's scope, matching the
+/// M3 Task 7b brief): the ship-center toggle, the hull-visibility master
+/// toggle and its `hull_opaque` sub-toggle (hull meshes aren't uploaded
+/// until M4), the entire camera-rings/camera-perspective analysis section
+/// (`tab.rs:4924-5043`), the save-defaults button (this port has no settings
+/// write-back path yet -- same limitation `legend.rs`'s `end_legend_drag`
+/// documents), the key/ambient color pickers (`gpui_component::color_picker`
+/// exists, but wiring two more persistent picker entities is left for later
+/// polish -- the flat-intensity slider already covers the egui popover's
+/// numeric ambient-intensity control), and the transient light-source marker
+/// (`light_moved`/`light_changed_at`) the egui app shows for a few seconds
+/// after a light change.
+fn render_display_popover_content(
+    entity: &Entity<ViewportView>,
+    _window: &mut Window,
+    cx: &mut Context<PopoverState>,
+) -> AnyElement {
+    let (display, lighting, waterline_slider, armor_slider, lighting_sliders) = {
+        let view = entity.read(cx);
+        (
+            view.display_settings,
+            view.lighting(),
+            view.display_sliders.waterline_opacity.clone(),
+            view.display_sliders.armor_opacity.clone(),
+            (
+                view.lighting_sliders.flat_intensity.clone(),
+                view.lighting_sliders.key_intensity.clone(),
+                view.lighting_sliders.azimuth_deg.clone(),
+                view.lighting_sliders.elevation_deg.clone(),
+                view.lighting_sliders.rim_strength.clone(),
+                view.lighting_sliders.specular_strength.clone(),
+                view.lighting_sliders.shininess.clone(),
+            ),
+        )
+    };
+    let (flat_slider, key_slider, azimuth_slider, elevation_slider, rim_slider, specular_slider, shininess_slider) =
+        lighting_sliders;
+
+    let border = cx.theme().border;
+
+    let edges_entity = entity.clone();
+    let waterline_entity = entity.clone();
+    let zero_mm_entity = entity.clone();
+    let lighting_enabled_entity = entity.clone();
+    let preset_ingame_entity = entity.clone();
+    let preset_flat_entity = entity.clone();
+    let preset_studio_entity = entity.clone();
+
+    let mut col = v_flex()
+        .w(px(260.))
+        .gap_2()
+        .child(
+            Checkbox::new("armor-display-plate-edges").label("Plate Edges").checked(display.show_plate_edges).on_click(
+                move |checked, _window, cx| {
+                    let checked = *checked;
+                    edges_entity
+                        .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_plate_edges = checked));
+                },
+            ),
+        )
+        .child(Checkbox::new("armor-display-waterline").label("Waterline").checked(display.show_waterline).on_click(
+            move |checked, _window, cx| {
+                let checked = *checked;
+                waterline_entity
+                    .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_waterline = checked));
+            },
+        ));
+
+    if display.show_waterline {
+        col = col.child(div().pl(px(20.)).child(labeled_slider_row(
+            "Opacity",
+            &waterline_slider,
+            display.waterline_opacity,
+            false,
+        )));
+    }
+
+    col = col
+        .child(Checkbox::new("armor-display-zero-mm").label("0 mm Plates").checked(display.show_zero_mm).on_click(
+            move |checked, _window, cx| {
+                let checked = *checked;
+                zero_mm_entity.update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_zero_mm = checked));
+            },
+        ))
+        .child(labeled_slider_row("Armor Opacity", &armor_slider, display.armor_opacity, false))
+        .child(div().h(px(1.)).bg(border))
+        .child(div().text_sm().font_weight(FontWeight::BOLD).child("Hull Lighting"))
+        .child(
+            Checkbox::new("armor-display-lighting-enabled")
+                .label("Enable lighting")
+                .checked(lighting.enabled)
+                .on_click(move |checked, _window, cx| {
+                    let checked = *checked;
+                    lighting_enabled_entity.update(cx, |view, cx| view.mutate_lighting(cx, |l| l.enabled = checked));
+                }),
+        )
+        .child(
+            h_flex()
+                .gap_1()
+                .child(
+                    Button::new("armor-lighting-preset-ingame")
+                        .label("In-Game")
+                        .compact()
+                        .disabled(!lighting.enabled)
+                        .on_click(move |_, _window, cx| {
+                            preset_ingame_entity
+                                .update(cx, |view, cx| view.set_lighting_preset(LightingSettings::in_game(), cx));
+                        }),
+                )
+                .child(
+                    Button::new("armor-lighting-preset-flat")
+                        .label("Flat")
+                        .compact()
+                        .disabled(!lighting.enabled)
+                        .on_click(move |_, _window, cx| {
+                            preset_flat_entity
+                                .update(cx, |view, cx| view.set_lighting_preset(LightingSettings::flat(), cx));
+                        }),
+                )
+                .child(
+                    Button::new("armor-lighting-preset-studio")
+                        .label("Studio")
+                        .compact()
+                        .disabled(!lighting.enabled)
+                        .on_click(move |_, _window, cx| {
+                            preset_studio_entity
+                                .update(cx, |view, cx| view.set_lighting_preset(LightingSettings::studio(), cx));
+                        }),
+                ),
+        )
+        .child(labeled_slider_row("Flat (ambient)", &flat_slider, lighting.flat_intensity, !lighting.enabled))
+        .child(labeled_slider_row("Light intensity", &key_slider, lighting.key_intensity, !lighting.enabled))
+        .child(labeled_slider_row("Light azimuth", &azimuth_slider, lighting.azimuth_deg, !lighting.enabled))
+        .child(labeled_slider_row("Light elevation", &elevation_slider, lighting.elevation_deg, !lighting.enabled))
+        .child(labeled_slider_row("Rim", &rim_slider, lighting.rim_strength, !lighting.enabled))
+        .child(labeled_slider_row("Specular", &specular_slider, lighting.specular_strength, !lighting.enabled))
+        .child(labeled_slider_row("Shininess", &shininess_slider, lighting.shininess, !lighting.enabled));
+
+    col.into_any_element()
+}
+
+/// One labeled slider row: `label`, the slider itself, and a live numeric
+/// readout. `slider` is always a persistent `Entity<SliderState>` already
+/// subscribed (see `render_display_popover_content`'s doc) to mutate the
+/// right domain field on drag, so this is purely presentational. `disabled`
+/// matches the egui original's `ui.add_enabled_ui(pane.lighting.enabled, ..)`
+/// wrapping the lighting sliders (`tab.rs:5053`); always `false` for the
+/// waterline/armor-opacity rows, which aren't lighting-gated.
+fn labeled_slider_row(label: &'static str, slider: &Entity<SliderState>, value: f32, disabled: bool) -> AnyElement {
+    h_flex()
+        .gap_2()
+        .items_center()
+        .child(div().text_sm().w(px(110.)).child(label))
+        .child(Slider::new(slider).w(px(110.)).disabled(disabled))
+        .child(div().text_sm().w(px(40.)).child(format!("{value:.2}")))
+        .into_any_element()
+}
+
 /// One zone header row + (if expanded) its parts. Ports the zone
 /// `CollapsingState` block (`tab.rs:4470-4608`).
 #[allow(clippy::too_many_arguments)]
@@ -180,8 +379,9 @@ fn render_zone_row(
     expanded_zones: &HashSet<String>,
     expanded_parts: &HashSet<(String, String)>,
     warn: Hsla,
+    show_zero_mm: bool,
 ) -> AnyElement {
-    let all_on = zone_all_on(zone, part_visibility, plate_visibility, SHOW_ZERO_MM);
+    let all_on = zone_all_on(zone, part_visibility, plate_visibility, show_zero_mm);
     let any_on = zone_any_on(zone, part_visibility);
     let state = TriState::from_all_any(all_on, any_on);
     let expanded = expanded_zones.contains(&zone.name);
@@ -231,6 +431,7 @@ fn render_zone_row(
                 plate_visibility,
                 expanded_parts,
                 warn,
+                show_zero_mm,
             ));
         }
         column = column.child(body);
@@ -250,11 +451,12 @@ fn render_part_row(
     plate_visibility: &HashMap<PlateKey, bool>,
     expanded_parts: &HashSet<(String, String)>,
     warn: Hsla,
+    show_zero_mm: bool,
 ) -> AnyElement {
     let part_key = (zone_name.to_string(), part.name.clone());
     let part_visible = part_on(part_visibility, zone_name, &part.name);
-    let any_plate_hidden = part_any_plate_hidden(zone_name, part, plate_visibility, SHOW_ZERO_MM);
-    let visible_plates: Vec<i32> = part.plates.iter().copied().filter(|&t| SHOW_ZERO_MM || t != 0).collect();
+    let any_plate_hidden = part_any_plate_hidden(zone_name, part, plate_visibility, show_zero_mm);
+    let visible_plates: Vec<i32> = part.plates.iter().copied().filter(|&t| show_zero_mm || t != 0).collect();
 
     let toggle_entity = entity.clone();
     let toggle_zone_name = zone_name.to_string();

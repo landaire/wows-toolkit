@@ -29,7 +29,10 @@ use gpui_component::ActiveTheme;
 use gpui_component::h_flex;
 use gpui_component::menu::ContextMenuExt;
 use gpui_component::menu::PopupMenuItem;
+use gpui_component::slider::SliderEvent;
+use gpui_component::slider::SliderState;
 use gpui_component::v_flex;
+use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 
 use crate::armor_viewer::load_ship::ArmorTriangleTooltip;
 use crate::armor_viewer::load_ship::LoadedShipArmor;
@@ -52,6 +55,7 @@ use crate::viewport::gizmo;
 use crate::viewport::renderer::GpuPipeline;
 use crate::viewport::renderer::LAYER_DEFAULT;
 use crate::viewport::renderer::Viewport3D;
+use crate::viewport::types::LightingSettings;
 use crate::viewport::types::MeshId;
 use crate::viewport::types::Vec2;
 use crate::viewport::types::Vec3;
@@ -150,6 +154,34 @@ struct HoverInfo {
     cursor: Point<Pixels>,
 }
 
+/// The display-settings popover's two numeric sliders (`popover.rs`),
+/// backing `ViewportView::display_settings`'s `waterline_opacity`/
+/// `armor_opacity` fields. A persistent `Entity<SliderState>` per slider so
+/// its thumb position survives the popover closing and reopening (the
+/// popover's `.content()` closure only runs while open, see `popover.rs`'s
+/// module doc); rebuilt wholesale (not `set_value`d) whenever the seed
+/// changes outside a drag (`apply_armor_defaults`), since `SliderState::
+/// set_value` needs a `&mut Window` that isn't available there -- mirrors
+/// `app.rs`'s own `zoom_slider` reseed-by-recreation.
+pub(crate) struct DisplaySettingsSliders {
+    pub(crate) waterline_opacity: Entity<SliderState>,
+    pub(crate) armor_opacity: Entity<SliderState>,
+}
+
+/// The display-settings popover's lighting sliders, same persistent-entity
+/// rationale as [`DisplaySettingsSliders`]. Rebuilt wholesale by a preset
+/// button (`ViewportView::set_lighting_preset`), which moves every slider at
+/// once.
+pub(crate) struct LightingSliders {
+    pub(crate) flat_intensity: Entity<SliderState>,
+    pub(crate) key_intensity: Entity<SliderState>,
+    pub(crate) azimuth_deg: Entity<SliderState>,
+    pub(crate) elevation_deg: Entity<SliderState>,
+    pub(crate) rim_strength: Entity<SliderState>,
+    pub(crate) specular_strength: Entity<SliderState>,
+    pub(crate) shininess: Entity<SliderState>,
+}
+
 pub struct ViewportView {
     focus_handle: FocusHandle,
     viewport: Viewport3D,
@@ -229,11 +261,38 @@ pub struct ViewportView {
     /// Per-mesh triangle tooltip data from the most recent armor upload, used
     /// to map a `pick()` hit back to its `ArmorTriangleTooltip`.
     mesh_triangle_info: Vec<(MeshId, Vec<ArmorTriangleTooltip>)>,
+    /// Live display settings (plate edges, waterline, zero-mm plates, armor
+    /// opacity) mutable via the display-settings popover (`popover.rs`, Task
+    /// 7b); changing any field re-uploads the armor since they affect
+    /// geometry. Seeded from `ArmorViewerDefaults` (`apply_armor_defaults`),
+    /// falling back to the same fixed values `upload.rs` used to bake in as
+    /// constants. `pub(crate)` so `popover.rs` can read it while building
+    /// both popovers' content -- the visibility popover's own zero-mm
+    /// filtering (`popover.rs`) reads `display_settings.show_zero_mm` too, so
+    /// toggling it here updates both the 3D geometry and which plate rows
+    /// that popover's tree shows.
+    pub(crate) display_settings: upload::DisplaySettings,
+    /// The display-settings popover's waterline/armor opacity slider state.
+    pub(crate) display_sliders: DisplaySettingsSliders,
+    /// Kept alive so `display_sliders`' `SliderEvent::Change` subscriptions
+    /// keep firing; replaced wholesale (dropping and canceling the old ones)
+    /// whenever `apply_armor_defaults` rebuilds the sliders.
+    _display_slider_subscriptions: Vec<Subscription>,
+    /// The display-settings popover's lighting slider state.
+    pub(crate) lighting_sliders: LightingSliders,
+    /// Kept alive so `lighting_sliders`' `SliderEvent::Change` subscriptions
+    /// keep firing; replaced wholesale whenever `set_lighting_preset` rebuilds
+    /// the sliders.
+    _lighting_slider_subscriptions: Vec<Subscription>,
 }
 
 impl ViewportView {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
+        let display_settings = upload::DisplaySettings::default();
+        let (display_sliders, display_slider_subscriptions) = Self::build_display_sliders(cx, display_settings);
+        let lighting = LightingSettings::default();
+        let (lighting_sliders, lighting_slider_subscriptions) = Self::build_lighting_sliders(cx, &lighting);
         let mut this = Self {
             focus_handle,
             viewport: Viewport3D::new(),
@@ -259,9 +318,113 @@ impl ViewportView {
             hover_highlight: None,
             sidebar_highlight: None,
             mesh_triangle_info: Vec::new(),
+            display_settings,
+            display_sliders,
+            _display_slider_subscriptions: display_slider_subscriptions,
+            lighting_sliders,
+            _lighting_slider_subscriptions: lighting_slider_subscriptions,
         };
         this.start_gpu_init(cx);
         this
+    }
+
+    /// Creates a `SliderState` entity seeded to `default` (min/max/step), for
+    /// [`build_display_sliders`](Self::build_display_sliders)/
+    /// [`build_lighting_sliders`](Self::build_lighting_sliders).
+    fn new_slider(cx: &mut Context<Self>, min: f32, max: f32, step: f32, default: f32) -> Entity<SliderState> {
+        cx.new(|_| SliderState::new().min(min).max(max).step(step).default_value(default))
+    }
+
+    /// Subscribes so every `SliderEvent::Change` on `state` (fired
+    /// continuously while the user drags the thumb, matching egui's own
+    /// per-frame `Slider::changed()`) invokes `on_change` with the slider's
+    /// current value.
+    fn subscribe_slider(
+        cx: &mut Context<Self>,
+        state: &Entity<SliderState>,
+        on_change: impl Fn(&mut Self, f32, &mut Context<Self>) + 'static,
+    ) -> Subscription {
+        cx.subscribe(state, move |this, _state, event, cx| {
+            if let SliderEvent::Change(value) = event {
+                on_change(this, value.end(), cx);
+            }
+        })
+    }
+
+    /// Builds [`DisplaySettingsSliders`] seeded from `display`, wired so a
+    /// drag calls [`mutate_display_settings`](Self::mutate_display_settings).
+    /// Called from `new()` and, to reseed after `apply_armor_defaults` loads
+    /// a persisted row, again there.
+    fn build_display_sliders(
+        cx: &mut Context<Self>,
+        display: upload::DisplaySettings,
+    ) -> (DisplaySettingsSliders, Vec<Subscription>) {
+        let waterline_opacity = Self::new_slider(cx, 0.05, 1.0, 0.01, display.waterline_opacity);
+        let armor_opacity = Self::new_slider(cx, 0.1, 1.0, 0.01, display.armor_opacity);
+        let subs = vec![
+            Self::subscribe_slider(cx, &waterline_opacity, |this, v, cx| {
+                this.mutate_display_settings(cx, |d| d.waterline_opacity = v)
+            }),
+            Self::subscribe_slider(cx, &armor_opacity, |this, v, cx| {
+                this.mutate_display_settings(cx, |d| d.armor_opacity = v)
+            }),
+        ];
+        (DisplaySettingsSliders { waterline_opacity, armor_opacity }, subs)
+    }
+
+    /// Builds [`LightingSliders`] seeded from `lighting`, wired so a drag
+    /// calls [`mutate_lighting`](Self::mutate_lighting). Called from `new()`
+    /// and, to move every thumb at once, again from `set_lighting_preset`.
+    fn build_lighting_sliders(
+        cx: &mut Context<Self>,
+        lighting: &LightingSettings,
+    ) -> (LightingSliders, Vec<Subscription>) {
+        let flat_intensity = Self::new_slider(cx, 0.0, 1.5, 0.01, lighting.flat_intensity);
+        let key_intensity = Self::new_slider(cx, 0.0, 1.5, 0.01, lighting.key_intensity);
+        let azimuth_deg = Self::new_slider(cx, 0.0, 360.0, 1.0, lighting.azimuth_deg);
+        let elevation_deg = Self::new_slider(cx, -90.0, 90.0, 1.0, lighting.elevation_deg);
+        let rim_strength = Self::new_slider(cx, 0.0, 1.0, 0.01, lighting.rim_strength);
+        let specular_strength = Self::new_slider(cx, 0.0, 1.0, 0.01, lighting.specular_strength);
+        let shininess = Self::new_slider(cx, 1.0, 128.0, 1.0, lighting.shininess);
+        let subs = vec![
+            Self::subscribe_slider(cx, &flat_intensity, |this, v, cx| {
+                this.mutate_lighting(cx, |l| l.flat_intensity = v)
+            }),
+            Self::subscribe_slider(cx, &key_intensity, |this, v, cx| this.mutate_lighting(cx, |l| l.key_intensity = v)),
+            Self::subscribe_slider(cx, &azimuth_deg, |this, v, cx| this.mutate_lighting(cx, |l| l.azimuth_deg = v)),
+            Self::subscribe_slider(cx, &elevation_deg, |this, v, cx| this.mutate_lighting(cx, |l| l.elevation_deg = v)),
+            Self::subscribe_slider(cx, &rim_strength, |this, v, cx| this.mutate_lighting(cx, |l| l.rim_strength = v)),
+            Self::subscribe_slider(cx, &specular_strength, |this, v, cx| {
+                this.mutate_lighting(cx, |l| l.specular_strength = v)
+            }),
+            Self::subscribe_slider(cx, &shininess, |this, v, cx| this.mutate_lighting(cx, |l| l.shininess = v)),
+        ];
+        (
+            LightingSliders {
+                flat_intensity,
+                key_intensity,
+                azimuth_deg,
+                elevation_deg,
+                rim_strength,
+                specular_strength,
+                shininess,
+            },
+            subs,
+        )
+    }
+
+    /// Seeds `display_settings` from the persisted `armor_viewer_defaults`
+    /// row (falls back to the egui defaults when `None`, matching `upload::
+    /// DisplaySettings::from_defaults`), rebuilds the two display sliders so
+    /// their thumbs reflect the new seed, and -- if a ship is already shown
+    /// -- re-uploads it. Called once from `ArmorViewerPane::
+    /// apply_armor_defaults`, itself called once from `App::apply_settings`.
+    pub fn apply_armor_defaults(&mut self, defaults: Option<&ArmorViewerDefaultsRow>, cx: &mut Context<Self>) {
+        self.display_settings = upload::DisplaySettings::from_defaults(defaults);
+        let (display_sliders, subs) = Self::build_display_sliders(cx, self.display_settings);
+        self.display_sliders = display_sliders;
+        self._display_slider_subscriptions = subs;
+        self.reupload_current_armor(cx);
     }
 
     /// Shows `armor`'s armor meshes in this viewport: clears any previous
@@ -301,7 +464,8 @@ impl ViewportView {
         self.hover_highlight = None;
         self.sidebar_highlight = None;
         let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
-        self.mesh_triangle_info = upload_armor_to_viewport(&mut self.viewport, &device, &armor, visibility);
+        self.mesh_triangle_info =
+            upload_armor_to_viewport(&mut self.viewport, &device, &armor, visibility, self.display_settings);
         self.model_bounds = Some(armor.bounds);
         self.current_armor = Some(armor);
     }
@@ -668,7 +832,14 @@ impl ViewportView {
         let GpuState::Ready { ctx, .. } = &self.gpu else { return };
         let Some(armor) = self.current_armor.clone() else { return };
         let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
-        let mesh_id = picking_ui::upload_plate_highlight(&mut self.viewport, &ctx.device, &armor, key, visibility);
+        let mesh_id = picking_ui::upload_plate_highlight(
+            &mut self.viewport,
+            &ctx.device,
+            &armor,
+            key,
+            visibility,
+            self.display_settings.show_zero_mm,
+        );
         self.hover_highlight = Some((key.clone(), mesh_id));
         self.viewport.mark_dirty();
     }
@@ -686,16 +857,33 @@ impl ViewportView {
         let GpuState::Ready { ctx, .. } = &self.gpu else { return };
         let Some(armor) = self.current_armor.clone() else { return };
         let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
+        let show_zero_mm = self.display_settings.show_zero_mm;
         let mesh_id = match &key {
-            SidebarHighlightKey::Zone(zone) => {
-                picking_ui::upload_zone_highlight(&mut self.viewport, &ctx.device, &armor, zone, visibility)
-            }
-            SidebarHighlightKey::Part(zone, part) => {
-                picking_ui::upload_part_highlight(&mut self.viewport, &ctx.device, &armor, zone, part, visibility)
-            }
-            SidebarHighlightKey::Plate(pk) => {
-                picking_ui::upload_plate_highlight(&mut self.viewport, &ctx.device, &armor, pk, visibility)
-            }
+            SidebarHighlightKey::Zone(zone) => picking_ui::upload_zone_highlight(
+                &mut self.viewport,
+                &ctx.device,
+                &armor,
+                zone,
+                visibility,
+                show_zero_mm,
+            ),
+            SidebarHighlightKey::Part(zone, part) => picking_ui::upload_part_highlight(
+                &mut self.viewport,
+                &ctx.device,
+                &armor,
+                zone,
+                part,
+                visibility,
+                show_zero_mm,
+            ),
+            SidebarHighlightKey::Plate(pk) => picking_ui::upload_plate_highlight(
+                &mut self.viewport,
+                &ctx.device,
+                &armor,
+                pk,
+                visibility,
+                show_zero_mm,
+            ),
         };
         self.sidebar_highlight = Some((key, mesh_id));
         self.viewport.mark_dirty();
@@ -934,7 +1122,8 @@ impl ViewportView {
         let Some(armor) = self.current_armor.clone() else { return };
         let device = ctx.device.clone();
         let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
-        self.mesh_triangle_info = upload::reupload_armor_plates(&mut self.viewport, &device, &armor, visibility);
+        self.mesh_triangle_info =
+            upload::reupload_armor_plates(&mut self.viewport, &device, &armor, visibility, self.display_settings);
         // `viewport.clear()` (inside the re-upload) already dropped the old
         // highlight meshes; forget the stale ids before rebuilding against
         // the fresh geometry.
@@ -950,6 +1139,54 @@ impl ViewportView {
         if let Some((key, _)) = self.sidebar_highlight.take() {
             self.rebuild_sidebar_highlight(key);
         }
+        self.viewport.mark_dirty();
+        cx.notify();
+    }
+
+    /// Mutates `display_settings` via `mutate` and re-uploads the armor --
+    /// every display-settings popover checkbox and slider (`popover.rs`)
+    /// goes through this single seam, so no call site can forget the
+    /// re-upload these settings need (they affect geometry: edge outlines,
+    /// the water plane, per-vertex alpha, and 0mm filtering).
+    pub(crate) fn mutate_display_settings(
+        &mut self,
+        cx: &mut Context<Self>,
+        mutate: impl FnOnce(&mut upload::DisplaySettings),
+    ) {
+        mutate(&mut self.display_settings);
+        self.reupload_current_armor(cx);
+    }
+
+    /// Current lighting settings, for `popover.rs` to read while building the
+    /// display-settings popover's Hull Lighting section (`viewport` itself is
+    /// private -- this is the read-only seam, `mutate_lighting`/
+    /// `set_lighting_preset` below are the write seam).
+    pub(crate) fn lighting(&self) -> LightingSettings {
+        self.viewport.lighting.clone()
+    }
+
+    /// Mutates the viewport's lighting via `mutate` and marks it dirty for a
+    /// redraw. Lighting is a per-frame uniform (`Viewport3D::lighting`), so
+    /// unlike `mutate_display_settings` this never re-uploads a mesh.
+    pub(crate) fn mutate_lighting(&mut self, cx: &mut Context<Self>, mutate: impl FnOnce(&mut LightingSettings)) {
+        mutate(&mut self.viewport.lighting);
+        self.viewport.mark_dirty();
+        cx.notify();
+    }
+
+    /// Applies a lighting preset (In-game/Flat/Studio popover buttons):
+    /// replaces `viewport.lighting` wholesale but keeps `enabled` across the
+    /// swap, matching the egui original's own preset handlers (`tab.rs:5055-
+    /// 5075`, each of which reads `pane.lighting.enabled` before overwriting
+    /// `pane.lighting` and restores it after). A preset moves every lighting
+    /// slider's thumb at once, so the sliders are rebuilt (not `set_value`d
+    /// -- see `LightingSliders`'s doc) rather than just the domain value.
+    pub(crate) fn set_lighting_preset(&mut self, mut preset: LightingSettings, cx: &mut Context<Self>) {
+        preset.enabled = self.viewport.lighting.enabled;
+        self.viewport.lighting = preset.clone();
+        let (lighting_sliders, subs) = Self::build_lighting_sliders(cx, &preset);
+        self.lighting_sliders = lighting_sliders;
+        self._lighting_slider_subscriptions = subs;
         self.viewport.mark_dirty();
         cx.notify();
     }

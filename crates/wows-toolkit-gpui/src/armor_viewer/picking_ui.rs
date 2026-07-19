@@ -77,8 +77,9 @@ pub fn upload_plate_highlight(
     armor: &LoadedShipArmor,
     key: &PlateKey,
     visibility: VisibilityFilter,
+    show_zero_mm: bool,
 ) -> MeshId {
-    upload_highlight_mesh(viewport, device, armor, visibility, HOVER_HIGHLIGHT_COLOR, |info| {
+    upload_highlight_mesh(viewport, device, armor, visibility, show_zero_mm, HOVER_HIGHLIGHT_COLOR, |info| {
         &upload::derive_plate_key(info) == key
     })
 }
@@ -99,8 +100,11 @@ pub fn upload_zone_highlight(
     armor: &LoadedShipArmor,
     zone: &str,
     visibility: VisibilityFilter,
+    show_zero_mm: bool,
 ) -> MeshId {
-    upload_highlight_mesh(viewport, device, armor, visibility, SIDEBAR_HIGHLIGHT_COLOR, |info| info.zone == zone)
+    upload_highlight_mesh(viewport, device, armor, visibility, show_zero_mm, SIDEBAR_HIGHLIGHT_COLOR, |info| {
+        info.zone == zone
+    })
 }
 
 /// Uploads a highlight overlay for every visible armor triangle matching
@@ -112,21 +116,23 @@ pub fn upload_part_highlight(
     zone: &str,
     material: &str,
     visibility: VisibilityFilter,
+    show_zero_mm: bool,
 ) -> MeshId {
-    upload_highlight_mesh(viewport, device, armor, visibility, SIDEBAR_HIGHLIGHT_COLOR, |info| {
+    upload_highlight_mesh(viewport, device, armor, visibility, show_zero_mm, SIDEBAR_HIGHLIGHT_COLOR, |info| {
         info.zone == zone && info.material_name == material
     })
 }
 
-/// Shared highlight-mesh builder: every visible triangle (per `visibility`,
-/// same 0mm/part/plate filtering as the main upload) that also matches
-/// `matches`, offset along its normal so the overlay renders in front of the
-/// plate it highlights instead of z-fighting with it.
+/// Shared highlight-mesh builder: every visible triangle (per `visibility`
+/// and `show_zero_mm`, same 0mm/part/plate filtering as the main upload)
+/// that also matches `matches`, offset along its normal so the overlay
+/// renders in front of the plate it highlights instead of z-fighting with it.
 fn upload_highlight_mesh(
     viewport: &mut Viewport3D,
     device: &wgpu::Device,
     armor: &LoadedShipArmor,
     visibility: VisibilityFilter,
+    show_zero_mm: bool,
     color: [f32; 4],
     matches: impl Fn(&wowsunpack::export::gltf_export::ArmorTriangleInfo) -> bool,
 ) -> MeshId {
@@ -135,7 +141,7 @@ fn upload_highlight_mesh(
 
     for mesh in &armor.meshes {
         for (tri_idx, info) in mesh.triangle_info.iter().enumerate() {
-            if !upload::plate_is_visible(info, visibility) {
+            if !upload::plate_is_visible(info, visibility, show_zero_mm) {
                 continue;
             }
             if !matches(info) {

@@ -101,11 +101,14 @@ impl ArmorViewerPane {
         }
     }
 
-    /// Seeds the legend's initial visibility/collapsed/position from the
-    /// persisted `armor_viewer_defaults` row, the same way `app.rs` threads
-    /// the rest of `GpuiSettings` into its child views on startup.
+    /// Seeds the legend's initial visibility/collapsed/position, and the
+    /// viewport's display settings (plate edges, waterline, zero-mm plates,
+    /// armor opacity -- Task 7b), from the persisted `armor_viewer_defaults`
+    /// row, the same way `app.rs` threads the rest of `GpuiSettings` into its
+    /// child views on startup.
     pub fn apply_armor_defaults(&mut self, defaults: Option<&ArmorViewerDefaultsRow>, cx: &mut Context<Self>) {
         self.legend = LegendState::from_defaults(defaults);
+        self.viewport.update(cx, |viewport, cx| viewport.apply_armor_defaults(defaults, cx));
         cx.notify();
     }
 
