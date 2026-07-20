@@ -211,6 +211,30 @@ enum QueryCommands {
         #[arg(required = true)]
         replays: Vec<PathBuf>,
     },
+    /// Print each replay's roster by ship class, resolved from the plaintext
+    /// metadata header. Unlike `players` this never touches the packet stream,
+    /// so it is fast enough to sweep a large replay archive. Requires game data
+    /// (`-g` or `-e`) to map ship ids to a class.
+    Roster {
+        /// Replay files or directories to walk
+        #[arg(required = true)]
+        replays: Vec<PathBuf>,
+
+        /// Only print replays whose roster contains this class (case-insensitive,
+        /// e.g. `Submarine`). Repeatable.
+        #[arg(long = "has-class")]
+        has_class: Vec<String>,
+
+        /// Only print replays where the recording player's own ship is NOT one
+        /// of the `--has-class` classes. Use with `--has-class Submarine` to
+        /// find matches where someone else brought the submarine.
+        #[arg(long)]
+        exclude_own: bool,
+
+        /// Emit newline-delimited JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 struct InvestigativePrinter {
@@ -816,6 +840,87 @@ fn apply_translations(mo_path: &Path, provider: &mut GameMetadataProvider) {
     }
 }
 
+/// Resolve every replay's roster to ship classes using only the plaintext
+/// metadata header, so a large archive can be swept without decoding packets.
+fn run_roster_query(
+    replays: &[PathBuf],
+    game_dir: Option<&str>,
+    extracted_dir: Option<&str>,
+    has_class: &[String],
+    exclude_own: bool,
+    as_json: bool,
+) -> anyhow::Result<()> {
+    let wanted: Vec<String> = has_class.iter().map(|c| c.to_lowercase()).collect();
+    // Loading game params is the expensive step, so keep one provider per game
+    // version across the whole sweep.
+    let mut providers: HashMap<String, Option<GameMetadataProvider>> = HashMap::new();
+
+    for replay_path in replays {
+        for entry in walkdir::WalkDir::new(replay_path) {
+            let entry = entry.expect("Error walking replays");
+            let path = entry.path();
+            if !path.is_file() || path.extension().is_none_or(|e| e != "wowsreplay") {
+                continue;
+            }
+            let Ok(meta) = ReplayFile::meta_from_file(path) else { continue };
+            let Some(version) = Version::try_from_client_exe(&meta.clientVersionFromExe) else { continue };
+
+            let provider = providers.entry(meta.clientVersionFromExe.clone()).or_insert_with(|| {
+                load_metadata_provider_and_constants(game_dir, extracted_dir, &version).ok().map(|(p, _)| p)
+            });
+            let Some(provider) = provider.as_ref() else { continue };
+
+            // A ship id absent from this version's params (removed test ship,
+            // partial dump) has no class to report, so it is grouped as such
+            // rather than silently dropped from the roster.
+            let class_of = |ship_id| {
+                provider
+                    .game_param_by_id(ship_id)
+                    .and_then(|p| p.species().and_then(|s| s.known().map(|s| format!("{s:?}"))))
+                    .unwrap_or_else(|| "Unknown".to_string())
+            };
+
+            let mut counts: HashMap<String, usize> = HashMap::new();
+            for vehicle in &meta.vehicles {
+                *counts.entry(class_of(vehicle.shipId)).or_default() += 1;
+            }
+            let own_class = meta.vehicles.iter().find(|v| v.name == meta.playerName).map(|v| class_of(v.shipId));
+
+            if !wanted.is_empty() {
+                let present = counts.keys().any(|c| wanted.contains(&c.to_lowercase()));
+                if !present {
+                    continue;
+                }
+                if exclude_own && own_class.as_ref().is_some_and(|c| wanted.contains(&c.to_lowercase())) {
+                    continue;
+                }
+            }
+
+            let mut classes: Vec<(&String, &usize)> = counts.iter().collect();
+            classes.sort();
+            if as_json {
+                let value = serde_json::json!({
+                    "path": path.display().to_string(),
+                    "version": meta.clientVersionFromExe,
+                    "own_class": own_class,
+                    "classes": counts,
+                });
+                println!("{value}");
+            } else {
+                let rendered: Vec<String> = classes.iter().map(|(c, n)| format!("{c}={n}")).collect();
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    meta.clientVersionFromExe,
+                    own_class.as_deref().unwrap_or("-"),
+                    rendered.join(","),
+                    path.display()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 /// A resolved player row for the `query players` command.
 struct PlayerRow {
     player_name: String,
@@ -1164,6 +1269,10 @@ fn main() {
                         println!("{}\t{}", version, path.display());
                     }
                 }
+            }
+            QueryCommands::Roster { replays, has_class, exclude_own, json } => {
+                run_roster_query(&replays, game_dir, extracted, &has_class, exclude_own, json)
+                    .expect("failed to query roster");
             }
         },
     }
