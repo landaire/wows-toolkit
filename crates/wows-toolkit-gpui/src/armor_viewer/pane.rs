@@ -42,6 +42,7 @@
 //! the legend panel itself, since dragging must keep tracking the pointer
 //! past the panel's own small bounds -- see `legend.rs`'s module doc.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
@@ -65,10 +66,12 @@ use super::dock::ViewportDock;
 use super::legend;
 use super::legend::LegendDrag;
 use super::legend::LegendState;
+use super::load_ship;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::ShipLoadError;
 use super::load_ship::spawn_load_ship_armor;
 use super::sidebar::CompareSplit;
+use super::sidebar::ExportModelRequested;
 use super::sidebar::ShipSelected;
 use super::sidebar::Sidebar;
 use super::viewport_view::ViewportEvent;
@@ -148,6 +151,7 @@ impl ArmorViewerPane {
         let dock = cx.new(|_| ViewportDock::new(viewport));
         let ship_selected_sub = cx.subscribe_in(&sidebar, window, Self::on_sidebar_event);
         let compare_split_sub = cx.subscribe_in(&sidebar, window, Self::on_compare_split);
+        let export_requested_sub = cx.subscribe_in(&sidebar, window, Self::on_export_model_requested);
 
         let mut this = Self {
             sidebar,
@@ -160,7 +164,7 @@ impl ArmorViewerPane {
             ship_load_generation: 0,
             mirror_cameras: false,
             sync_options: false,
-            _subscriptions: vec![ship_selected_sub, compare_split_sub, viewport_event_sub],
+            _subscriptions: vec![ship_selected_sub, compare_split_sub, export_requested_sub, viewport_event_sub],
         };
         this.start_gpu_init(cx);
         this
@@ -410,6 +414,49 @@ impl ArmorViewerPane {
         cx: &mut Context<Self>,
     ) {
         self.start_ship_load(event.param_index.clone(), event.display_name.clone(), cx);
+    }
+
+    /// Sidebar per-ship "Export model" context-menu handler
+    /// (`sidebar::ExportModelRequested`, Milestone 5 Task 10, item 4): opens
+    /// a native save-file dialog (blocking, same inline `rfd::FileDialog`
+    /// pattern as `replay_inspector::view::open_manually` and
+    /// `viewport_view::ViewportView::confirm_export`) defaulted to
+    /// `{display_name}.glb`, then exports `event`'s ship at STOCK hull and
+    /// default LOD on the background executor -- independent of whatever
+    /// hull/LOD/module selection any pane currently displays, unlike the
+    /// toolbar's own export (which exports a pane's LIVE selection). A
+    /// cancelled dialog, or a request that arrives before the ship-asset
+    /// bundle finishes loading, is a no-op.
+    fn on_export_model_requested(
+        &mut self,
+        _sidebar: &Entity<Sidebar>,
+        event: &ExportModelRequested,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let BundleState::Ready(bundle) = &self.bundle else {
+            tracing::warn!("armor viewer: export requested before ship assets finished loading");
+            return;
+        };
+        let bundle = Arc::clone(bundle);
+        let param_index = event.param_index.clone();
+        let display_name = event.display_name.clone();
+
+        let default_filename = load_ship::default_export_filename(&display_name);
+        let Some(path) =
+            rfd::FileDialog::new().set_file_name(&default_filename).add_filter("glTF Binary", &["glb"]).save_file()
+        else {
+            return;
+        };
+
+        let options = load_ship::export_options_from_selection(load_ship::DEFAULT_LOD, None, HashMap::new());
+        cx.background_spawn(async move {
+            match load_ship::export_ship_glb(&bundle.assets, &param_index, &options, &path) {
+                Ok(()) => tracing::info!("armor viewer: exported {display_name} to {}", path.display()),
+                Err(e) => tracing::error!("armor viewer: failed to export {display_name}: {e}"),
+            }
+        })
+        .detach();
     }
 
     fn start_ship_load(&mut self, param_index: String, display_name: String, cx: &mut Context<Self>) {

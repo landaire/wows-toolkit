@@ -102,6 +102,19 @@ pub enum ShipLoadError {
     CamoSource(String),
 }
 
+/// Reasons a GLB model export ([`export_ship_glb`]) failed.
+#[derive(Debug, thiserror::Error)]
+pub enum ExportGlbError {
+    #[error("no vehicle found for param index {0}")]
+    NoVehicle(String),
+    #[error("failed to export ship model: {0}")]
+    ShipExport(String),
+    #[error("failed to create output file {path}: {source}")]
+    CreateFile { path: std::path::PathBuf, source: std::io::Error },
+    #[error("failed to write glb: {0}")]
+    WriteGlb(String),
+}
+
 /// Options for [`load_ship_armor`]. Built by [`default_load_options`] for a
 /// default (stock hull, highest-detail LOD) load, or by
 /// [`build_reload_options`]/[`reload_load_options`] for a Task 8c reload
@@ -518,6 +531,50 @@ pub(crate) fn build_reload_options(
     Ok(reload_load_options(&vehicle, display_name, lod, selected_hull, module_overrides))
 }
 
+/// Default save-file name for a GLB export (Milestone 5 Task 10), matching
+/// the egui app's own `format!("{}.glb", display_name)` default
+/// (`armor_viewer/ui/tab.rs:1057`).
+pub(crate) fn default_export_filename(display_name: &str) -> String {
+    format!("{display_name}.glb")
+}
+
+/// Builds [`ShipExportOptions`] for a GLB export of the ship as currently
+/// DISPLAYED in a viewport pane: the pane's current hull/LOD/module
+/// selection, matching [`load_ship_armor`]'s own construction (`textures:
+/// false, damaged: false`) so the exported model matches what is on screen.
+/// A pure function, split out from [`export_ship_glb`] so it is unit-testable
+/// without a `ShipAssets`/`Vehicle`.
+pub(crate) fn export_options_from_selection(
+    lod: usize,
+    selected_hull: Option<String>,
+    module_overrides: HashMap<ComponentType, String>,
+) -> ShipExportOptions {
+    ShipExportOptions { lod, hull: selected_hull, textures: false, damaged: false, module_overrides }
+}
+
+/// Exports `param_index`'s ship model to `path` as a glTF Binary (GLB) file,
+/// under `options` (built by [`export_options_from_selection`] for a
+/// viewport-pane export, so the exported model matches what that pane
+/// currently displays). Synchronous and CPU/IO-bound; callers run it off the
+/// UI thread (`viewport_view::ViewportView::confirm_export`), matching every
+/// other `ShipAssets`-driven load in this module.
+pub(crate) fn export_ship_glb(
+    ship_assets: &ShipAssets,
+    param_index: &str,
+    options: &ShipExportOptions,
+    path: &std::path::Path,
+) -> Result<(), ExportGlbError> {
+    let vehicle =
+        resolve_vehicle(ship_assets, param_index).map_err(|_| ExportGlbError::NoVehicle(param_index.to_string()))?;
+    let ctx = ship_assets
+        .load_ship_from_vehicle(&vehicle, options)
+        .map_err(|e| ExportGlbError::ShipExport(format!("{e:?}")))?;
+    let mut file = std::fs::File::create(path)
+        .map_err(|source| ExportGlbError::CreateFile { path: path.to_path_buf(), source })?;
+    ctx.export_glb(&mut file).map_err(|e| ExportGlbError::WriteGlb(format!("{e:?}")))?;
+    Ok(())
+}
+
 /// Kicks off a ship's armor load on the background executor. `bundle` is the
 /// Armor Viewer's already-loaded [`ArmorAssetsBundle`](super::assets::ArmorAssetsBundle)
 /// (shared `Arc`, cheap to clone into the background task); this never
@@ -550,6 +607,26 @@ pub fn spawn_reload_ship_armor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_export_filename_appends_glb_extension() {
+        assert_eq!(default_export_filename("Yamato"), "Yamato.glb");
+        assert_eq!(default_export_filename("USS Iowa"), "USS Iowa.glb");
+    }
+
+    #[test]
+    fn export_options_from_selection_carries_the_pane_s_live_selection_with_no_baked_textures_or_damage() {
+        let mut modules = HashMap::new();
+        modules.insert(ComponentType::Artillery, "AB1_Artillery".to_string());
+
+        let options = export_options_from_selection(2, Some("B_Hull".to_string()), modules.clone());
+
+        assert_eq!(options.lod, 2);
+        assert_eq!(options.hull, Some("B_Hull".to_string()));
+        assert_eq!(options.module_overrides, modules);
+        assert!(!options.textures, "an interactive-viewport export never needs baked textures");
+        assert!(!options.damaged, "export always targets the intact hull, matching load_ship_armor");
+    }
 
     #[test]
     fn hull_part_group_classifies_known_hp_prefixes_and_falls_back_to_hull() {
@@ -706,6 +783,70 @@ mod tests {
             armor.zones.len(),
             armor.hull_meshes.len(),
             armor.bounds
+        );
+    }
+
+    /// Needs a local game install: exercises the exact synchronous path
+    /// `viewport_view::ViewportView::confirm_export`'s background task runs
+    /// (`export_options_from_selection` + `export_ship_glb`) end to end
+    /// against a real ship, then checks the written file starts with the
+    /// glTF Binary magic (`glTF`) and is non-empty. Same
+    /// first-ship-from-the-real-catalog approach as
+    /// `load_ship_armor_against_a_real_install_produces_a_renderable_model`.
+    /// Run with:
+    ///
+    /// ```text
+    /// WOWS_ARMOR_VIEWER_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
+    /// cargo test -p wows-toolkit-gpui -- --ignored export_ship_glb_against_a_real_install_writes_a_valid_glb_file
+    /// ```
+    #[test]
+    #[ignore = "needs a local game install; see the doc comment for the run command"]
+    fn export_ship_glb_against_a_real_install_writes_a_valid_glb_file() {
+        let wows_dir = std::env::var("WOWS_ARMOR_VIEWER_LOAD_TEST_DIR")
+            .expect("set WOWS_ARMOR_VIEWER_LOAD_TEST_DIR to a WoWs install directory");
+        let wows_dir = std::path::PathBuf::from(wows_dir);
+
+        let available =
+            wowsunpack::game_data::list_available_builds(&wows_dir).expect("failed to list installed builds");
+        let build = *available.last().expect("expected at least one installed build");
+
+        let vfs = wowsunpack::game_data::build_game_vfs_for_build(&wows_dir, build)
+            .expect("failed to build the game VFS for the latest installed build");
+        let metadata = Arc::new(
+            wowsunpack::game_params::provider::GameMetadataProvider::from_vfs(&vfs)
+                .expect("failed to build GameMetadataProvider from the VFS"),
+        );
+        let ship_assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata))
+            .expect("failed to load ShipAssets from the VFS");
+
+        let catalog = crate::armor_viewer::catalog::ShipCatalog::build(&metadata);
+        let ship = catalog
+            .nations
+            .iter()
+            .flat_map(|n| &n.classes)
+            .flat_map(|c| &c.ships)
+            .next()
+            .expect("expected at least one ship in the real catalog");
+
+        let out_dir = std::env::temp_dir().join("wows-toolkit-gpui-export-glb-test");
+        std::fs::create_dir_all(&out_dir).expect("failed to create scratch output dir");
+        let out_path = out_dir.join(default_export_filename(&ship.display_name));
+
+        let options = export_options_from_selection(DEFAULT_LOD, None, HashMap::new());
+        export_ship_glb(&ship_assets, &ship.param_index, &options, &out_path).unwrap_or_else(|e| {
+            panic!("failed to export {} ({}) to {}: {e}", ship.display_name, ship.param_index, out_path.display())
+        });
+
+        let bytes = std::fs::read(&out_path).expect("failed to read back the exported glb file");
+        assert!(!bytes.is_empty(), "expected a non-empty glb file");
+        assert_eq!(&bytes[0..4], b"glTF", "expected the glTF Binary magic at the start of the file");
+
+        println!(
+            "exported {} ({}, build {build}) to {} ({} bytes)",
+            ship.display_name,
+            ship.param_index,
+            out_path.display(),
+            bytes.len()
         );
     }
 }

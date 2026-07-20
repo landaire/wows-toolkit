@@ -24,8 +24,16 @@
 //! active, so the next ship picked here loads into it rather than replacing
 //! whatever the previously active pane was showing.
 //!
-//! **Deferred.** Per-ship right-click context menu ("Export model") is
-//! Milestone 10 and is not implemented here.
+//! **Export model (Milestone 5 Task 10).** Right-clicking a ship row shows
+//! an "Export model" item (via `gpui_component::tree::Tree::context_menu`,
+//! a first-class per-row hook the tree builder already exposes); picking it
+//! emits [`ExportModelRequested`], which `pane.rs` handles by exporting that
+//! ship at STOCK hull/default LOD -- independent of whatever any pane
+//! currently displays, unlike the toolbar's own export button
+//! (`viewport_view::ViewportView::confirm_export`), which exports a pane's
+//! LIVE hull/LOD/module selection. Ports the egui app's sidebar-tree
+//! "Export model" context-menu item (`tab.rs:472-486`), which likewise
+//! always passes `selected_hull: None`.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -42,6 +50,7 @@ use gpui_component::input::Input;
 use gpui_component::input::InputEvent;
 use gpui_component::input::InputState;
 use gpui_component::list::ListItem;
+use gpui_component::menu::PopupMenuItem;
 use gpui_component::tree::TreeEntry;
 use gpui_component::tree::TreeItem;
 use gpui_component::tree::TreeState;
@@ -68,6 +77,15 @@ pub struct ShipSelected {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompareSplit;
 
+/// Emitted when the user picks "Export model" from a ship row's right-click
+/// context menu (Milestone 5 Task 10): `pane.rs` responds by exporting this
+/// ship at stock hull/default LOD, independent of any pane's own selection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportModelRequested {
+    pub param_index: String,
+    pub display_name: String,
+}
+
 /// What a tree row id refers to, resolved once per `rebuild_tree` and
 /// consulted by the row renderer (icon choice) and the click handler (ship
 /// rows only fire [`ShipSelected`]).
@@ -91,6 +109,7 @@ pub struct Sidebar {
 
 impl EventEmitter<ShipSelected> for Sidebar {}
 impl EventEmitter<CompareSplit> for Sidebar {}
+impl EventEmitter<ExportModelRequested> for Sidebar {}
 
 impl Sidebar {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -296,8 +315,26 @@ impl Render for Sidebar {
                 let entity = cx.entity();
                 let bundle = bundle.clone();
                 let row_info = self.row_info.clone();
+                let context_menu_entity = entity.clone();
+                let context_menu_row_info = self.row_info.clone();
                 tree(&self.tree_state, move |ix, entry, selected, _window, _cx| {
                     render_sidebar_item(entity.clone(), ix, entry, selected, &bundle, &row_info)
+                })
+                .context_menu(move |_ix, entry, menu, _window, _cx| {
+                    let Some(RowKind::Ship { param_index, display_name }) = context_menu_row_info.get(&entry.item().id)
+                    else {
+                        return menu;
+                    };
+                    let param_index = param_index.clone();
+                    let display_name = display_name.clone();
+                    let entity = context_menu_entity.clone();
+                    menu.item(PopupMenuItem::new("Export model").on_click(move |_event, _window, cx| {
+                        let request = ExportModelRequested {
+                            param_index: param_index.clone(),
+                            display_name: display_name.clone(),
+                        };
+                        entity.update(cx, |_sidebar, cx| cx.emit(request));
+                    }))
                 })
                 .flex_1()
                 .into_any_element()

@@ -28,6 +28,7 @@ use std::time::Duration;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::ActiveTheme;
+use gpui_component::button::Button;
 use gpui_component::h_flex;
 use gpui_component::menu::ContextMenuExt;
 use gpui_component::menu::PopupMenuItem;
@@ -435,6 +436,15 @@ pub struct ViewportView {
     /// keep firing; replaced wholesale whenever `set_lighting_preset` rebuilds
     /// the sliders.
     _lighting_slider_subscriptions: Vec<Subscription>,
+    /// Whether the toolbar's export-confirm panel (Milestone 5 Task 10) is
+    /// showing, ported from the egui app's `export_confirm` (`state.rs:181`,
+    /// `tab.rs:1045-1111`) but scoped to a bool here rather than an
+    /// `Option<ExportRequest>` -- this pane's `reload_source` already carries
+    /// the param index/display name a confirm needs, and the export is always
+    /// "this pane's currently displayed ship", never a different one (the
+    /// sidebar's stock-hull export, item 4 of the brief, is a separate
+    /// deferred action, not routed through this field).
+    export_confirm: bool,
 }
 
 impl EventEmitter<ViewportEvent> for ViewportView {}
@@ -491,6 +501,7 @@ impl ViewportView {
             _display_slider_subscriptions: display_slider_subscriptions,
             lighting_sliders,
             _lighting_slider_subscriptions: lighting_slider_subscriptions,
+            export_confirm: false,
         }
     }
 
@@ -1650,6 +1661,75 @@ impl ViewportView {
         .detach();
     }
 
+    /// Opens the export-confirm panel (toolbar "Export" button,
+    /// `popover.rs`'s `render_export_button`) for this pane's currently
+    /// displayed ship. A no-op if no ship is loaded -- the button itself is
+    /// disabled in that case (`current_armor.is_none()`), this is just
+    /// defense in depth against a stale click.
+    pub(crate) fn open_export_confirm(&mut self, cx: &mut Context<Self>) {
+        if self.current_armor.is_none() {
+            return;
+        }
+        self.export_confirm = true;
+        cx.notify();
+    }
+
+    /// Dismisses the export-confirm panel with no further action, matching
+    /// egui's own Cancel button (`tab.rs:1102-1104`).
+    pub(crate) fn cancel_export(&mut self, cx: &mut Context<Self>) {
+        self.export_confirm = false;
+        cx.notify();
+    }
+
+    /// Confirms the export: closes the confirm panel, then opens a native
+    /// save-file dialog (blocking; same inline `rfd::FileDialog` pattern as
+    /// `replay_inspector::view::open_manually`) defaulted to
+    /// `{display_name}.glb`. A cancelled dialog is a no-op beyond closing the
+    /// panel. On a chosen path, builds `ShipExportOptions` from this pane's
+    /// CURRENT hull/LOD/module selection (`load_ship::
+    /// export_options_from_selection`, so the exported model matches what is
+    /// on screen) and runs the actual export -- `load_ship_from_vehicle` +
+    /// `export_glb`, both CPU/IO heavy -- on the background executor so the
+    /// UI thread is not blocked, matching every other `ShipAssets`-driven
+    /// load in this pane (`reload_ship` above). Ports the egui app's Export
+    /// button handler (`tab.rs:1057-1097`), except the export options always
+    /// reflect the pane's live selection rather than egui's fixed `lod: 0,
+    /// textures: true` -- see `load_ship::export_options_from_selection`'s
+    /// doc.
+    ///
+    /// **Logging, not toasts.** No `Notification`/toast infrastructure is
+    /// wired up anywhere in this port yet (unlike the egui app's
+    /// `self.tab_state.toasts`); success/failure is surfaced via
+    /// `tracing::info!`/`tracing::error!` only.
+    pub(crate) fn confirm_export(&mut self, cx: &mut Context<Self>) {
+        self.export_confirm = false;
+        cx.notify();
+        let Some(source) = &self.reload_source else { return };
+        let default_filename = load_ship::default_export_filename(&source.display_name);
+        let Some(path) =
+            rfd::FileDialog::new().set_file_name(&default_filename).add_filter("glTF Binary", &["glb"]).save_file()
+        else {
+            return;
+        };
+
+        let bundle = Arc::clone(&source.bundle);
+        let param_index = source.param_index.clone();
+        let display_name = source.display_name.clone();
+        let options = load_ship::export_options_from_selection(
+            self.hull_lod,
+            self.selected_hull.clone(),
+            self.selected_modules.clone(),
+        );
+
+        cx.background_spawn(async move {
+            match load_ship::export_ship_glb(&bundle.assets, &param_index, &options, &path) {
+                Ok(()) => tracing::info!("armor viewer: exported {display_name} to {}", path.display()),
+                Err(e) => tracing::error!("armor viewer: failed to export {display_name}: {e}"),
+            }
+        })
+        .detach();
+    }
+
     /// Applies a completed `reload_ship` result. Discards it if a newer
     /// reload superseded this one (`generation` guard, mirroring
     /// `ArmorViewerPane::apply_ship_load_result`'s identical pattern for ship
@@ -1901,6 +1981,63 @@ impl Render for ViewportView {
             hovered_for_menu.as_ref().is_some_and(|h| self.plate_visibility.get(&h.key).copied().unwrap_or(false));
         let hidden_count = self.plate_visibility.len();
 
+        // Export-confirm panel (Milestone 5 Task 10): a minimal inline
+        // overlay (no `Modal`/`ContextModal` exists in this pinned
+        // gpui-component revision) reproducing egui's own `export_confirm`
+        // dialog (`tab.rs:1045-1111`) -- ship name, disclaimer, Export/Cancel.
+        // `.occlude()` blocks the 3D viewport's own mouse handlers underneath
+        // while it's open, matching `legend.rs`'s dragged panel.
+        let export_overlay = self.export_confirm.then(|| {
+            let theme = cx.theme();
+            let (background, border, radius) = (theme.background, theme.border, theme.radius);
+            let display_name = self.reload_source.as_ref().map(|s| s.display_name.clone()).unwrap_or_default();
+            let cancel_entity = entity.clone();
+            let confirm_entity = entity.clone();
+
+            div()
+                .id("armor-export-confirm-backdrop")
+                .occlude()
+                .absolute()
+                .inset_0()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(black().opacity(0.35))
+                .child(
+                    v_flex()
+                        .id("armor-export-confirm-panel")
+                        .w(px(360.))
+                        .gap_3()
+                        .p_4()
+                        .bg(background)
+                        .border_1()
+                        .border_color(border)
+                        .rounded(radius)
+                        .shadow_md()
+                        .child(div().font_weight(FontWeight::BOLD).child("Export Ship Model"))
+                        .child(div().text_sm().child(format!(
+                            "Export {display_name} to a glTF Binary (.glb) file. These 3D models and textures are IP of Wargaming and any usage of these models should be in compliance with your local laws."
+                        )))
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .justify_end()
+                                .child(Button::new("armor-export-confirm-cancel").label("Cancel").compact().on_click(
+                                    move |_, _window, cx| {
+                                        cancel_entity.update(cx, |view, cx| view.cancel_export(cx));
+                                    },
+                                ))
+                                .child(Button::new("armor-export-confirm-export").label("Export").compact().on_click(
+                                    move |_, _window, cx| {
+                                        confirm_entity.update(cx, |view, cx| view.confirm_export(cx));
+                                    },
+                                )),
+                        ),
+                )
+                .into_any_element()
+        });
+
         // Toolbar row above the viewport: the armor-visibility popover
         // trigger today, with room for Task 7b's display-settings button.
         let toolbar = popover::render_toolbar(&*self, &entity, cx);
@@ -1923,6 +2060,7 @@ impl Render for ViewportView {
             .child(image_child)
             .child(overlay)
             .when_some(tooltip_overlay, |this, t| this.child(t))
+            .when_some(export_overlay, |this, o| this.child(o))
             .context_menu(move |mut menu, _window, _cx| {
                 let Some(hover) = hovered_for_menu.clone() else { return menu };
                 let (zone, material, thickness_tenths) = hover.key.clone();

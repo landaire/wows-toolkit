@@ -86,6 +86,27 @@ pub fn render_toolbar(
         .child(render_visibility_button(view, entity))
         .child(render_hull_button(view, entity))
         .child(render_display_button(view, entity))
+        .child(render_export_button(view, entity))
+}
+
+/// Toolbar trigger for the export-confirm flow (Milestone 5 Task 10): opens
+/// `ViewportView`'s confirm panel for the ship currently displayed in this
+/// pane, at its current hull/LOD/module selection. Ports the egui app's
+/// "Export Ship Model" tab button (`tab.rs:1696-1709`), which is likewise
+/// gated on a ship being loaded.
+fn render_export_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
+    let has_armor = view.current_armor.is_some();
+    let click_entity = entity.clone();
+
+    Button::new("armor-export-trigger")
+        .icon(IconName::HardDrive)
+        .label("Export")
+        .compact()
+        .tooltip("Export ship model to a glTF Binary (.glb) file")
+        .disabled(!has_armor)
+        .on_click(move |_, _window, cx| {
+            click_entity.update(cx, |view, cx| view.open_export_confirm(cx));
+        })
 }
 
 fn render_visibility_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
