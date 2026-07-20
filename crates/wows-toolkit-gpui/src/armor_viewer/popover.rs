@@ -27,6 +27,7 @@ use gpui_component::IconName;
 use gpui_component::button::Button;
 use gpui_component::checkbox::Checkbox;
 use gpui_component::h_flex;
+use gpui_component::list::ListItem;
 use gpui_component::popover::Popover;
 use gpui_component::popover::PopoverState;
 use gpui_component::scroll::Scrollbar;
@@ -34,12 +35,16 @@ use gpui_component::slider::Slider;
 use gpui_component::slider::SliderState;
 use gpui_component::v_flex;
 
+use wowsunpack::export::camo_textures::CamoSchemeId;
+use wowsunpack::export::camo_textures::CamoSchemeInfo;
+use wowsunpack::export::gltf_export::CamoOrigin;
 use wowsunpack::export::gltf_export::thickness_to_color;
 
 use crate::viewport::types::LightingSettings;
 
 use super::legend::swatch_color;
 use super::load_ship::ArmorZone;
+use super::load_ship::LoadedShipArmor;
 use super::load_ship::PlateKey;
 use super::load_ship::ZonePart;
 use super::viewport_view::ViewportView;
@@ -208,28 +213,31 @@ fn render_hull_button(view: &ViewportView, entity: &Entity<ViewportView>) -> imp
 
 /// Builds the hull-visibility popover's tree from a snapshot of `entity`'s
 /// current state (same lazy-`.content()` rationale as
-/// `render_popover_content`'s doc).
+/// `render_popover_content`'s doc). Below the hull tree, adds the camo picker
+/// (Milestone 4 Task 8b, `render_camo_picker`) when `armor.camo_scheme_infos`
+/// is non-empty.
 ///
-/// **Deferred** (Milestone 4 Task 8b/8c, matching the M4 Task 8a brief): the
-/// hull-upgrade selector, module-alternative selectors, the camo picker, and
-/// the LOD selector (`tab.rs:3163-3265`) -- none of their backing state
-/// (`selected_hull`/`selected_modules`/`selected_camo`/`hull_lod`) exists in
-/// this port yet, so there is nothing to wire a selector to. The sidebar-hover
-/// highlight for a hovered hull row (egui's
-/// `SidebarHighlightKey::HullMeshes`) is likewise deferred -- see
-/// `upload_hull.rs`'s module doc.
+/// **Deferred** (Milestone 4 Task 8c): the hull-upgrade selector,
+/// module-alternative selectors, and the LOD selector (`tab.rs:3163-3265`,
+/// `3253-3265`) -- none of their backing state (`selected_hull`/
+/// `selected_modules`/`hull_lod`) exists in this port yet, so there is
+/// nothing to wire a selector to. The sidebar-hover highlight for a hovered
+/// hull row (egui's `SidebarHighlightKey::HullMeshes`) is likewise deferred --
+/// see `upload_hull.rs`'s module doc.
 fn render_hull_popover_content(
     entity: &Entity<ViewportView>,
     _window: &mut Window,
     cx: &mut Context<PopoverState>,
 ) -> AnyElement {
-    let (armor, hull_visibility, hull_opaque, expanded_hull_groups) = {
+    let (armor, hull_visibility, hull_opaque, expanded_hull_groups, selected_camo, expanded_camo_groups) = {
         let view = entity.read(cx);
         (
             view.current_armor.clone(),
             view.hull_visibility.clone(),
             view.display_settings.hull_opaque,
             view.expanded_hull_groups.clone(),
+            view.selected_camo,
+            view.expanded_camo_groups.clone(),
         )
     };
 
@@ -282,13 +290,135 @@ fn render_hull_popover_content(
         tree = tree.child(render_hull_group_row(entity, group, names, &hull_visibility, &expanded_hull_groups, warn));
     }
 
-    v_flex()
+    let mut col = v_flex()
         .w(px(260.))
         .gap_2()
         .child(header)
         .child(div().h(px(1.)).bg(border))
-        .child(div().id("armor-hull-visibility-tree-scroll").max_h(px(360.)).overflow_y_scroll().child(tree))
+        .child(div().id("armor-hull-visibility-tree-scroll").max_h(px(360.)).overflow_y_scroll().child(tree));
+
+    if !armor.camo_scheme_infos.is_empty() {
+        col = col.child(div().h(px(1.)).bg(border)).child(render_camo_picker(
+            entity,
+            &armor,
+            selected_camo,
+            &expanded_camo_groups,
+        ));
+    }
+
+    col.into_any_element()
+}
+
+/// Camo picker: "Stock" (deselects the active camo) + ship-specific schemes
+/// at top level, then collapsible Universal/Expendable/LegacyScan groups
+/// (each sorted by lowercased display name, skipped when empty). Ports the
+/// egui camo selector (`tab.rs:3196-3251`). The caller hides this entirely
+/// when `armor.camo_scheme_infos` is empty (old game versions carry no camo
+/// metadata).
+fn render_camo_picker(
+    entity: &Entity<ViewportView>,
+    armor: &LoadedShipArmor,
+    selected_camo: Option<CamoSchemeId>,
+    expanded_camo_groups: &HashSet<String>,
+) -> AnyElement {
+    let mut col = v_flex().gap_1().child(div().text_sm().font_weight(FontWeight::BOLD).child("Camouflage"));
+
+    let none_entity = entity.clone();
+    col = col.child(
+        ListItem::new("armor-camo-none")
+            .selected(selected_camo.is_none())
+            .child(div().text_sm().child("Stock"))
+            .on_click(move |_, _window, cx| {
+                none_entity.update(cx, |view, cx| view.select_camo(None, cx));
+            }),
+    );
+
+    let mut ship_infos: Vec<&CamoSchemeInfo> =
+        armor.camo_scheme_infos.iter().filter(|i| i.origin == CamoOrigin::ShipSpecific).collect();
+    ship_infos.sort_by_key(|i| i.display_name.to_lowercase());
+    for info in &ship_infos {
+        col = col.child(render_camo_row(entity, info, selected_camo));
+    }
+
+    for (origin, label) in [
+        (CamoOrigin::Universal, "Universal"),
+        (CamoOrigin::Expendable, "Expendable"),
+        (CamoOrigin::LegacyScan, "Other"),
+    ] {
+        let mut group: Vec<&CamoSchemeInfo> = armor.camo_scheme_infos.iter().filter(|i| i.origin == origin).collect();
+        if group.is_empty() {
+            continue;
+        }
+        group.sort_by_key(|i| i.display_name.to_lowercase());
+        col = col.child(render_camo_group(entity, label, &group, selected_camo, expanded_camo_groups));
+    }
+
+    col.into_any_element()
+}
+
+/// One selectable camo-scheme row. Ports one `selectable_label` iteration of
+/// `tab.rs:3216`/`3243`.
+fn render_camo_row(
+    entity: &Entity<ViewportView>,
+    info: &CamoSchemeInfo,
+    selected_camo: Option<CamoSchemeId>,
+) -> AnyElement {
+    let id = info.id;
+    let is_selected = selected_camo == Some(id);
+    let toggle_entity = entity.clone();
+    ListItem::new(format!("armor-camo-{}", id.0))
+        .selected(is_selected)
+        .child(div().text_sm().child(info.display_name.clone()))
+        .on_click(move |_, _window, cx| {
+            toggle_entity.update(cx, |view, cx| view.select_camo(Some(id), cx));
+        })
         .into_any_element()
+}
+
+/// One collapsible camo-origin group header row + (if expanded) its scheme
+/// rows, scroll-clamped to match egui's own per-group `ScrollArea::max_height(240.0)`.
+/// Ports the `CollapsingState` block (`tab.rs:3234-3250`).
+fn render_camo_group(
+    entity: &Entity<ViewportView>,
+    label: &str,
+    infos: &[&CamoSchemeInfo],
+    selected_camo: Option<CamoSchemeId>,
+    expanded_camo_groups: &HashSet<String>,
+) -> AnyElement {
+    let expanded = expanded_camo_groups.contains(label);
+
+    let expand_entity = entity.clone();
+    let expand_label = label.to_string();
+    let chevron = div()
+        .id(format!("armor-camo-group-expand-{label}"))
+        .flex_none()
+        .child(Icon::new(if expanded { IconName::ChevronDown } else { IconName::ChevronRight }))
+        .on_click(move |_, _window, cx| {
+            expand_entity.update(cx, |view, cx| view.toggle_camo_group_expanded(expand_label.clone(), cx));
+        });
+
+    let header = h_flex()
+        .id(format!("armor-camo-group-row-{label}"))
+        .gap_1()
+        .items_center()
+        .child(chevron)
+        .child(div().text_sm().child(label.to_string()));
+
+    let mut column = v_flex().gap_1().child(header);
+    if expanded {
+        let mut inner = v_flex().gap_1();
+        for info in infos {
+            inner = inner.child(render_camo_row(entity, info, selected_camo));
+        }
+        let body = div()
+            .id(format!("armor-camo-group-scroll-{label}"))
+            .max_h(px(240.))
+            .overflow_y_scroll()
+            .pl(px(20.))
+            .child(inner);
+        column = column.child(body);
+    }
+    column.into_any_element()
 }
 
 /// One hull-part-group header row + (if expanded) its individual mesh

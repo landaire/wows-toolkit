@@ -21,10 +21,12 @@
 //! `upload_hull`'s hull-only mesh upload (kept separate from `upload`'s armor
 //! upload so a hull-only change never rebuilds the armor mesh set).
 //! `viewport_view.rs` owns the actual `part_visibility`/`plate_visibility`/
-//! `hull_visibility`/undo-stack state and wires all of the above into the
-//! mouse and key handlers. Multi-pane comparison (M5) and hull camo
-//! compositing / hull upgrade-LOD reload (M4 Task 8b/8c) are later
-//! milestones.
+//! `hull_visibility`/`selected_camo`/undo-stack state and wires all of the
+//! above into the mouse and key handlers. `camo` (Milestone 4 Task 8b) is the
+//! pure pixel-math camo compositor (`build_active_camo`) that bakes a decoded
+//! camo scheme against the hull's base albedo; `popover`'s hull popover adds
+//! the camo picker on top of it. Multi-pane comparison (M5) and hull
+//! upgrade-LOD reload (M4 Task 8c) are later milestones.
 #![allow(dead_code)]
 // Re-exports below are the module's public surface; not everything is
 // consumed outside its own file yet (some are reserved for a later
@@ -32,6 +34,7 @@
 #![allow(unused_imports)]
 
 pub mod assets;
+pub(crate) mod camo;
 pub mod catalog;
 pub mod legend;
 pub mod load_ship;

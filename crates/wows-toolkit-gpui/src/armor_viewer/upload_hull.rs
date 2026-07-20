@@ -4,21 +4,25 @@
 //! set. Ports the egui app's `upload_hull_meshes_to_viewport`
 //! (`armor_viewer/ui/tab.rs:1339-1442`).
 //!
-//! **Milestone 4 Task 8a scope.** Hull mesh display with the base albedo
-//! texture (`armor.hull_textures`) only -- `armor.active_camo_textures`/
-//! `active_camo_uvs` are always empty until Task 8b wires camo compositing,
-//! so every hull mesh falls back to its base albedo (or baked vertex colors,
-//! or a flat fallback color). The texture-precedence check below still reads
-//! the active-camo maps first, matching the egui original, so Task 8b needs
-//! no changes here once it starts populating them. Hull-upgrade/LOD reload
-//! (Task 8c) is out of scope; this always uploads whatever `armor.hull_meshes`
-//! currently holds. The sidebar-hover highlight for a hovered hull row
-//! (egui's `SidebarHighlightKey::HullMeshes`) is deferred -- this port's
-//! `SidebarHighlightKey` intentionally omits that variant for now (see
-//! `visibility.rs`'s module doc); the hull popover's own hover therefore has
-//! no 3D highlight yet, only the checkbox state.
+//! **Camo compositing (Milestone 4 Task 8b).** The active camo's decoded
+//! textures/UV transforms are not carried on `armor` (an `Arc<LoadedShipArmor>`
+//! is never mutated once loaded) -- `ViewportView` owns that state
+//! (`selected_camo`/`active_camo_textures`/`active_camo_uvs`) and passes it in
+//! as parameters here on every hull upload. A stem present in
+//! `active_camo_textures` takes precedence over `armor.hull_textures`'s base
+//! albedo for that mesh; empty maps (no camo selected) reproduce Task 8a's
+//! base-albedo-only behavior exactly.
+//!
+//! Hull-upgrade/LOD reload (Task 8c) is out of scope; this always uploads
+//! whatever `armor.hull_meshes` currently holds. The sidebar-hover highlight
+//! for a hovered hull row (egui's `SidebarHighlightKey::HullMeshes`) is
+//! deferred -- this port's `SidebarHighlightKey` intentionally omits that
+//! variant for now (see `visibility.rs`'s module doc); the hull popover's own
+//! hover therefore has no 3D highlight yet, only the checkbox state.
 
 use std::collections::HashMap;
+
+use wowsunpack::export::camouflage::UvTransform;
 
 use crate::viewport::renderer::GpuPipeline;
 use crate::viewport::renderer::LAYER_DEFAULT;
@@ -87,6 +91,9 @@ pub(crate) fn tex_brightness(rgba: &[u8]) -> f32 {
 /// egui app's own default). `hull_opaque` selects the alpha/layer: opaque
 /// hulls draw depth-written on [`LAYER_DEFAULT`] like armor plates,
 /// translucent ones draw on [`LAYER_HULL`] (no depth write, behind armor).
+/// `active_camo_textures`/`active_camo_uvs` are `ViewportView`'s decoded
+/// active-camo state (see the module doc); pass empty maps for base albedo
+/// only.
 ///
 /// Shares `viewport`'s mesh pool with the armor upload (`upload.rs`) but
 /// never calls [`Viewport3D::clear`] itself, so an armor-only change never
@@ -105,6 +112,8 @@ pub fn upload_hull_meshes(
     hull_mesh_ids: &mut Vec<MeshId>,
     hull_visibility: &HashMap<String, bool>,
     hull_opaque: bool,
+    active_camo_textures: &HashMap<String, (u32, u32, Vec<u8>)>,
+    active_camo_uvs: &HashMap<String, UvTransform>,
 ) {
     for mid in hull_mesh_ids.drain(..) {
         viewport.remove_mesh(mid);
@@ -123,13 +132,12 @@ pub fn upload_hull_meshes(
         let stem = mesh.mfm_path.as_deref().map(mfm_stem);
         // Active camo texture for this stem takes precedence; otherwise the base albedo.
         let texture_data = stem
-            .and_then(|s| armor.active_camo_textures.get(s))
+            .and_then(|s| active_camo_textures.get(s))
             .or_else(|| mesh.mfm_path.as_ref().and_then(|p| armor.hull_textures.get(p)));
         // Only apply a tiled UV transform when this stem actually has an
         // active camo texture; otherwise the mesh falls back to base albedo
         // with its own UVs.
-        let camo_uv =
-            stem.filter(|s| armor.active_camo_textures.contains_key(*s)).and_then(|s| armor.active_camo_uvs.get(s));
+        let camo_uv = stem.filter(|s| active_camo_textures.contains_key(*s)).and_then(|s| active_camo_uvs.get(s));
         let has_texture = texture_data.is_some() && has_uvs;
 
         let brightness = texture_data.map(|(_, _, rgba)| tex_brightness(rgba)).unwrap_or(FALLBACK_TEX_BRIGHTNESS);

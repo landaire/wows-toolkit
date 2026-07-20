@@ -33,7 +33,11 @@ use gpui_component::slider::SliderEvent;
 use gpui_component::slider::SliderState;
 use gpui_component::v_flex;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
+use wowsunpack::export::camo_textures::CamoSchemeId;
+use wowsunpack::export::camo_textures::SchemeTextures;
+use wowsunpack::export::camouflage::UvTransform;
 
+use crate::armor_viewer::camo::build_active_camo;
 use crate::armor_viewer::load_ship::ArmorTriangleTooltip;
 use crate::armor_viewer::load_ship::LoadedShipArmor;
 use crate::armor_viewer::load_ship::PlateKey;
@@ -251,6 +255,31 @@ pub struct ViewportView {
     /// `load_with_default_open(.., false)`. `pub(crate)` so `popover.rs` can
     /// read it while building the hull popover's tree.
     pub(crate) expanded_hull_groups: HashSet<String>,
+    /// Which camo-origin group headers (Universal/Expendable/LegacyScan) are
+    /// expanded in the hull-visibility popover's camo picker. Purely local UI
+    /// state, same defaults/scope as `expanded_hull_groups`. `pub(crate)` so
+    /// `popover.rs` can read it while building the camo picker.
+    pub(crate) expanded_camo_groups: HashSet<String>,
+    /// The currently selected camo scheme, if any (`None` = stock/base
+    /// albedo). Set by [`Self::select_camo`], driven by the hull popover's
+    /// camo picker (`popover.rs`). Reset (cleared) whenever a new ship loads.
+    /// `pub(crate)` so `popover.rs` can read it while building the picker.
+    pub(crate) selected_camo: Option<CamoSchemeId>,
+    /// Cache of decoded camo scheme textures, keyed by scheme id, so
+    /// reselecting a scheme (or the popover reopening) does not re-decode.
+    /// Reset (cleared) whenever a new ship loads -- a cached decode from a
+    /// previous ship is meaningless for a different ship's `CamoTextureSource`.
+    camo_texture_cache: HashMap<CamoSchemeId, SchemeTextures>,
+    /// The active camo's composited hull textures, keyed by mfm stem
+    /// (`camo::build_active_camo`'s output). Empty when `selected_camo` is
+    /// `None`. Lives here (not on `LoadedShipArmor`, an immutable `Arc`) and
+    /// is passed into [`upload_hull::upload_hull_meshes`] as a parameter on
+    /// every hull upload. Reset (cleared) whenever a new ship loads.
+    active_camo_textures: HashMap<String, (u32, u32, Vec<u8>)>,
+    /// The active camo's UV transforms, keyed by mfm stem, for stems the
+    /// compositor left tiled (GPU-side) rather than baking. Same lifetime/
+    /// reset rules as `active_camo_textures`.
+    active_camo_uvs: HashMap<String, UvTransform>,
     /// Undo/redo history over `{part_visibility, plate_visibility}`. Every
     /// mutator snapshots the pre-mutation state here via `snapshot_and_mutate`
     /// before applying the change. Cleared whenever a new ship loads.
@@ -334,6 +363,11 @@ impl ViewportView {
             hull_visibility: HashMap::new(),
             hull_mesh_ids: Vec::new(),
             expanded_hull_groups: HashSet::new(),
+            expanded_camo_groups: HashSet::new(),
+            selected_camo: None,
+            camo_texture_cache: HashMap::new(),
+            active_camo_textures: HashMap::new(),
+            active_camo_uvs: HashMap::new(),
             undo_stack: VisibilityUndoStack::default(),
             expanded_zones: HashSet::new(),
             expanded_parts: HashSet::new(),
@@ -489,6 +523,11 @@ impl ViewportView {
         self.hull_visibility.clear();
         self.hull_mesh_ids.clear();
         self.expanded_hull_groups.clear();
+        self.expanded_camo_groups.clear();
+        self.selected_camo = None;
+        self.camo_texture_cache.clear();
+        self.active_camo_textures.clear();
+        self.active_camo_uvs.clear();
         self.undo_stack.clear();
         self.expanded_zones.clear();
         self.expanded_parts.clear();
@@ -507,6 +546,8 @@ impl ViewportView {
             &mut self.hull_mesh_ids,
             &self.hull_visibility,
             self.display_settings.hull_opaque,
+            &self.active_camo_textures,
+            &self.active_camo_uvs,
         );
         self.model_bounds = Some(armor.bounds);
         self.current_armor = Some(armor);
@@ -1188,6 +1229,8 @@ impl ViewportView {
             &mut self.hull_mesh_ids,
             &self.hull_visibility,
             self.display_settings.hull_opaque,
+            &self.active_camo_textures,
+            &self.active_camo_uvs,
         );
         // `viewport.clear()` (inside the re-upload) already dropped the old
         // highlight meshes; forget the stale ids before rebuilding against
@@ -1246,6 +1289,8 @@ impl ViewportView {
             &mut self.hull_mesh_ids,
             &self.hull_visibility,
             self.display_settings.hull_opaque,
+            &self.active_camo_textures,
+            &self.active_camo_uvs,
         );
     }
 
@@ -1275,6 +1320,71 @@ impl ViewportView {
         }
         self.display_settings.hull_opaque = opaque;
         self.reupload_hull();
+        cx.notify();
+    }
+
+    /// Selects (or clears, `id: None`) the active camo scheme and re-uploads
+    /// only the hull. Ports the egui app's camo-change flow (`tab.rs:797-847`):
+    /// decode `id`'s textures (cache hit skips the decode), look up its
+    /// `CamoSchemeInfo` for `uv_transforms`/`use_color_scheme`, composite them
+    /// against `armor.hull_textures` via `camo::build_active_camo`, and store
+    /// the result as `active_camo_textures`/`active_camo_uvs`. A decode
+    /// failure, or a selected id with no matching `camo_scheme_infos` entry,
+    /// is logged via `tracing::warn!` and treated as stock (empty active-camo
+    /// maps) rather than left half-applied.
+    pub(crate) fn select_camo(&mut self, id: Option<CamoSchemeId>, cx: &mut Context<Self>) {
+        self.selected_camo = id;
+        self.active_camo_textures.clear();
+        self.active_camo_uvs.clear();
+
+        if let Some(id) = id
+            && let Some(armor) = self.current_armor.clone()
+        {
+            let decoded = match self.camo_texture_cache.get(&id) {
+                Some(t) => Some(t.clone()),
+                None => match armor.camo_source.decode(id) {
+                    Ok(t) => {
+                        if t.is_empty() {
+                            tracing::warn!(
+                                "camo scheme {id:?} decoded to zero textures for this ship; rendering as stock"
+                            );
+                        }
+                        self.camo_texture_cache.insert(id, t.clone());
+                        Some(t)
+                    }
+                    Err(e) => {
+                        tracing::warn!("failed to decode camo scheme {id:?}: {e}");
+                        None
+                    }
+                },
+            };
+            if let Some(textures) = decoded {
+                let info = armor.camo_scheme_infos.iter().find(|i| i.id == id);
+                let (uv, use_color_scheme) = match info {
+                    Some(i) => (i.uv_transforms.clone(), i.use_color_scheme),
+                    None => {
+                        tracing::warn!(
+                            "camo scheme {id:?} decoded successfully but has no matching entry in camo_scheme_infos; falling back to identity UVs and no color scheme"
+                        );
+                        (HashMap::default(), false)
+                    }
+                };
+                let (t, u) = build_active_camo(&textures, &uv, use_color_scheme, &armor.hull_textures);
+                self.active_camo_textures = t;
+                self.active_camo_uvs = u;
+            }
+        }
+
+        self.reupload_hull();
+        cx.notify();
+    }
+
+    /// Toggles a camo-origin group header's expanded/collapsed state in the
+    /// hull popover's camo picker. Purely local UI state; not undo-tracked.
+    pub(crate) fn toggle_camo_group_expanded(&mut self, group: String, cx: &mut Context<Self>) {
+        if !self.expanded_camo_groups.remove(&group) {
+            self.expanded_camo_groups.insert(group);
+        }
         cx.notify();
     }
 

@@ -35,7 +35,6 @@ use gpui::Task;
 
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::camo_textures::CamoTextureSource;
-use wowsunpack::export::camouflage::UvTransform;
 use wowsunpack::export::gltf_export::InteractiveArmorMesh;
 use wowsunpack::export::gltf_export::InteractiveHullMesh;
 use wowsunpack::export::ship::ShipAssets;
@@ -133,16 +132,10 @@ pub struct LoadedShipArmor {
     pub loaded_hull: Option<String>,
     /// Module alternatives for the loaded hull upgrade: component type -> component names.
     pub module_alternatives: Vec<(ComponentType, Vec<String>)>,
-    /// Cheap camo scheme metadata for a future picker (no textures decoded).
+    /// Camo scheme metadata for the picker (`popover.rs`); no textures decoded.
     pub camo_scheme_infos: Vec<CamoSchemeInfo>,
     /// Decodes a scheme's textures on demand when one is selected.
     pub camo_source: CamoTextureSource,
-    /// Decoded RGBA for the currently active camo, keyed by mfm stem. Always
-    /// empty in v1: no camo is ever selected yet (Milestone 4).
-    pub active_camo_textures: HashMap<String, (u32, u32, Vec<u8>)>,
-    /// UV transforms for the currently active camo, keyed by mfm stem. Always
-    /// empty in v1, for the same reason as `active_camo_textures`.
-    pub active_camo_uvs: HashMap<String, UvTransform>,
 }
 
 impl LoadedShipArmor {
@@ -423,8 +416,6 @@ fn load_ship_armor(
         module_alternatives: options.module_alternatives,
         camo_scheme_infos,
         camo_source,
-        active_camo_textures: HashMap::new(),
-        active_camo_uvs: HashMap::new(),
     })
 }
 
