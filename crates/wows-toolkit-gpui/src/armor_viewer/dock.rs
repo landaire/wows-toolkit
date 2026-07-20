@@ -136,6 +136,13 @@ impl Render for ViewportDock {
                 .id(("armor-viewport-pane", ix))
                 .relative()
                 .size_full()
+                // Fires on any left-click inside the pane, including its
+                // toolbar/close buttons -- enabled `gpui-component` `Button`s
+                // don't stop propagation, so clicking a control on an
+                // inactive pane both runs the control's own action AND
+                // activates that pane. Intended: interacting with a pane is
+                // what makes it the active one (the target for sidebar ship
+                // selections and the source for mirror/sync-on-enable).
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| this.activate_pane(ix, cx)),

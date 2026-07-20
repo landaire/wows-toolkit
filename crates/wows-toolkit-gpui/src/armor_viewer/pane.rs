@@ -152,6 +152,12 @@ impl ArmorViewerPane {
         let ship_selected_sub = cx.subscribe_in(&sidebar, window, Self::on_sidebar_event);
         let compare_split_sub = cx.subscribe_in(&sidebar, window, Self::on_compare_split);
         let export_requested_sub = cx.subscribe_in(&sidebar, window, Self::on_export_model_requested);
+        // `dock`'s own `cx.notify()` (add/close/activate pane) only
+        // invalidates `ViewportDock`'s render; without this, the common-
+        // settings toggle row below -- gated on `dock.panes().len() > 1` --
+        // goes stale after a close (e.g. stays visible once back down to one
+        // pane) until some unrelated event happens to re-render this pane.
+        let dock_sub = cx.observe(&dock, |_this, _dock, cx| cx.notify());
 
         let mut this = Self {
             sidebar,
@@ -164,7 +170,13 @@ impl ArmorViewerPane {
             ship_load_generation: 0,
             mirror_cameras: false,
             sync_options: false,
-            _subscriptions: vec![ship_selected_sub, compare_split_sub, export_requested_sub, viewport_event_sub],
+            _subscriptions: vec![
+                ship_selected_sub,
+                compare_split_sub,
+                export_requested_sub,
+                viewport_event_sub,
+                dock_sub,
+            ],
         };
         this.start_gpu_init(cx);
         this

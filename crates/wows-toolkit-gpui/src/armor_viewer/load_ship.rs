@@ -540,16 +540,17 @@ pub(crate) fn default_export_filename(display_name: &str) -> String {
 
 /// Builds [`ShipExportOptions`] for a GLB export of the ship as currently
 /// DISPLAYED in a viewport pane: the pane's current hull/LOD/module
-/// selection, matching [`load_ship_armor`]'s own construction (`textures:
-/// false, damaged: false`) so the exported model matches what is on screen.
-/// A pure function, split out from [`export_ship_glb`] so it is unit-testable
-/// without a `ShipAssets`/`Vehicle`.
+/// selection, with textures embedded (`textures: true`) and the intact hull
+/// (`damaged: false`), matching the egui app's own Export handler
+/// (`armor_viewer/ui/tab.rs:1057-1097`) so exported GLBs are textured on both
+/// UIs. A pure function, split out from [`export_ship_glb`] so it is
+/// unit-testable without a `ShipAssets`/`Vehicle`.
 pub(crate) fn export_options_from_selection(
     lod: usize,
     selected_hull: Option<String>,
     module_overrides: HashMap<ComponentType, String>,
 ) -> ShipExportOptions {
-    ShipExportOptions { lod, hull: selected_hull, textures: false, damaged: false, module_overrides }
+    ShipExportOptions { lod, hull: selected_hull, textures: true, damaged: false, module_overrides }
 }
 
 /// Exports `param_index`'s ship model to `path` as a glTF Binary (GLB) file,
@@ -564,8 +565,10 @@ pub(crate) fn export_ship_glb(
     options: &ShipExportOptions,
     path: &std::path::Path,
 ) -> Result<(), ExportGlbError> {
-    let vehicle =
-        resolve_vehicle(ship_assets, param_index).map_err(|_| ExportGlbError::NoVehicle(param_index.to_string()))?;
+    let vehicle = resolve_vehicle(ship_assets, param_index).map_err(|e| {
+        tracing::debug!("armor viewer: GLB export vehicle resolution failed for {param_index}: {e}");
+        ExportGlbError::NoVehicle(param_index.to_string())
+    })?;
     let ctx = ship_assets
         .load_ship_from_vehicle(&vehicle, options)
         .map_err(|e| ExportGlbError::ShipExport(format!("{e:?}")))?;
@@ -615,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    fn export_options_from_selection_carries_the_pane_s_live_selection_with_no_baked_textures_or_damage() {
+    fn export_options_from_selection_carries_the_pane_s_live_selection_with_baked_textures_and_no_damage() {
         let mut modules = HashMap::new();
         modules.insert(ComponentType::Artillery, "AB1_Artillery".to_string());
 
@@ -624,7 +627,7 @@ mod tests {
         assert_eq!(options.lod, 2);
         assert_eq!(options.hull, Some("B_Hull".to_string()));
         assert_eq!(options.module_overrides, modules);
-        assert!(!options.textures, "an interactive-viewport export never needs baked textures");
+        assert!(options.textures, "a GLB export should embed textures, matching the egui app's Export handler");
         assert!(!options.damaged, "export always targets the intact hull, matching load_ship_armor");
     }
 

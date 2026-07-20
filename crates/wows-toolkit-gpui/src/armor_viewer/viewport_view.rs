@@ -1692,10 +1692,10 @@ impl ViewportView {
     /// `export_glb`, both CPU/IO heavy -- on the background executor so the
     /// UI thread is not blocked, matching every other `ShipAssets`-driven
     /// load in this pane (`reload_ship` above). Ports the egui app's Export
-    /// button handler (`tab.rs:1057-1097`), except the export options always
-    /// reflect the pane's live selection rather than egui's fixed `lod: 0,
-    /// textures: true` -- see `load_ship::export_options_from_selection`'s
-    /// doc.
+    /// button handler (`tab.rs:1057-1097`), except the LOD/hull/module
+    /// options always reflect the pane's live selection rather than egui's
+    /// fixed `lod: 0` -- see `load_ship::export_options_from_selection`'s
+    /// doc. Textures are embedded either way (`textures: true`).
     ///
     /// **Logging, not toasts.** No `Notification`/toast infrastructure is
     /// wired up anywhere in this port yet (unlike the egui app's
