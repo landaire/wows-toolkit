@@ -97,6 +97,18 @@ const KEY_TICK_HZ: f32 = 60.0;
 /// position, so the tooltip doesn't sit directly under the pointer.
 const TOOLTIP_CURSOR_OFFSET: Pixels = px(16.);
 
+/// Cross-pane events (Milestone 5 Task 9c): `pane.rs` subscribes to every
+/// pane's `ViewportView` and, when `mirror_cameras`/`sync_options` is on,
+/// broadcasts the source pane's camera/settings to every OTHER pane. Fired
+/// only from genuinely USER-driven mutations (see each emit site's doc); the
+/// silent counterparts [`ViewportView::set_camera`]/[`ViewportView::apply_synced`]
+/// never emit, which is what keeps the broadcast from echoing back into a loop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ViewportEvent {
+    CameraChanged,
+    SettingsChanged,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DragKind {
     Orbit,
@@ -212,6 +224,26 @@ struct ReloadSource {
     bundle: Arc<ArmorAssetsBundle>,
     param_index: String,
     display_name: String,
+}
+
+/// The port's cross-pane-relevant settings (Milestone 5 Task 9c's "sync
+/// options"): everything [`ViewportView::synced_settings`]/[`ViewportView::
+/// apply_synced`] capture and apply between panes. Deliberately narrower than
+/// the egui app's own `SyncedPaneSettings` (`armor_viewer/state.rs`), which
+/// also carries ship-center/waterline-overlay/camera-ellipse/perspective
+/// fields this port hasn't built yet -- those are simply absent here, not
+/// stubbed. The selected camo is likewise NOT included: `CamoSchemeId` is
+/// only a stable index within a single ship's own `camo_scheme_infos` list
+/// (see that type's doc), so it can't be safely reapplied to a different
+/// pane's (possibly different-ship) armor without the same remap machinery
+/// `apply_reload_result` uses for a same-pane reload.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct SyncedSettings {
+    part_visibility: HashMap<(String, String), bool>,
+    plate_visibility: HashMap<PlateKey, bool>,
+    hull_visibility: HashMap<String, bool>,
+    display_settings: upload::DisplaySettings,
+    lighting: LightingSettings,
 }
 
 pub struct ViewportView {
@@ -405,6 +437,8 @@ pub struct ViewportView {
     _lighting_slider_subscriptions: Vec<Subscription>,
 }
 
+impl EventEmitter<ViewportEvent> for ViewportView {}
+
 impl ViewportView {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
@@ -569,6 +603,71 @@ impl ViewportView {
     /// itself; this only updates which ship a reload targets.
     pub fn set_reload_source(&mut self, bundle: Arc<ArmorAssetsBundle>, param_index: String, display_name: String) {
         self.reload_source = Some(ReloadSource { bundle, param_index, display_name });
+    }
+
+    /// The currently displayed armor, if any. `pane.rs`'s Compare-clone
+    /// (Milestone 5 Task 9c) reads this to hand the SAME immutable `Arc` to a
+    /// newly split pane, rather than re-exporting the ship.
+    pub(crate) fn current_armor(&self) -> Option<Arc<LoadedShipArmor>> {
+        self.current_armor.clone()
+    }
+
+    /// This pane's reload source (bundle/param index/display name), if a ship
+    /// has ever loaded here. `pane.rs`'s Compare-clone uses this to seed a new
+    /// pane's own `set_reload_source`, so the new pane can independently
+    /// switch hull/LOD/module afterward. `ReloadSource` itself stays private
+    /// to this module; this is the read-only seam.
+    pub(crate) fn reload_source(&self) -> Option<(Arc<ArmorAssetsBundle>, String, String)> {
+        self.reload_source.as_ref().map(|s| (Arc::clone(&s.bundle), s.param_index.clone(), s.display_name.clone()))
+    }
+
+    /// A clone of the current camera, for `pane.rs` to read when broadcasting
+    /// a camera-mirror update or seeding a Compare-cloned pane.
+    pub(crate) fn camera(&self) -> ArcballCamera {
+        self.viewport.camera.clone()
+    }
+
+    /// Sets the camera directly, with no `ViewportEvent::CameraChanged` emit.
+    /// The silent counterpart to every user-driven camera mutation (orbit,
+    /// pan, zoom, wasd, gizmo/double-click reset): `pane.rs`'s camera-mirror
+    /// broadcast and the Compare-clone both call this on the RECEIVING
+    /// pane(s), and emitting here would echo the change back out and loop.
+    pub(crate) fn set_camera(&mut self, camera: ArcballCamera, cx: &mut Context<Self>) {
+        self.viewport.camera = camera;
+        self.viewport.mark_dirty();
+        cx.notify();
+    }
+
+    /// Captures this pane's cross-pane-relevant settings (see
+    /// [`SyncedSettings`]'s doc for exactly what's included/excluded), for
+    /// `pane.rs` to broadcast via [`Self::apply_synced`] on every other pane.
+    pub(crate) fn synced_settings(&self) -> SyncedSettings {
+        SyncedSettings {
+            part_visibility: self.part_visibility.clone(),
+            plate_visibility: self.plate_visibility.clone(),
+            hull_visibility: self.hull_visibility.clone(),
+            display_settings: self.display_settings,
+            lighting: self.viewport.lighting.clone(),
+        }
+    }
+
+    /// Applies `settings` to this pane, with no `ViewportEvent::SettingsChanged`
+    /// emit and no undo-stack entry -- the silent counterpart to every
+    /// visibility/display/hull mutator, matching the egui app's own
+    /// `SyncedPaneSettings::apply_to` (also a direct field assignment with no
+    /// undo tracking). Re-uploads armor and hull in one pass via
+    /// `reupload_current_armor` (a no-op if this pane has no ship loaded), and
+    /// marks the viewport dirty unconditionally so a lighting-only change (no
+    /// mesh re-upload) still redraws.
+    pub(crate) fn apply_synced(&mut self, settings: &SyncedSettings, cx: &mut Context<Self>) {
+        self.part_visibility = settings.part_visibility.clone();
+        self.plate_visibility = settings.plate_visibility.clone();
+        self.hull_visibility = settings.hull_visibility.clone();
+        self.display_settings = settings.display_settings;
+        self.viewport.lighting = settings.lighting.clone();
+        self.reupload_current_armor(cx);
+        self.viewport.mark_dirty();
+        cx.notify();
     }
 
     /// Shows `armor`'s armor meshes in this viewport: clears any previous
@@ -750,6 +849,7 @@ impl ViewportView {
                     if let Some((min, max)) = self.model_bounds {
                         self.viewport.camera.reset(min, max);
                         self.viewport.mark_dirty();
+                        cx.emit(ViewportEvent::CameraChanged);
                         cx.notify();
                     }
                     self.drag = None;
@@ -803,6 +903,7 @@ impl ViewportView {
         }
         if camera_changed {
             self.viewport.mark_dirty();
+            cx.emit(ViewportEvent::CameraChanged);
         }
 
         // Plate picking only runs while not dragging the camera/gizmo, so it
@@ -858,6 +959,7 @@ impl ViewportView {
         if dy != 0.0 {
             self.viewport.camera.zoom(dy);
             self.viewport.mark_dirty();
+            cx.emit(ViewportEvent::CameraChanged);
             cx.notify();
         }
     }
@@ -950,6 +1052,7 @@ impl ViewportView {
                     let moved = this.apply_held_keys();
                     if moved {
                         this.viewport.mark_dirty();
+                        cx.emit(ViewportEvent::CameraChanged);
                         cx.notify();
                     }
                     !this.held_keys.is_empty()
@@ -1117,6 +1220,7 @@ impl ViewportView {
         });
         mutate(self);
         self.reupload_current_armor(cx);
+        cx.emit(ViewportEvent::SettingsChanged);
     }
 
     /// Toggles a single plate's visibility. Shared by the raycast click-to-
@@ -1292,6 +1396,7 @@ impl ViewportView {
         self.part_visibility = prev.part_visibility;
         self.plate_visibility = prev.plate_visibility;
         self.reupload_current_armor(cx);
+        cx.emit(ViewportEvent::SettingsChanged);
     }
 
     /// Ctrl/Cmd+Shift+Z or Ctrl/Cmd+R: re-applies the next visibility
@@ -1302,6 +1407,7 @@ impl ViewportView {
         self.part_visibility = next.part_visibility;
         self.plate_visibility = next.plate_visibility;
         self.reupload_current_armor(cx);
+        cx.emit(ViewportEvent::SettingsChanged);
     }
 
     /// Re-uploads `current_armor` honoring the current `part_visibility`/
@@ -1371,6 +1477,7 @@ impl ViewportView {
     ) {
         mutate(&mut self.display_settings);
         self.reupload_current_armor(cx);
+        cx.emit(ViewportEvent::SettingsChanged);
     }
 
     /// Re-uploads only the hull meshes (`upload_hull::upload_hull_meshes`),
@@ -1410,6 +1517,7 @@ impl ViewportView {
     ) {
         mutate(&mut self.hull_visibility);
         self.reupload_hull();
+        cx.emit(ViewportEvent::SettingsChanged);
         cx.notify();
     }
 
@@ -1424,6 +1532,7 @@ impl ViewportView {
         }
         self.display_settings.hull_opaque = opaque;
         self.reupload_hull();
+        cx.emit(ViewportEvent::SettingsChanged);
         cx.notify();
     }
 
@@ -1456,6 +1565,7 @@ impl ViewportView {
             }
         }
         self.reupload_hull();
+        cx.emit(ViewportEvent::SettingsChanged);
         cx.notify();
     }
 
@@ -1659,6 +1769,7 @@ impl ViewportView {
     pub(crate) fn mutate_lighting(&mut self, cx: &mut Context<Self>, mutate: impl FnOnce(&mut LightingSettings)) {
         mutate(&mut self.viewport.lighting);
         self.viewport.mark_dirty();
+        cx.emit(ViewportEvent::SettingsChanged);
         cx.notify();
     }
 
@@ -1676,6 +1787,7 @@ impl ViewportView {
         self.lighting_sliders = lighting_sliders;
         self._lighting_slider_subscriptions = subs;
         self.viewport.mark_dirty();
+        cx.emit(ViewportEvent::SettingsChanged);
         cx.notify();
     }
 
@@ -1683,6 +1795,7 @@ impl ViewportView {
         let (az, el) = camera::ortho_view(axis, positive, self.viewport.camera.azimuth);
         self.viewport.camera.animate_to(az, el, GIZMO_SNAP_DURATION_SECS);
         self.viewport.mark_dirty();
+        cx.emit(ViewportEvent::CameraChanged);
         cx.notify();
         self.start_animation_ticker(cx);
     }
@@ -2036,12 +2149,15 @@ mod tests {
     use std::collections::HashMap;
 
     use super::Axis;
+    use super::SyncedSettings;
     use super::axis_color;
     use super::ball_bounds;
     use super::point_to_vec2;
     use super::remap_camo_selection;
     use super::vec2_to_point;
     use super::view_rect_from_bounds;
+    use crate::armor_viewer::upload::DisplaySettings;
+    use crate::viewport::types::LightingSettings;
     use gpui::Bounds;
     use gpui::point;
     use gpui::px;
@@ -2115,5 +2231,41 @@ mod tests {
         let old: Vec<CamoSchemeInfo> = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific)];
         let new = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific)];
         assert_eq!(remap_camo_selection(&old, &new, CamoSchemeId(5)), None);
+    }
+
+    fn sample_synced_settings() -> SyncedSettings {
+        let mut part_visibility = HashMap::new();
+        part_visibility.insert(("Citadel".to_string(), "Belt".to_string()), false);
+        let mut plate_visibility = HashMap::new();
+        plate_visibility.insert(("Citadel".to_string(), "Belt".to_string(), 200), true);
+        let mut hull_visibility = HashMap::new();
+        hull_visibility.insert("Deck".to_string(), true);
+        SyncedSettings {
+            part_visibility,
+            plate_visibility,
+            hull_visibility,
+            display_settings: DisplaySettings { show_zero_mm: true, hull_opaque: true, ..Default::default() },
+            lighting: LightingSettings::flat(),
+        }
+    }
+
+    /// `ViewportView::synced_settings`/`apply_synced` are a straight field
+    /// copy into/out of this struct (see their docs) -- this is the pure,
+    /// `Context`-free half of that guarantee: a captured snapshot survives a
+    /// clone (the same operation `pane.rs`'s mirror/sync broadcast performs
+    /// when handing a source pane's settings to every other pane) with every
+    /// field intact.
+    #[test]
+    fn synced_settings_round_trips_through_clone() {
+        let original = sample_synced_settings();
+        let applied = original.clone();
+        assert_eq!(original, applied);
+    }
+
+    #[test]
+    fn synced_settings_differ_when_a_field_differs() {
+        let mut other = sample_synced_settings();
+        other.hull_visibility.insert("Deck".to_string(), false);
+        assert_ne!(sample_synced_settings(), other);
     }
 }

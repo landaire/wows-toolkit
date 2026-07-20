@@ -19,8 +19,23 @@
 //! itself isn't ready yet -- `apply_gpu_result` fans the result out to every
 //! pane in `dock`, not just the first). A ship selection always routes to
 //! `dock`'s *active* pane (`dock.active_viewport()`), not a fixed viewport;
-//! there is still exactly one sidebar for the whole tab. Camera-mirror and
-//! settings-sync across panes are Task 9c, not implemented here.
+//! there is still exactly one sidebar for the whole tab. `on_compare_split`
+//! also clones the active pane's ship/camera/visibility/display/hull/lighting
+//! state into the new pane (egui's own `CompareSettings`), so a fresh compare
+//! pane starts as a copy rather than blank.
+//!
+//! Camera-mirror and settings-sync (Milestone 5 Task 9c): `mirror_cameras`/
+//! `sync_options` gate two broadcasts, both driven by subscribing to every
+//! pane's `viewport_view::ViewportEvent` (`on_viewport_event`, subscribed
+//! alongside each pane's creation here and in `on_compare_split`). A
+//! `CameraChanged`/`SettingsChanged` event from pane P re-reads P's camera/
+//! `SyncedSettings` and applies it to every OTHER pane via `ViewportView`'s
+//! SILENT setters (`set_camera`/`apply_synced`, which never emit) -- the
+//! silence is what keeps this from echoing back into a loop. Toggling either
+//! flag on immediately pushes the *active* pane's state to every other pane,
+//! matching the egui app's own "sync on enable" feel. The toggles themselves
+//! render in this pane's own chrome (see `Render`), gated on `dock.panes().
+//! len() > 1`.
 //!
 //! Also owns the floating Armor Thickness legend (`legend.rs`): its state
 //! (`legend: LegendState`) and drag mouse handlers live here rather than on
@@ -31,6 +46,8 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui_component::ActiveTheme;
+use gpui_component::checkbox::Checkbox;
 use gpui_component::h_flex;
 use gpui_component::resizable::h_resizable;
 use gpui_component::resizable::resizable_panel;
@@ -54,6 +71,7 @@ use super::load_ship::spawn_load_ship_armor;
 use super::sidebar::CompareSplit;
 use super::sidebar::ShipSelected;
 use super::sidebar::Sidebar;
+use super::viewport_view::ViewportEvent;
 use super::viewport_view::ViewportView;
 
 /// Sidebar width, matching the Replay Inspector's own browser sidebar
@@ -110,6 +128,15 @@ pub struct ArmorViewerPane {
     /// nothing otherwise constrains which of two in-flight loads finishes
     /// last.
     ship_load_generation: u64,
+    /// Milestone 5 Task 9c: when set, every pane's camera is kept in lockstep
+    /// with whichever pane last moved its own (`on_viewport_event`). Off by
+    /// default, matching the egui app's own `mirror_cameras` default.
+    mirror_cameras: bool,
+    /// Milestone 5 Task 9c: when set, every pane's visibility/display/hull/
+    /// lighting settings are kept in lockstep with whichever pane last
+    /// changed its own (`on_viewport_event`). Off by default, matching the
+    /// egui app's own `sync_options` default.
+    sync_options: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -117,6 +144,7 @@ impl ArmorViewerPane {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let sidebar = cx.new(|cx| Sidebar::new(window, cx));
         let viewport = cx.new(ViewportView::new);
+        let viewport_event_sub = cx.subscribe(&viewport, Self::on_viewport_event);
         let dock = cx.new(|_| ViewportDock::new(viewport));
         let ship_selected_sub = cx.subscribe_in(&sidebar, window, Self::on_sidebar_event);
         let compare_split_sub = cx.subscribe_in(&sidebar, window, Self::on_compare_split);
@@ -130,7 +158,9 @@ impl ArmorViewerPane {
             ship_loaded: false,
             legend: LegendState::default(),
             ship_load_generation: 0,
-            _subscriptions: vec![ship_selected_sub, compare_split_sub],
+            mirror_cameras: false,
+            sync_options: false,
+            _subscriptions: vec![ship_selected_sub, compare_split_sub, viewport_event_sub],
         };
         this.start_gpu_init(cx);
         this
@@ -190,8 +220,18 @@ impl ArmorViewerPane {
     /// header button): creates a new pane, hands it the shared GPU device if
     /// it's already ready (a pane added before the device finishes instead
     /// gets it from `apply_gpu_result`'s fan-out, same as this tab's first
-    /// pane), and pushes it into `dock` as the active pane so the next ship
-    /// selection loads into it. The new pane starts empty until then.
+    /// pane), clones the active pane's ship/camera/settings into it (egui's
+    /// own `CompareSettings` -- see below), and pushes it into `dock` as the
+    /// active pane so the next ship selection loads into it.
+    ///
+    /// The clone: the new pane `show_armor`s the SAME `Arc<LoadedShipArmor>`
+    /// the active pane currently holds (immutable and shared, so this never
+    /// re-exports the ship), then overwrites the camera `show_armor` just
+    /// framed with the active pane's own camera (`set_camera`, silent) and
+    /// applies its visibility/display/hull/lighting settings (`apply_synced`,
+    /// silent), and copies its reload source so the new pane can
+    /// independently switch hull/LOD/module afterward. If the active pane has
+    /// no ship loaded yet, the new pane simply starts empty like before.
     fn on_compare_split(
         &mut self,
         _sidebar: &Entity<Sidebar>,
@@ -199,7 +239,18 @@ impl ArmorViewerPane {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let active = self.dock.read(cx).active_viewport();
+        let clone_source = {
+            let source = active.read(cx);
+            source
+                .current_armor()
+                .map(|armor| (armor, source.camera(), source.synced_settings(), source.reload_source()))
+        };
+
         let viewport = cx.new(ViewportView::new);
+        let viewport_event_sub = cx.subscribe(&viewport, Self::on_viewport_event);
+        self._subscriptions.push(viewport_event_sub);
+
         match &self.gpu {
             SharedGpu::Ready { ctx, pipeline } => {
                 let ctx = Arc::clone(ctx);
@@ -212,7 +263,90 @@ impl ArmorViewerPane {
             }
             SharedGpu::Initializing => {}
         }
+
+        if let Some((armor, camera, synced, reload_source)) = clone_source {
+            viewport.update(cx, |view, cx| {
+                if let Some((bundle, param_index, display_name)) = reload_source {
+                    view.set_reload_source(bundle, param_index, display_name);
+                }
+                view.show_armor(armor, cx);
+                view.set_camera(camera, cx);
+                view.apply_synced(&synced, cx);
+            });
+        }
+
         self.dock.update(cx, |dock, cx| dock.add_pane(viewport, cx));
+        cx.notify();
+    }
+
+    /// `ViewportEvent` handler, subscribed to every pane in `dock` (`new`,
+    /// `on_compare_split`): broadcasts the source pane's camera/settings to
+    /// every OTHER pane when the corresponding toggle is on. Uses
+    /// `ViewportView`'s silent setters (`set_camera`/`apply_synced`), so this
+    /// never re-triggers the event it's reacting to.
+    fn on_viewport_event(&mut self, source: Entity<ViewportView>, event: &ViewportEvent, cx: &mut Context<Self>) {
+        match event {
+            ViewportEvent::CameraChanged if self.mirror_cameras => self.push_camera_from(&source, cx),
+            ViewportEvent::SettingsChanged if self.sync_options => self.push_settings_from(&source, cx),
+            _ => {}
+        }
+    }
+
+    /// Broadcasts `source`'s current camera to every other pane in `dock`.
+    /// Called both from `on_viewport_event` (mirroring a user drag/zoom/etc.)
+    /// and from `set_mirror_cameras` (pushing once, immediately, when the
+    /// toggle is switched on).
+    fn push_camera_from(&self, source: &Entity<ViewportView>, cx: &mut Context<Self>) {
+        let panes = self.dock.read(cx).panes().to_vec();
+        let Some(source_ix) = panes.iter().position(|pane| pane == source) else { return };
+        let camera = source.read(cx).camera();
+        for ix in other_pane_indices(panes.len(), source_ix) {
+            panes[ix].update(cx, |view, cx| view.set_camera(camera.clone(), cx));
+        }
+    }
+
+    /// Broadcasts `source`'s current visibility/display/hull/lighting
+    /// settings to every other pane in `dock`. Called both from
+    /// `on_viewport_event` (syncing a user visibility/display change) and
+    /// from `set_sync_options` (pushing once, immediately, when the toggle is
+    /// switched on).
+    fn push_settings_from(&self, source: &Entity<ViewportView>, cx: &mut Context<Self>) {
+        let panes = self.dock.read(cx).panes().to_vec();
+        let Some(source_ix) = panes.iter().position(|pane| pane == source) else { return };
+        let settings = source.read(cx).synced_settings();
+        for ix in other_pane_indices(panes.len(), source_ix) {
+            panes[ix].update(cx, |view, cx| view.apply_synced(&settings, cx));
+        }
+    }
+
+    /// Common-settings toggle (`Render`): flips `mirror_cameras`. Turning it
+    /// on immediately pushes the *active* pane's camera to every other pane,
+    /// matching the egui app's own "sync on enable" feel rather than waiting
+    /// for the active pane's next camera move.
+    pub(crate) fn set_mirror_cameras(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.mirror_cameras == enabled {
+            return;
+        }
+        self.mirror_cameras = enabled;
+        if enabled {
+            let active = self.dock.read(cx).active_viewport();
+            self.push_camera_from(&active, cx);
+        }
+        cx.notify();
+    }
+
+    /// Common-settings toggle (`Render`): flips `sync_options`. Turning it on
+    /// immediately pushes the *active* pane's settings to every other pane,
+    /// same "sync on enable" rationale as `set_mirror_cameras`.
+    pub(crate) fn set_sync_options(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.sync_options == enabled {
+            return;
+        }
+        self.sync_options = enabled;
+        if enabled {
+            let active = self.dock.read(cx).active_viewport();
+            self.push_settings_from(&active, cx);
+        }
         cx.notify();
     }
 
@@ -423,19 +557,58 @@ impl Render for ArmorViewerPane {
             .status_text()
             .map(|text| h_flex().flex_none().px_2().py_1().child(div().text_xs().opacity(0.6).child(text)));
 
-        let content = v_flex().size_full().when_some(status_banner, |this, banner| this.child(banner)).child(
-            div().flex_1().min_h(px(0.)).child(
-                h_resizable("armor-viewer-split")
-                    .child(
-                        resizable_panel()
-                            .size(SIDEBAR_WIDTH)
-                            .size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)
-                            .flex_none()
-                            .child(self.sidebar.clone()),
-                    )
-                    .child(resizable_panel().child(self.dock.clone())),
-            ),
-        );
+        // Common-settings toggles (Milestone 5 Task 9c): only meaningful --
+        // and only shown -- once a second pane exists, matching the egui
+        // app's own `pane_count > 1` gate (`ui/tab.rs:307`).
+        let common_settings_row = (self.dock.read(cx).panes().len() > 1).then(|| {
+            let mirror_entity = cx.entity();
+            let sync_entity = cx.entity();
+            h_flex()
+                .flex_none()
+                .gap_3()
+                .items_center()
+                .px_2()
+                .py_1()
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .child(
+                    Checkbox::new("armor-pane-mirror-cameras")
+                        .label("Mirror cameras")
+                        .checked(self.mirror_cameras)
+                        .on_click(move |checked, _window, cx| {
+                            let checked = *checked;
+                            mirror_entity.update(cx, |pane, cx| pane.set_mirror_cameras(checked, cx));
+                        }),
+                )
+                .child(
+                    Checkbox::new("armor-pane-sync-options")
+                        .label("Sync settings")
+                        .tooltip("Sync visibility and display settings across all panes")
+                        .checked(self.sync_options)
+                        .on_click(move |checked, _window, cx| {
+                            let checked = *checked;
+                            sync_entity.update(cx, |pane, cx| pane.set_sync_options(checked, cx));
+                        }),
+                )
+        });
+
+        let content = v_flex()
+            .size_full()
+            .when_some(common_settings_row, |this, row| this.child(row))
+            .when_some(status_banner, |this, banner| this.child(banner))
+            .child(
+                div().flex_1().min_h(px(0.)).child(
+                    h_resizable("armor-viewer-split")
+                        .child(
+                            resizable_panel()
+                                .size(SIDEBAR_WIDTH)
+                                .size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)
+                                .flex_none()
+                                .child(self.sidebar.clone()),
+                        )
+                        .child(resizable_panel().child(self.dock.clone())),
+                ),
+            );
 
         // Legend floats over the whole pane (not just the viewport), gated
         // on a ship being loaded, matching the egui app's `any_ship_loaded`
@@ -453,5 +626,40 @@ impl Render for ArmorViewerPane {
             .child(content)
             .when_some(legend_panel, |this, panel| this.child(panel))
             .into_any_element()
+    }
+}
+
+/// The pane indices, out of `panes_len` panes, that should receive a
+/// camera-mirror/settings-sync broadcast from the pane at `source_ix`: every
+/// index except the source's own -- a broadcast never re-applies to the pane
+/// it came from. Factored out of `ArmorViewerPane::push_camera_from`/
+/// `push_settings_from` so the "apply to others, never to self" rule is
+/// unit-testable without a gpui `Context`.
+fn other_pane_indices(panes_len: usize, source_ix: usize) -> Vec<usize> {
+    (0..panes_len).filter(|&ix| ix != source_ix).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::other_pane_indices;
+
+    #[test]
+    fn other_pane_indices_excludes_only_the_source() {
+        assert_eq!(other_pane_indices(3, 1), vec![0, 2]);
+    }
+
+    #[test]
+    fn other_pane_indices_empty_when_source_is_the_only_pane() {
+        assert_eq!(other_pane_indices(1, 0), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn other_pane_indices_covers_every_pane_but_the_first() {
+        assert_eq!(other_pane_indices(4, 0), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn other_pane_indices_covers_every_pane_but_the_last() {
+        assert_eq!(other_pane_indices(4, 3), vec![0, 1, 2]);
     }
 }
