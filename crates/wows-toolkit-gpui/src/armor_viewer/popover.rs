@@ -24,7 +24,10 @@ use gpui_component::ActiveTheme;
 use gpui_component::Disableable;
 use gpui_component::Icon;
 use gpui_component::IconName;
+use gpui_component::Sizable;
+use gpui_component::Size;
 use gpui_component::button::Button;
+use gpui_component::button::Toggle;
 use gpui_component::checkbox::Checkbox;
 use gpui_component::h_flex;
 use gpui_component::list::ListItem;
@@ -39,6 +42,7 @@ use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::gltf_export::CamoOrigin;
 use wowsunpack::export::gltf_export::thickness_to_color;
+use wowsunpack::game_params::keys::ComponentType;
 
 use crate::viewport::types::LightingSettings;
 
@@ -213,23 +217,35 @@ fn render_hull_button(view: &ViewportView, entity: &Entity<ViewportView>) -> imp
 
 /// Builds the hull-visibility popover's tree from a snapshot of `entity`'s
 /// current state (same lazy-`.content()` rationale as
-/// `render_popover_content`'s doc). Below the hull tree, adds the camo picker
-/// (Milestone 4 Task 8b, `render_camo_picker`) when `armor.camo_scheme_infos`
-/// is non-empty.
+/// `render_popover_content`'s doc). Between the header and the hull tree,
+/// adds the Milestone 4 Task 8c selectors -- hull upgrade
+/// (`render_hull_upgrade_row`, when the ship has more than one), module
+/// alternatives (`render_module_alternative_row`, one row per component type
+/// with more than one option), and LOD (`render_lod_row`, when the ship has
+/// more than one) -- each selecting a new value on `ViewportView` and
+/// triggering a background reload (`ViewportView::reload_ship`). Below the
+/// hull tree, adds the camo picker (Milestone 4 Task 8b, `render_camo_picker`)
+/// when `armor.camo_scheme_infos` is non-empty.
 ///
-/// **Deferred** (Milestone 4 Task 8c): the hull-upgrade selector,
-/// module-alternative selectors, and the LOD selector (`tab.rs:3163-3265`,
-/// `3253-3265`) -- none of their backing state (`selected_hull`/
-/// `selected_modules`/`hull_lod`) exists in this port yet, so there is
-/// nothing to wire a selector to. The sidebar-hover highlight for a hovered
-/// hull row (egui's `SidebarHighlightKey::HullMeshes`) is likewise deferred --
-/// see `upload_hull.rs`'s module doc.
+/// **Deferred.** The sidebar-hover highlight for a hovered hull row (egui's
+/// `SidebarHighlightKey::HullMeshes`) is out of this port's scope -- see
+/// `upload_hull.rs`'s module doc.
 fn render_hull_popover_content(
     entity: &Entity<ViewportView>,
     _window: &mut Window,
     cx: &mut Context<PopoverState>,
 ) -> AnyElement {
-    let (armor, hull_visibility, hull_opaque, expanded_hull_groups, selected_camo, expanded_camo_groups) = {
+    let (
+        armor,
+        hull_visibility,
+        hull_opaque,
+        expanded_hull_groups,
+        selected_camo,
+        expanded_camo_groups,
+        selected_hull,
+        hull_lod,
+        selected_modules,
+    ) = {
         let view = entity.read(cx);
         (
             view.current_armor.clone(),
@@ -238,6 +254,9 @@ fn render_hull_popover_content(
             view.expanded_hull_groups.clone(),
             view.selected_camo,
             view.expanded_camo_groups.clone(),
+            view.selected_hull.clone(),
+            view.hull_lod,
+            view.selected_modules.clone(),
         )
     };
 
@@ -285,15 +304,26 @@ fn render_hull_popover_content(
             },
         ));
 
+    let mut col = v_flex().w(px(260.)).gap_2().child(header);
+
+    if armor.hull_upgrade_names.len() > 1 {
+        col = col.child(render_hull_upgrade_row(entity, &armor, &selected_hull));
+    }
+    for (ct, alternatives) in &armor.module_alternatives {
+        if alternatives.len() > 1 {
+            col = col.child(render_module_alternative_row(entity, *ct, alternatives, selected_modules.get(ct)));
+        }
+    }
+    if armor.hull_lod_count > 1 {
+        col = col.child(render_lod_row(entity, &armor, hull_lod));
+    }
+
     let mut tree = v_flex().gap_1();
     for (group, names) in &armor.hull_part_groups {
         tree = tree.child(render_hull_group_row(entity, group, names, &hull_visibility, &expanded_hull_groups, warn));
     }
 
-    let mut col = v_flex()
-        .w(px(260.))
-        .gap_2()
-        .child(header)
+    col = col
         .child(div().h(px(1.)).bg(border))
         .child(div().id("armor-hull-visibility-tree-scroll").max_h(px(360.)).overflow_y_scroll().child(tree));
 
@@ -307,6 +337,106 @@ fn render_hull_popover_content(
     }
 
     col.into_any_element()
+}
+
+/// Hull-upgrade selector row: a "Hull:" label followed by one selectable
+/// toggle per hull upgrade (`armor.hull_upgrade_names`, key -> label).
+/// Selecting a different key switches to it (`ViewportView::select_hull_upgrade`,
+/// which also clears `selected_modules` and triggers a reload). Ports the
+/// egui `selectable_label` row (`tab.rs:3163-3175`); `selected_hull.is_none()`
+/// is treated as the first (alphabetically stock) entry, matching the egui
+/// original's own fallback.
+fn render_hull_upgrade_row(
+    entity: &Entity<ViewportView>,
+    armor: &LoadedShipArmor,
+    selected_hull: &Option<String>,
+) -> AnyElement {
+    let stock_key = &armor.hull_upgrade_names[0].0;
+    let mut row = h_flex().gap_1().items_center().flex_wrap().child(div().text_sm().flex_none().child("Hull:"));
+    for (key, label) in &armor.hull_upgrade_names {
+        let is_selected = selected_hull.as_ref().map(|sel| sel == key).unwrap_or(key == stock_key);
+        let toggle_entity = entity.clone();
+        let toggle_key = key.clone();
+        row = row.child(
+            Toggle::new(format!("armor-hull-upgrade-{key}"))
+                .label(label.clone())
+                .with_size(Size::XSmall)
+                .checked(is_selected)
+                .on_click(move |_, _window, cx| {
+                    if is_selected {
+                        return;
+                    }
+                    let key = toggle_key.clone();
+                    toggle_entity.update(cx, |view, cx| view.select_hull_upgrade(key, cx));
+                }),
+        );
+    }
+    row.into_any_element()
+}
+
+/// One module-alternative selector row for component type `ct`: a "{ct}:"
+/// label followed by one selectable toggle per alternative, labeled
+/// "{ct} {letter}" with the full component name as its tooltip. Selecting a
+/// different alternative overrides it (`ViewportView::select_module_alternative`,
+/// which triggers a reload). Ports the egui `selectable_label` row
+/// (`tab.rs:3178-3190`); `selected.is_none()` is treated as the first entry,
+/// matching the egui original's own fallback.
+fn render_module_alternative_row(
+    entity: &Entity<ViewportView>,
+    ct: ComponentType,
+    alternatives: &[String],
+    selected: Option<&String>,
+) -> AnyElement {
+    let mut row =
+        h_flex().gap_1().items_center().flex_wrap().child(div().text_sm().flex_none().child(format!("{ct}:")));
+    for (i, name) in alternatives.iter().enumerate() {
+        let is_selected = selected.map(|sel| sel == name).unwrap_or(i == 0);
+        let letter = (b'A' + i as u8) as char;
+        let toggle_entity = entity.clone();
+        let toggle_name = name.clone();
+        row = row.child(
+            Toggle::new(format!("armor-module-alt-{ct}-{i}"))
+                .label(format!("{ct} {letter}"))
+                .tooltip(name.clone())
+                .with_size(Size::XSmall)
+                .checked(is_selected)
+                .on_click(move |_, _window, cx| {
+                    if is_selected {
+                        return;
+                    }
+                    let name = toggle_name.clone();
+                    toggle_entity.update(cx, |view, cx| view.select_module_alternative(ct, name, cx));
+                }),
+        );
+    }
+    row.into_any_element()
+}
+
+/// LOD selector row: a "LOD:" label followed by one selectable toggle per
+/// level `0..armor.hull_lod_count` (`0` labeled "0 (highest)", matching the
+/// egui original). Selecting a different level switches to it
+/// (`ViewportView::select_hull_lod`, which triggers a reload). Ports the egui
+/// `selectable_label` row (`tab.rs:3253-3264`).
+fn render_lod_row(entity: &Entity<ViewportView>, armor: &LoadedShipArmor, hull_lod: usize) -> AnyElement {
+    let mut row = h_flex().gap_1().items_center().flex_wrap().child(div().text_sm().flex_none().child("LOD:"));
+    for i in 0..armor.hull_lod_count {
+        let label = if i == 0 { "0 (highest)".to_string() } else { i.to_string() };
+        let is_selected = hull_lod == i;
+        let toggle_entity = entity.clone();
+        row = row.child(
+            Toggle::new(format!("armor-hull-lod-{i}"))
+                .label(label)
+                .with_size(Size::XSmall)
+                .checked(is_selected)
+                .on_click(move |_, _window, cx| {
+                    if is_selected {
+                        return;
+                    }
+                    toggle_entity.update(cx, |view, cx| view.select_hull_lod(i, cx));
+                }),
+        );
+    }
+    row.into_any_element()
 }
 
 /// Camo picker: "Stock" (deselects the active camo) + ship-specific schemes

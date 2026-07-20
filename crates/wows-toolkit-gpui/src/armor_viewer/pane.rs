@@ -163,6 +163,7 @@ impl ArmorViewerPane {
             tracing::warn!("armor viewer: ship selected before ship assets finished loading");
             return;
         };
+        let bundle = Arc::clone(bundle);
 
         self.ship_load_generation += 1;
         let generation = self.ship_load_generation;
@@ -170,18 +171,23 @@ impl ArmorViewerPane {
         self.ship_load = ShipLoadState::Loading { display_name: display_name.clone() };
         cx.notify();
 
-        let task = spawn_load_ship_armor(Arc::clone(bundle), param_index, display_name.clone(), cx);
+        let task = spawn_load_ship_armor(Arc::clone(&bundle), param_index.clone(), display_name.clone(), cx);
         cx.spawn(async move |this, cx| {
             let result = task.await;
-            let _ = this.update(cx, |this, cx| this.apply_ship_load_result(generation, display_name, result, cx));
+            let _ = this.update(cx, |this, cx| {
+                this.apply_ship_load_result(generation, param_index, display_name, bundle, result, cx)
+            });
         })
         .detach();
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn apply_ship_load_result(
         &mut self,
         generation: u64,
+        param_index: String,
         display_name: String,
+        bundle: Arc<ArmorAssetsBundle>,
         result: Result<LoadedShipArmor, ShipLoadError>,
         cx: &mut Context<Self>,
     ) {
@@ -194,7 +200,15 @@ impl ArmorViewerPane {
             Ok(armor) => {
                 self.ship_load = ShipLoadState::Idle;
                 self.ship_loaded = true;
-                self.viewport.update(cx, |viewport, cx| viewport.show_armor(Arc::new(armor), cx));
+                self.viewport.update(cx, |viewport, cx| {
+                    // Set before `show_armor`: a reload (Milestone 4 Task 8c)
+                    // needs to know which bundle/param_index/display_name to
+                    // re-export against, and `show_armor`'s own reset
+                    // (`upload_armor_now`) is what clears the hull/LOD/module
+                    // selection for this (possibly new) ship.
+                    viewport.set_reload_source(bundle, param_index, display_name.clone());
+                    viewport.show_armor(Arc::new(armor), cx);
+                });
             }
             Err(e) => {
                 tracing::error!("armor viewer: failed to load {display_name}: {e}");

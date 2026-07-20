@@ -2,29 +2,35 @@
 //! (`armor_viewer/common.rs:137-315`) plus the default-hull option building
 //! from `load_ship_for_pane_with_lod` (`armor_viewer/ui/tab.rs:2374`).
 //!
-//! **v1 scope.** This loads the DEFAULT hull at the DEFAULT (highest-detail)
-//! LOD -- `hull_lod: 0` and `selected_hull: None` both match the egui app's
-//! own per-pane defaults (`ArmorPane::with_defaults`, `armor_viewer/state.rs`),
-//! and `ShipExportOptions::hull: None` resolves to the first/stock hull the
-//! same way the egui app's own default load does. Hull/upgrade selection UI
-//! is Milestone 4; `module_overrides` is always empty here.
+//! **Default load.** [`spawn_load_ship_armor`]/[`load_ship_armor_by_param`]
+//! load the DEFAULT hull at the DEFAULT (highest-detail) LOD -- `hull_lod: 0`
+//! and `selected_hull: None` both match the egui app's own per-pane defaults
+//! (`ArmorPane::with_defaults`, `armor_viewer/state.rs`), and
+//! `ShipExportOptions::hull: None` resolves to the first/stock hull the same
+//! way the egui app's own default load does.
+//!
+//! **Reload (Milestone 4 Task 8c).** [`spawn_reload_ship_armor`]/
+//! [`build_reload_options`] instead take an explicit hull/LOD/module
+//! selection from `viewport_view::ViewportView::reload_ship`, which the
+//! egui app's own incremental `start_hull_lod_reload`/`start_upgrade_reload`
+//! (`tab.rs:2472`/`2568`) mutate an existing `LoadedShipArmor` in place for;
+//! this port's `LoadedShipArmor` is an immutable `Arc`, so a reload always
+//! produces a brand new one via the same `load_ship_armor` this module's
+//! default load uses, rather than a second, narrower load path.
 //!
 //! **Deferred fields.** The egui `LoadedShipArmor` also carries splash-box
 //! data, hit-location data, and camera orbit trajectories -- all
 //! analysis-only, consumed by UI this milestone does not build yet (splash
 //! analysis, camera ellipse overlay). This port's [`LoadedShipArmor`] omits
 //! them outright rather than carrying `None`/empty placeholders, keeping the
-//! v1 struct to exactly what the sidebar/load/upload path in this milestone
-//! produces or consumes.
+//! struct to exactly what the sidebar/load/reload/upload path this milestone
+//! builds produces or consumes.
 //!
 //! **Kept fields.** `hull_meshes`/`hull_part_groups`/`hull_textures`/
-//! `hull_lod_count` are loaded (mirroring the egui core) even though nothing
-//! displays them until Milestone 4 (hull mesh display is out of scope for
-//! `upload.rs`, see that module's doc) -- loading them now means M4 does not
-//! need a second ship reload to get hull data. `hull_upgrade_names` and
-//! `module_alternatives` are cheap to derive alongside the default load (same
-//! source data, no extra ship export), so they are populated for M4's
-//! selectors to consume directly.
+//! `hull_lod_count` are loaded (mirroring the egui core). `hull_upgrade_names`
+//! and `module_alternatives` are cheap to derive alongside a load/reload (same
+//! source data, no extra ship export), so they are populated for the hull
+//! popover's selectors (`popover.rs`) to consume directly.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -97,7 +103,9 @@ pub enum ShipLoadError {
 }
 
 /// Options for [`load_ship_armor`]. Built by [`default_load_options`] for a
-/// v1 (stock hull, highest-detail LOD) load.
+/// default (stock hull, highest-detail LOD) load, or by
+/// [`build_reload_options`]/[`reload_load_options`] for a Task 8c reload
+/// against an explicit hull/LOD/module selection.
 pub struct ShipLoadOptions {
     pub display_name: String,
     pub lod: usize,
@@ -249,18 +257,26 @@ fn build_hull_upgrade_names(vehicle: &Vehicle) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-/// Module alternatives for the stock (first alphabetically) hull upgrade:
-/// component types with more than one option. Ports the default-hull branch
-/// of `load_ship_for_pane_with_lod`'s module-alternatives resolution
-/// (`armor_viewer/ui/tab.rs:2430-2444`) verbatim -- v1 always loads the
-/// default hull, so `selected_hull` is never threaded through here.
-fn default_module_alternatives(vehicle: &Vehicle) -> Vec<(ComponentType, Vec<String>)> {
+/// Module alternatives for `selected_hull` (or the stock/first-alphabetical
+/// hull when `None`): component types with more than one option. Ports the
+/// module-alternatives resolution `load_ship_for_pane_with_lod` runs before
+/// every ship load/reload (`armor_viewer/ui/tab.rs:2427-2444`) verbatim.
+/// Used both for a fresh ship's default load (`selected_hull: None`) and a
+/// Milestone 4 Task 8c reload against a specific hull -- `module_alternatives`
+/// depends on which hull is selected (each upgrade can offer different
+/// component options), so a reload must re-derive this rather than carry a
+/// stale value from the previously loaded armor.
+fn module_alternatives_for_hull(vehicle: &Vehicle, selected_hull: Option<&str>) -> Vec<(ComponentType, Vec<String>)> {
     vehicle
         .hull_upgrades()
         .and_then(|upgrades| {
-            let mut keys: Vec<&String> = upgrades.keys().collect();
-            keys.sort();
-            let config = keys.first().and_then(|k| upgrades.get(*k))?;
+            let config = if let Some(sel) = selected_hull {
+                upgrades.get(sel)
+            } else {
+                let mut keys: Vec<&String> = upgrades.keys().collect();
+                keys.sort();
+                keys.first().and_then(|k| upgrades.get(*k))
+            }?;
             Some(config.component_alternatives.iter().map(|(k, v)| (*k, v.clone())).collect())
         })
         .unwrap_or_default()
@@ -273,8 +289,31 @@ fn default_load_options(vehicle: &Vehicle, display_name: &str, lod: usize) -> Sh
         lod,
         selected_hull: None,
         module_overrides: HashMap::new(),
-        module_alternatives: default_module_alternatives(vehicle),
+        module_alternatives: module_alternatives_for_hull(vehicle, None),
         hull_upgrade_names: build_hull_upgrade_names(vehicle),
+    }
+}
+
+/// Builds [`ShipLoadOptions`] for a Milestone 4 Task 8c reload: re-derives
+/// `hull_upgrade_names` (unaffected by hull selection) and
+/// `module_alternatives` (re-derived for `selected_hull` specifically, see
+/// [`module_alternatives_for_hull`]'s doc) from `vehicle`, so the popover's
+/// selectors reflect the new selection instead of stale data carried over
+/// from the previous load.
+fn reload_load_options(
+    vehicle: &Vehicle,
+    display_name: String,
+    lod: usize,
+    selected_hull: Option<String>,
+    module_overrides: HashMap<ComponentType, String>,
+) -> ShipLoadOptions {
+    ShipLoadOptions {
+        display_name,
+        lod,
+        module_alternatives: module_alternatives_for_hull(vehicle, selected_hull.as_deref()),
+        hull_upgrade_names: build_hull_upgrade_names(vehicle),
+        selected_hull,
+        module_overrides,
     }
 }
 
@@ -424,6 +463,14 @@ fn load_ship_armor(
 /// `armor_viewer/state.rs`).
 pub const DEFAULT_LOD: usize = 0;
 
+/// Resolves `param_index`'s `Vehicle` from `ship_assets`. Shared by
+/// [`load_ship_armor_by_param`] (default load) and
+/// [`load_ship_armor_with_options`] (Milestone 4 Task 8c reload).
+fn resolve_vehicle(ship_assets: &ShipAssets, param_index: &str) -> Result<Vehicle, ShipLoadError> {
+    let param = ship_assets.metadata().game_param_by_index(param_index);
+    param.as_ref().and_then(|p| p.vehicle().cloned()).ok_or_else(|| ShipLoadError::NoVehicle(param_index.to_string()))
+}
+
 /// Resolves `param_index`'s `Vehicle` from `ship_assets`, then loads its
 /// default-hull armor model at [`DEFAULT_LOD`]. Synchronous and CPU/IO-bound;
 /// callers run it off the UI thread (see [`spawn_load_ship_armor`]).
@@ -432,13 +479,43 @@ pub(crate) fn load_ship_armor_by_param(
     param_index: &str,
     display_name: &str,
 ) -> Result<LoadedShipArmor, ShipLoadError> {
-    let param = ship_assets.metadata().game_param_by_index(param_index);
-    let vehicle = param
-        .as_ref()
-        .and_then(|p| p.vehicle().cloned())
-        .ok_or_else(|| ShipLoadError::NoVehicle(param_index.to_string()))?;
+    let vehicle = resolve_vehicle(ship_assets, param_index)?;
     let options = default_load_options(&vehicle, display_name, DEFAULT_LOD);
     load_ship_armor(&vehicle, ship_assets, options)
+}
+
+/// Resolves `param_index`'s `Vehicle` from `ship_assets`, then loads its
+/// armor model under caller-supplied `options` -- a Milestone 4 Task 8c
+/// reload with a specific hull/LOD/module selection, as opposed to
+/// [`load_ship_armor_by_param`]'s always-default load. Synchronous and
+/// CPU/IO-bound; callers run it off the UI thread (see
+/// [`spawn_reload_ship_armor`]).
+fn load_ship_armor_with_options(
+    ship_assets: &ShipAssets,
+    param_index: &str,
+    options: ShipLoadOptions,
+) -> Result<LoadedShipArmor, ShipLoadError> {
+    let vehicle = resolve_vehicle(ship_assets, param_index)?;
+    load_ship_armor(&vehicle, ship_assets, options)
+}
+
+/// Resolves `param_index`'s `Vehicle` from `ship_assets` and builds the
+/// [`ShipLoadOptions`] a Task 8c reload needs (see [`reload_load_options`]'s
+/// doc). Runs synchronously on the UI thread -- a `GameParams` lookup plus a
+/// small hashmap scan, mirroring the sync prep the egui app's own
+/// `load_ship_for_pane_with_lod` runs before spawning its background reload
+/// (`armor_viewer/ui/tab.rs:2427-2444`) -- so the caller can build this right
+/// before handing it to [`spawn_reload_ship_armor`]'s background task.
+pub(crate) fn build_reload_options(
+    ship_assets: &ShipAssets,
+    param_index: &str,
+    display_name: String,
+    lod: usize,
+    selected_hull: Option<String>,
+    module_overrides: HashMap<ComponentType, String>,
+) -> Result<ShipLoadOptions, ShipLoadError> {
+    let vehicle = resolve_vehicle(ship_assets, param_index)?;
+    Ok(reload_load_options(&vehicle, display_name, lod, selected_hull, module_overrides))
 }
 
 /// Kicks off a ship's armor load on the background executor. `bundle` is the
@@ -452,6 +529,22 @@ pub fn spawn_load_ship_armor(
     cx: &App,
 ) -> Task<Result<LoadedShipArmor, ShipLoadError>> {
     cx.background_spawn(async move { load_ship_armor_by_param(&bundle.assets, &param_index, &display_name) })
+}
+
+/// Kicks off a background reload of `param_index`'s armor under `options` --
+/// a hull-upgrade/LOD/module selection change from the hull popover
+/// (`popover.rs`), driven by `viewport_view::ViewportView::reload_ship`. Like
+/// [`spawn_load_ship_armor`], but the caller controls `options` (build it via
+/// [`build_reload_options`]) instead of getting the always-default load;
+/// `bundle` is the same shared `ArmorAssetsBundle`, so this never triggers a
+/// second game-data or `ShipAssets` load either.
+pub fn spawn_reload_ship_armor(
+    bundle: Arc<super::assets::ArmorAssetsBundle>,
+    param_index: String,
+    options: ShipLoadOptions,
+    cx: &App,
+) -> Task<Result<LoadedShipArmor, ShipLoadError>> {
+    cx.background_spawn(async move { load_ship_armor_with_options(&bundle.assets, &param_index, options) })
 }
 
 #[cfg(test)]

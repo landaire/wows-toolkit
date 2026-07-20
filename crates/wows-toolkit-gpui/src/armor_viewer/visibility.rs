@@ -183,6 +183,59 @@ pub(crate) fn hull_group_any_on(hull_visibility: &HashMap<String, bool>, names: 
     names.iter().any(|n| hull_visibility.get(n).copied().unwrap_or(false))
 }
 
+/// Drops `hull_visibility` entries for mesh names no longer present in
+/// `hull_part_groups` (a Milestone 4 Task 8c hull-upgrade/LOD reload changed
+/// the mesh set), then inserts a default entry for every mesh name that
+/// doesn't already have one. The default is "on" if any surviving entry was
+/// on, else "off" -- matching the egui app's own `apply_hull_reload`/
+/// `apply_upgrade_reload` retain-plus-default-new-parts logic
+/// (`armor_viewer/ui/tab.rs:2547-2554`, `2737-2743`). The default-fill (not
+/// just a retain) is necessary here specifically because `hull_visibility`'s
+/// convention is absent-means-HIDDEN (see the module doc's convention note,
+/// which is about `part_visibility`/`plate_visibility`, but `hull_visibility`
+/// carries the same opposite-of-`part_visibility` default too -- a newly
+/// appeared hull mesh name would otherwise silently stay hidden even when
+/// every other hull part is on).
+pub(crate) fn retain_hull_visibility(
+    hull_visibility: &mut HashMap<String, bool>,
+    hull_part_groups: &[(String, Vec<String>)],
+) {
+    let default_on = hull_visibility.values().any(|&v| v);
+    hull_visibility.retain(|name, _| hull_part_groups.iter().any(|(_, names)| names.contains(name)));
+    for (_group, names) in hull_part_groups {
+        for name in names {
+            hull_visibility.entry(name.clone()).or_insert(default_on);
+        }
+    }
+}
+
+/// Drops `part_visibility` entries for `(zone, material)` pairs no longer
+/// present in `zone_parts` (post-reload). No default-fill needed here, unlike
+/// [`retain_hull_visibility`]: `part_visibility`'s absent-means-visible
+/// convention already makes a newly appeared part visible with no entry at
+/// all, matching the egui app's own `apply_upgrade_reload`
+/// (`tab.rs:2719-2723`), whose explicit `or_insert(true)` fill is a no-op
+/// under this port's opposite default-boolean convention (see the module
+/// doc's convention note).
+pub(crate) fn retain_part_visibility(
+    part_visibility: &mut HashMap<(String, String), bool>,
+    zone_parts: &[(String, Vec<String>)],
+) {
+    part_visibility.retain(|(zone, part), _| zone_parts.iter().any(|(z, parts)| z == zone && parts.contains(part)));
+}
+
+/// Drops `plate_visibility` entries for plate keys no longer present in
+/// `zone_part_plates` (post-reload). Same no-default-fill rationale as
+/// [`retain_part_visibility`]; matches the egui app's own `apply_upgrade_reload`
+/// plate retain (`tab.rs:2725-2729`), which likewise has no default-fill.
+pub(crate) fn retain_plate_visibility(plate_visibility: &mut HashMap<PlateKey, bool>, zone_part_plates: &[ArmorZone]) {
+    plate_visibility.retain(|(zone, part, thickness), _| {
+        zone_part_plates
+            .iter()
+            .any(|z| z.name == *zone && z.parts.iter().any(|p| p.name == *part && p.plates.contains(thickness)))
+    });
+}
+
 /// A checkbox's on/off/indeterminate state, driving both the checked value
 /// and whether the popover draws the partial-state dash.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -399,5 +452,56 @@ mod tests {
         let names = vec!["Hull_A".to_string(), "Hull_B".to_string()];
         assert!(!hull_group_all_on(&vis, &names));
         assert!(!hull_group_any_on(&vis, &names));
+    }
+
+    #[test]
+    fn retain_hull_visibility_drops_meshes_no_longer_present() {
+        let mut vis = HashMap::new();
+        vis.insert("Turret_A".to_string(), true);
+        vis.insert("Turret_B_stale".to_string(), true);
+        let groups = vec![("Main Battery".to_string(), vec!["Turret_A".to_string()])];
+        retain_hull_visibility(&mut vis, &groups);
+        assert!(!vis.contains_key("Turret_B_stale"), "a mesh not in the new hull's groups must be dropped");
+        assert_eq!(vis.get("Turret_A"), Some(&true), "a surviving mesh's existing value must be preserved");
+    }
+
+    #[test]
+    fn retain_hull_visibility_defaults_new_meshes_on_when_any_surviving_entry_was_on() {
+        let mut vis = HashMap::new();
+        vis.insert("Turret_A".to_string(), true);
+        let groups = vec![("Main Battery".to_string(), vec!["Turret_A".to_string(), "Turret_B_new".to_string()])];
+        retain_hull_visibility(&mut vis, &groups);
+        assert_eq!(vis.get("Turret_B_new"), Some(&true), "a new mesh should default on when the user had any on");
+    }
+
+    #[test]
+    fn retain_hull_visibility_defaults_new_meshes_off_when_nothing_was_on() {
+        let mut vis = HashMap::new();
+        vis.insert("Turret_A".to_string(), false);
+        let groups = vec![("Main Battery".to_string(), vec!["Turret_A".to_string(), "Turret_B_new".to_string()])];
+        retain_hull_visibility(&mut vis, &groups);
+        assert_eq!(vis.get("Turret_B_new"), Some(&false), "a new mesh should default off when nothing was on");
+    }
+
+    #[test]
+    fn retain_part_visibility_drops_parts_no_longer_present_and_keeps_survivors() {
+        let mut vis = HashMap::new();
+        vis.insert(("Citadel".to_string(), "Cit_Belt".to_string()), false);
+        vis.insert(("Bow".to_string(), "Bow_Stale".to_string()), false);
+        let zone_parts = vec![("Citadel".to_string(), vec!["Cit_Belt".to_string()])];
+        retain_part_visibility(&mut vis, &zone_parts);
+        assert!(!vis.contains_key(&("Bow".to_string(), "Bow_Stale".to_string())));
+        assert_eq!(vis.get(&("Citadel".to_string(), "Cit_Belt".to_string())), Some(&false));
+    }
+
+    #[test]
+    fn retain_plate_visibility_drops_plates_no_longer_present_and_keeps_survivors() {
+        let mut vis = HashMap::new();
+        vis.insert(("Citadel".to_string(), "Cit_Belt".to_string(), 320), true);
+        vis.insert(("Citadel".to_string(), "Cit_Belt".to_string(), 999), true);
+        let zone_part_plates = vec![zone("Citadel", vec![("Cit_Belt", vec![320])])];
+        retain_plate_visibility(&mut vis, &zone_part_plates);
+        assert!(!vis.contains_key(&("Citadel".to_string(), "Cit_Belt".to_string(), 999)));
+        assert_eq!(vis.get(&("Citadel".to_string(), "Cit_Belt".to_string(), 320)), Some(&true));
     }
 }
