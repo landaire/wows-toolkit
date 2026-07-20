@@ -85,8 +85,10 @@ const SHIP_ICON_WIDTH: f32 = 16.0;
 /// `window.rem_size()` (the theme's body font size; see `theme.rs`), with
 /// `bold` reproducing `header_cell`'s `.font_weight(FontWeight::BOLD)`.
 /// Backs `measure_column_widths`'s one-shot content pass -- never called on a
-/// per-frame path.
-fn text_width(text: SharedString, window: &mut Window, bold: bool) -> f32 {
+/// per-frame path. `pub(super)` so `expanded.rs`'s `expanded_detail_width`
+/// (the same one-shot pass, for expanded-row content) can reuse it instead of
+/// duplicating text shaping.
+pub(super) fn text_width(text: SharedString, window: &mut Window, bold: bool) -> f32 {
     if text.is_empty() {
         return 0.0;
     }
@@ -121,10 +123,22 @@ fn text_width(text: SharedString, window: &mut Window, bold: bool) -> f32 {
 /// `PlayerTable::new` completes) -- so this one pass stays correct across
 /// that transition without needing a second recompute when the icons land.
 ///
-/// Run once per data/column/debug change (`PlayerTable::new`, `set_columns`,
-/// `set_debug`), gated behind `PlayerTable::widths_dirty` in `render` -- never
-/// per frame.
-fn measure_column_widths(model: &ReplayReportModel, debug: bool, window: &mut Window) -> Vec<Pixels> {
+/// A row in `expanded` also folds `expanded::expanded_detail_width` into that
+/// row's per-column width alongside its collapsed content -- `table.rs`'s
+/// `render_column_cell` clamps an expanded row's detail (the Skills column's
+/// captain-skill grid and consumables table, in particular) to the column's
+/// measured width, so without this an expanded row's detail would clip at the
+/// collapsed-only width instead of growing the column to fit it.
+///
+/// Run once per data/column/debug/expanded-set change (`PlayerTable::new`,
+/// `set_columns`, `set_debug`, `toggle_expanded`), gated behind
+/// `PlayerTable::widths_dirty` in `render` -- never per frame.
+fn measure_column_widths(
+    model: &ReplayReportModel,
+    debug: bool,
+    expanded: &HashSet<AccountId>,
+    window: &mut Window,
+) -> Vec<Pixels> {
     let rem = window.rem_size().as_f32();
     let gap_1 = rem * 0.25;
     let gap_0p5 = rem * 0.125;
@@ -149,7 +163,11 @@ fn measure_column_widths(model: &ReplayReportModel, debug: bool, window: &mut Wi
                     let text_w = text_width(cell.text.into(), window, false);
                     let species_w = text_width(row.ship_species_text.clone().into(), window, false);
                     let icon_w = species_w.max(SHIP_ICON_WIDTH);
-                    max_w = max_w.max(icon_default + gap_1 + icon_w + gap_1 + text_w);
+                    let mut row_w = icon_default + gap_1 + icon_w + gap_1 + text_w;
+                    if expanded.contains(&row.db_id) {
+                        row_w = row_w.max(expanded::expanded_detail_width(col, row, debug, window));
+                    }
+                    max_w = max_w.max(row_w);
                 }
                 max_w
             }
@@ -159,13 +177,16 @@ fn measure_column_widths(model: &ReplayReportModel, debug: bool, window: &mut Wi
                     let cell = cell_value(row, col, debug);
                     let text_w = text_width(cell.text.into(), window, false);
                     let marker_count = row.skill_warning as u32 + row.has_dazzle as u32 + row.has_ifa as u32;
-                    let row_w = if marker_count > 0 {
+                    let mut row_w = if marker_count > 0 {
                         let markers_w =
                             marker_count as f32 * icon_default + marker_count.saturating_sub(1) as f32 * gap_0p5;
                         markers_w + gap_1 + text_w
                     } else {
                         text_w
                     };
+                    if expanded.contains(&row.db_id) {
+                        row_w = row_w.max(expanded::expanded_detail_width(col, row, debug, window));
+                    }
                     max_w = max_w.max(row_w);
                 }
                 max_w
@@ -174,7 +195,11 @@ fn measure_column_widths(model: &ReplayReportModel, debug: bool, window: &mut Wi
                 let mut max_w = header_w;
                 for row in &model.rows {
                     let cell = cell_value(row, col, debug);
-                    max_w = max_w.max(text_width(cell.text.into(), window, false));
+                    let mut row_w = text_width(cell.text.into(), window, false);
+                    if expanded.contains(&row.db_id) {
+                        row_w = row_w.max(expanded::expanded_detail_width(col, row, debug, window));
+                    }
+                    max_w = max_w.max(row_w);
                 }
                 max_w
             }
@@ -421,13 +446,17 @@ impl PlayerTable {
     /// `remeasure_items` (unlike `sort_by`'s `reset`) preserves the list's
     /// current scroll position, so expanding a row on-screen doesn't jump the
     /// viewport. Mirrors the egui app's `is_row_expanded`/`row_heights`
-    /// toggle in `cell_content_ui`.
+    /// toggle in `cell_content_ui`. Also marks `widths_dirty`: an expanding
+    /// row's Skills/Name/damage columns may need to grow to fit that row's
+    /// detail (`measure_column_widths`'s `expanded` argument), and a
+    /// collapsing row may let them shrink back.
     fn toggle_expanded(&mut self, ix: usize, cx: &mut Context<Self>) {
         let db_id = self.model.rows[ix].db_id;
         if !self.expanded.remove(&db_id) {
             self.expanded.insert(db_id);
         }
         self.list_state.remeasure_items(ix..ix + 1);
+        self.widths_dirty = true;
         cx.notify();
     }
 
@@ -886,7 +915,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
 impl Render for PlayerTable {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.widths_dirty {
-            self.column_widths = measure_column_widths(&self.model, self.debug, window);
+            self.column_widths = measure_column_widths(&self.model, self.debug, &self.expanded, window);
             self.widths_dirty = false;
         }
 

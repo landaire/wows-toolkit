@@ -40,6 +40,7 @@ use super::columns::ReplayColumn;
 use super::icons::IconCache;
 use super::model::PlayerRow;
 use super::model::separate_number;
+use super::table::text_width;
 
 /// Multiplier for a detail-list item's `ElementId`
 /// (`row_ix * DETAIL_ID_STRIDE + item_ix`), spacing rows apart enough that no
@@ -94,6 +95,232 @@ pub fn render_column_detail(
         ReplayColumn::SpottingDamage => row.spotting_damage_hover_text.as_deref().map(multiline_body),
         _ => None,
     }
+}
+
+/// One column's expanded-detail content width for `row`, measured (not
+/// rendered) so `table.rs`'s `measure_column_widths` can grow that column to
+/// fit an expanded row instead of clipping it at the collapsed width. Kept
+/// structurally aligned with `render_column_detail` above -- same match arms,
+/// same per-section gating -- so the two stay in sync as either one changes;
+/// each arm below carries a terse note on which `render_*` it mirrors.
+/// Deliberately does not take `all_rows`: unlike `render_damage_section`, this
+/// only measures the ActualDamage/ReceivedDamage ammo-type breakdown
+/// paragraph, not the per-victim interaction lines (those need another row's
+/// `ship_name` to size, and the breakdown paragraph is already the wider of
+/// the two in practice). Modernizations and signals are excluded everywhere:
+/// `modernization_slots_view`/`signals_view` both use `h_flex().flex_wrap()`,
+/// which wraps onto new lines instead of pushing the column wider, so they
+/// must never drive a column's measured width.
+pub(super) fn expanded_detail_width(col: ReplayColumn, row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
+    match col {
+        ReplayColumn::Name => name_section_width(row, debug, window),
+        ReplayColumn::Skills => build_section_width(row, debug, window),
+        ReplayColumn::ActualDamage => nda_gated_text_width(row.actual_damage_hover_text.as_deref(), row, debug, window),
+        ReplayColumn::ReceivedDamage => {
+            nda_gated_text_width(row.received_damage_hover_text.as_deref(), row, debug, window)
+        }
+        ReplayColumn::PotentialDamage => {
+            nda_gated_text_width(row.potential_damage_hover_text.as_deref(), row, debug, window)
+        }
+        ReplayColumn::Hits => nda_gated_text_width(row.hits_hover_text.as_deref(), row, debug, window),
+        ReplayColumn::SpottingDamage => {
+            row.spotting_damage_hover_text.as_deref().map(|text| multiline_width(text, window)).unwrap_or(0.0)
+        }
+        _ => 0.0,
+    }
+}
+
+/// Widest line of a `\n`-separated block, matching how `multiline_body`/
+/// `hover_paragraph` render one `div` per line rather than a single wrapped
+/// paragraph.
+fn multiline_width(text: &str, window: &mut Window) -> f32 {
+    text.split('\n').map(|line| text_width(line.into(), window, false)).fold(0.0_f32, f32::max)
+}
+
+/// Mirrors `render_nda_gated_hover` (Potential/Hits) and the NDA gate at the
+/// top of `render_damage_section` (ActualDamage/ReceivedDamage): the NDA
+/// placeholder's width when stats are hidden, otherwise the widest line of
+/// `text`.
+fn nda_gated_text_width(text: Option<&str>, row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
+    if row.should_hide_stats() && !debug {
+        return text_width(NDA.into(), window, false);
+    }
+    text.map(|t| multiline_width(t, window)).unwrap_or(0.0)
+}
+
+/// Mirrors `render_name_section`: the section headings, each achievement/
+/// ribbon row's icon-box-plus-label width (`icon_label_row_width`), and the
+/// damage-event lines (or the NDA placeholder when hidden).
+fn name_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
+    let has_achievements = !row.achievements.is_empty();
+    let has_ribbons = !row.ribbons.is_empty();
+    let has_damage_events =
+        row.fires.is_some() || row.floods.is_some() || row.citadels.is_some() || row.crits.is_some();
+    if !has_achievements && !has_ribbons && !has_damage_events {
+        return 0.0;
+    }
+
+    let mut max_w: f32 = 0.0;
+
+    if has_achievements {
+        max_w = max_w.max(text_width("Achievements".into(), window, true));
+        for achievement in &row.achievements {
+            let label = if achievement.count > 1 {
+                format!("{} ({}x)", achievement.display_name, achievement.count)
+            } else {
+                achievement.display_name.clone()
+            };
+            let label_w = text_width(label.into(), window, false);
+            // Achievements always render at LARGE_ICON_SIZE (`achievement_row`).
+            max_w = max_w.max(icon_label_row_width(LARGE_ICON_SIZE, label_w));
+        }
+    }
+
+    if has_ribbons {
+        max_w = max_w.max(text_width("Ribbons".into(), window, true));
+        for ribbon in &row.ribbons {
+            // `ribbon_row`: subribbons render at LARGE_ICON_SIZE, others at
+            // RIBBON_ICON_SIZE; a fitted wide ribbon's width tops out at its
+            // box size (`fit_within_box`), so the box size is a safe bound.
+            let icon_box = if ribbon.is_subribbon { LARGE_ICON_SIZE } else { RIBBON_ICON_SIZE };
+            let label = format!("{} ({}x)", ribbon.display_name, ribbon.count);
+            let label_w = text_width(label.into(), window, false);
+            max_w = max_w.max(icon_label_row_width(icon_box, label_w));
+        }
+    }
+
+    if has_damage_events {
+        max_w = max_w.max(text_width("Damage Events".into(), window, true));
+        if row.should_hide_stats() && !debug {
+            max_w = max_w.max(text_width(NDA.into(), window, false));
+        } else {
+            if let Some(fires) = row.fires {
+                max_w = max_w.max(text_width(format!("Fires: {fires}").into(), window, false));
+            }
+            if let Some(floods) = row.floods {
+                max_w = max_w.max(text_width(format!("Floods: {floods}").into(), window, false));
+            }
+            if let Some(citadels) = row.citadels {
+                max_w = max_w.max(text_width(format!("Citadels: {citadels}").into(), window, false));
+            }
+            if let Some(crits) = row.crits {
+                max_w = max_w.max(text_width(format!("Crits: {crits}").into(), window, false));
+            }
+        }
+    }
+
+    max_w
+}
+
+/// Pure width formula for `icon_label_row`: the icon box, the 8px icon-to-
+/// label gap (`icon_label_row`'s `gap(px(8.))`), then the label text.
+fn icon_label_row_width(icon_box: f32, label_width: f32) -> f32 {
+    icon_box + 8.0 + label_width
+}
+
+/// Mirrors `render_build_section`: the loadout/skill-tier hover text, the
+/// sub-section headings, the loadout entries, the captain-skill grid
+/// (`skill_grid_width`), and the consumables table (`consumables_width`).
+/// Modernizations and signals are intentionally excluded (see
+/// `expanded_detail_width`'s doc).
+fn build_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
+    if row.relation.is_enemy() && !debug {
+        return 0.0;
+    }
+
+    let rem = window.rem_size().as_f32();
+    let gap_1 = rem * 0.25;
+    let gap_2 = rem * 0.5;
+
+    let mut max_w: f32 = 0.0;
+    let mut has_content = false;
+
+    if let Some(hover) = row.skill_hover_text.as_ref() {
+        max_w = max_w.max(multiline_width(hover, window));
+        has_content = true;
+    }
+
+    if let Some(build) = row.translated_build.as_ref() {
+        max_w = max_w.max(text_width("Modules:".into(), window, true));
+        if build.modernization_slots.is_empty() {
+            max_w = max_w.max(text_width("No Modules".into(), window, false));
+        }
+        has_content = true;
+
+        if !build.signals.is_empty() {
+            max_w = max_w.max(text_width("Signals:".into(), window, true));
+        }
+
+        max_w = max_w.max(text_width("Loadout:".into(), window, true));
+        if build.loadout.is_empty() {
+            max_w = max_w.max(text_width("No Loadout".into(), window, false));
+        } else {
+            for module in &build.loadout {
+                if let Some(name) = module.name.as_ref() {
+                    max_w = max_w.max(text_width(name.clone().into(), window, false));
+                }
+            }
+        }
+
+        match build.captain_skills.as_ref() {
+            Some(skills) => {
+                max_w = max_w.max(text_width("Captain Skills:".into(), window, true));
+                if skills.is_empty() {
+                    max_w = max_w.max(text_width("No Captain Skills".into(), window, false));
+                } else {
+                    max_w = max_w.max(skill_grid_width(skills, gap_1));
+                }
+            }
+            None => {
+                max_w = max_w.max(text_width("No Captain Skills".into(), window, false));
+            }
+        }
+    }
+
+    if !row.consumables.is_empty() {
+        max_w = max_w.max(text_width("Consumables:".into(), window, true));
+        max_w = max_w.max(consumables_width(gap_2));
+        has_content = true;
+    } else if let Some(build) = row.translated_build.as_ref()
+        && !build.abilities.is_empty()
+    {
+        max_w = max_w.max(text_width("Consumables:".into(), window, true));
+        for ability in &build.abilities {
+            if let Some(name) = ability.name.as_ref() {
+                max_w = max_w.max(text_width(name.clone().into(), window, false));
+            }
+        }
+        has_content = true;
+    }
+
+    if has_content { max_w } else { 0.0 }
+}
+
+/// Pure per-tier width for `captain_skill_grid_view`: the 14px cost-label
+/// cell, `gap_1` before it and after each skill cell (matching the line's
+/// `h_flex().gap_1()` across its `1 + skill_count` children), and one
+/// `MODULE_ICON_SIZE` cell per skill -- a resolved icon renders at exactly
+/// that size, and an unresolved text-fallback cell is assumed to be no wider
+/// (a small overshoot beats clipping, per the column's overall 500px clamp).
+/// Returns the widest tier, since the tiers stack vertically.
+fn skill_grid_width(rows: &[SkillGridRow], gap_1: f32) -> f32 {
+    rows.iter()
+        .map(|row| {
+            let skill_count = row.skills.len() as f32;
+            14.0 + gap_1 + skill_count * (MODULE_ICON_SIZE + gap_1)
+        })
+        .fold(0.0_f32, f32::max)
+}
+
+/// Pure width for `consumables_view`'s fixed 3-column layout: `NAME_COL` +
+/// `gap_2` + `COUNT_COL` + `gap_2` + `COUNT_COL`, matching the header/row's
+/// `h_flex().gap_2()` across its three fixed-width cells (`consumable_row`'s
+/// leading icon renders inside the fixed `NAME_COL` box, so it never widens
+/// the row beyond `NAME_COL`).
+fn consumables_width(gap_2: f32) -> f32 {
+    const NAME_COL: f32 = 170.0;
+    const COUNT_COL: f32 = 64.0;
+    NAME_COL + gap_2 + COUNT_COL + gap_2 + COUNT_COL
 }
 
 /// Potential-damage / Hits expanded content: the column's hover text shown
@@ -717,12 +944,21 @@ fn interaction_percentage(interaction: &DamageInteraction, direction: DamageDire
 mod tests {
     use wows_replay_insights::battle_report::DamageInteraction;
     use wows_replay_insights::battle_report::RibbonResult;
+    use wowsunpack::game_params::skill_grid_data::SkillGridRow;
+    use wowsunpack::game_params::skill_grid_data::SkillGridSkill;
+    use wowsunpack::game_params::types::CrewSkillName;
+    use wowsunpack::game_params::types::CrewSkillType;
+    use wowsunpack::game_params::types::SkillPointCost;
 
     use super::DamageDirection;
+    use super::MODULE_ICON_SIZE;
+    use super::consumables_width;
     use super::fit_dims;
+    use super::icon_label_row_width;
     use super::interaction_amount;
     use super::interaction_percentage;
     use super::reorder_bulge_after_main_caliber;
+    use super::skill_grid_width;
 
     #[test]
     fn fit_dims_keeps_a_wide_ribbon_short() {
@@ -818,5 +1054,63 @@ mod tests {
         assert_eq!(interaction_amount(&i, DamageDirection::Received), 12_000);
         assert!((interaction_percentage(&i, DamageDirection::Dealt) - 56.4).abs() < 1e-9);
         assert!((interaction_percentage(&i, DamageDirection::Received) - 38.1).abs() < 1e-9);
+    }
+
+    fn skill_tier(skill_count: usize) -> SkillGridRow {
+        SkillGridRow {
+            point_cost: Some(SkillPointCost::new(1)),
+            skills: (0..skill_count)
+                .map(|i| SkillGridSkill {
+                    internal_name: CrewSkillName::from(format!("Skill{i}").as_str()),
+                    skill_type: CrewSkillType::new(0),
+                    name: None,
+                    description: None,
+                    point_cost: Some(SkillPointCost::new(1)),
+                    learned: i % 2 == 0,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn skill_grid_width_matches_the_cost_label_plus_gap_plus_icon_formula() {
+        let rows = [skill_tier(7)];
+        let width = skill_grid_width(&rows, 4.0);
+        // 14 (cost label) + gap_1 + 7 skills * (MODULE_ICON_SIZE + gap_1).
+        let expected = 14.0 + 4.0 + 7.0 * (MODULE_ICON_SIZE + 4.0);
+        assert!((width - expected).abs() < 1e-4, "width {width} != expected {expected}");
+    }
+
+    #[test]
+    fn skill_grid_width_takes_the_widest_tier() {
+        let rows = [skill_tier(1), skill_tier(7), skill_tier(3)];
+        let width = skill_grid_width(&rows, 4.0);
+        assert!((width - skill_grid_width(&[skill_tier(7)], 4.0)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn skill_grid_width_of_a_full_tier_far_exceeds_a_typical_collapsed_skills_width() {
+        // The collapsed Skills cell is a short label ("Fine 12pt" and change);
+        // a 7-skill tier at MODULE_ICON_SIZE per icon must dwarf it, which is
+        // the whole point of re-measuring on expand.
+        let collapsed_skills_column_width = 90.0;
+        let width = skill_grid_width(&[skill_tier(7)], 4.0);
+        assert!(
+            width > collapsed_skills_column_width,
+            "grid width {width} should exceed {collapsed_skills_column_width}"
+        );
+    }
+
+    #[test]
+    fn consumables_width_matches_the_fixed_three_column_layout() {
+        // NAME_COL(170) + gap_2 + COUNT_COL(64) + gap_2 + COUNT_COL(64), with
+        // gap_2 = 8 at the default 16px rem.
+        assert!((consumables_width(8.0) - 314.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn icon_label_row_width_adds_the_8px_gap_between_icon_and_label() {
+        assert!((icon_label_row_width(64.0, 40.0) - 112.0).abs() < 1e-4);
+        assert!((icon_label_row_width(0.0, 40.0) - 48.0).abs() < 1e-4);
     }
 }
