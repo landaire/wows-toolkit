@@ -436,15 +436,31 @@ pub struct ViewportView {
     /// keep firing; replaced wholesale whenever `set_lighting_preset` rebuilds
     /// the sliders.
     _lighting_slider_subscriptions: Vec<Subscription>,
-    /// Whether the toolbar's export-confirm panel (Milestone 5 Task 10) is
-    /// showing, ported from the egui app's `export_confirm` (`state.rs:181`,
-    /// `tab.rs:1045-1111`) but scoped to a bool here rather than an
-    /// `Option<ExportRequest>` -- this pane's `reload_source` already carries
-    /// the param index/display name a confirm needs, and the export is always
-    /// "this pane's currently displayed ship", never a different one (the
-    /// sidebar's stock-hull export, item 4 of the brief, is a separate
-    /// deferred action, not routed through this field).
-    export_confirm: bool,
+    /// The toolbar's export-confirm panel (Milestone 5 Task 10) target, if
+    /// open: a snapshot of everything the export needs, taken at the moment
+    /// the panel opens (`open_export_confirm`), mirroring the egui app's own
+    /// `Option<ExportRequest>` (`state.rs:180-188`, `tab.rs:556-576`). The
+    /// panel stays interactive to the rest of the pane while open -- the
+    /// sidebar can still be clicked -- so reading this snapshot rather than
+    /// live `reload_source`/`selected_hull`/`hull_lod`/`selected_modules` is
+    /// what keeps a sidebar re-click from silently retargeting an
+    /// already-open "Export {A}?" confirmation onto a different ship B.
+    export_confirm: Option<ExportConfirm>,
+}
+
+/// [`ViewportView::export_confirm`]'s snapshot: fixes the export target for
+/// the lifetime of the confirm panel, taken from `reload_source` and the
+/// pane's live hull/LOD/module selection at `open_export_confirm` time. Never
+/// re-read from `self` after that -- `confirm_export` builds `ShipExportOptions`
+/// from these fields, not from whatever the pane's live selection has become
+/// by the time the user clicks "Export".
+struct ExportConfirm {
+    bundle: Arc<ArmorAssetsBundle>,
+    param_index: String,
+    display_name: String,
+    hull_lod: usize,
+    selected_hull: Option<String>,
+    selected_modules: HashMap<ComponentType, String>,
 }
 
 impl EventEmitter<ViewportEvent> for ViewportView {}
@@ -501,7 +517,7 @@ impl ViewportView {
             _display_slider_subscriptions: display_slider_subscriptions,
             lighting_sliders,
             _lighting_slider_subscriptions: lighting_slider_subscriptions,
-            export_confirm: false,
+            export_confirm: None,
         }
     }
 
@@ -630,6 +646,17 @@ impl ViewportView {
     /// to this module; this is the read-only seam.
     pub(crate) fn reload_source(&self) -> Option<(Arc<ArmorAssetsBundle>, String, String)> {
         self.reload_source.as_ref().map(|s| (Arc::clone(&s.bundle), s.param_index.clone(), s.display_name.clone()))
+    }
+
+    /// The param index of the ship actually shown right now, or `None` if no
+    /// ship has finished loading into this pane yet. Gated on `current_armor`
+    /// (not just `reload_source`) so a load still in flight -- which has
+    /// already called `set_reload_source` but hasn't reached `show_armor` --
+    /// does not count as "loaded": `pane.rs`'s re-click guard (mirroring
+    /// egui's `already_selected`, `ui/tab.rs:520-521`) only skips a reload
+    /// once the previous one actually finished and is on screen.
+    pub(crate) fn loaded_param_index(&self) -> Option<&str> {
+        self.current_armor.is_some().then(|| self.reload_source.as_ref().map(|s| s.param_index.as_str())).flatten()
     }
 
     /// A clone of the current camera, for `pane.rs` to read when broadcasting
@@ -1663,21 +1690,32 @@ impl ViewportView {
 
     /// Opens the export-confirm panel (toolbar "Export" button,
     /// `popover.rs`'s `render_export_button`) for this pane's currently
-    /// displayed ship. A no-op if no ship is loaded -- the button itself is
-    /// disabled in that case (`current_armor.is_none()`), this is just
-    /// defense in depth against a stale click.
+    /// displayed ship, snapshotting `reload_source` plus the live hull/LOD/
+    /// module selection into `export_confirm` so the export target is FIXED
+    /// for the panel's lifetime -- see `ExportConfirm`'s doc. A no-op if no
+    /// ship is loaded -- the button itself is disabled in that case
+    /// (`current_armor.is_none()`), this is just defense in depth against a
+    /// stale click.
     pub(crate) fn open_export_confirm(&mut self, cx: &mut Context<Self>) {
         if self.current_armor.is_none() {
             return;
         }
-        self.export_confirm = true;
+        let Some(source) = &self.reload_source else { return };
+        self.export_confirm = Some(ExportConfirm {
+            bundle: Arc::clone(&source.bundle),
+            param_index: source.param_index.clone(),
+            display_name: source.display_name.clone(),
+            hull_lod: self.hull_lod,
+            selected_hull: self.selected_hull.clone(),
+            selected_modules: self.selected_modules.clone(),
+        });
         cx.notify();
     }
 
     /// Dismisses the export-confirm panel with no further action, matching
     /// egui's own Cancel button (`tab.rs:1102-1104`).
     pub(crate) fn cancel_export(&mut self, cx: &mut Context<Self>) {
-        self.export_confirm = false;
+        self.export_confirm = None;
         cx.notify();
     }
 
@@ -1685,16 +1723,18 @@ impl ViewportView {
     /// save-file dialog (blocking; same inline `rfd::FileDialog` pattern as
     /// `replay_inspector::view::open_manually`) defaulted to
     /// `{display_name}.glb`. A cancelled dialog is a no-op beyond closing the
-    /// panel. On a chosen path, builds `ShipExportOptions` from this pane's
-    /// CURRENT hull/LOD/module selection (`load_ship::
-    /// export_options_from_selection`, so the exported model matches what is
-    /// on screen) and runs the actual export -- `load_ship_from_vehicle` +
-    /// `export_glb`, both CPU/IO heavy -- on the background executor so the
+    /// panel. On a chosen path, builds `ShipExportOptions` from the
+    /// SNAPSHOT taken when the panel opened (`export_confirm`, `load_ship::
+    /// export_options_from_selection`) -- never from this pane's possibly-
+    /// since-changed live hull/LOD/module selection, so the sidebar staying
+    /// interactive while this dialog is open can't retarget the export onto
+    /// a different ship -- and runs the actual export (`load_ship_from_vehicle`
+    /// and `export_glb`, both CPU/IO heavy) on the background executor so the
     /// UI thread is not blocked, matching every other `ShipAssets`-driven
     /// load in this pane (`reload_ship` above). Ports the egui app's Export
     /// button handler (`tab.rs:1057-1097`), except the LOD/hull/module
-    /// options always reflect the pane's live selection rather than egui's
-    /// fixed `lod: 0` -- see `load_ship::export_options_from_selection`'s
+    /// options reflect the pane's selection AS OF OPEN TIME rather than
+    /// egui's fixed `lod: 0` -- see `load_ship::export_options_from_selection`'s
     /// doc. Textures are embedded either way (`textures: true`).
     ///
     /// **Logging, not toasts.** No `Notification`/toast infrastructure is
@@ -1702,23 +1742,22 @@ impl ViewportView {
     /// `self.tab_state.toasts`); success/failure is surfaced via
     /// `tracing::info!`/`tracing::error!` only.
     pub(crate) fn confirm_export(&mut self, cx: &mut Context<Self>) {
-        self.export_confirm = false;
+        let Some(snapshot) = self.export_confirm.take() else { return };
         cx.notify();
-        let Some(source) = &self.reload_source else { return };
-        let default_filename = load_ship::default_export_filename(&source.display_name);
+        let default_filename = load_ship::default_export_filename(&snapshot.display_name);
         let Some(path) =
             rfd::FileDialog::new().set_file_name(&default_filename).add_filter("glTF Binary", &["glb"]).save_file()
         else {
             return;
         };
 
-        let bundle = Arc::clone(&source.bundle);
-        let param_index = source.param_index.clone();
-        let display_name = source.display_name.clone();
+        let bundle = snapshot.bundle;
+        let param_index = snapshot.param_index;
+        let display_name = snapshot.display_name;
         let options = load_ship::export_options_from_selection(
-            self.hull_lod,
-            self.selected_hull.clone(),
-            self.selected_modules.clone(),
+            snapshot.hull_lod,
+            snapshot.selected_hull,
+            snapshot.selected_modules,
         );
 
         cx.background_spawn(async move {
@@ -1987,10 +2026,10 @@ impl Render for ViewportView {
         // dialog (`tab.rs:1045-1111`) -- ship name, disclaimer, Export/Cancel.
         // `.occlude()` blocks the 3D viewport's own mouse handlers underneath
         // while it's open, matching `legend.rs`'s dragged panel.
-        let export_overlay = self.export_confirm.then(|| {
+        let export_overlay = self.export_confirm.as_ref().map(|snapshot| {
             let theme = cx.theme();
             let (background, border, radius) = (theme.background, theme.border, theme.radius);
-            let display_name = self.reload_source.as_ref().map(|s| s.display_name.clone()).unwrap_or_default();
+            let display_name = snapshot.display_name.clone();
             let cancel_entity = entity.clone();
             let confirm_entity = entity.clone();
 

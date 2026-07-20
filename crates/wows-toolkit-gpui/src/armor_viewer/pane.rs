@@ -425,6 +425,17 @@ impl ArmorViewerPane {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Mirrors egui's `already_selected` guard (`ui/tab.rs:520-521`): a
+        // re-click on the ship already loaded in the ACTIVE pane must not
+        // re-trigger `start_ship_load`, which resets part/plate/hull
+        // visibility, selected camo, and the undo stack. Only the active
+        // pane is checked -- a Compare pane loading the same ship separately
+        // is a legitimate, distinct load.
+        let active = self.dock.read(cx).active_viewport();
+        let loaded = active.read(cx).loaded_param_index();
+        if is_ship_already_loaded(loaded, &event.param_index) {
+            return;
+        }
         self.start_ship_load(event.param_index.clone(), event.display_name.clone(), cx);
     }
 
@@ -698,9 +709,37 @@ fn other_pane_indices(panes_len: usize, source_ix: usize) -> Vec<usize> {
     (0..panes_len).filter(|&ix| ix != source_ix).collect()
 }
 
+/// The egui-mirrored "already selected" decision (`ui/tab.rs:520-521`):
+/// whether `requested_param_index` is the same ship already loaded in the
+/// pane `loaded_param_index` came from. Factored out of `on_sidebar_event`
+/// so the decision itself is unit-testable without a `ViewportView`/gpui
+/// `Context`. `loaded_param_index` is `None` both when no ship has finished
+/// loading yet and when a load is still in flight (see `ViewportView::
+/// loaded_param_index`'s doc) -- either way, a `None` never counts as
+/// already-loaded, so a re-click always proceeds.
+fn is_ship_already_loaded(loaded_param_index: Option<&str>, requested_param_index: &str) -> bool {
+    loaded_param_index == Some(requested_param_index)
+}
+
 #[cfg(test)]
 mod tests {
+    use super::is_ship_already_loaded;
     use super::other_pane_indices;
+
+    #[test]
+    fn already_loaded_when_the_active_pane_holds_the_same_param_index() {
+        assert!(is_ship_already_loaded(Some("PASC001"), "PASC001"));
+    }
+
+    #[test]
+    fn not_already_loaded_when_the_active_pane_holds_a_different_ship() {
+        assert!(!is_ship_already_loaded(Some("PASC001"), "PASC002"));
+    }
+
+    #[test]
+    fn not_already_loaded_when_the_active_pane_has_no_ship_yet() {
+        assert!(!is_ship_already_loaded(None, "PASC001"));
+    }
 
     #[test]
     fn other_pane_indices_excludes_only_the_source() {
