@@ -25,10 +25,12 @@
 //! above into the mouse and key handlers. `camo` (Milestone 4 Task 8b) is the
 //! pure pixel-math camo compositor (`build_active_camo`) that bakes a decoded
 //! camo scheme against the hull's base albedo; `popover`'s hull popover adds
-//! the camo picker on top of it. Multi-pane comparison (M5) and hull
-//! upgrade-LOD reload (M4 Task 8c) are later milestones. `dock` (M5 Task 9a)
-//! is the chrome-less scaffold `pane` wraps the viewport in, ready for Task
-//! 9b to turn into a real multi-pane split.
+//! the camo picker on top of it. Hull upgrade-LOD reload (M4 Task 8c) is a
+//! later milestone. `dock` (M5 Task 9b) lays out one or more panes itself
+//! (no `DockArea`/`TabPanel` chrome, see its module doc); the sidebar's
+//! "Compare" button (`CompareSplit`) adds a pane, and a ship selection routes
+//! to the dock's active pane. Camera-mirror/settings-sync across panes (M5
+//! Task 9c) is not implemented yet.
 #![allow(dead_code)]
 // Re-exports below are the module's public surface; not everything is
 // consumed outside its own file yet (some are reserved for a later
@@ -57,6 +59,7 @@ pub use catalog::ShipCatalog;
 pub use load_ship::LoadedShipArmor;
 pub use load_ship::ShipLoadError;
 pub use pane::ArmorViewerPane;
+pub use sidebar::CompareSplit;
 pub use sidebar::ShipSelected;
 pub use sidebar::Sidebar;
 pub use viewport_view::ViewportView;

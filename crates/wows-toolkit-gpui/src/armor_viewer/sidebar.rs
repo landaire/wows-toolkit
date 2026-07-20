@@ -19,9 +19,13 @@
 //! with no match anywhere inside them are omitted entirely, not merely
 //! collapsed.
 //!
+//! **Compare.** The header's "Compare" button emits [`CompareSplit`];
+//! `pane.rs` responds by adding a new (empty) pane to the dock and making it
+//! active, so the next ship picked here loads into it rather than replacing
+//! whatever the previously active pane was showing.
+//!
 //! **Deferred.** Per-ship right-click context menu ("Export model") is
-//! Milestone 10 and is not implemented here. Compare-split is Milestone 5
-//! and is out of scope.
+//! Milestone 10 and is not implemented here.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -32,6 +36,7 @@ use gpui_component::ActiveTheme;
 use gpui_component::Icon;
 use gpui_component::IconName;
 use gpui_component::Sizable;
+use gpui_component::button::Button;
 use gpui_component::h_flex;
 use gpui_component::input::Input;
 use gpui_component::input::InputEvent;
@@ -58,6 +63,11 @@ pub struct ShipSelected {
     pub display_name: String,
 }
 
+/// Emitted when the user clicks the sidebar header's "Compare" button:
+/// `pane.rs` responds by adding a new pane to the dock (Milestone 5 Task 9b).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompareSplit;
+
 /// What a tree row id refers to, resolved once per `rebuild_tree` and
 /// consulted by the row renderer (icon choice) and the click handler (ship
 /// rows only fire [`ShipSelected`]).
@@ -80,6 +90,7 @@ pub struct Sidebar {
 }
 
 impl EventEmitter<ShipSelected> for Sidebar {}
+impl EventEmitter<CompareSplit> for Sidebar {}
 
 impl Sidebar {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -258,7 +269,15 @@ impl Render for Sidebar {
             .py_1()
             .border_b_1()
             .border_color(border)
-            .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child("Ships"));
+            .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child("Ships"))
+            .child(
+                Button::new("armor-sidebar-compare")
+                    .icon(IconName::LayoutDashboard)
+                    .label("Compare")
+                    .compact()
+                    .tooltip("Open a new comparison pane")
+                    .on_click(cx.listener(|_this, _event, _window, cx| cx.emit(CompareSplit))),
+            );
 
         let search_row = h_flex()
             .flex_none()

@@ -13,9 +13,14 @@
 //! set_gpu` once ready -- see `SharedGpu`'s own doc. `ViewportView` no longer
 //! creates its own device.
 //!
-//! Multi-pane comparison (Milestone 5 Task 9b) does not exist yet, so `dock`
-//! holds exactly one viewport and there is exactly one sidebar for the whole
-//! tab.
+//! Multi-pane comparison (Milestone 5 Task 9b): the sidebar's "Compare"
+//! button (`sidebar::CompareSplit`) adds a new pane to `dock`, handing it the
+//! shared device immediately (or leaving it `Initializing` if the device
+//! itself isn't ready yet -- `apply_gpu_result` fans the result out to every
+//! pane in `dock`, not just the first). A ship selection always routes to
+//! `dock`'s *active* pane (`dock.active_viewport()`), not a fixed viewport;
+//! there is still exactly one sidebar for the whole tab. Camera-mirror and
+//! settings-sync across panes are Task 9c, not implemented here.
 //!
 //! Also owns the floating Armor Thickness legend (`legend.rs`): its state
 //! (`legend: LegendState`) and drag mouse handlers live here rather than on
@@ -46,6 +51,7 @@ use super::legend::LegendState;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::ShipLoadError;
 use super::load_ship::spawn_load_ship_armor;
+use super::sidebar::CompareSplit;
 use super::sidebar::ShipSelected;
 use super::sidebar::Sidebar;
 use super::viewport_view::ViewportView;
@@ -74,9 +80,9 @@ enum ShipLoadState {
 /// Lifecycle of the wgpu device shared by every viewport in the pane's dock
 /// (`ViewportDock`). Created once, off the UI thread, by `ArmorViewerPane`
 /// itself (Milestone 5 Task 9a moved this up from `ViewportView`, which
-/// previously stood up its own device per viewport) so a future multi-pane
-/// split (Task 9b) renders every pane through the same device instead of one
-/// per pane.
+/// previously stood up its own device per viewport) so the multi-pane split
+/// (Task 9b) renders every pane through the same device instead of one per
+/// pane.
 enum SharedGpu {
     Initializing,
     Ready { ctx: Arc<GpuContext>, pipeline: Arc<GpuPipeline> },
@@ -85,7 +91,6 @@ enum SharedGpu {
 
 pub struct ArmorViewerPane {
     sidebar: Entity<Sidebar>,
-    viewport: Entity<ViewportView>,
     dock: Entity<ViewportDock>,
     gpu: SharedGpu,
     bundle: BundleState,
@@ -112,12 +117,12 @@ impl ArmorViewerPane {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let sidebar = cx.new(|cx| Sidebar::new(window, cx));
         let viewport = cx.new(ViewportView::new);
-        let dock = cx.new(|_| ViewportDock::new(viewport.clone()));
-        let subscription = cx.subscribe_in(&sidebar, window, Self::on_sidebar_event);
+        let dock = cx.new(|_| ViewportDock::new(viewport));
+        let ship_selected_sub = cx.subscribe_in(&sidebar, window, Self::on_sidebar_event);
+        let compare_split_sub = cx.subscribe_in(&sidebar, window, Self::on_compare_split);
 
         let mut this = Self {
             sidebar,
-            viewport,
             dock,
             gpu: SharedGpu::Initializing,
             bundle: BundleState::NotStarted,
@@ -125,7 +130,7 @@ impl ArmorViewerPane {
             ship_loaded: false,
             legend: LegendState::default(),
             ship_load_generation: 0,
-            _subscriptions: vec![subscription],
+            _subscriptions: vec![ship_selected_sub, compare_split_sub],
         };
         this.start_gpu_init(cx);
         this
@@ -134,8 +139,8 @@ impl ArmorViewerPane {
     /// Stands up the shared wgpu device off the UI thread (device/adapter
     /// negotiation blocks on `pollster` internally), once, for the whole
     /// pane. Replaces `ViewportView`'s former per-viewport device init;
-    /// [`Self::apply_gpu_result`] hands the result down to every current (and,
-    /// via Task 9b, future) viewport in `dock`.
+    /// [`Self::apply_gpu_result`] hands the result down to every current (and
+    /// every later "Compare"-added) viewport in `dock`.
     fn start_gpu_init(&mut self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let created = cx
@@ -152,36 +157,78 @@ impl ArmorViewerPane {
 
     /// Applies the shared device's init result: on success, stores it as
     /// `SharedGpu::Ready` and hands the `Arc<GpuContext>`/`Arc<GpuPipeline>`
-    /// down to the (currently single) viewport via `ViewportView::set_gpu`;
-    /// on failure, stores `SharedGpu::Failed` and propagates the same reason
-    /// into the viewport via `set_gpu_failed` so it shows the error instead
-    /// of hanging on "Initializing...".
+    /// down to every viewport currently in `dock` via `ViewportView::set_gpu`
+    /// -- including any pane added by "Compare" while the device was still
+    /// initializing (see `add_pane`'s doc); on failure, stores
+    /// `SharedGpu::Failed` and propagates the same reason into every pane via
+    /// `set_gpu_failed` so each shows the error instead of hanging on
+    /// "Initializing...".
     fn apply_gpu_result(&mut self, result: anyhow::Result<(GpuContext, GpuPipeline)>, cx: &mut Context<Self>) {
+        let panes = self.dock.read(cx).panes().to_vec();
         match result {
             Ok((ctx, pipeline)) => {
                 let ctx = Arc::new(ctx);
                 let pipeline = Arc::new(pipeline);
                 self.gpu = SharedGpu::Ready { ctx: Arc::clone(&ctx), pipeline: Arc::clone(&pipeline) };
-                self.viewport.update(cx, |viewport, cx| viewport.set_gpu(ctx, pipeline, cx));
+                for pane in panes {
+                    pane.update(cx, |viewport, cx| viewport.set_gpu(Arc::clone(&ctx), Arc::clone(&pipeline), cx));
+                }
             }
             Err(e) => {
                 tracing::error!("armor viewer: failed to create shared wgpu device: {e:#}");
                 let reason = format!("{e:#}");
                 self.gpu = SharedGpu::Failed(reason.clone());
-                self.viewport.update(cx, |viewport, cx| viewport.set_gpu_failed(reason, cx));
+                for pane in panes {
+                    pane.update(cx, |viewport, cx| viewport.set_gpu_failed(reason.clone(), cx));
+                }
             }
         }
         cx.notify();
     }
 
-    /// Seeds the legend's initial visibility/collapsed/position, and the
-    /// viewport's display settings (plate edges, waterline, zero-mm plates,
-    /// armor opacity -- Task 7b), from the persisted `armor_viewer_defaults`
-    /// row, the same way `app.rs` threads the rest of `GpuiSettings` into its
-    /// child views on startup.
+    /// "Compare" handler (`sidebar::CompareSplit`, emitted by the sidebar
+    /// header button): creates a new pane, hands it the shared GPU device if
+    /// it's already ready (a pane added before the device finishes instead
+    /// gets it from `apply_gpu_result`'s fan-out, same as this tab's first
+    /// pane), and pushes it into `dock` as the active pane so the next ship
+    /// selection loads into it. The new pane starts empty until then.
+    fn on_compare_split(
+        &mut self,
+        _sidebar: &Entity<Sidebar>,
+        _event: &CompareSplit,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let viewport = cx.new(ViewportView::new);
+        match &self.gpu {
+            SharedGpu::Ready { ctx, pipeline } => {
+                let ctx = Arc::clone(ctx);
+                let pipeline = Arc::clone(pipeline);
+                viewport.update(cx, |viewport, cx| viewport.set_gpu(ctx, pipeline, cx));
+            }
+            SharedGpu::Failed(reason) => {
+                let reason = reason.clone();
+                viewport.update(cx, |viewport, cx| viewport.set_gpu_failed(reason, cx));
+            }
+            SharedGpu::Initializing => {}
+        }
+        self.dock.update(cx, |dock, cx| dock.add_pane(viewport, cx));
+        cx.notify();
+    }
+
+    /// Seeds the legend's initial visibility/collapsed/position, and every
+    /// current pane's display settings (plate edges, waterline, zero-mm
+    /// plates, armor opacity -- Task 7b), from the persisted
+    /// `armor_viewer_defaults` row, the same way `app.rs` threads the rest of
+    /// `GpuiSettings` into its child views on startup. Called once, before
+    /// the ship catalog itself has loaded, so `dock` only ever holds its
+    /// single initial pane at this point -- no "Compare" pane can exist yet.
     pub fn apply_armor_defaults(&mut self, defaults: Option<&ArmorViewerDefaultsRow>, cx: &mut Context<Self>) {
         self.legend = LegendState::from_defaults(defaults);
-        self.viewport.update(cx, |viewport, cx| viewport.apply_armor_defaults(defaults, cx));
+        let panes = self.dock.read(cx).panes().to_vec();
+        for pane in panes {
+            pane.update(cx, |viewport, cx| viewport.apply_armor_defaults(defaults, cx));
+        }
         cx.notify();
     }
 
@@ -237,6 +284,12 @@ impl ArmorViewerPane {
             return;
         };
         let bundle = Arc::clone(bundle);
+        // Captured now (the dock's *current* active pane), not re-read when
+        // the load completes: a pane switch (or another "Compare") while
+        // this load is in flight must not redirect its result to whatever
+        // pane happens to be active later -- it always lands in the pane it
+        // was requested for.
+        let target_viewport = self.dock.read(cx).active_viewport();
 
         self.ship_load_generation += 1;
         let generation = self.ship_load_generation;
@@ -248,7 +301,7 @@ impl ArmorViewerPane {
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
-                this.apply_ship_load_result(generation, param_index, display_name, bundle, result, cx)
+                this.apply_ship_load_result(generation, param_index, display_name, bundle, target_viewport, result, cx)
             });
         })
         .detach();
@@ -261,6 +314,7 @@ impl ArmorViewerPane {
         param_index: String,
         display_name: String,
         bundle: Arc<ArmorAssetsBundle>,
+        target_viewport: Entity<ViewportView>,
         result: Result<LoadedShipArmor, ShipLoadError>,
         cx: &mut Context<Self>,
     ) {
@@ -273,7 +327,7 @@ impl ArmorViewerPane {
             Ok(armor) => {
                 self.ship_load = ShipLoadState::Idle;
                 self.ship_loaded = true;
-                self.viewport.update(cx, |viewport, cx| {
+                target_viewport.update(cx, |viewport, cx| {
                     // Set before `show_armor`: a reload (Milestone 4 Task 8c)
                     // needs to know which bundle/param_index/display_name to
                     // re-export against, and `show_armor`'s own reset

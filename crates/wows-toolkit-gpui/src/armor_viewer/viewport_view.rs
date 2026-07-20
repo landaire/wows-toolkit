@@ -148,9 +148,9 @@ impl MoveKey {
 /// Lifecycle of the shared wgpu device backing this viewport. The device
 /// itself is created once by `ArmorViewerPane` (`SharedGpu`) and handed down
 /// via [`ViewportView::set_gpu`]/[`ViewportView::set_gpu_failed`] once ready,
-/// so every viewport in a future multi-pane split (Task 9b) renders through
-/// the same `Arc<GpuContext>`/`Arc<GpuPipeline>` instead of standing up its
-/// own device.
+/// so every viewport in the multi-pane split (`dock::ViewportDock`, Task 9b)
+/// renders through the same `Arc<GpuContext>`/`Arc<GpuPipeline>` instead of
+/// standing up its own device.
 enum GpuState {
     /// Waiting on the pane's shared device to finish initializing.
     Initializing,
