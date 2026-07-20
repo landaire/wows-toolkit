@@ -47,7 +47,7 @@ struct MinimapEntry {
     y: f32,
     heading: f32,
     visible: bool,
-    visibility_flags: u32,
+    visibility_flags: Option<u32>,
     is_invisible: bool,
 }
 
@@ -58,7 +58,7 @@ struct VehicleEntry {
     max_health: f32,
     is_alive: bool,
     is_invisible: bool,
-    visibility_flags: u32,
+    visibility_flags: Option<u32>,
     team_id: i8,
     owner: u32,
     selected_weapon: String,
@@ -394,7 +394,7 @@ fn digest_snapshot(filename: &str) -> Digest {
             y: r3(m.pos.y),
             heading: r3(m.heading.0),
             visible: m.visible,
-            visibility_flags: m.visibility_flags.0,
+            visibility_flags: m.visibility_flags.map(|f| f.raw()),
             is_invisible: m.is_invisible,
         })
         .collect();
@@ -409,7 +409,7 @@ fn digest_snapshot(filename: &str) -> Digest {
             max_health: r3(vp.max_health()),
             is_alive: vp.is_alive(),
             is_invisible: vp.is_invisible(),
-            visibility_flags: vp.visibility_flags(),
+            visibility_flags: vp.visibility_flags().map(|f| f.raw()),
             team_id: vp.team_id(),
             owner: vp.owner(),
             selected_weapon: format!("{:?}", vp.selected_weapon()),

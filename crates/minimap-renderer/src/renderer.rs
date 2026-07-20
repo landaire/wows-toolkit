@@ -1497,10 +1497,7 @@ impl<'a> MinimapRenderer<'a> {
             let world = ship_positions.get(entity_id);
             let detected = minimap.map(|m| m.visible).unwrap_or(false);
 
-            // visibility_flags from the Vehicle entity: bitmask of detection
-            // reasons (radar, hydro, direct vision, etc.). Non-zero means the
-            // ship is confirmed detected through game mechanics.
-            let vis_flags = controller.vehicle_props(*entity_id).map(|p| p.visibility_flags()).unwrap_or(0);
+            let vis_flags = controller.vehicle_props(*entity_id).and_then(|p| p.visibility_flags());
 
             // Get health fraction from entity
             let health_fraction = controller.vehicle_props(*entity_id).and_then(|p| {
@@ -1512,14 +1509,13 @@ impl<'a> MinimapRenderer<'a> {
             let minimap_yaw = minimap.map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.0.to_radians());
             let world_yaw = world.map(|t| t.yaw.0);
 
-            // A ship is "spotted" when its visibility_flags are non-zero
-            // (detected by radar, hydro, direct vision, etc.). On friendlies
-            // and self this outlines the icon to show when the enemy can see
-            // them. On enemies the outline is only meaningful in merged
-            // sessions, where enemy icons render continuously from alt-
-            // perspective data; without that, an enemy icon's mere presence
-            // already implies detection and the outline is redundant.
-            let is_spotted = vis_flags != 0;
+            // On friendlies and self the outline shows when the enemy can see
+            // them. On enemies it is only meaningful in merged sessions, where
+            // enemy icons render continuously from alt-perspective data;
+            // without that, an enemy icon's mere presence already implies
+            // detection and the outline is redundant. Builds with no
+            // visibilityFlags property draw no outline rather than a wrong one.
+            let is_spotted = vis_flags.is_some_and(|f| f.is_detected());
             let show_outline_for_relation = !relation.is_enemy() || self.has_merged_perspectives;
             let is_detected_teammate = is_spotted && show_outline_for_relation;
 
@@ -2482,9 +2478,9 @@ impl<'a> MinimapRenderer<'a> {
                 .map(|b| hp_healable.min(b))
                 .unwrap_or(hp_healable);
             // Same source as the yellow ship-icon outline: visibilityFlags on
-            // the live VehicleEntity. Non-zero means the game has confirmed
-            // the ship is detected (radar, hydro, direct vision, etc.).
-            let is_spotted = vehicle_props.as_ref().map(|props| props.visibility_flags() != 0).unwrap_or(false);
+            // the live VehicleEntity.
+            let is_spotted =
+                vehicle_props.as_ref().and_then(|props| props.visibility_flags()).is_some_and(|f| f.is_detected());
             let is_disconnected = !is_dead && is_player_disconnected_at(controller, entity_id, clock);
 
             // Kills at the current clock: filter the global kill list by

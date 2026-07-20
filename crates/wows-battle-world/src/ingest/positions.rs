@@ -20,7 +20,6 @@ use crate::ids::SourceTeam;
 use crate::resources::EntityIndex;
 use crate::units::Degrees;
 use crate::units::Radians;
-use crate::units::VisibilityFlags;
 
 /// Handle a Position packet: update Transform3d for the entity.
 pub fn handle_position(pos: &PositionPacket, world: &mut World, clock: GameClock) {
@@ -98,10 +97,10 @@ pub fn handle_minimap_updates(updates: &[MinimapUpdate], world: &mut World, cloc
             .resource::<EntityIndex>()
             .get(update.entity_id)
             .and_then(|e| world.get_entity(e).ok())
-            .and_then(|er| {
-                er.get::<VehicleState>().map(|vs| (VisibilityFlags(vs.0.visibility_flags()), vs.0.is_invisible()))
-            })
-            .unwrap_or((VisibilityFlags(0), false));
+            .and_then(|er| er.get::<VehicleState>().map(|vs| (vs.0.visibility_flags(), vs.0.is_invisible())))
+            // No VehicleState yet means nothing is known about this entity's
+            // detection state, which is what `None` already encodes.
+            .unwrap_or((None, false));
 
         let placement =
             MinimapPlacement { pos: position, heading, visible, visibility_flags, is_invisible, last_updated: clock };

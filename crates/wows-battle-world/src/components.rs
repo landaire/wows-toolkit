@@ -31,7 +31,7 @@ use wowsunpack::recognized::Recognized;
 
 use crate::units::Degrees;
 use crate::units::Radians;
-use crate::units::VisibilityFlags;
+use wowsunpack::game_types::VisibilityFlags;
 
 // -- Kind markers (zero-sized, tag the archetype) --
 
@@ -106,8 +106,9 @@ pub struct MinimapPlacement {
     /// Heading in degrees.
     pub heading: Degrees,
     pub visible: bool,
-    /// Bitmask of special detection reasons (radar, hydro, etc.).
-    pub visibility_flags: VisibilityFlags,
+    /// Why the entity is detected. `None` on builds predating the
+    /// `visibilityFlags` property, which is not the same as undetected.
+    pub visibility_flags: Option<VisibilityFlags>,
     /// True when the entity is invisible (e.g. submarine submerged).
     pub is_invisible: bool,
     pub last_updated: GameClock,

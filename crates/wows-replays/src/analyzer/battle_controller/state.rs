@@ -15,6 +15,7 @@ use crate::types::GameClock;
 use crate::types::GameParamId;
 use crate::types::NormalizedPos;
 use crate::types::PlaneId;
+use crate::types::VisibilityFlags;
 use crate::types::WorldPos;
 use crate::types::WorldPos2D;
 use wowsunpack::game_types::ConsumableUsageParams;
@@ -39,10 +40,9 @@ pub struct MinimapPosition {
     /// Heading in degrees
     pub heading: f32,
     pub visible: bool,
-    /// Bitmask of detection reasons (radar, hydro, etc.). Non-zero means the
-    /// ship is detected through special means. Sourced from the Vehicle entity's
-    /// `visibilityFlags` property.
-    pub visibility_flags: u32,
+    /// Why the ship is detected, from the Vehicle entity's `visibilityFlags`
+    /// property. `None` on builds predating that property.
+    pub visibility_flags: Option<VisibilityFlags>,
     /// True when the ship is invisible (e.g. submarine submerged). Sourced from
     /// the Vehicle entity's `isInvisible` property.
     pub is_invisible: bool,

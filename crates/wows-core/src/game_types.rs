@@ -396,6 +396,195 @@ impl WeaponLockType {
     }
 }
 
+/// One reason a ship is visible to the opposing team, from the client's
+/// `VisionFlags` bit enum.
+///
+/// The bit positions are read from a modern client build. Bits outside this set
+/// are preserved by [`VisibilityFlags::unknown_bits`] rather than dropped, so a
+/// build that adds or omits flags still round-trips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+#[repr(u32)]
+pub enum VisionFlag {
+    /// Direct line-of-sight spotting by a ship.
+    Ship = 0,
+    /// Spotted by a carrier's attacking squadron.
+    MainPlane = 1,
+    /// Spotted through the always-on short-range x-ray vision every ship has.
+    CommonXRay = 2,
+    /// Hydroacoustic-style detection visible only to the spotter, not the team.
+    RlsPersonal = 3,
+    /// Surveillance radar.
+    Rls = 4,
+    /// Hydroacoustic search.
+    Sonar = 5,
+    /// Firing from within a smoke screen.
+    Smoke = 6,
+    /// Spotted by a submarine's sonar ping.
+    Pinger = 7,
+    /// Spotted by a non-attacking squadron (spotter, fighter, smoke plane).
+    MiscPlane = 8,
+    /// Spotted by the Submarine Surveillance consumable.
+    SubmarineLocator = 9,
+    /// Spotted by a reconnaissance squadron.
+    Recon = 10,
+    /// Spotted by anti-missile systems.
+    AntiMissile = 11,
+}
+
+impl VisionFlag {
+    /// Every flag, in ascending bit order.
+    pub const ALL: [VisionFlag; 12] = [
+        VisionFlag::Ship,
+        VisionFlag::MainPlane,
+        VisionFlag::CommonXRay,
+        VisionFlag::RlsPersonal,
+        VisionFlag::Rls,
+        VisionFlag::Sonar,
+        VisionFlag::Smoke,
+        VisionFlag::Pinger,
+        VisionFlag::MiscPlane,
+        VisionFlag::SubmarineLocator,
+        VisionFlag::Recon,
+        VisionFlag::AntiMissile,
+    ];
+
+    pub fn bit(self) -> u32 {
+        1 << (self as u32)
+    }
+
+    /// The client's own identifier for this flag.
+    pub fn name(self) -> &'static str {
+        match self {
+            VisionFlag::Ship => "BY_SHIP",
+            VisionFlag::MainPlane => "BY_MAIN_PLANE",
+            VisionFlag::CommonXRay => "BY_COMMON_XRAY",
+            VisionFlag::RlsPersonal => "BY_RLS_PERSONAL",
+            VisionFlag::Rls => "BY_RLS",
+            VisionFlag::Sonar => "BY_SONAR",
+            VisionFlag::Smoke => "IN_SMOKE",
+            VisionFlag::Pinger => "BY_PINGER",
+            VisionFlag::MiscPlane => "BY_MISC_PLANE",
+            VisionFlag::SubmarineLocator => "BY_SUBMARINE_LOCATOR",
+            VisionFlag::Recon => "BY_RECON",
+            VisionFlag::AntiMissile => "BY_ANTI_MISSILE",
+        }
+    }
+}
+
+impl fmt::Display for VisionFlag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
+/// The `Vehicle.visibilityFlags` bitmask: why this ship is currently visible to
+/// the team opposing it. Zero means undetected (the client's `INVISIBLE`).
+///
+/// The property is `ALL_CLIENTS`, so it is populated for allies and enemies
+/// alike. It says how the ship is detected, never by whom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct VisibilityFlags(u32);
+
+impl VisibilityFlags {
+    /// Every bit this table assigns a meaning to.
+    const KNOWN: u32 = {
+        let mut mask = 0;
+        let mut bit = 0;
+        while bit < VisionFlag::ALL.len() {
+            mask |= 1 << bit;
+            bit += 1;
+        }
+        mask
+    };
+
+    pub fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+
+    /// Any flag set at all. A ship in smoke that is firing is detected, so this
+    /// is true whenever the game considers the ship spotted for any reason.
+    pub fn is_detected(self) -> bool {
+        self.0 != 0
+    }
+
+    pub fn contains(self, flag: VisionFlag) -> bool {
+        self.0 & flag.bit() != 0
+    }
+
+    /// The recognized flags that are set, in ascending bit order.
+    pub fn flags(self) -> impl Iterator<Item = VisionFlag> {
+        VisionFlag::ALL.into_iter().filter(move |flag| self.contains(*flag))
+    }
+
+    /// Set bits with no known meaning in this build. Non-zero means the client
+    /// added a flag this table does not cover yet.
+    pub fn unknown_bits(self) -> u32 {
+        self.0 & !Self::KNOWN
+    }
+
+    /// Spotted by aircraft of any kind.
+    pub fn by_any_plane(self) -> bool {
+        self.contains(VisionFlag::MainPlane) || self.contains(VisionFlag::MiscPlane) || self.contains(VisionFlag::Recon)
+    }
+
+    /// Spotted by radar, whether team-wide or spotter-only.
+    pub fn by_any_rls(self) -> bool {
+        self.contains(VisionFlag::Rls) || self.contains(VisionFlag::RlsPersonal)
+    }
+
+    /// Spotted through a hull-penetrating source rather than line of sight.
+    /// Mirrors the client's `BY_XRAY`, which deliberately excludes
+    /// `BY_COMMON_XRAY`.
+    pub fn by_xray(self) -> bool {
+        self.by_any_rls() || self.contains(VisionFlag::Sonar) || self.contains(VisionFlag::SubmarineLocator)
+    }
+
+    /// Whether this detection is shared with the spotter's team. Radar marked
+    /// spotter-only and submarine pings stay private to whoever made them.
+    pub fn visible_for_team(self) -> bool {
+        self.0 & !(VisionFlag::RlsPersonal.bit() | VisionFlag::Pinger.bit()) != 0
+    }
+}
+
+impl fmt::Display for VisibilityFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.is_detected() {
+            return write!(f, "INVISIBLE");
+        }
+        let mut first = true;
+        for flag in self.flags() {
+            if !first {
+                write!(f, "|")?;
+            }
+            write!(f, "{flag}")?;
+            first = false;
+        }
+        let unknown = self.unknown_bits();
+        if unknown != 0 {
+            if !first {
+                write!(f, "|")?;
+            }
+            write!(f, "UNKNOWN({unknown:#x})")?;
+        }
+        Ok(())
+    }
+}
+
+impl From<u32> for VisibilityFlags {
+    fn from(raw: u32) -> Self {
+        Self(raw)
+    }
+}
+
 /// Packed minimap squadron identifier.
 /// Encodes `(avatar_id: u32, index: u3, purpose: u3, departures: u1)` in the low 39 bits.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -2755,5 +2944,58 @@ mod tests {
         assert_eq!(Ribbon::from_id(54), Ribbon::Assist);
         assert_eq!(Ribbon::from_id(15), Ribbon::Penetration);
         assert_eq!(Ribbon::from_id(0), Ribbon::MainCaliber);
+    }
+
+    /// Bit values come from the client's `VisionFlags` bit-enum, which assigns
+    /// them by declaration order. Pin them so a reordering of `VisionFlag` or
+    /// `ALL` cannot silently remap every flag.
+    #[test]
+    fn vision_flag_bits_match_the_client() {
+        assert_eq!(VisionFlag::Ship.bit(), 1);
+        assert_eq!(VisionFlag::MainPlane.bit(), 2);
+        assert_eq!(VisionFlag::CommonXRay.bit(), 4);
+        assert_eq!(VisionFlag::RlsPersonal.bit(), 8);
+        assert_eq!(VisionFlag::Rls.bit(), 16);
+        assert_eq!(VisionFlag::Sonar.bit(), 32);
+        assert_eq!(VisionFlag::Smoke.bit(), 64);
+        assert_eq!(VisionFlag::Pinger.bit(), 128);
+        assert_eq!(VisionFlag::MiscPlane.bit(), 256);
+        assert_eq!(VisionFlag::SubmarineLocator.bit(), 512);
+        assert_eq!(VisionFlag::Recon.bit(), 1024);
+        assert_eq!(VisionFlag::AntiMissile.bit(), 2048);
+        // ALL must stay in ascending bit order for `flags()` to iterate in it.
+        let mut expected = 1;
+        for flag in VisionFlag::ALL {
+            assert_eq!(flag.bit(), expected);
+            expected <<= 1;
+        }
+    }
+
+    #[test]
+    fn visibility_flags_decompose() {
+        // Observed on the wire: BY_SHIP | IN_SMOKE, a ship firing from smoke.
+        let flags = VisibilityFlags::new(65);
+        assert!(flags.is_detected());
+        assert_eq!(flags.flags().collect::<Vec<_>>(), vec![VisionFlag::Ship, VisionFlag::Smoke]);
+        assert_eq!(flags.to_string(), "BY_SHIP|IN_SMOKE");
+        assert_eq!(flags.unknown_bits(), 0);
+
+        assert_eq!(VisibilityFlags::default().to_string(), "INVISIBLE");
+        assert!(!VisibilityFlags::default().is_detected());
+
+        // BY_RECON | BY_MISC_PLANE | BY_SHIP, observed on a 15.1 replay.
+        let planes = VisibilityFlags::new(1281);
+        assert!(planes.by_any_plane());
+        assert!(!planes.by_xray());
+
+        // Spotter-only sources do not reveal the ship to the spotter's team.
+        assert!(!VisibilityFlags::new(VisionFlag::RlsPersonal.bit()).visible_for_team());
+        assert!(!VisibilityFlags::new(VisionFlag::Pinger.bit()).visible_for_team());
+        assert!(VisibilityFlags::new(VisionFlag::Rls.bit()).visible_for_team());
+
+        // A bit this table does not know is surfaced, not dropped.
+        let future = VisibilityFlags::new(1 | 1 << 20);
+        assert_eq!(future.unknown_bits(), 1 << 20);
+        assert_eq!(future.to_string(), "BY_SHIP|UNKNOWN(0x100000)");
     }
 }

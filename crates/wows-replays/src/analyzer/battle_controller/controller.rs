@@ -31,6 +31,7 @@ use crate::types::EntityId;
 use crate::types::GameClock;
 use crate::types::GameParamId;
 use crate::types::Relation;
+use crate::types::VisibilityFlags;
 
 use super::state::BuildingEntity;
 use super::state::KillRecord;
@@ -666,7 +667,10 @@ pub struct VehicleProps {
     buoyancy_current_waterline: f32,
     is_alive: bool,
     is_bot: bool,
-    visibility_flags: u32,
+    /// `None` until a `visibilityFlags` value is seen. The property first
+    /// appears on the Vehicle entity in build 4462593 (10.8.0), so on older
+    /// replays it stays `None`, which is not the same as "never detected".
+    visibility_flags: Option<VisibilityFlags>,
     heat_infos: Vec<()>,
     buoyancy_rudder_index: u8,
     is_anti_air_mode: bool,
@@ -729,7 +733,7 @@ impl Default for VehicleProps {
             buoyancy_current_waterline: 0.0,
             is_alive: false,
             is_bot: false,
-            visibility_flags: 0,
+            visibility_flags: None,
             heat_infos: Vec::new(),
             buoyancy_rudder_index: 0,
             is_anti_air_mode: false,
@@ -894,7 +898,7 @@ impl VehicleProps {
         self.is_bot
     }
 
-    pub fn visibility_flags(&self) -> u32 {
+    pub fn visibility_flags(&self) -> Option<VisibilityFlags> {
         self.visibility_flags
     }
 
@@ -1161,7 +1165,11 @@ impl UpdateFromReplayArgs for VehicleProps {
         set_arg_value!(self.buoyancy_current_waterline, args, BUOYANCY_CURRENT_WATERLINE_KEY, f32);
         set_arg_value!(self.is_alive, args, IS_ALIVE_KEY, bool);
         set_arg_value!(self.is_bot, args, IS_BOT_KEY, bool);
-        set_arg_value!(self.visibility_flags, args, VISIBILITY_FLAGS_KEY, u32);
+        // Read leniently: a field present with an unexpected width across game
+        // versions leaves the flags untouched rather than aborting the parse.
+        if let Some(flags) = args.get(VISIBILITY_FLAGS_KEY).and_then(ArgValue::as_u32) {
+            self.visibility_flags = Some(VisibilityFlags::new(flags));
+        }
 
         // TODO: heatInfos
 

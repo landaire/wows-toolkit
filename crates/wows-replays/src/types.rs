@@ -17,6 +17,8 @@ pub use wowsunpack::game_types::TeamId;
 pub use wowsunpack::game_types::Vec2;
 pub use wowsunpack::game_types::Vec3;
 pub use wowsunpack::game_types::Velocity;
+pub use wowsunpack::game_types::VisibilityFlags;
+pub use wowsunpack::game_types::VisionFlag;
 pub use wowsunpack::game_types::WeaponLockType;
 pub use wowsunpack::game_types::WeaponType;
 pub use wowsunpack::game_types::WorldPos;
