@@ -26,7 +26,9 @@
 //! pure pixel-math camo compositor (`build_active_camo`) that bakes a decoded
 //! camo scheme against the hull's base albedo; `popover`'s hull popover adds
 //! the camo picker on top of it. Multi-pane comparison (M5) and hull
-//! upgrade-LOD reload (M4 Task 8c) are later milestones.
+//! upgrade-LOD reload (M4 Task 8c) are later milestones. `dock` (M5 Task 9a)
+//! is the chrome-less scaffold `pane` wraps the viewport in, ready for Task
+//! 9b to turn into a real multi-pane split.
 #![allow(dead_code)]
 // Re-exports below are the module's public surface; not everything is
 // consumed outside its own file yet (some are reserved for a later
@@ -36,6 +38,7 @@
 pub mod assets;
 pub(crate) mod camo;
 pub mod catalog;
+pub mod dock;
 pub mod legend;
 pub mod load_ship;
 pub mod pane;

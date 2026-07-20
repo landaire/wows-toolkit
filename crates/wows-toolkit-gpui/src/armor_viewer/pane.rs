@@ -1,13 +1,21 @@
 //! Single-pane Armor Viewer tab: the ship sidebar (`sidebar::Sidebar`) next
-//! to the 3D viewport (`viewport_view::ViewportView`) in a resizable split,
-//! matching the layout pattern `replay_inspector::view::ReplayInspectorView`
-//! already uses for its browser + dock split. Picking a ship in the sidebar
-//! starts a background armor load (`load_ship::spawn_load_ship_armor`); when
-//! it completes, the loaded armor is handed to the viewport
-//! (`ViewportView::show_armor`), which uploads it and frames the camera.
+//! to the 3D viewport dock (`dock::ViewportDock`, wrapping `viewport_view::
+//! ViewportView`) in a resizable split, matching the layout pattern
+//! `replay_inspector::view::ReplayInspectorView` already uses for its browser
+//! and dock split. Picking a ship in the sidebar starts a background armor
+//! load (`load_ship::spawn_load_ship_armor`); when it completes, the loaded
+//! armor is handed to the viewport (`ViewportView::show_armor`), which
+//! uploads it and frames the camera.
 //!
-//! Multi-pane comparison (Milestone 5) does not exist yet, so there is
-//! exactly one sidebar and one viewport for the whole tab.
+//! Owns the wgpu device shared by every viewport in the dock (`SharedGpu`,
+//! Milestone 5 Task 9a): created once, off the UI thread, and handed down to
+//! each viewport as an `Arc<GpuContext>`/`Arc<GpuPipeline>` via `ViewportView::
+//! set_gpu` once ready -- see `SharedGpu`'s own doc. `ViewportView` no longer
+//! creates its own device.
+//!
+//! Multi-pane comparison (Milestone 5 Task 9b) does not exist yet, so `dock`
+//! holds exactly one viewport and there is exactly one sidebar for the whole
+//! tab.
 //!
 //! Also owns the floating Armor Thickness legend (`legend.rs`): its state
 //! (`legend: LegendState`) and drag mouse handlers live here rather than on
@@ -25,10 +33,13 @@ use gpui_component::v_flex;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 
 use crate::replay_inspector::load::LoadedGameData;
+use crate::viewport::device::GpuContext;
+use crate::viewport::renderer::GpuPipeline;
 
 use super::assets::ArmorAssetsBundle;
 use super::assets::ArmorAssetsError;
 use super::assets::spawn_load_armor_assets;
+use super::dock::ViewportDock;
 use super::legend;
 use super::legend::LegendDrag;
 use super::legend::LegendState;
@@ -60,9 +71,23 @@ enum ShipLoadState {
     Failed { display_name: String, reason: String },
 }
 
+/// Lifecycle of the wgpu device shared by every viewport in the pane's dock
+/// (`ViewportDock`). Created once, off the UI thread, by `ArmorViewerPane`
+/// itself (Milestone 5 Task 9a moved this up from `ViewportView`, which
+/// previously stood up its own device per viewport) so a future multi-pane
+/// split (Task 9b) renders every pane through the same device instead of one
+/// per pane.
+enum SharedGpu {
+    Initializing,
+    Ready { ctx: Arc<GpuContext>, pipeline: Arc<GpuPipeline> },
+    Failed(String),
+}
+
 pub struct ArmorViewerPane {
     sidebar: Entity<Sidebar>,
     viewport: Entity<ViewportView>,
+    dock: Entity<ViewportDock>,
+    gpu: SharedGpu,
     bundle: BundleState,
     ship_load: ShipLoadState,
     /// Set once a ship's armor has been shown in `viewport` at least once,
@@ -87,18 +112,66 @@ impl ArmorViewerPane {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let sidebar = cx.new(|cx| Sidebar::new(window, cx));
         let viewport = cx.new(ViewportView::new);
+        let dock = cx.new(|_| ViewportDock::new(viewport.clone()));
         let subscription = cx.subscribe_in(&sidebar, window, Self::on_sidebar_event);
 
-        Self {
+        let mut this = Self {
             sidebar,
             viewport,
+            dock,
+            gpu: SharedGpu::Initializing,
             bundle: BundleState::NotStarted,
             ship_load: ShipLoadState::Idle,
             ship_loaded: false,
             legend: LegendState::default(),
             ship_load_generation: 0,
             _subscriptions: vec![subscription],
+        };
+        this.start_gpu_init(cx);
+        this
+    }
+
+    /// Stands up the shared wgpu device off the UI thread (device/adapter
+    /// negotiation blocks on `pollster` internally), once, for the whole
+    /// pane. Replaces `ViewportView`'s former per-viewport device init;
+    /// [`Self::apply_gpu_result`] hands the result down to every current (and,
+    /// via Task 9b, future) viewport in `dock`.
+    fn start_gpu_init(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let created = cx
+                .background_spawn(async move {
+                    let ctx = GpuContext::new()?;
+                    let pipeline = ctx.pipeline();
+                    Ok::<_, anyhow::Error>((ctx, pipeline))
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| this.apply_gpu_result(created, cx));
+        })
+        .detach();
+    }
+
+    /// Applies the shared device's init result: on success, stores it as
+    /// `SharedGpu::Ready` and hands the `Arc<GpuContext>`/`Arc<GpuPipeline>`
+    /// down to the (currently single) viewport via `ViewportView::set_gpu`;
+    /// on failure, stores `SharedGpu::Failed` and propagates the same reason
+    /// into the viewport via `set_gpu_failed` so it shows the error instead
+    /// of hanging on "Initializing...".
+    fn apply_gpu_result(&mut self, result: anyhow::Result<(GpuContext, GpuPipeline)>, cx: &mut Context<Self>) {
+        match result {
+            Ok((ctx, pipeline)) => {
+                let ctx = Arc::new(ctx);
+                let pipeline = Arc::new(pipeline);
+                self.gpu = SharedGpu::Ready { ctx: Arc::clone(&ctx), pipeline: Arc::clone(&pipeline) };
+                self.viewport.update(cx, |viewport, cx| viewport.set_gpu(ctx, pipeline, cx));
+            }
+            Err(e) => {
+                tracing::error!("armor viewer: failed to create shared wgpu device: {e:#}");
+                let reason = format!("{e:#}");
+                self.gpu = SharedGpu::Failed(reason.clone());
+                self.viewport.update(cx, |viewport, cx| viewport.set_gpu_failed(reason, cx));
+            }
         }
+        cx.notify();
     }
 
     /// Seeds the legend's initial visibility/collapsed/position, and the
@@ -306,7 +379,7 @@ impl Render for ArmorViewerPane {
                             .flex_none()
                             .child(self.sidebar.clone()),
                     )
-                    .child(resizable_panel().child(self.viewport.clone())),
+                    .child(resizable_panel().child(self.dock.clone())),
             ),
         );
 

@@ -14,9 +14,11 @@
 //! mutation or mesh change) gates the expensive offscreen render + CPU
 //! readback + `RenderImage` rebuild, done once per notified frame rather
 //! than every frame. Hovering the gizmo only repaints the cheap CPU overlay
-//! (no GPU work). The owned wgpu device is created on a background task so
-//! it never blocks the UI thread; the view shows a brief status message
-//! until it is ready.
+//! (no GPU work). Milestone 5 Task 9a moved wgpu device creation up to
+//! `ArmorViewerPane` (`SharedGpu`), created once and shared across every
+//! viewport rather than one owned device per view; this view starts in
+//! `GpuState::Initializing` and shows a brief status message until the pane
+//! hands it the shared `Arc<GpuContext>`/`Arc<GpuPipeline>` via `set_gpu`.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -143,13 +145,18 @@ impl MoveKey {
     }
 }
 
-/// Lifecycle of the owned wgpu device backing this viewport.
+/// Lifecycle of the shared wgpu device backing this viewport. The device
+/// itself is created once by `ArmorViewerPane` (`SharedGpu`) and handed down
+/// via [`ViewportView::set_gpu`]/[`ViewportView::set_gpu_failed`] once ready,
+/// so every viewport in a future multi-pane split (Task 9b) renders through
+/// the same `Arc<GpuContext>`/`Arc<GpuPipeline>` instead of standing up its
+/// own device.
 enum GpuState {
-    /// The background device-creation task is still running.
+    /// Waiting on the pane's shared device to finish initializing.
     Initializing,
     Ready {
-        ctx: GpuContext,
-        pipeline: GpuPipeline,
+        ctx: Arc<GpuContext>,
+        pipeline: Arc<GpuPipeline>,
     },
     Failed(String),
 }
@@ -405,7 +412,7 @@ impl ViewportView {
         let (display_sliders, display_slider_subscriptions) = Self::build_display_sliders(cx, display_settings);
         let lighting = LightingSettings::default();
         let (lighting_sliders, lighting_slider_subscriptions) = Self::build_lighting_sliders(cx, &lighting);
-        let mut this = Self {
+        Self {
             focus_handle,
             viewport: Viewport3D::new(),
             gpu: GpuState::Initializing,
@@ -450,9 +457,7 @@ impl ViewportView {
             _display_slider_subscriptions: display_slider_subscriptions,
             lighting_sliders,
             _lighting_slider_subscriptions: lighting_slider_subscriptions,
-        };
-        this.start_gpu_init(cx);
-        this
+        }
     }
 
     /// Creates a `SliderState` entity seeded to `default` (min/max/step), for
@@ -662,46 +667,36 @@ impl ViewportView {
         self.current_armor = Some(armor);
     }
 
-    /// Creates the owned wgpu device off the UI thread (device/adapter
-    /// negotiation blocks on `pollster` internally) and uploads the
-    /// placeholder mesh once it lands back on the entity.
-    fn start_gpu_init(&mut self, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let created = cx
-                .background_spawn(async move {
-                    let ctx = GpuContext::new()?;
-                    let pipeline = ctx.pipeline();
-                    Ok::<_, anyhow::Error>((ctx, pipeline))
-                })
-                .await;
-            let _ = this.update(cx, |this, cx| this.apply_gpu_result(created, cx));
-        })
-        .detach();
+    /// Adopts the pane's shared wgpu device once it finishes initializing
+    /// (`ArmorViewerPane`'s `SharedGpu` background task): transitions to
+    /// `GpuState::Ready` and uploads whatever a ship selection stashed in
+    /// `pending_armor` while the device was not ready yet, or the placeholder
+    /// cube otherwise. Called once per viewport by the pane -- for a viewport
+    /// created after the shared device is already `Ready` (Task 9b's later
+    /// panes), the pane calls this immediately instead of waiting on a new
+    /// background task.
+    pub(crate) fn set_gpu(&mut self, ctx: Arc<GpuContext>, pipeline: Arc<GpuPipeline>, cx: &mut Context<Self>) {
+        self.gpu = GpuState::Ready { ctx, pipeline };
+        // A ship picked in the sidebar while the device was still
+        // initializing takes priority over the placeholder cube.
+        if let Some(armor) = self.pending_armor.take() {
+            self.upload_armor_now(armor);
+        } else {
+            let GpuState::Ready { ctx, .. } = &self.gpu else { unreachable!() };
+            let (vertices, indices) = unit_cube(PLACEHOLDER_COLOR);
+            self.viewport.add_mesh(&ctx.device, &vertices, &indices, LAYER_DEFAULT);
+            let (min, max) = (Vec3::new(-0.5, -0.5, -0.5), Vec3::new(0.5, 0.5, 0.5));
+            self.viewport.camera = ArcballCamera::from_bounds(min, max);
+            self.model_bounds = Some((min, max));
+        }
+        self.viewport.mark_dirty();
+        cx.notify();
     }
 
-    fn apply_gpu_result(&mut self, result: anyhow::Result<(GpuContext, GpuPipeline)>, cx: &mut Context<Self>) {
-        match result {
-            Ok((ctx, pipeline)) => {
-                self.gpu = GpuState::Ready { ctx, pipeline };
-                // A ship picked in the sidebar while the device was still
-                // initializing takes priority over the placeholder cube.
-                if let Some(armor) = self.pending_armor.take() {
-                    self.upload_armor_now(armor);
-                } else {
-                    let GpuState::Ready { ctx, .. } = &self.gpu else { unreachable!() };
-                    let (vertices, indices) = unit_cube(PLACEHOLDER_COLOR);
-                    self.viewport.add_mesh(&ctx.device, &vertices, &indices, LAYER_DEFAULT);
-                    let (min, max) = (Vec3::new(-0.5, -0.5, -0.5), Vec3::new(0.5, 0.5, 0.5));
-                    self.viewport.camera = ArcballCamera::from_bounds(min, max);
-                    self.model_bounds = Some((min, max));
-                }
-                self.viewport.mark_dirty();
-            }
-            Err(e) => {
-                tracing::error!("armor viewport: failed to create owned wgpu device: {e:#}");
-                self.gpu = GpuState::Failed(format!("{e:#}"));
-            }
-        }
+    /// Adopts the pane's shared-device init failure: shows `reason` instead
+    /// of the viewport, matching the previous per-viewport failure path.
+    pub(crate) fn set_gpu_failed(&mut self, reason: String, cx: &mut Context<Self>) {
+        self.gpu = GpuState::Failed(reason);
         cx.notify();
     }
 
