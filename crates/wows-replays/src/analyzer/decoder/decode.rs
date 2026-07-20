@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::packet2::EntityMethodPacket;
 use crate::packet2::Packet;
 use crate::packet2::PacketType;
@@ -772,6 +774,29 @@ impl MinimapUpdate {
     }
 }
 
+/// One surface contact reported by a submarine's hydrophone. Carries a coarse
+/// minimap position only, not a full detection: the contact never enters the
+/// client as a Vehicle entity.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HydrophoneZoneContact {
+    /// Minimap zone the contact sits in. `SURFACE_BROADCAST_ZONE_INFO`, used by
+    /// the team-shared channel, carries no zone.
+    pub zone_id: Option<u8>,
+    pub entity_id: EntityId,
+    pub position: WorldPos2D,
+}
+
+/// One contact from `SUBMARINE_HYDROPHONE_TARGET_INFO`, which carries a full
+/// pose and ship identity rather than just a zone.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SubmarineHydrophoneContact {
+    pub entity_id: EntityId,
+    pub params_id: GameParamId,
+    pub position: WorldPos,
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
 /// A single shell in an artillery salvo (from SHOT in alias.xml)
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ArtilleryShotData {
@@ -1161,6 +1186,36 @@ pub enum DecodedPacketPayload<'replay, 'argtype, 'rawpacket> {
         /// Usage parameters (15.2+): how the consumable was targeted.
         /// `None` for pre-15.2 replays.
         usage_params: Option<ConsumableUsageParams>,
+    },
+    /// The recording player's ship is (or is no longer) held by a submarine's
+    /// hydrophone. Sent to the detected ship, not the submarine. The game client
+    /// receives this but surfaces nothing for it in the UI.
+    DetectedByHydrophone {
+        detected: bool,
+    },
+    /// Surface contacts the recording player's own hydrophone is holding.
+    /// `broadcast` distinguishes the team-shared variant
+    /// (`updateSurfaceHydrophoneBroadcast`) from the private one.
+    HydrophoneContacts {
+        contacts: Vec<HydrophoneZoneContact>,
+        broadcast: bool,
+    },
+    /// A contact the recording player's hydrophone stopped holding.
+    HydrophoneContactLost {
+        entity: EntityId,
+    },
+    /// Every hydrophone contact was dropped at once.
+    HydrophoneCleared,
+    /// Full-pose contacts reported to a submarine's hydrophone.
+    SubmarineHydrophoneContacts {
+        /// The submarine holding the contacts. This is a Vehicle method, so
+        /// merged multi-perspective sessions can see more than one holder.
+        holder: EntityId,
+        contacts: Vec<SubmarineHydrophoneContact>,
+        /// How long a contact stays held. `None` on builds whose
+        /// `addSubmarineHydrophoneTargets` carries no lifetime argument; those
+        /// contacts are dropped by an explicit clear instead of expiring.
+        zone_life_time: Option<Duration>,
     },
     /// Indicates a change to the "cruise state," which is the fixed settings for various controls
     /// such as steering (using the Q & E keys), throttle, and dive planes.
@@ -2066,6 +2121,68 @@ where
             };
 
             DecodedPacketPayload::Consumable { entity: *entity_id, consumable, duration, usage_params }
+        } else if *method == "updateDetectionBySurfaceHydrophone" {
+            let detected = match args.first() {
+                Some(ArgValue::Uint8(v)) => *v != 0,
+                Some(ArgValue::Int8(v)) => *v != 0,
+                _ => return DecodedPacketPayload::EntityMethod(packet),
+            };
+            DecodedPacketPayload::DetectedByHydrophone { detected }
+        } else if *method == "updateSurfaceHydrophone" || *method == "updateSurfaceHydrophoneBroadcast" {
+            // The two channels carry different dicts: SURFACE_HYDROPHONE_ZONE_INFO
+            // has a zoneID, SURFACE_BROADCAST_ZONE_INFO does not.
+            let broadcast = *method == "updateSurfaceHydrophoneBroadcast";
+            let Some(ArgValue::Array(entries)) = args.first() else {
+                return DecodedPacketPayload::EntityMethod(packet);
+            };
+            let mut contacts = Vec::new();
+            for entry in entries.iter() {
+                let ArgValue::FixedDict(dict) = entry else { continue };
+                let (Some(entity), Some(ArgValue::Vector2((x, z)))) =
+                    (dict.get("entityID").and_then(ArgValue::as_i32), dict.get("position2D"))
+                else {
+                    continue;
+                };
+                contacts.push(HydrophoneZoneContact {
+                    zone_id: dict.get("zoneID").and_then(ArgValue::as_u32).map(|z| z as u8),
+                    entity_id: EntityId::from(entity),
+                    position: WorldPos2D { x: *x, z: *z },
+                });
+            }
+            DecodedPacketPayload::HydrophoneContacts { contacts, broadcast }
+        } else if *method == "surfaceHydrophoneRemoveTarget" {
+            let Some(entity) = args.first().and_then(ArgValue::as_i32) else {
+                return DecodedPacketPayload::EntityMethod(packet);
+            };
+            DecodedPacketPayload::HydrophoneContactLost { entity: EntityId::from(entity) }
+        } else if *method == "clearSubmarineHydrophone" || *method == "hideHydrophoneIndicator" {
+            DecodedPacketPayload::HydrophoneCleared
+        } else if *method == "addSubmarineHydrophoneTargets" {
+            let Some(ArgValue::Array(entries)) = args.first() else {
+                return DecodedPacketPayload::EntityMethod(packet);
+            };
+            let mut contacts = Vec::new();
+            for entry in entries.iter() {
+                let ArgValue::FixedDict(dict) = entry else { continue };
+                let (Some(entity), Some(params_id), Some(ArgValue::Vector3((x, y, z))), Some(yaw), Some(pitch)) = (
+                    dict.get("entityID").and_then(ArgValue::as_i32),
+                    dict.get("paramsID").and_then(ArgValue::as_u32),
+                    dict.get("position"),
+                    dict.get("yaw").and_then(ArgValue::as_f32),
+                    dict.get("pitch").and_then(ArgValue::as_f32),
+                ) else {
+                    continue;
+                };
+                contacts.push(SubmarineHydrophoneContact {
+                    entity_id: EntityId::from(entity),
+                    params_id: GameParamId::from(params_id),
+                    position: WorldPos::new(*x, *y, *z),
+                    yaw,
+                    pitch,
+                });
+            }
+            let zone_life_time = args.get(1).and_then(ArgValue::as_u32).map(|secs| Duration::from_secs(secs as u64));
+            DecodedPacketPayload::SubmarineHydrophoneContacts { holder: *entity_id, contacts, zone_life_time }
         } else if *method == "receiveArtilleryShots" {
             let salvos_array = match &args[0] {
                 ArgValue::Array(a) => a,

@@ -21,6 +21,9 @@ use wows_replays::analyzer::decoder::Recognized;
 use wows_replays::types::ArenaId;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
+use wows_replays::types::GameParamId;
+use wows_replays::types::WorldPos;
+use wows_replays::types::WorldPos2D;
 use wowsunpack::game_types::BattleStage;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
@@ -220,3 +223,62 @@ pub struct PlayerIndex(pub HashMap<EntityId, Rc<Player>>);
 /// PlayerIndex.
 #[derive(Resource, Clone, Default)]
 pub struct ReplayVehicles(pub Vec<VehicleInfoMeta>);
+
+/// Submarine hydrophone state observed from the recording player's client.
+///
+/// The hydrophone is a separate channel from `Vehicle.visibilityFlags`: a
+/// hydrophone contact never enters the client as a Vehicle entity and never
+/// sets a vision flag, so it is invisible to detection-flag analysis.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct Hydrophone {
+    /// Whether the recording player's ship is currently held by an enemy
+    /// submarine's hydrophone. `None` until the first report.
+    pub detected: Option<bool>,
+    /// Every transition of `detected`, in clock order.
+    pub detection_changes: Vec<HydrophoneDetectionChange>,
+    /// Contacts currently held, keyed by holding submarine and contact. A
+    /// merged multi-perspective session can observe more than one holder.
+    pub contacts: HashMap<HydrophoneContactKey, HydrophoneContact>,
+}
+
+impl Hydrophone {
+    /// Drop contacts whose lifetime has elapsed by `clock`. Contacts with no
+    /// lifetime are held until an explicit clear.
+    pub fn expire(&mut self, clock: GameClock) {
+        self.contacts.retain(|_, c| c.expires_at.is_none_or(|expiry| expiry > clock));
+    }
+}
+
+/// Identifies a contact by the submarine holding it and the ship being held.
+/// The zone channel reports no holder, so `holder` is `None` there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HydrophoneContactKey {
+    pub holder: Option<EntityId>,
+    pub target: EntityId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HydrophoneDetectionChange {
+    pub clock: GameClock,
+    pub detected: bool,
+}
+
+/// A contact held by a submarine's hydrophone. Zone contacts carry only a
+/// coarse minimap position; submarine contacts carry a full pose.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HydrophoneContact {
+    pub position: HydrophoneContactPosition,
+    /// When the contact lapses. `None` when the reporting RPC carried no
+    /// lifetime, in which case only an explicit clear drops it.
+    pub expires_at: Option<GameClock>,
+    pub last_updated: GameClock,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HydrophoneContactPosition {
+    /// From the zone channel: a coarse minimap position. `zone_id` is absent on
+    /// the team-shared `SURFACE_BROADCAST_ZONE_INFO` variant.
+    Zone { zone_id: Option<u8>, position: WorldPos2D, broadcast: bool },
+    /// From `SUBMARINE_HYDROPHONE_TARGET_INFO`: full pose and ship identity.
+    Pose { params_id: GameParamId, position: WorldPos, yaw: f32, pitch: f32 },
+}

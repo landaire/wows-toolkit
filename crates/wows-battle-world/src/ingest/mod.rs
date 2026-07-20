@@ -5,6 +5,7 @@ pub mod chat;
 pub mod combat;
 pub mod consumables;
 pub mod entities;
+pub mod hydrophone;
 pub mod match_state;
 pub mod positions;
 pub mod projectiles;
@@ -118,6 +119,21 @@ pub fn dispatch<G: ResourceLoader>(
         }
         DecodedPacketPayload::Consumable { entity, consumable, duration, usage_params } => {
             consumables::handle_consumable(entity, consumable.clone(), duration, usage_params, clock, world);
+        }
+        DecodedPacketPayload::DetectedByHydrophone { detected } => {
+            hydrophone::handle_detection(detected, world, clock);
+        }
+        DecodedPacketPayload::HydrophoneContacts { ref contacts, broadcast } => {
+            hydrophone::handle_zone_contacts(contacts, broadcast, world, clock);
+        }
+        DecodedPacketPayload::HydrophoneContactLost { entity } => {
+            hydrophone::handle_contact_lost(entity, world);
+        }
+        DecodedPacketPayload::HydrophoneCleared => {
+            hydrophone::handle_cleared(world);
+        }
+        DecodedPacketPayload::SubmarineHydrophoneContacts { holder, ref contacts, zone_life_time } => {
+            hydrophone::handle_submarine_contacts(holder, contacts, zone_life_time, world, clock);
         }
         DecodedPacketPayload::CruiseState { .. } => {}
         DecodedPacketPayload::Map(_) => {}

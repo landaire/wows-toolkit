@@ -28,6 +28,7 @@ use crate::resources::Clock;
 use crate::resources::DamageLedger;
 use crate::resources::DeadShips;
 use crate::resources::EntityIndex;
+use crate::resources::Hydrophone;
 use crate::resources::InteractiveZoneIndex;
 use crate::resources::KillLog;
 use crate::resources::MatchState;
@@ -225,6 +226,7 @@ fn insert_empty_resources(world: &mut World) {
     world.insert_resource(ActiveShotOrder::default());
     world.insert_resource(ActiveTorpedoOrder::default());
     world.insert_resource(SelfStats::default());
+    world.insert_resource(Hydrophone::default());
     world.insert_resource(CapturePointOrder::default());
     world.insert_resource(WeatherZoneOrder::default());
     world.insert_resource(InteractiveZoneIndex::default());
