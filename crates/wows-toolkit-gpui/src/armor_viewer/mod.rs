@@ -16,10 +16,14 @@
 //! toggles. `visibility` holds the zone/part/plate override maps' shared
 //! types (`VisibilityFilter`, undo/redo snapshot stack, sidebar-highlight
 //! key) plus the tri-state tree's pure derivation logic; `popover` builds the
-//! toolbar button and the armor-visibility popover's gpui tree on top of it.
+//! toolbar button and the armor-visibility popover's gpui tree on top of it,
+//! plus (Milestone 4 Task 8a) the hull-visibility popover's tree, backed by
+//! `upload_hull`'s hull-only mesh upload (kept separate from `upload`'s armor
+//! upload so a hull-only change never rebuilds the armor mesh set).
 //! `viewport_view.rs` owns the actual `part_visibility`/`plate_visibility`/
-//! undo-stack state and wires all of the above into the mouse and key
-//! handlers. Multi-pane comparison (M5) and hull/camo display (M4) are later
+//! `hull_visibility`/undo-stack state and wires all of the above into the
+//! mouse and key handlers. Multi-pane comparison (M5) and hull camo
+//! compositing / hull upgrade-LOD reload (M4 Task 8b/8c) are later
 //! milestones.
 #![allow(dead_code)]
 // Re-exports below are the module's public surface; not everything is
@@ -36,6 +40,7 @@ pub mod picking_ui;
 pub mod popover;
 pub mod sidebar;
 pub mod upload;
+pub mod upload_hull;
 pub mod viewport_view;
 pub mod visibility;
 

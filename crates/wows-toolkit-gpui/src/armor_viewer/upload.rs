@@ -10,16 +10,23 @@
 //! logic via [`upload_armor_meshes`] but leaves the camera untouched, so
 //! toggling a plate's visibility does not reset the user's view.
 //!
-//! **v1 scope.** Armor meshes only. Hull meshes are loaded into
-//! [`LoadedShipArmor`] (see `load_ship.rs`) but never uploaded here -- hull
-//! display, camo, and the part-level *display* toggles (opacity, hull
-//! visibility) are Milestone 4. Camera-orbit-ellipse and ship-center overlays
-//! are likewise out of scope (their toggles do not exist yet). `show_hidden_only`
-//! is still a fixed v1 default (no pane UI for it yet). [`DisplaySettings`]
-//! (Task 7b's display-settings popover, `popover.rs`) makes `show_plate_edges`/
-//! `show_waterline`/`waterline_opacity`/`show_zero_mm`/`armor_opacity`
-//! user-mutable; `part_visibility` and `plate_visibility` (Milestone 3 Task 7's
-//! armor-visibility popover) are likewise both user-mutable.
+//! **v1 scope.** Armor meshes only -- hull meshes are uploaded separately by
+//! `upload_hull.rs` (Milestone 4 Task 8a), which shares this module's
+//! `Viewport3D` but tracks its own mesh id list so a hull-only change never
+//! runs this module's (comparatively expensive) armor rebuild. Camo and the
+//! part-level display toggles are Milestone 4 Task 8b/8c. Camera-orbit-ellipse
+//! and ship-center overlays are likewise out of scope (their toggles do not
+//! exist yet). `show_hidden_only` is still a fixed v1 default (no pane UI for
+//! it yet). [`DisplaySettings`] (Task 7b's display-settings popover,
+//! `popover.rs`) makes `show_plate_edges`/`show_waterline`/`waterline_opacity`/
+//! `show_zero_mm`/`armor_opacity` user-mutable, each through
+//! `ViewportView::mutate_display_settings` (re-uploads armor); `hull_opaque`
+//! (Task 8a) lives on the same struct for persistence symmetry with
+//! `ArmorViewerDefaultsRow`, but is mutated through the hull-only
+//! `ViewportView::set_hull_opaque` instead, so toggling it never triggers this
+//! module's armor rebuild. `part_visibility` and `plate_visibility`
+//! (Milestone 3 Task 7's armor-visibility popover) are likewise both
+//! user-mutable.
 
 use std::collections::HashMap;
 
@@ -55,6 +62,13 @@ pub struct DisplaySettings {
     pub waterline_opacity: f32,
     pub show_zero_mm: bool,
     pub armor_opacity: f32,
+    /// Whether hull meshes render fully opaque with depth writes (like armor
+    /// plates) rather than semi-transparent behind them. Task 8's hull upload
+    /// (`upload_hull.rs`) reads this for `hull_alpha`/`hull_layer`; mutated
+    /// through `ViewportView::set_hull_opaque` rather than
+    /// `mutate_display_settings`, since a hull-only change should re-upload
+    /// only the hull, not the (potentially much larger) armor mesh set.
+    pub hull_opaque: bool,
 }
 
 impl Default for DisplaySettings {
@@ -66,6 +80,7 @@ impl Default for DisplaySettings {
             waterline_opacity: 0.3,
             show_zero_mm: false,
             armor_opacity: 1.0,
+            hull_opaque: false,
         }
     }
 }
@@ -82,6 +97,7 @@ impl DisplaySettings {
             waterline_opacity: row.waterline_opacity as f32,
             show_zero_mm: row.show_zero_mm,
             armor_opacity: row.armor_opacity as f32,
+            hull_opaque: row.hull_opaque,
         }
     }
 }
@@ -530,6 +546,7 @@ mod tests {
         assert!(!d.show_zero_mm);
         assert_eq!(d.armor_opacity, 1.0);
         assert_eq!(d.waterline_opacity, 0.3);
+        assert!(!d.hull_opaque);
     }
 
     #[test]
@@ -545,7 +562,7 @@ mod tests {
             show_zero_mm: true,
             armor_opacity: 0.5,
             waterline_opacity: 0.75,
-            hull_opaque: false,
+            hull_opaque: true,
             hull_all_visible: false,
             armor_all_visible: true,
             show_splash_boxes: false,
@@ -558,6 +575,7 @@ mod tests {
         assert!(!d.show_plate_edges);
         assert!(!d.show_waterline);
         assert!(d.show_zero_mm);
+        assert!(d.hull_opaque);
         assert_eq!(d.armor_opacity, 0.5);
         assert_eq!(d.waterline_opacity, 0.75);
     }

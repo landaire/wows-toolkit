@@ -41,6 +41,7 @@ use crate::armor_viewer::picking_ui;
 use crate::armor_viewer::popover;
 use crate::armor_viewer::upload;
 use crate::armor_viewer::upload::upload_armor_to_viewport;
+use crate::armor_viewer::upload_hull;
 use crate::armor_viewer::visibility;
 use crate::armor_viewer::visibility::SidebarHighlightKey;
 use crate::armor_viewer::visibility::VisibilityFilter;
@@ -231,6 +232,25 @@ pub struct ViewportView {
     /// new ship loads. Mutations always go through `snapshot_and_mutate`.
     /// `pub(crate)` so `popover.rs` can read it while building the popover's tree.
     pub(crate) plate_visibility: HashMap<PlateKey, bool>,
+    /// Per hull-mesh visibility overrides from the hull-visibility popover
+    /// (`popover.rs`, Milestone 4 Task 8a): mesh name -> is-visible. Absent =
+    /// HIDDEN (opposite default from `part_visibility`, matching the egui
+    /// app's own `hull_visibility` default -- a freshly loaded ship shows no
+    /// hull until the user turns parts on). Reset (cleared) whenever a new
+    /// ship loads. `pub(crate)` so `popover.rs` can read it while building the
+    /// hull popover's tree.
+    pub(crate) hull_visibility: HashMap<String, bool>,
+    /// Mesh ids of the currently-uploaded hull meshes, so
+    /// [`Self::reupload_hull`] can remove the old set before re-adding the
+    /// ones `hull_visibility` now marks visible. Ports the egui app's
+    /// `pane.hull_mesh_ids`.
+    hull_mesh_ids: Vec<MeshId>,
+    /// Which hull-part-group headers are expanded in the hull-visibility
+    /// popover's tree. Purely local UI state (not visibility, not
+    /// undo-tracked); collapsed by default, matching egui's own
+    /// `load_with_default_open(.., false)`. `pub(crate)` so `popover.rs` can
+    /// read it while building the hull popover's tree.
+    pub(crate) expanded_hull_groups: HashSet<String>,
     /// Undo/redo history over `{part_visibility, plate_visibility}`. Every
     /// mutator snapshots the pre-mutation state here via `snapshot_and_mutate`
     /// before applying the change. Cleared whenever a new ship loads.
@@ -311,6 +331,9 @@ impl ViewportView {
             current_armor: None,
             part_visibility: HashMap::new(),
             plate_visibility: HashMap::new(),
+            hull_visibility: HashMap::new(),
+            hull_mesh_ids: Vec::new(),
+            expanded_hull_groups: HashSet::new(),
             undo_stack: VisibilityUndoStack::default(),
             expanded_zones: HashSet::new(),
             expanded_parts: HashSet::new(),
@@ -447,17 +470,25 @@ impl ViewportView {
 
     /// Uploads `armor` into the viewport and keeps it as `current_armor` for
     /// later visibility-only re-uploads (`reupload_current_armor`). Resets
-    /// `part_visibility`/`plate_visibility`, the undo/redo history, the
-    /// popover's expanded-row state, and any hover state -- a freshly loaded
-    /// ship starts with every plate visible and nothing hovered/undoable,
-    /// matching the egui app's own reset on ship load (`tab.rs:1453-1454`,
-    /// `2393-2394`, `2741`). Callers must have already checked `self.gpu` is
-    /// `Ready`; a no-op otherwise.
+    /// `part_visibility`/`plate_visibility`/`hull_visibility`, the undo/redo
+    /// history, the popover's expanded-row state, and any hover state -- a
+    /// freshly loaded ship starts with every armor plate visible, every hull
+    /// mesh HIDDEN (matching the egui app's own `hull_visibility` default),
+    /// and nothing hovered/undoable, matching the egui app's own reset on
+    /// ship load (`tab.rs:1453-1454`, `2393-2394`, `2741`). Uploads the hull
+    /// too (a visual no-op the first time, since `hull_visibility` is empty,
+    /// but exercises the same path a later hull-visibility toggle uses).
+    /// Callers must have already checked `self.gpu` is `Ready`; a no-op
+    /// otherwise.
     fn upload_armor_now(&mut self, armor: Arc<LoadedShipArmor>) {
-        let GpuState::Ready { ctx, .. } = &self.gpu else { return };
+        let GpuState::Ready { ctx, pipeline } = &self.gpu else { return };
         let device = ctx.device.clone();
+        let queue = ctx.queue.clone();
         self.part_visibility.clear();
         self.plate_visibility.clear();
+        self.hull_visibility.clear();
+        self.hull_mesh_ids.clear();
+        self.expanded_hull_groups.clear();
         self.undo_stack.clear();
         self.expanded_zones.clear();
         self.expanded_parts.clear();
@@ -467,6 +498,16 @@ impl ViewportView {
         let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
         self.mesh_triangle_info =
             upload_armor_to_viewport(&mut self.viewport, &device, &armor, visibility, self.display_settings);
+        upload_hull::upload_hull_meshes(
+            &mut self.viewport,
+            &device,
+            &queue,
+            pipeline,
+            &armor,
+            &mut self.hull_mesh_ids,
+            &self.hull_visibility,
+            self.display_settings.hull_opaque,
+        );
         self.model_bounds = Some(armor.bounds);
         self.current_armor = Some(armor);
     }
@@ -1082,6 +1123,15 @@ impl ViewportView {
         cx.notify();
     }
 
+    /// Toggles a hull-part-group header's expanded/collapsed state in the
+    /// hull-visibility popover tree. Purely local UI state; not undo-tracked.
+    pub(crate) fn toggle_hull_group_expanded(&mut self, group: String, cx: &mut Context<Self>) {
+        if !self.expanded_hull_groups.remove(&group) {
+            self.expanded_hull_groups.insert(group);
+        }
+        cx.notify();
+    }
+
     fn current_visibility_snapshot(&self) -> VisibilitySnapshot {
         VisibilitySnapshot {
             part_visibility: self.part_visibility.clone(),
@@ -1117,12 +1167,28 @@ impl ViewportView {
     /// than waiting for the next mouse-move. The popover's sidebar-hover
     /// highlight, if active, is likewise rebuilt against the fresh geometry.
     fn reupload_current_armor(&mut self, cx: &mut Context<Self>) {
-        let GpuState::Ready { ctx, .. } = &self.gpu else { return };
+        let GpuState::Ready { ctx, pipeline } = &self.gpu else { return };
         let Some(armor) = self.current_armor.clone() else { return };
         let device = ctx.device.clone();
+        let queue = ctx.queue.clone();
         let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
         self.mesh_triangle_info =
             upload::reupload_armor_plates(&mut self.viewport, &device, &armor, visibility, self.display_settings);
+        // `viewport.clear()` (inside the armor re-upload above) wipes every
+        // mesh, hull included -- top the hull back up now that the armor pass
+        // is done, keeping the two upload paths decoupled (a hull-only change
+        // never lands here, see `reupload_hull`) while staying in sync with
+        // whatever `Viewport3D::clear` just destroyed.
+        upload_hull::upload_hull_meshes(
+            &mut self.viewport,
+            &device,
+            &queue,
+            pipeline,
+            &armor,
+            &mut self.hull_mesh_ids,
+            &self.hull_visibility,
+            self.display_settings.hull_opaque,
+        );
         // `viewport.clear()` (inside the re-upload) already dropped the old
         // highlight meshes; forget the stale ids before rebuilding against
         // the fresh geometry.
@@ -1158,6 +1224,58 @@ impl ViewportView {
     ) {
         mutate(&mut self.display_settings);
         self.reupload_current_armor(cx);
+    }
+
+    /// Re-uploads only the hull meshes (`upload_hull::upload_hull_meshes`),
+    /// honoring the current `hull_visibility`/`display_settings.hull_opaque`.
+    /// Never touches armor meshes, visibility overrides, or the camera, and
+    /// never calls `Viewport3D::clear()` itself -- a hull-only change stays
+    /// cheap even on a ship with a large armor mesh set. A no-op if the GPU
+    /// device isn't ready or there is no armor loaded.
+    fn reupload_hull(&mut self) {
+        let GpuState::Ready { ctx, pipeline } = &self.gpu else { return };
+        let Some(armor) = self.current_armor.clone() else { return };
+        let device = ctx.device.clone();
+        let queue = ctx.queue.clone();
+        upload_hull::upload_hull_meshes(
+            &mut self.viewport,
+            &device,
+            &queue,
+            pipeline,
+            &armor,
+            &mut self.hull_mesh_ids,
+            &self.hull_visibility,
+            self.display_settings.hull_opaque,
+        );
+    }
+
+    /// Mutates `hull_visibility` via `mutate` and re-uploads only the hull --
+    /// the hull-visibility popover's All/None buttons and per-mesh checkboxes
+    /// (`popover.rs`) all go through this single seam. Unlike
+    /// `mutate_display_settings`, this never touches armor meshes or the
+    /// camera (see `reupload_hull`'s doc).
+    pub(crate) fn mutate_hull_visibility(
+        &mut self,
+        cx: &mut Context<Self>,
+        mutate: impl FnOnce(&mut HashMap<String, bool>),
+    ) {
+        mutate(&mut self.hull_visibility);
+        self.reupload_hull();
+        cx.notify();
+    }
+
+    /// Sets `display_settings.hull_opaque` and re-uploads only the hull (its
+    /// alpha and depth-write layer both depend on this flag, see
+    /// `upload_hull::upload_hull_meshes`'s doc). Kept separate from
+    /// `mutate_display_settings` so toggling hull opacity -- a hull-only
+    /// change -- never rebuilds the armor mesh set.
+    pub(crate) fn set_hull_opaque(&mut self, opaque: bool, cx: &mut Context<Self>) {
+        if self.display_settings.hull_opaque == opaque {
+            return;
+        }
+        self.display_settings.hull_opaque = opaque;
+        self.reupload_hull();
+        cx.notify();
     }
 
     /// Current lighting settings, for `popover.rs` to read while building the

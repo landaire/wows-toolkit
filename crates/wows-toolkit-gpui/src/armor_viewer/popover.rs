@@ -2,19 +2,18 @@
 //! `viewport_view.rs` renders above the 3D viewport, and the popover content
 //! it opens -- the tri-state zone/material/plate tree. Ports
 //! `armor_viewer::ui::tab::draw_armor_visibility_popover` (`tab.rs:4403-4611`).
-//! The popover's own `PopoverState`/`Context<PopoverState>` is a different
-//! entity than [`ViewportView`], so every row's click/hover handler captures
-//! a clone of `Entity<ViewportView>` and mutates it via `.update(cx, ..)`,
-//! matching this file's own `.context_menu()` closures. The popover's
-//! `.content()` closure is only invoked while the popover is open (see
-//! `gpui_component::popover::Popover`'s `RenderOnce` impl), so rebuilding the
-//! whole tree here on every open-render does not cost anything while the
-//! popover is closed -- unlike the always-visible viewport, which re-renders
-//! on every hover-driven `cx.notify()`.
-//!
-//! **Task 7b note.** This toolbar has room for a second button (display
-//! settings): `render_toolbar` returns an `h_flex` row, so a sibling
-//! `.child(..)` is all a later task needs to add.
+//! Also builds the display-settings popover (Task 7b) and the
+//! hull-visibility popover (Milestone 4 Task 8a, `render_hull_button`/
+//! `render_hull_popover_content`, porting `draw_hull_visibility_popover`,
+//! `tab.rs:3135-3317`). The popover's own `PopoverState`/`Context<PopoverState>`
+//! is a different entity than [`ViewportView`], so every row's click/hover
+//! handler captures a clone of `Entity<ViewportView>` and mutates it via
+//! `.update(cx, ..)`, matching this file's own `.context_menu()` closures.
+//! The popover's `.content()` closure is only invoked while the popover is
+//! open (see `gpui_component::popover::Popover`'s `RenderOnce` impl), so
+//! rebuilding the whole tree here on every open-render does not cost
+//! anything while the popover is closed -- unlike the always-visible
+//! viewport, which re-renders on every hover-driven `cx.notify()`.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -46,6 +45,8 @@ use super::load_ship::ZonePart;
 use super::viewport_view::ViewportView;
 use super::visibility::SidebarHighlightKey;
 use super::visibility::TriState;
+use super::visibility::hull_group_all_on;
+use super::visibility::hull_group_any_on;
 use super::visibility::part_any_plate_hidden;
 use super::visibility::part_on;
 use super::visibility::plate_explicitly_hidden;
@@ -74,6 +75,7 @@ pub fn render_toolbar(
         .border_b_1()
         .border_color(cx.theme().border)
         .child(render_visibility_button(view, entity))
+        .child(render_hull_button(view, entity))
         .child(render_display_button(view, entity))
 }
 
@@ -176,6 +178,202 @@ fn render_popover_content(
         .into_any_element()
 }
 
+/// Toolbar trigger for the hull-visibility popover (Milestone 4 Task 8a):
+/// All/None, the `hull_opaque` toggle, and a per-part-group tri-state tree of
+/// hull meshes (all hidden by default -- see `viewport_view.rs`'s
+/// `hull_visibility` doc). Ports the egui app's `draw_hull_visibility_popover`
+/// V1 subset (`tab.rs:3135-3317`); see `render_hull_popover_content`'s doc for
+/// the exact deferrals.
+fn render_hull_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
+    let has_armor = view.current_armor.is_some();
+    let close_entity = entity.clone();
+    let content_entity = entity.clone();
+
+    Popover::new("armor-hull-visibility-popover")
+        .trigger(
+            Button::new("armor-hull-visibility-popover-trigger")
+                .icon(IconName::Frame)
+                .label("Hull")
+                .compact()
+                .tooltip("Hull visibility")
+                .disabled(!has_armor),
+        )
+        .on_open_change(move |open, _window, cx| {
+            if !*open {
+                close_entity.update(cx, |view, cx| view.clear_sidebar_hover(cx));
+            }
+        })
+        .content(move |_state, window, cx| render_hull_popover_content(&content_entity, window, cx))
+}
+
+/// Builds the hull-visibility popover's tree from a snapshot of `entity`'s
+/// current state (same lazy-`.content()` rationale as
+/// `render_popover_content`'s doc).
+///
+/// **Deferred** (Milestone 4 Task 8b/8c, matching the M4 Task 8a brief): the
+/// hull-upgrade selector, module-alternative selectors, the camo picker, and
+/// the LOD selector (`tab.rs:3163-3265`) -- none of their backing state
+/// (`selected_hull`/`selected_modules`/`selected_camo`/`hull_lod`) exists in
+/// this port yet, so there is nothing to wire a selector to. The sidebar-hover
+/// highlight for a hovered hull row (egui's
+/// `SidebarHighlightKey::HullMeshes`) is likewise deferred -- see
+/// `upload_hull.rs`'s module doc.
+fn render_hull_popover_content(
+    entity: &Entity<ViewportView>,
+    _window: &mut Window,
+    cx: &mut Context<PopoverState>,
+) -> AnyElement {
+    let (armor, hull_visibility, hull_opaque, expanded_hull_groups) = {
+        let view = entity.read(cx);
+        (
+            view.current_armor.clone(),
+            view.hull_visibility.clone(),
+            view.display_settings.hull_opaque,
+            view.expanded_hull_groups.clone(),
+        )
+    };
+
+    let Some(armor) = armor else {
+        return div().text_sm().opacity(0.6).p_2().child("No ship loaded").into_any_element();
+    };
+
+    let warn = cx.theme().warning;
+    let border = cx.theme().border;
+
+    let all_names: Vec<String> = armor.hull_part_groups.iter().flat_map(|(_, names)| names.clone()).collect();
+    let all_entity = entity.clone();
+    let all_names_for_all = all_names.clone();
+    let none_entity = entity.clone();
+    let opaque_entity = entity.clone();
+
+    let header = h_flex()
+        .flex_none()
+        .gap_2()
+        .items_center()
+        .child(Button::new("armor-hull-vis-all").label("All").compact().on_click(move |_, _window, cx| {
+            let names = all_names_for_all.clone();
+            all_entity.update(cx, |view, cx| {
+                view.mutate_hull_visibility(cx, |hull_visibility| {
+                    for name in names {
+                        hull_visibility.insert(name, true);
+                    }
+                })
+            });
+        }))
+        .child(Button::new("armor-hull-vis-none").label("None").compact().on_click(move |_, _window, cx| {
+            let names = all_names.clone();
+            none_entity.update(cx, |view, cx| {
+                view.mutate_hull_visibility(cx, |hull_visibility| {
+                    for name in names {
+                        hull_visibility.insert(name, false);
+                    }
+                })
+            });
+        }))
+        .child(Checkbox::new("armor-hull-vis-opaque").label("Opaque").checked(hull_opaque).on_click(
+            move |checked, _window, cx| {
+                let checked = *checked;
+                opaque_entity.update(cx, |view, cx| view.set_hull_opaque(checked, cx));
+            },
+        ));
+
+    let mut tree = v_flex().gap_1();
+    for (group, names) in &armor.hull_part_groups {
+        tree = tree.child(render_hull_group_row(entity, group, names, &hull_visibility, &expanded_hull_groups, warn));
+    }
+
+    v_flex()
+        .w(px(260.))
+        .gap_2()
+        .child(header)
+        .child(div().h(px(1.)).bg(border))
+        .child(div().id("armor-hull-visibility-tree-scroll").max_h(px(360.)).overflow_y_scroll().child(tree))
+        .into_any_element()
+}
+
+/// One hull-part-group header row + (if expanded) its individual mesh
+/// checkboxes. Ports the group `CollapsingState` block
+/// (`tab.rs:3272-3312`).
+fn render_hull_group_row(
+    entity: &Entity<ViewportView>,
+    group: &str,
+    names: &[String],
+    hull_visibility: &HashMap<String, bool>,
+    expanded_hull_groups: &HashSet<String>,
+    warn: Hsla,
+) -> AnyElement {
+    let all_on = hull_group_all_on(hull_visibility, names);
+    let any_on = hull_group_any_on(hull_visibility, names);
+    let state = TriState::from_all_any(all_on, any_on);
+    let expanded = expanded_hull_groups.contains(group);
+
+    let toggle_entity = entity.clone();
+    let toggle_names = names.to_vec();
+    let checkbox = tri_checkbox(format!("armor-hull-vis-group-{group}"), state, warn, move |checked, _window, cx| {
+        let checked = *checked;
+        let names = toggle_names.clone();
+        toggle_entity.update(cx, |view, cx| {
+            view.mutate_hull_visibility(cx, |hull_visibility| {
+                for name in names {
+                    hull_visibility.insert(name, checked);
+                }
+            })
+        });
+    });
+
+    let expand_entity = entity.clone();
+    let expand_group = group.to_string();
+    let chevron = div()
+        .id(format!("armor-hull-vis-group-expand-{group}"))
+        .flex_none()
+        .child(Icon::new(if expanded { IconName::ChevronDown } else { IconName::ChevronRight }))
+        .on_click(move |_, _window, cx| {
+            expand_entity.update(cx, |view, cx| view.toggle_hull_group_expanded(expand_group.clone(), cx));
+        });
+
+    let header = h_flex()
+        .id(format!("armor-hull-vis-group-row-{group}"))
+        .gap_1()
+        .items_center()
+        .child(chevron)
+        .child(checkbox)
+        .child(div().text_sm().child(group.to_string()));
+
+    let mut column = v_flex().gap_1().child(header);
+    if expanded {
+        let mut body = v_flex().gap_1().pl(px(20.));
+        for name in names {
+            body = body.child(render_hull_mesh_row(entity, name, hull_visibility));
+        }
+        column = column.child(body);
+    }
+    column.into_any_element()
+}
+
+/// One hull-mesh checkbox row. Ports `tab.rs:3300-3310`.
+fn render_hull_mesh_row(
+    entity: &Entity<ViewportView>,
+    name: &str,
+    hull_visibility: &HashMap<String, bool>,
+) -> AnyElement {
+    let visible = hull_visibility.get(name).copied().unwrap_or(false);
+    let toggle_entity = entity.clone();
+    let toggle_name = name.to_string();
+    Checkbox::new(format!("armor-hull-vis-mesh-{name}"))
+        .label(name.to_string())
+        .checked(visible)
+        .on_click(move |checked, _window, cx| {
+            let checked = *checked;
+            let name = toggle_name.clone();
+            toggle_entity.update(cx, |view, cx| {
+                view.mutate_hull_visibility(cx, |hull_visibility| {
+                    hull_visibility.insert(name, checked);
+                })
+            });
+        })
+        .into_any_element()
+}
+
 /// Toolbar trigger for the display-settings popover (Task 7b): plate edges,
 /// waterline, zero-mm plates, armor opacity, and hull lighting. Ports the
 /// egui app's `draw_display_settings_popover` V1 subset (`tab.rs:4875-5144`)
@@ -211,9 +409,11 @@ fn render_display_button(view: &ViewportView, entity: &Entity<ViewportView>) -> 
 /// handler to a slider the way the checkboxes below attach `on_click`.
 ///
 /// **Deferred** (later milestones or out of this task's scope, matching the
-/// M3 Task 7b brief): the ship-center toggle, the hull-visibility master
-/// toggle and its `hull_opaque` sub-toggle (hull meshes aren't uploaded
-/// until M4), the entire camera-rings/camera-perspective analysis section
+/// M3 Task 7b brief): the ship-center toggle and the hull-visibility master
+/// toggle (the egui original's duplicate `hull_opaque` checkbox here,
+/// `tab.rs:4911`, is likewise not mirrored -- the Hull popover's own
+/// `hull_opaque` checkbox, `render_hull_popover_content`, is this port's only
+/// control for it), the entire camera-rings/camera-perspective analysis section
 /// (`tab.rs:4924-5043`), the save-defaults button (this port has no settings
 /// write-back path yet -- same limitation `legend.rs`'s `end_legend_drag`
 /// documents), the key/ambient color pickers (`gpui_component::color_picker`

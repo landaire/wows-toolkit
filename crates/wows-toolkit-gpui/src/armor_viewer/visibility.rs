@@ -168,6 +168,21 @@ pub(crate) fn clear_plate_overrides(
     }
 }
 
+/// Whether every named hull mesh in `names` is visible per `hull_visibility`
+/// (absent/false = hidden, matching `upload_hull::upload_hull_meshes`'s own
+/// default). Drives the hull popover's group-checkbox tri-state
+/// (`popover.rs`); ports the `group_all_on`/`group_any_on` locals from
+/// `draw_hull_visibility_popover` (`tab.rs:3273-3274`).
+pub(crate) fn hull_group_all_on(hull_visibility: &HashMap<String, bool>, names: &[String]) -> bool {
+    names.iter().all(|n| hull_visibility.get(n).copied().unwrap_or(false))
+}
+
+/// Whether any named hull mesh in `names` is visible per `hull_visibility`.
+/// See [`hull_group_all_on`]'s doc.
+pub(crate) fn hull_group_any_on(hull_visibility: &HashMap<String, bool>, names: &[String]) -> bool {
+    names.iter().any(|n| hull_visibility.get(n).copied().unwrap_or(false))
+}
+
 /// A checkbox's on/off/indeterminate state, driving both the checked value
 /// and whether the popover draws the partial-state dash.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -356,5 +371,33 @@ mod tests {
         assert!(TriState::from_all_any(true, true).checked());
         assert!(TriState::from_all_any(false, true).partial());
         assert!(!TriState::from_all_any(true, true).partial());
+    }
+
+    #[test]
+    fn hull_group_all_on_requires_every_named_mesh_visible() {
+        let mut vis = HashMap::new();
+        vis.insert("Hull_A".to_string(), true);
+        vis.insert("Hull_B".to_string(), false);
+        let names = vec!["Hull_A".to_string(), "Hull_B".to_string()];
+        assert!(!hull_group_all_on(&vis, &names));
+        assert!(hull_group_any_on(&vis, &names));
+    }
+
+    #[test]
+    fn hull_group_all_on_is_true_when_every_named_mesh_is_visible() {
+        let mut vis = HashMap::new();
+        vis.insert("Hull_A".to_string(), true);
+        vis.insert("Hull_B".to_string(), true);
+        let names = vec!["Hull_A".to_string(), "Hull_B".to_string()];
+        assert!(hull_group_all_on(&vis, &names));
+        assert!(hull_group_any_on(&vis, &names));
+    }
+
+    #[test]
+    fn hull_group_any_on_is_false_when_every_named_mesh_is_hidden_or_absent() {
+        let vis = HashMap::new();
+        let names = vec!["Hull_A".to_string(), "Hull_B".to_string()];
+        assert!(!hull_group_all_on(&vis, &names));
+        assert!(!hull_group_any_on(&vis, &names));
     }
 }
