@@ -34,6 +34,7 @@ use gpui_component::slider::SliderState;
 use gpui_component::v_flex;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wowsunpack::export::camo_textures::CamoSchemeId;
+use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::camo_textures::SchemeTextures;
 use wowsunpack::export::camouflage::UvTransform;
 use wowsunpack::game_params::keys::ComponentType;
@@ -247,6 +248,14 @@ pub struct ViewportView {
     /// Mutations always go through `snapshot_and_mutate`. `pub(crate)` so
     /// `popover.rs` can read it while building the popover's tree.
     pub(crate) part_visibility: HashMap<(String, String), bool>,
+    /// Persisted `ArmorViewerDefaultsRow.armor_all_visible`, read only when a
+    /// new ship loads (`upload_armor_now`) to seed `part_visibility`. Set by
+    /// `apply_armor_defaults`; defaults to `true` (matching
+    /// `ArmorViewerDefaults::default()`) before any row loads. Does not
+    /// retroactively reseed an already-loaded ship's visibility -- carrying
+    /// the previous ship's end-state into the next ship is a deferred
+    /// nuance, not in this fix's scope.
+    armor_all_visible: bool,
     /// Explicitly-hidden plates (click-to-hide / context-menu toggle,
     /// `picking_ui.rs`, and the popover's plate rows); absent = visible.
     /// Present value = true means explicitly hidden (opposite sense from
@@ -262,6 +271,12 @@ pub struct ViewportView {
     /// ship loads. `pub(crate)` so `popover.rs` can read it while building the
     /// hull popover's tree.
     pub(crate) hull_visibility: HashMap<String, bool>,
+    /// Persisted `ArmorViewerDefaultsRow.hull_all_visible`, read only when a
+    /// new ship loads (`upload_armor_now`) to seed `hull_visibility`. Set by
+    /// `apply_armor_defaults`; defaults to `false` (matching
+    /// `ArmorViewerDefaults::default()`) before any row loads. Same
+    /// deferred-reseed scope note as `armor_all_visible`.
+    hull_all_visible: bool,
     /// Mesh ids of the currently-uploaded hull meshes, so
     /// [`Self::reupload_hull`] can remove the old set before re-adding the
     /// ones `hull_visibility` now marks visible. Ports the egui app's
@@ -406,8 +421,10 @@ impl ViewportView {
             pending_armor: None,
             current_armor: None,
             part_visibility: HashMap::new(),
+            armor_all_visible: true,
             plate_visibility: HashMap::new(),
             hull_visibility: HashMap::new(),
+            hull_all_visible: false,
             hull_mesh_ids: Vec::new(),
             expanded_hull_groups: HashSet::new(),
             expanded_camo_groups: HashSet::new(),
@@ -531,6 +548,8 @@ impl ViewportView {
     /// apply_armor_defaults`, itself called once from `App::apply_settings`.
     pub fn apply_armor_defaults(&mut self, defaults: Option<&ArmorViewerDefaultsRow>, cx: &mut Context<Self>) {
         self.display_settings = upload::DisplaySettings::from_defaults(defaults);
+        self.armor_all_visible = defaults.map(|d| d.armor_all_visible).unwrap_or(true);
+        self.hull_all_visible = defaults.map(|d| d.hull_all_visible).unwrap_or(false);
         let (display_sliders, subs) = Self::build_display_sliders(cx, self.display_settings);
         self.display_sliders = display_sliders;
         self._display_slider_subscriptions = subs;
@@ -566,21 +585,28 @@ impl ViewportView {
 
     /// Uploads `armor` into the viewport and keeps it as `current_armor` for
     /// later visibility-only re-uploads (`reupload_current_armor`). Resets
-    /// `part_visibility`/`plate_visibility`/`hull_visibility`, the hull/LOD/
-    /// module selection (`selected_hull`/`hull_lod`/`selected_modules`), the
-    /// undo/redo history, the popover's expanded-row state, and any hover
-    /// state -- a freshly loaded ship starts with every armor plate visible,
-    /// every hull mesh HIDDEN (matching the egui app's own `hull_visibility`
-    /// default), stock hull at the highest-detail LOD, and nothing
-    /// hovered/undoable, matching the egui app's own reset on ship load
+    /// `part_visibility`/`plate_visibility`/`hull_visibility` (then reseeds
+    /// them from the persisted `armor_all_visible`/`hull_all_visible`
+    /// defaults, see below), the hull/LOD/module selection (`selected_hull`/
+    /// `hull_lod`/`selected_modules`), the undo/redo history, the popover's
+    /// expanded-row state, and any hover state -- a freshly loaded ship
+    /// starts at stock hull, highest-detail LOD, and nothing hovered/
+    /// undoable, matching the egui app's own reset on ship load
     /// (`tab.rs:1453-1454`, `2393-2394`, `2741`). Uploads the hull too (a
-    /// visual no-op the first time, since `hull_visibility` is empty, but
+    /// visual no-op the first time when `hull_all_visible` is `false`, but
     /// exercises the same path a later hull-visibility toggle uses). Callers
     /// must have already checked `self.gpu` is `Ready`; a no-op otherwise.
+    ///
+    /// Also bumps `reload_generation`, invalidating any reload still in
+    /// flight against the *previous* ship: that reload's background task
+    /// already captured the pre-bump value, so `apply_reload_result`'s
+    /// generation guard discards its result instead of overwriting this
+    /// (possibly different) ship's freshly uploaded armor.
     fn upload_armor_now(&mut self, armor: Arc<LoadedShipArmor>) {
         let GpuState::Ready { ctx, pipeline } = &self.gpu else { return };
         let device = ctx.device.clone();
         let queue = ctx.queue.clone();
+        self.reload_generation += 1;
         self.part_visibility.clear();
         self.plate_visibility.clear();
         self.hull_visibility.clear();
@@ -600,6 +626,23 @@ impl ViewportView {
         self.hovered = None;
         self.hover_highlight = None;
         self.sidebar_highlight = None;
+        // `part_visibility` absent means visible and `hull_visibility`
+        // absent means hidden (see their field docs), so only the
+        // non-default outcome needs explicit entries here.
+        if !self.armor_all_visible {
+            for (zone, parts) in &armor.zone_parts {
+                for part in parts {
+                    self.part_visibility.insert((zone.clone(), part.clone()), false);
+                }
+            }
+        }
+        if self.hull_all_visible {
+            for (_group, names) in &armor.hull_part_groups {
+                for name in names {
+                    self.hull_visibility.insert(name.clone(), true);
+                }
+            }
+        }
         let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
         self.mesh_triangle_info =
             upload_armor_to_viewport(&mut self.viewport, &device, &armor, visibility, self.display_settings);
@@ -1402,6 +1445,9 @@ impl ViewportView {
     /// to re-apply the same `selected_camo` against a freshly reloaded
     /// armor's hull textures (a hull/LOD/module reload).
     pub(crate) fn select_camo(&mut self, id: Option<CamoSchemeId>, cx: &mut Context<Self>) {
+        if self.selected_camo == id {
+            return;
+        }
         self.selected_camo = id;
         match self.current_armor.clone() {
             Some(armor) => {
@@ -1502,18 +1548,22 @@ impl ViewportView {
     /// Applies a completed `reload_ship` result. Discards it if a newer
     /// reload superseded this one (`generation` guard, mirroring
     /// `ArmorViewerPane::apply_ship_load_result`'s identical pattern for ship
-    /// selection). Otherwise: retains whatever `hull_visibility`/
+    /// selection). Otherwise: resolves the selected camo across the reload by
+    /// name (`remap_camo_selection`) and clears `camo_texture_cache`, since
+    /// `CamoSchemeId` is only a stable index within a single load's
+    /// `camo_scheme_infos` list -- see that type's own doc -- and this reload
+    /// rebuilds the list from scratch; retains whatever `hull_visibility`/
     /// `part_visibility`/`plate_visibility` entries still apply to the new
     /// armor (`visibility::retain_*`; a hull/LOD/module change can add or
-    /// drop parts/plates/hull meshes), re-applies the active camo against the
-    /// new armor's hull textures (`recompute_active_camo`), replaces
-    /// `current_armor`, and re-uploads armor + hull WITHOUT reframing the
-    /// camera (`upload::reupload_armor_plates`, not `upload_armor_to_viewport`)
-    /// -- the user is mid-view when they change a hull/LOD/module selector,
-    /// and a reload must not jump it. Clears the undo/redo history and any
-    /// hover/sidebar highlight, since either can reference a part/plate/mesh
-    /// the reload just removed, matching the egui app's own
-    /// `apply_upgrade_reload` (`tab.rs:2737`).
+    /// drop parts/plates/hull meshes); re-applies the (now-resolved) active
+    /// camo against the new armor's hull textures (`recompute_active_camo`);
+    /// replaces `current_armor`; and re-uploads armor + hull WITHOUT
+    /// reframing the camera (`upload::reupload_armor_plates`, not
+    /// `upload_armor_to_viewport`) -- the user is mid-view when they change a
+    /// hull/LOD/module selector, and a reload must not jump it. Clears the
+    /// undo/redo history and any hover/sidebar highlight, since either can
+    /// reference a part/plate/mesh the reload just removed, matching the egui
+    /// app's own `apply_upgrade_reload` (`tab.rs:2737`).
     fn apply_reload_result(
         &mut self,
         generation: u64,
@@ -1533,6 +1583,24 @@ impl ViewportView {
         let GpuState::Ready { ctx, pipeline } = &self.gpu else { return };
         let device = ctx.device.clone();
         let queue = ctx.queue.clone();
+
+        // Resolve the selected camo by name while `self.current_armor` is
+        // still the OLD armor (both old and new `camo_scheme_infos` are
+        // reachable here) and before it is replaced below.
+        if let Some(old_id) = self.selected_camo {
+            let old_infos: &[CamoSchemeInfo] =
+                self.current_armor.as_ref().map(|a| a.camo_scheme_infos.as_slice()).unwrap_or(&[]);
+            self.selected_camo = remap_camo_selection(old_infos, &armor.camo_scheme_infos, old_id);
+            if self.selected_camo.is_none() {
+                tracing::warn!(
+                    "armor viewer: selected camo scheme {old_id:?} did not survive the reload (name not found in the reloaded ship's scheme list); reverting to stock"
+                );
+            }
+        }
+        // Keyed by the pre-reload ids, which are no longer valid indices
+        // into the new `camo_scheme_infos` list -- a stale-keyed hit here
+        // would skip decode and apply a different scheme's textures.
+        self.camo_texture_cache.clear();
 
         visibility::retain_hull_visibility(&mut self.hull_visibility, &armor.hull_part_groups);
         visibility::retain_part_visibility(&mut self.part_visibility, &armor.zone_parts);
@@ -1792,6 +1860,25 @@ impl Render for ViewportView {
     }
 }
 
+/// Resolves a selected camo scheme across a full reload (Task 8c) by name.
+/// `CamoSchemeId` is a raw index into a per-load `camo_scheme_infos` list
+/// (see that type's own doc: "never persisted") -- a reload rebuilds the list
+/// from scratch, so `old_id` can end up pointing at an entirely different
+/// scheme in `new_infos`, or at nothing at all. Looks up `old_id`'s
+/// `display_name` in `old_infos`, then finds the entry with that same
+/// `display_name` in `new_infos` and returns its (new) id. Returns `None` if
+/// `old_id` has no entry in `old_infos`, or if no entry in `new_infos` shares
+/// its name -- the camo did not survive the reload (for example, a hull
+/// upgrade dropped a ship-specific scheme).
+fn remap_camo_selection(
+    old_infos: &[CamoSchemeInfo],
+    new_infos: &[CamoSchemeInfo],
+    old_id: CamoSchemeId,
+) -> Option<CamoSchemeId> {
+    let name = &old_infos.iter().find(|i| i.id == old_id)?.display_name;
+    new_infos.iter().find(|i| &i.display_name == name).map(|i| i.id)
+}
+
 /// Decodes and composites `selected_camo`'s textures (if any) against
 /// `armor`'s hull textures, returning the active-camo texture/UV maps for
 /// [`upload_hull::upload_hull_meshes`] (empty maps mean "render base albedo
@@ -1951,16 +2038,32 @@ fn paint_axis_label(label: &'static str, tip: Point<Pixels>, window: &mut Window
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::Axis;
     use super::axis_color;
     use super::ball_bounds;
     use super::point_to_vec2;
+    use super::remap_camo_selection;
     use super::vec2_to_point;
     use super::view_rect_from_bounds;
     use gpui::Bounds;
     use gpui::point;
     use gpui::px;
     use gpui::size;
+    use wowsunpack::export::camo_textures::CamoSchemeId;
+    use wowsunpack::export::camo_textures::CamoSchemeInfo;
+    use wowsunpack::export::gltf_export::CamoOrigin;
+
+    fn scheme(id: usize, display_name: &str, origin: CamoOrigin) -> CamoSchemeInfo {
+        CamoSchemeInfo {
+            id: CamoSchemeId(id),
+            display_name: display_name.to_string(),
+            origin,
+            use_color_scheme: false,
+            uv_transforms: HashMap::new(),
+        }
+    }
 
     #[test]
     fn view_rect_from_bounds_matches_origin_and_size() {
@@ -1993,5 +2096,29 @@ mod tests {
         assert_eq!(b.size.height.as_f32(), 14.0);
         assert_eq!(b.origin.x.as_f32(), 93.0);
         assert_eq!(b.origin.y.as_f32(), 43.0);
+    }
+
+    #[test]
+    fn remap_camo_selection_follows_name_across_shuffled_ids() {
+        let old = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific), scheme(1, "Camo B", CamoOrigin::Universal)];
+        // The reload rebuilt the scheme list in a different order: "Camo A"
+        // is now id 1, not id 0 -- exactly the instability this guards
+        // against.
+        let new = vec![scheme(0, "Camo B", CamoOrigin::Universal), scheme(1, "Camo A", CamoOrigin::ShipSpecific)];
+        assert_eq!(remap_camo_selection(&old, &new, CamoSchemeId(0)), Some(CamoSchemeId(1)));
+    }
+
+    #[test]
+    fn remap_camo_selection_none_when_name_gone_from_new_list() {
+        let old = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific)];
+        let new: Vec<CamoSchemeInfo> = vec![scheme(0, "Camo B", CamoOrigin::Universal)];
+        assert_eq!(remap_camo_selection(&old, &new, CamoSchemeId(0)), None);
+    }
+
+    #[test]
+    fn remap_camo_selection_none_when_old_id_unknown() {
+        let old: Vec<CamoSchemeInfo> = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific)];
+        let new = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific)];
+        assert_eq!(remap_camo_selection(&old, &new, CamoSchemeId(5)), None);
     }
 }

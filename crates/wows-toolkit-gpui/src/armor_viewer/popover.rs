@@ -218,14 +218,16 @@ fn render_hull_button(view: &ViewportView, entity: &Entity<ViewportView>) -> imp
 /// Builds the hull-visibility popover's tree from a snapshot of `entity`'s
 /// current state (same lazy-`.content()` rationale as
 /// `render_popover_content`'s doc). Between the header and the hull tree,
-/// adds the Milestone 4 Task 8c selectors -- hull upgrade
+/// adds -- in the same order as egui's `draw_hull_visibility_popover`
+/// (`tab.rs:3135-3317`) -- the Milestone 4 Task 8c selectors: hull upgrade
 /// (`render_hull_upgrade_row`, when the ship has more than one), module
 /// alternatives (`render_module_alternative_row`, one row per component type
-/// with more than one option), and LOD (`render_lod_row`, when the ship has
-/// more than one) -- each selecting a new value on `ViewportView` and
-/// triggering a background reload (`ViewportView::reload_ship`). Below the
-/// hull tree, adds the camo picker (Milestone 4 Task 8b, `render_camo_picker`)
-/// when `armor.camo_scheme_infos` is non-empty.
+/// with more than one option), the camo picker (Milestone 4 Task 8b,
+/// `render_camo_picker`, when `armor.camo_scheme_infos` is non-empty), and
+/// LOD (`render_lod_row`, when the ship has more than one) -- the selectors
+/// each select a new value on `ViewportView` and trigger a background reload
+/// (`ViewportView::reload_ship`), the camo picker changes the active camo
+/// directly (`ViewportView::select_camo`).
 ///
 /// **Deferred.** The sidebar-hover highlight for a hovered hull row (egui's
 /// `SidebarHighlightKey::HullMeshes`) is out of this port's scope -- see
@@ -314,6 +316,19 @@ fn render_hull_popover_content(
             col = col.child(render_module_alternative_row(entity, *ct, alternatives, selected_modules.get(ct)));
         }
     }
+
+    // Matches egui's `draw_hull_visibility_popover` order (`tab.rs:3135-
+    // 3317`): header, hull upgrade, module alternatives, camo, LOD, then the
+    // hull tree.
+    if !armor.camo_scheme_infos.is_empty() {
+        col = col.child(div().h(px(1.)).bg(border)).child(render_camo_picker(
+            entity,
+            &armor,
+            selected_camo,
+            &expanded_camo_groups,
+        ));
+    }
+
     if armor.hull_lod_count > 1 {
         col = col.child(render_lod_row(entity, &armor, hull_lod));
     }
@@ -326,15 +341,6 @@ fn render_hull_popover_content(
     col = col
         .child(div().h(px(1.)).bg(border))
         .child(div().id("armor-hull-visibility-tree-scroll").max_h(px(360.)).overflow_y_scroll().child(tree));
-
-    if !armor.camo_scheme_infos.is_empty() {
-        col = col.child(div().h(px(1.)).bg(border)).child(render_camo_picker(
-            entity,
-            &armor,
-            selected_camo,
-            &expanded_camo_groups,
-        ));
-    }
 
     col.into_any_element()
 }
