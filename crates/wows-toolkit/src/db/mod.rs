@@ -16,6 +16,9 @@ pub mod save;
 // currently needs it directly (the config crate uses its own local db_path).
 #[allow(unused_imports)]
 pub use wows_toolkit_config::db_path;
+// Populated by later index tasks; no call site in this crate yet.
+#[allow(unused_imports)]
+pub use wows_toolkit_config::index;
 pub use wows_toolkit_config::is_migrated;
 pub use wows_toolkit_config::load_main_window_settings;
 pub use wows_toolkit_config::open_db;

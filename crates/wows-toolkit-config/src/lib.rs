@@ -5,6 +5,7 @@
 //! egui app and the GPUI port read the same on-disk database and formats.
 
 mod db;
+pub mod index;
 pub mod queries;
 mod settings;
 mod window;

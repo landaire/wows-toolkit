@@ -11187,12 +11187,15 @@ name = "wows-toolkit-config"
 version = "0.1.0"
 dependencies = [
  "home",
+ "jiff",
  "serde",
  "serde_json",
  "sqlx",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "wows-core",
 ]
 
 [[package]]

@@ -1,0 +1,222 @@
+use std::path::PathBuf;
+
+use jiff::Timestamp;
+use wows_core::game_types::AccountId;
+use wows_core::game_types::ArenaId;
+use wows_core::game_types::GameParamId;
+
+/// Identifies one replay group (the live dir, an imported dir, or an ad-hoc set).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SourceId(pub i64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceKind {
+    Live,
+    ImportedDir,
+    AdHoc,
+}
+
+impl SourceKind {
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            SourceKind::Live => "live",
+            SourceKind::ImportedDir => "imported_dir",
+            SourceKind::AdHoc => "ad_hoc",
+        }
+    }
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "live" => Some(SourceKind::Live),
+            "imported_dir" => Some(SourceKind::ImportedDir),
+            "ad_hoc" => Some(SourceKind::AdHoc),
+            _ => None,
+        }
+    }
+}
+
+/// Perspective-relative battle outcome. `Unknown` when the player left before
+/// results were written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchOutcome {
+    Win,
+    Loss,
+    Draw,
+    Unknown,
+}
+
+impl MatchOutcome {
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            MatchOutcome::Win => "win",
+            MatchOutcome::Loss => "loss",
+            MatchOutcome::Draw => "draw",
+            MatchOutcome::Unknown => "unknown",
+        }
+    }
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "win" => Some(MatchOutcome::Win),
+            "loss" => Some(MatchOutcome::Loss),
+            "draw" => Some(MatchOutcome::Draw),
+            "unknown" => Some(MatchOutcome::Unknown),
+            _ => None,
+        }
+    }
+}
+
+/// A roster vehicle's relation to the indexing replay's perspective.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VehicleRelation {
+    SelfPlayer,
+    Ally,
+    Enemy,
+}
+
+impl VehicleRelation {
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            VehicleRelation::SelfPlayer => "self",
+            VehicleRelation::Ally => "ally",
+            VehicleRelation::Enemy => "enemy",
+        }
+    }
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "self" => Some(VehicleRelation::SelfPlayer),
+            "ally" => Some(VehicleRelation::Ally),
+            "enemy" => Some(VehicleRelation::Enemy),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexSource {
+    pub id: SourceId,
+    pub name: String,
+    pub kind: SourceKind,
+    pub root_path: Option<PathBuf>,
+}
+
+/// Objective, server-authoritative match facts (one row per `arena_id`).
+#[derive(Debug, Clone)]
+pub struct ObjectiveMatch {
+    pub arena_id: ArenaId,
+    pub timestamp: Timestamp,
+    pub map: String,
+    pub game_mode: String,
+    pub game_type: String,
+    pub match_group: String,
+    pub version_build: Option<u32>,
+}
+
+/// A specific replay file of a match, within a group, with its perspective.
+#[derive(Debug, Clone)]
+pub struct ReplayRecord {
+    pub arena_id: ArenaId,
+    pub source_id: SourceId,
+    pub replay_path: PathBuf,
+    pub file_mtime: Option<i64>,
+    pub outcome: MatchOutcome,
+    pub self_account_id: Option<AccountId>,
+    pub self_ship_id: Option<GameParamId>,
+    pub self_survived: Option<bool>,
+    pub self_damage: Option<u64>,
+    pub self_kills: Option<i64>,
+    pub self_pr: Option<f64>,
+    pub results_available: bool,
+    pub indexed_at: Timestamp,
+}
+
+/// A roster vehicle (objective, shared across perspectives).
+#[derive(Debug, Clone)]
+pub struct IndexedVehicleRow {
+    pub arena_id: ArenaId,
+    pub account_id: AccountId,
+    pub player_name: String,
+    pub clan: String,
+    pub realm: Option<String>,
+    pub ship_id: GameParamId,
+    pub ship_index: String,
+    pub ship_name: String,
+    pub nation: String,
+    pub species: String,
+    pub tier: u32,
+    pub relation: VehicleRelation,
+    pub division_id: Option<i64>,
+    pub survived: Option<bool>,
+    pub damage: Option<u64>,
+    pub kills: Option<i64>,
+    pub spotting: Option<u64>,
+    pub potential: Option<u64>,
+    pub received: Option<u64>,
+    pub pr: Option<f64>,
+    pub is_test_ship: bool,
+}
+
+/// A search/recent result: objective match plus the chosen record's perspective.
+#[derive(Debug, Clone)]
+pub struct MatchHit {
+    pub arena_id: ArenaId,
+    pub timestamp: Timestamp,
+    pub map: String,
+    pub game_mode: String,
+    pub game_type: String,
+    pub match_group: String,
+    pub version_build: Option<u32>,
+    pub source_id: SourceId,
+    pub outcome: MatchOutcome,
+    pub self_account_id: Option<AccountId>,
+    pub self_ship_id: Option<GameParamId>,
+    pub self_survived: Option<bool>,
+    pub self_damage: Option<u64>,
+    pub self_kills: Option<i64>,
+    pub self_pr: Option<f64>,
+    pub results_available: bool,
+    pub replay_path: PathBuf,
+    pub file_mtime: Option<i64>,
+}
+
+/// A distinct player seen in the index (for palette/Search facets).
+#[derive(Debug, Clone)]
+pub struct PlayerFacet {
+    pub account_id: AccountId,
+    pub latest_name: String,
+    pub clan: String,
+    pub match_count: i64,
+}
+
+/// A distinct ship the user has played (for palette/Search facets).
+#[derive(Debug, Clone)]
+pub struct ShipFacet {
+    pub ship_id: GameParamId,
+    pub ship_name: String,
+    pub match_count: i64,
+}
+
+/// Optional constraints for a match search. All `None` matches everything.
+#[derive(Debug, Clone, Default)]
+pub struct MatchFilter {
+    pub source_ids: Option<Vec<SourceId>>,
+    pub outcome: Option<MatchOutcome>,
+    pub self_ship: Option<GameParamId>,
+    pub species: Option<String>,
+    pub tier: Option<u32>,
+    pub map: Option<String>,
+    pub game_type: Option<String>,
+    pub date_from: Option<Timestamp>,
+    pub date_to: Option<Timestamp>,
+    pub self_damage_min: Option<u64>,
+    pub self_damage_max: Option<u64>,
+    pub self_survived: Option<bool>,
+    pub player_present: Option<AccountId>,
+    pub enemy_ship: Option<GameParamId>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum IndexError {
+    #[error("index database error")]
+    Sqlx(#[from] sqlx::Error),
+    #[error("unknown source: {0:?}")]
+    UnknownSource(SourceId),
+}
