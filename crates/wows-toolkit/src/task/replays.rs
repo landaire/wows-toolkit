@@ -30,8 +30,11 @@ use wowsunpack::game_data;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
 
+use crate::data::settings::DataSharingMode;
 use crate::data::wows_data::GameAsset;
 use crate::data::wows_data::WorldOfWarshipsData;
+use crate::task::replay_upload::ReplayUploadAction;
+use crate::task::replay_upload::decide_upload_action;
 use crate::twitch::TwitchState;
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::Replay;
@@ -684,37 +687,75 @@ fn parse_replay_data_in_background(
                                 debug!("game type is: {}", &game_type);
                             }
                             if !replay_parsed_before {
-                                if data.should_send_replays && is_valid_game_type_for_shipbuilds {
-                                    // Send the replay builds to the remote server
-                                    for player in report.players().iter().filter(|player| !player.is_bot()) {
-                                        let Some(realm) = player.initial_state().realm() else {
-                                            continue;
-                                        };
-                                        #[cfg(not(feature = "shipbuilds_debugging"))]
-                                        let url = "https://shipbuilds.com/api/ship_builds";
-                                        #[cfg(feature = "shipbuilds_debugging")]
-                                        let url = "http://192.168.1.215:3000/api/ship_builds";
+                                let self_confirmed_non_test = report
+                                    .players()
+                                    .iter()
+                                    .find(|p| p.relation().is_self())
+                                    .and_then(|p| p.vehicle().vehicle())
+                                    .map(|v| !v.is_test_ship())
+                                    .unwrap_or(false);
 
-                                        if let Some(payload) = build_tracker::BuildTrackerPayload::build_from(
-                                            player,
-                                            realm.to_string(),
-                                            report.version(),
-                                            game_type.to_string(),
-                                            &metadata_provider,
-                                        ) {
-                                            // TODO: Bulk API
-                                            let res = client.post(url).json(&payload).send();
-                                            if let Err(e) = res {
-                                                error!("error sending request: {:?}", e);
-                                                if e.is_connect() {
-                                                    break 'main_loop;
+                                match decide_upload_action(
+                                    data.data_sharing_mode,
+                                    is_valid_game_type_for_shipbuilds,
+                                    self_confirmed_non_test,
+                                ) {
+                                    ReplayUploadAction::Skip => {}
+                                    ReplayUploadAction::BuildData => {
+                                        for player in report.players().iter().filter(|player| !player.is_bot()) {
+                                            let Some(realm) = player.initial_state().realm() else {
+                                                continue;
+                                            };
+                                            #[cfg(not(feature = "shipbuilds_debugging"))]
+                                            let url = "https://shipbuilds.com/api/ship_builds";
+                                            #[cfg(feature = "shipbuilds_debugging")]
+                                            let url = "http://192.168.1.215:3000/api/ship_builds";
+
+                                            if let Some(payload) = build_tracker::BuildTrackerPayload::build_from(
+                                                player,
+                                                realm.to_string(),
+                                                report.version(),
+                                                game_type.to_string(),
+                                                &metadata_provider,
+                                            ) {
+                                                let res = client.post(url).json(&payload).send();
+                                                if let Err(e) = res {
+                                                    error!("error sending request: {:?}", e);
+                                                    if e.is_connect() {
+                                                        break 'main_loop;
+                                                    }
+                                                }
+                                            } else {
+                                                error!("no vehicle entity for player?");
+                                            }
+                                        }
+                                        debug!("Successfully sent all builds");
+                                    }
+                                    ReplayUploadAction::RawReplay => {
+                                        #[cfg(not(feature = "shipbuilds_debugging"))]
+                                        let url = "https://shipbuilds.com/api/replays";
+                                        #[cfg(feature = "shipbuilds_debugging")]
+                                        let url = "http://192.168.1.215:3000/api/replays";
+
+                                        match std::fs::read(path) {
+                                            Ok(bytes) => {
+                                                let res = client
+                                                    .post(url)
+                                                    .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+                                                    .body(bytes)
+                                                    .send();
+                                                if let Err(e) = res {
+                                                    error!("error sending replay: {:?}", e);
+                                                    if e.is_connect() {
+                                                        break 'main_loop;
+                                                    }
                                                 }
                                             }
-                                        } else {
-                                            error!("no vehicle entity for player?");
+                                            Err(e) => {
+                                                error!("failed to read replay file for upload {:?}: {:?}", path, e)
+                                            }
                                         }
                                     }
-                                    debug!("Successfully sent all builds");
                                 }
 
                                 data.player_tracker.write().update_from_replay(&replay);
@@ -824,7 +865,7 @@ pub enum ReplayBackgroundParserThreadMessage {
     /// A replay has been modified. This probably indicates that the post-battle
     /// results have been written to the file.
     ModifiedReplay(PathBuf),
-    ShouldSendReplaysToServer(bool),
+    DataSharingModeChanged(DataSharingMode),
     DataAutoExportSettingChange(DataExportSettings),
     DebugStateChange(bool),
 }
@@ -834,7 +875,7 @@ pub struct BackgroundParserThread {
     pub sent_replays: Arc<RwLock<HashSet<String>>>,
     pub wows_data_map: crate::data::wows_data::WoWsDataMap,
     pub twitch_state: Arc<RwLock<TwitchState>>,
-    pub should_send_replays: bool,
+    pub data_sharing_mode: DataSharingMode,
     pub data_export_settings: DataExportSettings,
     pub player_tracker: Arc<RwLock<PlayerTracker>>,
     pub is_debug: bool,
@@ -925,8 +966,8 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                     // TODO: this might export data multiple times?
                     let _ = parse_replay_data_in_background(&path, &client, already_parsed_replay, &data);
                 }
-                ReplayBackgroundParserThreadMessage::ShouldSendReplaysToServer(should_send) => {
-                    data.should_send_replays = should_send;
+                ReplayBackgroundParserThreadMessage::DataSharingModeChanged(mode) => {
+                    data.data_sharing_mode = mode;
                 }
                 ReplayBackgroundParserThreadMessage::DataAutoExportSettingChange(new_data_export_settings) => {
                     data.data_export_settings = new_data_export_settings;

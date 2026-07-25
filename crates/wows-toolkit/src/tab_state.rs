@@ -726,11 +726,11 @@ impl TabState {
     }
 
     pub(crate) fn send_replay_consent_changed(&self) {
-        let send = self.persisted.read().settings.integrations.send_replay_data;
+        let mode = self.persisted.read().settings.integrations.data_sharing_mode;
         let _ = self
             .background_parser_tx
             .as_ref()
-            .map(|tx| tx.send(ReplayBackgroundParserThreadMessage::ShouldSendReplaysToServer(send)));
+            .map(|tx| tx.send(ReplayBackgroundParserThreadMessage::DataSharingModeChanged(mode)));
     }
 
     pub(crate) fn try_update_replays(&mut self) {
@@ -940,7 +940,7 @@ impl TabState {
                 sent_replays: Arc::clone(&self.sent_replays),
                 wows_data_map,
                 twitch_state: Arc::clone(&self.twitch_state),
-                should_send_replays: p.settings.integrations.send_replay_data,
+                data_sharing_mode: p.settings.integrations.data_sharing_mode,
                 data_export_settings: DataExportSettings {
                     should_auto_export: p.settings.replay.auto_export_data,
                     export_path: PathBuf::from(p.settings.replay.auto_export_path.clone()),
