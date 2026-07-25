@@ -969,22 +969,34 @@ impl TabState {
                 Ok(event) => {
                     // TODO: maybe properly handle moves?
                     debug!("filesytem event: {:?}", event);
+
+                    // The receiver is dropped when the WoWs directory changes or
+                    // the app shuts down. Log and drop the event rather than
+                    // panicking, which runs on notify's own thread and would kill
+                    // the watcher for the rest of the session.
+                    let send_ui = |file_event: NotifyFileEvent| {
+                        if let Err(e) = tx.send(file_event) {
+                            debug!("file watcher receiver disconnected, dropping event: {e}");
+                        }
+                    };
+
                     match event.kind {
                         EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
                             for path in event.paths {
-                                if path.is_file() {
-                                    if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
-                                        && path.file_name().expect("path has no filename") != "temp.wowsreplay"
-                                    {
-                                        tx.send(NotifyFileEvent::Added(path.clone()))
-                                            .expect("failed to send file creation event");
-                                        // Send this path to the thread watching for replays in background
-                                        let _ = background_tx
-                                            .send(crate::task::ReplayBackgroundParserThreadMessage::NewReplay(path));
-                                    } else if path.file_name().expect("path has no file name") == "tempArenaInfo.json" {
-                                        tx.send(NotifyFileEvent::TempArenaInfoCreated(path.clone()))
-                                            .expect("failed to send file creation event");
-                                    }
+                                if !path.is_file() {
+                                    continue;
+                                }
+                                let Some(file_name) = path.file_name() else {
+                                    continue;
+                                };
+                                let is_replay = path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false);
+                                if is_replay && file_name != "temp.wowsreplay" {
+                                    send_ui(NotifyFileEvent::Added(path.clone()));
+                                    // Send this path to the thread watching for replays in background
+                                    let _ = background_tx
+                                        .send(crate::task::ReplayBackgroundParserThreadMessage::NewReplay(path));
+                                } else if file_name == "tempArenaInfo.json" {
+                                    send_ui(NotifyFileEvent::TempArenaInfoCreated(path.clone()));
                                 }
                             }
                         }
@@ -994,12 +1006,10 @@ impl TabState {
                                     && filename == "preferences.xml"
                                 {
                                     debug!("Sending preferences changed event");
-                                    tx.send(NotifyFileEvent::PreferencesChanged)
-                                        .expect("failed to send file creation event");
+                                    send_ui(NotifyFileEvent::PreferencesChanged);
                                 }
                                 if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
-                                    tx.send(NotifyFileEvent::Modified(path.clone()))
-                                        .expect("failed to send file modification event");
+                                    send_ui(NotifyFileEvent::Modified(path.clone()));
                                     let _ = background_tx
                                         .send(crate::task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path));
                                 }
@@ -1007,7 +1017,7 @@ impl TabState {
                         }
                         EventKind::Remove(_) => {
                             for path in event.paths {
-                                tx.send(NotifyFileEvent::Removed(path)).expect("failed to send file removal event");
+                                send_ui(NotifyFileEvent::Removed(path));
                             }
                         }
                         _ => {
