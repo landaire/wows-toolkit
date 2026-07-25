@@ -77,7 +77,8 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
         lang_shown,
         suppress_gpu,
         enable_log,
-        send_replay,
+        data_sharing_mode,
+        replay_consent_prompt_shown,
         twitch_tok,
         twitch_ch,
         stats_limit,
@@ -110,7 +111,8 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
             s.app.language_selection_shown,
             s.app.suppress_gpu_encoder_warning,
             s.app.enable_logging,
-            s.integrations.send_replay_data,
+            s.integrations.data_sharing_mode,
+            s.app.replay_consent_prompt_shown,
             serde_json::to_string(&s.integrations.twitch_token).unwrap_or_default(),
             s.integrations.twitch_monitored_channel.clone(),
             s.stats_filters.limit_enabled,
@@ -143,7 +145,10 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
     queries::set_setting(pool, "language_selection_shown", &lang_shown).await?;
     queries::set_setting(pool, "suppress_gpu_encoder_warning", &suppress_gpu).await?;
     queries::set_setting(pool, "enable_logging", &enable_log).await?;
-    queries::set_setting(pool, "send_replay_data", &send_replay).await?;
+    queries::set_setting(pool, "data_sharing_mode", &data_sharing_mode).await?;
+    queries::set_setting(pool, "replay_consent_prompt_shown", &replay_consent_prompt_shown).await?;
+    // Downgrade-compat: an older app build still reads this bool.
+    queries::set_setting(pool, "send_replay_data", &data_sharing_mode.shares_anything()).await?;
     queries::set_setting_raw(pool, "twitch_token", &twitch_tok).await?;
     queries::set_setting(pool, "twitch_monitored_channel", &twitch_ch).await?;
     queries::set_setting(pool, "session_stats_limit_enabled", &stats_limit).await?;

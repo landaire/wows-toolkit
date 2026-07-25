@@ -211,6 +211,7 @@ impl LegacyWowsToolkitApp {
                 locale: s.locale,
                 build_consent_window_shown: s.build_consent_window_shown,
                 language_selection_shown: s.language_selection_shown,
+                replay_consent_prompt_shown: false,
                 suppress_gpu_encoder_warning: s.suppress_gpu_encoder_warning,
                 zoom_factor: 1.15,
             },
@@ -233,6 +234,9 @@ impl LegacyWowsToolkitApp {
             },
             integrations: IntegrationSettings {
                 send_replay_data: s.send_replay_data,
+                data_sharing_mode: crate::data::settings::DataSharingMode::from_send_replay_data_bool(
+                    s.send_replay_data,
+                ),
                 twitch_token: s.twitch_token,
                 twitch_monitored_channel: s.twitch_monitored_channel,
             },

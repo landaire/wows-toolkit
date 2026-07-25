@@ -199,6 +199,7 @@ pub struct AppPreferences {
     pub locale: Option<String>,
     pub build_consent_window_shown: bool,
     pub language_selection_shown: bool,
+    pub replay_consent_prompt_shown: bool,
     pub suppress_gpu_encoder_warning: bool,
     /// UI zoom factor (default 1.15).
     pub zoom_factor: f32,
@@ -213,6 +214,7 @@ impl Default for AppPreferences {
             locale: Some("en".to_string()),
             build_consent_window_shown: false,
             language_selection_shown: false,
+            replay_consent_prompt_shown: false,
             suppress_gpu_encoder_warning: false,
             zoom_factor: 1.15,
         }
@@ -267,10 +269,38 @@ impl Default for StatsFilterSettings {
     }
 }
 
+/// How much battle data the user has agreed to share with the server.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DataSharingMode {
+    /// Share nothing.
+    #[default]
+    Off,
+    /// Send per-player build payloads to `/api/ship_builds`.
+    BuildData,
+    /// Send the raw replay file to `/api/replays`; test-ship battles fall back
+    /// to build data.
+    Replays,
+}
+
+impl DataSharingMode {
+    /// Migrate the legacy `send_replay_data` bool. `true` shared build data, so
+    /// map to `BuildData`; never escalate to `Replays`.
+    pub fn from_send_replay_data_bool(enabled: bool) -> Self {
+        if enabled { Self::BuildData } else { Self::Off }
+    }
+
+    /// Whether any data is shared. Used to persist a downgrade-compatible bool.
+    pub fn shares_anything(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
 /// External service integrations.
 #[derive(Default)]
 pub struct IntegrationSettings {
     pub send_replay_data: bool,
+    pub data_sharing_mode: DataSharingMode,
     pub twitch_token: Option<Token>,
     pub twitch_monitored_channel: String,
 }
@@ -281,4 +311,38 @@ pub struct CollabSettings {
     pub display_name: String,
     pub suppress_p2p_ip_warning: bool,
     pub disable_auto_open_session_windows: bool,
+}
+
+#[cfg(test)]
+mod data_sharing_mode_tests {
+    use super::DataSharingMode;
+
+    #[test]
+    fn serializes_to_stable_snake_case() {
+        assert_eq!(serde_json::to_string(&DataSharingMode::Off).unwrap(), "\"off\"");
+        assert_eq!(serde_json::to_string(&DataSharingMode::BuildData).unwrap(), "\"build_data\"");
+        assert_eq!(serde_json::to_string(&DataSharingMode::Replays).unwrap(), "\"replays\"");
+    }
+
+    #[test]
+    fn round_trips_through_json() {
+        for mode in [DataSharingMode::Off, DataSharingMode::BuildData, DataSharingMode::Replays] {
+            let s = serde_json::to_string(&mode).unwrap();
+            let back: DataSharingMode = serde_json::from_str(&s).unwrap();
+            assert_eq!(mode, back);
+        }
+    }
+
+    #[test]
+    fn legacy_bool_maps_without_escalation() {
+        assert_eq!(DataSharingMode::from_send_replay_data_bool(true), DataSharingMode::BuildData);
+        assert_eq!(DataSharingMode::from_send_replay_data_bool(false), DataSharingMode::Off);
+    }
+
+    #[test]
+    fn shares_anything_only_when_not_off() {
+        assert!(!DataSharingMode::Off.shares_anything());
+        assert!(DataSharingMode::BuildData.shares_anything());
+        assert!(DataSharingMode::Replays.shares_anything());
+    }
 }

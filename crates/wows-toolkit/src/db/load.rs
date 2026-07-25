@@ -62,6 +62,11 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
     if let Some(v) = queries::get_setting::<bool>(pool, "send_replay_data").await {
         s.integrations.send_replay_data = v;
     }
+    if let Some(v) = queries::get_setting::<crate::data::settings::DataSharingMode>(pool, "data_sharing_mode").await {
+        s.integrations.data_sharing_mode = v;
+    } else if let Some(v) = queries::get_setting::<bool>(pool, "send_replay_data").await {
+        s.integrations.data_sharing_mode = crate::data::settings::DataSharingMode::from_send_replay_data_bool(v);
+    }
     if let Some(v) = queries::get_setting::<bool>(pool, "has_052_game_params_fix").await {
         s.game.has_052_game_params_fix = v;
     }
@@ -89,6 +94,9 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
     }
     if let Some(v) = queries::get_setting::<bool>(pool, "build_consent_window_shown").await {
         s.app.build_consent_window_shown = v;
+    }
+    if let Some(v) = queries::get_setting::<bool>(pool, "replay_consent_prompt_shown").await {
+        s.app.replay_consent_prompt_shown = v;
     }
     if let Some(v) = queries::get_setting::<bool>(pool, "language_selection_shown").await {
         s.app.language_selection_shown = v;
