@@ -190,6 +190,7 @@ async fn seed_rosters(pool: &sqlx::SqlitePool) {
         (100, 501, 111, "PJSB018", "Yamato", "Battleship", VehicleRelation::Enemy),
         (200, 7, 999, "PJSD018", "Harugumo", "Destroyer", VehicleRelation::SelfPlayer),
         (200, 777, 222, "PJSD718", "Shimakaze", "Destroyer", VehicleRelation::Enemy),
+        (100, 0, 333, "PABOT", "Bot", "Cruiser", VehicleRelation::Enemy),
     ] {
         let v = IndexedVehicleRow {
             arena_id: ArenaId::new(arena),
