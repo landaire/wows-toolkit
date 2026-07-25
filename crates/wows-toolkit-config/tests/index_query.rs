@@ -250,3 +250,25 @@ async fn exists_predicates_and_helpers() {
     .unwrap();
     assert_eq!(hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![100]);
 }
+
+#[tokio::test]
+async fn facets_list_players_and_self_ships() {
+    use wows_toolkit_config::index::rows::MatchFilter;
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    let players = query::distinct_players(&pool, &MatchFilter::default()).await.unwrap();
+    // account 7 appears in both arenas; 501 and 777 once each. Bot account 0 excluded.
+    let by_id: std::collections::HashMap<i64, i64> =
+        players.iter().map(|p| (p.account_id.raw(), p.match_count)).collect();
+    assert_eq!(by_id.get(&7), Some(&2));
+    assert_eq!(by_id.get(&501), Some(&1));
+    assert!(!by_id.contains_key(&0));
+
+    let ships = query::distinct_self_ships(&pool, &MatchFilter::default()).await.unwrap();
+    // self played Harugumo (999) in both arenas.
+    let haru = ships.iter().find(|s| s.ship_id.raw() == 999).unwrap();
+    assert_eq!(haru.match_count, 2);
+    assert_eq!(haru.ship_name, "Harugumo");
+}

@@ -19,7 +19,9 @@ use super::rows::MatchFilter;
 use super::rows::MatchHit;
 use super::rows::MatchOutcome;
 use super::rows::ObjectiveMatch;
+use super::rows::PlayerFacet;
 use super::rows::ReplayRecord;
+use super::rows::ShipFacet;
 use super::rows::SourceId;
 use super::rows::SourceKind;
 
@@ -323,4 +325,70 @@ pub async fn matches_with_ship(
     let allowed: std::collections::HashSet<i64> = arenas.into_iter().map(|(a,)| a).collect();
     let hits = search_matches(pool, filter).await?;
     Ok(hits.into_iter().filter(|h| allowed.contains(&h.arena_id.raw())).collect())
+}
+
+/// Distinct non-bot players across the index, most-encountered first.
+/// `filter.source_ids` scopes to groups; other filter fields are ignored here.
+pub async fn distinct_players(pool: &SqlitePool, filter: &MatchFilter) -> Result<Vec<PlayerFacet>, IndexError> {
+    // latest name = name from the vehicle row in the most recent match for that account.
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "SELECT v.account_id, \
+                (SELECT v2.player_name FROM indexed_vehicle v2 JOIN indexed_match m2 ON m2.arena_id = v2.arena_id \
+                   WHERE v2.account_id = v.account_id ORDER BY m2.timestamp DESC LIMIT 1) AS latest_name, \
+                (SELECT v3.clan FROM indexed_vehicle v3 JOIN indexed_match m3 ON m3.arena_id = v3.arena_id \
+                   WHERE v3.account_id = v.account_id ORDER BY m3.timestamp DESC LIMIT 1) AS clan, \
+                COUNT(DISTINCT v.arena_id) AS match_count \
+         FROM indexed_vehicle v WHERE v.account_id <> 0",
+    );
+    if let Some(sources) = &filter.source_ids {
+        qb.push(" AND v.arena_id IN (SELECT arena_id FROM replay_record WHERE source_id IN (");
+        let mut sep = qb.separated(", ");
+        for s in sources {
+            sep.push_bind(s.0);
+        }
+        qb.push("))");
+    }
+    qb.push(" GROUP BY v.account_id ORDER BY match_count DESC");
+
+    let rows = qb.build().fetch_all(pool).await?;
+    rows.iter()
+        .map(|row| {
+            Ok(PlayerFacet {
+                account_id: AccountId::from(row.try_get::<i64, _>("account_id")?),
+                latest_name: row.try_get::<Option<String>, _>("latest_name")?.unwrap_or_default(),
+                clan: row.try_get::<Option<String>, _>("clan")?.unwrap_or_default(),
+                match_count: row.try_get("match_count")?,
+            })
+        })
+        .collect()
+}
+
+/// Ships the user has played (from `replay_record.self_ship_id`), most-played first.
+pub async fn distinct_self_ships(pool: &SqlitePool, filter: &MatchFilter) -> Result<Vec<ShipFacet>, IndexError> {
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "SELECT r.self_ship_id AS ship_id, \
+                (SELECT v.ship_name FROM indexed_vehicle v WHERE v.ship_id = r.self_ship_id LIMIT 1) AS ship_name, \
+                COUNT(DISTINCT r.arena_id) AS match_count \
+         FROM replay_record r WHERE r.self_ship_id IS NOT NULL",
+    );
+    if let Some(sources) = &filter.source_ids {
+        qb.push(" AND r.source_id IN (");
+        let mut sep = qb.separated(", ");
+        for s in sources {
+            sep.push_bind(s.0);
+        }
+        qb.push(")");
+    }
+    qb.push(" GROUP BY r.self_ship_id ORDER BY match_count DESC");
+
+    let rows = qb.build().fetch_all(pool).await?;
+    rows.iter()
+        .map(|row| {
+            Ok(ShipFacet {
+                ship_id: GameParamId::from(row.try_get::<i64, _>("ship_id")? as u64),
+                ship_name: row.try_get::<Option<String>, _>("ship_name")?.unwrap_or_default(),
+                match_count: row.try_get("match_count")?,
+            })
+        })
+        .collect()
 }
