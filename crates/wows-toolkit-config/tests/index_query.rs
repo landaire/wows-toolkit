@@ -182,3 +182,71 @@ async fn search_matches_applies_match_level_predicates() {
     assert_eq!(recent[0].outcome, MatchOutcome::Loss);
     assert_eq!(recent[0].self_damage, Some(40_000));
 }
+
+async fn seed_rosters(pool: &sqlx::SqlitePool) {
+    // arena 100: self Harugumo (id 999), enemy Yamato (id 111, account 501)
+    for (arena, acct, ship_id, idx, name, species, rel) in [
+        (100i64, 7i64, 999u64, "PJSD018", "Harugumo", "Destroyer", VehicleRelation::SelfPlayer),
+        (100, 501, 111, "PJSB018", "Yamato", "Battleship", VehicleRelation::Enemy),
+        (200, 7, 999, "PJSD018", "Harugumo", "Destroyer", VehicleRelation::SelfPlayer),
+        (200, 777, 222, "PJSD718", "Shimakaze", "Destroyer", VehicleRelation::Enemy),
+    ] {
+        let v = IndexedVehicleRow {
+            arena_id: ArenaId::new(arena),
+            account_id: AccountId(acct),
+            player_name: format!("p{acct}"),
+            clan: String::new(),
+            realm: None,
+            ship_id: GameParamId::from(ship_id),
+            ship_index: idx.into(),
+            ship_name: name.into(),
+            nation: "japan".into(),
+            species: species.into(),
+            tier: 10,
+            relation: rel,
+            division_id: None,
+            survived: Some(true),
+            damage: Some(1),
+            kills: Some(0),
+            spotting: Some(0),
+            potential: Some(0),
+            received: Some(0),
+            pr: None,
+            is_test_ship: false,
+        };
+        query::upsert_vehicles(pool, &[v]).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn exists_predicates_and_helpers() {
+    use wows_toolkit_config::index::rows::MatchFilter;
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    // enemy_ship = Yamato (111) -> only arena 100
+    let f = MatchFilter { enemy_ship: Some(GameParamId::from(111u64)), ..Default::default() };
+    let hits = query::search_matches(&pool, &f).await.unwrap();
+    assert_eq!(hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![100]);
+
+    // player_present = account 777 -> only arena 200
+    let f = MatchFilter { player_present: Some(AccountId(777)), ..Default::default() };
+    let hits = query::search_matches(&pool, &f).await.unwrap();
+    assert_eq!(hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![200]);
+
+    // matches_with_player convenience
+    let hits = query::matches_with_player(&pool, AccountId(501), &MatchFilter::default()).await.unwrap();
+    assert_eq!(hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![100]);
+
+    // matches_with_ship: Yamato as enemy -> arena 100
+    let hits = query::matches_with_ship(
+        &pool,
+        GameParamId::from(111u64),
+        Some(VehicleRelation::Enemy),
+        &MatchFilter::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![100]);
+}

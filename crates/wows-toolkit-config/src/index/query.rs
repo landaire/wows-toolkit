@@ -161,7 +161,7 @@ pub async fn arena_ids_in_source(pool: &SqlitePool, source: SourceId) -> Result<
 
 /// One `MatchHit` per arena. The chosen record prefers `file_mtime IS NOT NULL`
 /// then most-recently indexed, so the open target points at a present file when
-/// possible. Match-level predicates only; Task 6 adds EXISTS predicates.
+/// possible. Applies both match/record-level predicates and roster EXISTS predicates.
 pub async fn search_matches(pool: &SqlitePool, filter: &MatchFilter) -> Result<Vec<MatchHit>, IndexError> {
     run_match_query(pool, filter, None).await
 }
@@ -224,7 +224,7 @@ async fn run_match_query(
     if let Some(s) = filter.self_survived {
         qb.push(" AND r.self_survived = ").push_bind(s);
     }
-    push_exists_predicates(&mut qb, filter); // defined in Task 6; a no-op stub until then
+    push_exists_predicates(&mut qb, filter);
 
     qb.push(" ORDER BY m.timestamp DESC");
     if let Some(limit) = limit {
@@ -264,6 +264,63 @@ fn row_to_match_hit(row: &sqlx::sqlite::SqliteRow) -> Result<MatchHit, IndexErro
     })
 }
 
-fn push_exists_predicates(_qb: &mut QueryBuilder<'_, Sqlite>, _filter: &MatchFilter) {
-    // Replaced in Task 6 with species/tier/player_present/enemy_ship EXISTS subqueries.
+fn push_exists_predicates(qb: &mut QueryBuilder<'_, Sqlite>, filter: &MatchFilter) {
+    if let Some(species) = &filter.species {
+        qb.push(
+            " AND EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND v.relation = 'self' AND v.species = ",
+        )
+        .push_bind(species.clone())
+        .push(")");
+    }
+    if let Some(tier) = filter.tier {
+        qb.push(
+            " AND EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND v.relation = 'self' AND v.tier = ",
+        )
+        .push_bind(tier as i64)
+        .push(")");
+    }
+    if let Some(acct) = filter.player_present {
+        qb.push(" AND EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND v.account_id = ")
+            .push_bind(acct.raw())
+            .push(")");
+    }
+    if let Some(ship) = filter.enemy_ship {
+        qb.push(
+            " AND EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND v.relation = 'enemy' AND v.ship_id = ",
+        )
+        .push_bind(ship.raw() as i64)
+        .push(")");
+    }
+}
+
+pub async fn matches_with_player(
+    pool: &SqlitePool,
+    account: AccountId,
+    filter: &MatchFilter,
+) -> Result<Vec<MatchHit>, IndexError> {
+    let mut f = filter.clone();
+    f.player_present = Some(account);
+    search_matches(pool, &f).await
+}
+
+pub async fn matches_with_ship(
+    pool: &SqlitePool,
+    ship: GameParamId,
+    relation: Option<super::rows::VehicleRelation>,
+    filter: &MatchFilter,
+) -> Result<Vec<MatchHit>, IndexError> {
+    // Reuse search_matches for all shared predicates, then require the ship in the
+    // requested relation (or any relation) via arena membership in the roster.
+    let arenas: Vec<(i64,)> = {
+        let mut qb: QueryBuilder<Sqlite> =
+            QueryBuilder::new("SELECT DISTINCT arena_id FROM indexed_vehicle WHERE ship_id = ");
+        qb.push_bind(ship.raw() as i64);
+        if let Some(rel) = relation {
+            qb.push(" AND relation = ").push_bind(rel.as_db_str());
+        }
+        qb.build_query_as().fetch_all(pool).await?
+    };
+    let allowed: std::collections::HashSet<i64> = arenas.into_iter().map(|(a,)| a).collect();
+    let hits = search_matches(pool, filter).await?;
+    Ok(hits.into_iter().filter(|h| allowed.contains(&h.arena_id.raw())).collect())
 }
