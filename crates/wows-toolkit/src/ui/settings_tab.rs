@@ -9,6 +9,7 @@ use rust_i18n::t;
 
 use crate::app::ToolkitTabViewer;
 use crate::data::settings::AppPreferences;
+use crate::data::settings::DataSharingMode;
 use crate::icons;
 use crate::tab_state::GameDataCacheStats;
 use crate::task::DataExportSettings;
@@ -48,9 +49,19 @@ impl ToolkitTabViewer<'_> {
                 {
                     self.tab_state.persisted.write().settings.app.enable_logging = enable_logging;
                 }
-                let mut send_replay_data = self.tab_state.persisted.read().settings.integrations.send_replay_data;
-                if ui.checkbox(&mut send_replay_data, t!("ui.settings.app.send_replay_data")).changed() {
-                    self.tab_state.persisted.write().settings.integrations.send_replay_data = send_replay_data;
+                let mut mode = self.tab_state.persisted.read().settings.integrations.data_sharing_mode;
+                ui.label(t!("ui.settings.app.data_sharing_mode"));
+                let mut mode_changed = false;
+                mode_changed |=
+                    ui.radio_value(&mut mode, DataSharingMode::Off, t!("ui.settings.app.data_sharing_off")).changed();
+                mode_changed |= ui
+                    .radio_value(&mut mode, DataSharingMode::BuildData, t!("ui.settings.app.data_sharing_build_data"))
+                    .changed();
+                mode_changed |= ui
+                    .radio_value(&mut mode, DataSharingMode::Replays, t!("ui.settings.app.data_sharing_replays"))
+                    .changed();
+                if mode_changed {
+                    self.tab_state.persisted.write().settings.integrations.data_sharing_mode = mode;
                     self.tab_state.send_replay_consent_changed();
                 }
                 ui.horizontal(|ui| {

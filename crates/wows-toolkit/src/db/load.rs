@@ -59,9 +59,6 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
     if let Some(v) = queries::get_setting::<bool>(pool, "check_for_updates").await {
         s.app.check_for_updates = v;
     }
-    if let Some(v) = queries::get_setting::<bool>(pool, "send_replay_data").await {
-        s.integrations.send_replay_data = v;
-    }
     if let Some(v) = queries::get_setting::<crate::data::settings::DataSharingMode>(pool, "data_sharing_mode").await {
         s.integrations.data_sharing_mode = v;
     } else if let Some(v) = queries::get_setting::<bool>(pool, "send_replay_data").await {

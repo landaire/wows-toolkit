@@ -299,7 +299,6 @@ impl DataSharingMode {
 /// External service integrations.
 #[derive(Default)]
 pub struct IntegrationSettings {
-    pub send_replay_data: bool,
     pub data_sharing_mode: DataSharingMode,
     pub twitch_token: Option<Token>,
     pub twitch_monitored_channel: String,

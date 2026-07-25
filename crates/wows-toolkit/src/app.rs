@@ -41,6 +41,7 @@ use serde::Serialize;
 use tokio::runtime::Runtime;
 use wows_replays::analyzer::battle_controller::GameMessage;
 
+use crate::data::settings::DataSharingMode;
 use crate::icons;
 use crate::tab_state::TabState;
 use crate::task;
@@ -170,6 +171,8 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     build_consent_window_open: bool,
     #[serde(skip)]
+    replay_migration_window_open: bool,
+    #[serde(skip)]
     language_selection_open: bool,
     #[serde(skip)]
     latest_release: Option<Release>,
@@ -265,6 +268,7 @@ impl Default for WowsToolkitApp {
             panic_info: None,
             panic_window_open: false,
             build_consent_window_open: false,
+            replay_migration_window_open: false,
             language_selection_open: false,
             latest_release: None,
             show_about_window: false,
@@ -485,6 +489,8 @@ impl WowsToolkitApp {
             let p = state.tab_state.persisted.read();
             if !p.settings.app.build_consent_window_shown {
                 state.build_consent_window_open = true;
+            } else if !p.settings.app.replay_consent_prompt_shown {
+                state.replay_migration_window_open = true;
             }
 
             // Show language selection dialog on first launch if a non-English locale was detected
@@ -1963,21 +1969,35 @@ impl WowsToolkitApp {
             egui::Window::new(t!("ui.windows.build_consent")).collapsible(false).show(ctx, |ui| {
                 ui.label(t!("ui.dialogs.build_consent_message"));
                 ui.horizontal(|ui| {
-                    if ui.button(t!("ui.buttons.yes")).clicked() {
-                        self.build_consent_window_open = false;
-                        let mut p = self.tab_state.persisted.write();
-                        p.settings.app.build_consent_window_shown = true;
-                        p.settings.integrations.send_replay_data = true;
-                        drop(p);
+                    if ui.button(t!("ui.buttons.send_replays")).clicked() {
+                        self.set_data_sharing_choice(DataSharingMode::Replays);
+                    }
+                    if ui.button(t!("ui.buttons.send_build_data")).clicked() {
+                        self.set_data_sharing_choice(DataSharingMode::BuildData);
+                    }
+                    if ui.button(t!("ui.buttons.send_nothing")).clicked() {
+                        self.set_data_sharing_choice(DataSharingMode::Off);
+                    }
+                });
+            });
+        }
+
+        if self.replay_migration_window_open {
+            egui::Window::new(t!("ui.windows.replay_migration")).collapsible(false).show(ctx, |ui| {
+                ui.label(t!("ui.dialogs.replay_migration_message"));
+                ui.horizontal(|ui| {
+                    if ui.button(t!("ui.buttons.switch_to_replays")).clicked() {
+                        self.replay_migration_window_open = false;
+                        {
+                            let mut p = self.tab_state.persisted.write();
+                            p.settings.app.replay_consent_prompt_shown = true;
+                            p.settings.integrations.data_sharing_mode = DataSharingMode::Replays;
+                        }
                         self.tab_state.send_replay_consent_changed();
                     }
-                    if ui.button(t!("ui.buttons.no")).clicked() {
-                        self.build_consent_window_open = false;
-                        let mut p = self.tab_state.persisted.write();
-                        p.settings.app.build_consent_window_shown = true;
-                        p.settings.integrations.send_replay_data = false;
-                        drop(p);
-                        self.tab_state.send_replay_consent_changed();
+                    if ui.button(t!("ui.buttons.keep_current")).clicked() {
+                        self.replay_migration_window_open = false;
+                        self.tab_state.persisted.write().settings.app.replay_consent_prompt_shown = true;
                     }
                 });
             });
@@ -2865,6 +2885,17 @@ impl WowsToolkitApp {
                 _ => {}
             }
         }
+    }
+
+    fn set_data_sharing_choice(&mut self, mode: DataSharingMode) {
+        self.build_consent_window_open = false;
+        {
+            let mut p = self.tab_state.persisted.write();
+            p.settings.app.build_consent_window_shown = true;
+            p.settings.app.replay_consent_prompt_shown = true;
+            p.settings.integrations.data_sharing_mode = mode;
+        }
+        self.tab_state.send_replay_consent_changed();
     }
 }
 

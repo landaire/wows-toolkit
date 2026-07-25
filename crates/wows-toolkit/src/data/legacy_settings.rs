@@ -233,7 +233,6 @@ impl LegacyWowsToolkitApp {
                 game_mode_filter: s.session_stats_game_mode_filter,
             },
             integrations: IntegrationSettings {
-                send_replay_data: s.send_replay_data,
                 data_sharing_mode: crate::data::settings::DataSharingMode::from_send_replay_data_bool(
                     s.send_replay_data,
                 ),
