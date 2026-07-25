@@ -18,8 +18,13 @@ mod ui;
 pub(crate) mod util;
 pub mod viewport_3d;
 pub use app::WowsToolkitApp;
+pub use data::replay_index;
 pub use db::load_main_window_settings;
 pub use tab_state::WindowSettingsEguiExt;
+// Narrow re-export so the gated integration test in `tests/replay_index_mapper.rs`
+// can construct a `Replay` and call `replay_index::map_rows` on it without making
+// the whole (egui-coupled) `ui` module public.
+pub use ui::replay_parser::Replay;
 pub const APP_NAME: &str = "WoWs Toolkit";
 pub(crate) use egui_phosphor::regular as icons;
 
