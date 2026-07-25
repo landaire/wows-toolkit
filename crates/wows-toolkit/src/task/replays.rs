@@ -791,26 +791,16 @@ fn parse_replay_data_in_background(
                             };
                             replay.build_ui_report(&deps);
 
-                            if let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref()) {
-                                let source_dir = path.parent().unwrap_or(Path::new("."));
-                                match rt.block_on(crate::db::index::query::ensure_default_source(
+                            if let (Some(pool), Some(rt), Some(source_id)) =
+                                (data.db_pool.as_ref(), data.tokio_runtime.as_ref(), data.index_source_id)
+                            {
+                                crate::data::replay_index::index_replay_blocking(
+                                    rt,
                                     pool,
-                                    source_dir,
+                                    &replay,
+                                    source_id,
                                     jiff::Timestamp::now(),
-                                )) {
-                                    Ok(source_id) => {
-                                        crate::data::replay_index::index_replay_blocking(
-                                            rt,
-                                            pool,
-                                            &replay,
-                                            source_id,
-                                            jiff::Timestamp::now(),
-                                        );
-                                    }
-                                    Err(e) => {
-                                        warn!("failed to resolve replay index source: {e}");
-                                    }
-                                }
+                                );
                             }
 
                             if data.data_export_settings.should_auto_export {
@@ -905,6 +895,12 @@ pub struct BackgroundParserThread {
     pub cap_layout_db: Arc<Mutex<crate::data::cap_layout::CapLayoutDb>>,
     pub db_pool: Option<sqlx::SqlitePool>,
     pub tokio_runtime: Option<Arc<tokio::runtime::Runtime>>,
+    /// Cached id of the live replay-index source, resolved once at scan start so
+    /// the live hook does not hit `ensure_default_source` per replay.
+    pub index_source_id: Option<crate::db::index::rows::SourceId>,
+    /// Paths of replays that panicked or hard-errored during indexing, persisted
+    /// so they are not retried every launch.
+    pub unindexable: HashSet<String>,
 }
 
 pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
@@ -940,9 +936,39 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                 return;
             };
 
+            // Resolve the live index source once so the per-replay hook reuses it
+            // instead of hitting ensure_default_source on every file.
+            if let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref()) {
+                data.index_source_id = rt
+                    .block_on(crate::db::index::query::ensure_default_source(
+                        pool,
+                        &replays_dir,
+                        jiff::Timestamp::now(),
+                    ))
+                    .inspect_err(|e| warn!("failed to resolve replay index source: {e}"))
+                    .ok();
+            }
+
+            // Load both ledgers once: which paths are already indexed for this
+            // source, and the persistent set of files that previously failed.
+            let indexed_paths: HashSet<String> =
+                match (data.db_pool.as_ref(), data.tokio_runtime.as_ref(), data.index_source_id) {
+                    (Some(pool), Some(rt), Some(src)) => {
+                        rt.block_on(crate::db::index::query::record_paths_in_source(pool, src)).unwrap_or_default()
+                    }
+                    _ => HashSet::new(),
+                };
+            if let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref())
+                && let Some(saved) =
+                    rt.block_on(crate::db::queries::get_setting::<HashSet<String>>(pool, "replay_unindexable"))
+            {
+                data.unindexable = saved;
+            }
+
             // Try to see if we have any historical replays we can send
             match std::fs::read_dir(&replays_dir) {
                 Ok(read_dir) => {
+                    let mut unindexable_dirty = false;
                     for file in read_dir.flatten() {
                         let path = file.path();
                         if path.extension().map(|ext| ext != "wowsreplay").unwrap_or(false)
@@ -952,14 +978,43 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                         }
 
                         let path_str = path.to_string_lossy();
-                        let already_recorded_replay = { data.sent_replays.read().contains(path_str.as_ref()) }
-                            || cfg!(feature = "shipbuilds_debugging");
-
-                        if !already_recorded_replay
-                            && parse_replay_data_in_background(&path, &client, already_recorded_replay, &data).is_ok()
-                        {
-                            data.sent_replays.write().insert(path_str.into_owned());
+                        if data.unindexable.contains(path_str.as_ref()) {
+                            continue;
                         }
+                        let sent = { data.sent_replays.read().contains(path_str.as_ref()) }
+                            || cfg!(feature = "shipbuilds_debugging");
+                        let indexed = indexed_paths.contains(path_str.as_ref());
+
+                        let outcome = crate::data::replay_reconcile::reconcile_one(
+                            &path,
+                            indexed,
+                            sent,
+                            std::panic::AssertUnwindSafe(|| {
+                                parse_replay_data_in_background(&path, &client, sent, &data)
+                            }),
+                        );
+
+                        match outcome {
+                            crate::data::replay_reconcile::FileOutcome::Indexed => {
+                                if !sent {
+                                    data.sent_replays.write().insert(path_str.into_owned());
+                                }
+                            }
+                            crate::data::replay_reconcile::FileOutcome::Failed => {
+                                if data.unindexable.insert(path_str.into_owned()) {
+                                    unindexable_dirty = true;
+                                }
+                            }
+                            crate::data::replay_reconcile::FileOutcome::Skipped => {}
+                        }
+                    }
+
+                    if unindexable_dirty
+                        && let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref())
+                        && let Err(e) =
+                            rt.block_on(crate::db::queries::set_setting(pool, "replay_unindexable", &data.unindexable))
+                    {
+                        warn!("failed to persist unindexable replay set: {e}");
                     }
                 }
                 Err(e) => {
