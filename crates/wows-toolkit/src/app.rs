@@ -830,6 +830,7 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::DownloadingGameData { .. } => {}
                             BackgroundTaskKind::CheckingGameDataUpdates => {}
                             BackgroundTaskKind::ValidatingGameData { .. } => {}
+                            BackgroundTaskKind::ReconcilingIndex { .. } => {}
                         }
 
                         self.handle_task_completion(ui.ctx(), result);
@@ -1258,6 +1259,17 @@ impl WowsToolkitApp {
                 }
                 BackgroundTaskCompletion::PersonalRatingDataLoaded(pr_data) => {
                     self.tab_state.personal_rating_data.write().load(pr_data);
+                }
+                BackgroundTaskCompletion::ReconcileIndexComplete { indexed, total } => {
+                    if indexed > 0 {
+                        self.tab_state.toasts.lock().success(t!(
+                            "ui.messages.replays_indexed",
+                            indexed = indexed,
+                            total = total
+                        ));
+                    } else {
+                        self.tab_state.toasts.lock().info(t!("ui.messages.replays_already_indexed", total = total));
+                    }
                 }
                 #[cfg(feature = "mod_manager")]
                 BackgroundTaskCompletion::ModManager(mod_manager_info) => match *mod_manager_info {

@@ -65,9 +65,16 @@ pub use replays::load_wows_data_for_build;
 pub use replays::load_wows_files;
 pub use replays::start_background_parsing_thread;
 pub use replays::start_populating_player_inspector;
+pub use replays::start_reconcile_index;
 
 pub struct DownloadProgress {
     pub downloaded: u64,
+    pub total: u64,
+}
+
+/// Progress for the on-demand "Index all replays" reconciliation pass.
+pub struct IndexProgress {
+    pub done: u64,
     pub total: u64,
 }
 
@@ -133,6 +140,10 @@ pub enum BackgroundTaskKind {
     OpenFileViewer(PlaintextFileViewer),
     BatchVideoExport {
         progress: Arc<parking_lot::Mutex<BatchVideoExportProgress>>,
+    },
+    ReconcilingIndex {
+        rx: mpsc::Receiver<IndexProgress>,
+        last_progress: Option<IndexProgress>,
     },
 }
 
@@ -322,6 +333,26 @@ impl BackgroundTask {
                             name = &p.current_name,
                         )));
                     }
+                    BackgroundTaskKind::ReconcilingIndex { rx, last_progress } => {
+                        match rx.try_recv() {
+                            Ok(progress) => *last_progress = Some(progress),
+                            Err(TryRecvError::Empty) => {}
+                            Err(TryRecvError::Disconnected) => {}
+                        }
+                        match last_progress {
+                            Some(progress) if progress.total > 0 => {
+                                ui.add(egui::ProgressBar::new(progress.done as f32 / progress.total as f32).text(t!(
+                                    "ui.messages.indexing_replays_progress",
+                                    done = progress.done,
+                                    total = progress.total
+                                )));
+                            }
+                            _ => {
+                                ui.spinner();
+                                ui.label(t!("ui.messages.indexing_replays"));
+                            }
+                        }
+                    }
                     BackgroundTaskKind::LoadingPersonalRatingData
                     | BackgroundTaskKind::UpdateTimedMessage(_)
                     | BackgroundTaskKind::OpenFileViewer(_) => {
@@ -365,6 +396,13 @@ pub enum BackgroundTaskCompletion {
     UpdateDownloaded(PathBuf),
     PopulatePlayerInspectorFromReplays,
     PersonalRatingDataLoaded(crate::util::personal_rating::ExpectedValuesData),
+    /// On-demand "Index all replays" reconciliation pass finished.
+    /// `indexed` counts replays newly parsed and written to the index this pass;
+    /// `total` is the number of replay files scanned.
+    ReconcileIndexComplete {
+        indexed: usize,
+        total: usize,
+    },
     #[cfg(feature = "mod_manager")]
     ModManager(Box<crate::mod_manager::ModTaskCompletion>),
     NoReceiver,
@@ -405,6 +443,9 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
             Self::UpdateDownloaded(arg0) => f.debug_tuple("UpdateDownloaded").field(arg0).finish(),
             Self::PopulatePlayerInspectorFromReplays => f.write_str("PopulatePlayerInspectorFromReplays"),
             Self::PersonalRatingDataLoaded(_) => f.write_str("PersonalRatingDataLoaded(_)"),
+            Self::ReconcileIndexComplete { indexed, total } => {
+                f.debug_struct("ReconcileIndexComplete").field("indexed", indexed).field("total", total).finish()
+            }
             #[cfg(feature = "mod_manager")]
             Self::ModManager(mod_manager_completion) => {
                 f.write_fmt(format_args!("ModManager({:?})", mod_manager_completion))

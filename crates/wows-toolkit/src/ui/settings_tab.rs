@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use egui::Color32;
 use egui::OpenUrl;
@@ -385,6 +386,38 @@ impl ToolkitTabViewer<'_> {
                         });
                     }
                 });
+
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                // Reads all replays into the durable index so the player tracker,
+                // and any future search UI, can query them without re-parsing.
+                let reindex_deps = match (
+                    self.tab_state.db_pool.as_ref(),
+                    self.tab_state.tokio_runtime.as_ref(),
+                    self.tab_state.wows_data_map.as_ref(),
+                ) {
+                    (Some(pool), Some(rt), Some(wows_data_map)) => {
+                        Some((pool.clone(), Arc::clone(rt), wows_data_map.clone()))
+                    }
+                    _ => None,
+                };
+                if ui
+                    .add_enabled(reindex_deps.is_some(), egui::Button::new(t!("ui.settings.replay.index_all_replays")))
+                    .clicked()
+                    && let Some((pool, rt, wows_data_map)) = reindex_deps
+                {
+                    crate::update_background_task!(
+                        self.tab_state.background_tasks,
+                        Some(crate::task::start_reconcile_index(
+                            wows_data_map,
+                            Arc::clone(&self.tab_state.twitch_state),
+                            pool,
+                            rt,
+                        ))
+                    );
+                }
             });
 
             ui.add_space(12.0);

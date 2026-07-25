@@ -49,6 +49,7 @@ use crate::util::replay_export::Match;
 use super::BackgroundTask;
 use super::BackgroundTaskCompletion;
 use super::BackgroundTaskKind;
+use super::IndexProgress;
 
 use crate::task::networking::load_versioned_constants_from_disk;
 use crate::task::networking::load_versioned_constants_from_disk_with_fallback;
@@ -1127,4 +1128,193 @@ pub fn start_populating_player_inspector(
     });
 
     BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::PopulatePlayerInspectorFromReplays }
+}
+
+/// Parse and index a single replay for the on-demand "Index all replays" pass.
+///
+/// Distinct from `parse_replay_data_in_background`: no upload, no player-tracker
+/// update, no data export -- this only produces index rows, so it can run for
+/// every historical replay without re-triggering side effects meant for newly
+/// finished battles. Only indexes replays whose server battle results are
+/// already available; otherwise the replay is treated as transient so a later
+/// pass retries once results land.
+fn index_one_replay(
+    path: &Path,
+    wows_data_map: &crate::data::wows_data::WoWsDataMap,
+    twitch_state: &Arc<RwLock<TwitchState>>,
+    db_pool: &sqlx::SqlitePool,
+    tokio_runtime: &tokio::runtime::Runtime,
+    source_id: crate::db::index::rows::SourceId,
+) -> ParseOutcome {
+    let replay_file = match ReplayFile::from_file(path) {
+        Ok(f) => f,
+        Err(e) => {
+            error!("failed to parse replay {}: {:?}", path.display(), e);
+            return ParseOutcome::HardFailure;
+        }
+    };
+
+    let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+    let Some(wows_data_for_build) = wows_data_map.resolve(&replay_version) else {
+        warn!(
+            "Skipping replay {:?}: no data for build {}",
+            path,
+            replay_version.build_number().map_or_else(|| "unknown".to_string(), |b| b.to_string())
+        );
+        return ParseOutcome::Transient;
+    };
+    let (metadata_provider, game_version, gc) = {
+        let wows_data = wows_data_for_build.read();
+        (wows_data.game_metadata.clone(), wows_data.patch_version, wows_data.game_constants.clone())
+    };
+    let Some(metadata_provider) = metadata_provider else {
+        return ParseOutcome::Transient;
+    };
+
+    let mut replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
+    replay.game_constants = Some(gc);
+    replay.source_path = Some(path.to_path_buf());
+
+    match replay.parse(game_version.to_string().as_str()) {
+        Ok(report) => {
+            replay.battle_report = Some(report);
+        }
+        Err(e)
+            if e.downcast_current_context::<ToolkitError>()
+                .is_some_and(|e| matches!(e, ToolkitError::ReplayVersionMismatch { .. })) =>
+        {
+            // Not malformed, just parsed with the wrong build's data. Retry
+            // later rather than blacklisting.
+            return ParseOutcome::Transient;
+        }
+        Err(e) => {
+            error!("error indexing replay {:?}: {:?}", path, e);
+            return ParseOutcome::HardFailure;
+        }
+    }
+
+    let Some(battle_report) = replay.battle_report.as_ref() else {
+        return ParseOutcome::HardFailure;
+    };
+    if battle_report.battle_results().is_none() {
+        // Server-provided results aren't written yet; retry on a later pass.
+        return ParseOutcome::Transient;
+    }
+
+    let (dummy_sender, _) = mpsc::channel();
+    let deps = crate::data::wows_data::ReplayDependencies {
+        wows_data_map: wows_data_map.clone(),
+        twitch_state: Arc::clone(twitch_state),
+        replay_sort: Arc::new(Mutex::new(SortOrder::default())),
+        background_task_sender: dummy_sender,
+        is_debug_mode: false,
+    };
+    replay.build_ui_report(&deps);
+
+    crate::data::replay_index::index_replay_blocking(
+        tokio_runtime,
+        db_pool,
+        &replay,
+        source_id,
+        jiff::Timestamp::now(),
+    );
+
+    ParseOutcome::ParsedAndSent
+}
+
+/// Spawn the on-demand "Index all replays" reconciliation pass.
+///
+/// This is a focused index-only backfill: it does not reuse the startup scan's
+/// loop in `start_background_parsing_thread`, since that loop also drives
+/// uploads and player-tracker updates and is entangled with the parser thread's
+/// message loop. Instead it walks the replays directory directly, skips
+/// anything already recorded for the default source, and indexes the rest
+/// through `index_one_replay`, wrapped in `reconcile_one` for panic isolation
+/// exactly like the startup pass.
+pub fn start_reconcile_index(
+    wows_data_map: crate::data::wows_data::WoWsDataMap,
+    twitch_state: Arc<RwLock<TwitchState>>,
+    db_pool: sqlx::SqlitePool,
+    tokio_runtime: Arc<tokio::runtime::Runtime>,
+) -> BackgroundTask {
+    let (tx, rx) = mpsc::channel();
+    let (progress_tx, progress_rx) = mpsc::channel();
+
+    crate::util::thread::spawn_logged("reconcile-index", move || {
+        let _ = tx.send(run_reconcile_index(wows_data_map, twitch_state, db_pool, tokio_runtime, &progress_tx));
+    });
+
+    BackgroundTask {
+        receiver: Some(rx),
+        kind: BackgroundTaskKind::ReconcilingIndex { rx: progress_rx, last_progress: None },
+    }
+}
+
+fn run_reconcile_index(
+    wows_data_map: crate::data::wows_data::WoWsDataMap,
+    twitch_state: Arc<RwLock<TwitchState>>,
+    db_pool: sqlx::SqlitePool,
+    tokio_runtime: Arc<tokio::runtime::Runtime>,
+    progress_tx: &mpsc::Sender<IndexProgress>,
+) -> Result<BackgroundTaskCompletion, Report> {
+    let Some(replays_dir) =
+        wows_data_map.with_builds(|builds| builds.values().next().map(|d| d.read().replays_dir.clone()))
+    else {
+        return Err(report!("no game data loaded, cannot enumerate replays directory"));
+    };
+
+    let now = jiff::Timestamp::now();
+    let source_id = tokio_runtime
+        .block_on(crate::db::index::query::ensure_default_source(&db_pool, &replays_dir, now))
+        .map_err(|e| report!("failed to resolve replay index source: {e}"))?;
+
+    let indexed_paths: HashSet<String> = tokio_runtime
+        .block_on(crate::db::index::query::record_paths_in_source(&db_pool, source_id))
+        .unwrap_or_default();
+    let mut unindexable = tokio_runtime.block_on(crate::data::replay_reconcile::Unindexable::load(&db_pool));
+
+    let files = replay_filepaths(&replays_dir).unwrap_or_default();
+    let total = files.len();
+    let mut indexed_count = 0usize;
+    let mut unindexable_dirty = false;
+
+    for (done, path) in files.into_iter().enumerate() {
+        let _ = progress_tx.send(IndexProgress { done: done as u64, total: total as u64 });
+
+        let path_str = path.to_string_lossy();
+        if unindexable.contains(&path) {
+            continue;
+        }
+        let already_indexed = indexed_paths.contains(path_str.as_ref());
+
+        // `sent` is forced true: this task has no upload ledger of its own, so
+        // the skip decision depends only on whether the replay is already indexed.
+        let outcome = crate::data::replay_reconcile::reconcile_one(
+            &path,
+            already_indexed,
+            true,
+            std::panic::AssertUnwindSafe(|| {
+                index_one_replay(&path, &wows_data_map, &twitch_state, &db_pool, &tokio_runtime, source_id)
+            }),
+        );
+
+        match outcome {
+            crate::data::replay_reconcile::FileOutcome::Parsed { .. } => indexed_count += 1,
+            crate::data::replay_reconcile::FileOutcome::HardFailure => {
+                if unindexable.insert(&path) {
+                    unindexable_dirty = true;
+                }
+            }
+            crate::data::replay_reconcile::FileOutcome::Transient
+            | crate::data::replay_reconcile::FileOutcome::Skipped => {}
+        }
+    }
+
+    let _ = progress_tx.send(IndexProgress { done: total as u64, total: total as u64 });
+
+    if unindexable_dirty && let Err(e) = tokio_runtime.block_on(unindexable.save(&db_pool)) {
+        warn!("failed to persist unindexable replay set: {e}");
+    }
+
+    Ok(BackgroundTaskCompletion::ReconcileIndexComplete { indexed: indexed_count, total })
 }

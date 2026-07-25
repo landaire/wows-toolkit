@@ -123,6 +123,47 @@ impl PlayerTracker {
             tracked_players_by_ts.entry(timestamp).or_default().push(player_state.db_id());
         }
     }
+
+    /// Rebuild tracked-player aggregates from the durable replay index. Cheaper
+    /// than re-parsing every replay from disk. Live updates via
+    /// `update_from_replay` are unchanged and continue to layer on top.
+    ///
+    /// Returns `true` when the index had at least one player to populate from,
+    /// so callers can fall back to re-parsing replays when the index is empty
+    /// (e.g. before the first reconciliation pass has run).
+    pub fn populate_from_index(&mut self, pool: &sqlx::SqlitePool, rt: &tokio::runtime::Runtime) -> bool {
+        use crate::db::index::query;
+        use crate::db::index::rows::MatchFilter;
+
+        let players = match rt.block_on(query::distinct_players(pool, &MatchFilter::default())) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("player tracker: index query failed: {e}");
+                return false;
+            }
+        };
+        if players.is_empty() {
+            return false;
+        }
+
+        for facet in players {
+            let hits = rt
+                .block_on(query::matches_with_player(pool, facet.account_id, &MatchFilter::default()))
+                .unwrap_or_default();
+
+            let entry = self.tracked_players.entry(facet.account_id).or_default();
+            entry.db_id = facet.account_id;
+            entry.last_name = facet.latest_name;
+            entry.clan = facet.clan;
+            for hit in hits {
+                entry.timestamps.insert(hit.timestamp);
+                entry.arena_ids.insert(hit.arena_id);
+                self.tracked_players_by_time.entry(hit.timestamp).or_default().push(facet.account_id);
+            }
+        }
+
+        true
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -264,18 +305,29 @@ impl ToolkitTabViewer<'_> {
                     });
                 ui.label(t!("ui.player_tracker.player_filter"));
                 ui.text_edit_singleline(&mut player_tracker_settings.player_filter);
-                if let Some(replay_files) = self.tab_state.replay_files.as_ref()
-                    && let Some(wows_data_map) = self.tab_state.wows_data_map.as_ref()
-                    && ui.button(t!("ui.player_tracker.populate_from_replays")).clicked()
-                {
-                    crate::update_background_task!(
-                        self.tab_state.background_tasks,
-                        Some(task::start_populating_player_inspector(
-                            replay_files.keys().cloned().collect(),
-                            wows_data_map.clone(),
-                            Arc::clone(&self.tab_state.player_tracker)
-                        ))
-                    );
+                if ui.button(t!("ui.player_tracker.populate_from_replays")).clicked() {
+                    // Prefer the durable index: it's already parsed and avoids
+                    // re-reading every replay from disk. Fall back to the
+                    // background re-parse task when the index has nothing yet.
+                    let populated_from_index =
+                        match (self.tab_state.db_pool.as_ref(), self.tab_state.tokio_runtime.as_ref()) {
+                            (Some(pool), Some(rt)) => player_tracker_settings.populate_from_index(pool, rt),
+                            _ => false,
+                        };
+
+                    if !populated_from_index
+                        && let Some(replay_files) = self.tab_state.replay_files.as_ref()
+                        && let Some(wows_data_map) = self.tab_state.wows_data_map.as_ref()
+                    {
+                        crate::update_background_task!(
+                            self.tab_state.background_tasks,
+                            Some(task::start_populating_player_inspector(
+                                replay_files.keys().cloned().collect(),
+                                wows_data_map.clone(),
+                                Arc::clone(&self.tab_state.player_tracker)
+                            ))
+                        );
+                    }
                 }
             });
 
@@ -609,5 +661,119 @@ impl ToolkitTabViewer<'_> {
                 });
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::path::PathBuf;
+
+    use wows_replays::types::GameParamId;
+
+    use super::*;
+    use crate::db::index::query;
+    use crate::db::index::rows::IndexedVehicleRow;
+    use crate::db::index::rows::MatchOutcome;
+    use crate::db::index::rows::ObjectiveMatch;
+    use crate::db::index::rows::ReplayRecord;
+    use crate::db::index::rows::VehicleRelation;
+
+    fn build_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("failed to build test runtime")
+    }
+
+    async fn mem_pool() -> sqlx::SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("../wows-toolkit-config/migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    #[test]
+    fn populate_from_index_fills_tracker_from_seeded_matches() {
+        let rt = build_runtime();
+        let pool = rt.block_on(async {
+            let pool = mem_pool().await;
+            let now = Timestamp::from_second(1_700_000_000).unwrap();
+            let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+            let objective = ObjectiveMatch {
+                arena_id: ArenaId::new(100),
+                timestamp: Timestamp::from_second(1_700_000_100).unwrap(),
+                map: "Ocean".into(),
+                game_mode: "Domination".into(),
+                game_type: "pvp".into(),
+                match_group: "pvp".into(),
+                version_build: Some(1234),
+            };
+            query::upsert_match(&pool, &objective).await.unwrap();
+
+            let enemy = IndexedVehicleRow {
+                arena_id: ArenaId::new(100),
+                account_id: AccountId(501),
+                player_name: "Enemy".into(),
+                clan: "CLAN".into(),
+                realm: Some("na".into()),
+                ship_id: GameParamId::from(111u64),
+                ship_index: "PJSB018".into(),
+                ship_name: "Yamato".into(),
+                nation: "japan".into(),
+                species: "Battleship".into(),
+                tier: 10,
+                relation: VehicleRelation::Enemy,
+                division_id: None,
+                survived: Some(true),
+                damage: Some(50_000),
+                kills: Some(1),
+                spotting: Some(0),
+                potential: Some(0),
+                received: Some(0),
+                pr: Some(1200.0),
+                is_test_ship: false,
+            };
+            query::upsert_vehicles(&pool, &[enemy]).await.unwrap();
+
+            let record = ReplayRecord {
+                arena_id: ArenaId::new(100),
+                source_id: src,
+                replay_path: PathBuf::from("a.wowsreplay"),
+                file_mtime: Some(1),
+                outcome: MatchOutcome::Win,
+                self_account_id: Some(AccountId(7)),
+                self_ship_id: Some(GameParamId::from(999u64)),
+                self_survived: Some(true),
+                self_damage: Some(120_000),
+                self_kills: Some(2),
+                self_pr: Some(1500.0),
+                results_available: true,
+                indexed_at: now,
+            };
+            query::upsert_record(&pool, &record).await.unwrap();
+
+            pool
+        });
+
+        let mut tracker = PlayerTracker::default();
+        let populated = tracker.populate_from_index(&pool, &rt);
+        assert!(populated, "index had a match to populate from");
+
+        let enemy = tracker.tracked_players.get(&AccountId(501)).expect("enemy account tracked from index");
+        assert_eq!(enemy.last_name, "Enemy");
+        assert_eq!(enemy.clan, "CLAN");
+        assert!(enemy.arena_ids.contains(&ArenaId::new(100)));
+        assert_eq!(enemy.timestamps.len(), 1);
+
+        let timestamp = *enemy.timestamps.iter().next().unwrap();
+        assert_eq!(tracker.tracked_players_by_time.get(&timestamp).map(|v| v.len()), Some(1));
+    }
+
+    #[test]
+    fn populate_from_index_reports_false_when_index_is_empty() {
+        let rt = build_runtime();
+        let pool = rt.block_on(mem_pool());
+
+        let mut tracker = PlayerTracker::default();
+        assert!(!tracker.populate_from_index(&pool, &rt), "empty index must not report as populated");
+        assert!(tracker.tracked_players.is_empty());
     }
 }

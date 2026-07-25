@@ -131,6 +131,10 @@ host_opened_replay = "Host opened replay: %{name}"
 host_closed_replay = "Host closed a replay"
 session_error_generic = "Session: %{msg}"
 session_rejected = "Session rejected: %{reason}"
+indexing_replays = "Indexing replays..."
+indexing_replays_progress = "Indexing replays (%{done}/%{total})"
+replays_indexed = "Indexed %{indexed} of %{total} replay(s)"
+replays_already_indexed = "All %{total} replay(s) already indexed"
 
 # -- Stat names --
 
@@ -228,6 +232,7 @@ format_json = "JSON"
 format_csv = "CSV"
 format_cbor = "CBOR"
 export_path_hint = "Data auto-export directory"
+index_all_replays = "Index All Replays"
 
 [ui.settings.session]
 heading = "Session Settings"
