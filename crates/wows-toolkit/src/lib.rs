@@ -6,7 +6,7 @@ rust_i18n::i18n!("../wt-translations/translations", fallback = "en", backend = F
 mod app;
 mod armor_viewer;
 pub mod collab;
-pub(crate) mod data;
+pub mod data;
 pub(crate) mod db;
 #[cfg(feature = "mod_manager")]
 mod mod_manager;

@@ -791,6 +791,28 @@ fn parse_replay_data_in_background(
                             };
                             replay.build_ui_report(&deps);
 
+                            if let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref()) {
+                                let source_dir = path.parent().unwrap_or(Path::new("."));
+                                match rt.block_on(crate::db::index::query::ensure_default_source(
+                                    pool,
+                                    source_dir,
+                                    jiff::Timestamp::now(),
+                                )) {
+                                    Ok(source_id) => {
+                                        crate::data::replay_index::index_replay_blocking(
+                                            rt,
+                                            pool,
+                                            &replay,
+                                            source_id,
+                                            jiff::Timestamp::now(),
+                                        );
+                                    }
+                                    Err(e) => {
+                                        warn!("failed to resolve replay index source: {e}");
+                                    }
+                                }
+                            }
+
                             if data.data_export_settings.should_auto_export {
                                 let export_path = data
                                     .data_export_settings

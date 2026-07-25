@@ -2,9 +2,14 @@
 //! Mirrors `PerGameStat::from_replay` and `Vehicle::new` for field extraction.
 
 use jiff::Timestamp;
+use sqlx::SqlitePool;
+use tokio::runtime::Runtime;
+use tracing::warn;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::Relation;
 
+use crate::db::index::query;
+use crate::db::index::rows::IndexError;
 use crate::db::index::rows::IndexedVehicleRow;
 use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::ObjectiveMatch;
@@ -120,6 +125,24 @@ pub fn map_rows(replay: &Replay, source_id: SourceId, indexed_at: Timestamp) -> 
     };
 
     Some(MappedRows { objective, vehicles, record })
+}
+
+pub async fn write_index(pool: &SqlitePool, rows: &MappedRows) -> Result<(), IndexError> {
+    query::upsert_match(pool, &rows.objective).await?;
+    query::upsert_vehicles(pool, &rows.vehicles).await?;
+    query::upsert_record(pool, &rows.record).await?;
+    Ok(())
+}
+
+/// Map + persist on the current (background) thread. Best-effort: errors are
+/// logged and swallowed so indexing never destabilizes the parser thread.
+pub fn index_replay_blocking(rt: &Runtime, pool: &SqlitePool, replay: &Replay, source_id: SourceId, now: Timestamp) {
+    let Some(rows) = map_rows(replay, source_id, now) else {
+        return;
+    };
+    if let Err(e) = rt.block_on(write_index(pool, &rows)) {
+        warn!("failed to index replay: {e}");
+    }
 }
 
 #[cfg(test)]
