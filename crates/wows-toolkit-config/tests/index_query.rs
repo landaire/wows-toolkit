@@ -272,6 +272,32 @@ async fn exists_predicates_and_helpers() {
 }
 
 #[tokio::test]
+async fn self_account_ids_returns_distinct_self_accounts() {
+    use wows_toolkit_config::index::rows::MatchFilter;
+    let pool = mem_pool().await;
+    let src = seed_two_matches(&pool).await;
+
+    // Both seeded records use self_account_id 7 (from sample_record).
+    let ids = query::self_account_ids(&pool, &MatchFilter::default()).await.unwrap();
+    assert_eq!(ids.len(), 1);
+    assert!(ids.contains(&AccountId(7)));
+
+    // Source scoping: an unrelated source id excludes everything.
+    let other_src = wows_toolkit_config::index::rows::SourceId(src.0 + 1);
+    let scoped =
+        query::self_account_ids(&pool, &MatchFilter { source_ids: Some(vec![other_src]), ..Default::default() })
+            .await
+            .unwrap();
+    assert!(scoped.is_empty());
+
+    let scoped = query::self_account_ids(&pool, &MatchFilter { source_ids: Some(vec![src]), ..Default::default() })
+        .await
+        .unwrap();
+    assert_eq!(scoped.len(), 1);
+    assert!(scoped.contains(&AccountId(7)));
+}
+
+#[tokio::test]
 async fn facets_list_players_and_self_ships() {
     use wows_toolkit_config::index::rows::MatchFilter;
     let pool = mem_pool().await;

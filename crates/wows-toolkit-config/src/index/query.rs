@@ -374,6 +374,24 @@ pub async fn distinct_players(pool: &SqlitePool, filter: &MatchFilter) -> Result
         .collect()
 }
 
+/// Distinct self-perspective account ids across the index (`replay_record.self_account_id`).
+/// `filter.source_ids` scopes to groups; other filter fields are ignored here.
+pub async fn self_account_ids(pool: &SqlitePool, filter: &MatchFilter) -> Result<HashSet<AccountId>, IndexError> {
+    let mut qb: QueryBuilder<Sqlite> =
+        QueryBuilder::new("SELECT DISTINCT self_account_id FROM replay_record WHERE self_account_id IS NOT NULL");
+    if let Some(sources) = &filter.source_ids {
+        qb.push(" AND source_id IN (");
+        let mut sep = qb.separated(", ");
+        for s in sources {
+            sep.push_bind(s.0);
+        }
+        qb.push(")");
+    }
+
+    let rows: Vec<(i64,)> = qb.build_query_as().fetch_all(pool).await?;
+    Ok(rows.into_iter().map(|(a,)| AccountId::from(a)).collect())
+}
+
 /// Ships the user has played (from `replay_record.self_ship_id`), most-played first.
 pub async fn distinct_self_ships(pool: &SqlitePool, filter: &MatchFilter) -> Result<Vec<ShipFacet>, IndexError> {
     let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(

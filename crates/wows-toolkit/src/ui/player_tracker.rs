@@ -146,7 +146,16 @@ impl PlayerTracker {
             return false;
         }
 
+        // Never track the replay-perspective (self) account: the live path
+        // (`update_from_replay`) deliberately excludes it, and it would otherwise
+        // dominate the default times-encountered sort.
+        let self_accounts = rt.block_on(query::self_account_ids(pool, &MatchFilter::default())).unwrap_or_default();
+
         for facet in players {
+            if self_accounts.contains(&facet.account_id) {
+                continue;
+            }
+
             let hits = rt
                 .block_on(query::matches_with_player(pool, facet.account_id, &MatchFilter::default()))
                 .unwrap_or_default();
@@ -305,7 +314,19 @@ impl ToolkitTabViewer<'_> {
                     });
                 ui.label(t!("ui.player_tracker.player_filter"));
                 ui.text_edit_singleline(&mut player_tracker_settings.player_filter);
-                if ui.button(t!("ui.player_tracker.populate_from_replays")).clicked() {
+
+                // Never a silent no-op: only enable the button when at least one of the
+                // two population paths (durable index, or on-demand replay re-parse) has
+                // its prerequisites available.
+                let index_path_available = self.tab_state.db_pool.is_some() && self.tab_state.tokio_runtime.is_some();
+                let fallback_path_available =
+                    self.tab_state.replay_files.is_some() && self.tab_state.wows_data_map.is_some();
+                let populate_enabled = index_path_available || fallback_path_available;
+
+                if ui
+                    .add_enabled(populate_enabled, egui::Button::new(t!("ui.player_tracker.populate_from_replays")))
+                    .clicked()
+                {
                     // Prefer the durable index: it's already parsed and avoids
                     // re-reading every replay from disk. Fall back to the
                     // background re-parse task when the index has nothing yet.
@@ -775,5 +796,99 @@ mod tests {
         let mut tracker = PlayerTracker::default();
         assert!(!tracker.populate_from_index(&pool, &rt), "empty index must not report as populated");
         assert!(tracker.tracked_players.is_empty());
+    }
+
+    #[test]
+    fn populate_from_index_excludes_self_account() {
+        let rt = build_runtime();
+        let pool = rt.block_on(async {
+            let pool = mem_pool().await;
+            let now = Timestamp::from_second(1_700_000_000).unwrap();
+            let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+            let objective = ObjectiveMatch {
+                arena_id: ArenaId::new(100),
+                timestamp: Timestamp::from_second(1_700_000_100).unwrap(),
+                map: "Ocean".into(),
+                game_mode: "Domination".into(),
+                game_type: "pvp".into(),
+                match_group: "pvp".into(),
+                version_build: Some(1234),
+            };
+            query::upsert_match(&pool, &objective).await.unwrap();
+
+            let self_vehicle = IndexedVehicleRow {
+                arena_id: ArenaId::new(100),
+                account_id: AccountId(7),
+                player_name: "MyAccount".into(),
+                clan: "SELF".into(),
+                realm: Some("na".into()),
+                ship_id: GameParamId::from(999u64),
+                ship_index: "PJSD018".into(),
+                ship_name: "Harugumo".into(),
+                nation: "japan".into(),
+                species: "Destroyer".into(),
+                tier: 10,
+                relation: VehicleRelation::SelfPlayer,
+                division_id: None,
+                survived: Some(true),
+                damage: Some(120_000),
+                kills: Some(2),
+                spotting: Some(0),
+                potential: Some(0),
+                received: Some(0),
+                pr: Some(1500.0),
+                is_test_ship: false,
+            };
+            let enemy = IndexedVehicleRow {
+                arena_id: ArenaId::new(100),
+                account_id: AccountId(501),
+                player_name: "Enemy".into(),
+                clan: "CLAN".into(),
+                realm: Some("na".into()),
+                ship_id: GameParamId::from(111u64),
+                ship_index: "PJSB018".into(),
+                ship_name: "Yamato".into(),
+                nation: "japan".into(),
+                species: "Battleship".into(),
+                tier: 10,
+                relation: VehicleRelation::Enemy,
+                division_id: None,
+                survived: Some(true),
+                damage: Some(50_000),
+                kills: Some(1),
+                spotting: Some(0),
+                potential: Some(0),
+                received: Some(0),
+                pr: Some(1200.0),
+                is_test_ship: false,
+            };
+            query::upsert_vehicles(&pool, &[self_vehicle, enemy]).await.unwrap();
+
+            let record = ReplayRecord {
+                arena_id: ArenaId::new(100),
+                source_id: src,
+                replay_path: PathBuf::from("a.wowsreplay"),
+                file_mtime: Some(1),
+                outcome: MatchOutcome::Win,
+                self_account_id: Some(AccountId(7)),
+                self_ship_id: Some(GameParamId::from(999u64)),
+                self_survived: Some(true),
+                self_damage: Some(120_000),
+                self_kills: Some(2),
+                self_pr: Some(1500.0),
+                results_available: true,
+                indexed_at: now,
+            };
+            query::upsert_record(&pool, &record).await.unwrap();
+
+            pool
+        });
+
+        let mut tracker = PlayerTracker::default();
+        assert!(tracker.populate_from_index(&pool, &rt), "index had a match to populate from");
+
+        assert!(!tracker.tracked_players.contains_key(&AccountId(7)), "self-perspective account must not be tracked");
+        assert!(tracker.tracked_players.contains_key(&AccountId(501)), "opponent account must still be tracked");
     }
 }
