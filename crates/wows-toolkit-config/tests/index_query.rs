@@ -113,3 +113,72 @@ async fn upserts_are_idempotent_and_ledger_tracks_arena() {
     let (records,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM replay_record").fetch_one(&pool).await.unwrap();
     assert_eq!((matches, vehicles, records), (1, 1, 1));
 }
+
+async fn seed_two_matches(pool: &sqlx::SqlitePool) -> wows_toolkit_config::index::rows::SourceId {
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_default_source(pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+    // arena 100: win, Ocean, ts 1000, self_damage 120k
+    let mut m1 = sample_match(100);
+    m1.map = "Ocean".into();
+    m1.timestamp = Timestamp::from_second(1000).unwrap();
+    query::upsert_match(pool, &m1).await.unwrap();
+    let mut r1 = sample_record(100, src, "a.wowsreplay");
+    r1.outcome = MatchOutcome::Win;
+    r1.self_damage = Some(120_000);
+    r1.self_survived = Some(true);
+    query::upsert_record(pool, &r1).await.unwrap();
+
+    // arena 200: loss, Trap, ts 2000, self_damage 40k
+    let mut m2 = sample_match(200);
+    m2.map = "Trap".into();
+    m2.timestamp = Timestamp::from_second(2000).unwrap();
+    query::upsert_match(pool, &m2).await.unwrap();
+    let mut r2 = sample_record(200, src, "b.wowsreplay");
+    r2.outcome = MatchOutcome::Loss;
+    r2.self_damage = Some(40_000);
+    r2.self_survived = Some(false);
+    query::upsert_record(pool, &r2).await.unwrap();
+
+    src
+}
+
+#[tokio::test]
+async fn search_matches_applies_match_level_predicates() {
+    use wows_toolkit_config::index::rows::MatchFilter;
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+
+    // No filter: both, newest first.
+    let all = query::search_matches(&pool, &MatchFilter::default()).await.unwrap();
+    assert_eq!(all.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![200, 100]);
+
+    // Outcome = loss.
+    let losses = query::search_matches(&pool, &MatchFilter { outcome: Some(MatchOutcome::Loss), ..Default::default() })
+        .await
+        .unwrap();
+    assert_eq!(losses.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![200]);
+
+    // Map = Ocean.
+    let ocean =
+        query::search_matches(&pool, &MatchFilter { map: Some("Ocean".into()), ..Default::default() }).await.unwrap();
+    assert_eq!(ocean.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![100]);
+
+    // self_damage >= 100k.
+    let big = query::search_matches(&pool, &MatchFilter { self_damage_min: Some(100_000), ..Default::default() })
+        .await
+        .unwrap();
+    assert_eq!(big.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![100]);
+
+    // survived = false.
+    let died =
+        query::search_matches(&pool, &MatchFilter { self_survived: Some(false), ..Default::default() }).await.unwrap();
+    assert_eq!(died.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![200]);
+
+    // recent capped to 1 returns newest.
+    let recent = query::recent_matches(&pool, &MatchFilter::default(), 1).await.unwrap();
+    assert_eq!(recent.len(), 1);
+    assert_eq!(recent[0].arena_id.raw(), 200);
+    assert_eq!(recent[0].outcome, MatchOutcome::Loss);
+    assert_eq!(recent[0].self_damage, Some(40_000));
+}

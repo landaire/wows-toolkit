@@ -4,12 +4,20 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use jiff::Timestamp;
+use sqlx::QueryBuilder;
+use sqlx::Row;
+use sqlx::Sqlite;
 use sqlx::SqlitePool;
+use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
+use wows_core::game_types::GameParamId;
 
 use super::rows::IndexError;
 use super::rows::IndexSource;
 use super::rows::IndexedVehicleRow;
+use super::rows::MatchFilter;
+use super::rows::MatchHit;
+use super::rows::MatchOutcome;
 use super::rows::ObjectiveMatch;
 use super::rows::ReplayRecord;
 use super::rows::SourceId;
@@ -149,4 +157,113 @@ pub async fn arena_ids_in_source(pool: &SqlitePool, source: SourceId) -> Result<
         .fetch_all(pool)
         .await?;
     Ok(rows.into_iter().map(|(a,)| ArenaId::new(a)).collect())
+}
+
+/// One `MatchHit` per arena. The chosen record prefers `file_mtime IS NOT NULL`
+/// then most-recently indexed, so the open target points at a present file when
+/// possible. Match-level predicates only; Task 6 adds EXISTS predicates.
+pub async fn search_matches(pool: &SqlitePool, filter: &MatchFilter) -> Result<Vec<MatchHit>, IndexError> {
+    run_match_query(pool, filter, None).await
+}
+
+pub async fn recent_matches(pool: &SqlitePool, filter: &MatchFilter, limit: i64) -> Result<Vec<MatchHit>, IndexError> {
+    run_match_query(pool, filter, Some(limit)).await
+}
+
+async fn run_match_query(
+    pool: &SqlitePool,
+    filter: &MatchFilter,
+    limit: Option<i64>,
+) -> Result<Vec<MatchHit>, IndexError> {
+    // Pick one record per arena: prefer a file that still has an mtime, then newest indexed.
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "SELECT m.arena_id, m.timestamp, m.map, m.game_mode, m.game_type, m.match_group, m.version_build, \
+                r.source_id, r.outcome, r.self_account_id, r.self_ship_id, r.self_survived, r.self_damage, \
+                r.self_kills, r.self_pr, r.results_available, r.replay_path, r.file_mtime \
+         FROM indexed_match m \
+         JOIN replay_record r ON r.record_id = ( \
+            SELECT rr.record_id FROM replay_record rr \
+            WHERE rr.arena_id = m.arena_id",
+    );
+    // source scope inside the per-arena record picker
+    if let Some(sources) = &filter.source_ids {
+        qb.push(" AND rr.source_id IN (");
+        let mut sep = qb.separated(", ");
+        for s in sources {
+            sep.push_bind(s.0);
+        }
+        qb.push(")");
+    }
+    qb.push(" ORDER BY (rr.file_mtime IS NOT NULL) DESC, rr.indexed_at DESC LIMIT 1 ) WHERE 1=1");
+
+    // match-level + record-level predicates
+    if let Some(o) = filter.outcome {
+        qb.push(" AND r.outcome = ").push_bind(o.as_db_str());
+    }
+    if let Some(ship) = filter.self_ship {
+        qb.push(" AND r.self_ship_id = ").push_bind(ship.raw() as i64);
+    }
+    if let Some(map) = &filter.map {
+        qb.push(" AND m.map = ").push_bind(map.clone());
+    }
+    if let Some(gt) = &filter.game_type {
+        qb.push(" AND m.game_type = ").push_bind(gt.clone());
+    }
+    if let Some(from) = filter.date_from {
+        qb.push(" AND m.timestamp >= ").push_bind(from.as_second());
+    }
+    if let Some(to) = filter.date_to {
+        qb.push(" AND m.timestamp <= ").push_bind(to.as_second());
+    }
+    if let Some(min) = filter.self_damage_min {
+        qb.push(" AND r.self_damage >= ").push_bind(min as i64);
+    }
+    if let Some(max) = filter.self_damage_max {
+        qb.push(" AND r.self_damage <= ").push_bind(max as i64);
+    }
+    if let Some(s) = filter.self_survived {
+        qb.push(" AND r.self_survived = ").push_bind(s);
+    }
+    push_exists_predicates(&mut qb, filter); // defined in Task 6; a no-op stub until then
+
+    qb.push(" ORDER BY m.timestamp DESC");
+    if let Some(limit) = limit {
+        qb.push(" LIMIT ").push_bind(limit);
+    }
+
+    let rows = qb.build().fetch_all(pool).await?;
+    rows.iter().map(row_to_match_hit).collect()
+}
+
+fn row_to_match_hit(row: &sqlx::sqlite::SqliteRow) -> Result<MatchHit, IndexError> {
+    let outcome_str: String = row.try_get("outcome")?;
+    let self_account: Option<i64> = row.try_get("self_account_id")?;
+    let self_ship: Option<i64> = row.try_get("self_ship_id")?;
+    let version_build: Option<i64> = row.try_get("version_build")?;
+    let self_damage: Option<i64> = row.try_get("self_damage")?;
+    Ok(MatchHit {
+        arena_id: wows_core::game_types::ArenaId::new(row.try_get::<i64, _>("arena_id")?),
+        timestamp: jiff::Timestamp::from_second(row.try_get::<i64, _>("timestamp")?)
+            .unwrap_or(jiff::Timestamp::UNIX_EPOCH),
+        map: row.try_get("map")?,
+        game_mode: row.try_get("game_mode")?,
+        game_type: row.try_get("game_type")?,
+        match_group: row.try_get("match_group")?,
+        version_build: version_build.map(|v| v as u32),
+        source_id: SourceId(row.try_get::<i64, _>("source_id")?),
+        outcome: MatchOutcome::from_db_str(&outcome_str).unwrap_or(MatchOutcome::Unknown),
+        self_account_id: self_account.map(AccountId::from),
+        self_ship_id: self_ship.map(|s| GameParamId::from(s as u64)),
+        self_survived: row.try_get::<Option<bool>, _>("self_survived")?,
+        self_damage: self_damage.map(|d| d as u64),
+        self_kills: row.try_get("self_kills")?,
+        self_pr: row.try_get("self_pr")?,
+        results_available: row.try_get("results_available")?,
+        replay_path: std::path::PathBuf::from(row.try_get::<String, _>("replay_path")?),
+        file_mtime: row.try_get("file_mtime")?,
+    })
+}
+
+fn push_exists_predicates(_qb: &mut QueryBuilder<'_, Sqlite>, _filter: &MatchFilter) {
+    // Replaced in Task 6 with species/tier/player_present/enemy_ship EXISTS subqueries.
 }
