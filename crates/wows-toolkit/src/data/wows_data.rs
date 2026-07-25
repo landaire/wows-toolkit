@@ -767,7 +767,7 @@ impl ReplayLoader {
         deps: &ReplayDependencies,
         path: PathBuf,
     ) -> Result<Arc<RwLock<Replay>>, rootcause::Report> {
-        let replay_file = ReplayFile::from_file(&path).map_err(|e| e.into_dynamic())?;
+        let replay_file = read_replay_file_with_retry(&path)?;
         let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
 
         let Some(wows_data_for_build) = deps.wows_data_map.resolve(&replay_version) else {
@@ -795,5 +795,33 @@ impl ReplayLoader {
         replay.game_constants = Some(game_constants);
         replay.source_path = Some(path);
         Ok(Arc::new(RwLock::new(replay)))
+    }
+}
+
+/// Read and parse a replay, retrying while the game finishes flushing it.
+///
+/// The filesystem watcher fires as soon as the game creates or renames the
+/// file, but the metadata JSON and packet stream may still be mid-write, and
+/// Windows virus scanners can briefly hold the new file open. Retrying over a
+/// few seconds off the UI thread avoids dropping a replay right after a match.
+fn read_replay_file_with_retry(path: &Path) -> Result<ReplayFile, rootcause::Report> {
+    const MAX_ATTEMPTS: u32 = 8;
+    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(750);
+
+    let mut attempt = 1;
+    loop {
+        match ReplayFile::from_file(path) {
+            Ok(replay_file) => return Ok(replay_file),
+            Err(e) => {
+                let e = e.into_dynamic().attach(format!("path: {}", path.display()));
+                if attempt >= MAX_ATTEMPTS {
+                    error!("failed to read replay after {MAX_ATTEMPTS} attempts: {e:?}");
+                    return Err(e.attach(format!("gave up after {MAX_ATTEMPTS} attempts")));
+                }
+                warn!("replay not ready (attempt {attempt}/{MAX_ATTEMPTS}), retrying: {e:?}");
+                attempt += 1;
+                std::thread::sleep(RETRY_DELAY);
+            }
+        }
     }
 }

@@ -1187,6 +1187,18 @@ impl WowsToolkitApp {
                     let open_tab =
                         matches!(source, ReplaySource::ManualOpen | ReplaySource::AutoLoad | ReplaySource::Reload);
 
+                    // A replay newly written by the game (the watcher's Added
+                    // path) is read and built on the background thread; add it to
+                    // the listing here so it appears without a full rescan. The
+                    // most recently completed read wins, so a re-read triggered by
+                    // a later modification replaces an earlier, staler parse.
+                    if matches!(source, ReplaySource::AutoLoad | ReplaySource::SessionStatsOnly)
+                        && let Some(replay_files) = &mut self.tab_state.replay_files
+                        && let Some(path) = replay.read().source_path.clone()
+                    {
+                        replay_files.insert(path, Arc::clone(&replay));
+                    }
+
                     if track_session_stats {
                         let replay_guard = replay.read();
                         if let Some(stat) = crate::data::session_stats::PerGameStat::from_replay(

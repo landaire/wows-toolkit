@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
-use std::time::Duration;
 
 use notify::EventKind;
 use notify::RecommendedWatcher;
@@ -15,9 +14,11 @@ use notify::event::ModifyKind;
 use notify::event::RenameMode;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
+use rootcause::prelude::ResultExt;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::debug;
+use tracing::warn;
 use wows_replays::ReplayFile;
 use wows_replays::types::GameParamId;
 use wowsunpack::vfs::VfsPath;
@@ -750,62 +751,49 @@ impl TabState {
         for file_event in events {
             match file_event {
                 NotifyFileEvent::Added(new_file) => {
-                    // Build the replay while holding the read guard, then drop it
-                    // before calling &mut self methods.
-                    let new_replay = self.world_of_warships_data.as_ref().and_then(|wd| {
-                        let wows_data = wd.read();
-                        let game_metadata = wows_data.game_metadata.as_ref()?;
-                        for _ in 0..3 {
-                            if let Ok(replay_file) = ReplayFile::from_file(&new_file) {
-                                let mut replay = Replay::new(replay_file, game_metadata.clone());
-                                replay.game_constants = Some(Arc::clone(&wows_data.game_constants));
-                                replay.source_path = Some(new_file.clone());
-                                return Some(Arc::new(RwLock::new(replay)));
-                            } else {
-                                // oops our framerate
-                                std::thread::sleep(Duration::from_secs(1));
-                            }
-                        }
-                        None
-                    });
+                    let source = if self.persisted.read().auto_load_latest_replay {
+                        ReplaySource::AutoLoad
+                    } else {
+                        ReplaySource::SessionStatsOnly
+                    };
 
-                    if let Some(replay) = new_replay {
-                        if let Some(replay_files) = &mut self.replay_files {
-                            replay_files.insert(new_file.clone(), Arc::clone(&replay));
-                        }
-
-                        let source = if self.persisted.read().auto_load_latest_replay {
-                            ReplaySource::AutoLoad
-                        } else {
-                            ReplaySource::SessionStatsOnly
-                        };
-                        if let Some(deps) = self.replay_dependencies() {
-                            update_background_task!(self.background_tasks, deps.load_replay(replay, source));
-                        }
+                    // The game may still be flushing the freshly written replay
+                    // when the watcher fires. Read, retry, and build on the
+                    // background thread so the UI never stalls; the loaded replay
+                    // is inserted into the listing when the task completes.
+                    if let Some(deps) = self.replay_dependencies() {
+                        update_background_task!(self.background_tasks, deps.parse_replay_from_path(new_file, source));
                     }
                 }
                 NotifyFileEvent::Modified(modified_file) => {
-                    // Invalidate cached data when file is modified
+                    let source = if self.persisted.read().auto_load_latest_replay {
+                        ReplaySource::AutoLoad
+                    } else {
+                        ReplaySource::SessionStatsOnly
+                    };
+
                     let replay_clone =
                         self.replay_files.as_ref().and_then(|files| files.get(&modified_file)).map(Arc::clone);
 
                     if let Some(replay) = replay_clone {
+                        // Invalidate cached data so the reload re-parses the file.
                         let mut replay_inner = replay.write();
                         replay_inner.battle_report = None;
                         replay_inner.ui_report = None;
                         drop(replay_inner);
 
-                        let source = if self.persisted.read().auto_load_latest_replay {
-                            ReplaySource::AutoLoad
-                        } else {
-                            ReplaySource::SessionStatsOnly
-                        };
                         if let Some(deps) = self.replay_dependencies() {
-                            update_background_task!(
-                                self.background_tasks,
-                                deps.load_replay(Arc::clone(&replay), source)
-                            );
+                            update_background_task!(self.background_tasks, deps.load_replay(replay, source));
                         }
+                    } else if let Some(deps) = self.replay_dependencies() {
+                        // The Added task for this replay may still be parsing, so
+                        // the listing entry does not exist yet. Read from the path
+                        // so the modification is not dropped; the freshest read
+                        // wins on completion.
+                        update_background_task!(
+                            self.background_tasks,
+                            deps.parse_replay_from_path(modified_file, source)
+                        );
                     }
                 }
                 NotifyFileEvent::Removed(old_file) => {
@@ -818,16 +806,22 @@ impl TabState {
                     // self.background_task = Some(self.load_game_data(self.settings.wows_dir.clone().into()));
                 }
                 NotifyFileEvent::TempArenaInfoCreated(path) => {
-                    // Parse the metadata
-                    let meta_data = std::fs::read(path);
+                    let parsed = std::fs::read(&path)
+                        .context("failed to read tempArenaInfo.json")
+                        .and_then(|meta_data| {
+                            ReplayFile::from_decrypted_parts(meta_data, Vec::new())
+                                .context("failed to parse tempArenaInfo.json")
+                        })
+                        .attach_with(|| format!("path: {}", path.display()));
 
-                    if meta_data.is_err() {
-                        return;
-                    }
-
-                    if let Ok(replay_file) = ReplayFile::from_decrypted_parts(meta_data.unwrap(), Vec::with_capacity(0))
-                    {
-                        self.player_tracker.write().update_from_live_arena_info(&replay_file.meta);
+                    match parsed {
+                        Ok(replay_file) => {
+                            self.player_tracker.write().update_from_live_arena_info(&replay_file.meta);
+                        }
+                        // The game writes this file at match start and may not
+                        // have finished flushing it yet; skip this event and let
+                        // a later write re-trigger the update.
+                        Err(e) => warn!("live arena info update skipped: {e:?}"),
                     }
                 }
             }
