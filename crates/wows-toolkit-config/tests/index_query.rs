@@ -114,6 +114,25 @@ async fn upserts_are_idempotent_and_ledger_tracks_arena() {
     assert_eq!((matches, vehicles, records), (1, 1, 1));
 }
 
+#[tokio::test]
+async fn record_paths_in_source_returns_recorded_paths() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_match(&pool, &sample_match(200)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "a.wowsreplay")).await.unwrap();
+    query::upsert_record(&pool, &sample_record(200, src, "b.wowsreplay")).await.unwrap();
+    // Re-recording the same path is idempotent (keyed on source + path).
+    query::upsert_record(&pool, &sample_record(100, src, "a.wowsreplay")).await.unwrap();
+
+    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    assert_eq!(paths.len(), 2, "two distinct paths recorded, idempotent on re-record");
+    assert!(paths.contains("a.wowsreplay"));
+    assert!(paths.contains("b.wowsreplay"));
+}
+
 async fn seed_two_matches(pool: &sqlx::SqlitePool) -> wows_toolkit_config::index::rows::SourceId {
     let now = Timestamp::from_second(1_700_000_000).unwrap();
     let src = query::ensure_default_source(pool, Path::new("C:/wows/replays"), now).await.unwrap();

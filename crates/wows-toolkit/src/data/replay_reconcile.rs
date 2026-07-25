@@ -5,50 +5,78 @@ use std::collections::HashSet;
 use std::panic::UnwindSafe;
 use std::panic::catch_unwind;
 use std::path::Path;
-use std::path::PathBuf;
 
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::warn;
 
+/// Result of a single background parse attempt, distinguishing genuinely
+/// un-processable files from retryable conditions so the caller can blacklist
+/// only the former.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseOutcome {
+    /// Parsed successfully and the upload completed (or was not required).
+    ParsedAndSent,
+    /// Parsed successfully (and indexed) but the upload hit a transient error.
+    /// Left unsent so the upload is retried next launch.
+    ParsedNotSent,
+    /// A retryable non-parse condition: no game data for this build yet.
+    /// Left unsent and unindexed; retried next launch.
+    Transient,
+    /// The replay is malformed / unparseable after the retries. Blacklist it.
+    HardFailure,
+}
+
+/// Reconciliation decision for one replay file, consumed by the startup scan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileOutcome {
+    /// Both ledgers already satisfied; the parse closure was not run.
     Skipped,
-    Indexed,
-    Failed,
+    /// Parsed successfully. `sent` is true when the upload also completed.
+    Parsed { sent: bool },
+    /// A retryable condition; leave the file for a later launch, do not blacklist.
+    Transient,
+    /// A hard parse failure or a panic; record in the persistent blacklist.
+    HardFailure,
 }
 
 /// Process one replay file. Skips when both ledgers are already satisfied.
 /// Otherwise runs `parse_and_index` inside `catch_unwind` so a parser panic on
-/// one file cannot abort the pass.
+/// one file cannot abort the pass. A panic is mapped to [`FileOutcome::HardFailure`]
+/// exactly like a hard parse failure.
 pub fn reconcile_one<F>(path: &Path, indexed: bool, sent: bool, parse_and_index: F) -> FileOutcome
 where
-    F: FnOnce() -> Result<(), ()> + UnwindSafe,
+    F: FnOnce() -> ParseOutcome + UnwindSafe,
 {
     if indexed && sent {
         return FileOutcome::Skipped;
     }
     match catch_unwind(parse_and_index) {
-        Ok(Ok(())) => FileOutcome::Indexed,
-        Ok(Err(())) => {
-            warn!("failed to index replay {}", path.display());
-            FileOutcome::Failed
+        Ok(ParseOutcome::ParsedAndSent) => FileOutcome::Parsed { sent: true },
+        Ok(ParseOutcome::ParsedNotSent) => FileOutcome::Parsed { sent: false },
+        Ok(ParseOutcome::Transient) => FileOutcome::Transient,
+        Ok(ParseOutcome::HardFailure) => {
+            warn!("failed to parse replay {} (blacklisted)", path.display());
+            FileOutcome::HardFailure
         }
         Err(_) => {
-            warn!("panic while indexing replay {} (skipped)", path.display());
-            FileOutcome::Failed
+            warn!("panic while parsing replay {} (blacklisted)", path.display());
+            FileOutcome::HardFailure
         }
     }
 }
 
 /// Persistent set of files that panicked or hard-errored, keyed by path + mtime,
-/// so they are not retried every launch. Serialized as JSON in the settings table.
+/// so they are not retried every launch. A replaced file (new mtime) recovers.
+/// Serialized as JSON in the settings table under `replay_unindexable`.
 #[derive(Default, Serialize, Deserialize)]
 pub struct Unindexable {
     entries: HashSet<(String, i64)>,
 }
 
 impl Unindexable {
+    const SETTING_KEY: &'static str = "replay_unindexable";
+
     fn key(path: &Path) -> Option<(String, i64)> {
         let mtime = std::fs::metadata(path)
             .and_then(|m| m.modified())
@@ -62,22 +90,34 @@ impl Unindexable {
         Self::key(path).map(|k| self.entries.contains(&k)).unwrap_or(false)
     }
 
-    pub fn insert(&mut self, path: &Path) {
-        if let Some(k) = Self::key(path) {
-            self.entries.insert(k);
+    /// Record the file as un-processable. Returns true when this is a new entry
+    /// (so the caller knows the set is dirty and needs persisting).
+    pub fn insert(&mut self, path: &Path) -> bool {
+        match Self::key(path) {
+            Some(k) => self.entries.insert(k),
+            None => false,
         }
     }
 
-    pub fn paths(&self) -> Vec<PathBuf> {
-        self.entries.iter().map(|(p, _)| PathBuf::from(p)).collect()
+    /// Load the persisted blacklist from the settings table, or an empty set.
+    pub async fn load(pool: &sqlx::SqlitePool) -> Self {
+        crate::db::queries::get_setting::<Self>(pool, Self::SETTING_KEY).await.unwrap_or_default()
+    }
+
+    /// Persist the blacklist to the settings table.
+    pub async fn save(&self, pool: &sqlx::SqlitePool) -> Result<(), sqlx::Error> {
+        crate::db::queries::set_setting(pool, Self::SETTING_KEY, self).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use std::panic::AssertUnwindSafe;
     use std::path::Path;
+    use std::time::Duration;
+    use std::time::SystemTime;
 
     #[test]
     fn skips_when_both_ledgers_satisfied() {
@@ -88,7 +128,7 @@ mod tests {
             true,
             AssertUnwindSafe(|| {
                 called = true;
-                Ok(())
+                ParseOutcome::ParsedAndSent
             }),
         );
         assert_eq!(out, FileOutcome::Skipped);
@@ -96,23 +136,59 @@ mod tests {
     }
 
     #[test]
-    fn a_panicking_parse_is_isolated_and_reported_failed() {
-        let out = reconcile_one(
-            Path::new("b"),
-            false,
-            false,
-            AssertUnwindSafe(|| -> Result<(), ()> {
-                panic!("boom");
-            }),
-        );
-        assert_eq!(out, FileOutcome::Failed);
+    fn a_panicking_parse_is_isolated_and_reported_as_hard_failure() {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let out = reconcile_one(Path::new("b"), false, false, AssertUnwindSafe(|| -> ParseOutcome { panic!("boom") }));
+        std::panic::set_hook(prev);
+        assert_eq!(out, FileOutcome::HardFailure);
     }
 
     #[test]
-    fn a_good_parse_after_a_bad_one_still_indexes() {
-        let bad = reconcile_one(Path::new("b"), false, false, AssertUnwindSafe(|| -> Result<(), ()> { panic!("x") }));
-        let good = reconcile_one(Path::new("c"), false, false, AssertUnwindSafe(|| Ok(())));
-        assert_eq!(bad, FileOutcome::Failed);
-        assert_eq!(good, FileOutcome::Indexed);
+    fn a_transient_condition_is_not_a_hard_failure() {
+        let out = reconcile_one(Path::new("t"), false, false, AssertUnwindSafe(|| ParseOutcome::Transient));
+        assert_eq!(out, FileOutcome::Transient);
+    }
+
+    #[test]
+    fn a_parsed_but_unsent_replay_is_not_blacklisted() {
+        let out = reconcile_one(Path::new("p"), false, false, AssertUnwindSafe(|| ParseOutcome::ParsedNotSent));
+        assert_eq!(out, FileOutcome::Parsed { sent: false });
+    }
+
+    #[test]
+    fn a_good_parse_after_a_bad_one_still_parses() {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let bad = reconcile_one(Path::new("b"), false, false, AssertUnwindSafe(|| -> ParseOutcome { panic!("x") }));
+        std::panic::set_hook(prev);
+        let good = reconcile_one(Path::new("c"), false, false, AssertUnwindSafe(|| ParseOutcome::ParsedAndSent));
+        assert_eq!(bad, FileOutcome::HardFailure);
+        assert_eq!(good, FileOutcome::Parsed { sent: true });
+    }
+
+    #[test]
+    fn unindexable_contains_insert_roundtrip_is_mtime_keyed() {
+        let path = std::env::temp_dir().join(format!("wt_unindexable_test_{}.tmp", std::process::id()));
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            f.write_all(b"x").unwrap();
+        }
+
+        let mut u = Unindexable::default();
+        assert!(!u.contains(&path), "fresh set contains nothing");
+        assert!(u.insert(&path), "first insert reports a new entry");
+        assert!(!u.insert(&path), "second insert of the same key is not new");
+        assert!(u.contains(&path), "just-inserted path must be contained");
+
+        // A replaced file (newer mtime) must not match the stored key.
+        let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        f.set_modified(SystemTime::now() + Duration::from_secs(10)).unwrap();
+        drop(f);
+        assert!(!u.contains(&path), "mtime change must invalidate the blacklist entry");
+
+        // A missing file has no key and is never contained.
+        let _ = std::fs::remove_file(&path);
+        assert!(!u.contains(&path), "missing file is never contained");
     }
 }

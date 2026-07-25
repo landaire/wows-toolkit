@@ -954,7 +954,7 @@ impl TabState {
                 db_pool: self.db_pool.clone(),
                 tokio_runtime: self.tokio_runtime.clone(),
                 index_source_id: None,
-                unindexable: std::collections::HashSet::new(),
+                unindexable: crate::data::replay_reconcile::Unindexable::default(),
             };
             drop(p);
             crate::task::start_background_parsing_thread(background_thread_data);

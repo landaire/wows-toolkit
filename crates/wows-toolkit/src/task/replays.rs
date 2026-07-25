@@ -30,6 +30,7 @@ use wowsunpack::game_data;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
 
+use crate::data::replay_reconcile::ParseOutcome;
 use crate::data::settings::DataSharingMode;
 use crate::data::wows_data::GameAsset;
 use crate::data::wows_data::WorldOfWarshipsData;
@@ -598,7 +599,7 @@ fn parse_replay_data_in_background(
     client: &reqwest::blocking::Client,
     replay_parsed_before: bool,
     data: &BackgroundParserThread,
-) -> Result<(), ()> {
+) -> ParseOutcome {
     // The parser lock serves to prevent file access issues when both the main
     // and background thread are attempting to parse some data. This technically
     // makes all parsers synchronous, but shouldn't be a big deal in practice.
@@ -607,7 +608,7 @@ fn parse_replay_data_in_background(
     // Files may be getting written to. If we fail to parse the replay,
     // let's try try to parse this at least 3 times.
     debug!("Sending replay data for: {:?}", path);
-    'main_loop: for _ in 0..3 {
+    for _ in 0..3 {
         match ReplayFile::from_file(path) {
             Ok(replay_file) => {
                 debug!("replay parsed successfully");
@@ -622,7 +623,7 @@ fn parse_replay_data_in_background(
                         path,
                         replay_version.build_number().map_or_else(|| "unknown".to_string(), |b| b.to_string())
                     );
-                    return Ok(());
+                    return ParseOutcome::Transient;
                 };
 
                 let (metadata_provider, game_version, gc) = {
@@ -671,7 +672,8 @@ fn parse_replay_data_in_background(
                     let mut replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
                     replay.game_constants = Some(gc);
                     replay.source_path = Some(path.to_path_buf());
-                    let mut build_uploaded_successfully = false;
+                    let mut parsed_ok = false;
+                    let mut upload_transient = false;
                     match replay.parse(game_version.to_string().as_str()) {
                         Ok(report) => {
                             let battle_type =
@@ -722,7 +724,8 @@ fn parse_replay_data_in_background(
                                                 if let Err(e) = res {
                                                     error!("error sending request: {:?}", e);
                                                     if e.is_connect() {
-                                                        break 'main_loop;
+                                                        upload_transient = true;
+                                                        break;
                                                     }
                                                 }
                                             } else {
@@ -747,7 +750,7 @@ fn parse_replay_data_in_background(
                                                 if let Err(e) = res {
                                                     error!("error sending replay: {:?}", e);
                                                     if e.is_connect() {
-                                                        break 'main_loop;
+                                                        upload_transient = true;
                                                     }
                                                 }
                                             }
@@ -763,13 +766,15 @@ fn parse_replay_data_in_background(
 
                             // Update the player tracker
                             replay.battle_report = Some(report);
-                            build_uploaded_successfully = true;
+                            parsed_ok = true;
                         }
                         Err(e)
                             if e.downcast_current_context::<ToolkitError>()
                                 .is_some_and(|e| matches!(e, ToolkitError::ReplayVersionMismatch { .. })) =>
                         {
-                            return Ok(()); // We don't want to keep trying to parse this
+                            // The replay's version can't be parsed with this build's data.
+                            // Not a malformed replay: don't blacklist, just stop retrying.
+                            return ParseOutcome::ParsedAndSent;
                         }
                         Err(e) => {
                             error!("error parsing background replay: {:?}", e);
@@ -846,11 +851,19 @@ fn parse_replay_data_in_background(
                         }
                     }
 
-                    if build_uploaded_successfully {
-                        return Ok(());
+                    if parsed_ok {
+                        // Indexing already happened above (independent of upload). The
+                        // upload either completed or hit a transient error; only the
+                        // former marks the file sent.
+                        return if upload_transient {
+                            ParseOutcome::ParsedNotSent
+                        } else {
+                            ParseOutcome::ParsedAndSent
+                        };
                     }
                 } else {
-                    return Err(());
+                    // Game data for this build isn't loaded yet; retry next launch.
+                    return ParseOutcome::Transient;
                 }
             }
             Err(e) => {
@@ -860,7 +873,7 @@ fn parse_replay_data_in_background(
         }
     }
 
-    Err(())
+    ParseOutcome::HardFailure
 }
 
 pub use wows_toolkit_config::ReplayExportFormat;
@@ -898,9 +911,9 @@ pub struct BackgroundParserThread {
     /// Cached id of the live replay-index source, resolved once at scan start so
     /// the live hook does not hit `ensure_default_source` per replay.
     pub index_source_id: Option<crate::db::index::rows::SourceId>,
-    /// Paths of replays that panicked or hard-errored during indexing, persisted
-    /// so they are not retried every launch.
-    pub unindexable: HashSet<String>,
+    /// Replays that panicked or hard-errored during parsing, keyed by path + mtime
+    /// and persisted so they are not retried every launch.
+    pub unindexable: crate::data::replay_reconcile::Unindexable,
 }
 
 pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
@@ -958,11 +971,8 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                     }
                     _ => HashSet::new(),
                 };
-            if let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref())
-                && let Some(saved) =
-                    rt.block_on(crate::db::queries::get_setting::<HashSet<String>>(pool, "replay_unindexable"))
-            {
-                data.unindexable = saved;
+            if let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref()) {
+                data.unindexable = rt.block_on(crate::data::replay_reconcile::Unindexable::load(pool));
             }
 
             // Try to see if we have any historical replays we can send
@@ -978,7 +988,7 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                         }
 
                         let path_str = path.to_string_lossy();
-                        if data.unindexable.contains(path_str.as_ref()) {
+                        if data.unindexable.contains(&path) {
                             continue;
                         }
                         let sent = { data.sent_replays.read().contains(path_str.as_ref()) }
@@ -995,24 +1005,29 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                         );
 
                         match outcome {
-                            crate::data::replay_reconcile::FileOutcome::Indexed => {
-                                if !sent {
+                            // Parsed: mark sent only when the upload also completed. A
+                            // transient upload failure (sent == false) is left for retry
+                            // but must not be blacklisted -- it was indexed regardless.
+                            crate::data::replay_reconcile::FileOutcome::Parsed { sent: upload_sent } => {
+                                if upload_sent && !sent {
                                     data.sent_replays.write().insert(path_str.into_owned());
                                 }
                             }
-                            crate::data::replay_reconcile::FileOutcome::Failed => {
-                                if data.unindexable.insert(path_str.into_owned()) {
+                            // Only a hard parse failure or panic gets blacklisted.
+                            crate::data::replay_reconcile::FileOutcome::HardFailure => {
+                                if data.unindexable.insert(&path) {
                                     unindexable_dirty = true;
                                 }
                             }
-                            crate::data::replay_reconcile::FileOutcome::Skipped => {}
+                            // Retryable (no game data yet) or already satisfied: no-op.
+                            crate::data::replay_reconcile::FileOutcome::Transient
+                            | crate::data::replay_reconcile::FileOutcome::Skipped => {}
                         }
                     }
 
                     if unindexable_dirty
                         && let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref())
-                        && let Err(e) =
-                            rt.block_on(crate::db::queries::set_setting(pool, "replay_unindexable", &data.unindexable))
+                        && let Err(e) = rt.block_on(data.unindexable.save(pool))
                     {
                         warn!("failed to persist unindexable replay set: {e}");
                     }
@@ -1031,7 +1046,12 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                     let already_parsed_replay = { data.sent_replays.read().contains(path_str.as_ref()) };
 
                     debug!("Attempting to parse replay at {}", path_str);
-                    if parse_replay_data_in_background(&path, &client, already_parsed_replay, &data).is_ok() {
+                    // Mark sent only when the parse fully completed and the upload
+                    // succeeded; transient conditions are left for a later attempt.
+                    if matches!(
+                        parse_replay_data_in_background(&path, &client, already_parsed_replay, &data),
+                        ParseOutcome::ParsedAndSent
+                    ) {
                         data.sent_replays.write().insert(path_str.into_owned());
                     }
                 }
