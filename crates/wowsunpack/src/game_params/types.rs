@@ -1453,6 +1453,12 @@ impl Vehicle {
         self.group.as_ref()
     }
 
+    /// Whether this is a test/preview ship. WG marks these with a `group`
+    /// beginning with `"demo"` (e.g. `demoWithoutStats`, `demoWithStats`).
+    pub fn is_test_ship(&self) -> bool {
+        self.group.starts_with("demo")
+    }
+
     pub fn abilities(&self) -> Option<&[Vec<(String, String)>]> {
         self.abilities.as_deref()
     }
@@ -3548,5 +3554,36 @@ mod exterior_tests {
     fn is_tileflage_defaults_false_and_roundtrips() {
         assert!(!Exterior::builder().modifiers(vec![]).build().is_tileflage());
         assert!(Exterior::builder().modifiers(vec![]).is_tileflage(true).build().is_tileflage());
+    }
+}
+
+#[cfg(test)]
+mod vehicle_test_ship_tests {
+    use super::Vehicle;
+
+    #[test]
+    fn demo_group_is_test_ship() {
+        let v = Vehicle::builder()
+            .level(10)
+            .group("demoWithoutStats".to_string())
+            .upgrades(vec![])
+            .permoflages(vec![])
+            .camera_trajectories(vec![])
+            .innate_skills(vec![])
+            .build();
+        assert!(v.is_test_ship());
+    }
+
+    #[test]
+    fn normal_group_is_not_test_ship() {
+        let v = Vehicle::builder()
+            .level(10)
+            .group("cruiser".to_string())
+            .upgrades(vec![])
+            .permoflages(vec![])
+            .camera_trajectories(vec![])
+            .innate_skills(vec![])
+            .build();
+        assert!(!v.is_test_ship());
     }
 }
