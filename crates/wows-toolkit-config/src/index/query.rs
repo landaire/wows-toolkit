@@ -161,6 +161,17 @@ pub async fn arena_ids_in_source(pool: &SqlitePool, source: SourceId) -> Result<
     Ok(rows.into_iter().map(|(a,)| ArenaId::new(a)).collect())
 }
 
+/// Absolute replay paths already recorded for `source`. The startup reconciliation
+/// pass uses this as the per-path index-membership ledger so already-indexed files
+/// are skipped instead of re-parsed on every launch.
+pub async fn record_paths_in_source(pool: &SqlitePool, source: SourceId) -> Result<HashSet<String>, IndexError> {
+    let rows: Vec<(String,)> = sqlx::query_as("SELECT replay_path FROM replay_record WHERE source_id = ?1")
+        .bind(source.0)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(|(p,)| p).collect())
+}
+
 /// One `MatchHit` per arena. The chosen record prefers `file_mtime IS NOT NULL`
 /// then most-recently indexed, so the open target points at a present file when
 /// possible. Applies both match/record-level predicates and roster EXISTS predicates.

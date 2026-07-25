@@ -215,7 +215,7 @@ pub struct MatchFilter {
 
 #[derive(Debug, thiserror::Error)]
 pub enum IndexError {
-    #[error("index database error")]
+    #[error("index database error: {0}")]
     Sqlx(#[from] sqlx::Error),
     #[error("unknown source: {0:?}")]
     UnknownSource(SourceId),
