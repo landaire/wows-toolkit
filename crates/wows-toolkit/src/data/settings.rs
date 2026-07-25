@@ -294,6 +294,18 @@ impl DataSharingMode {
     pub fn shares_anything(self) -> bool {
         !matches!(self, Self::Off)
     }
+
+    /// Reconcile a loaded mode against the downgrade-compat `send_replay_data`
+    /// bool when both persisted keys exist. An older app build writes only the
+    /// bool, so a disagreement means the bool is the newer signal; honor it
+    /// without ever escalating to Replays.
+    pub fn reconcile_with_compat_bool(self, shared: bool) -> Self {
+        match (self, shared) {
+            (Self::Off, true) => Self::BuildData,
+            (mode, false) if mode.shares_anything() => Self::Off,
+            (mode, _) => mode,
+        }
+    }
 }
 
 /// External service integrations.
@@ -343,5 +355,23 @@ mod data_sharing_mode_tests {
         assert!(!DataSharingMode::Off.shares_anything());
         assert!(DataSharingMode::BuildData.shares_anything());
         assert!(DataSharingMode::Replays.shares_anything());
+    }
+
+    #[test]
+    fn reconcile_is_identity_when_bool_agrees() {
+        assert_eq!(DataSharingMode::Off.reconcile_with_compat_bool(false), DataSharingMode::Off);
+        assert_eq!(DataSharingMode::BuildData.reconcile_with_compat_bool(true), DataSharingMode::BuildData);
+        assert_eq!(DataSharingMode::Replays.reconcile_with_compat_bool(true), DataSharingMode::Replays);
+    }
+
+    #[test]
+    fn reconcile_honors_opt_out() {
+        assert_eq!(DataSharingMode::Replays.reconcile_with_compat_bool(false), DataSharingMode::Off);
+        assert_eq!(DataSharingMode::BuildData.reconcile_with_compat_bool(false), DataSharingMode::Off);
+    }
+
+    #[test]
+    fn reconcile_never_escalates_to_replays() {
+        assert_eq!(DataSharingMode::Off.reconcile_with_compat_bool(true), DataSharingMode::BuildData);
     }
 }
