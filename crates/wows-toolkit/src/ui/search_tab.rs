@@ -49,6 +49,7 @@ const NON_STAT_FIELDS: &[Field] = &[
     Field::EnemyShip,
     Field::AllyShip,
     Field::Group,
+    Field::ContainsStreamSniper,
 ];
 
 fn field_display_label(field: Field) -> String {
@@ -64,6 +65,7 @@ fn field_display_label(field: Field) -> String {
         Field::EnemyShip => t!("ui.search.field.enemy_ship").into(),
         Field::AllyShip => t!("ui.search.field.ally_ship").into(),
         Field::Group => t!("ui.search.field.group").into(),
+        Field::ContainsStreamSniper => t!("ui.search.field.contains_stream_sniper").into(),
         Field::Stat { kind, .. } => stat_kind_label(kind),
     }
 }

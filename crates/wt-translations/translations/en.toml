@@ -589,6 +589,7 @@ stat_received = "Damage received"
 stat_pr = "PR"
 stat_survived = "Survived"
 stat_disconnected = "Disconnected"
+contains_stream_sniper = "Contains possible stream sniper"
 
 [ui.search.op]
 contains = "contains"

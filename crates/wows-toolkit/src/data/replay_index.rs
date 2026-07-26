@@ -113,6 +113,8 @@ pub fn map_rows(replay: &Replay, source_id: SourceId, indexed_at: Timestamp) -> 
             pr: report.personal_rating().map(|pr| pr.pr),
             is_test_ship: report.is_test_ship(),
             disconnected: Some(player_disconnected(player)),
+            is_stream_sniper: None,
+            sniper_twitch_login: None,
         });
     }
 
@@ -142,6 +144,45 @@ pub fn map_rows(replay: &Replay, source_id: SourceId, indexed_at: Timestamp) -> 
     Some(MappedRows { objective, vehicles, record })
 }
 
+/// Seconds before/after a match's start within which a Twitch chat
+/// observation is considered relevant to that match, mirroring
+/// `TwitchState::player_is_potential_stream_sniper`'s -2..+20 minute window.
+const SNIPER_WINDOW_BEFORE_SECS: i64 = 2 * 60;
+const SNIPER_WINDOW_AFTER_SECS: i64 = 20 * 60;
+
+/// Applies stream-sniper flags to `vehicles` from a match's in-window Twitch
+/// chat `observations` (login, seen_at unix seconds; already filtered to the
+/// match's window by the caller).
+///
+/// If `observations` is empty, every row is left as-is (`None`, meaning
+/// "unknown": no Twitch data was available for this match's window) -- this
+/// is never turned into a `Some(false)` sentinel. Otherwise, each real player
+/// (bots, which carry `AccountId(0)`, are always left `None` since they have
+/// no Twitch-matchable account) gets `is_stream_sniper = Some(true)` plus the
+/// matching login if any observation's login fuzzy-matches their player
+/// name via `login_matches_ign`, or `Some(false)` if detection ran and found
+/// no match.
+pub fn apply_sniper_flags(vehicles: &mut [IndexedVehicleRow], observations: &[(String, i64)]) {
+    if observations.is_empty() {
+        return;
+    }
+    for vehicle in vehicles.iter_mut() {
+        if vehicle.account_id.raw() == 0 {
+            continue;
+        }
+        match observations.iter().find(|(login, _)| crate::twitch::login_matches_ign(login, &vehicle.player_name)) {
+            Some((login, _)) => {
+                vehicle.is_stream_sniper = Some(true);
+                vehicle.sniper_twitch_login = Some(login.clone());
+            }
+            None => {
+                vehicle.is_stream_sniper = Some(false);
+                vehicle.sniper_twitch_login = None;
+            }
+        }
+    }
+}
+
 pub async fn write_index(pool: &SqlitePool, rows: &MappedRows) -> Result<(), IndexError> {
     query::upsert_match(pool, &rows.objective).await?;
     query::upsert_vehicles(pool, &rows.vehicles).await?;
@@ -149,13 +190,27 @@ pub async fn write_index(pool: &SqlitePool, rows: &MappedRows) -> Result<(), Ind
     Ok(())
 }
 
-/// Map + persist on the current (background) thread. Best-effort: errors are
-/// logged and swallowed so indexing never destabilizes the parser thread.
+/// Map, enrich with stream-sniper detection, and persist on the current
+/// (background) thread. Shared by both the live indexing path and the
+/// on-demand reindex/backfill path, so both benefit from persisted Twitch
+/// observations. Best-effort: errors are logged and swallowed so indexing
+/// never destabilizes the parser thread.
 pub fn index_replay_blocking(rt: &Runtime, pool: &SqlitePool, replay: &Replay, source_id: SourceId, now: Timestamp) {
-    let Some(rows) = map_rows(replay, source_id, now) else {
+    let Some(mut rows) = map_rows(replay, source_id, now) else {
         return;
     };
-    if let Err(e) = rt.block_on(write_index(pool, &rows)) {
+
+    let match_ts = rows.objective.timestamp.as_second();
+    let window_start = match_ts - SNIPER_WINDOW_BEFORE_SECS;
+    let window_end = match_ts + SNIPER_WINDOW_AFTER_SECS;
+
+    if let Err(e) = rt.block_on(async {
+        match query::observations_in_window(pool, window_start, window_end).await {
+            Ok(observations) => apply_sniper_flags(&mut rows.vehicles, &observations),
+            Err(e) => warn!("failed to fetch twitch observations for sniper detection: {e}"),
+        }
+        write_index(pool, &rows).await
+    }) {
         warn!("failed to index replay: {e}");
     }
 }
@@ -166,7 +221,94 @@ mod tests {
     use crate::db::index::rows::MatchOutcome;
     use crate::db::index::rows::VehicleRelation;
     use wows_replays::analyzer::battle_controller::BattleResult;
+    use wows_replays::types::AccountId;
+    use wows_replays::types::ArenaId;
+    use wows_replays::types::GameParamId;
     use wows_replays::types::Relation;
+
+    fn vehicle_row(account_id: i64, player_name: &str) -> IndexedVehicleRow {
+        IndexedVehicleRow {
+            arena_id: ArenaId::new(1),
+            account_id: AccountId(account_id),
+            player_name: player_name.to_string(),
+            clan: String::new(),
+            realm: None,
+            ship_id: GameParamId::from(1u64),
+            ship_index: "PJSD018".into(),
+            ship_name: "Harugumo".into(),
+            nation: "japan".into(),
+            species: "Destroyer".into(),
+            tier: 10,
+            relation: VehicleRelation::Ally,
+            division_id: None,
+            survived: Some(true),
+            damage: Some(0),
+            kills: Some(0),
+            spotting: Some(0),
+            potential: Some(0),
+            received: Some(0),
+            pr: None,
+            is_test_ship: false,
+            disconnected: Some(false),
+            is_stream_sniper: None,
+            sniper_twitch_login: None,
+        }
+    }
+
+    #[test]
+    fn apply_sniper_flags_empty_observations_leaves_all_rows_none() {
+        let mut vehicles = vec![vehicle_row(7, "Player1"), vehicle_row(8, "Player2")];
+        apply_sniper_flags(&mut vehicles, &[]);
+        assert_eq!(vehicles[0].is_stream_sniper, None);
+        assert_eq!(vehicles[0].sniper_twitch_login, None);
+        assert_eq!(vehicles[1].is_stream_sniper, None);
+        assert_eq!(vehicles[1].sniper_twitch_login, None);
+    }
+
+    #[test]
+    fn apply_sniper_flags_matching_login_flags_true_with_login() {
+        let mut vehicles = vec![vehicle_row(7, "Player1")];
+        let observations = vec![("Player1".to_string(), 1000)];
+        apply_sniper_flags(&mut vehicles, &observations);
+        assert_eq!(vehicles[0].is_stream_sniper, Some(true));
+        assert_eq!(vehicles[0].sniper_twitch_login, Some("Player1".to_string()));
+    }
+
+    #[test]
+    fn apply_sniper_flags_non_matching_real_player_flags_false() {
+        let mut vehicles = vec![vehicle_row(7, "Player1")];
+        let observations = vec![("CompletelyDifferent".to_string(), 1000)];
+        apply_sniper_flags(&mut vehicles, &observations);
+        assert_eq!(vehicles[0].is_stream_sniper, Some(false));
+        assert_eq!(vehicles[0].sniper_twitch_login, None);
+    }
+
+    #[test]
+    fn apply_sniper_flags_bot_left_none_even_with_matching_observation() {
+        // A bot carries AccountId(0) and has no real Twitch-matchable account.
+        let mut vehicles = vec![vehicle_row(0, "Player1")];
+        let observations = vec![("Player1".to_string(), 1000)];
+        apply_sniper_flags(&mut vehicles, &observations);
+        assert_eq!(vehicles[0].is_stream_sniper, None);
+        assert_eq!(vehicles[0].sniper_twitch_login, None);
+    }
+
+    #[test]
+    fn apply_sniper_flags_mixed_roster() {
+        let mut vehicles = vec![
+            vehicle_row(7, "Player1"),  // matches
+            vehicle_row(8, "ZZZZZZZ"),  // no match
+            vehicle_row(0, "AnyBot99"), // bot, skipped
+        ];
+        let observations = vec![("Player1".to_string(), 1000)];
+        apply_sniper_flags(&mut vehicles, &observations);
+        assert_eq!(vehicles[0].is_stream_sniper, Some(true));
+        assert_eq!(vehicles[0].sniper_twitch_login, Some("Player1".to_string()));
+        assert_eq!(vehicles[1].is_stream_sniper, Some(false));
+        assert_eq!(vehicles[1].sniper_twitch_login, None);
+        assert_eq!(vehicles[2].is_stream_sniper, None);
+        assert_eq!(vehicles[2].sniper_twitch_login, None);
+    }
 
     #[test]
     fn outcome_maps_all_variants() {

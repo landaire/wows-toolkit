@@ -97,6 +97,8 @@ async fn upserts_are_idempotent_and_ledger_tracks_arena() {
         pr: Some(1500.0),
         is_test_ship: false,
         disconnected: Some(false),
+        is_stream_sniper: None,
+        sniper_twitch_login: None,
     };
     query::upsert_vehicles(&pool, &[veh.clone()]).await.unwrap();
     query::upsert_vehicles(&pool, &[veh]).await.unwrap(); // idempotent
@@ -254,6 +256,8 @@ async fn seed_rosters(pool: &sqlx::SqlitePool) {
             pr,
             is_test_ship: false,
             disconnected,
+            is_stream_sniper: None,
+            sniper_twitch_login: None,
         };
         query::upsert_vehicles(pool, &[v]).await.unwrap();
     }
@@ -496,6 +500,8 @@ async fn search_by_query_covers_selfship_allyship_kills_group() {
         pr: None,
         is_test_ship: false,
         disconnected: None,
+        is_stream_sniper: None,
+        sniper_twitch_login: None,
     };
     query::upsert_vehicles(&pool, &[ally]).await.unwrap();
 
@@ -733,4 +739,104 @@ async fn ship_name_resolves_seeded_ship_and_none_for_unknown() {
 
     let unknown = query::ship_name(&pool, GameParamId::from(987_654u64)).await.unwrap();
     assert_eq!(unknown, None);
+}
+
+#[tokio::test]
+async fn twitch_observations_round_trip_window_and_dedup() {
+    let pool = mem_pool().await;
+
+    query::record_twitch_observations(
+        &pool,
+        &[("streamer_a".to_string(), 1000), ("streamer_b".to_string(), 1500), ("streamer_a".to_string(), 2000)],
+    )
+    .await
+    .unwrap();
+    // Duplicate (login, seen_at) pair: must dedup to one row, not error.
+    query::record_twitch_observations(&pool, &[("streamer_a".to_string(), 1000)]).await.unwrap();
+
+    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM twitch_observation").fetch_one(&pool).await.unwrap();
+    assert_eq!(count, 3, "duplicate (login, seen_at) must not insert a second row");
+
+    // Window [900, 1600] catches streamer_a@1000 and streamer_b@1500, not streamer_a@2000.
+    let mut window = query::observations_in_window(&pool, 900, 1600).await.unwrap();
+    window.sort();
+    assert_eq!(window, vec![("streamer_a".to_string(), 1000), ("streamer_b".to_string(), 1500)]);
+
+    // Out-of-window bounds exclude everything.
+    let none = query::observations_in_window(&pool, 5000, 6000).await.unwrap();
+    assert!(none.is_empty());
+
+    // Prune rows older than 1600: removes streamer_a@1000 and streamer_b@1500, keeps streamer_a@2000.
+    let pruned = query::prune_twitch_observations(&pool, 1600).await.unwrap();
+    assert_eq!(pruned, 2);
+    let remaining = query::observations_in_window(&pool, 0, 10_000).await.unwrap();
+    assert_eq!(remaining, vec![("streamer_a".to_string(), 2000)]);
+}
+
+#[tokio::test]
+async fn search_by_query_contains_stream_sniper_is_match_level_and_null_safe() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    // Arena 100: explicitly flag the self roster row as a stream sniper.
+    let mut flagged = IndexedVehicleRow {
+        arena_id: ArenaId::new(100),
+        account_id: AccountId(7),
+        player_name: "p7".into(),
+        clan: String::new(),
+        realm: None,
+        ship_id: GameParamId::from(999u64),
+        ship_index: "PJSD018".into(),
+        ship_name: "Harugumo".into(),
+        nation: "japan".into(),
+        species: "Destroyer".into(),
+        tier: 10,
+        relation: VehicleRelation::SelfPlayer,
+        division_id: None,
+        survived: Some(true),
+        damage: Some(50_000),
+        kills: Some(0),
+        spotting: Some(0),
+        potential: Some(0),
+        received: Some(0),
+        pr: None,
+        is_test_ship: false,
+        disconnected: None,
+        is_stream_sniper: Some(true),
+        sniper_twitch_login: Some("sniper_login".into()),
+    };
+    query::upsert_vehicles(&pool, std::slice::from_ref(&flagged)).await.unwrap();
+
+    // Arena 200: an explicit non-sniper row (is_stream_sniper = Some(false)); the
+    // other arena-200 roster rows from seed_rosters stay NULL (uncomputed).
+    flagged.arena_id = ArenaId::new(200);
+    flagged.is_stream_sniper = Some(false);
+    flagged.sniper_twitch_login = None;
+    query::upsert_vehicles(&pool, &[flagged]).await.unwrap();
+
+    // Is true -> only the arena with an explicit is_stream_sniper = 1 row.
+    let q = one(Field::ContainsStreamSniper, Op::Is, Value::Bool(true));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert_eq!(
+        hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(),
+        vec![100],
+        "ContainsStreamSniper Is true must match only the arena with an is_stream_sniper=1 row"
+    );
+
+    // Is false -> only the arena with an explicit is_stream_sniper = 0 row; the
+    // flagged arena is excluded (it has no explicit-false row), and NULL rows in
+    // both arenas satisfy neither direction.
+    let q = one(Field::ContainsStreamSniper, Op::Is, Value::Bool(false));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert_eq!(
+        hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(),
+        vec![200],
+        "ContainsStreamSniper Is false must match only the arena with an explicit is_stream_sniper=0 row"
+    );
+
+    // IsNot true must negate: excludes the flagged arena, keeps the rest.
+    let q = one(Field::ContainsStreamSniper, Op::IsNot, Value::Bool(true));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert!(!hits.iter().any(|h| h.arena_id.raw() == 100), "IsNot true must exclude the flagged arena");
 }

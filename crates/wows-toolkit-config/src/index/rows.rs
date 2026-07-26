@@ -159,6 +159,13 @@ pub struct IndexedVehicleRow {
     /// `None` only appears on legacy rows written before this column existed;
     /// the live indexing path always writes `Some`.
     pub disconnected: Option<bool>,
+    /// `None` if stream-sniper detection has not been computed for this row (legacy
+    /// rows, or Twitch data unavailable at index time). `Some(true)` if a Twitch
+    /// chatter login was fuzzy-matched to this player near the match's start time;
+    /// `Some(false)` if detection ran and found no match.
+    pub is_stream_sniper: Option<bool>,
+    /// The Twitch chatter login that triggered `is_stream_sniper = Some(true)`, if any.
+    pub sniper_twitch_login: Option<String>,
 }
 
 /// A search/recent result: objective match plus the chosen record's perspective.

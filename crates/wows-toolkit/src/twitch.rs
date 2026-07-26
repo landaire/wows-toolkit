@@ -105,6 +105,20 @@ pub struct TwitchState {
     pub token_validation_failed: bool,
 }
 
+/// Pure name-similarity predicate: does a Twitch chat `login` plausibly refer
+/// to the same person as in-game name `ign`? Matches if `ign` is longer than
+/// 5 characters and within Levenshtein distance 3 of `login`, or if any
+/// 5-character chunk of `ign` (also longer than 5 chars, i.e. the final
+/// undersized chunk is skipped) is a substring of `login`. Carries no
+/// time-window filtering -- callers apply that separately.
+pub fn login_matches_ign(login: &str, ign: &str) -> bool {
+    let name_chunks =
+        ign.chars().collect::<Vec<char>>().chunks(5).map(|c| c.iter().collect::<String>()).collect::<Vec<String>>();
+
+    (ign.len() > 5 && levenshtein::levenshtein(login, ign) <= 3)
+        || name_chunks.iter().any(|chunk| if chunk.len() > 5 { login.contains(chunk) } else { false })
+}
+
 impl TwitchState {
     pub fn token_is_valid(&self) -> bool {
         if let Some(token) = self.token.as_ref() { token.expires_in().as_secs() > 0 } else { false }
@@ -120,17 +134,9 @@ impl TwitchState {
         match_timestamp: Timestamp,
     ) -> Option<HashMap<String, Vec<Timestamp>>> {
         let mut results = HashMap::new();
-        let name_chunks = name
-            .chars()
-            .collect::<Vec<char>>()
-            .chunks(5)
-            .map(|c| c.iter().collect::<String>())
-            .collect::<Vec<String>>();
 
         for (viewer_name, viewer_timestamps) in &self.participants {
-            if (name.len() > 5 && levenshtein::levenshtein(viewer_name, name) <= 3)
-                || name_chunks.iter().any(|chunk| if chunk.len() > 5 { viewer_name.contains(chunk) } else { false })
-            {
+            if login_matches_ign(viewer_name, name) {
                 let timestamps: Vec<_> = viewer_timestamps
                     .iter()
                     .cloned()
@@ -316,6 +322,36 @@ mod tests {
         let delta = viewer_ts - match_ts;
         let total_mins = delta.total(Unit::Minute).unwrap();
         assert!((total_mins - 10.0).abs() < 0.01, "expected ~10.0 minutes, got {total_mins}");
+    }
+
+    #[test]
+    fn login_matches_ign_exact_match() {
+        // Identical strings: distance 0, len > 5.
+        assert!(login_matches_ign("Player1", "Player1"));
+    }
+
+    #[test]
+    fn login_matches_ign_close_name_within_threshold() {
+        // "PlayerX" vs "Player1" = distance 1 (<= 3), both len > 5.
+        assert!(login_matches_ign("PlayerX", "Player1"));
+    }
+
+    #[test]
+    fn login_matches_ign_distant_name_no_match() {
+        // "ABCDEFGH" vs "Player1" = distance well above 3.
+        assert!(!login_matches_ign("ABCDEFGH", "Player1"));
+    }
+
+    #[test]
+    fn login_matches_ign_short_name_skips_levenshtein_branch() {
+        // ign.len() <= 5, so the levenshtein branch is skipped entirely, and
+        // the 5-char chunk is not long enough to trigger the chunk branch either.
+        assert!(!login_matches_ign("ABCDE", "ABCDE"));
+    }
+
+    #[test]
+    fn login_matches_ign_no_overlap_no_match() {
+        assert!(!login_matches_ign("CompletelyDifferent", "Player1"));
     }
 
     #[test]

@@ -781,6 +781,8 @@ mod tests {
                 pr: Some(1200.0),
                 is_test_ship: false,
                 disconnected: None,
+                is_stream_sniper: None,
+                sniper_twitch_login: None,
             };
             query::upsert_vehicles(&pool, &[enemy]).await.unwrap();
 
@@ -870,6 +872,8 @@ mod tests {
                 pr: Some(1500.0),
                 is_test_ship: false,
                 disconnected: None,
+                is_stream_sniper: None,
+                sniper_twitch_login: None,
             };
             let enemy = IndexedVehicleRow {
                 arena_id: ArenaId::new(100),
@@ -894,6 +898,8 @@ mod tests {
                 pr: Some(1200.0),
                 is_test_ship: false,
                 disconnected: None,
+                is_stream_sniper: None,
+                sniper_twitch_login: None,
             };
             query::upsert_vehicles(&pool, &[self_vehicle, enemy]).await.unwrap();
 

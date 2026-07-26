@@ -454,6 +454,25 @@ use parking_lot::RwLock;
 use twitch_api::twitch_oauth2::AccessToken;
 use twitch_api::twitch_oauth2::UserToken;
 
+/// How long a persisted Twitch chat observation is retained before pruning.
+const TWITCH_OBSERVATION_RETENTION_SECS: i64 = 30 * 24 * 60 * 60;
+
+/// Persists `chatters` as Twitch observations at `now`, then prunes
+/// observations older than the retention window. Best-effort: a DB hiccup is
+/// logged and never allowed to interrupt the poll loop.
+async fn persist_twitch_observations(pool: &sqlx::SqlitePool, chatters: &[String], now: Timestamp) {
+    let seen_at = now.as_second();
+    let observations: Vec<(String, i64)> = chatters.iter().map(|login| (login.clone(), seen_at)).collect();
+    if let Err(e) = crate::db::index::query::record_twitch_observations(pool, &observations).await {
+        tracing::warn!("failed to persist twitch observations: {e}");
+    }
+    if let Err(e) =
+        crate::db::index::query::prune_twitch_observations(pool, seen_at - TWITCH_OBSERVATION_RETENTION_SECS).await
+    {
+        tracing::warn!("failed to prune twitch observations: {e}");
+    }
+}
+
 async fn update_twitch_token(twitch_state: &RwLock<TwitchState>, token: &Token) {
     let client = twitch_state.read().client().clone();
     match UserToken::from_token(&client, AccessToken::from(token.oauth_token())).await {
@@ -475,6 +494,7 @@ pub fn start_twitch_task(
     monitored_channel: String,
     token: Option<Token>,
     mut token_rx: tokio::sync::mpsc::Receiver<TwitchUpdate>,
+    db_pool: Option<sqlx::SqlitePool>,
 ) {
     runtime.spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60 * 2));
@@ -507,9 +527,14 @@ pub fn start_twitch_task(
                         && let Some(monitored_user) = &monitored_user_id
                             && let Ok(chatters) = twitch::fetch_chatters(&client, monitored_user, &token).await {
                                 let now = Timestamp::now();
-                                let mut state = twitch_state.write();
-                                for chatter in chatters {
-                                    state.participants.entry(chatter).or_default().insert(now);
+                                {
+                                    let mut state = twitch_state.write();
+                                    for chatter in &chatters {
+                                        state.participants.entry(chatter.clone()).or_default().insert(now);
+                                    }
+                                }
+                                if let Some(pool) = &db_pool {
+                                    persist_twitch_observations(pool, &chatters, now).await;
                                 }
                             }
                 }
@@ -526,9 +551,14 @@ pub fn start_twitch_task(
                                     && let Some(monitored_user) = &monitored_user_id
                                         && let Ok(chatters) = twitch::fetch_chatters(&client, monitored_user, token).await {
                                             let now = Timestamp::now();
-                                            let mut state = twitch_state.write();
-                                            for chatter in chatters {
-                                                state.participants.entry(chatter).or_default().insert(now);
+                                            {
+                                                let mut state = twitch_state.write();
+                                                for chatter in &chatters {
+                                                    state.participants.entry(chatter.clone()).or_default().insert(now);
+                                                }
+                                            }
+                                            if let Some(pool) = &db_pool {
+                                                persist_twitch_observations(pool, &chatters, now).await;
                                             }
                                         }
 

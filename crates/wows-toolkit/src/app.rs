@@ -628,6 +628,7 @@ impl WowsToolkitApp {
             twitch_channel,
             twitch_token,
             token_rx,
+            self.db_pool.clone(),
         );
 
         #[cfg(feature = "mod_manager")]

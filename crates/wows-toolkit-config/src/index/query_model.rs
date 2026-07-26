@@ -18,6 +18,10 @@ pub enum Field {
     EnemyShip,
     AllyShip,
     Group,
+    /// Match-level flag: does this arena's roster contain a vehicle whose
+    /// `is_stream_sniper` was fuzzy-matched to a Twitch chatter? Not a `StatKind`
+    /// (it has no per-subject meaning) and has no `Subject`.
+    ContainsStreamSniper,
     /// A roster stat, scoped to a subject (me, any player, or a specific player).
     /// Always reads `indexed_vehicle` (the roster), never `replay_record.self_*`,
     /// so all seven stats are uniformly available for every subject.
@@ -174,6 +178,7 @@ impl Field {
             Field::PlayerPresent => ValueKind::Account,
             Field::EnemyShip | Field::AllyShip => ValueKind::Ship,
             Field::Group => ValueKind::Source,
+            Field::ContainsStreamSniper => ValueKind::Bool,
             Field::Stat { kind, .. } => {
                 if kind.is_bool() {
                     ValueKind::Bool
@@ -191,6 +196,7 @@ impl Field {
             Field::Outcome | Field::Class | Field::Group => ENUM_OPS,
             Field::SelfShip => ENUM_OPS,
             Field::PlayerPresent | Field::EnemyShip | Field::AllyShip => PRESENCE_OPS,
+            Field::ContainsStreamSniper => ENUM_OPS,
             Field::Stat { kind, .. } => {
                 if kind.is_bool() {
                     ENUM_OPS
@@ -235,6 +241,14 @@ mod tests {
         for kind in StatKind::ALL {
             assert_eq!(kind.is_bool(), matches!(kind, StatKind::Survived | StatKind::Disconnected));
         }
+    }
+
+    #[test]
+    fn contains_stream_sniper_is_a_standalone_bool_field() {
+        assert_eq!(Field::ContainsStreamSniper.value_kind(), ValueKind::Bool);
+        assert!(Field::ContainsStreamSniper.allowed_ops().contains(&Op::Is));
+        assert!(Field::ContainsStreamSniper.allowed_ops().contains(&Op::IsNot));
+        assert!(!Field::ContainsStreamSniper.allowed_ops().contains(&Op::Gt));
     }
 
     #[test]

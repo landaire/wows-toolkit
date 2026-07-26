@@ -102,12 +102,13 @@ pub async fn upsert_vehicles(pool: &SqlitePool, rows: &[IndexedVehicleRow]) -> R
             "INSERT INTO indexed_vehicle \
              (arena_id, account_id, player_name, clan, realm, ship_id, ship_index, ship_name, nation, species, \
               tier, relation, division_id, survived, damage, kills, spotting, potential, received, pr, is_test_ship, \
-              disconnected) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22) \
+              disconnected, is_stream_sniper, sniper_twitch_login) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24) \
              ON CONFLICT(arena_id, account_id, ship_id) DO UPDATE SET \
                player_name=?3, clan=?4, realm=?5, ship_index=?7, ship_name=?8, nation=?9, species=?10, \
                tier=?11, relation=?12, division_id=?13, survived=?14, damage=?15, kills=?16, spotting=?17, \
-               potential=?18, received=?19, pr=?20, is_test_ship=?21, disconnected=?22",
+               potential=?18, received=?19, pr=?20, is_test_ship=?21, disconnected=?22, is_stream_sniper=?23, \
+               sniper_twitch_login=?24",
         )
         .bind(v.arena_id.raw())
         .bind(v.account_id.raw())
@@ -131,11 +132,53 @@ pub async fn upsert_vehicles(pool: &SqlitePool, rows: &[IndexedVehicleRow]) -> R
         .bind(v.pr)
         .bind(v.is_test_ship)
         .bind(v.disconnected)
+        .bind(v.is_stream_sniper)
+        .bind(&v.sniper_twitch_login)
         .execute(&mut *tx)
         .await?;
     }
     tx.commit().await?;
     Ok(())
+}
+
+/// Record Twitch chat observations (login, seen_at unix seconds). Duplicate
+/// (login, seen_at) pairs are silently ignored via the unique index.
+pub async fn record_twitch_observations(pool: &SqlitePool, observations: &[(String, i64)]) -> Result<(), IndexError> {
+    if observations.is_empty() {
+        return Ok(());
+    }
+    let mut tx = pool.begin().await?;
+    for (login, seen_at) in observations {
+        sqlx::query("INSERT OR IGNORE INTO twitch_observation (login, seen_at) VALUES (?1, ?2)")
+            .bind(login)
+            .bind(seen_at)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Twitch observations with `seen_at` in `[start_unix, end_unix]`.
+pub async fn observations_in_window(
+    pool: &SqlitePool,
+    start_unix: i64,
+    end_unix: i64,
+) -> Result<Vec<(String, i64)>, IndexError> {
+    let rows: Vec<(String, i64)> =
+        sqlx::query_as("SELECT login, seen_at FROM twitch_observation WHERE seen_at BETWEEN ?1 AND ?2")
+            .bind(start_unix)
+            .bind(end_unix)
+            .fetch_all(pool)
+            .await?;
+    Ok(rows)
+}
+
+/// Delete Twitch observations older than `older_than_unix`. Returns the number of rows deleted.
+pub async fn prune_twitch_observations(pool: &SqlitePool, older_than_unix: i64) -> Result<u64, IndexError> {
+    let result =
+        sqlx::query("DELETE FROM twitch_observation WHERE seen_at < ?1").bind(older_than_unix).execute(pool).await?;
+    Ok(result.rows_affected())
 }
 
 pub async fn upsert_record(pool: &SqlitePool, r: &ReplayRecord) -> Result<(), IndexError> {
@@ -587,6 +630,12 @@ fn push_chip(qb: &mut QueryBuilder<'_, Sqlite>, chip: &Chip) {
             push_presence(qb, "v.relation='ally' AND v.ship_id = ", ExistsBind::Int(id.raw() as i64), chip.op)
         }
         (Field::Group, Value::Source(s)) => push_enum_i64(qb, "r.source_id", chip.op, s.0),
+        // Match-level flag, no subject: mirrors the bool `Stat` branch below but reads
+        // `is_stream_sniper` directly instead of a subject-scoped column.
+        (Field::ContainsStreamSniper, Value::Bool(b)) => {
+            let sql_op = if matches!(chip.op, Op::IsNot) { "<>" } else { "=" };
+            push_exists(qb, &format!("v.is_stream_sniper {sql_op} "), ExistsBind::Bool(*b))
+        }
         // Subject-scoped roster stat: EXISTS over the roster, scoped by arena and by
         // the subject (self row / any row / a specific account's row).
         (Field::Stat { kind, subject }, Value::Int(n)) if !kind.is_bool() => {

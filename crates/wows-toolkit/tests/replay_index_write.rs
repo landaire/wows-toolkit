@@ -59,6 +59,8 @@ async fn write_index_persists_all_three_tables() {
             pr: None,
             is_test_ship: false,
             disconnected: None,
+            is_stream_sniper: None,
+            sniper_twitch_login: None,
         }],
         record: ReplayRecord {
             arena_id: ArenaId::new(500),
