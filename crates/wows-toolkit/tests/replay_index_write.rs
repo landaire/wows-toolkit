@@ -83,3 +83,86 @@ async fn write_index_persists_all_three_tables() {
     assert_eq!(hits[0].arena_id, ArenaId::new(500));
     assert_eq!(hits[0].self_ship_id, Some(GameParamId::from(999u64)));
 }
+
+/// A results-absent (left-early) replay must index with `results_available =
+/// false` and NULL server stats, then be upgraded in place -- not duplicated
+/// -- once a later pass indexes the same arena with results present. This is
+/// the `ON CONFLICT DO UPDATE` upsert behavior Task 12 depends on.
+#[tokio::test]
+async fn reindexing_with_results_upgrades_a_results_absent_row() {
+    let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+    sqlx::migrate!("../wows-toolkit-config/migrations").run(&pool).await.unwrap();
+    let src = query::ensure_default_source(
+        &pool,
+        std::path::Path::new("C:/wows/replays"),
+        Timestamp::from_second(1).unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let objective = ObjectiveMatch {
+        arena_id: ArenaId::new(600),
+        timestamp: Timestamp::from_second(9000).unwrap(),
+        map: "Ocean".into(),
+        game_mode: "Domination".into(),
+        game_type: "pvp".into(),
+        match_group: "pvp".into(),
+        version_build: Some(1),
+    };
+
+    let pending_rows = MappedRows {
+        objective: objective.clone(),
+        vehicles: vec![],
+        record: ReplayRecord {
+            arena_id: ArenaId::new(600),
+            source_id: src,
+            replay_path: PathBuf::from("left_early.wowsreplay"),
+            file_mtime: Some(1),
+            outcome: MatchOutcome::Unknown,
+            self_account_id: Some(AccountId(7)),
+            self_ship_id: Some(GameParamId::from(999u64)),
+            self_survived: None,
+            self_damage: None,
+            self_kills: None,
+            self_pr: None,
+            results_available: false,
+            indexed_at: Timestamp::from_second(9001).unwrap(),
+        },
+    };
+    write_index(&pool, &pending_rows).await.unwrap();
+
+    let hits = query::search_matches(&pool, &MatchFilter::default()).await.unwrap();
+    assert_eq!(hits.len(), 1, "results-absent replay must still produce a match row");
+    assert!(!hits[0].results_available, "results_available must be false while results are pending");
+    assert_eq!(hits[0].self_damage, None, "server stats must be NULL, not a sentinel, while results are pending");
+    assert_eq!(hits[0].outcome, MatchOutcome::Unknown);
+
+    // Results land: a re-index of the same replay (same arena_id, same source +
+    // path) upserts rather than inserting a second row.
+    let complete_rows = MappedRows {
+        objective,
+        vehicles: vec![],
+        record: ReplayRecord {
+            arena_id: ArenaId::new(600),
+            source_id: src,
+            replay_path: PathBuf::from("left_early.wowsreplay"),
+            file_mtime: Some(2),
+            outcome: MatchOutcome::Win,
+            self_account_id: Some(AccountId(7)),
+            self_ship_id: Some(GameParamId::from(999u64)),
+            self_survived: Some(true),
+            self_damage: Some(50000),
+            self_kills: Some(2),
+            self_pr: Some(1234.5),
+            results_available: true,
+            indexed_at: Timestamp::from_second(9500).unwrap(),
+        },
+    };
+    write_index(&pool, &complete_rows).await.unwrap();
+
+    let hits = query::search_matches(&pool, &MatchFilter::default()).await.unwrap();
+    assert_eq!(hits.len(), 1, "re-indexing must upgrade the existing row, not duplicate it");
+    assert!(hits[0].results_available, "results_available must flip to true once results land");
+    assert_eq!(hits[0].self_damage, Some(50000));
+    assert_eq!(hits[0].outcome, MatchOutcome::Win);
+}

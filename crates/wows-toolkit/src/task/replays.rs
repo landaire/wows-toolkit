@@ -783,49 +783,54 @@ fn parse_replay_data_in_background(
                     }
 
                     if let Some(battle_report) = replay.battle_report.as_ref() {
-                        // We should only really be exporting data when the server-provided battle results
-                        // are available. Otherwise the data isn't very reliable or interesting.
-                        if battle_report.battle_results().is_some() {
-                            // Create a dummy sender since we don't need to send background tasks from here
-                            let (dummy_sender, _) = mpsc::channel();
-                            let deps = crate::data::wows_data::ReplayDependencies {
-                                wows_data_map: data.wows_data_map.clone(),
-                                twitch_state: Arc::clone(&data.twitch_state),
-                                replay_sort: Arc::new(Mutex::new(SortOrder::default())),
-                                background_task_sender: dummy_sender,
-                                is_debug_mode: data.is_debug,
-                            };
-                            replay.build_ui_report(&deps);
+                        // Data export should only happen once server-provided battle results are
+                        // available -- otherwise the exported data isn't reliable or interesting.
+                        // Indexing, however, runs for any successfully-parsed replay: a
+                        // results-absent (left-early) replay is still indexed with
+                        // `results_available = false` and NULL server stats (see
+                        // `replay_index::map_rows`), so it still shows up in rosters and
+                        // recent-matches. Capture the flag now, since it's the last use of
+                        // `battle_report` before `build_ui_report` needs `&mut replay`.
+                        let results_available = battle_report.battle_results().is_some();
 
-                            if let (Some(pool), Some(rt), Some(source_id)) =
-                                (data.db_pool.as_ref(), data.tokio_runtime.as_ref(), data.index_source_id)
-                            {
-                                crate::data::replay_index::index_replay_blocking(
-                                    rt,
-                                    pool,
-                                    &replay,
-                                    source_id,
-                                    jiff::Timestamp::now(),
-                                );
-                            }
+                        // Create a dummy sender since we don't need to send background tasks from here
+                        let (dummy_sender, _) = mpsc::channel();
+                        let deps = crate::data::wows_data::ReplayDependencies {
+                            wows_data_map: data.wows_data_map.clone(),
+                            twitch_state: Arc::clone(&data.twitch_state),
+                            replay_sort: Arc::new(Mutex::new(SortOrder::default())),
+                            background_task_sender: dummy_sender,
+                            is_debug_mode: data.is_debug,
+                        };
+                        replay.build_ui_report(&deps);
 
-                            if data.data_export_settings.should_auto_export {
-                                let export_path = data
-                                    .data_export_settings
-                                    .export_path
-                                    .join(replay.better_file_name(&metadata_provider));
-                                let export_path =
-                                    export_path.with_extension(match data.data_export_settings.export_format {
-                                        ReplayExportFormat::Json => "json",
-                                        ReplayExportFormat::Cbor => "cbor",
-                                        ReplayExportFormat::Csv => "csv",
-                                    });
+                        if let (Some(pool), Some(rt), Some(source_id)) =
+                            (data.db_pool.as_ref(), data.tokio_runtime.as_ref(), data.index_source_id)
+                        {
+                            crate::data::replay_index::index_replay_blocking(
+                                rt,
+                                pool,
+                                &replay,
+                                source_id,
+                                jiff::Timestamp::now(),
+                            );
+                        }
 
-                                let transformed_data = Match::new(&replay, data.is_debug);
+                        if results_available && data.data_export_settings.should_auto_export {
+                            let export_path =
+                                data.data_export_settings.export_path.join(replay.better_file_name(&metadata_provider));
+                            let export_path =
+                                export_path.with_extension(match data.data_export_settings.export_format {
+                                    ReplayExportFormat::Json => "json",
+                                    ReplayExportFormat::Cbor => "cbor",
+                                    ReplayExportFormat::Csv => "csv",
+                                });
 
-                                if let Err(e) = File::create(&export_path)
-                                    .context("failed to create export file")
-                                    .and_then(|file| match data.data_export_settings.export_format {
+                            let transformed_data = Match::new(&replay, data.is_debug);
+
+                            if let Err(e) =
+                                File::create(&export_path).context("failed to create export file").and_then(|file| {
+                                    match data.data_export_settings.export_format {
                                         ReplayExportFormat::Json => serde_json::to_writer(file, &transformed_data)
                                             .context("failed to write export file"),
                                         ReplayExportFormat::Cbor => ciborium::into_writer(&transformed_data, file)
@@ -843,11 +848,11 @@ fn parse_replay_data_in_background(
 
                                             result.context("failed to write export file")
                                         }
-                                    })
-                                {
-                                    // fail gracefully
-                                    error!("failed to write data export file: {:?}", e);
-                                }
+                                    }
+                                })
+                            {
+                                // fail gracefully
+                                error!("failed to write data export file: {:?}", e);
                             }
                         }
                     }
@@ -1135,9 +1140,11 @@ pub fn start_populating_player_inspector(
 /// Distinct from `parse_replay_data_in_background`: no upload, no player-tracker
 /// update, no data export -- this only produces index rows, so it can run for
 /// every historical replay without re-triggering side effects meant for newly
-/// finished battles. Only indexes replays whose server battle results are
-/// already available; otherwise the replay is treated as transient so a later
-/// pass retries once results land.
+/// finished battles. Indexes any replay that parses successfully, whether or
+/// not server battle results are present: results-absent (left-early) replays
+/// are indexed with `results_available = false` and NULL server stats (see
+/// `replay_index::map_rows`), and are upgraded in place if a later pass
+/// re-indexes them once results have landed.
 fn index_one_replay(
     path: &Path,
     wows_data_map: &crate::data::wows_data::WoWsDataMap,
@@ -1193,12 +1200,8 @@ fn index_one_replay(
         }
     }
 
-    let Some(battle_report) = replay.battle_report.as_ref() else {
+    if replay.battle_report.is_none() {
         return ParseOutcome::HardFailure;
-    };
-    if battle_report.battle_results().is_none() {
-        // Server-provided results aren't written yet; retry on a later pass.
-        return ParseOutcome::Transient;
     }
 
     let (dummy_sender, _) = mpsc::channel();
