@@ -695,8 +695,20 @@ impl ToolkitTabViewer<'_> {
         });
 
         if let Some(id) = find_matches_target {
-            self.tab_state.pending_search_filter =
-                Some(crate::db::index::rows::MatchFilter { player_present: Some(id), ..Default::default() });
+            use crate::db::index::query_model::Chip;
+            use crate::db::index::query_model::Connector;
+            use crate::db::index::query_model::Field;
+            use crate::db::index::query_model::Group;
+            use crate::db::index::query_model::Op;
+            use crate::db::index::query_model::Query;
+            use crate::db::index::query_model::Value;
+
+            self.tab_state.pending_search_query = Some(Query {
+                groups: vec![Group {
+                    chips: vec![Chip { field: Field::PlayerPresent, op: Op::Present, value: Value::Account(id) }],
+                }],
+                connector: Connector::And,
+            });
             self.tab_state.pending_focus_search = true;
         }
     }

@@ -391,8 +391,8 @@ pub struct TabState {
     pub search_tab: crate::ui::search_tab::SearchTabState,
     /// Command palette state (Ctrl+K / Ctrl+P), including cached player/ship facets.
     pub command_palette: crate::ui::command_palette::CommandPalette,
-    /// When set, the Search tab adopts this filter on next show (from palette/tracker).
-    pub pending_search_filter: Option<crate::db::index::rows::MatchFilter>,
+    /// When set, the Search tab adopts this query on next show (from palette/tracker).
+    pub pending_search_query: Option<crate::db::index::query_model::Query>,
     /// When true, the app focuses the Search tab next frame (from palette/tracker).
     pub pending_focus_search: bool,
     /// Cached ship catalog for palette ship entries; built lazily on first palette open.
@@ -538,7 +538,7 @@ impl Default for TabState {
             replay_parser_tab: Default::default(),
             search_tab: Default::default(),
             command_palette: Default::default(),
-            pending_search_filter: None,
+            pending_search_query: None,
             pending_focus_search: false,
             ship_catalog: None,
             file_viewer: Default::default(),

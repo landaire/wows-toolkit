@@ -2962,7 +2962,13 @@ impl WowsToolkitApp {
 
     /// Dispatch a palette-picked action against app state.
     fn dispatch_palette_action(&mut self, action: crate::ui::command_palette::PaletteAction) {
-        use crate::db::index::rows::MatchFilter;
+        use crate::db::index::query_model::Chip;
+        use crate::db::index::query_model::Connector;
+        use crate::db::index::query_model::Field;
+        use crate::db::index::query_model::Group;
+        use crate::db::index::query_model::Op;
+        use crate::db::index::query_model::Query;
+        use crate::db::index::query_model::Value;
         use crate::ui::command_palette::PaletteAction;
 
         match action {
@@ -2971,13 +2977,25 @@ impl WowsToolkitApp {
                 self.focus_tab(&Tab::ArmorViewer);
             }
             PaletteAction::MyMatchesInShip { ship_id } => {
-                self.tab_state.pending_search_filter =
-                    Some(MatchFilter { self_ship: Some(ship_id), ..Default::default() });
+                self.tab_state.pending_search_query = Some(Query {
+                    groups: vec![Group {
+                        chips: vec![Chip { field: Field::SelfShip, op: Op::Is, value: Value::Ship(ship_id) }],
+                    }],
+                    connector: Connector::And,
+                });
                 self.focus_tab(&Tab::Search);
             }
             PaletteAction::FindMatchesWithPlayer { account_id } => {
-                self.tab_state.pending_search_filter =
-                    Some(MatchFilter { player_present: Some(account_id), ..Default::default() });
+                self.tab_state.pending_search_query = Some(Query {
+                    groups: vec![Group {
+                        chips: vec![Chip {
+                            field: Field::PlayerPresent,
+                            op: Op::Present,
+                            value: Value::Account(account_id),
+                        }],
+                    }],
+                    connector: Connector::And,
+                });
                 self.focus_tab(&Tab::Search);
             }
             PaletteAction::OpenSearchTab => self.focus_tab(&Tab::Search),
