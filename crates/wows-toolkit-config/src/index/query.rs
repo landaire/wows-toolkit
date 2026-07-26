@@ -478,10 +478,6 @@ fn push_query_where(qb: &mut QueryBuilder<'_, Sqlite>, query: &Query) {
         }
         qb.push(")");
     }
-    // If every group was empty we opened "(" with nothing; close and neutralize.
-    if first_group {
-        qb.push("1=1");
-    }
     qb.push(")");
 }
 
@@ -497,9 +493,12 @@ fn push_chip(qb: &mut QueryBuilder<'_, Sqlite>, chip: &Chip) {
         (Field::Kills, Value::Int(n)) => push_num(qb, "r.self_kills", chip.op, *n),
         (Field::Pr, Value::Int(n)) => push_num(qb, "r.self_pr", chip.op, *n),
         (Field::Date, Value::Timestamp(t)) => push_num(qb, "m.timestamp", chip.op, t.as_second()),
-        (Field::Tier, Value::Int(n)) => push_exists(qb, "v.relation='self' AND v.tier = ", ExistsBind::Int(*n)),
+        (Field::Tier, Value::Int(n)) => {
+            let sql_op = num_sql_op(chip.op);
+            push_exists(qb, &format!("v.relation='self' AND v.tier {sql_op} "), ExistsBind::Int(*n))
+        }
         (Field::Class, Value::Class(s)) => {
-            push_exists(qb, "v.relation='self' AND v.species = ", ExistsBind::Text(s.clone()))
+            push_presence(qb, "v.relation='self' AND v.species = ", ExistsBind::Text(s.clone()), chip.op)
         }
         (Field::PlayerPresent, Value::Account(a)) => {
             push_presence(qb, "v.account_id = ", ExistsBind::Int(a.raw()), chip.op)
@@ -539,15 +538,19 @@ fn push_text(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, s: &str) {
     }
 }
 
-fn push_num(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, n: i64) {
-    let sql_op = match op {
+fn num_sql_op(op: Op) -> &'static str {
+    match op {
         Op::Eq => "=",
         Op::Ne => "<>",
         Op::Gt => ">",
         Op::Ge => ">=",
         Op::Lt => "<",
         _ => "<=", // Le and any other
-    };
+    }
+}
+
+fn push_num(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, n: i64) {
+    let sql_op = num_sql_op(op);
     qb.push(format!("{col} {sql_op} ")).push_bind(n);
 }
 
@@ -576,7 +579,7 @@ fn push_exists(qb: &mut QueryBuilder<'_, Sqlite>, inner: &str, bind: ExistsBind)
 }
 
 fn push_presence(qb: &mut QueryBuilder<'_, Sqlite>, inner: &str, bind: ExistsBind, op: Op) {
-    if matches!(op, Op::NotPresent) {
+    if matches!(op, Op::NotPresent | Op::IsNot) {
         qb.push("NOT ");
     }
     push_exists(qb, inner, bind);

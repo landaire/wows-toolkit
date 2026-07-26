@@ -384,3 +384,125 @@ async fn search_by_query_predicates_and_groups() {
     let none = query::search_by_query(&pool, &Query::default(), 1).await.unwrap();
     assert_eq!(none.len(), 1);
 }
+
+#[tokio::test]
+async fn search_by_query_tier_honors_op() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    // Both seeded arenas have self tier 10. Tier > 9 matches both.
+    let q = one(Field::Tier, Op::Gt, Value::Int(9));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    let mut arenas = hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>();
+    arenas.sort();
+    assert_eq!(arenas, vec![100, 200], "tier 10 > 9 must match");
+
+    // Tier > 10 matches nothing: proves the op is not silently rewritten to `=`.
+    let q = one(Field::Tier, Op::Gt, Value::Int(10));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert!(hits.is_empty(), "tier 10 is not > 10; old hardcoded `=` code would have matched both arenas here");
+
+    // Tier = 10 still matches both (Eq still works).
+    let q = one(Field::Tier, Op::Eq, Value::Int(10));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    let mut arenas = hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>();
+    arenas.sort();
+    assert_eq!(arenas, vec![100, 200]);
+}
+
+#[tokio::test]
+async fn search_by_query_class_honors_op() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    // Both seeded arenas have self ship Harugumo, a Destroyer.
+    let q = one(Field::Class, Op::Is, Value::Class("Destroyer".into()));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    let mut arenas = hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>();
+    arenas.sort();
+    assert_eq!(arenas, vec![100, 200], "Class Is Destroyer must match both self-Destroyer arenas");
+
+    // IsNot must negate: excludes both arenas since self is always a Destroyer here.
+    let q = one(Field::Class, Op::IsNot, Value::Class("Destroyer".into()));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert!(
+        hits.is_empty(),
+        "Class IsNot Destroyer must exclude self-Destroyer arenas; old hardcoded EXISTS code would have matched both"
+    );
+
+    // IsNot on a species that is never self: matches everything back.
+    let q = one(Field::Class, Op::IsNot, Value::Class("Battleship".into()));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    let mut arenas = hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>();
+    arenas.sort();
+    assert_eq!(arenas, vec![100, 200]);
+}
+
+#[tokio::test]
+async fn search_by_query_covers_selfship_allyship_kills_group() {
+    use wows_toolkit_config::index::rows::VehicleRelation;
+
+    let pool = mem_pool().await;
+    let src = seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    // Add an ally ship to arena 100 so AllyShip Present has something to find.
+    let ally = IndexedVehicleRow {
+        arena_id: ArenaId::new(100),
+        account_id: AccountId(42),
+        player_name: "ally42".into(),
+        clan: String::new(),
+        realm: None,
+        ship_id: GameParamId::from(444u64),
+        ship_index: "PJSC018".into(),
+        ship_name: "Kuma".into(),
+        nation: "japan".into(),
+        species: "Cruiser".into(),
+        tier: 4,
+        relation: VehicleRelation::Ally,
+        division_id: None,
+        survived: Some(true),
+        damage: Some(1),
+        kills: Some(0),
+        spotting: Some(0),
+        potential: Some(0),
+        received: Some(0),
+        pr: None,
+        is_test_ship: false,
+    };
+    query::upsert_vehicles(&pool, &[ally]).await.unwrap();
+
+    // SelfShip Is Harugumo(999) -> both arenas.
+    let q = one(Field::SelfShip, Op::Is, Value::Ship(GameParamId::from(999u64)));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    let mut arenas = hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>();
+    arenas.sort();
+    assert_eq!(arenas, vec![100, 200]);
+
+    // AllyShip Present (Kuma 444) -> arena 100 only.
+    let q = one(Field::AllyShip, Op::Present, Value::Ship(GameParamId::from(444u64)));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert_eq!(hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![100]);
+
+    // Kills >= 2: seed_two_matches sets self_kills only via sample_record defaults (2),
+    // both arenas share the default self_kills of 2.
+    let q = one(Field::Kills, Op::Ge, Value::Int(2));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    let mut arenas = hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>();
+    arenas.sort();
+    assert_eq!(arenas, vec![100, 200]);
+
+    // Group (source) Is the seeded source -> both arenas; a different source id excludes all.
+    let q = one(Field::Group, Op::Is, Value::Source(src));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    let mut arenas = hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>();
+    arenas.sort();
+    assert_eq!(arenas, vec![100, 200]);
+
+    let other_src = wows_toolkit_config::index::rows::SourceId(src.0 + 1);
+    let q = one(Field::Group, Op::Is, Value::Source(other_src));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert!(hits.is_empty());
+}
