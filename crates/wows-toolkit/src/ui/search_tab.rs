@@ -20,6 +20,8 @@ use crate::db::index::query_model::Field;
 use crate::db::index::query_model::Group;
 use crate::db::index::query_model::Op;
 use crate::db::index::query_model::Query;
+use crate::db::index::query_model::StatKind;
+use crate::db::index::query_model::Subject;
 use crate::db::index::query_model::Value;
 use crate::db::index::query_model::ValueKind;
 use crate::db::index::rows::IndexSource;
@@ -28,8 +30,9 @@ use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::PlayerFacet;
 use crate::db::index::rows::SourceId;
 
-/// Fields offered by the "Add filter" picker, in display order.
-const ALL_FIELDS: &[Field] = &[
+/// Non-stat fields offered by the "Add filter" picker, in display order. The
+/// seven `StatKind`s are appended to this list in the picker (see `StatKind::ALL`).
+const NON_STAT_FIELDS: &[Field] = &[
     Field::Outcome,
     Field::Map,
     Field::Mode,
@@ -37,35 +40,54 @@ const ALL_FIELDS: &[Field] = &[
     Field::Class,
     Field::Tier,
     Field::Date,
-    Field::SelfDamage,
-    Field::Kills,
-    Field::Pr,
-    Field::Survived,
     Field::PlayerPresent,
     Field::EnemyShip,
     Field::AllyShip,
     Field::Group,
 ];
 
-fn field_label(field: Field) -> String {
+fn field_display_label(field: Field) -> String {
     match field {
-        Field::Outcome => t!("ui.search.field.outcome"),
-        Field::Map => t!("ui.search.field.map"),
-        Field::Mode => t!("ui.search.field.mode"),
-        Field::SelfShip => t!("ui.search.field.self_ship"),
-        Field::Class => t!("ui.search.field.class"),
-        Field::Tier => t!("ui.search.field.tier"),
-        Field::Date => t!("ui.search.field.date"),
-        Field::SelfDamage => t!("ui.search.field.self_damage"),
-        Field::Kills => t!("ui.search.field.kills"),
-        Field::Pr => t!("ui.search.field.pr"),
-        Field::Survived => t!("ui.search.field.survived"),
-        Field::PlayerPresent => t!("ui.search.field.player_present"),
-        Field::EnemyShip => t!("ui.search.field.enemy_ship"),
-        Field::AllyShip => t!("ui.search.field.ally_ship"),
-        Field::Group => t!("ui.search.field.group"),
+        Field::Outcome => t!("ui.search.field.outcome").into(),
+        Field::Map => t!("ui.search.field.map").into(),
+        Field::Mode => t!("ui.search.field.mode").into(),
+        Field::SelfShip => t!("ui.search.field.self_ship").into(),
+        Field::Class => t!("ui.search.field.class").into(),
+        Field::Tier => t!("ui.search.field.tier").into(),
+        Field::Date => t!("ui.search.field.date").into(),
+        Field::PlayerPresent => t!("ui.search.field.player_present").into(),
+        Field::EnemyShip => t!("ui.search.field.enemy_ship").into(),
+        Field::AllyShip => t!("ui.search.field.ally_ship").into(),
+        Field::Group => t!("ui.search.field.group").into(),
+        Field::Stat { kind, .. } => stat_kind_label(kind),
+    }
+}
+
+fn stat_kind_label(kind: StatKind) -> String {
+    match kind {
+        StatKind::Damage => t!("ui.search.field.stat_damage"),
+        StatKind::Kills => t!("ui.search.field.stat_kills"),
+        StatKind::Spotting => t!("ui.search.field.stat_spotting"),
+        StatKind::Potential => t!("ui.search.field.stat_potential"),
+        StatKind::Received => t!("ui.search.field.stat_received"),
+        StatKind::Pr => t!("ui.search.field.stat_pr"),
+        StatKind::Survived => t!("ui.search.field.stat_survived"),
     }
     .into()
+}
+
+/// Selector label for a `Subject`: "Me" / "Any player" / the resolved player's
+/// name (or "#<id>" if unresolved). `picking` overrides with the "Specific
+/// player..." prompt while the user has opened the picker but not chosen yet.
+fn subject_combo_label(subject: Subject, picking: bool, resolved_players: &HashMap<AccountId, String>) -> String {
+    if picking {
+        return t!("ui.search.subject_specific").into();
+    }
+    match subject {
+        Subject::SelfPlayer => t!("ui.search.subject_me").into(),
+        Subject::AnyPlayer => t!("ui.search.subject_any").into(),
+        Subject::Player(id) => resolved_players.get(&id).cloned().unwrap_or_else(|| format!("#{}", id.raw())),
+    }
 }
 
 fn op_label(op: Op) -> String {
@@ -98,7 +120,7 @@ fn outcome_label(o: MatchOutcome) -> String {
 }
 
 fn bool_label(b: bool) -> String {
-    if b { t!("ui.search.survived_true") } else { t!("ui.search.survived_false") }.into()
+    if b { t!("ui.search.bool_true") } else { t!("ui.search.bool_false") }.into()
 }
 
 /// Compact display text for a chip's value. Ship/account ids are resolved
@@ -124,6 +146,43 @@ fn value_label(
     }
 }
 
+/// Full pill text for one chip. Non-`Stat` fields keep the plain
+/// "<field> <op> <value>" form; `Stat` fields are phrased with their subject:
+/// "My <stat> <op> <value>", "Any player <stat> <op> <value>", or
+/// "<name>'s <stat> <op> <value>". Numeric stat values use `separate_number`
+/// (thousands separator) to match the results table.
+fn chip_pill_label(
+    chip: &Chip,
+    resolved_ships: &HashMap<GameParamId, String>,
+    resolved_players: &HashMap<AccountId, String>,
+    sources: &[IndexSource],
+    locale: Option<&str>,
+) -> String {
+    let Field::Stat { kind, subject } = chip.field else {
+        return format!(
+            "{} {} {}",
+            field_display_label(chip.field),
+            op_label(chip.op),
+            value_label(&chip.value, resolved_ships, resolved_players, sources)
+        );
+    };
+    let stat = stat_kind_label(kind);
+    let op = op_label(chip.op);
+    let value = match &chip.value {
+        Value::Int(n) => crate::util::formatting::separate_number(*n, locale),
+        Value::Bool(b) => bool_label(*b),
+        other => value_label(other, resolved_ships, resolved_players, sources),
+    };
+    match subject {
+        Subject::SelfPlayer => format!("{} {stat} {op} {value}", t!("ui.search.pill_my")),
+        Subject::AnyPlayer => format!("{} {stat} {op} {value}", t!("ui.search.pill_any_player")),
+        Subject::Player(id) => {
+            let name = resolved_players.get(&id).cloned().unwrap_or_else(|| format!("#{}", id.raw()));
+            format!("{name}{} {stat} {op} {value}", t!("ui.search.pill_possessive"))
+        }
+    }
+}
+
 /// Draft state for the "Add filter" picker within one group. Detached from the
 /// query itself; only committed into a `Chip` when the user clicks Add.
 #[derive(Clone)]
@@ -143,9 +202,16 @@ struct AddFilterDraft {
     player_label: String,
     player_results: Vec<PlayerFacet>,
     source_id: Option<SourceId>,
-    date_year: i16,
-    date_month: i8,
-    date_day: i8,
+    date: jiff::civil::Date,
+    /// Subject for a `Field::Stat` chip; irrelevant (but always valid, never a
+    /// sentinel) for non-stat fields. Persists across stat-kind changes.
+    subject: Subject,
+    /// True while the "Specific player..." subject picker is open but no
+    /// player has been chosen yet, so `subject` itself stays at its last
+    /// valid value until a pick commits.
+    subject_picking_player: bool,
+    subject_player_search: String,
+    subject_player_results: Vec<PlayerFacet>,
 }
 
 impl Default for AddFilterDraft {
@@ -168,9 +234,11 @@ impl Default for AddFilterDraft {
             player_label: String::new(),
             player_results: Vec::new(),
             source_id: None,
-            date_year: today.year(),
-            date_month: today.month(),
-            date_day: today.day(),
+            date: today,
+            subject: Subject::SelfPlayer,
+            subject_picking_player: false,
+            subject_player_search: String::new(),
+            subject_player_results: Vec::new(),
         }
     }
 }
@@ -192,11 +260,13 @@ impl AddFilterDraft {
             ValueKind::Bool => Some(Value::Bool(self.bool_val)),
             ValueKind::Ship => self.ship_id.map(Value::Ship),
             ValueKind::Account => self.player_id.map(Value::Account),
-            ValueKind::Timestamp => {
-                let date = jiff::civil::Date::new(self.date_year, self.date_month, self.date_day).ok()?;
-                let zoned = date.to_zoned(jiff::tz::TimeZone::UTC).ok()?;
-                Some(Value::Timestamp(zoned.timestamp()))
-            }
+            ValueKind::Timestamp => match self.date.to_zoned(jiff::tz::TimeZone::UTC) {
+                Ok(zoned) => Some(Value::Timestamp(zoned.timestamp())),
+                Err(e) => {
+                    tracing::warn!("search: date-to-timestamp conversion failed for {:?}: {e}", self.date);
+                    None
+                }
+            },
             ValueKind::Source => self.source_id.map(Value::Source),
         }
     }
@@ -233,12 +303,14 @@ pub struct SearchTabState {
 
 impl Default for SearchTabState {
     fn default() -> Self {
+        // One group with its add-filter draft open, so the user can pick a
+        // field/op/value immediately instead of adding a group then a filter.
         Self {
-            query: Query::default(),
+            query: Query { groups: vec![Group::default()], connector: Connector::And },
             results: Vec::new(),
             dirty: true,
-            add_drafts: Vec::new(),
-            add_draft_open: Vec::new(),
+            add_drafts: vec![AddFilterDraft::default()],
+            add_draft_open: vec![true],
             sources: Vec::new(),
             resolved_ships: HashMap::new(),
             resolved_players: HashMap::new(),
@@ -338,6 +410,7 @@ impl ToolkitTabViewer<'_> {
         }
 
         let ship_catalog = self.tab_state.ship_catalog.as_ref();
+        let locale = self.tab_state.persisted.read().settings.app.locale.clone();
 
         let mut chip_to_remove: Option<(usize, usize)> = None;
         let mut new_chip: Option<(usize, Chip, Option<String>)> = None;
@@ -375,16 +448,12 @@ impl ToolkitTabViewer<'_> {
                     for (chip_idx, chip) in chips.iter().enumerate() {
                         egui::Frame::group(ui.style()).show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                ui.label(format!(
-                                    "{} {} {}",
-                                    field_label(chip.field),
-                                    op_label(chip.op),
-                                    value_label(
-                                        &chip.value,
-                                        &search_tab.resolved_ships,
-                                        &search_tab.resolved_players,
-                                        &search_tab.sources
-                                    )
+                                ui.label(chip_pill_label(
+                                    chip,
+                                    &search_tab.resolved_ships,
+                                    &search_tab.resolved_players,
+                                    &search_tab.sources,
+                                    locale.as_deref(),
                                 ));
                                 if ui.small_button("x").on_hover_text(t!("ui.search.remove")).clicked() {
                                     chip_to_remove = Some((group_idx, chip_idx));
@@ -410,16 +479,104 @@ impl ToolkitTabViewer<'_> {
                             ui.label(t!("ui.search.field_label"));
                             let prev_field = draft.field;
                             egui::ComboBox::from_id_salt(("search_add_field", group_idx))
-                                .selected_text(field_label(draft.field))
+                                .selected_text(field_display_label(draft.field))
                                 .show_ui(ui, |ui| {
-                                    for &f in ALL_FIELDS {
-                                        ui.selectable_value(&mut draft.field, f, field_label(f));
+                                    for &f in NON_STAT_FIELDS {
+                                        ui.selectable_value(&mut draft.field, f, field_display_label(f));
+                                    }
+                                    ui.separator();
+                                    for kind in StatKind::ALL {
+                                        let selected = matches!(draft.field, Field::Stat { kind: k, .. } if k == kind);
+                                        if ui.selectable_label(selected, stat_kind_label(kind)).clicked() {
+                                            // Subject is finalized just below once we know whether
+                                            // the previous field was already a Stat (preserve) or not
+                                            // (default to Me); this placeholder subject is discarded.
+                                            draft.field = Field::Stat { kind, subject: Subject::SelfPlayer };
+                                        }
                                     }
                                 });
                             if draft.field != prev_field {
+                                if let Field::Stat { kind, .. } = draft.field {
+                                    let subject = match prev_field {
+                                        Field::Stat { subject, .. } => subject,
+                                        _ => Subject::SelfPlayer,
+                                    };
+                                    draft.field = Field::Stat { kind, subject };
+                                    draft.subject = subject;
+                                } else {
+                                    draft.subject = Subject::SelfPlayer;
+                                    draft.subject_picking_player = false;
+                                }
                                 draft.reset_for_field(draft.field);
                             }
                         });
+
+                        if let Field::Stat { kind, subject } = draft.field {
+                            ui.horizontal(|ui| {
+                                ui.label(t!("ui.search.subject_label"));
+                                egui::ComboBox::from_id_salt(("search_add_subject", group_idx))
+                                    .selected_text(subject_combo_label(
+                                        subject,
+                                        draft.subject_picking_player,
+                                        &search_tab.resolved_players,
+                                    ))
+                                    .show_ui(ui, |ui| {
+                                        let me_selected =
+                                            !draft.subject_picking_player && subject == Subject::SelfPlayer;
+                                        if ui.selectable_label(me_selected, t!("ui.search.subject_me")).clicked() {
+                                            draft.subject = Subject::SelfPlayer;
+                                            draft.subject_picking_player = false;
+                                            draft.field = Field::Stat { kind, subject: Subject::SelfPlayer };
+                                        }
+                                        let any_selected =
+                                            !draft.subject_picking_player && subject == Subject::AnyPlayer;
+                                        if ui.selectable_label(any_selected, t!("ui.search.subject_any")).clicked() {
+                                            draft.subject = Subject::AnyPlayer;
+                                            draft.subject_picking_player = false;
+                                            draft.field = Field::Stat { kind, subject: Subject::AnyPlayer };
+                                        }
+                                        let specific_selected =
+                                            draft.subject_picking_player || matches!(subject, Subject::Player(_));
+                                        if ui
+                                            .selectable_label(specific_selected, t!("ui.search.subject_specific"))
+                                            .clicked()
+                                        {
+                                            draft.subject_picking_player = true;
+                                        }
+                                    });
+                            });
+
+                            if draft.subject_picking_player {
+                                ui.indent(("search_add_subject_player", group_idx), |ui| {
+                                    if ui.text_edit_singleline(&mut draft.subject_player_search).changed()
+                                        && let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref())
+                                    {
+                                        match rt.block_on(query::search_players(pool, &draft.subject_player_search, 50))
+                                        {
+                                            Ok(results) => draft.subject_player_results = results,
+                                            Err(e) => tracing::warn!("search: subject search_players failed: {e}"),
+                                        }
+                                    }
+                                    egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+                                        for p in draft.subject_player_results.clone() {
+                                            let label = if p.clan.is_empty() {
+                                                p.latest_name.clone()
+                                            } else {
+                                                format!("[{}] {}", p.clan, p.latest_name)
+                                            };
+                                            let selected = matches!(subject, Subject::Player(id) if id == p.account_id);
+                                            if ui.selectable_label(selected, label.clone()).clicked() {
+                                                draft.subject = Subject::Player(p.account_id);
+                                                draft.field =
+                                                    Field::Stat { kind, subject: Subject::Player(p.account_id) };
+                                                draft.subject_picking_player = false;
+                                                search_tab.resolved_players.entry(p.account_id).or_insert(label);
+                                            }
+                                        }
+                                    });
+                                });
+                            }
+                        }
 
                         ui.horizontal(|ui| {
                             ui.label(t!("ui.search.op_label"));
@@ -518,13 +675,8 @@ impl ToolkitTabViewer<'_> {
                                 });
                             }
                             ValueKind::Timestamp => {
-                                ui.horizontal(|ui| {
-                                    ui.add(egui::DragValue::new(&mut draft.date_year).range(2000..=2100));
-                                    ui.label("-");
-                                    ui.add(egui::DragValue::new(&mut draft.date_month).range(1..=12));
-                                    ui.label("-");
-                                    ui.add(egui::DragValue::new(&mut draft.date_day).range(1..=31));
-                                });
+                                let date_salt = format!("search_add_date_{group_idx}");
+                                ui.add(egui_extras::DatePickerButton::new(&mut draft.date).id_salt(&date_salt));
                             }
                             ValueKind::Source => {
                                 let selected_name = draft
@@ -544,7 +696,9 @@ impl ToolkitTabViewer<'_> {
 
                         ui.separator();
                         ui.horizontal(|ui| {
-                            if ui.button(t!("ui.search.add")).clicked()
+                            let add_disabled =
+                                matches!(draft.field, Field::Stat { .. }) && draft.subject_picking_player;
+                            if ui.add_enabled(!add_disabled, egui::Button::new(t!("ui.search.add"))).clicked()
                                 && let Some(value) = draft.to_value()
                             {
                                 let label = draft.value_display_label();
@@ -642,8 +796,6 @@ impl ToolkitTabViewer<'_> {
         }
 
         ui.label(t!("ui.search.match_count", count = self.tab_state.search_tab.results.len()));
-
-        let locale = self.tab_state.persisted.read().settings.app.locale.clone();
 
         let mut open_path: Option<std::path::PathBuf> = None;
         egui::ScrollArea::horizontal().id_salt("search_results").show(ui, |ui| {

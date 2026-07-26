@@ -203,14 +203,23 @@ async fn search_matches_applies_match_level_predicates() {
 }
 
 async fn seed_rosters(pool: &sqlx::SqlitePool) {
-    // arena 100: self Harugumo (id 999), enemy Yamato (id 111, account 501)
-    for (arena, acct, ship_id, idx, name, species, rel) in [
-        (100i64, 7i64, 999u64, "PJSD018", "Harugumo", "Destroyer", VehicleRelation::SelfPlayer),
-        (100, 501, 111, "PJSB018", "Yamato", "Battleship", VehicleRelation::Enemy),
-        (200, 7, 999, "PJSD018", "Harugumo", "Destroyer", VehicleRelation::SelfPlayer),
-        (200, 777, 222, "PJSD718", "Shimakaze", "Destroyer", VehicleRelation::Enemy),
-        (100, 0, 333, "PABOT", "Bot", "Cruiser", VehicleRelation::Enemy),
+    // arena 100: self Harugumo (id 999, damage 50k), enemy Yamato (id 111, account
+    // 501, damage 90k), bot (account 0, damage 1, survived=false).
+    // arena 200: self Harugumo (damage 30k), enemy Shimakaze (account 777, damage 20k).
+    // Damage is distinct per row so subject-scoped stat predicates (self/any/specific
+    // player) are provably non-vacuous and arena-scoped.
+    for (arena, acct, ship_id, idx, name, species, rel, damage) in [
+        (100i64, 7i64, 999u64, "PJSD018", "Harugumo", "Destroyer", VehicleRelation::SelfPlayer, 50_000u64),
+        (100, 501, 111, "PJSB018", "Yamato", "Battleship", VehicleRelation::Enemy, 90_000),
+        (200, 7, 999, "PJSD018", "Harugumo", "Destroyer", VehicleRelation::SelfPlayer, 30_000),
+        (200, 777, 222, "PJSD718", "Shimakaze", "Destroyer", VehicleRelation::Enemy, 20_000),
+        (100, 0, 333, "PABOT", "Bot", "Cruiser", VehicleRelation::Enemy, 1),
     ] {
+        // Yamato (arena 100, account 501) gets a distinguishing pr; the bot
+        // (arena 100, account 0) gets survived=false, so the two arenas differ
+        // on both fields and the any-player predicates are provably non-vacuous.
+        let pr = if acct == 501 { Some(1000.0) } else { None };
+        let survived = if acct == 0 { Some(false) } else { Some(true) };
         let v = IndexedVehicleRow {
             arena_id: ArenaId::new(arena),
             account_id: AccountId(acct),
@@ -225,13 +234,13 @@ async fn seed_rosters(pool: &sqlx::SqlitePool) {
             tier: 10,
             relation: rel,
             division_id: None,
-            survived: Some(true),
-            damage: Some(1),
+            survived,
+            damage: Some(damage),
             kills: Some(0),
             spotting: Some(0),
             potential: Some(0),
             received: Some(0),
-            pr: None,
+            pr,
             is_test_ship: false,
         };
         query::upsert_vehicles(pool, &[v]).await.unwrap();
@@ -325,6 +334,8 @@ use wows_toolkit_config::index::query_model::Field;
 use wows_toolkit_config::index::query_model::Group;
 use wows_toolkit_config::index::query_model::Op;
 use wows_toolkit_config::index::query_model::Query;
+use wows_toolkit_config::index::query_model::StatKind;
+use wows_toolkit_config::index::query_model::Subject;
 use wows_toolkit_config::index::query_model::Value;
 
 fn one(field: Field, op: Op, value: Value) -> Query {
@@ -342,8 +353,9 @@ async fn search_by_query_predicates_and_groups() {
     let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
     assert_eq!(hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![100]);
 
-    // Numeric: self_damage >= 100k -> arena 100.
-    let q = one(Field::SelfDamage, Op::Ge, Value::Int(100_000));
+    // Numeric: Stat{Damage, SelfPlayer} >= 50k -> arena 100 only (seed_rosters gives
+    // the self roster row 50k damage in arena 100, 30k in arena 200).
+    let q = one(Field::Stat { kind: StatKind::Damage, subject: Subject::SelfPlayer }, Op::Ge, Value::Int(50_000));
     let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
     assert_eq!(hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![100]);
 
@@ -486,13 +498,18 @@ async fn search_by_query_covers_selfship_allyship_kills_group() {
     let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
     assert_eq!(hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![100]);
 
-    // Kills >= 2: seed_two_matches sets self_kills only via sample_record defaults (2),
-    // both arenas share the default self_kills of 2.
-    let q = one(Field::Kills, Op::Ge, Value::Int(2));
+    // Stat{Kills, SelfPlayer} >= 0: seed_rosters gives every roster row kills = 0,
+    // so both arenas' self row matches.
+    let q = one(Field::Stat { kind: StatKind::Kills, subject: Subject::SelfPlayer }, Op::Ge, Value::Int(0));
     let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
     let mut arenas = hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>();
     arenas.sort();
     assert_eq!(arenas, vec![100, 200]);
+
+    // Gt 0 matches nothing: proves the op is a real predicate, not a presence check.
+    let q = one(Field::Stat { kind: StatKind::Kills, subject: Subject::SelfPlayer }, Op::Gt, Value::Int(0));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert!(hits.is_empty(), "no self roster row has kills > 0");
 
     // Group (source) Is the seeded source -> both arenas; a different source id excludes all.
     let q = one(Field::Group, Op::Is, Value::Source(src));
@@ -545,6 +562,118 @@ async fn player_name_resolves_seeded_account_and_none_for_unknown() {
 
     let unknown = query::player_name(&pool, AccountId(999_999)).await.unwrap();
     assert_eq!(unknown, None);
+}
+
+#[tokio::test]
+async fn search_by_query_stat_self_subject_is_arena_scoped() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    // seed_rosters: self roster row damage is 50k in arena 100, 30k in arena 200.
+    // Ge 50k matches only the arena whose self row actually meets it.
+    let q = one(Field::Stat { kind: StatKind::Damage, subject: Subject::SelfPlayer }, Op::Ge, Value::Int(50_000));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert_eq!(
+        hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(),
+        vec![100],
+        "Stat{{Damage, SelfPlayer}} Ge 50k must match only arena 100 (self row = 50k there, 30k in arena 200)"
+    );
+
+    // Gt 50k: no self row exceeds 50k, so this must be empty. A wrong relation
+    // clause (e.g. matching the arena-100 enemy's 90k row) would wrongly match here.
+    let q = one(Field::Stat { kind: StatKind::Damage, subject: Subject::SelfPlayer }, Op::Gt, Value::Int(50_000));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert!(hits.is_empty(), "no self roster row has damage > 50k; a wrong column/relation would match arena 100");
+}
+
+#[tokio::test]
+async fn search_by_query_stat_any_player_subject_matches_non_self_rows() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    // 80k is only met by the arena-100 enemy Yamato row (90k damage); neither self
+    // row (50k/30k) meets it, so this proves AnyPlayer is not silently self-scoped.
+    let q = one(Field::Stat { kind: StatKind::Damage, subject: Subject::AnyPlayer }, Op::Ge, Value::Int(80_000));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert_eq!(
+        hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(),
+        vec![100],
+        "Stat{{Damage, AnyPlayer}} Ge 80k must match via the non-self Yamato row in arena 100"
+    );
+
+    // The same threshold under SelfPlayer must be empty: proves AnyPlayer's match
+    // above genuinely comes from a non-self roster row, not from a relation bug.
+    let q = one(Field::Stat { kind: StatKind::Damage, subject: Subject::SelfPlayer }, Op::Ge, Value::Int(80_000));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert!(hits.is_empty(), "no self row meets 80k damage; SelfPlayer must not see the enemy's 90k row");
+}
+
+#[tokio::test]
+async fn search_by_query_stat_specific_player_subject_binds_account_and_arena() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    // Account 501 (Yamato, arena 100) has damage 90k there and never appears in
+    // arena 200. Ge 90k under Player(501) must match arena 100 only.
+    let q = one(
+        Field::Stat { kind: StatKind::Damage, subject: Subject::Player(AccountId(501)) },
+        Op::Ge,
+        Value::Int(90_000),
+    );
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert_eq!(
+        hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(),
+        vec![100],
+        "Stat{{Damage, Player(501)}} Ge 90k must match arena 100, where account 501's row is 90k"
+    );
+
+    // A different account (777, Shimakaze, arena 200, damage 20k) queried at the
+    // same 90k threshold must be empty: proves the account bind is not ignored,
+    // and account 501's 90k in arena 100 is not wrongly attributed to account 777.
+    let q = one(
+        Field::Stat { kind: StatKind::Damage, subject: Subject::Player(AccountId(777)) },
+        Op::Ge,
+        Value::Int(90_000),
+    );
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert!(hits.is_empty(), "account 777 never has damage >= 90k in any arena it appears in");
+
+    // Account 777 at its own (lower) threshold matches its own arena.
+    let q = one(
+        Field::Stat { kind: StatKind::Damage, subject: Subject::Player(AccountId(777)) },
+        Op::Ge,
+        Value::Int(20_000),
+    );
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert_eq!(
+        hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(),
+        vec![200],
+        "Stat{{Damage, Player(777)}} Ge 20k must match arena 200, where account 777's row is 20k"
+    );
+}
+
+#[tokio::test]
+async fn search_by_query_stat_survived_self_subject() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    // Every self roster row is survived=true in both arenas.
+    let q = one(Field::Stat { kind: StatKind::Survived, subject: Subject::SelfPlayer }, Op::Is, Value::Bool(true));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    let mut arenas = hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>();
+    arenas.sort();
+    assert_eq!(arenas, vec![100, 200], "Stat{{Survived, SelfPlayer}} Is true must match both arenas");
+
+    // Only the arena-100 bot's (enemy) row is survived=false; no self row is ever
+    // false, so this must be empty. A wrong relation clause (matching any roster
+    // row) would incorrectly match arena 100 here.
+    let q = one(Field::Stat { kind: StatKind::Survived, subject: Subject::SelfPlayer }, Op::Is, Value::Bool(false));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert!(hits.is_empty(), "no self roster row has survived=false; only the non-self bot row does");
 }
 
 #[tokio::test]

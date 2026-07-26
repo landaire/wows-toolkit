@@ -19,7 +19,7 @@ eframe = { workspace = true, features = [
     "wgpu",
     "wayland",       # To support Linux (and CI)
 ] }
-egui_extras = { version = "0.35", features = ["syntect", "image", "svg"] }
+egui_extras = { version = "0.35", features = ["syntect", "image", "svg", "datepicker", "serde"] }
 egui_dock = { workspace = true, features = ["serde"] }
 egui-phosphor = { workspace = true }
 egui_table = "0.9.0"

@@ -2489,10 +2489,12 @@ dependencies = [
  "enum-map",
  "image",
  "itertools 0.14.0",
+ "jiff",
  "log",
  "mime_guess2",
  "profiling",
  "resvg 0.45.1",
+ "serde",
  "syntect",
 ]
 
@@ -2718,6 +2720,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6866f3bfdf8207509a033af1a75a7b08abda06bbaaeae6669323fd5a097df2e9"
 dependencies = [
  "enum-map-derive",
+ "serde",
 ]
 
 [[package]]
@@ -4685,10 +4688,12 @@ dependencies = [
  "jiff-core",
  "jiff-static",
  "jiff-tzdb-platform",
+ "js-sys",
  "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
+ "wasm-bindgen",
  "windows-link",
 ]
 

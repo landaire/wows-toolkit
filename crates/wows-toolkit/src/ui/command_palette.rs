@@ -22,6 +22,8 @@ use crate::db::index::query_model::Field;
 use crate::db::index::query_model::Group;
 use crate::db::index::query_model::Op;
 use crate::db::index::query_model::Query;
+use crate::db::index::query_model::StatKind;
+use crate::db::index::query_model::Subject;
 use crate::db::index::query_model::Value;
 use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::PlayerFacet;
@@ -119,7 +121,11 @@ impl CommandPalette {
             groups: vec![Group {
                 chips: vec![
                     Chip { field: Field::Outcome, op: Op::Is, value: Value::Outcome(MatchOutcome::Loss) },
-                    Chip { field: Field::Survived, op: Op::Is, value: Value::Bool(false) },
+                    Chip {
+                        field: Field::Stat { kind: StatKind::Survived, subject: Subject::SelfPlayer },
+                        op: Op::Is,
+                        value: Value::Bool(false),
+                    },
                 ],
             }],
             connector: Connector::And,

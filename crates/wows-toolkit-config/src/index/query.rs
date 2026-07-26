@@ -17,6 +17,7 @@ use super::query_model::Connector;
 use super::query_model::Field;
 use super::query_model::Op;
 use super::query_model::Query;
+use super::query_model::Subject;
 use super::query_model::Value;
 use super::rows::IndexError;
 use super::rows::IndexSource;
@@ -566,10 +567,6 @@ fn push_chip(qb: &mut QueryBuilder<'_, Sqlite>, chip: &Chip) {
         (Field::Mode, Value::Text(s)) => push_text(qb, "m.game_type", chip.op, s),
         (Field::Outcome, Value::Outcome(o)) => push_enum(qb, "r.outcome", chip.op, o.as_db_str()),
         (Field::SelfShip, Value::Ship(id)) => push_enum_i64(qb, "r.self_ship_id", chip.op, id.raw() as i64),
-        (Field::Survived, Value::Bool(b)) => push_enum_bool(qb, "r.self_survived", chip.op, *b),
-        (Field::SelfDamage, Value::Int(n)) => push_num(qb, "r.self_damage", chip.op, *n),
-        (Field::Kills, Value::Int(n)) => push_num(qb, "r.self_kills", chip.op, *n),
-        (Field::Pr, Value::Int(n)) => push_num(qb, "r.self_pr", chip.op, *n),
         (Field::Date, Value::Timestamp(t)) => push_num(qb, "m.timestamp", chip.op, t.as_second()),
         (Field::Tier, Value::Int(n)) => {
             let sql_op = num_sql_op(chip.op);
@@ -588,6 +585,16 @@ fn push_chip(qb: &mut QueryBuilder<'_, Sqlite>, chip: &Chip) {
             push_presence(qb, "v.relation='ally' AND v.ship_id = ", ExistsBind::Int(id.raw() as i64), chip.op)
         }
         (Field::Group, Value::Source(s)) => push_enum_i64(qb, "r.source_id", chip.op, s.0),
+        // Subject-scoped roster stat: EXISTS over the roster, scoped by arena and by
+        // the subject (self row / any row / a specific account's row).
+        (Field::Stat { kind, subject }, Value::Int(n)) if !kind.is_bool() => {
+            let sql_op = num_sql_op(chip.op);
+            push_exists_subject(qb, subject, &format!("v.{} {sql_op} ", kind.column()), ExistsBind::Int(*n))
+        }
+        (Field::Stat { kind, subject }, Value::Bool(b)) if kind.is_bool() => {
+            let sql_op = if matches!(chip.op, Op::IsNot) { "<>" } else { "=" };
+            push_exists_subject(qb, subject, &format!("v.{} {sql_op} ", kind.column()), ExistsBind::Bool(*b))
+        }
         // Field/value mismatch (UI prevents this): no-op predicate + log.
         _ => {
             tracing::warn!("search_by_query: unsupported field/value combination");
@@ -599,6 +606,7 @@ fn push_chip(qb: &mut QueryBuilder<'_, Sqlite>, chip: &Chip) {
 enum ExistsBind {
     Int(i64),
     Text(String),
+    Bool(bool),
 }
 
 fn push_text(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, s: &str) {
@@ -642,17 +650,43 @@ fn push_enum_i64(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, val: i64)
     qb.push(format!("{col} {sql_op} ")).push_bind(val);
 }
 
-fn push_enum_bool(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, val: bool) {
-    let sql_op = if matches!(op, Op::IsNot) { "<>" } else { "=" };
-    qb.push(format!("{col} {sql_op} ")).push_bind(val);
-}
-
 fn push_exists(qb: &mut QueryBuilder<'_, Sqlite>, inner: &str, bind: ExistsBind) {
     qb.push("EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND ").push(inner);
     match bind {
         ExistsBind::Int(n) => qb.push_bind(n),
         ExistsBind::Text(s) => qb.push_bind(s),
+        ExistsBind::Bool(b) => qb.push_bind(b),
     };
+    qb.push(")");
+}
+
+/// `EXISTS` over the roster, scoped by arena and by `subject`: the perspective
+/// player's own row, any row, or one specific account's row. `inner` is a trusted
+/// (hardcoded) column comparison fragment ending in a placeholder for `bind`; a
+/// `Subject::Player` account id is bound before `bind`, matching bind order.
+fn push_exists_subject(qb: &mut QueryBuilder<'_, Sqlite>, subject: Subject, inner: &str, bind: ExistsBind) {
+    qb.push("EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id");
+    match subject {
+        Subject::SelfPlayer => {
+            qb.push(" AND v.relation = ").push_bind(VehicleRelation::SelfPlayer.as_db_str());
+        }
+        Subject::AnyPlayer => {}
+        Subject::Player(account) => {
+            qb.push(" AND v.account_id = ").push_bind(account.raw());
+        }
+    }
+    qb.push(" AND ").push(inner);
+    match bind {
+        ExistsBind::Int(n) => {
+            qb.push_bind(n);
+        }
+        ExistsBind::Text(s) => {
+            qb.push_bind(s);
+        }
+        ExistsBind::Bool(b) => {
+            qb.push_bind(b);
+        }
+    }
     qb.push(")");
 }
 
