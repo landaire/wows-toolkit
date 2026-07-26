@@ -613,6 +613,7 @@ pub struct ReplayDependencies {
     pub replay_sort: Arc<Mutex<SortOrder>>,
     pub background_task_sender: mpsc::Sender<BackgroundTask>,
     pub is_debug_mode: bool,
+    pub personal_rating_data: Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
 }
 
 impl ReplayDependencies {

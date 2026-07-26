@@ -2711,7 +2711,16 @@ impl Replay {
             };
 
             let merge_active = !self.alt_replays.is_empty();
-            self.ui_report = Some(UiReport::new(&self.replay_file, battle_report, &wows_data, deps, merge_active));
+            let mut ui_report = UiReport::new(&self.replay_file, battle_report, &wows_data, deps, merge_active);
+
+            {
+                let pr_data = deps.personal_rating_data.read();
+                if pr_data.is_loaded() {
+                    ui_report.populate_personal_ratings(&pr_data);
+                }
+            }
+
+            self.ui_report = Some(ui_report);
         }
     }
 

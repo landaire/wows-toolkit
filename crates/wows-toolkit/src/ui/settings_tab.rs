@@ -415,6 +415,7 @@ impl ToolkitTabViewer<'_> {
                             Arc::clone(&self.tab_state.twitch_state),
                             pool,
                             rt,
+                            Arc::clone(&self.tab_state.personal_rating_data),
                         ))
                     );
                 }

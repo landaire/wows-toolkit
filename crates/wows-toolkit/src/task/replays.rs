@@ -801,6 +801,7 @@ fn parse_replay_data_in_background(
                             replay_sort: Arc::new(Mutex::new(SortOrder::default())),
                             background_task_sender: dummy_sender,
                             is_debug_mode: data.is_debug,
+                            personal_rating_data: Arc::clone(&data.personal_rating_data),
                         };
                         replay.build_ui_report(&deps);
 
@@ -914,6 +915,7 @@ pub struct BackgroundParserThread {
     pub cap_layout_db: Arc<Mutex<crate::data::cap_layout::CapLayoutDb>>,
     pub db_pool: Option<sqlx::SqlitePool>,
     pub tokio_runtime: Option<Arc<tokio::runtime::Runtime>>,
+    pub personal_rating_data: Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
     /// Cached id of the live replay-index source, resolved once at scan start so
     /// the live hook does not hit `ensure_default_source` per replay.
     pub index_source_id: Option<crate::db::index::rows::SourceId>,
@@ -1151,6 +1153,7 @@ fn index_one_replay(
     twitch_state: &Arc<RwLock<TwitchState>>,
     db_pool: &sqlx::SqlitePool,
     tokio_runtime: &tokio::runtime::Runtime,
+    personal_rating_data: &Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
     source_id: crate::db::index::rows::SourceId,
 ) -> ParseOutcome {
     let replay_file = match ReplayFile::from_file(path) {
@@ -1211,6 +1214,7 @@ fn index_one_replay(
         replay_sort: Arc::new(Mutex::new(SortOrder::default())),
         background_task_sender: dummy_sender,
         is_debug_mode: false,
+        personal_rating_data: Arc::clone(personal_rating_data),
     };
     replay.build_ui_report(&deps);
 
@@ -1239,12 +1243,20 @@ pub fn start_reconcile_index(
     twitch_state: Arc<RwLock<TwitchState>>,
     db_pool: sqlx::SqlitePool,
     tokio_runtime: Arc<tokio::runtime::Runtime>,
+    personal_rating_data: Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
 ) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
     let (progress_tx, progress_rx) = mpsc::channel();
 
     crate::util::thread::spawn_logged("reconcile-index", move || {
-        let _ = tx.send(run_reconcile_index(wows_data_map, twitch_state, db_pool, tokio_runtime, &progress_tx));
+        let _ = tx.send(run_reconcile_index(
+            wows_data_map,
+            twitch_state,
+            db_pool,
+            tokio_runtime,
+            personal_rating_data,
+            &progress_tx,
+        ));
     });
 
     BackgroundTask {
@@ -1258,6 +1270,7 @@ fn run_reconcile_index(
     twitch_state: Arc<RwLock<TwitchState>>,
     db_pool: sqlx::SqlitePool,
     tokio_runtime: Arc<tokio::runtime::Runtime>,
+    personal_rating_data: Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
     progress_tx: &mpsc::Sender<IndexProgress>,
 ) -> Result<BackgroundTaskCompletion, Report> {
     let Some(replays_dir) =
@@ -1297,7 +1310,15 @@ fn run_reconcile_index(
             already_indexed,
             true,
             std::panic::AssertUnwindSafe(|| {
-                index_one_replay(&path, &wows_data_map, &twitch_state, &db_pool, &tokio_runtime, source_id)
+                index_one_replay(
+                    &path,
+                    &wows_data_map,
+                    &twitch_state,
+                    &db_pool,
+                    &tokio_runtime,
+                    &personal_rating_data,
+                    source_id,
+                )
             }),
         );
 

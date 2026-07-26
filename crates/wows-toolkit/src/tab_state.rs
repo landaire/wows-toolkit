@@ -660,6 +660,7 @@ impl TabState {
             replay_sort: Arc::clone(&self.replay_sort),
             background_task_sender: self.background_task_sender.clone(),
             is_debug_mode: self.persisted.read().settings.app.debug_mode,
+            personal_rating_data: Arc::clone(&self.personal_rating_data),
         })
     }
 
@@ -968,6 +969,7 @@ impl TabState {
                 cap_layout_db: Arc::clone(&self.cap_layout_db),
                 db_pool: self.db_pool.clone(),
                 tokio_runtime: self.tokio_runtime.clone(),
+                personal_rating_data: Arc::clone(&self.personal_rating_data),
                 index_source_id: None,
                 unindexable: crate::data::replay_reconcile::Unindexable::default(),
             };
