@@ -51,12 +51,12 @@ pub struct SemanticColors {
 
 const DARK: SemanticColors = SemanticColors {
     win: Color32::from_rgb(0x6F, 0xD9, 0x8A),
-    loss: Color32::from_rgb(0xE8, 0x65, 0x6E),
+    loss: Color32::from_rgb(0xEA, 0x70, 0x78),
     draw: Color32::from_rgb(0xCF, 0xC8, 0xB6),
     warn: Color32::from_rgb(0xE8, 0xA5, 0x4A),
     error: Color32::from_rgb(0xF2, 0x72, 0x7C),
     text_strong: Color32::from_rgb(0xFA, 0xF8, 0xF1),
-    text_dim: Color32::from_rgb(0x8E, 0x8B, 0x82),
+    text_dim: Color32::from_rgb(0x9C, 0x99, 0x90),
     division: Color32::from_rgb(0xE5, 0xC1, 0x58),
     icon_accent: Color32::from_rgb(0xE5, 0xC1, 0x58),
     abuser: Color32::from_rgb(0xF0, 0x9B, 0xC0),
@@ -78,28 +78,28 @@ const DARK: SemanticColors = SemanticColors {
 };
 
 const LIGHT: SemanticColors = SemanticColors {
-    win: Color32::from_rgb(0x12, 0x79, 0x3A),
+    win: Color32::from_rgb(0x10, 0x6C, 0x34),
     loss: Color32::from_rgb(0xB0, 0x1F, 0x2B),
     draw: Color32::from_rgb(0x5F, 0x5C, 0x52),
     warn: Color32::from_rgb(0x8A, 0x4B, 0x00),
     error: Color32::from_rgb(0xA8, 0x1F, 0x2A),
     text_strong: Color32::from_rgb(0x0A, 0x0A, 0x08),
     text_dim: Color32::from_rgb(0x5C, 0x5A, 0x53),
-    division: Color32::from_rgb(0x7A, 0x5A, 0x00),
-    icon_accent: Color32::from_rgb(0x7A, 0x5A, 0x00),
+    division: Color32::from_rgb(0x77, 0x58, 0x00),
+    icon_accent: Color32::from_rgb(0x77, 0x58, 0x00),
     abuser: Color32::from_rgb(0xA3, 0x32, 0x70),
     chat: ChatColors {
-        division: Color32::from_rgb(0x7A, 0x5A, 0x00),
+        division: Color32::from_rgb(0x77, 0x58, 0x00),
         global: Color32::from_rgb(0x1A, 0x1A, 0x17),
-        team: Color32::from_rgb(0x12, 0x79, 0x3A),
+        team: Color32::from_rgb(0x10, 0x6C, 0x34),
         other: Color32::from_rgb(0x8A, 0x4B, 0x00),
     },
     armor: ArmorColors {
-        angle_good: Color32::from_rgb(0x14, 0x7A, 0x3C),
-        angle_mid: Color32::from_rgb(0x7A, 0x5A, 0x08),
+        angle_good: Color32::from_rgb(0x11, 0x6B, 0x34),
+        angle_mid: Color32::from_rgb(0x78, 0x58, 0x08),
         angle_bad: Color32::from_rgb(0xAE, 0x22, 0x30),
         pen: Color32::from_rgb(0xAE, 0x22, 0x30),
-        overpen: Color32::from_rgb(0x7A, 0x5A, 0x08),
+        overpen: Color32::from_rgb(0x78, 0x58, 0x08),
         ricochet: Color32::from_rgb(0x1B, 0x5F, 0xA8),
         shatter: Color32::from_rgb(0x5F, 0x5C, 0x52),
     },
@@ -164,9 +164,14 @@ mod tests {
     }
 
     #[test]
-    fn every_dark_role_clears_the_floor_on_panel_and_card() {
+    fn every_dark_role_clears_the_floor_on_every_text_surface() {
         for (name, color) in roles(&DARK) {
-            for (surface_name, surface) in [("panel", palette::dark::PANEL), ("card", palette::dark::CARD)] {
+            for (surface_name, surface) in [
+                ("panel", palette::dark::PANEL),
+                ("card", palette::dark::CARD),
+                ("faint", palette::dark::FAINT),
+                ("selection", palette::dark::SELECTION),
+            ] {
                 let r = contrast_ratio(color, surface);
                 assert!(r >= CONTRAST_FLOOR, "dark {name} on {surface_name} is {r}, needs {CONTRAST_FLOOR}");
             }
@@ -174,9 +179,14 @@ mod tests {
     }
 
     #[test]
-    fn every_light_role_clears_the_floor_on_panel_and_card() {
+    fn every_light_role_clears_the_floor_on_every_text_surface() {
         for (name, color) in roles(&LIGHT) {
-            for (surface_name, surface) in [("panel", palette::light::PANEL), ("card", palette::light::CARD)] {
+            for (surface_name, surface) in [
+                ("panel", palette::light::PANEL),
+                ("card", palette::light::CARD),
+                ("faint", palette::light::FAINT),
+                ("selection", palette::light::SELECTION),
+            ] {
                 let r = contrast_ratio(color, surface);
                 assert!(r >= CONTRAST_FLOOR, "light {name} on {surface_name} is {r}, needs {CONTRAST_FLOOR}");
             }
@@ -190,13 +200,29 @@ mod tests {
                 "dark",
                 palette::dark::TEXT,
                 palette::dark::TEXT_DIM,
-                [palette::dark::SURFACE, palette::dark::PANEL, palette::dark::CARD, palette::dark::WIDGET],
+                [
+                    palette::dark::SURFACE,
+                    palette::dark::PANEL,
+                    palette::dark::CARD,
+                    palette::dark::WIDGET,
+                    palette::dark::WIDGET_HOT,
+                    palette::dark::FAINT,
+                    palette::dark::SELECTION,
+                ],
             ),
             (
                 "light",
                 palette::light::TEXT,
                 palette::light::TEXT_DIM,
-                [palette::light::SURFACE, palette::light::PANEL, palette::light::CARD, palette::light::WIDGET],
+                [
+                    palette::light::SURFACE,
+                    palette::light::PANEL,
+                    palette::light::CARD,
+                    palette::light::WIDGET,
+                    palette::light::WIDGET_HOT,
+                    palette::light::FAINT,
+                    palette::light::SELECTION,
+                ],
             ),
         ] {
             for surface in surfaces {

@@ -15,10 +15,10 @@ pub mod dark {
     pub const BORDER: Color32 = Color32::from_rgb(0x30, 0x2F, 0x2C);
     pub const BORDER_BRIGHT: Color32 = Color32::from_rgb(0x4A, 0x49, 0x45);
     pub const FAINT: Color32 = Color32::from_rgb(0x16, 0x16, 0x15);
-    pub const SELECTION: Color32 = Color32::from_rgb(0x33, 0x32, 0x2D);
+    pub const SELECTION: Color32 = Color32::from_rgb(0x2F, 0x2F, 0x2A);
     pub const ACCENT: Color32 = Color32::from_rgb(0xE8, 0xE4, 0xD8);
     pub const TEXT: Color32 = Color32::from_rgb(0xDE, 0xDB, 0xD2);
-    pub const TEXT_DIM: Color32 = Color32::from_rgb(0x8E, 0x8B, 0x82);
+    pub const TEXT_DIM: Color32 = Color32::from_rgb(0x9C, 0x99, 0x90);
     pub const TEXT_BRIGHT: Color32 = Color32::from_rgb(0xFA, 0xF8, 0xF1);
 }
 
