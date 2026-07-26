@@ -389,7 +389,8 @@ pub struct TabState {
     pub last_progress: Option<UnpackerProgress>,
     pub replay_parser_tab: SharedReplayParserTabState,
     pub search_tab: crate::ui::search_tab::SearchTabState,
-    /// Command palette state (Ctrl+K / Ctrl+P), including cached player/ship facets.
+    /// Command palette state (Ctrl+K / Ctrl+P): cascade mode plus on-demand,
+    /// bounded sub-search results.
     pub command_palette: crate::ui::command_palette::CommandPalette,
     /// When set, the Search tab adopts this query on next show (from palette/tracker).
     pub pending_search_query: Option<crate::db::index::query_model::Query>,

@@ -1956,9 +1956,6 @@ impl WowsToolkitApp {
             if self.tab_state.command_palette.state.open {
                 self.tab_state.command_palette.state.close();
             } else {
-                if let Some(pool) = self.tab_state.db_pool.as_ref() {
-                    self.tab_state.command_palette.refresh_facets(pool, self.runtime.as_ref());
-                }
                 if self.tab_state.ship_catalog.is_none()
                     && let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref()
                 {
@@ -1968,6 +1965,7 @@ impl WowsToolkitApp {
                             Some(crate::armor_viewer::ship_selector::ShipCatalog::build(metadata));
                     }
                 }
+                self.tab_state.command_palette.mode = crate::ui::command_palette::PaletteMode::Root;
                 self.tab_state.command_palette.state.open();
             }
         }
@@ -3031,6 +3029,13 @@ impl WowsToolkitApp {
                 }
             }
             PaletteAction::GoToTab(tab) => self.focus_tab(&tab),
+            PaletteAction::OpenSearchWith(query) => {
+                self.tab_state.pending_search_query = Some(query);
+                self.focus_tab(&Tab::Search);
+            }
+            // Handled by the render loop before it reaches dispatch: entering a
+            // sub-mode keeps the palette open instead of running an action.
+            PaletteAction::EnterSub(_) => {}
         }
     }
 }
@@ -3087,17 +3092,57 @@ impl eframe::App for WowsToolkitApp {
         });
 
         if self.tab_state.command_palette.state.open {
-            let entries = self.tab_state.command_palette.build_entries(None, self.tab_state.ship_catalog.as_ref());
-            if let Some(outcome) = egui_palette::show(
-                &ctx,
-                &mut self.tab_state.command_palette.state,
-                &entries,
-                "Search ships, players, replays, commands",
-            ) {
-                // egui-palette leaves open/close to the host: close on any outcome.
-                self.tab_state.command_palette.state.close();
-                if let egui_palette::Outcome::Picked { data, .. } = outcome {
-                    self.dispatch_palette_action(data);
+            use crate::ui::command_palette::PaletteAction;
+            use crate::ui::command_palette::PaletteMode;
+            use crate::ui::command_palette::SubKind;
+
+            // Split borrows: `palette` needs `&mut`, the others just `&`, all
+            // disjoint fields of `self`/`self.tab_state` -- take the shared
+            // borrows first so they don't overlap the palette's `&mut`.
+            let db_pool = self.tab_state.db_pool.as_ref();
+            let ship_catalog = self.tab_state.ship_catalog.as_ref();
+            let rt = self.runtime.as_ref();
+            let palette = &mut self.tab_state.command_palette;
+            let (entries, hint): (Vec<egui_palette::Entry<'static, PaletteAction>>, &str) = match palette.mode {
+                PaletteMode::Root => {
+                    palette.state.bypass_filter = false;
+                    (palette.root_entries(), "Search ships, players, replays, commands")
+                }
+                PaletteMode::Sub(kind) => {
+                    palette.state.bypass_filter = true;
+                    let hint = match kind {
+                        SubKind::Players => "Search players",
+                        SubKind::MyShips => "Search ships you've played",
+                        SubKind::ArmorShips => "Search ships to view armor",
+                    };
+                    (palette.sub_entries(kind, db_pool, rt, ship_catalog), hint)
+                }
+            };
+
+            if let Some(outcome) = egui_palette::show(&ctx, &mut self.tab_state.command_palette.state, &entries, hint) {
+                match outcome {
+                    egui_palette::Outcome::Picked { data, .. } => match data {
+                        PaletteAction::EnterSub(kind) => {
+                            self.tab_state.command_palette.enter_sub(kind);
+                        }
+                        other => {
+                            self.tab_state.command_palette.state.close();
+                            self.tab_state.command_palette.mode = PaletteMode::Root;
+                            self.dispatch_palette_action(other);
+                        }
+                    },
+                    egui_palette::Outcome::Dismissed(_) => {
+                        // Esc: back out of a submenu first, else close.
+                        let cp = &mut self.tab_state.command_palette;
+                        if matches!(cp.mode, PaletteMode::Sub(_)) {
+                            cp.back_to_root();
+                        } else {
+                            cp.state.close();
+                        }
+                    }
+                    egui_palette::Outcome::SubAction { .. } => {
+                        self.tab_state.command_palette.state.close();
+                    }
                 }
             }
         }
