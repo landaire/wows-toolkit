@@ -58,6 +58,7 @@ async fn write_index_persists_all_three_tables() {
             received: Some(0),
             pr: None,
             is_test_ship: false,
+            disconnected: None,
         }],
         record: ReplayRecord {
             arena_id: ArenaId::new(500),

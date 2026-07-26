@@ -586,6 +586,7 @@ stat_potential = "Potential damage"
 stat_received = "Damage received"
 stat_pr = "PR"
 stat_survived = "Survived"
+stat_disconnected = "Disconnected"
 
 [ui.search.op]
 contains = "contains"

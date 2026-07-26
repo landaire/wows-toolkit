@@ -96,6 +96,7 @@ async fn upserts_are_idempotent_and_ledger_tracks_arena() {
         received: Some(10_000),
         pr: Some(1500.0),
         is_test_ship: false,
+        disconnected: Some(false),
     };
     query::upsert_vehicles(&pool, &[veh.clone()]).await.unwrap();
     query::upsert_vehicles(&pool, &[veh]).await.unwrap(); // idempotent
@@ -220,6 +221,16 @@ async fn seed_rosters(pool: &sqlx::SqlitePool) {
         // on both fields and the any-player predicates are provably non-vacuous.
         let pr = if acct == 501 { Some(1000.0) } else { None };
         let survived = if acct == 0 { Some(false) } else { Some(true) };
+        // Self row in arena 100 is explicitly connected; Yamato (account 501, arena
+        // 100) explicitly disconnected. Arena 200 rows stay NULL (unknown), so
+        // `Is false` on the self row only matches arena 100, never a NULL row.
+        let disconnected = if arena == 100 && acct == 7 {
+            Some(false)
+        } else if arena == 100 && acct == 501 {
+            Some(true)
+        } else {
+            None
+        };
         let v = IndexedVehicleRow {
             arena_id: ArenaId::new(arena),
             account_id: AccountId(acct),
@@ -242,6 +253,7 @@ async fn seed_rosters(pool: &sqlx::SqlitePool) {
             received: Some(0),
             pr,
             is_test_ship: false,
+            disconnected,
         };
         query::upsert_vehicles(pool, &[v]).await.unwrap();
     }
@@ -483,6 +495,7 @@ async fn search_by_query_covers_selfship_allyship_kills_group() {
         received: Some(0),
         pr: None,
         is_test_ship: false,
+        disconnected: None,
     };
     query::upsert_vehicles(&pool, &[ally]).await.unwrap();
 
@@ -674,6 +687,39 @@ async fn search_by_query_stat_survived_self_subject() {
     let q = one(Field::Stat { kind: StatKind::Survived, subject: Subject::SelfPlayer }, Op::Is, Value::Bool(false));
     let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
     assert!(hits.is_empty(), "no self roster row has survived=false; only the non-self bot row does");
+}
+
+#[tokio::test]
+async fn search_by_query_stat_disconnected_subject_scoped() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    // seed_rosters: arena 100 has Yamato (account 501) disconnected=true and self
+    // (account 7) disconnected=false; arena 200 rows are NULL (unknown).
+    let q = one(Field::Stat { kind: StatKind::Disconnected, subject: Subject::AnyPlayer }, Op::Is, Value::Bool(true));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert_eq!(
+        hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(),
+        vec![100],
+        "Stat{{Disconnected, AnyPlayer}} Is true must match only arena 100, via the Yamato row"
+    );
+
+    // No self roster row ever disconnected=true, so this must be empty. A wrong
+    // relation clause (matching any roster row) would incorrectly match arena 100.
+    let q = one(Field::Stat { kind: StatKind::Disconnected, subject: Subject::SelfPlayer }, Op::Is, Value::Bool(true));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert!(hits.is_empty(), "no self roster row has disconnected=true; only the non-self Yamato row does");
+
+    // The self row is present and connected only in arena 100 (arena 200's self row
+    // is NULL/unknown, which `Is false` must not match).
+    let q = one(Field::Stat { kind: StatKind::Disconnected, subject: Subject::SelfPlayer }, Op::Is, Value::Bool(false));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert_eq!(
+        hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(),
+        vec![100],
+        "Stat{{Disconnected, SelfPlayer}} Is false must match arena 100 only; arena 200's self row is NULL, not false"
+    );
 }
 
 #[tokio::test]

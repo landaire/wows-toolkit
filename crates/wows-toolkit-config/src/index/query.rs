@@ -101,12 +101,13 @@ pub async fn upsert_vehicles(pool: &SqlitePool, rows: &[IndexedVehicleRow]) -> R
         sqlx::query(
             "INSERT INTO indexed_vehicle \
              (arena_id, account_id, player_name, clan, realm, ship_id, ship_index, ship_name, nation, species, \
-              tier, relation, division_id, survived, damage, kills, spotting, potential, received, pr, is_test_ship) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21) \
+              tier, relation, division_id, survived, damage, kills, spotting, potential, received, pr, is_test_ship, \
+              disconnected) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22) \
              ON CONFLICT(arena_id, account_id, ship_id) DO UPDATE SET \
                player_name=?3, clan=?4, realm=?5, ship_index=?7, ship_name=?8, nation=?9, species=?10, \
                tier=?11, relation=?12, division_id=?13, survived=?14, damage=?15, kills=?16, spotting=?17, \
-               potential=?18, received=?19, pr=?20, is_test_ship=?21",
+               potential=?18, received=?19, pr=?20, is_test_ship=?21, disconnected=?22",
         )
         .bind(v.arena_id.raw())
         .bind(v.account_id.raw())
@@ -129,6 +130,7 @@ pub async fn upsert_vehicles(pool: &SqlitePool, rows: &[IndexedVehicleRow]) -> R
         .bind(v.received.map(|d| d as i64))
         .bind(v.pr)
         .bind(v.is_test_ship)
+        .bind(v.disconnected)
         .execute(&mut *tx)
         .await?;
     }

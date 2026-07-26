@@ -780,6 +780,7 @@ mod tests {
                 received: Some(0),
                 pr: Some(1200.0),
                 is_test_ship: false,
+                disconnected: None,
             };
             query::upsert_vehicles(&pool, &[enemy]).await.unwrap();
 
@@ -868,6 +869,7 @@ mod tests {
                 received: Some(0),
                 pr: Some(1500.0),
                 is_test_ship: false,
+                disconnected: None,
             };
             let enemy = IndexedVehicleRow {
                 arena_id: ArenaId::new(100),
@@ -891,6 +893,7 @@ mod tests {
                 received: Some(0),
                 pr: Some(1200.0),
                 is_test_ship: false,
+                disconnected: None,
             };
             query::upsert_vehicles(&pool, &[self_vehicle, enemy]).await.unwrap();
 

@@ -152,6 +152,13 @@ pub struct IndexedVehicleRow {
     pub received: Option<u64>,
     pub pr: Option<f64>,
     pub is_test_ship: bool,
+    /// `Some(true)` if the player had a mid-match disconnect: a `Disconnected`
+    /// connection event that was not accompanied by a death. `Some(false)` if no
+    /// such disconnect was observed -- this covers both a player connected
+    /// throughout and a replay build that never reported connection state.
+    /// `None` only appears on legacy rows written before this column existed;
+    /// the live indexing path always writes `Some`.
+    pub disconnected: Option<bool>,
 }
 
 /// A search/recent result: objective match plus the chosen record's perspective.

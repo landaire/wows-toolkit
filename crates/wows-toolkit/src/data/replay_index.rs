@@ -6,6 +6,7 @@ use sqlx::SqlitePool;
 use tokio::runtime::Runtime;
 use tracing::warn;
 use wows_replays::analyzer::battle_controller::BattleResult;
+use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
 use wows_replays::types::Relation;
 
 use crate::db::index::query;
@@ -36,6 +37,19 @@ pub fn relation_from(rel: Relation) -> VehicleRelation {
     } else {
         VehicleRelation::Ally
     }
+}
+
+/// Whether the player had a mid-match disconnect: a `Disconnected`
+/// connection-change event whose `had_death_event` is false. An empty history
+/// (or one with only reconnects, or a disconnect that coincided with death) is
+/// not a disconnect. This intentionally does not cover the UI's separate
+/// "never connected" / no-show case (a roster player who never spawned) --
+/// that is out of scope for this boolean.
+pub fn player_disconnected(player: &wows_replays::analyzer::battle_controller::Player) -> bool {
+    player
+        .connection_change_info()
+        .iter()
+        .any(|change| ConnectionChangeKind::Disconnected == change.event_kind() && !change.had_death_event())
 }
 
 pub struct MappedRows {
@@ -98,6 +112,7 @@ pub fn map_rows(replay: &Replay, source_id: SourceId, indexed_at: Timestamp) -> 
             received: report.received_damage(),
             pr: report.personal_rating().map(|pr| pr.pr),
             is_test_ship: report.is_test_ship(),
+            disconnected: Some(player_disconnected(player)),
         });
     }
 

@@ -77,6 +77,7 @@ fn stat_kind_label(kind: StatKind) -> String {
         StatKind::Received => t!("ui.search.field.stat_received"),
         StatKind::Pr => t!("ui.search.field.stat_pr"),
         StatKind::Survived => t!("ui.search.field.stat_survived"),
+        StatKind::Disconnected => t!("ui.search.field.stat_disconnected"),
     }
     .into()
 }

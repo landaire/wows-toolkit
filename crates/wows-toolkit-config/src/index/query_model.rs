@@ -37,10 +37,11 @@ pub enum StatKind {
     Received,
     Pr,
     Survived,
+    Disconnected,
 }
 
 impl StatKind {
-    pub const ALL: [StatKind; 7] = [
+    pub const ALL: [StatKind; 8] = [
         StatKind::Damage,
         StatKind::Kills,
         StatKind::Spotting,
@@ -48,6 +49,7 @@ impl StatKind {
         StatKind::Received,
         StatKind::Pr,
         StatKind::Survived,
+        StatKind::Disconnected,
     ];
 
     /// The `indexed_vehicle` column this stat reads.
@@ -60,12 +62,13 @@ impl StatKind {
             StatKind::Received => "received",
             StatKind::Pr => "pr",
             StatKind::Survived => "survived",
+            StatKind::Disconnected => "disconnected",
         }
     }
 
-    /// True only for `Survived`, the sole boolean-valued stat.
+    /// True for `Survived` and `Disconnected`, the boolean-valued stats.
     pub fn is_bool(self) -> bool {
-        matches!(self, StatKind::Survived)
+        matches!(self, StatKind::Survived | StatKind::Disconnected)
     }
 }
 
@@ -223,11 +226,14 @@ mod tests {
 
     #[test]
     fn stat_kind_all_covers_every_variant_with_correct_columns_and_bool_flag() {
-        assert_eq!(StatKind::ALL.len(), 7);
+        assert_eq!(StatKind::ALL.len(), 8);
         let columns: Vec<&str> = StatKind::ALL.iter().map(|k| k.column()).collect();
-        assert_eq!(columns, vec!["damage", "kills", "spotting", "potential", "received", "pr", "survived"]);
+        assert_eq!(
+            columns,
+            vec!["damage", "kills", "spotting", "potential", "received", "pr", "survived", "disconnected"]
+        );
         for kind in StatKind::ALL {
-            assert_eq!(kind.is_bool(), kind == StatKind::Survived);
+            assert_eq!(kind.is_bool(), matches!(kind, StatKind::Survived | StatKind::Disconnected));
         }
     }
 
