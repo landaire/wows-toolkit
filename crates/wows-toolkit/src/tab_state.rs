@@ -389,6 +389,12 @@ pub struct TabState {
     pub last_progress: Option<UnpackerProgress>,
     pub replay_parser_tab: SharedReplayParserTabState,
     pub search_tab: crate::ui::search_tab::SearchTabState,
+    /// Command palette state (Ctrl+K / Ctrl+P), including cached player/ship facets.
+    pub command_palette: crate::ui::command_palette::CommandPalette,
+    /// When set, the Search tab adopts this filter on next show (from palette/tracker).
+    pub pending_search_filter: Option<crate::db::index::rows::MatchFilter>,
+    /// Cached ship catalog for palette ship entries; built lazily on first palette open.
+    pub ship_catalog: Option<crate::armor_viewer::ship_selector::ShipCatalog>,
     pub file_viewer: Mutex<Vec<PlaintextFileViewer>>,
     pub replay_renderers: Mutex<Vec<crate::replay::renderer::ReplayRendererViewer>>,
     pub renderer_asset_cache: Arc<parking_lot::Mutex<crate::replay::renderer::RendererAssetCache>>,
@@ -529,6 +535,9 @@ impl Default for TabState {
             last_progress: Default::default(),
             replay_parser_tab: Default::default(),
             search_tab: Default::default(),
+            command_palette: Default::default(),
+            pending_search_filter: None,
+            ship_catalog: None,
             file_viewer: Default::default(),
             replay_renderers: Default::default(),
             renderer_asset_cache: Default::default(),

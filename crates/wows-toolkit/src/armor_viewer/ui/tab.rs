@@ -297,6 +297,28 @@ impl ToolkitTabViewer<'_> {
         }
         let current_active_id = state.active_pane_id;
 
+        // Adopt a ship selection requested externally (command palette): load it
+        // into the active pane, resolving the display name from the catalog.
+        if let Some(param_index) = state.pending_ship_selection.take() {
+            let display_name = ship_catalog
+                .as_ref()
+                .and_then(|catalog| {
+                    catalog
+                        .nations
+                        .iter()
+                        .flat_map(|n| &n.classes)
+                        .flat_map(|c| &c.ships)
+                        .find(|s| s.param_index == param_index)
+                        .map(|s| s.display_name.clone())
+                })
+                .unwrap_or_else(|| param_index.clone());
+            let pane =
+                state.dock_state.iter_all_tabs_mut().find(|(_, tab)| tab.id == current_active_id).map(|(_, tab)| tab);
+            if let Some(pane) = pane {
+                load_ship_for_pane(pane, &param_index, &display_name, &ship_assets);
+            }
+        }
+
         // Ship selector sidebar (rendered once)
         let mut sidebar_compare: Option<CompareSettings> = None;
         {

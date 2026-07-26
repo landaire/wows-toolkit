@@ -226,6 +226,10 @@ pub struct ArmorViewerState {
     pub comparison_ships_version: u64,
     /// Dock state for the analysis sub-panel (Ships / Trajectory / Splash).
     pub analysis_dock_state: DockState<AnalysisTab>,
+    /// Ship param_index requested externally (e.g. from the command palette).
+    /// Consumed at the top of `build_armor_viewer_tab`, which loads it into
+    /// the active pane once ship assets are ready.
+    pub pending_ship_selection: Option<String>,
 }
 
 impl Default for ArmorViewerState {
@@ -249,6 +253,7 @@ impl Default for ArmorViewerState {
             ifhe_enabled: false,
             comparison_ships_version: 0,
             analysis_dock_state: DockState::new(vec![AnalysisTab::Ships, AnalysisTab::Trajectory, AnalysisTab::Splash]),
+            pending_ship_selection: None,
         }
     }
 }

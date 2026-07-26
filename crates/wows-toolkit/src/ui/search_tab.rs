@@ -34,6 +34,11 @@ impl ToolkitTabViewer<'_> {
     }
 
     pub fn build_search_tab(&mut self, ui: &mut egui::Ui) {
+        if let Some(f) = self.tab_state.pending_search_filter.take() {
+            self.tab_state.search_tab.filter = f;
+            self.tab_state.search_tab.dirty = true;
+        }
+
         let mut changed = false;
         ui.horizontal_wrapped(|ui| {
             // Outcome selector: None (Any) / Win / Loss / Draw.

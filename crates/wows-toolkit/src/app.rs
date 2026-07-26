@@ -64,7 +64,7 @@ macro_rules! update_background_task {
 }
 
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Tab {
     Unpacker,
     ReplayParser,
@@ -1949,6 +1949,29 @@ impl WowsToolkitApp {
             }
         }
 
+        if ctx.input_mut(|i| {
+            i.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL, egui::Key::K))
+                || i.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL, egui::Key::P))
+        }) {
+            if self.tab_state.command_palette.state.open {
+                self.tab_state.command_palette.state.close();
+            } else {
+                if let Some(pool) = self.tab_state.db_pool.as_ref() {
+                    self.tab_state.command_palette.refresh_facets(pool, self.runtime.as_ref());
+                }
+                if self.tab_state.ship_catalog.is_none()
+                    && let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref()
+                {
+                    let wd = wows_data.read();
+                    if let Some(metadata) = wd.game_metadata.as_ref() {
+                        self.tab_state.ship_catalog =
+                            Some(crate::armor_viewer::ship_selector::ShipCatalog::build(metadata));
+                    }
+                }
+                self.tab_state.command_palette.state.open();
+            }
+        }
+
         self.tab_state.try_update_replays();
 
         // Pick up "Add to Session Stats" requests (no confirmation needed)
@@ -2920,6 +2943,78 @@ impl WowsToolkitApp {
         }
         self.tab_state.send_replay_consent_changed();
     }
+
+    /// Focus the given dock tab, opening it first if it isn't currently docked
+    /// (only `Tab::Search` can be closed by the user today, so it's the only
+    /// variant that gets a fallback push).
+    fn focus_tab(&mut self, tab: &Tab) {
+        if let Some(loc) = self.dock_state.find_tab(tab) {
+            let _ = self.dock_state.set_active_tab(loc);
+            return;
+        }
+        if matches!(tab, Tab::Search) {
+            self.dock_state.push_to_focused_leaf(Tab::Search);
+            if let Some(loc) = self.dock_state.find_tab(tab) {
+                let _ = self.dock_state.set_active_tab(loc);
+            }
+        }
+    }
+
+    /// Dispatch a palette-picked action against app state.
+    fn dispatch_palette_action(&mut self, action: crate::ui::command_palette::PaletteAction) {
+        use crate::db::index::rows::MatchFilter;
+        use crate::ui::command_palette::PaletteAction;
+
+        match action {
+            PaletteAction::ViewArmor { ship_index } => {
+                self.tab_state.armor_viewer.pending_ship_selection = Some(ship_index);
+                self.focus_tab(&Tab::ArmorViewer);
+            }
+            PaletteAction::MyMatchesInShip { ship_id } => {
+                self.tab_state.pending_search_filter =
+                    Some(MatchFilter { self_ship: Some(ship_id), ..Default::default() });
+                self.focus_tab(&Tab::Search);
+            }
+            PaletteAction::FindMatchesWithPlayer { account_id } => {
+                self.tab_state.pending_search_filter =
+                    Some(MatchFilter { player_present: Some(account_id), ..Default::default() });
+                self.focus_tab(&Tab::Search);
+            }
+            PaletteAction::OpenSearchTab => self.focus_tab(&Tab::Search),
+            PaletteAction::OpenReplay { path } => {
+                if let Some(deps) = self.tab_state.replay_dependencies() {
+                    update_background_task!(
+                        self.tab_state.background_tasks,
+                        deps.parse_replay_from_path(path, crate::task::ReplaySource::ManualOpen)
+                    );
+                }
+            }
+            PaletteAction::IndexAllReplays => {
+                let reindex_deps = match (
+                    self.tab_state.db_pool.as_ref(),
+                    self.tab_state.tokio_runtime.as_ref(),
+                    self.tab_state.wows_data_map.as_ref(),
+                ) {
+                    (Some(pool), Some(rt), Some(wows_data_map)) => {
+                        Some((pool.clone(), Arc::clone(rt), wows_data_map.clone()))
+                    }
+                    _ => None,
+                };
+                if let Some((pool, rt, wows_data_map)) = reindex_deps {
+                    update_background_task!(
+                        self.tab_state.background_tasks,
+                        Some(crate::task::start_reconcile_index(
+                            wows_data_map,
+                            Arc::clone(&self.tab_state.twitch_state),
+                            pool,
+                            rt,
+                        ))
+                    );
+                }
+            }
+            PaletteAction::GoToTab(tab) => self.focus_tab(&tab),
+        }
+    }
 }
 
 impl eframe::App for WowsToolkitApp {
@@ -2972,6 +3067,18 @@ impl eframe::App for WowsToolkitApp {
                 .show_close_buttons(false)
                 .show_inside(ui, &mut ToolkitTabViewer { tab_state: &mut self.tab_state });
         });
+
+        if self.tab_state.command_palette.state.open {
+            let entries = self.tab_state.command_palette.build_entries(None, self.tab_state.ship_catalog.as_ref());
+            if let Some(egui_palette::Outcome::Picked { data, .. }) = egui_palette::show(
+                &ctx,
+                &mut self.tab_state.command_palette.state,
+                &entries,
+                "Search ships, players, replays, commands",
+            ) {
+                self.dispatch_palette_action(data);
+            }
+        }
     }
 
     fn on_exit(&mut self) {
