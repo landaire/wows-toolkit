@@ -17,7 +17,7 @@ use crate::tab_state::ChartableStat;
 use crate::tab_state::StatsSubTab;
 use crate::ui::session_stats_chart::render_bar_chart;
 use crate::ui::session_stats_chart::render_line_chart;
-use crate::util::personal_rating::PersonalRatingCategoryColor;
+use crate::util::personal_rating::PersonalRatingCategorySwatch;
 use crate::util::separate_number;
 use rust_i18n::t;
 use std::cmp::Reverse;
@@ -270,9 +270,11 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
         {
             ui.separator();
             ui.label(t!("ui.stats.pr"));
+            let swatch = pr_result.category.swatch();
             ui.label(
                 RichText::new(format!("{:.0} ({})", pr_result.pr, pr_result.category.name()))
-                    .color(pr_result.category.color())
+                    .color(swatch.label)
+                    .background_color(swatch.fill)
                     .strong(),
             );
         }
@@ -532,15 +534,31 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
                         if let Some(pr) = pr_stats {
                             ui.label(t!("stat.personal_rating"));
                             let min_cat = PersonalRatingCategory::from_pr(pr.min);
-                            ui.label(RichText::new(format!("{:.0}", pr.min)).color(min_cat.color()))
-                                .on_hover_text(min_cat.name());
+                            let min_swatch = min_cat.swatch();
+                            ui.label(
+                                RichText::new(format!("{:.0}", pr.min))
+                                    .color(min_swatch.label)
+                                    .background_color(min_swatch.fill),
+                            )
+                            .on_hover_text(min_cat.name());
                             let max_cat = PersonalRatingCategory::from_pr(pr.max);
-                            ui.label(RichText::new(format!("{:.0}", pr.max)).color(max_cat.color()))
-                                .on_hover_text(max_cat.name());
+                            let max_swatch = max_cat.swatch();
+                            ui.label(
+                                RichText::new(format!("{:.0}", pr.max))
+                                    .color(max_swatch.label)
+                                    .background_color(max_swatch.fill),
+                            )
+                            .on_hover_text(max_cat.name());
                             ui.label("");
                             let avg_cat = PersonalRatingCategory::from_pr(pr.avg);
-                            ui.label(RichText::new(format!("{:.0}", pr.avg)).color(avg_cat.color()).strong())
-                                .on_hover_text(avg_cat.name());
+                            let avg_swatch = avg_cat.swatch();
+                            ui.label(
+                                RichText::new(format!("{:.0}", pr.avg))
+                                    .color(avg_swatch.label)
+                                    .background_color(avg_swatch.fill)
+                                    .strong(),
+                            )
+                            .on_hover_text(avg_cat.name());
                             ui.end_row();
                         }
 

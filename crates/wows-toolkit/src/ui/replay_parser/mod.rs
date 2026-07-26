@@ -118,7 +118,7 @@ use crate::util::build_ship_config_url;
 use crate::util::build_short_ship_config_url;
 use crate::util::build_wows_numbers_url;
 use crate::util::error::ToolkitError;
-use crate::util::personal_rating::PersonalRatingCategoryColor;
+use crate::util::personal_rating::PersonalRatingCategorySwatch;
 use crate::util::player_color_for_team_relation;
 use crate::util::separate_number;
 
@@ -2057,8 +2057,13 @@ impl UiReport {
                     }
                     ReplayColumn::PersonalRating => {
                         if let Some(pr) = report.personal_rating.as_ref() {
-                            ui.label(RichText::new(format!("{:.0}", pr.pr)).color(pr.category.color()))
-                                .on_hover_text(pr.category.name());
+                            let swatch = pr.category.swatch();
+                            ui.label(
+                                RichText::new(format!("{:.0}", pr.pr))
+                                    .color(swatch.label)
+                                    .background_color(swatch.fill),
+                            )
+                            .on_hover_text(pr.category.name());
                         } else {
                             ui.label("-");
                         }
@@ -3275,9 +3280,11 @@ impl ToolkitTabViewer<'_> {
                 if let Some(battle_stats) = replay_file.to_battle_stats() {
                     let pr_data = self.tab_state.personal_rating_data.read();
                     if let Some(pr_result) = pr_data.calculate_pr(&[battle_stats]) {
+                        let swatch = pr_result.category.swatch();
                         ui.label(
                             RichText::new(format!("PR: {:.0} ({})", pr_result.pr, pr_result.category.name()))
-                                .color(pr_result.category.color()),
+                                .color(swatch.label)
+                                .background_color(swatch.fill),
                         );
                     }
                 }

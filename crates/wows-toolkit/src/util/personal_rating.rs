@@ -20,15 +20,24 @@ const UPDATE_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// File name for cached expected values
 const EXPECTED_VALUES_FILENAME: &str = "pr_expected_values.json";
 
-/// egui color per rating category. An extension trait because the enum now
-/// lives in wows-replay-insights and cannot carry an inherent egui method.
-pub trait PersonalRatingCategoryColor {
-    fn color(&self) -> egui::Color32;
+/// A rating badge: the canonical community hue as a fill, with a label colour
+/// chosen for legibility. The hue is never altered, so the scale stays
+/// recognisable; only the text on top of it adapts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RatingSwatch {
+    pub fill: egui::Color32,
+    pub label: egui::Color32,
 }
 
-impl PersonalRatingCategoryColor for PersonalRatingCategory {
-    fn color(&self) -> egui::Color32 {
-        match self {
+/// Badge colours per rating category. An extension trait because the enum
+/// lives in wows-replay-insights and cannot carry an inherent egui method.
+pub trait PersonalRatingCategorySwatch {
+    fn swatch(&self) -> RatingSwatch;
+}
+
+impl PersonalRatingCategorySwatch for PersonalRatingCategory {
+    fn swatch(&self) -> RatingSwatch {
+        let fill = match self {
             Self::Bad => egui::Color32::from_rgb(0xFF, 0x00, 0x00),
             Self::BelowAverage => egui::Color32::from_rgb(0xFE, 0x79, 0x03),
             Self::Average => egui::Color32::from_rgb(0xFF, 0xC7, 0x1F),
@@ -37,7 +46,8 @@ impl PersonalRatingCategoryColor for PersonalRatingCategory {
             Self::Great => egui::Color32::from_rgb(0x02, 0xC9, 0xB3),
             Self::Unicum => egui::Color32::from_rgb(0xD0, 0x42, 0xF3),
             Self::SuperUnicum => egui::Color32::from_rgb(0xA0, 0x0D, 0xC5),
-        }
+        };
+        RatingSwatch { fill, label: crate::ui::theme::contrast::label_on(fill) }
     }
 }
 
@@ -201,5 +211,34 @@ mod tests {
     fn validate_rejects_empty_data() {
         let empty = br#"{"time":123,"data":{}}"#;
         assert!(matches!(validate_expected_values(empty), Err(FetchExpectedValuesError::Empty)));
+    }
+
+    // -- Rating badges --
+
+    #[test]
+    fn swatch_keeps_the_canonical_hue() {
+        assert_eq!(PersonalRatingCategory::Average.swatch().fill, egui::Color32::from_rgb(0xFF, 0xC7, 0x1F));
+        assert_eq!(PersonalRatingCategory::SuperUnicum.swatch().fill, egui::Color32::from_rgb(0xA0, 0x0D, 0xC5));
+    }
+
+    #[test]
+    fn every_tier_badge_is_legible() {
+        use crate::ui::theme::contrast::CONTRAST_FLOOR;
+        use crate::ui::theme::contrast::contrast_ratio;
+
+        for category in [
+            PersonalRatingCategory::Bad,
+            PersonalRatingCategory::BelowAverage,
+            PersonalRatingCategory::Average,
+            PersonalRatingCategory::Good,
+            PersonalRatingCategory::VeryGood,
+            PersonalRatingCategory::Great,
+            PersonalRatingCategory::Unicum,
+            PersonalRatingCategory::SuperUnicum,
+        ] {
+            let swatch = category.swatch();
+            let r = contrast_ratio(swatch.label, swatch.fill);
+            assert!(r >= CONTRAST_FLOOR, "{category:?} badge is {r}, needs {CONTRAST_FLOOR}");
+        }
     }
 }
