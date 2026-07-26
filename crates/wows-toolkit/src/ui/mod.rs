@@ -1,3 +1,4 @@
+pub mod command_palette;
 pub mod file_unpacker;
 pub mod mod_manager;
 pub(crate) mod plaintext_viewer;

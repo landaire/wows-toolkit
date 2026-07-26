@@ -27,6 +27,7 @@ egui_commonmark = "0.24"
 egui_ltreeview = { version = "0.8.0", features = ["persistence"] }
 egui_plot = "0.36.0"
 egui_taffy = "0.13.0"
+egui-palette = "0.6.0"
 egui-notify = { git = "https://github.com/ItsEthra/egui-notify", rev = "3dfaa2473e385b69e22656b8ea7a13bb74ff7576" }
 wgpu = { workspace = true }
 

@@ -2382,6 +2382,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui-palette"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40b5cca0d198563663070a5e87efcbbaff06b3cd5158628bf78ca14d7d468e67"
+dependencies = [
+ "egui",
+ "nucleo-matcher",
+]
+
+[[package]]
 name = "egui-phosphor"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5728,6 +5738,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "nucleo-matcher"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf33f538733d1a5a3494b836ba913207f14d9d4a1d3cd67030c5061bdd2cac85"
+dependencies = [
+ "memchr",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -11227,6 +11247,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui-notify",
+ "egui-palette",
  "egui-phosphor",
  "egui_commonmark",
  "egui_dock",
