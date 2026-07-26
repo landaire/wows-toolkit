@@ -393,6 +393,8 @@ pub struct TabState {
     pub command_palette: crate::ui::command_palette::CommandPalette,
     /// When set, the Search tab adopts this filter on next show (from palette/tracker).
     pub pending_search_filter: Option<crate::db::index::rows::MatchFilter>,
+    /// When true, the app focuses the Search tab next frame (from palette/tracker).
+    pub pending_focus_search: bool,
     /// Cached ship catalog for palette ship entries; built lazily on first palette open.
     pub ship_catalog: Option<crate::armor_viewer::ship_selector::ShipCatalog>,
     pub file_viewer: Mutex<Vec<PlaintextFileViewer>>,
@@ -537,6 +539,7 @@ impl Default for TabState {
             search_tab: Default::default(),
             command_palette: Default::default(),
             pending_search_filter: None,
+            pending_focus_search: false,
             ship_catalog: None,
             file_viewer: Default::default(),
             replay_renderers: Default::default(),

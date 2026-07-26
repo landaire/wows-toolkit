@@ -3083,6 +3083,10 @@ impl eframe::App for WowsToolkitApp {
                 }
             }
         }
+
+        if std::mem::take(&mut self.tab_state.pending_focus_search) {
+            self.focus_tab(&Tab::Search);
+        }
     }
 
     fn on_exit(&mut self) {

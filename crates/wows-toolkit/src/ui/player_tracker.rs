@@ -290,6 +290,10 @@ impl ToolkitTabViewer<'_> {
         let player_tracker_settings = &mut *player_tracker_settings;
         let filter_lower = player_tracker_settings.player_filter.to_ascii_lowercase();
         let now = Timestamp::now();
+        // Collected during the table pass and applied after the table (the
+        // player-tracker write lock is held while rendering rows, so we can't
+        // touch other `self.tab_state` fields from inside a row closure).
+        let mut find_matches_target: Option<AccountId> = None;
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
                 if ui.button(t!("ui.player_tracker.clear_stats")).clicked() {
@@ -434,6 +438,7 @@ impl ToolkitTabViewer<'_> {
                         .column(Column::initial(130.0).clip(true))
                         .column(Column::initial(200.0).clip(true))
                         .column(Column::remainder())
+                        .column(Column::initial(110.0).clip(true))
                         .min_scrolled_height(0.0);
 
                     let sorted_by = player_tracker_settings.sort_order;
@@ -514,6 +519,7 @@ impl ToolkitTabViewer<'_> {
                             header.col(|ui| {
                                 ui.strong(t!("ui.player_tracker.column.notes"));
                             });
+                            header.col(|_ui| {});
                         })
                         .body(|mut body| {
                             let tracked_players_by_ts = &player_tracker_settings.tracked_players_by_time;
@@ -676,12 +682,23 @@ impl ToolkitTabViewer<'_> {
                                     row.col(|ui| {
                                         ui.text_edit_singleline(&mut player.notes);
                                     });
+                                    row.col(|ui| {
+                                        if ui.button(t!("ui.player_tracker.find_matches")).clicked() {
+                                            find_matches_target = Some(*player_id);
+                                        }
+                                    });
                                 });
                             }
                         });
                 });
             });
         });
+
+        if let Some(id) = find_matches_target {
+            self.tab_state.pending_search_filter =
+                Some(crate::db::index::rows::MatchFilter { player_present: Some(id), ..Default::default() });
+            self.tab_state.pending_focus_search = true;
+        }
     }
 }
 

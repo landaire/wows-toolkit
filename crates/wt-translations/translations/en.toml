@@ -511,6 +511,7 @@ populate_from_replays = "Populate Data From Replays"
 current_match = "Players in Current Match"
 historical = "Historical Matches"
 seen_minutes = "Seen %{minutes} minutes after match start"
+find_matches = "Find matches"
 
 [ui.player_tracker.column]
 clan = "Clan"
