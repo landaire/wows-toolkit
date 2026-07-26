@@ -120,11 +120,13 @@ pub struct Player {
 
 /// Fallback clan colours for pre-clan-color replays with no `clanColor`
 /// field. Exported data must not vary with the app's theme, so these are
-/// fixed values (dark palette: self = text_strong, ally = win, enemy = loss)
-/// rather than a resolved-at-theme call.
-const EXPORT_FALLBACK_CLAN_COLOR_SELF: u32 = 0x00_FA_F8_F1;
-const EXPORT_FALLBACK_CLAN_COLOR_ALLY: u32 = 0x00_6F_D9_8A;
-const EXPORT_FALLBACK_CLAN_COLOR_ENEMY: u32 = 0x00_EA_70_78;
+/// fixed values rather than a resolved-at-theme call. These are the
+/// historical values (`Color32::WHITE` / `LIGHT_GREEN` / `LIGHT_RED`,
+/// predating the semantic theme layer entirely), deliberately frozen so
+/// files already sent to ShipBuilds.com don't change meaning.
+const EXPORT_FALLBACK_CLAN_COLOR_SELF: u32 = 0x00_FF_FF_FF;
+const EXPORT_FALLBACK_CLAN_COLOR_ALLY: u32 = 0x00_90_EE_90;
+const EXPORT_FALLBACK_CLAN_COLOR_ENEMY: u32 = 0x00_FF_88_88;
 
 impl From<&wows_replays::analyzer::battle_controller::Player> for Player {
     fn from(value: &wows_replays::analyzer::battle_controller::Player) -> Self {

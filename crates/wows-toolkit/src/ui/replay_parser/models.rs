@@ -58,6 +58,14 @@ impl PlayerTint {
             Self::Abuser => sem.abuser,
         }
     }
+
+    /// Applies the abuser override on top of this (row) tint: abuser beats
+    /// everything else, including DivisionMate. This is the role the
+    /// player's name renders with; the row's other colours (stats, icon)
+    /// use the tint as-is, without this override.
+    pub fn with_abuser_override(self, is_abuser: bool) -> Self {
+        if is_abuser { Self::Abuser } else { self }
+    }
 }
 
 /// A clan tag's colour: the server-supplied clan colour, or, for replays
@@ -290,7 +298,7 @@ impl PlayerReport {
     /// The row tint, with the abuser override layered on top if applicable.
     /// This is the role the player's name renders with.
     pub fn name_tint(&self) -> PlayerTint {
-        if self.is_abuser { PlayerTint::Abuser } else { self.tint }
+        self.tint.with_abuser_override(self.is_abuser)
     }
 
     pub fn name_text(&self, visuals: &egui::Visuals) -> RichText {
@@ -299,7 +307,9 @@ impl PlayerReport {
 
     pub fn clan_text(&self, visuals: &egui::Visuals) -> Option<RichText> {
         let tag = self.clan_tag.as_ref()?;
-        let color = self.clan_color.expect("clan_tag is set without a clan_color").color(visuals);
+        // clan_color is always set alongside clan_tag; the fallback here is a
+        // safety net for the draw loop, not an expected path.
+        let color = self.clan_color.unwrap_or(ClanColor::Relation(self.tint)).color(visuals);
         Some(RichText::new(format!("[{tag}]")).color(color))
     }
 
@@ -469,5 +479,49 @@ impl PlayerReport {
 
     pub fn relation(&self) -> Relation {
         self.relation
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use egui::Visuals;
+
+    use super::*;
+
+    #[test]
+    fn from_relation_maps_self_ally_enemy() {
+        assert_eq!(PlayerTint::from_relation(Relation::new(0)), PlayerTint::SelfPlayer);
+        assert_eq!(PlayerTint::from_relation(Relation::new(1)), PlayerTint::Ally);
+        assert_eq!(PlayerTint::from_relation(Relation::new(2)), PlayerTint::Enemy);
+    }
+
+    /// The subtle case: abuser overrides the name even when the row tint is
+    /// DivisionMate, the next-strongest classification below abuser.
+    #[test]
+    fn name_role_is_abuser_even_over_division_mate() {
+        assert_eq!(PlayerTint::DivisionMate.with_abuser_override(true), PlayerTint::Abuser);
+    }
+
+    #[test]
+    fn name_role_falls_back_to_row_tint_when_not_abuser() {
+        assert_eq!(PlayerTint::DivisionMate.with_abuser_override(false), PlayerTint::DivisionMate);
+    }
+
+    #[test]
+    fn row_tint_never_becomes_abuser_on_its_own() {
+        // Abuser only ever appears via with_abuser_override (the name role);
+        // the row tint (from_relation, plus a DivisionMate override applied
+        // by the caller) never produces Abuser directly.
+        for relation in [Relation::new(0), Relation::new(1), Relation::new(2)] {
+            assert_ne!(PlayerTint::from_relation(relation), PlayerTint::Abuser);
+        }
+        assert_ne!(PlayerTint::DivisionMate, PlayerTint::Abuser);
+    }
+
+    #[test]
+    fn color_resolves_per_theme_not_a_constant() {
+        let dark = PlayerTint::SelfPlayer.color(&Visuals::dark());
+        let light = PlayerTint::SelfPlayer.color(&Visuals::light());
+        assert_ne!(dark, light, "SelfPlayer tint must resolve differently between themes");
     }
 }
