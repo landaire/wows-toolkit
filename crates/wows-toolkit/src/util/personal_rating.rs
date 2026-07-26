@@ -153,8 +153,6 @@ mod tests {
         pr
     }
 
-    // -- Loading --
-
     #[test]
     fn load_from_bytes_parses_fixture() {
         let pr = loaded_pr_data();
@@ -188,8 +186,6 @@ mod tests {
         assert!(ev.is_none());
     }
 
-    // -- Download validation --
-
     #[test]
     fn validate_accepts_real_fixture() {
         validate_expected_values(&fixture_bytes()).expect("fixture should pass validation");
@@ -212,8 +208,6 @@ mod tests {
         let empty = br#"{"time":123,"data":{}}"#;
         assert!(matches!(validate_expected_values(empty), Err(FetchExpectedValuesError::Empty)));
     }
-
-    // -- Rating badges --
 
     #[test]
     fn swatch_keeps_the_canonical_hue() {
