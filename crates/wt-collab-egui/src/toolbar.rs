@@ -79,7 +79,11 @@ fn ship_species_button(
 /// `horizontal_wrapped` see the correct size for wrapping decisions.
 /// On the first frame (no cached width), uses `f32::INFINITY` so items get
 /// full space; from the second frame onward the tight width is used.
-fn toolbar_group(ui: &mut egui::Ui, id_salt: impl std::hash::Hash, add_contents: impl FnOnce(&mut egui::Ui)) {
+fn toolbar_group(
+    ui: &mut egui::Ui,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
     let id = ui.id().with(id_salt);
     let prev_width = ui.data(|d| d.get_temp::<f32>(id));
     let height = ui.spacing().interact_size.y;

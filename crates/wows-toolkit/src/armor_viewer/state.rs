@@ -65,7 +65,7 @@ pub struct HullPopoverResult {
 }
 
 /// Which tab is active in the unified analysis window.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum AnalysisTab {
     #[default]
     Ships,

@@ -355,7 +355,7 @@ impl ToolkitTabViewer<'_> {
             ui.add_space(10.0);
 
             ui.separator();
-            egui::Panel::left("current_match_side_panel").default_size(450.0).show_inside(ui, |ui| {
+            egui::Panel::left("current_match_side_panel").default_size(450.0).show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.heading(t!("ui.player_tracker.current_match"));
                     egui::ScrollArea::both().id_salt("current_match_scroll_area").show(ui, |ui| {
@@ -419,7 +419,7 @@ impl ToolkitTabViewer<'_> {
                 });
             });
 
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 ui.heading(t!("ui.player_tracker.historical"));
                 egui::ScrollArea::horizontal().id_salt("player_tracker_central").show(ui, |ui| {
                     let table = TableBuilder::new(ui)

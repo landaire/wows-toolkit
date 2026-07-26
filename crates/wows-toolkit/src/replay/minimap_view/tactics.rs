@@ -825,7 +825,7 @@ impl TacticsBoardViewer {
                 .unwrap_or(true); // No session -> standalone, show everything.
 
             if is_authority {
-                egui::Panel::bottom("tactics_bottom_panel").show_inside(viewport_ui, |ui| {
+                egui::Panel::bottom("tactics_bottom_panel").show(viewport_ui, |ui| {
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         Self::draw_map_mode_selector(
@@ -866,7 +866,7 @@ impl TacticsBoardViewer {
             } // is_authority
 
             // ── Annotation toolbar ──
-            egui::Panel::top("tactics_annotation_toolbar").show_inside(viewport_ui, |ui| {
+            egui::Panel::top("tactics_annotation_toolbar").show(viewport_ui, |ui| {
                 let locked =
                     collab_session_state.as_ref().map(|ss| ss.lock().permissions.annotations_locked).unwrap_or(false);
                 let mut ann = annotation_state_arc.lock();
@@ -882,7 +882,7 @@ impl TacticsBoardViewer {
             });
 
             // ── Central panel: map viewport ──
-            egui::CentralPanel::default().show_inside(viewport_ui, |ui| {
+            egui::CentralPanel::default().show(viewport_ui, |ui| {
                 Self::draw_map_viewport(
                     ui,
                     &mut state,

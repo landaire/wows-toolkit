@@ -42,10 +42,10 @@ wt-collab-egui = { path = "crates/wt-collab-egui" }
 wt-translations = { version = "0.14.0", path = "crates/wt-translations" }
 wows-toolkit-config = { path = "crates/wows-toolkit-config" }
 # Shared UI dependencies
-egui = "0.34.1"
-egui-phosphor = "0.12"
-egui_dock = "0.19.1"
-eframe = { version = "0.34.1", default-features = false }
+egui = "0.35"
+egui-phosphor = "0.13"
+egui_dock = "0.20.1"
+eframe = { version = "0.35", default-features = false }
 # Pin to match eframe's wgpu version so backend features unify correctly.
 # This dependency with `default-features = true` is also needed to ensure
 # that targets are properly initialized.

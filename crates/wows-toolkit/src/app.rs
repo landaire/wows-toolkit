@@ -2918,7 +2918,7 @@ impl eframe::App for WowsToolkitApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        egui::Panel::top("top_panel").show_inside(ui, |ui| {
+        egui::Panel::top("top_panel").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 let is_web = cfg!(target_arch = "wasm32");
                 if !is_web {
@@ -2948,11 +2948,11 @@ impl eframe::App for WowsToolkitApp {
             });
         });
 
-        egui::Panel::bottom("status_panel").show_inside(ui, |ui| {
+        egui::Panel::bottom("status_panel").show(ui, |ui| {
             self.build_bottom_panel(ui);
         });
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             DockArea::new(&mut self.dock_state)
                 .style(Style::from_egui(ui.style().as_ref()))
                 .allowed_splits(egui_dock::AllowedSplits::None)

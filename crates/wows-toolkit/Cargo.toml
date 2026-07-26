@@ -19,15 +19,15 @@ eframe = { workspace = true, features = [
     "wgpu",
     "wayland",       # To support Linux (and CI)
 ] }
-egui_extras = { version = "0.34.1", features = ["syntect", "image", "svg"] }
+egui_extras = { version = "0.35", features = ["syntect", "image", "svg"] }
 egui_dock = { workspace = true, features = ["serde"] }
 egui-phosphor = { workspace = true }
-egui_table = "0.8.0"
-egui_commonmark = "0.23"
-egui_ltreeview = { version = "0.7.0", features = ["persistence"] }
-egui_plot = "0.35.0"
-egui_taffy = "0.11.0"
-egui-notify = "0.22.0"
+egui_table = "0.9.0"
+egui_commonmark = "0.24"
+egui_ltreeview = { version = "0.8.0", features = ["persistence"] }
+egui_plot = "0.36.0"
+egui_taffy = "0.13.0"
+egui-notify = { git = "https://github.com/ItsEthra/egui-notify", rev = "3dfaa2473e385b69e22656b8ea7a13bb74ff7576" }
 wgpu = { workspace = true }
 
 tracing = { workspace = true }
@@ -103,7 +103,7 @@ rustls = { version = "0.23.37", default-features = false, features = ["ring", "s
 rust-i18n = { workspace = true }
 sys-locale = { workspace = true }
 ron = "0.12.1"
-egui_inbox = "0.11.0"
+egui_inbox = "0.12.0"
 memmap2 = "0.9"
 
 [dev-dependencies]

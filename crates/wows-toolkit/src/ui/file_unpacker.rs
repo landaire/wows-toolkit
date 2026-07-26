@@ -361,10 +361,9 @@ impl UnpackerPaneViewer<'_> {
         recompute_filter(browser);
 
         // Per-pane folder tree in a left side panel
-        egui::Panel::left(format!("browser_folder_tree_{}", source_id))
-            .default_size(260.0)
-            .resizable(true)
-            .show_inside(ui, |ui| {
+        egui::Panel::left(format!("browser_folder_tree_{}", source_id)).default_size(260.0).resizable(true).show(
+            ui,
+            |ui| {
                 // Filter input
                 ui.horizontal(|ui| {
                     ui.label(icons::FUNNEL);
@@ -377,7 +376,7 @@ impl UnpackerPaneViewer<'_> {
                 ui.separator();
 
                 // Content search input (at bottom of sidebar)
-                egui::Panel::bottom(format!("browser_content_search_{}", source_id)).show_inside(ui, |ui| {
+                egui::Panel::bottom(format!("browser_content_search_{}", source_id)).show(ui, |ui| {
                     ui.add_space(2.0);
                     ui.label(RichText::new(t!("ui.unpacker.search_in_files").as_ref()).strong());
                     ui.horizontal(|ui| {
@@ -446,13 +445,14 @@ impl UnpackerPaneViewer<'_> {
                         }
                     }
                 });
-            });
+            },
+        );
 
         // Main content area
         let selected_dir = browser.selected_dir.clone().unwrap_or_else(|| "/".to_string());
         let is_filtering = browser.filter.len() >= 3;
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             if is_filtering {
                 // ── Filter results mode ──
                 ui.horizontal(|ui| {
@@ -1819,7 +1819,7 @@ impl ToolkitTabViewer<'_> {
 
         // ── Top panel: version selector (only when multiple builds) ──────
         if self.tab_state.available_builds.len() > 1 {
-            egui::Panel::top("browser_version_bar").show_inside(ui, |ui| {
+            egui::Panel::top("browser_version_bar").show(ui, |ui| {
                 if let Some(map) = &self.tab_state.wows_data_map {
                     let mut builds = self.tab_state.available_builds.clone();
                     builds.sort();
@@ -1904,7 +1904,7 @@ impl ToolkitTabViewer<'_> {
         }
 
         // ── Bottom panel: extract controls ───────────────────────────────
-        egui::Panel::bottom("browser_extract_bar").exact_size(36.0).show_inside(ui, |ui| {
+        egui::Panel::bottom("browser_extract_bar").exact_size(36.0).show(ui, |ui| {
             let queue_count = self.tab_state.items_to_extract.lock().len();
 
             ui.horizontal_centered(|ui| {
@@ -2061,7 +2061,7 @@ impl ToolkitTabViewer<'_> {
         });
 
         // ── Central panel: nested DockArea ───────────────────────────────
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let navigate_to: std::cell::Cell<Option<(BrowserSource, String)>> = std::cell::Cell::new(None);
             let clear_filter: std::cell::Cell<Option<BrowserSource>> = std::cell::Cell::new(None);
             let start_search: std::cell::Cell<Option<BrowserSource>> = std::cell::Cell::new(None);

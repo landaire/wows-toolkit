@@ -1499,7 +1499,7 @@ impl ReplayRendererViewer {
 
                 // ── Annotation toolbar ──
                 if !status_is_loading {
-                    egui::Panel::top("replay_annotation_toolbar").show_inside(viewport_ui, |ui| {
+                    egui::Panel::top("replay_annotation_toolbar").show(viewport_ui, |ui| {
                         let locked = shared_state
                             .lock()
                             .collab_session_state
@@ -1535,7 +1535,7 @@ impl ReplayRendererViewer {
                     (stats, team)
                 };
 
-                egui::CentralPanel::default().show_inside(viewport_ui, |ui| {
+                egui::CentralPanel::default().show(viewport_ui, |ui| {
                     if status_is_loading {
                         ui.centered_and_justified(|ui| {
                             ui.spinner();

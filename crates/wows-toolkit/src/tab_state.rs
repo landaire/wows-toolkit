@@ -181,7 +181,7 @@ impl Default for TrackedPersistedState {
 pub type SharedPersistedState = Arc<TrackedPersistedState>;
 
 /// Sub-tab selection for the Stats tab
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum StatsSubTab {
     Overview,
     Charts(u64),

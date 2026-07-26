@@ -227,7 +227,7 @@ impl ToolkitTabViewer<'_> {
     pub fn build_mod_manager_tab(&mut self, ui: &mut egui::Ui) {
         let mut mod_manager_info = std::mem::take(&mut self.tab_state.persisted.write().mod_manager_info);
         let mod_manager_info = &mut mod_manager_info;
-        egui::Panel::left("mod_manager_left").show_inside(ui, |ui| {
+        egui::Panel::left("mod_manager_left").show(ui, |ui| {
             ui.heading(t!("ui.mod_manager.category_filters"));
 
             for (macro_group, categories) in &mut mod_manager_info.categories {
@@ -239,7 +239,7 @@ impl ToolkitTabViewer<'_> {
             }
         });
 
-        egui::Panel::right("mod_manager_right").min_size(400.0).show_inside(ui, |ui| {
+        egui::Panel::right("mod_manager_right").min_size(400.0).show(ui, |ui| {
             if let Some(selected_mod_arc) = &mod_manager_info.selected_mod {
                 let mut selected_mod = selected_mod_arc.lock();
 
@@ -276,7 +276,7 @@ impl ToolkitTabViewer<'_> {
             }
         });
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.mod_manager.save_config"))).clicked();
                 ui.button(wt_translations::icon_t(icons::FOLDER, &t!("ui.mod_manager.load_config"))).clicked();

@@ -1230,7 +1230,7 @@ pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx:
             // viewports, so we can't depend on the parent's tick alone).
             viewer.tick();
 
-            egui::CentralPanel::default().show_inside(viewport_ui, |ui| {
+            egui::CentralPanel::default().show(viewport_ui, |ui| {
                 viewer.draw_content(ui);
             });
 
@@ -1254,11 +1254,11 @@ pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx:
 impl RealtimeArmorViewer {
     /// Draw the main content: 3D viewport + side panel.
     fn draw_content(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::right("rtav_side_panel").default_size(250.0).min_size(200.0).show_inside(ui, |ui| {
+        egui::Panel::right("rtav_side_panel").default_size(250.0).min_size(200.0).show(ui, |ui| {
             self.draw_side_panel(ui);
         });
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             self.draw_viewport(ui);
         });
     }

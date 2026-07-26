@@ -3246,7 +3246,7 @@ impl ToolkitTabViewer<'_> {
                 self_report.manual_stat_hide_toggle = hide_my_stats;
             }
 
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 if let Some(ui_report) = replay_file.ui_report.as_mut() {
                     ui_report.debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
                     self.build_replay_player_list(ui_report, ui);
@@ -4325,14 +4325,14 @@ impl ToolkitTabViewer<'_> {
                 egui::Panel::left("replay_listing_panel")
                     .default_size(default_width)
                     .size_range(100.0..=f32::INFINITY)
-                    .show_inside(ui, |ui| {
+                    .show(ui, |ui| {
                         egui::ScrollArea::both().id_salt("replay_listing_scroll_area").show(ui, |ui| {
                             self.build_file_listing(ui);
                         });
                     });
             }
 
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let has_tabs = self.tab_state.replay_dock_state.iter_all_tabs().next().is_some();
                 if has_tabs {
                     let mut dock_state =

@@ -1220,12 +1220,12 @@ impl eframe::App for WebApp {
         let ctx = ui.ctx().clone();
 
         // Info bar at bottom
-        egui::Panel::bottom("info_bar").show_inside(ui, |ui| {
+        egui::Panel::bottom("info_bar").show(ui, |ui| {
             self.render_info_bar(ui);
         });
 
         // Dock area for tabbed views
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             // Temporarily take the dock state out of self so we can pass
             // &mut self to the TabViewer without double-borrow.
             let mut dock_state = std::mem::replace(&mut self.dock_state, DockState::new(vec![WebTab::Lobby]));
