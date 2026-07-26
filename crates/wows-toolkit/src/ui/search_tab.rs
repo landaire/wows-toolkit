@@ -219,6 +219,10 @@ pub struct SearchTabState {
     pub dirty: bool,
     /// Per-group "add filter" draft; length kept in sync with `query.groups`.
     add_drafts: Vec<AddFilterDraft>,
+    /// Per-group: whether the "add filter" draft row is expanded. Rendered
+    /// inline (not in a popover/menu) so the draft's own `ComboBox` popups
+    /// don't register as an outside click and dismiss it.
+    add_draft_open: Vec<bool>,
     /// Cached replay groups, used by the Group/Source value editor.
     sources: Vec<IndexSource>,
     /// Friendly names for ship/account ids picked via the pickers, so chip
@@ -234,9 +238,49 @@ impl Default for SearchTabState {
             results: Vec::new(),
             dirty: true,
             add_drafts: Vec::new(),
+            add_draft_open: Vec::new(),
             sources: Vec::new(),
             resolved_ships: HashMap::new(),
             resolved_players: HashMap::new(),
+        }
+    }
+}
+
+/// Resolve any `Value::Account`/`Value::Ship` chip ids in `query` that are not already
+/// in the name caches, by DB lookup. Chips seeded from the command palette or the
+/// player tracker carry only an id, so without this the chip pill falls back to
+/// `#<id>` forever. Errors are logged and swallowed; unknown ids are left unresolved
+/// so the `#<id>` fallback still applies to them.
+fn resolve_seeded_names(
+    query: &Query,
+    resolved_ships: &mut HashMap<GameParamId, String>,
+    resolved_players: &mut HashMap<AccountId, String>,
+    pool: &sqlx::SqlitePool,
+    rt: &tokio::runtime::Runtime,
+) {
+    for group in &query.groups {
+        for chip in &group.chips {
+            match &chip.value {
+                Value::Account(id) if !resolved_players.contains_key(id) => {
+                    match rt.block_on(crate::db::index::query::player_name(pool, *id)) {
+                        Ok(Some(name)) => {
+                            resolved_players.insert(*id, name);
+                        }
+                        Ok(None) => {}
+                        Err(e) => tracing::warn!("search: player_name lookup failed for {id:?}: {e}"),
+                    }
+                }
+                Value::Ship(id) if !resolved_ships.contains_key(id) => {
+                    match rt.block_on(crate::db::index::query::ship_name(pool, *id)) {
+                        Ok(Some(name)) => {
+                            resolved_ships.insert(*id, name);
+                        }
+                        Ok(None) => {}
+                        Err(e) => tracing::warn!("search: ship_name lookup failed for {id:?}: {e}"),
+                    }
+                }
+                _ => {}
+            }
         }
     }
 }
@@ -254,13 +298,23 @@ impl ToolkitTabViewer<'_> {
     }
 
     pub fn build_search_tab(&mut self, ui: &mut egui::Ui) {
+        let pool = self.tab_state.db_pool.clone();
+        let rt = self.tab_state.tokio_runtime.clone();
+
         if let Some(q) = self.tab_state.pending_search_query.take() {
             self.tab_state.search_tab.query = q;
             self.tab_state.search_tab.dirty = true;
+            if let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref()) {
+                let search_tab = &mut self.tab_state.search_tab;
+                resolve_seeded_names(
+                    &search_tab.query,
+                    &mut search_tab.resolved_ships,
+                    &mut search_tab.resolved_players,
+                    pool,
+                    rt,
+                );
+            }
         }
-
-        let pool = self.tab_state.db_pool.clone();
-        let rt = self.tab_state.tokio_runtime.clone();
 
         // Lazily build the ship catalog (used by the Ship value editor), the
         // same way the command palette does.
@@ -297,6 +351,10 @@ impl ToolkitTabViewer<'_> {
             search_tab.add_drafts.push(AddFilterDraft::default());
         }
         search_tab.add_drafts.truncate(search_tab.query.groups.len());
+        while search_tab.add_draft_open.len() < search_tab.query.groups.len() {
+            search_tab.add_draft_open.push(false);
+        }
+        search_tab.add_draft_open.truncate(search_tab.query.groups.len());
 
         let num_groups = search_tab.query.groups.len();
         if num_groups == 0 {
@@ -338,152 +396,170 @@ impl ToolkitTabViewer<'_> {
 
                 let mut draft = search_tab.add_drafts[group_idx].clone();
                 let sources_snapshot = search_tab.sources.clone();
-                ui.menu_button(t!("ui.search.add_filter"), |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(t!("ui.search.field_label"));
-                        let prev_field = draft.field;
-                        egui::ComboBox::from_id_salt(("search_add_field", group_idx))
-                            .selected_text(field_label(draft.field))
-                            .show_ui(ui, |ui| {
-                                for &f in ALL_FIELDS {
-                                    ui.selectable_value(&mut draft.field, f, field_label(f));
-                                }
-                            });
-                        if draft.field != prev_field {
-                            draft.reset_for_field(draft.field);
-                        }
-                    });
+                let mut draft_open = search_tab.add_draft_open[group_idx];
 
-                    ui.horizontal(|ui| {
-                        ui.label(t!("ui.search.op_label"));
-                        egui::ComboBox::from_id_salt(("search_add_op", group_idx))
-                            .selected_text(op_label(draft.op))
-                            .show_ui(ui, |ui| {
-                                for &o in draft.field.allowed_ops() {
-                                    ui.selectable_value(&mut draft.op, o, op_label(o));
-                                }
-                            });
-                    });
-
+                if !draft_open {
+                    if ui.button(t!("ui.search.add_filter")).clicked() {
+                        draft_open = true;
+                    }
+                    search_tab.add_draft_open[group_idx] = draft_open;
+                } else {
                     ui.separator();
+                    ui.indent(("search_add_draft", group_idx), |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(t!("ui.search.field_label"));
+                            let prev_field = draft.field;
+                            egui::ComboBox::from_id_salt(("search_add_field", group_idx))
+                                .selected_text(field_label(draft.field))
+                                .show_ui(ui, |ui| {
+                                    for &f in ALL_FIELDS {
+                                        ui.selectable_value(&mut draft.field, f, field_label(f));
+                                    }
+                                });
+                            if draft.field != prev_field {
+                                draft.reset_for_field(draft.field);
+                            }
+                        });
 
-                    match draft.field.value_kind() {
-                        ValueKind::Text => {
-                            ui.text_edit_singleline(&mut draft.text);
-                        }
-                        ValueKind::Int => {
-                            ui.add(egui::DragValue::new(&mut draft.int_val));
-                        }
-                        ValueKind::Outcome => {
-                            egui::ComboBox::from_id_salt(("search_add_outcome", group_idx))
-                                .selected_text(outcome_label(draft.outcome))
+                        ui.horizontal(|ui| {
+                            ui.label(t!("ui.search.op_label"));
+                            egui::ComboBox::from_id_salt(("search_add_op", group_idx))
+                                .selected_text(op_label(draft.op))
                                 .show_ui(ui, |ui| {
-                                    for o in [
-                                        MatchOutcome::Win,
-                                        MatchOutcome::Loss,
-                                        MatchOutcome::Draw,
-                                        MatchOutcome::Unknown,
-                                    ] {
-                                        ui.selectable_value(&mut draft.outcome, o, outcome_label(o));
+                                    for &o in draft.field.allowed_ops() {
+                                        ui.selectable_value(&mut draft.op, o, op_label(o));
                                     }
                                 });
-                        }
-                        ValueKind::Bool => {
-                            egui::ComboBox::from_id_salt(("search_add_bool", group_idx))
-                                .selected_text(bool_label(draft.bool_val))
-                                .show_ui(ui, |ui| {
-                                    ui.selectable_value(&mut draft.bool_val, true, bool_label(true));
-                                    ui.selectable_value(&mut draft.bool_val, false, bool_label(false));
-                                });
-                        }
-                        ValueKind::Class => {
-                            egui::ComboBox::from_id_salt(("search_add_class", group_idx))
-                                .selected_text(species_name(&draft.species))
-                                .show_ui(ui, |ui| {
-                                    for &s in SHIP_SPECIES {
-                                        ui.selectable_value(&mut draft.species, s, species_name(&s));
-                                    }
-                                });
-                        }
-                        ValueKind::Ship => {
-                            ui.text_edit_singleline(&mut draft.ship_search);
-                            match ship_catalog {
-                                Some(catalog) => {
-                                    egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-                                        for entry in catalog.search(&draft.ship_search, 30) {
-                                            let selected = draft.ship_id == Some(entry.ship_id);
-                                            let label = format!("{} (T{})", entry.display_name, tier_roman(entry.tier));
-                                            if ui.selectable_label(selected, label).clicked() {
-                                                draft.ship_id = Some(entry.ship_id);
-                                                draft.ship_label = entry.display_name.clone();
-                                            }
+                        });
+
+                        ui.separator();
+
+                        match draft.field.value_kind() {
+                            ValueKind::Text => {
+                                ui.text_edit_singleline(&mut draft.text);
+                            }
+                            ValueKind::Int => {
+                                ui.add(egui::DragValue::new(&mut draft.int_val));
+                            }
+                            ValueKind::Outcome => {
+                                egui::ComboBox::from_id_salt(("search_add_outcome", group_idx))
+                                    .selected_text(outcome_label(draft.outcome))
+                                    .show_ui(ui, |ui| {
+                                        for o in [
+                                            MatchOutcome::Win,
+                                            MatchOutcome::Loss,
+                                            MatchOutcome::Draw,
+                                            MatchOutcome::Unknown,
+                                        ] {
+                                            ui.selectable_value(&mut draft.outcome, o, outcome_label(o));
                                         }
                                     });
-                                }
-                                None => {
-                                    ui.label(t!("ui.search.ship_catalog_unavailable"));
-                                }
                             }
-                        }
-                        ValueKind::Account => {
-                            if ui.text_edit_singleline(&mut draft.player_search).changed()
-                                && let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref())
-                            {
-                                match rt.block_on(query::search_players(pool, &draft.player_search, 50)) {
-                                    Ok(results) => draft.player_results = results,
-                                    Err(e) => tracing::warn!("search: search_players failed: {e}"),
-                                }
+                            ValueKind::Bool => {
+                                egui::ComboBox::from_id_salt(("search_add_bool", group_idx))
+                                    .selected_text(bool_label(draft.bool_val))
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut draft.bool_val, true, bool_label(true));
+                                        ui.selectable_value(&mut draft.bool_val, false, bool_label(false));
+                                    });
                             }
-                            egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-                                for p in draft.player_results.clone() {
-                                    let label = if p.clan.is_empty() {
-                                        p.latest_name.clone()
-                                    } else {
-                                        format!("[{}] {}", p.clan, p.latest_name)
-                                    };
-                                    let selected = draft.player_id == Some(p.account_id);
-                                    if ui.selectable_label(selected, label.clone()).clicked() {
-                                        draft.player_id = Some(p.account_id);
-                                        draft.player_label = label;
+                            ValueKind::Class => {
+                                egui::ComboBox::from_id_salt(("search_add_class", group_idx))
+                                    .selected_text(species_name(&draft.species))
+                                    .show_ui(ui, |ui| {
+                                        for &s in SHIP_SPECIES {
+                                            ui.selectable_value(&mut draft.species, s, species_name(&s));
+                                        }
+                                    });
+                            }
+                            ValueKind::Ship => {
+                                ui.text_edit_singleline(&mut draft.ship_search);
+                                match ship_catalog {
+                                    Some(catalog) => {
+                                        egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+                                            for entry in catalog.search(&draft.ship_search, 30) {
+                                                let selected = draft.ship_id == Some(entry.ship_id);
+                                                let label =
+                                                    format!("{} (T{})", entry.display_name, tier_roman(entry.tier));
+                                                if ui.selectable_label(selected, label).clicked() {
+                                                    draft.ship_id = Some(entry.ship_id);
+                                                    draft.ship_label = entry.display_name.clone();
+                                                }
+                                            }
+                                        });
+                                    }
+                                    None => {
+                                        ui.label(t!("ui.search.ship_catalog_unavailable"));
                                     }
                                 }
-                            });
-                        }
-                        ValueKind::Timestamp => {
-                            ui.horizontal(|ui| {
-                                ui.add(egui::DragValue::new(&mut draft.date_year).range(2000..=2100));
-                                ui.label("-");
-                                ui.add(egui::DragValue::new(&mut draft.date_month).range(1..=12));
-                                ui.label("-");
-                                ui.add(egui::DragValue::new(&mut draft.date_day).range(1..=31));
-                            });
-                        }
-                        ValueKind::Source => {
-                            let selected_name = draft
-                                .source_id
-                                .and_then(|id| sources_snapshot.iter().find(|s| s.id == id))
-                                .map(|s| s.name.clone())
-                                .unwrap_or_else(|| t!("ui.search.source_any").into());
-                            egui::ComboBox::from_id_salt(("search_add_source", group_idx))
-                                .selected_text(selected_name)
-                                .show_ui(ui, |ui| {
-                                    for s in &sources_snapshot {
-                                        ui.selectable_value(&mut draft.source_id, Some(s.id), s.name.clone());
+                            }
+                            ValueKind::Account => {
+                                if ui.text_edit_singleline(&mut draft.player_search).changed()
+                                    && let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref())
+                                {
+                                    match rt.block_on(query::search_players(pool, &draft.player_search, 50)) {
+                                        Ok(results) => draft.player_results = results,
+                                        Err(e) => tracing::warn!("search: search_players failed: {e}"),
+                                    }
+                                }
+                                egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+                                    for p in draft.player_results.clone() {
+                                        let label = if p.clan.is_empty() {
+                                            p.latest_name.clone()
+                                        } else {
+                                            format!("[{}] {}", p.clan, p.latest_name)
+                                        };
+                                        let selected = draft.player_id == Some(p.account_id);
+                                        if ui.selectable_label(selected, label.clone()).clicked() {
+                                            draft.player_id = Some(p.account_id);
+                                            draft.player_label = label;
+                                        }
                                     }
                                 });
+                            }
+                            ValueKind::Timestamp => {
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::DragValue::new(&mut draft.date_year).range(2000..=2100));
+                                    ui.label("-");
+                                    ui.add(egui::DragValue::new(&mut draft.date_month).range(1..=12));
+                                    ui.label("-");
+                                    ui.add(egui::DragValue::new(&mut draft.date_day).range(1..=31));
+                                });
+                            }
+                            ValueKind::Source => {
+                                let selected_name = draft
+                                    .source_id
+                                    .and_then(|id| sources_snapshot.iter().find(|s| s.id == id))
+                                    .map(|s| s.name.clone())
+                                    .unwrap_or_else(|| t!("ui.search.source_any").into());
+                                egui::ComboBox::from_id_salt(("search_add_source", group_idx))
+                                    .selected_text(selected_name)
+                                    .show_ui(ui, |ui| {
+                                        for s in &sources_snapshot {
+                                            ui.selectable_value(&mut draft.source_id, Some(s.id), s.name.clone());
+                                        }
+                                    });
+                            }
                         }
-                    }
 
-                    ui.separator();
-                    if ui.button(t!("ui.search.add")).clicked()
-                        && let Some(value) = draft.to_value()
-                    {
-                        let label = draft.value_display_label();
-                        new_chip = Some((group_idx, Chip { field: draft.field, op: draft.op, value }, label));
-                        draft = AddFilterDraft::default();
-                        ui.close();
-                    }
-                });
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            if ui.button(t!("ui.search.add")).clicked()
+                                && let Some(value) = draft.to_value()
+                            {
+                                let label = draft.value_display_label();
+                                new_chip = Some((group_idx, Chip { field: draft.field, op: draft.op, value }, label));
+                                draft = AddFilterDraft::default();
+                                draft_open = false;
+                            }
+                            if ui.button(t!("ui.buttons.cancel")).clicked() {
+                                draft = AddFilterDraft::default();
+                                draft_open = false;
+                            }
+                        });
+                    });
+                    search_tab.add_draft_open[group_idx] = draft_open;
+                }
 
                 search_tab.add_drafts[group_idx] = draft;
             });
@@ -532,6 +608,7 @@ impl ToolkitTabViewer<'_> {
         if let Some(group_idx) = group_to_remove {
             self.tab_state.search_tab.query.groups.remove(group_idx);
             self.tab_state.search_tab.add_drafts.remove(group_idx);
+            self.tab_state.search_tab.add_draft_open.remove(group_idx);
             changed = true;
         }
         if want_add_group {
@@ -555,6 +632,8 @@ impl ToolkitTabViewer<'_> {
             && let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref())
         {
             let query = self.tab_state.search_tab.query.clone();
+            let search_tab = &mut self.tab_state.search_tab;
+            resolve_seeded_names(&query, &mut search_tab.resolved_ships, &mut search_tab.resolved_players, pool, rt);
             match rt.block_on(crate::db::index::query::search_by_query(pool, &query, 500)) {
                 Ok(hits) => self.tab_state.search_tab.results = hits,
                 Err(e) => tracing::warn!("search query failed: {e}"),
@@ -563,6 +642,8 @@ impl ToolkitTabViewer<'_> {
         }
 
         ui.label(t!("ui.search.match_count", count = self.tab_state.search_tab.results.len()));
+
+        let locale = self.tab_state.persisted.read().settings.app.locale.clone();
 
         let mut open_path: Option<std::path::PathBuf> = None;
         egui::ScrollArea::horizontal().id_salt("search_results").show(ui, |ui| {
@@ -622,7 +703,11 @@ impl ToolkitTabViewer<'_> {
                                 });
                             });
                             row.col(|ui| {
-                                ui.label(hit.self_damage.map(|d| d.to_string()).unwrap_or_default());
+                                ui.label(
+                                    hit.self_damage
+                                        .map(|d| crate::util::formatting::separate_number(d, locale.as_deref()))
+                                        .unwrap_or_default(),
+                                );
                             });
                             row.col(|ui| {
                                 ui.label(hit.self_kills.map(|k| k.to_string()).unwrap_or_default());

@@ -533,3 +533,29 @@ async fn bounded_search_players_and_ships() {
     let ships = query::search_self_ships(&pool, "haru", 50).await.unwrap();
     assert!(ships.iter().any(|s| s.ship_id.raw() == 999));
 }
+
+#[tokio::test]
+async fn player_name_resolves_seeded_account_and_none_for_unknown() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    let name = query::player_name(&pool, AccountId(501)).await.unwrap();
+    assert_eq!(name, Some("p501".to_string()));
+
+    let unknown = query::player_name(&pool, AccountId(999_999)).await.unwrap();
+    assert_eq!(unknown, None);
+}
+
+#[tokio::test]
+async fn ship_name_resolves_seeded_ship_and_none_for_unknown() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    let name = query::ship_name(&pool, GameParamId::from(111u64)).await.unwrap();
+    assert_eq!(name, Some("Yamato".to_string()));
+
+    let unknown = query::ship_name(&pool, GameParamId::from(987_654u64)).await.unwrap();
+    assert_eq!(unknown, None);
+}

@@ -432,6 +432,27 @@ pub async fn distinct_self_ships(pool: &SqlitePool, filter: &MatchFilter) -> Res
         .collect()
 }
 
+/// The account's most-recent `player_name`, or `None` if the account is unknown to the index.
+pub async fn player_name(pool: &SqlitePool, account: AccountId) -> Result<Option<String>, IndexError> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT v.player_name FROM indexed_vehicle v JOIN indexed_match m ON m.arena_id = v.arena_id \
+         WHERE v.account_id = ?1 ORDER BY m.timestamp DESC LIMIT 1",
+    )
+    .bind(account.raw())
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|(name,)| name))
+}
+
+/// Any `indexed_vehicle.ship_name` recorded for `ship`, or `None` if the ship is unknown to the index.
+pub async fn ship_name(pool: &SqlitePool, ship: GameParamId) -> Result<Option<String>, IndexError> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT ship_name FROM indexed_vehicle WHERE ship_id = ?1 LIMIT 1")
+        .bind(ship.raw() as i64)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(|(name,)| name))
+}
+
 /// Bounded, case-insensitive player search for the cascading palette: non-bot accounts
 /// whose latest name contains `needle`, ranked by match count, capped at `limit`.
 /// An empty `needle` matches everything, so this also serves as "top players by count".

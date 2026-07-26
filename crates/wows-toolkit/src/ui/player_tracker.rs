@@ -437,8 +437,8 @@ impl ToolkitTabViewer<'_> {
                         .column(Column::initial(165.0).clip(true))
                         .column(Column::initial(130.0).clip(true))
                         .column(Column::initial(200.0).clip(true))
-                        .column(Column::remainder())
                         .column(Column::initial(110.0).clip(true))
+                        .column(Column::remainder())
                         .min_scrolled_height(0.0);
 
                     let sorted_by = player_tracker_settings.sort_order;
@@ -516,10 +516,10 @@ impl ToolkitTabViewer<'_> {
                             header.col(|ui| {
                                 ui.strong(t!("ui.player_tracker.column.aliases"));
                             });
+                            header.col(|_ui| {});
                             header.col(|ui| {
                                 ui.strong(t!("ui.player_tracker.column.notes"));
                             });
-                            header.col(|_ui| {});
                         })
                         .body(|mut body| {
                             let tracked_players_by_ts = &player_tracker_settings.tracked_players_by_time;
@@ -680,12 +680,12 @@ impl ToolkitTabViewer<'_> {
                                         ui.label(player.names.iter().join(", "));
                                     });
                                     row.col(|ui| {
-                                        ui.text_edit_singleline(&mut player.notes);
-                                    });
-                                    row.col(|ui| {
                                         if ui.button(t!("ui.player_tracker.find_matches")).clicked() {
                                             find_matches_target = Some(*player_id);
                                         }
+                                    });
+                                    row.col(|ui| {
+                                        ui.text_edit_singleline(&mut player.notes);
                                     });
                                 });
                             }
