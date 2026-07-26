@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use egui::Visuals;
 use escaper::decode_html;
 use jiff::Timestamp;
 use serde::Serialize;
@@ -132,7 +133,10 @@ impl From<&wows_replays::analyzer::battle_controller::Player> for Player {
                 Some(clan_color) => (clan_color & 0xFFFFFF) as u32,
                 None => {
                     tracing::warn!("player '{}' has no clanColor; using team color", state.username());
-                    let color = player_color_for_team_relation(value.relation());
+                    // This runs off the UI thread building exported data, not a
+                    // live view, so there is no theme to read; anchor to dark,
+                    // matching the palette these colours were tuned for.
+                    let color = player_color_for_team_relation(value.relation(), &Visuals::dark());
                     ((color.r() as u32) << 16) | ((color.g() as u32) << 8) | (color.b() as u32)
                 }
             }

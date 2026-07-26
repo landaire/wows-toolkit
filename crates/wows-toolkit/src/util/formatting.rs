@@ -1,4 +1,5 @@
 use crate::icons;
+use crate::ui::theme::semantic::semantic;
 use egui::Color32;
 use egui::RichText;
 use jiff::Timestamp;
@@ -42,13 +43,14 @@ pub fn separate_number<T: Separable>(num: T, locale: Option<&str>) -> String {
     }
 }
 
-pub fn player_color_for_team_relation(relation: Relation) -> Color32 {
+pub fn player_color_for_team_relation(relation: Relation, visuals: &egui::Visuals) -> Color32 {
+    let sem = semantic(visuals);
     if relation.is_self() {
-        Color32::WHITE
+        sem.text_strong
     } else if relation.is_ally() {
-        Color32::LIGHT_GREEN
+        sem.win
     } else {
-        Color32::LIGHT_RED
+        sem.loss
     }
 }
 
@@ -79,12 +81,14 @@ pub fn colorize_captain_points(
     highest_skill_tier: usize,
     num_tier_1_skills: usize,
     raw_skills: Option<Vec<&CrewSkill>>,
+    visuals: &egui::Visuals,
 ) -> (RichText, Option<String>) {
+    let sem = semantic(visuals);
     let mut color = match points {
-        0..=9 => Color32::LIGHT_RED,
-        10..=12 => Color32::from_rgb(0xfc, 0xae, 0x1e), // orange
-        13..=16 => Color32::YELLOW,
-        _ => Color32::LIGHT_GREEN,
+        0..=9 => sem.loss,
+        10..=12 => sem.warn,
+        13..=16 => sem.division,
+        _ => sem.win,
     };
     const NUM_SKILLS_IN_TIER: usize = 6;
 
@@ -114,7 +118,7 @@ pub fn colorize_captain_points(
     let extra_icons = if !extra_icons.is_empty() { extra_icons.join("") } else { String::new() };
 
     if num_tier_1_skills == NUM_SKILLS_IN_TIER {
-        color = Color32::LIGHT_RED;
+        color = sem.loss;
         let default_text = "Player is playing tower defense with their skills";
         return (
             RichText::new(format!("{}{} {}pts ({} skills)", extra_icons, crate::icons::CASTLE_TURRET, points, skills))
@@ -126,7 +130,7 @@ pub fn colorize_captain_points(
             },
         );
     } else if highest_skill_tier <= 2 && points >= 6 {
-        color = Color32::LIGHT_RED;
+        color = sem.loss;
         let default_text = "Player has no skills above tier 2";
         return (
             RichText::new(format!("{}{} {}pts ({} skills)", extra_icons, crate::icons::WARNING, points, skills))

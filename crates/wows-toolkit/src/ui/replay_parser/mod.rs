@@ -71,6 +71,7 @@ use egui::TextFormat;
 use egui::Tooltip;
 use egui::UiKind;
 use egui::Vec2;
+use egui::Visuals;
 use egui::text::LayoutJob;
 
 use escaper::decode_html;
@@ -672,6 +673,11 @@ impl UiReport {
 
         let locale = "en-US";
 
+        // Report colours are baked in here, off the UI thread with no live theme
+        // to read; anchor to dark, matching the palette these colours were tuned
+        // for.
+        let visuals = Visuals::dark();
+
         // Single source of truth for per-player numbers: the egui-free normalized
         // report. PlayerReport below is presentation rebuilt over these values.
         let normalized = wows_replay_insights::battle_report::NormalizedBattleReport::from_battle_report(
@@ -697,7 +703,7 @@ impl UiReport {
                 let vehicle_param = player.vehicle();
                 let server = np.server_results.as_ref();
 
-                let mut player_color = player_color_for_team_relation(np.relation);
+                let mut player_color = player_color_for_team_relation(np.relation, &visuals);
                 if let (Some(self_div), Some(self_id)) = (self_division_id, self_db_id)
                     && self_id != np.db_id
                     && np.division_id == Some(self_div)
@@ -725,7 +731,9 @@ impl UiReport {
                 });
 
                 let clan_text = if !np.clan.is_empty() {
-                    Some(RichText::new(format!("[{}]", np.clan)).color(clan_color_for_player(player).unwrap()))
+                    Some(
+                        RichText::new(format!("[{}]", np.clan)).color(clan_color_for_player(player, &visuals).unwrap()),
+                    )
                 } else {
                     None
                 };
@@ -873,6 +881,7 @@ impl UiReport {
                     np.skill_info.highest_tier,
                     np.skill_info.num_tier_1_skills,
                     vehicle.and_then(|v| v.commander_skills(species)),
+                    &visuals,
                 );
                 let skill_info = SkillInfo {
                     skill_points: np.skill_info.skill_points,
@@ -2939,7 +2948,7 @@ pub struct Replay {
     pub source_path: Option<PathBuf>,
 }
 
-fn clan_color_for_player(player: &Player) -> Option<Color32> {
+fn clan_color_for_player(player: &Player, visuals: &egui::Visuals) -> Option<Color32> {
     let state = player.initial_state();
     if state.clan().is_empty() {
         return None;
@@ -2954,7 +2963,7 @@ fn clan_color_for_player(player: &Player) -> Option<Color32> {
         ),
         None => {
             tracing::warn!("player '{}' has no clanColor; using team color", state.username());
-            player_color_for_team_relation(player.relation())
+            player_color_for_team_relation(player.relation(), visuals)
         }
     };
     Some(clan_color)
@@ -5796,7 +5805,7 @@ fn build_replay_chat_content(
         };
 
         let name_color = if let Some(relation) = sender_relation {
-            player_color_for_team_relation(*relation)
+            player_color_for_team_relation(*relation, ui.visuals())
         } else {
             Color32::GRAY
         };
@@ -5808,7 +5817,7 @@ fn build_replay_chat_content(
             job.append(
                 &format!("[{}] ", player.initial_state().clan()),
                 0.0,
-                TextFormat { color: clan_color_for_player(player).unwrap(), ..Default::default() },
+                TextFormat { color: clan_color_for_player(player, ui.visuals()).unwrap(), ..Default::default() },
             );
         }
         job.append(&format!("{sender_name}:\n"), 0.0, TextFormat { color: name_color, ..Default::default() });
