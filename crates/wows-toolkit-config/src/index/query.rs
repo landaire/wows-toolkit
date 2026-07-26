@@ -24,6 +24,7 @@ use super::rows::ReplayRecord;
 use super::rows::ShipFacet;
 use super::rows::SourceId;
 use super::rows::SourceKind;
+use super::rows::VehicleRelation;
 
 /// Return the id of the single `Live` source, creating it if absent.
 pub async fn ensure_default_source(
@@ -31,15 +32,18 @@ pub async fn ensure_default_source(
     root_path: &Path,
     now: Timestamp,
 ) -> Result<SourceId, IndexError> {
-    let existing: Option<(i64,)> =
-        sqlx::query_as("SELECT source_id FROM index_source WHERE kind = 'live' LIMIT 1").fetch_optional(pool).await?;
+    let existing: Option<(i64,)> = sqlx::query_as("SELECT source_id FROM index_source WHERE kind = ?1 LIMIT 1")
+        .bind(SourceKind::Live.as_db_str())
+        .fetch_optional(pool)
+        .await?;
     if let Some((id,)) = existing {
         return Ok(SourceId(id));
     }
     let id: (i64,) = sqlx::query_as(
-        "INSERT INTO index_source (name, kind, root_path, added_at) VALUES (?1, 'live', ?2, ?3) RETURNING source_id",
+        "INSERT INTO index_source (name, kind, root_path, added_at) VALUES (?1, ?2, ?3, ?4) RETURNING source_id",
     )
     .bind("Live replays")
+    .bind(SourceKind::Live.as_db_str())
     .bind(root_path.to_string_lossy().to_string())
     .bind(now.as_second())
     .fetch_one(pool)
@@ -279,18 +283,18 @@ fn row_to_match_hit(row: &sqlx::sqlite::SqliteRow) -> Result<MatchHit, IndexErro
 
 fn push_exists_predicates(qb: &mut QueryBuilder<'_, Sqlite>, filter: &MatchFilter) {
     if let Some(species) = &filter.species {
-        qb.push(
-            " AND EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND v.relation = 'self' AND v.species = ",
-        )
-        .push_bind(species.clone())
-        .push(")");
+        qb.push(" AND EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND v.relation = ")
+            .push_bind(VehicleRelation::SelfPlayer.as_db_str())
+            .push(" AND v.species = ")
+            .push_bind(species.clone())
+            .push(")");
     }
     if let Some(tier) = filter.tier {
-        qb.push(
-            " AND EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND v.relation = 'self' AND v.tier = ",
-        )
-        .push_bind(tier as i64)
-        .push(")");
+        qb.push(" AND EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND v.relation = ")
+            .push_bind(VehicleRelation::SelfPlayer.as_db_str())
+            .push(" AND v.tier = ")
+            .push_bind(tier as i64)
+            .push(")");
     }
     if let Some(acct) = filter.player_present {
         qb.push(" AND EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND v.account_id = ")
@@ -298,11 +302,11 @@ fn push_exists_predicates(qb: &mut QueryBuilder<'_, Sqlite>, filter: &MatchFilte
             .push(")");
     }
     if let Some(ship) = filter.enemy_ship {
-        qb.push(
-            " AND EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND v.relation = 'enemy' AND v.ship_id = ",
-        )
-        .push_bind(ship.raw() as i64)
-        .push(")");
+        qb.push(" AND EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND v.relation = ")
+            .push_bind(VehicleRelation::Enemy.as_db_str())
+            .push(" AND v.ship_id = ")
+            .push_bind(ship.raw() as i64)
+            .push(")");
     }
 }
 
