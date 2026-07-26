@@ -1,7 +1,6 @@
 use jiff::Timestamp;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::GameParamId;
-use wowsunpack::game_params::types::Species;
 
 use super::rows::MatchOutcome;
 use super::rows::SourceId;
@@ -48,7 +47,7 @@ pub enum ValueKind {
     Text,
     Int,
     Outcome,
-    Species,
+    Class,
     Bool,
     Ship,
     Account,
@@ -61,7 +60,7 @@ pub enum Value {
     Text(String),
     Int(i64),
     Outcome(MatchOutcome),
-    Species(Species),
+    Class(String),
     Bool(bool),
     Ship(GameParamId),
     Account(AccountId),
@@ -110,7 +109,7 @@ impl Field {
             Field::Outcome => ValueKind::Outcome,
             Field::Map | Field::Mode => ValueKind::Text,
             Field::SelfShip => ValueKind::Ship,
-            Field::Class => ValueKind::Species,
+            Field::Class => ValueKind::Class,
             Field::Tier | Field::SelfDamage | Field::Kills => ValueKind::Int,
             Field::Pr => ValueKind::Int,
             Field::Date => ValueKind::Timestamp,
