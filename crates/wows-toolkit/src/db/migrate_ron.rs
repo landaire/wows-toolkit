@@ -90,6 +90,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
         collab_auto_open,
         zoom_factor,
         replay_settings_json,
+        search_query_json,
         output_dir,
         auto_load,
         next_chart_id,
@@ -124,6 +125,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
             s.collab.disable_auto_open_session_windows,
             s.app.zoom_factor,
             serde_json::to_string(&s.replay).unwrap_or_default(),
+            serde_json::to_string(&s.search_query).unwrap_or_default(),
             p.output_dir.clone(),
             p.auto_load_latest_replay,
             p.next_chart_tab_id,
@@ -160,6 +162,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
     queries::set_setting(pool, "disable_auto_open_session_windows", &collab_auto_open).await?;
     queries::set_setting(pool, "zoom_factor", &zoom_factor).await?;
     queries::set_setting_raw(pool, "replay_settings", &replay_settings_json).await?;
+    queries::set_setting_raw(pool, "search_query", &search_query_json).await?;
     queries::set_setting(pool, "output_dir", &output_dir).await?;
     queries::set_setting(pool, "auto_load_latest_replay", &auto_load).await?;
     let replay_sort = *ctx.replay_sort.lock();

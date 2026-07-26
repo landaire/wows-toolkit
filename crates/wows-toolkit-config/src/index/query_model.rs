@@ -5,7 +5,7 @@ use wows_core::game_types::GameParamId;
 use super::rows::MatchOutcome;
 use super::rows::SourceId;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Field {
     Outcome,
     Map,
@@ -28,7 +28,7 @@ pub enum Field {
 }
 
 /// Which roster stat a `Field::Stat` reads. Maps 1:1 to an `indexed_vehicle` column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum StatKind {
     Damage,
     Kills,
@@ -70,7 +70,7 @@ impl StatKind {
 }
 
 /// Which roster row(s) a `Field::Stat` predicate is evaluated against.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Subject {
     /// The perspective player's own roster row (`indexed_vehicle.relation = 'self'`).
     SelfPlayer,
@@ -80,7 +80,7 @@ pub enum Subject {
     Player(AccountId),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Op {
     Contains,
     Equals,
@@ -98,7 +98,7 @@ pub enum Op {
 }
 
 /// Which `Value` variant a field expects; drives the UI value editor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ValueKind {
     Text,
     Int,
@@ -111,7 +111,7 @@ pub enum ValueKind {
     Source,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Value {
     Text(String),
     Int(i64),
@@ -124,25 +124,25 @@ pub enum Value {
     Source(SourceId),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Chip {
     pub field: Field,
     pub op: Op,
     pub value: Value,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Group {
     pub chips: Vec<Chip>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Connector {
     And,
     Or,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Query {
     pub groups: Vec<Group>,
     pub connector: Connector,

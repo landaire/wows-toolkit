@@ -11,6 +11,7 @@ use crate::twitch::Token;
 
 pub use wows_toolkit_config::ReplayGrouping;
 pub use wows_toolkit_config::ReplaySettings;
+pub use wows_toolkit_config::index::query_model::Query as SearchQuery;
 
 pub const fn default_bool<const V: bool>() -> bool {
     V
@@ -189,6 +190,8 @@ pub struct AppSettings {
     pub stats_filters: StatsFilterSettings,
     pub integrations: IntegrationSettings,
     pub collab: CollabSettings,
+    /// The Search tab's chip query, persisted so it survives app restarts.
+    pub search_query: SearchQuery,
 }
 
 /// General application preferences.

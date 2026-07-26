@@ -12,9 +12,9 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 tokio = { version = "1.51", features = ["rt", "rt-multi-thread", "macros"] }
 home = "0.5"
-wows-core = { path = "../wows-core" }
+wows-core = { path = "../wows-core", features = ["serde"] }
 thiserror = { workspace = true }
-jiff = { workspace = true }
+jiff = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 tokio = { version = "1.51", features = ["rt", "macros"] }

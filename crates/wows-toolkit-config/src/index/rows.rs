@@ -6,7 +6,7 @@ use wows_core::game_types::ArenaId;
 use wows_core::game_types::GameParamId;
 
 /// Identifies one replay group (the live dir, an imported dir, or an ad-hoc set).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct SourceId(pub i64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +36,7 @@ impl SourceKind {
 
 /// Perspective-relative battle outcome. `Unknown` when the player left before
 /// results were written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum MatchOutcome {
     Win,
     Loss,

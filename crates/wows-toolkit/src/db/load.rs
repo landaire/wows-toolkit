@@ -136,6 +136,12 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
     if let Some(v) = queries::get_setting(pool, "replay_settings").await {
         s.replay = v;
     }
+    // Nested struct: search_query. Also restored into the Search tab itself
+    // below, once the write guard on `settings` is dropped.
+    let search_query: Option<crate::data::settings::SearchQuery> = queries::get_setting(pool, "search_query").await;
+    if let Some(v) = search_query.clone() {
+        s.search_query = v;
+    }
 
     // Fields that moved to PersistedState.
     if let Some(v) = queries::get_setting::<String>(pool, "output_dir").await {
@@ -150,6 +156,14 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
 
     // Drop the write guard before accessing ts fields directly.
     drop(p);
+
+    // Restore the Search tab's chip query. A missing or empty query keeps the
+    // tab's default single-open-group state (see `SearchTabState::default`).
+    if let Some(v) = search_query
+        && !v.groups.is_empty()
+    {
+        ts.search_tab.restore_query(v);
+    }
 
     if let Some(v) = queries::get_setting(pool, "replay_sort").await {
         *ts.replay_sort.lock() = v;
