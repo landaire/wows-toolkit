@@ -36,9 +36,13 @@ pub fn label_on(fill: Color32) -> Color32 {
 /// server, collab peer colours from other users.
 ///
 /// Both directions are tried and the smaller adjustment wins, so a colour is
-/// changed as little as the floor allows. If neither direction can reach the
-/// floor (only possible against a mid-luminance background), the most legible
-/// candidate found is returned.
+/// changed as little as the floor allows.
+///
+/// The fallback returning the most legible candidate is unreachable while
+/// `CONTRAST_FLOOR` stays at or below sqrt(21) (about 4.583): under that
+/// bound pure black and pure white between them clear every possible
+/// background, and the walk reaches both extremes. Raising the floor toward
+/// AAA (7:1) opens a real gap and makes the fallback live.
 pub fn readable_on(color: Color32, bg: Color32) -> Color32 {
     if contrast_ratio(color, bg) >= CONTRAST_FLOOR {
         return color;
@@ -207,6 +211,24 @@ mod tests {
                 let delta = (fixed_h - h as f32).abs().min(360.0 - (fixed_h - h as f32).abs());
                 assert!(delta < 5.0, "hue drifted {delta} degrees from {h}");
             }
+        }
+    }
+
+    #[test]
+    fn extremes_cover_every_background_at_this_floor() {
+        // Guards the reachability argument in readable_on's doc comment.
+        assert!(
+            CONTRAST_FLOOR * CONTRAST_FLOOR <= 21.0,
+            "floor {CONTRAST_FLOOR} exceeds sqrt(21); the fallback in readable_on is now reachable \
+             and its doc comment needs revisiting"
+        );
+        for v in 0..=255u8 {
+            let bg = Color32::from_gray(v);
+            assert!(
+                contrast_ratio(Color32::BLACK, bg) >= CONTRAST_FLOOR
+                    || contrast_ratio(Color32::WHITE, bg) >= CONTRAST_FLOOR,
+                "gray {v} is cleared by neither black nor white"
+            );
         }
     }
 }
