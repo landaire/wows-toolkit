@@ -8,3 +8,4 @@ pub mod search_tab;
 pub mod session_stats_chart;
 mod settings_tab;
 pub mod stats_tab;
+pub mod theme;
