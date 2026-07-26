@@ -12,6 +12,12 @@ use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
 use wows_core::game_types::GameParamId;
 
+use super::query_model::Chip;
+use super::query_model::Connector;
+use super::query_model::Field;
+use super::query_model::Op;
+use super::query_model::Query;
+use super::query_model::Value;
 use super::rows::IndexError;
 use super::rows::IndexSource;
 use super::rows::IndexedVehicleRow;
@@ -424,4 +430,154 @@ pub async fn distinct_self_ships(pool: &SqlitePool, filter: &MatchFilter) -> Res
             })
         })
         .collect()
+}
+
+/// Run a dynamic advanced-search query built from chips grouped by AND, with groups
+/// joined by `query.connector`. Reuses the same per-arena record-picker prefix and row
+/// mapping as `run_match_query`. An empty query (no chips in any group) matches everything.
+pub async fn search_by_query(pool: &SqlitePool, query: &Query, limit: i64) -> Result<Vec<MatchHit>, IndexError> {
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "SELECT m.arena_id, m.timestamp, m.map, m.game_mode, m.game_type, m.match_group, m.version_build, \
+                r.source_id, r.outcome, r.self_account_id, r.self_ship_id, r.self_survived, r.self_damage, \
+                r.self_kills, r.self_pr, r.results_available, r.replay_path, r.file_mtime \
+         FROM indexed_match m \
+         JOIN replay_record r ON r.record_id = ( \
+            SELECT rr.record_id FROM replay_record rr WHERE rr.arena_id = m.arena_id \
+            ORDER BY (rr.file_mtime IS NOT NULL) DESC, rr.indexed_at DESC LIMIT 1 ) WHERE 1=1",
+    );
+    push_query_where(&mut qb, query);
+    qb.push(" ORDER BY m.timestamp DESC LIMIT ").push_bind(limit);
+    let rows = qb.build().fetch_all(pool).await?;
+    rows.iter().map(row_to_match_hit).collect()
+}
+
+fn push_query_where(qb: &mut QueryBuilder<'_, Sqlite>, query: &Query) {
+    if query.groups.iter().all(|g| g.chips.is_empty()) {
+        return; // empty query matches everything
+    }
+    let join = match query.connector {
+        Connector::And => " AND ",
+        Connector::Or => " OR ",
+    };
+    qb.push(" AND (");
+    let mut first_group = true;
+    for group in &query.groups {
+        if group.chips.is_empty() {
+            continue;
+        }
+        if !first_group {
+            qb.push(join);
+        }
+        first_group = false;
+        qb.push("(");
+        for (i, chip) in group.chips.iter().enumerate() {
+            if i > 0 {
+                qb.push(" AND ");
+            }
+            push_chip(qb, chip);
+        }
+        qb.push(")");
+    }
+    // If every group was empty we opened "(" with nothing; close and neutralize.
+    if first_group {
+        qb.push("1=1");
+    }
+    qb.push(")");
+}
+
+fn push_chip(qb: &mut QueryBuilder<'_, Sqlite>, chip: &Chip) {
+    // Text columns: case-insensitive. Numeric/record columns direct. Presence: EXISTS.
+    match (chip.field, &chip.value) {
+        (Field::Map, Value::Text(s)) => push_text(qb, "m.map", chip.op, s),
+        (Field::Mode, Value::Text(s)) => push_text(qb, "m.game_type", chip.op, s),
+        (Field::Outcome, Value::Outcome(o)) => push_enum(qb, "r.outcome", chip.op, o.as_db_str()),
+        (Field::SelfShip, Value::Ship(id)) => push_enum_i64(qb, "r.self_ship_id", chip.op, id.raw() as i64),
+        (Field::Survived, Value::Bool(b)) => push_enum_bool(qb, "r.self_survived", chip.op, *b),
+        (Field::SelfDamage, Value::Int(n)) => push_num(qb, "r.self_damage", chip.op, *n),
+        (Field::Kills, Value::Int(n)) => push_num(qb, "r.self_kills", chip.op, *n),
+        (Field::Pr, Value::Int(n)) => push_num(qb, "r.self_pr", chip.op, *n),
+        (Field::Date, Value::Timestamp(t)) => push_num(qb, "m.timestamp", chip.op, t.as_second()),
+        (Field::Tier, Value::Int(n)) => push_exists(qb, "v.relation='self' AND v.tier = ", ExistsBind::Int(*n)),
+        (Field::Class, Value::Class(s)) => {
+            push_exists(qb, "v.relation='self' AND v.species = ", ExistsBind::Text(s.clone()))
+        }
+        (Field::PlayerPresent, Value::Account(a)) => {
+            push_presence(qb, "v.account_id = ", ExistsBind::Int(a.raw()), chip.op)
+        }
+        (Field::EnemyShip, Value::Ship(id)) => {
+            push_presence(qb, "v.relation='enemy' AND v.ship_id = ", ExistsBind::Int(id.raw() as i64), chip.op)
+        }
+        (Field::AllyShip, Value::Ship(id)) => {
+            push_presence(qb, "v.relation='ally' AND v.ship_id = ", ExistsBind::Int(id.raw() as i64), chip.op)
+        }
+        (Field::Group, Value::Source(s)) => push_enum_i64(qb, "r.source_id", chip.op, s.0),
+        // Field/value mismatch (UI prevents this): no-op predicate + log.
+        _ => {
+            tracing::warn!("search_by_query: unsupported field/value combination");
+            qb.push("1=1");
+        }
+    }
+}
+
+enum ExistsBind {
+    Int(i64),
+    Text(String),
+}
+
+fn push_text(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, s: &str) {
+    match op {
+        Op::Contains => {
+            qb.push(format!("LOWER({col}) LIKE '%' || LOWER(")).push_bind(s.to_string()).push(") || '%'");
+        }
+        Op::NotEquals => {
+            qb.push(format!("LOWER({col}) <> LOWER(")).push_bind(s.to_string()).push(")");
+        }
+        _ => {
+            // Equals (and any other): case-insensitive equality.
+            qb.push(format!("LOWER({col}) = LOWER(")).push_bind(s.to_string()).push(")");
+        }
+    }
+}
+
+fn push_num(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, n: i64) {
+    let sql_op = match op {
+        Op::Eq => "=",
+        Op::Ne => "<>",
+        Op::Gt => ">",
+        Op::Ge => ">=",
+        Op::Lt => "<",
+        _ => "<=", // Le and any other
+    };
+    qb.push(format!("{col} {sql_op} ")).push_bind(n);
+}
+
+fn push_enum(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, val: &str) {
+    let sql_op = if matches!(op, Op::IsNot | Op::NotEquals | Op::Ne) { "<>" } else { "=" };
+    qb.push(format!("{col} {sql_op} ")).push_bind(val.to_string());
+}
+
+fn push_enum_i64(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, val: i64) {
+    let sql_op = if matches!(op, Op::IsNot | Op::NotEquals | Op::Ne) { "<>" } else { "=" };
+    qb.push(format!("{col} {sql_op} ")).push_bind(val);
+}
+
+fn push_enum_bool(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, val: bool) {
+    let sql_op = if matches!(op, Op::IsNot) { "<>" } else { "=" };
+    qb.push(format!("{col} {sql_op} ")).push_bind(val);
+}
+
+fn push_exists(qb: &mut QueryBuilder<'_, Sqlite>, inner: &str, bind: ExistsBind) {
+    qb.push("EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND ").push(inner);
+    match bind {
+        ExistsBind::Int(n) => qb.push_bind(n),
+        ExistsBind::Text(s) => qb.push_bind(s),
+    };
+    qb.push(")");
+}
+
+fn push_presence(qb: &mut QueryBuilder<'_, Sqlite>, inner: &str, bind: ExistsBind, op: Op) {
+    if matches!(op, Op::NotPresent) {
+        qb.push("NOT ");
+    }
+    push_exists(qb, inner, bind);
 }

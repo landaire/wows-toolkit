@@ -318,3 +318,69 @@ async fn facets_list_players_and_self_ships() {
     assert_eq!(haru.match_count, 2);
     assert_eq!(haru.ship_name, "Harugumo");
 }
+
+use wows_toolkit_config::index::query_model::Chip;
+use wows_toolkit_config::index::query_model::Connector;
+use wows_toolkit_config::index::query_model::Field;
+use wows_toolkit_config::index::query_model::Group;
+use wows_toolkit_config::index::query_model::Op;
+use wows_toolkit_config::index::query_model::Query;
+use wows_toolkit_config::index::query_model::Value;
+
+fn one(field: Field, op: Op, value: Value) -> Query {
+    Query { groups: vec![Group { chips: vec![Chip { field, op, value }] }], connector: Connector::And }
+}
+
+#[tokio::test]
+async fn search_by_query_predicates_and_groups() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    // Case-insensitive Contains on map: "oce" -> arena 100 (Ocean).
+    let q = one(Field::Map, Op::Contains, Value::Text("oce".into()));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert_eq!(hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![100]);
+
+    // Numeric: self_damage >= 100k -> arena 100.
+    let q = one(Field::SelfDamage, Op::Ge, Value::Int(100_000));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert_eq!(hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![100]);
+
+    // Outcome Is Loss -> arena 200.
+    let q = one(Field::Outcome, Op::Is, Value::Outcome(MatchOutcome::Loss));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert_eq!(hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![200]);
+
+    // Presence: EnemyShip Yamato(111) present -> arena 100.
+    let q = one(Field::EnemyShip, Op::Present, Value::Ship(GameParamId::from(111u64)));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert_eq!(hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>(), vec![100]);
+
+    // AND within a group: Loss AND map contains "tr" -> arena 200 only.
+    let q = Query {
+        groups: vec![Group {
+            chips: vec![
+                Chip { field: Field::Outcome, op: Op::Is, value: Value::Outcome(MatchOutcome::Loss) },
+                Chip { field: Field::Map, op: Op::Contains, value: Value::Text("tr".into()) },
+            ],
+        }],
+        connector: Connector::And,
+    };
+    assert_eq!(query::search_by_query(&pool, &q, 500).await.unwrap().len(), 1);
+
+    // OR between groups: (Win) OR (map contains "tr") -> both arenas.
+    let q = Query {
+        groups: vec![
+            Group { chips: vec![Chip { field: Field::Outcome, op: Op::Is, value: Value::Outcome(MatchOutcome::Win) }] },
+            Group { chips: vec![Chip { field: Field::Map, op: Op::Contains, value: Value::Text("tr".into()) }] },
+        ],
+        connector: Connector::Or,
+    };
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert_eq!(hits.len(), 2);
+
+    // Empty query -> all, capped by limit.
+    let none = query::search_by_query(&pool, &Query::default(), 1).await.unwrap();
+    assert_eq!(none.len(), 1);
+}
