@@ -11166,6 +11166,7 @@ dependencies = [
  "tokio",
  "tracing",
  "wows-core",
+ "wowsunpack",
 ]
 
 [[package]]

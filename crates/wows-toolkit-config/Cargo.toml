@@ -13,6 +13,7 @@ tracing = { workspace = true }
 tokio = { version = "1.51", features = ["rt", "rt-multi-thread", "macros"] }
 home = "0.5"
 wows-core = { path = "../wows-core" }
+wowsunpack = { workspace = true, features = ["parsing"] }
 thiserror = { workspace = true }
 jiff = { workspace = true }
 
