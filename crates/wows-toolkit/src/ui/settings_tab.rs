@@ -403,22 +403,50 @@ impl ToolkitTabViewer<'_> {
                     }
                     _ => None,
                 };
-                if ui
-                    .add_enabled(reindex_deps.is_some(), egui::Button::new(t!("ui.settings.replay.index_all_replays")))
-                    .clicked()
-                    && let Some((pool, rt, wows_data_map)) = reindex_deps
-                {
-                    crate::update_background_task!(
-                        self.tab_state.background_tasks,
-                        Some(crate::task::start_reconcile_index(
-                            wows_data_map,
-                            Arc::clone(&self.tab_state.twitch_state),
-                            pool,
-                            rt,
-                            Arc::clone(&self.tab_state.personal_rating_data),
-                        ))
-                    );
-                }
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            reindex_deps.is_some(),
+                            egui::Button::new(t!("ui.settings.replay.index_all_replays")),
+                        )
+                        .clicked()
+                        && let Some((pool, rt, wows_data_map)) = reindex_deps.clone()
+                    {
+                        crate::update_background_task!(
+                            self.tab_state.background_tasks,
+                            Some(crate::task::start_reconcile_index(
+                                wows_data_map,
+                                Arc::clone(&self.tab_state.twitch_state),
+                                pool,
+                                rt,
+                                Arc::clone(&self.tab_state.personal_rating_data),
+                                false,
+                            ))
+                        );
+                    }
+
+                    if ui
+                        .add_enabled(
+                            reindex_deps.is_some(),
+                            egui::Button::new(t!("ui.settings.replay.reindex_all_replays")),
+                        )
+                        .on_hover_text(t!("ui.settings.replay.reindex_all_replays_hover"))
+                        .clicked()
+                        && let Some((pool, rt, wows_data_map)) = reindex_deps
+                    {
+                        crate::update_background_task!(
+                            self.tab_state.background_tasks,
+                            Some(crate::task::start_reconcile_index(
+                                wows_data_map,
+                                Arc::clone(&self.tab_state.twitch_state),
+                                pool,
+                                rt,
+                                Arc::clone(&self.tab_state.personal_rating_data),
+                                true,
+                            ))
+                        );
+                    }
+                });
             });
 
             ui.add_space(12.0);

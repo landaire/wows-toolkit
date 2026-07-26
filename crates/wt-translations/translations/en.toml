@@ -234,6 +234,8 @@ format_csv = "CSV"
 format_cbor = "CBOR"
 export_path_hint = "Data auto-export directory"
 index_all_replays = "Index All Replays"
+reindex_all_replays = "Re-index All Replays"
+reindex_all_replays_hover = "Re-parse and re-index every replay, including ones already indexed. Use this after an update adds new index data (e.g. Personal Rating, disconnect status) so it backfills onto existing entries."
 
 [ui.settings.session]
 heading = "Session Settings"

@@ -3025,6 +3025,7 @@ impl WowsToolkitApp {
                             pool,
                             rt,
                             Arc::clone(&self.tab_state.personal_rating_data),
+                            false,
                         ))
                     );
                 }

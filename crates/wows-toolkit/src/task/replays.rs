@@ -1234,16 +1234,23 @@ fn index_one_replay(
 /// This is a focused index-only backfill: it does not reuse the startup scan's
 /// loop in `start_background_parsing_thread`, since that loop also drives
 /// uploads and player-tracker updates and is entangled with the parser thread's
-/// message loop. Instead it walks the replays directory directly, skips
-/// anything already recorded for the default source, and indexes the rest
+/// message loop. Instead it walks the replays directory directly and indexes
 /// through `index_one_replay`, wrapped in `reconcile_one` for panic isolation
 /// exactly like the startup pass.
+///
+/// When `force_reindex` is false, replays already recorded for the default
+/// source are skipped (only gaps are filled). When true, already-indexed
+/// replays are re-parsed and re-upserted too, so newly added index columns
+/// (e.g. personal rating, disconnect state) backfill onto existing rows.
+/// Either way, files in the persistent `Unindexable` blacklist are never
+/// re-parsed.
 pub fn start_reconcile_index(
     wows_data_map: crate::data::wows_data::WoWsDataMap,
     twitch_state: Arc<RwLock<TwitchState>>,
     db_pool: sqlx::SqlitePool,
     tokio_runtime: Arc<tokio::runtime::Runtime>,
     personal_rating_data: Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
+    force_reindex: bool,
 ) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
     let (progress_tx, progress_rx) = mpsc::channel();
@@ -1255,6 +1262,7 @@ pub fn start_reconcile_index(
             db_pool,
             tokio_runtime,
             personal_rating_data,
+            force_reindex,
             &progress_tx,
         ));
     });
@@ -1271,6 +1279,7 @@ fn run_reconcile_index(
     db_pool: sqlx::SqlitePool,
     tokio_runtime: Arc<tokio::runtime::Runtime>,
     personal_rating_data: Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
+    force_reindex: bool,
     progress_tx: &mpsc::Sender<IndexProgress>,
 ) -> Result<BackgroundTaskCompletion, Report> {
     let Some(replays_dir) =
@@ -1301,10 +1310,12 @@ fn run_reconcile_index(
         if unindexable.contains(&path) {
             continue;
         }
-        let already_indexed = indexed_paths.contains(path_str.as_ref());
+        let already_indexed = !force_reindex && indexed_paths.contains(path_str.as_ref());
 
         // `sent` is forced true: this task has no upload ledger of its own, so
-        // the skip decision depends only on whether the replay is already indexed.
+        // the skip decision depends only on whether the replay is already indexed
+        // (which `force_reindex` short-circuits to false so every non-blacklisted
+        // file is re-parsed and re-upserted).
         let outcome = crate::data::replay_reconcile::reconcile_one(
             &path,
             already_indexed,
