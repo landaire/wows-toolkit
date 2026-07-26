@@ -506,3 +506,23 @@ async fn search_by_query_covers_selfship_allyship_kills_group() {
     let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
     assert!(hits.is_empty());
 }
+
+#[tokio::test]
+async fn bounded_search_players_and_ships() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    // Case-insensitive substring: "P5" matches p501 (name lowercased in DB is "p501").
+    let players = query::search_players(&pool, "P5", 50).await.unwrap();
+    assert!(players.iter().any(|p| p.account_id.raw() == 501));
+    assert!(!players.iter().any(|p| p.account_id.raw() == 0)); // bots excluded
+
+    // limit respected.
+    let capped = query::search_players(&pool, "p", 1).await.unwrap();
+    assert_eq!(capped.len(), 1);
+
+    // self-ships: "haru" -> Harugumo.
+    let ships = query::search_self_ships(&pool, "haru", 50).await.unwrap();
+    assert!(ships.iter().any(|s| s.ship_id.raw() == 999));
+}

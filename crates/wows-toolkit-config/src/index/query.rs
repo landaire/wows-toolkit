@@ -432,6 +432,63 @@ pub async fn distinct_self_ships(pool: &SqlitePool, filter: &MatchFilter) -> Res
         .collect()
 }
 
+/// Bounded, case-insensitive player search for the cascading palette: non-bot accounts
+/// whose latest name contains `needle`, ranked by match count, capped at `limit`.
+/// An empty `needle` matches everything, so this also serves as "top players by count".
+pub async fn search_players(pool: &SqlitePool, needle: &str, limit: i64) -> Result<Vec<PlayerFacet>, IndexError> {
+    let rows: Vec<(i64, Option<String>, Option<String>, i64)> = sqlx::query_as(
+        "SELECT v.account_id, \
+                (SELECT v2.player_name FROM indexed_vehicle v2 JOIN indexed_match m2 ON m2.arena_id = v2.arena_id \
+                   WHERE v2.account_id = v.account_id ORDER BY m2.timestamp DESC LIMIT 1) AS latest_name, \
+                (SELECT v3.clan FROM indexed_vehicle v3 JOIN indexed_match m3 ON m3.arena_id = v3.arena_id \
+                   WHERE v3.account_id = v.account_id ORDER BY m3.timestamp DESC LIMIT 1) AS clan, \
+                COUNT(DISTINCT v.arena_id) AS match_count \
+         FROM indexed_vehicle v \
+         WHERE v.account_id <> 0 AND LOWER(v.player_name) LIKE '%' || LOWER(?1) || '%' \
+         GROUP BY v.account_id ORDER BY match_count DESC LIMIT ?2",
+    )
+    .bind(needle)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, name, clan, count)| PlayerFacet {
+            account_id: AccountId::from(id),
+            latest_name: name.unwrap_or_default(),
+            clan: clan.unwrap_or_default(),
+            match_count: count,
+        })
+        .collect())
+}
+
+/// Bounded, case-insensitive self-ship search for the cascading palette: ships the
+/// user has played whose name contains `needle`, ranked by match count, capped at `limit`.
+pub async fn search_self_ships(pool: &SqlitePool, needle: &str, limit: i64) -> Result<Vec<ShipFacet>, IndexError> {
+    let rows: Vec<(i64, Option<String>, i64)> = sqlx::query_as(
+        "SELECT r.self_ship_id AS ship_id, \
+                (SELECT v.ship_name FROM indexed_vehicle v WHERE v.ship_id = r.self_ship_id LIMIT 1) AS ship_name, \
+                COUNT(DISTINCT r.arena_id) AS match_count \
+         FROM replay_record r \
+         WHERE r.self_ship_id IS NOT NULL AND LOWER( \
+                (SELECT v.ship_name FROM indexed_vehicle v WHERE v.ship_id = r.self_ship_id LIMIT 1) \
+              ) LIKE '%' || LOWER(?1) || '%' \
+         GROUP BY r.self_ship_id ORDER BY match_count DESC LIMIT ?2",
+    )
+    .bind(needle)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, name, count)| ShipFacet {
+            ship_id: GameParamId::from(id as u64),
+            ship_name: name.unwrap_or_default(),
+            match_count: count,
+        })
+        .collect())
+}
+
 /// Run a dynamic advanced-search query built from chips grouped by AND, with groups
 /// joined by `query.connector`. Reuses the same per-arena record-picker prefix and row
 /// mapping as `run_match_query`. An empty query (no chips in any group) matches everything.
