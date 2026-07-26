@@ -3070,13 +3070,17 @@ impl eframe::App for WowsToolkitApp {
 
         if self.tab_state.command_palette.state.open {
             let entries = self.tab_state.command_palette.build_entries(None, self.tab_state.ship_catalog.as_ref());
-            if let Some(egui_palette::Outcome::Picked { data, .. }) = egui_palette::show(
+            if let Some(outcome) = egui_palette::show(
                 &ctx,
                 &mut self.tab_state.command_palette.state,
                 &entries,
                 "Search ships, players, replays, commands",
             ) {
-                self.dispatch_palette_action(data);
+                // egui-palette leaves open/close to the host: close on any outcome.
+                self.tab_state.command_palette.state.close();
+                if let egui_palette::Outcome::Picked { data, .. } = outcome {
+                    self.dispatch_palette_action(data);
+                }
             }
         }
     }
