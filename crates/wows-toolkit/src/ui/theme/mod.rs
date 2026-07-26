@@ -3,3 +3,4 @@
 pub mod contrast;
 pub mod palette;
 pub mod semantic;
+pub mod style;

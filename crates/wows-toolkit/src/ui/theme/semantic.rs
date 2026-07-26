@@ -49,7 +49,7 @@ pub struct SemanticColors {
     pub armor: ArmorColors,
 }
 
-const DARK: SemanticColors = SemanticColors {
+pub const DARK: SemanticColors = SemanticColors {
     win: Color32::from_rgb(0x6F, 0xD9, 0x8A),
     loss: Color32::from_rgb(0xEA, 0x70, 0x78),
     draw: Color32::from_rgb(0xCF, 0xC8, 0xB6),
@@ -77,7 +77,7 @@ const DARK: SemanticColors = SemanticColors {
     },
 };
 
-const LIGHT: SemanticColors = SemanticColors {
+pub const LIGHT: SemanticColors = SemanticColors {
     win: Color32::from_rgb(0x10, 0x6C, 0x34),
     loss: Color32::from_rgb(0xB0, 0x1F, 0x2B),
     draw: Color32::from_rgb(0x5F, 0x5C, 0x52),
