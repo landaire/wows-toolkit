@@ -206,6 +206,8 @@ pub struct AppPreferences {
     pub suppress_gpu_encoder_warning: bool,
     /// UI zoom factor (default 1.15).
     pub zoom_factor: f32,
+    /// Which theme to render in.
+    pub theme: ThemeChoice,
 }
 
 impl Default for AppPreferences {
@@ -220,6 +222,7 @@ impl Default for AppPreferences {
             replay_consent_prompt_shown: false,
             suppress_gpu_encoder_warning: false,
             zoom_factor: 1.15,
+            theme: ThemeChoice::default(),
         }
     }
 }
@@ -268,6 +271,26 @@ impl Default for StatsFilterSettings {
             game_count: 20,
             division_filter: DivisionFilter::default(),
             game_mode_filter: BTreeSet::default(),
+        }
+    }
+}
+
+/// Which theme the app renders in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub enum ThemeChoice {
+    /// Follow the desktop's light/dark preference.
+    #[default]
+    System,
+    Dark,
+    Light,
+}
+
+impl From<ThemeChoice> for egui::ThemePreference {
+    fn from(choice: ThemeChoice) -> Self {
+        match choice {
+            ThemeChoice::System => Self::System,
+            ThemeChoice::Dark => Self::Dark,
+            ThemeChoice::Light => Self::Light,
         }
     }
 }
@@ -376,5 +399,31 @@ mod data_sharing_mode_tests {
     #[test]
     fn reconcile_never_escalates_to_replays() {
         assert_eq!(DataSharingMode::Off.reconcile_with_compat_bool(true), DataSharingMode::BuildData);
+    }
+}
+
+#[cfg(test)]
+mod theme_choice_tests {
+    use super::*;
+
+    #[test]
+    fn default_follows_the_system() {
+        assert_eq!(ThemeChoice::default(), ThemeChoice::System);
+    }
+
+    #[test]
+    fn round_trips_through_json() {
+        for choice in [ThemeChoice::System, ThemeChoice::Dark, ThemeChoice::Light] {
+            let encoded = serde_json::to_string(&choice).expect("serialises");
+            let decoded: ThemeChoice = serde_json::from_str(&encoded).expect("deserialises");
+            assert_eq!(decoded, choice);
+        }
+    }
+
+    #[test]
+    fn maps_to_egui_theme_preference() {
+        assert_eq!(egui::ThemePreference::from(ThemeChoice::System), egui::ThemePreference::System);
+        assert_eq!(egui::ThemePreference::from(ThemeChoice::Dark), egui::ThemePreference::Dark);
+        assert_eq!(egui::ThemePreference::from(ThemeChoice::Light), egui::ThemePreference::Light);
     }
 }

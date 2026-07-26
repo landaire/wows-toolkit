@@ -89,6 +89,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
         collab_ip_warn,
         collab_auto_open,
         zoom_factor,
+        theme,
         replay_settings_json,
         search_query_json,
         output_dir,
@@ -124,6 +125,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
             s.collab.suppress_p2p_ip_warning,
             s.collab.disable_auto_open_session_windows,
             s.app.zoom_factor,
+            s.app.theme,
             serde_json::to_string(&s.replay).unwrap_or_default(),
             serde_json::to_string(&s.search_query).unwrap_or_default(),
             p.output_dir.clone(),
@@ -161,6 +163,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
     queries::set_setting(pool, "suppress_p2p_ip_warning", &collab_ip_warn).await?;
     queries::set_setting(pool, "disable_auto_open_session_windows", &collab_auto_open).await?;
     queries::set_setting(pool, "zoom_factor", &zoom_factor).await?;
+    queries::set_setting(pool, "theme", &theme).await?;
     queries::set_setting_raw(pool, "replay_settings", &replay_settings_json).await?;
     queries::set_setting_raw(pool, "search_query", &search_query_json).await?;
     queries::set_setting(pool, "output_dir", &output_dir).await?;

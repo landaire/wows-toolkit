@@ -11,6 +11,7 @@ use rust_i18n::t;
 use crate::app::ToolkitTabViewer;
 use crate::data::settings::AppPreferences;
 use crate::data::settings::DataSharingMode;
+use crate::data::settings::ThemeChoice;
 use crate::icons;
 use crate::tab_state::GameDataCacheStats;
 use crate::task::DataExportSettings;
@@ -75,6 +76,21 @@ impl ToolkitTabViewer<'_> {
                         let default_zoom = AppPreferences::default().zoom_factor;
                         ui.ctx().set_zoom_factor(default_zoom);
                         self.tab_state.persisted.write().settings.app.zoom_factor = default_zoom;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let mut theme = self.tab_state.persisted.read().settings.app.theme;
+                    ui.label(t!("ui.settings.app.theme"));
+                    let mut changed = false;
+                    changed |=
+                        ui.radio_value(&mut theme, ThemeChoice::System, t!("ui.settings.app.theme_system")).changed();
+                    changed |=
+                        ui.radio_value(&mut theme, ThemeChoice::Dark, t!("ui.settings.app.theme_dark")).changed();
+                    changed |=
+                        ui.radio_value(&mut theme, ThemeChoice::Light, t!("ui.settings.app.theme_light")).changed();
+                    if changed {
+                        self.tab_state.persisted.write().settings.app.theme = theme;
+                        crate::ui::theme::apply(ui.ctx(), theme);
                     }
                 });
                 ui.horizontal(|ui| {

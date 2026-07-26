@@ -122,6 +122,9 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
     if let Some(v) = queries::get_setting::<f32>(pool, "zoom_factor").await {
         s.app.zoom_factor = v;
     }
+    if let Some(v) = queries::get_setting::<crate::data::settings::ThemeChoice>(pool, "theme").await {
+        s.app.theme = v;
+    }
     if let Some(v) = queries::get_setting::<String>(pool, "collab_display_name").await {
         s.collab.display_name = v;
     }

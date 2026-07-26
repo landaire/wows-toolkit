@@ -214,6 +214,7 @@ impl LegacyWowsToolkitApp {
                 replay_consent_prompt_shown: false,
                 suppress_gpu_encoder_warning: s.suppress_gpu_encoder_warning,
                 zoom_factor: 1.15,
+                theme: crate::data::settings::ThemeChoice::default(),
             },
             game: GameSettings {
                 wows_dir: s.wows_dir,

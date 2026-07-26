@@ -52,6 +52,8 @@ pub enum PaletteAction {
     EnterSub(SubKind),
     /// Hand a pre-built query to the Search tab and focus it.
     OpenSearchWith(Query),
+    /// Switch the app theme.
+    SetTheme(crate::data::settings::ThemeChoice),
 }
 
 /// Which screen the palette is currently showing.
@@ -142,6 +144,13 @@ impl CommandPalette {
 
         entries.push(egui_palette::Entry::new("Advanced search...", PaletteAction::OpenSearchTab));
         entries.push(egui_palette::Entry::new("Index all replays", PaletteAction::IndexAllReplays));
+        for (label, choice) in [
+            ("Theme: follow system", crate::data::settings::ThemeChoice::System),
+            ("Theme: dark", crate::data::settings::ThemeChoice::Dark),
+            ("Theme: light", crate::data::settings::ThemeChoice::Light),
+        ] {
+            entries.push(egui_palette::Entry::new(label, PaletteAction::SetTheme(choice)));
+        }
         for (label, tab) in [
             ("Go to: Replay parser", Tab::ReplayParser),
             ("Go to: Player tracker", Tab::PlayerTracker),

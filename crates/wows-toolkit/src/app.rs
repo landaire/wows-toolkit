@@ -21,7 +21,6 @@ use egui::WidgetText;
 use egui_commonmark::CommonMarkViewer;
 use egui_dock::DockArea;
 use egui_dock::DockState;
-use egui_dock::Style;
 use egui_dock::TabStyle;
 use egui_dock::TabViewer;
 
@@ -356,7 +355,7 @@ impl WowsToolkitApp {
         crate::replay::minimap_view::shapes::register_game_fonts(&mut fonts, None);
 
         cc.egui_ctx.set_fonts(fonts);
-        cc.egui_ctx.set_theme(egui::Theme::Dark);
+        crate::ui::theme::install(&cc.egui_ctx);
 
         // Open SQLite database for persisting app state.
         let default_state: Self = Default::default();
@@ -480,6 +479,9 @@ impl WowsToolkitApp {
 
         // Restore zoom factor from persisted settings.
         cc.egui_ctx.set_zoom_factor(state.tab_state.persisted.read().settings.app.zoom_factor);
+
+        // Restore theme choice from persisted settings.
+        crate::ui::theme::apply(&cc.egui_ctx, state.tab_state.persisted.read().settings.app.theme);
 
         // Apply locale to rust-i18n
         if let Some(locale) = &state.tab_state.persisted.read().settings.app.locale {
@@ -2960,7 +2962,7 @@ impl WowsToolkitApp {
     }
 
     /// Dispatch a palette-picked action against app state.
-    fn dispatch_palette_action(&mut self, action: crate::ui::command_palette::PaletteAction) {
+    fn dispatch_palette_action(&mut self, ctx: &egui::Context, action: crate::ui::command_palette::PaletteAction) {
         use crate::db::index::query_model::Chip;
         use crate::db::index::query_model::Connector;
         use crate::db::index::query_model::Field;
@@ -3036,6 +3038,10 @@ impl WowsToolkitApp {
                 self.tab_state.pending_search_query = Some(query);
                 self.focus_tab(&Tab::Search);
             }
+            PaletteAction::SetTheme(choice) => {
+                self.tab_state.persisted.write().settings.app.theme = choice;
+                crate::ui::theme::apply(ctx, choice);
+            }
             // Handled by the render loop before it reaches dispatch: entering a
             // sub-mode keeps the palette open instead of running an action.
             PaletteAction::EnterSub(_) => {}
@@ -3086,7 +3092,7 @@ impl eframe::App for WowsToolkitApp {
 
         egui::CentralPanel::default().show(ui, |ui| {
             DockArea::new(&mut self.dock_state)
-                .style(Style::from_egui(ui.style().as_ref()))
+                .style(crate::ui::theme::style::dock_style(ui.style().as_ref()))
                 .allowed_splits(egui_dock::AllowedSplits::None)
                 .show_leaf_collapse_buttons(false)
                 .show_leaf_close_all_buttons(false)
@@ -3131,7 +3137,7 @@ impl eframe::App for WowsToolkitApp {
                         other => {
                             self.tab_state.command_palette.state.close();
                             self.tab_state.command_palette.mode = PaletteMode::Root;
-                            self.dispatch_palette_action(other);
+                            self.dispatch_palette_action(&ctx, other);
                         }
                     },
                     egui_palette::Outcome::Dismissed(_) => {
