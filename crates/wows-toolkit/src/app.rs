@@ -73,6 +73,7 @@ pub enum Tab {
     ModManager,
     ArmorViewer,
     Stats,
+    Search,
 }
 
 impl Tab {
@@ -86,6 +87,7 @@ impl Tab {
             Tab::ModManager => (icons::WRENCH, "ui.tabs.mod_manager"),
             Tab::ArmorViewer => (icons::SHIELD, "ui.tabs.armor_viewer"),
             Tab::Stats => (icons::CHART_BAR, "ui.tabs.stats"),
+            Tab::Search => (icons::MAGNIFYING_GLASS, "ui.tabs.search"),
         };
         wt_translations::icon_t(icon, &t!(key))
     }
@@ -120,6 +122,7 @@ impl TabViewer for ToolkitTabViewer<'_> {
             Tab::ModManager => self.build_mod_manager_tab(ui),
             Tab::ArmorViewer => self.build_armor_viewer_tab(ui),
             Tab::Stats => self.build_stats_tab(ui),
+            Tab::Search => self.build_search_tab(ui),
         }
     }
 
@@ -274,8 +277,16 @@ impl Default for WowsToolkitApp {
             show_about_window: false,
             tab_state: Default::default(),
             dock_state: DockState::new(
-                [Tab::ReplayParser, Tab::Stats, Tab::PlayerTracker, Tab::ArmorViewer, Tab::Unpacker, Tab::Settings]
-                    .to_vec(),
+                [
+                    Tab::ReplayParser,
+                    Tab::Stats,
+                    Tab::PlayerTracker,
+                    Tab::Search,
+                    Tab::ArmorViewer,
+                    Tab::Unpacker,
+                    Tab::Settings,
+                ]
+                .to_vec(),
             ),
             show_error_window: false,
             error_to_show: None,

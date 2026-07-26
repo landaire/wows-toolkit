@@ -22,6 +22,7 @@ player_tracker = "Player Tracker"
 mod_manager = "Mod Manager"
 armor_viewer = "Armor Viewer"
 stats = "Stats"
+search = "Search"
 
 # -- Common buttons --
 

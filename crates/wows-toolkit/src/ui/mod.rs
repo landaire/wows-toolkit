@@ -4,6 +4,7 @@ pub mod mod_manager;
 pub(crate) mod plaintext_viewer;
 pub mod player_tracker;
 pub mod replay_parser;
+pub mod search_tab;
 pub mod session_stats_chart;
 mod settings_tab;
 pub mod stats_tab;
