@@ -293,11 +293,16 @@ pub fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
     // from_egui derives this from widgets.active.fg_stroke, which this theme sets to
     // PANEL for the knocked-out label. That would make a dragged separator invisible.
     style.separator.color_dragged = accent;
+    // egui_dock halves selection.bg_fill for this, which the theme's dim
+    // selection renders invisible. The overlay marks where a dragged tab will
+    // land, so it has to read over arbitrary content.
+    style.overlay.selection_color = Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 96);
     style
 }
 
 #[cfg(test)]
 mod tests {
+    use egui::Color32;
     use egui::CornerRadius;
     use egui::Stroke;
 
@@ -373,6 +378,11 @@ mod tests {
             assert_eq!(s.tab.tab_body.stroke, Stroke::NONE, "{name} tab_body.stroke");
             assert_eq!(s.tab.tab_body.bg_fill, panel, "{name} tab_body.bg_fill");
             assert_eq!(s.separator.color_dragged, accent, "{name} separator.color_dragged");
+            assert_eq!(
+                s.overlay.selection_color,
+                Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 96),
+                "{name} overlay.selection_color"
+            );
         }
     }
 
