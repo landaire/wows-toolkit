@@ -5,10 +5,12 @@ mod sorting;
 use std::path::PathBuf;
 
 pub use models::Achievement;
+pub use models::ClanColor;
 pub use models::Damage;
 pub use models::DamageInteraction;
 pub use models::Hits;
 pub use models::PlayerReport;
+pub use models::PlayerTint;
 pub use models::PotentialDamage;
 pub use models::SkillInfo;
 pub use models::TranslatedBuild;
@@ -71,7 +73,6 @@ use egui::TextFormat;
 use egui::Tooltip;
 use egui::UiKind;
 use egui::Vec2;
-use egui::Visuals;
 use egui::text::LayoutJob;
 
 use escaper::decode_html;
@@ -673,11 +674,6 @@ impl UiReport {
 
         let locale = "en-US";
 
-        // Report colours are baked in here, off the UI thread with no live theme
-        // to read; anchor to dark, matching the palette these colours were tuned
-        // for.
-        let visuals = Visuals::dark();
-
         // Single source of truth for per-player numbers: the egui-free normalized
         // report. PlayerReport below is presentation rebuilt over these values.
         let normalized = wows_replay_insights::battle_report::NormalizedBattleReport::from_battle_report(
@@ -703,18 +699,13 @@ impl UiReport {
                 let vehicle_param = player.vehicle();
                 let server = np.server_results.as_ref();
 
-                let mut player_color = player_color_for_team_relation(np.relation, &visuals);
+                let mut tint = PlayerTint::from_relation(np.relation);
                 if let (Some(self_div), Some(self_id)) = (self_division_id, self_db_id)
                     && self_id != np.db_id
                     && np.division_id == Some(self_div)
                 {
-                    player_color = Color32::GOLD;
+                    tint = PlayerTint::DivisionMate;
                 }
-                let name_color = if np.is_abuser {
-                    Color32::from_rgb(0xFF, 0xC0, 0xCB) // pink
-                } else {
-                    player_color
-                };
 
                 let known_species = vehicle_param.species().and_then(|r| r.known().cloned());
                 let ship_species_text: String = known_species
@@ -730,19 +721,15 @@ impl UiReport {
                         .or_else(|| fallback_ship_icons.get(species).cloned())
                 });
 
-                let clan_text = if !np.clan.is_empty() {
-                    Some(
-                        RichText::new(format!("[{}]", np.clan)).color(clan_color_for_player(player, &visuals).unwrap()),
-                    )
+                let (clan_tag, clan_color) = if !np.clan.is_empty() {
+                    (Some(np.clan.clone()), clan_color_for_player(player))
                 } else {
-                    None
+                    (None, None)
                 };
-                let name_text = RichText::new(&np.display_name).color(name_color);
+                let name_text = np.display_name.clone();
 
                 let (base_xp, base_xp_text) = match server.and_then(|sr| sr.xp) {
-                    Some(base_xp) => {
-                        (Some(base_xp), Some(RichText::new(separate_number(base_xp, Some(locale))).color(player_color)))
-                    }
+                    Some(base_xp) => (Some(base_xp), Some(separate_number(base_xp, Some(locale)))),
                     None => (None, None),
                 };
 
@@ -757,7 +744,7 @@ impl UiReport {
                 let (actual_damage, actual_damage_report, actual_damage_text, actual_damage_hover_text) = match server {
                     Some(sr) if sr.damage.is_some() => {
                         let damage_number = sr.damage.expect("damage present");
-                        let text = RichText::new(separate_number(damage_number, Some(locale))).color(player_color);
+                        let text = separate_number(damage_number, Some(locale));
                         let hover = RichText::new(breakdown_hover_string(&DAMAGE_DESCRIPTIONS, locale, |key| {
                             sr.damage_by_type.get(key).copied().unwrap_or(0)
                         }))
@@ -770,7 +757,7 @@ impl UiReport {
                 let (hits, hits_report, hits_text, hits_hover_text) = match server {
                     Some(sr) => {
                         let hits_number = sr.hits.unwrap_or(0);
-                        let text = RichText::new(separate_number(hits_number, Some(locale))).color(player_color);
+                        let text = separate_number(hits_number, Some(locale));
                         let hover = RichText::new(breakdown_hover_string(&HITS_DESCRIPTIONS, locale, |key| {
                             sr.hits_by_type.get(key).copied().unwrap_or(0)
                         }))
@@ -784,7 +771,7 @@ impl UiReport {
                     match server {
                         Some(sr) => {
                             let total = sr.received_damage;
-                            let text = RichText::new(separate_number(total, Some(locale))).color(player_color);
+                            let text = separate_number(total, Some(locale));
                             let hover =
                                 RichText::new(breakdown_hover_string(&RECEIVED_DAMAGE_DESCRIPTIONS, locale, |key| {
                                     sr.received_damage_by_type.get(key).copied().unwrap_or(0)
@@ -872,16 +859,15 @@ impl UiReport {
                 let time_lived_secs = np.time_lived_secs;
                 let time_lived_text = time_lived_secs.map(|secs| format!("{}:{:02}", secs / 60, secs % 60));
 
-                // Skill counts come from the normalized report; the colored label and
-                // hover still need the entity's commander-skill list.
+                // Skill counts come from the normalized report; the label and hover
+                // still need the entity's commander-skill list.
                 let species = vehicle_param.species().and_then(|r| r.known()).cloned().expect("ship has no species?");
-                let (label_text, hover_text) = util::colorize_captain_points(
+                let (tier, label_text, hover_text) = util::colorize_captain_points(
                     np.skill_info.skill_points,
                     np.skill_info.num_skills,
                     np.skill_info.highest_tier,
                     np.skill_info.num_tier_1_skills,
                     vehicle.and_then(|v| v.commander_skills(species)),
-                    &visuals,
                 );
                 let skill_info = SkillInfo {
                     skill_points: np.skill_info.skill_points,
@@ -890,6 +876,7 @@ impl UiReport {
                     num_tier_1_skills: np.skill_info.num_tier_1_skills,
                     hover_text,
                     label_text,
+                    tier,
                 };
 
                 // `fires_dealt` is `Some` exactly when the resolved object carried an
@@ -959,9 +946,11 @@ impl UiReport {
 
                 PlayerReport {
                     player: Arc::clone(player),
-                    color: player_color,
+                    tint,
+                    is_abuser: np.is_abuser,
                     name_text,
-                    clan_text,
+                    clan_tag,
+                    clan_color,
                     icon,
                     division_label: np.division_label.clone(),
                     base_xp,
@@ -1212,8 +1201,8 @@ impl UiReport {
 
                     // Build hover text with clan tag and player name
                     let mut hover_layout = LayoutJob::default();
-                    if let Some(clan_text) = interaction_player.clan_text() {
-                        clan_text.clone().append_to(
+                    if let Some(clan_text) = interaction_player.clan_text(ui.visuals()) {
+                        clan_text.append_to(
                             &mut hover_layout,
                             &style,
                             egui::FontSelection::Default,
@@ -1221,7 +1210,7 @@ impl UiReport {
                         );
                         hover_layout.append(" ", 0.0, Default::default());
                     }
-                    interaction_player.name_text.clone().append_to(
+                    interaction_player.name_text(ui.visuals()).append_to(
                         &mut hover_layout,
                         &style,
                         egui::FontSelection::Default,
@@ -1544,8 +1533,8 @@ impl UiReport {
 
                     // Build hover text with clan tag and player name
                     let mut hover_layout = LayoutJob::default();
-                    if let Some(clan_text) = interaction_player.clan_text() {
-                        clan_text.clone().append_to(
+                    if let Some(clan_text) = interaction_player.clan_text(ui.visuals()) {
+                        clan_text.append_to(
                             &mut hover_layout,
                             &style,
                             egui::FontSelection::Default,
@@ -1553,7 +1542,7 @@ impl UiReport {
                         );
                         hover_layout.append(" ", 0.0, Default::default());
                     }
-                    interaction_player.name_text.clone().append_to(
+                    interaction_player.name_text(ui.visuals()).append_to(
                         &mut hover_layout,
                         &style,
                         egui::FontSelection::Default,
@@ -1848,7 +1837,7 @@ impl UiReport {
                                 // the icon size is <1k, this clone is fairly cheap
                                 bytes: icon.data.clone().into(),
                             })
-                            .tint(report.color)
+                            .tint(report.tint.color(ui.visuals()))
                             .fit_to_exact_size((20.0, 20.0).into())
                             .rotate(90.0_f32.to_radians(), Vec2::splat(0.5));
 
@@ -1866,12 +1855,12 @@ impl UiReport {
                         }
 
                         // Add player clan
-                        if let Some(clan_text) = report.clan_text.clone() {
+                        if let Some(clan_text) = report.clan_text(ui.visuals()) {
                             ui.label(clan_text);
                         }
 
                         // Add player name
-                        ui.label(report.name_text.clone());
+                        ui.label(report.name_text(ui.visuals()));
 
                         // Add icons for player properties
                         {
@@ -1945,8 +1934,8 @@ impl UiReport {
                         }
                     }
                     ReplayColumn::BaseXp => {
-                        if let Some(base_xp_text) = report.base_xp_text.clone() {
-                            ui.label(base_xp_text);
+                        if let Some(base_xp_text) = report.base_xp_text.as_ref() {
+                            ui.label(RichText::new(base_xp_text).color(report.tint.color(ui.visuals())));
                         } else {
                             ui.label("-");
                         }
@@ -1976,11 +1965,12 @@ impl UiReport {
                         }
                     }
                     ReplayColumn::ActualDamage => {
-                        if let Some(damage_text) = report.actual_damage_text.clone() {
+                        if let Some(damage_text) = report.actual_damage_text.as_ref() {
                             if report.should_hide_stats() && !self.debug_mode {
                                 ui.label(t!("ui.replay.nda"));
                             } else {
-                                let response = ui.label(damage_text);
+                                let response =
+                                    ui.label(RichText::new(damage_text).color(report.tint.color(ui.visuals())));
                                 if report.actual_damage_hover_text().is_some() || report.damage_interactions.is_some() {
                                     let tooltip = Tooltip::for_enabled(&response);
                                     tooltip.show(|ui| {
@@ -1993,11 +1983,12 @@ impl UiReport {
                         }
                     }
                     ReplayColumn::ReceivedDamage => {
-                        if let Some(received_damage_text) = report.received_damage_text.clone() {
+                        if let Some(received_damage_text) = report.received_damage_text.as_ref() {
                             if report.should_hide_stats() && !self.debug_mode {
                                 ui.label(t!("ui.replay.nda"));
                             } else {
-                                let response = ui.label(received_damage_text);
+                                let response = ui
+                                    .label(RichText::new(received_damage_text).color(report.tint.color(ui.visuals())));
                                 if report.received_damage_hover_text().is_some() || report.damage_interactions.is_some()
                                 {
                                     let tooltip = Tooltip::for_enabled(&response);
@@ -2058,7 +2049,9 @@ impl UiReport {
                             )
                             .on_hover_text(t!("ui.replay.build.not_spotted"));
                         } else {
-                            let response = ui.label(report.skill_info.label_text.clone());
+                            let label = RichText::new(&report.skill_info.label_text)
+                                .color(report.skill_info.tier.color(ui.visuals()));
+                            let response = ui.label(label);
                             if let Some(hover_text) = &report.skill_info.hover_text {
                                 response.on_hover_text(hover_text);
                             }
@@ -2199,11 +2192,12 @@ impl UiReport {
                         });
                     }
                     ReplayColumn::Hits => {
-                        if let Some(hits_text) = report.hits_text.clone() {
+                        if let Some(hits_text) = report.hits_text.as_ref() {
                             if report.should_hide_stats() && !self.debug_mode {
                                 ui.label(t!("ui.replay.nda"));
                             } else {
-                                let response = ui.label(hits_text);
+                                let response =
+                                    ui.label(RichText::new(hits_text).color(report.tint.color(ui.visuals())));
                                 if let Some(hover_text) = report.hits_hover_text.clone() {
                                     response.on_hover_text(hover_text);
                                 }
@@ -2585,12 +2579,9 @@ impl UiReport {
 
             // Bot display name
             if player_state.is_bot() && player_state.username().starts_with("IDS_") {
-                let display_name = metadata_provider
+                report.name_text = metadata_provider
                     .localized_name_from_id(&TranslationKey::new(player_state.username()))
                     .unwrap_or_else(|| player_state.username().to_string());
-                let name_color =
-                    if player_state.is_abuser() { Color32::from_rgb(0xFF, 0xC0, 0xCB) } else { report.color };
-                report.name_text = RichText::new(&display_name).color(name_color);
             }
 
             // Translated build
@@ -2948,7 +2939,9 @@ pub struct Replay {
     pub source_path: Option<PathBuf>,
 }
 
-fn clan_color_for_player(player: &Player, visuals: &egui::Visuals) -> Option<Color32> {
+/// The colour a player's clan tag should render with. `None` if the player
+/// has no clan. Resolved to a `Color32` at draw time via `ClanColor::color`.
+fn clan_color_for_player(player: &Player) -> Option<ClanColor> {
     let state = player.initial_state();
     if state.clan().is_empty() {
         return None;
@@ -2956,14 +2949,14 @@ fn clan_color_for_player(player: &Player, visuals: &egui::Visuals) -> Option<Col
     // Older replays omit clanColor; fall back to the player's team color so the
     // clan tag still renders instead of panicking.
     let clan_color = match state.raw_with_names().get("clanColor").and_then(|c| c.as_i64()) {
-        Some(clan_color) => Color32::from_rgb(
+        Some(clan_color) => ClanColor::Fixed(Color32::from_rgb(
             ((clan_color & 0xFF0000) >> 16) as u8,
             ((clan_color & 0xFF00) >> 8) as u8,
             (clan_color & 0xFF) as u8,
-        ),
+        )),
         None => {
             tracing::warn!("player '{}' has no clanColor; using team color", state.username());
-            player_color_for_team_relation(player.relation(), visuals)
+            ClanColor::Relation(PlayerTint::from_relation(player.relation()))
         }
     };
     Some(clan_color)
@@ -5817,7 +5810,7 @@ fn build_replay_chat_content(
             job.append(
                 &format!("[{}] ", player.initial_state().clan()),
                 0.0,
-                TextFormat { color: clan_color_for_player(player, ui.visuals()).unwrap(), ..Default::default() },
+                TextFormat { color: clan_color_for_player(player).unwrap().color(ui.visuals()), ..Default::default() },
             );
         }
         job.append(&format!("{sender_name}:\n"), 0.0, TextFormat { color: name_color, ..Default::default() });

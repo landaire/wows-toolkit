@@ -1,7 +1,6 @@
 use crate::icons;
 use crate::ui::theme::semantic::semantic;
 use egui::Color32;
-use egui::RichText;
 use jiff::Timestamp;
 use jiff::civil::DateTime;
 use jiff::tz::TimeZone;
@@ -75,20 +74,40 @@ pub fn build_short_ship_config_url(player: &Player, metadata_provider: &GameMeta
     Some(url)
 }
 
+/// How a player's captain-skill point count reads at a glance. Resolved to a
+/// colour at draw time so the scoreboard follows the active theme.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub enum SkillTier {
+    Poor,
+    Mediocre,
+    Good,
+    Great,
+}
+
+impl SkillTier {
+    pub fn color(self, visuals: &egui::Visuals) -> Color32 {
+        let sem = semantic(visuals);
+        match self {
+            Self::Poor => sem.loss,
+            Self::Mediocre => sem.warn,
+            Self::Good => sem.division,
+            Self::Great => sem.win,
+        }
+    }
+}
+
 pub fn colorize_captain_points(
     points: usize,
     skills: usize,
     highest_skill_tier: usize,
     num_tier_1_skills: usize,
     raw_skills: Option<Vec<&CrewSkill>>,
-    visuals: &egui::Visuals,
-) -> (RichText, Option<String>) {
-    let sem = semantic(visuals);
-    let mut color = match points {
-        0..=9 => sem.loss,
-        10..=12 => sem.warn,
-        13..=16 => sem.division,
-        _ => sem.win,
+) -> (SkillTier, String, Option<String>) {
+    let mut tier = match points {
+        0..=9 => SkillTier::Poor,
+        10..=12 => SkillTier::Mediocre,
+        13..=16 => SkillTier::Good,
+        _ => SkillTier::Great,
     };
     const NUM_SKILLS_IN_TIER: usize = 6;
 
@@ -118,11 +137,11 @@ pub fn colorize_captain_points(
     let extra_icons = if !extra_icons.is_empty() { extra_icons.join("") } else { String::new() };
 
     if num_tier_1_skills == NUM_SKILLS_IN_TIER {
-        color = sem.loss;
+        tier = SkillTier::Poor;
         let default_text = "Player is playing tower defense with their skills";
         return (
-            RichText::new(format!("{}{} {}pts ({} skills)", extra_icons, crate::icons::CASTLE_TURRET, points, skills))
-                .color(color),
+            tier,
+            format!("{}{} {}pts ({} skills)", extra_icons, crate::icons::CASTLE_TURRET, points, skills),
             if extra_hover_text.is_empty() {
                 Some(default_text.to_string())
             } else {
@@ -130,11 +149,11 @@ pub fn colorize_captain_points(
             },
         );
     } else if highest_skill_tier <= 2 && points >= 6 {
-        color = sem.loss;
+        tier = SkillTier::Poor;
         let default_text = "Player has no skills above tier 2";
         return (
-            RichText::new(format!("{}{} {}pts ({} skills)", extra_icons, crate::icons::WARNING, points, skills))
-                .color(color),
+            tier,
+            format!("{}{} {}pts ({} skills)", extra_icons, crate::icons::WARNING, points, skills),
             if extra_hover_text.is_empty() {
                 Some(default_text.to_string())
             } else {
@@ -144,7 +163,8 @@ pub fn colorize_captain_points(
     }
 
     (
-        RichText::new(format!("{extra_icons}{points}pts ({skills} skills)")).color(color),
+        tier,
+        format!("{extra_icons}{points}pts ({skills} skills)"),
         if extra_hover_text.is_empty() { None } else { Some(format!("Player has {}", extra_hover_text.join(", "))) },
     )
 }

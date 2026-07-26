@@ -23,6 +23,61 @@ pub fn ship_class_icon_from_species(species: Species, wows_data: &WorldOfWarship
     wows_data.ship_icons.get(&species).cloned()
 }
 
+/// What a player is, for colouring. Resolved to a colour at draw time so the
+/// scoreboard follows the active theme without rebuilding the report.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlayerTint {
+    SelfPlayer,
+    Ally,
+    Enemy,
+    DivisionMate,
+    Abuser,
+}
+
+impl PlayerTint {
+    /// Classifies by relation alone (self/ally/enemy). Division-mate and
+    /// abuser overrides are layered on top by the caller, since those are
+    /// stronger classifications than plain relation.
+    pub fn from_relation(relation: Relation) -> Self {
+        if relation.is_self() {
+            Self::SelfPlayer
+        } else if relation.is_ally() {
+            Self::Ally
+        } else {
+            Self::Enemy
+        }
+    }
+
+    pub fn color(self, visuals: &egui::Visuals) -> Color32 {
+        let sem = crate::ui::theme::semantic::semantic(visuals);
+        match self {
+            Self::SelfPlayer => sem.text_strong,
+            Self::Ally => sem.win,
+            Self::Enemy => sem.loss,
+            Self::DivisionMate => sem.division,
+            Self::Abuser => sem.abuser,
+        }
+    }
+}
+
+/// A clan tag's colour: the server-supplied clan colour, or, for replays
+/// that omit it (pre-clan-color builds), the plain relation colour as a
+/// fallback so the tag still renders.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClanColor {
+    Fixed(Color32),
+    Relation(PlayerTint),
+}
+
+impl ClanColor {
+    pub fn color(self, visuals: &egui::Visuals) -> Color32 {
+        match self {
+            Self::Fixed(color) => color,
+            Self::Relation(tint) => tint.color(visuals),
+        }
+    }
+}
+
 /// Information about a player's skill build.
 #[derive(Clone, Serialize)]
 pub struct SkillInfo {
@@ -33,7 +88,11 @@ pub struct SkillInfo {
     #[serde(skip)]
     pub hover_text: Option<String>,
     #[serde(skip)]
-    pub label_text: RichText,
+    pub label_text: String,
+    /// How the point count reads at a glance; resolved to a colour at draw
+    /// time. See `crate::util::formatting::SkillTier`.
+    #[serde(skip)]
+    pub tier: crate::util::formatting::SkillTier,
 }
 
 // Per-type damage/hit/potential breakdowns are field-identical to the insights
@@ -120,26 +179,31 @@ pub struct PlayerConsumable {
 /// Report for a single player in a battle.
 pub struct PlayerReport {
     pub player: Arc<Player>,
-    pub color: Color32,
-    pub name_text: RichText,
-    pub clan_text: Option<RichText>,
+    /// Row colour: relation, with a division-mate override. Does not reflect
+    /// abuser status; the name specifically applies that on top (see
+    /// [`Self::name_text`]).
+    pub tint: PlayerTint,
+    pub is_abuser: bool,
+    pub name_text: String,
+    pub clan_tag: Option<String>,
+    pub clan_color: Option<ClanColor>,
     pub ship_species_text: String,
     pub icon: Option<Arc<GameAsset>>,
     pub division_label: Option<String>,
     pub base_xp: Option<i64>,
-    pub base_xp_text: Option<RichText>,
+    pub base_xp_text: Option<String>,
     pub raw_xp: Option<i64>,
     pub raw_xp_text: Option<String>,
     pub observed_damage: u64,
     pub observed_damage_text: String,
     pub actual_damage: Option<u64>,
     pub actual_damage_report: Option<Damage>,
-    pub actual_damage_text: Option<RichText>,
+    pub actual_damage_text: Option<String>,
     /// RichText to support monospace font
     pub actual_damage_hover_text: Option<RichText>,
     pub hits: Option<u64>,
     pub hits_report: Option<Hits>,
-    pub hits_text: Option<RichText>,
+    pub hits_text: Option<String>,
     /// RichText to support monospace font
     pub hits_hover_text: Option<RichText>,
     pub ship_name: String,
@@ -154,7 +218,7 @@ pub struct PlayerReport {
     pub time_lived_text: Option<String>,
     pub skill_info: SkillInfo,
     pub received_damage: Option<u64>,
-    pub received_damage_text: Option<RichText>,
+    pub received_damage_text: Option<String>,
     pub received_damage_hover_text: Option<RichText>,
     pub received_damage_report: Option<Damage>,
     pub damage_interactions: Option<HashMap<AccountId, DamageInteraction>>,
@@ -219,16 +283,24 @@ impl PlayerReport {
         self.player.vehicle_entity()
     }
 
-    pub fn color(&self) -> Color32 {
-        self.color
+    pub fn tint(&self) -> PlayerTint {
+        self.tint
     }
 
-    pub fn name_text(&self) -> &RichText {
-        &self.name_text
+    /// The row tint, with the abuser override layered on top if applicable.
+    /// This is the role the player's name renders with.
+    pub fn name_tint(&self) -> PlayerTint {
+        if self.is_abuser { PlayerTint::Abuser } else { self.tint }
     }
 
-    pub fn clan_text(&self) -> Option<&RichText> {
-        self.clan_text.as_ref()
+    pub fn name_text(&self, visuals: &egui::Visuals) -> RichText {
+        RichText::new(&self.name_text).color(self.name_tint().color(visuals))
+    }
+
+    pub fn clan_text(&self, visuals: &egui::Visuals) -> Option<RichText> {
+        let tag = self.clan_tag.as_ref()?;
+        let color = self.clan_color.expect("clan_tag is set without a clan_color").color(visuals);
+        Some(RichText::new(format!("[{tag}]")).color(color))
     }
 
     pub fn ship_species_text(&self) -> &str {
@@ -247,7 +319,7 @@ impl PlayerReport {
         self.base_xp
     }
 
-    pub fn base_xp_text(&self) -> Option<&RichText> {
+    pub fn base_xp_text(&self) -> Option<&String> {
         self.base_xp_text.as_ref()
     }
 
@@ -275,7 +347,7 @@ impl PlayerReport {
         self.actual_damage_report.as_ref()
     }
 
-    pub fn actual_damage_text(&self) -> Option<&RichText> {
+    pub fn actual_damage_text(&self) -> Option<&String> {
         self.actual_damage_text.as_ref()
     }
 
@@ -331,7 +403,7 @@ impl PlayerReport {
         self.received_damage
     }
 
-    pub fn received_damage_text(&self) -> Option<&RichText> {
+    pub fn received_damage_text(&self) -> Option<&String> {
         self.received_damage_text.as_ref()
     }
 

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use egui::Visuals;
 use escaper::decode_html;
 use jiff::Timestamp;
 use serde::Serialize;
@@ -22,7 +21,6 @@ use crate::ui::replay_parser::PotentialDamage;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SkillInfo;
 use crate::ui::replay_parser::TranslatedBuild;
-use crate::util::player_color_for_team_relation;
 
 #[derive(Serialize)]
 pub struct Match {
@@ -120,6 +118,14 @@ pub struct Player {
     is_replay_perspective: bool,
 }
 
+/// Fallback clan colours for pre-clan-color replays with no `clanColor`
+/// field. Exported data must not vary with the app's theme, so these are
+/// fixed values (dark palette: self = text_strong, ally = win, enemy = loss)
+/// rather than a resolved-at-theme call.
+const EXPORT_FALLBACK_CLAN_COLOR_SELF: u32 = 0x00_FA_F8_F1;
+const EXPORT_FALLBACK_CLAN_COLOR_ALLY: u32 = 0x00_6F_D9_8A;
+const EXPORT_FALLBACK_CLAN_COLOR_ENEMY: u32 = 0x00_EA_70_78;
+
 impl From<&wows_replays::analyzer::battle_controller::Player> for Player {
     fn from(value: &wows_replays::analyzer::battle_controller::Player) -> Self {
         let state = value.initial_state();
@@ -133,11 +139,14 @@ impl From<&wows_replays::analyzer::battle_controller::Player> for Player {
                 Some(clan_color) => (clan_color & 0xFFFFFF) as u32,
                 None => {
                     tracing::warn!("player '{}' has no clanColor; using team color", state.username());
-                    // This runs off the UI thread building exported data, not a
-                    // live view, so there is no theme to read; anchor to dark,
-                    // matching the palette these colours were tuned for.
-                    let color = player_color_for_team_relation(value.relation(), &Visuals::dark());
-                    ((color.r() as u32) << 16) | ((color.g() as u32) << 8) | (color.b() as u32)
+                    let relation = value.relation();
+                    if relation.is_self() {
+                        EXPORT_FALLBACK_CLAN_COLOR_SELF
+                    } else if relation.is_enemy() {
+                        EXPORT_FALLBACK_CLAN_COLOR_ENEMY
+                    } else {
+                        EXPORT_FALLBACK_CLAN_COLOR_ALLY
+                    }
                 }
             }
         };
