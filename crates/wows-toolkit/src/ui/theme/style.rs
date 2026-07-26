@@ -154,7 +154,7 @@ fn dark_visuals() -> Visuals {
         indent_has_left_vline: true,
         striped: true,
         slider_trailing_fill: true,
-        ..Default::default()
+        ..Visuals::dark()
     }
 }
 
@@ -274,6 +274,8 @@ pub fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
     let mut style = egui_dock::Style::from_egui(egui_style);
     style.tab_bar.bg_fill = surface;
     style.tab_bar.hline_color = border;
+    // from_egui adds +2 to the noninteractive corner radius unconditionally; square it back off.
+    style.tab_bar.corner_radius = CornerRadius::ZERO;
     style.tab.active.bg_fill = accent;
     style.tab.active.text_color = panel;
     style.tab.active.outline_color = accent;
@@ -288,12 +290,16 @@ pub fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
     // Tab and its panel read as one shape; the panel fill provides the boundary.
     style.tab.tab_body.stroke = egui::Stroke::NONE;
     style.tab.tab_body.bg_fill = panel;
+    // from_egui derives this from widgets.active.fg_stroke, which this theme sets to
+    // PANEL for the knocked-out label. That would make a dragged separator invisible.
+    style.separator.color_dragged = accent;
     style
 }
 
 #[cfg(test)]
 mod tests {
     use egui::CornerRadius;
+    use egui::Stroke;
 
     use super::*;
     use crate::ui::theme::palette;
@@ -328,14 +334,46 @@ mod tests {
     }
 
     #[test]
-    fn dock_active_tab_inverts_and_matches_the_theme() {
-        let dark = dock_style(&dark_style());
-        assert_eq!(dark.tab.active.bg_fill, palette::dark::ACCENT);
-        assert_eq!(dark.tab.inactive.bg_fill, palette::dark::SURFACE);
-
-        let light = dock_style(&light_style());
-        assert_eq!(light.tab.active.bg_fill, palette::light::ACCENT);
-        assert_eq!(light.tab.inactive.bg_fill, palette::light::SURFACE);
+    fn dock_style_themes_every_field_it_sets() {
+        for (name, egui_style, surface, panel, widget_hot, border, accent) in [
+            (
+                "dark",
+                dark_style(),
+                palette::dark::SURFACE,
+                palette::dark::PANEL,
+                palette::dark::WIDGET_HOT,
+                palette::dark::BORDER,
+                palette::dark::ACCENT,
+            ),
+            (
+                "light",
+                light_style(),
+                palette::light::SURFACE,
+                palette::light::PANEL,
+                palette::light::WIDGET_HOT,
+                palette::light::BORDER,
+                palette::light::ACCENT,
+            ),
+        ] {
+            let s = dock_style(&egui_style);
+            assert_eq!(s.tab_bar.bg_fill, surface, "{name} tab_bar.bg_fill");
+            assert_eq!(s.tab_bar.hline_color, border, "{name} tab_bar.hline_color");
+            assert_eq!(s.tab_bar.corner_radius, CornerRadius::ZERO, "{name} tab_bar is rounded");
+            assert_eq!(s.tab.active.bg_fill, accent, "{name} tab.active.bg_fill");
+            assert_eq!(s.tab.active.text_color, panel, "{name} tab.active.text_color");
+            assert_eq!(s.tab.active.outline_color, accent, "{name} tab.active.outline_color");
+            assert_eq!(s.tab.focused.bg_fill, accent, "{name} tab.focused.bg_fill");
+            assert_eq!(s.tab.focused.text_color, panel, "{name} tab.focused.text_color");
+            assert_eq!(s.tab.focused.outline_color, accent, "{name} tab.focused.outline_color");
+            assert_eq!(s.tab.inactive.bg_fill, surface, "{name} tab.inactive.bg_fill");
+            assert_eq!(s.tab.inactive.outline_color, border, "{name} tab.inactive.outline_color");
+            assert_eq!(s.tab.hovered.bg_fill, widget_hot, "{name} tab.hovered.bg_fill");
+            assert_eq!(s.tab.hovered.outline_color, border, "{name} tab.hovered.outline_color");
+            assert!(!s.tab.hline_below_active_tab_name, "{name} hline_below_active_tab_name");
+            assert_eq!(s.tab.tab_body.stroke, Stroke::NONE, "{name} tab_body.stroke");
+            assert_eq!(s.tab.tab_body.bg_fill, panel, "{name} tab_body.bg_fill");
+            assert_eq!(s.separator.color_dragged, accent, "{name} separator.color_dragged");
+        }
     }
 
     #[test]
