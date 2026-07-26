@@ -522,6 +522,13 @@ async fn bounded_search_players_and_ships() {
     let capped = query::search_players(&pool, "p", 1).await.unwrap();
     assert_eq!(capped.len(), 1);
 
+    // Needle "p" matches every seeded name, including the bot's "p0" (account 0, from
+    // seed_rosters). This genuinely exercises the `account_id <> 0` filter: unlike the
+    // "P5" search above, the bot's name is NOT already excluded by the LIKE predicate.
+    let all = query::search_players(&pool, "p", 50).await.unwrap();
+    assert!(all.iter().any(|p| p.account_id.raw() == 7), "real player present");
+    assert!(!all.iter().any(|p| p.account_id.raw() == 0), "bot excluded despite matching needle");
+
     // self-ships: "haru" -> Harugumo.
     let ships = query::search_self_ships(&pool, "haru", 50).await.unwrap();
     assert!(ships.iter().any(|s| s.ship_id.raw() == 999));
