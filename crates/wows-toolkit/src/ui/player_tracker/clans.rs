@@ -43,8 +43,11 @@ pub(crate) struct ClanRow {
 /// The whole breakdown plus how much of it carries exact attribution.
 #[derive(Debug, Clone)]
 pub(crate) struct ClanBreakdown {
-    /// Tracked-player count this was built against, so new history invalidates it.
-    pub tracked_count: usize,
+    /// [`PlayerTracker::encounter_version`] this was built against, so newly
+    /// ingested history invalidates it. A count of tracked players would not:
+    /// a battle against players already in the tracker adds arena ids and
+    /// timestamps to existing entries and leaves the map the same size.
+    pub encounter_version: u64,
     pub rows: Vec<ClanRow>,
     /// Encounters whose arena the index covers, so their clan label is the clan
     /// the player was actually in. Computed and asserted by the aggregation
@@ -76,8 +79,12 @@ struct ClanAccumulator {
 /// timestamp. Both keys are exact on their own, which is why the tracker's
 /// unpaired `arena_ids` and `timestamps` sets need no reconciliation: every
 /// player in a battle shares that battle's timestamp.
+///
+/// `encounter_version` is the tracker's version of `tracked` at the time of the
+/// call, carried on the result as its cache key.
 pub(crate) fn build_clan_breakdown(
     tracked: &HashMap<AccountId, TrackedPlayer>,
+    encounter_version: u64,
     index_latest_clan: &HashMap<AccountId, String>,
     corrections: &[ClanCorrection],
     indexed_arenas: &HashSet<ArenaId>,
@@ -136,8 +143,16 @@ pub(crate) fn build_clan_breakdown(
             // A clan only reached here through an encounter, so `last_seen` is
             // set unless the arena and timestamp passes disagreed on the label,
             // which a correction to a different clan can cause. Drop those
-            // rather than invent a timestamp.
-            let last_seen = acc.last_seen?;
+            // rather than invent a timestamp, and say so: the row would
+            // otherwise vanish with a non-zero match count and no signal.
+            let Some(last_seen) = acc.last_seen else {
+                tracing::warn!(
+                    clan = clan.as_str(),
+                    matches = acc.arenas.len(),
+                    "clan breakdown: dropping a clan whose encounters carry no timestamp"
+                );
+                return None;
+            };
             let mut members: Vec<(AccountId, usize)> = acc.members.into_iter().collect();
             members.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.raw().cmp(&b.0.raw())));
 
@@ -155,7 +170,7 @@ pub(crate) fn build_clan_breakdown(
 
     rows.sort_by(|a, b| b.matches.cmp(&a.matches).then_with(|| a.clan.cmp(&b.clan)));
 
-    ClanBreakdown { tracked_count: tracked.len(), rows, exact_encounters, total_encounters }
+    ClanBreakdown { encounter_version, rows, exact_encounters, total_encounters }
 }
 
 /// Columns of the clans table, in render order.
@@ -564,13 +579,17 @@ fn fetch_index_inputs(
 /// boundary: `TimePeriod::to_date` is relative to `Timestamp::now`, so a stored
 /// boundary would differ on every frame and re-run the index queries on every
 /// repaint. `cached_period` is `None` after the Refresh button clears it.
+///
+/// `encounter_version` moves on every ingest, including a battle against
+/// players the tracker already holds, which is exactly the population this tab
+/// exists to surface.
 fn breakdown_is_current(
     breakdown: Option<&ClanBreakdown>,
     cached_period: Option<TimePeriod>,
     period: TimePeriod,
-    tracked_count: usize,
+    encounter_version: u64,
 ) -> bool {
-    breakdown.is_some_and(|breakdown| breakdown.tracked_count == tracked_count) && cached_period == Some(period)
+    breakdown.is_some_and(|breakdown| breakdown.encounter_version == encounter_version) && cached_period == Some(period)
 }
 
 /// Rebuild the breakdown when one of its inputs changed. The index queries run
@@ -586,7 +605,7 @@ fn refresh_clan_breakdown(
         tracker.clan_breakdown.as_ref(),
         tracker.clan_breakdown_period,
         period,
-        tracker.tracked_players.len(),
+        tracker.encounter_version,
     ) {
         return;
     }
@@ -598,8 +617,14 @@ fn refresh_clan_breakdown(
         _ => (HashMap::new(), Vec::new(), HashSet::new()),
     };
 
-    tracker.clan_breakdown =
-        Some(build_clan_breakdown(&tracker.tracked_players, &latest, &corrections, &indexed_arenas, period.to_date()));
+    tracker.clan_breakdown = Some(build_clan_breakdown(
+        &tracker.tracked_players,
+        tracker.encounter_version,
+        &latest,
+        &corrections,
+        &indexed_arenas,
+        period.to_date(),
+    ));
     tracker.clan_breakdown_period = Some(period);
 }
 
@@ -765,7 +790,7 @@ mod tests {
     fn groups_by_latest_clan_when_the_index_has_no_corrections() {
         let players = tracked(&[(1, player("RAIN", &[(10, 1000), (11, 2000)])), (2, player("RAIN", &[(10, 1000)]))]);
 
-        let breakdown = build_clan_breakdown(&players, &HashMap::new(), &[], &HashSet::new(), None);
+        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], &HashSet::new(), None);
 
         assert_eq!(breakdown.rows.len(), 1);
         let rain = &breakdown.rows[0];
@@ -787,7 +812,7 @@ mod tests {
             clan: "RAIN".into(),
         }];
 
-        let breakdown = build_clan_breakdown(&players, &HashMap::new(), &corrections, &HashSet::new(), None);
+        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &corrections, &HashSet::new(), None);
 
         let wolf = breakdown.rows.iter().find(|r| r.clan == "WOLF").expect("WOLF row");
         let rain = breakdown.rows.iter().find(|r| r.clan == "RAIN").expect("RAIN row");
@@ -800,7 +825,7 @@ mod tests {
         let players = tracked(&[(1, player("STALE", &[(10, 1000)]))]);
         let latest = HashMap::from([(AccountId(1), "FRESH".to_string())]);
 
-        let breakdown = build_clan_breakdown(&players, &latest, &[], &HashSet::new(), None);
+        let breakdown = build_clan_breakdown(&players, 0, &latest, &[], &HashSet::new(), None);
 
         assert_eq!(breakdown.rows.len(), 1);
         assert_eq!(breakdown.rows[0].clan, "FRESH");
@@ -810,7 +835,7 @@ mod tests {
     fn clanless_players_are_excluded() {
         let players = tracked(&[(1, player("", &[(10, 1000)]))]);
 
-        let breakdown = build_clan_breakdown(&players, &HashMap::new(), &[], &HashSet::new(), None);
+        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], &HashSet::new(), None);
 
         assert!(breakdown.rows.is_empty());
     }
@@ -825,7 +850,7 @@ mod tests {
             clan: String::new(),
         }];
 
-        let breakdown = build_clan_breakdown(&players, &HashMap::new(), &corrections, &HashSet::new(), None);
+        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &corrections, &HashSet::new(), None);
 
         assert_eq!(breakdown.rows.len(), 1);
         assert_eq!(breakdown.rows[0].matches, 1);
@@ -837,6 +862,7 @@ mod tests {
 
         let breakdown = build_clan_breakdown(
             &players,
+            0,
             &HashMap::new(),
             &[],
             &HashSet::new(),
@@ -858,6 +884,7 @@ mod tests {
     fn the_cached_breakdown_is_invalidated_by_its_inputs_and_nothing_else() {
         let breakdown = build_clan_breakdown(
             &tracked(&[(1, player("RAIN", &[(10, 1000)]))]),
+            7,
             &HashMap::new(),
             &[],
             &HashSet::new(),
@@ -866,24 +893,62 @@ mod tests {
         let cached = Some(TimePeriod::LastDay);
 
         assert!(
-            breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastDay, 1),
+            breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastDay, 7),
             "an unchanged frame must reuse the cache rather than re-run the index queries"
         );
         assert!(
-            !breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastWeek, 1),
+            !breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastWeek, 7),
             "changing the period on either sub-tab must invalidate the cache"
         );
         assert!(
-            !breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastDay, 2),
-            "newly tracked history must invalidate the cache"
+            !breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastDay, 8),
+            "newly ingested history must invalidate the cache"
         );
         assert!(
-            !breakdown_is_current(Some(&breakdown), None, TimePeriod::LastDay, 1),
+            !breakdown_is_current(Some(&breakdown), None, TimePeriod::LastDay, 7),
             "the Refresh button clears the period, which must invalidate the cache"
         );
         assert!(
-            !breakdown_is_current(None, cached, TimePeriod::LastDay, 1),
+            !breakdown_is_current(None, cached, TimePeriod::LastDay, 7),
             "the first paint of the tab has nothing cached"
+        );
+    }
+
+    /// The population this tab exists to surface is clans you meet repeatedly,
+    /// so a battle against players the tracker already holds has to invalidate
+    /// the cache. It adds arena ids and timestamps to existing entries and
+    /// leaves `tracked_players` the same size, which is why the key cannot be
+    /// that size.
+    #[test]
+    fn a_repeat_encounter_with_a_tracked_player_invalidates_the_cache() {
+        let mut tracker = PlayerTracker::default();
+        for (id, p) in tracked(&[(1, player("RAIN", &[(10, 1000)]))]) {
+            tracker.tracked_players.insert(id, p);
+        }
+        tracker.note_encounters_changed();
+
+        let breakdown = build_clan_breakdown(
+            &tracker.tracked_players,
+            tracker.encounter_version,
+            &HashMap::new(),
+            &[],
+            &HashSet::new(),
+            None,
+        );
+        let cached = Some(TimePeriod::LastDay);
+        assert!(breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastDay, tracker.encounter_version));
+
+        // What a second battle against the same player does to the tracker.
+        let players_before = tracker.tracked_players.len();
+        let entry = tracker.tracked_players.get_mut(&AccountId(1)).expect("the player is tracked");
+        entry.arena_ids.insert(ArenaId::new(11));
+        entry.timestamps.insert(Timestamp::from_second(2000).unwrap());
+        tracker.note_encounters_changed();
+
+        assert_eq!(tracker.tracked_players.len(), players_before, "a repeat encounter adds no tracked player");
+        assert!(
+            !breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastDay, tracker.encounter_version),
+            "a repeat encounter must invalidate the cache, or the tab shows stale counts until Refresh"
         );
     }
 
@@ -892,7 +957,7 @@ mod tests {
         let players = tracked(&[(1, player("RAIN", &[(10, 1000), (11, 2000)]))]);
         let indexed = HashSet::from([ArenaId::new(10)]);
 
-        let breakdown = build_clan_breakdown(&players, &HashMap::new(), &[], &indexed, None);
+        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], &indexed, None);
 
         assert_eq!(breakdown.total_encounters, 2);
         assert_eq!(breakdown.exact_encounters, 1);

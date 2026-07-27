@@ -313,6 +313,7 @@ impl PlayerTracker {
             }
         }
 
+        self.note_encounters_changed();
         true
     }
 }

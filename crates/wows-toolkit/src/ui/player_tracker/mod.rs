@@ -69,6 +69,15 @@ pub struct PlayerTracker {
     #[serde(skip)]
     pub(crate) expanded_clans: HashSet<String>,
 
+    /// Bumped whenever encounters are added to or removed from
+    /// `tracked_players`. A caller caching an aggregate over the tracker holds
+    /// the value it built against and rebuilds when it moves. Skipped rather
+    /// than persisted so it resets together with the caches keyed on it, which
+    /// are themselves `serde(skip)`: a restored counter paired with an empty
+    /// cache would carry no more information than a zeroed one.
+    #[serde(skip)]
+    pub(crate) encounter_version: u64,
+
     /// Clan aggregates, rebuilt only when their inputs change: the index queries
     /// behind them run synchronously on the UI thread.
     #[serde(skip)]
@@ -120,6 +129,13 @@ impl PlayerTracker {
         self.resolved_roster.as_ref()
     }
 
+    /// Record that the tracked encounter set changed, so aggregates cached over
+    /// it rebuild. Saturating because a wrapped counter could land back on the
+    /// value a stale cache holds.
+    pub(crate) fn note_encounters_changed(&mut self) {
+        self.encounter_version = self.encounter_version.saturating_add(1);
+    }
+
     pub fn update_from_replay(&mut self, replay: &Replay) {
         let Some(report) = replay.battle_report.as_ref() else {
             return;
@@ -127,6 +143,7 @@ impl PlayerTracker {
 
         let tracked_players = &mut self.tracked_players;
         let tracked_players_by_ts = &mut self.tracked_players_by_time;
+        let mut ingested_any = false;
 
         let timestamp = util::replay_timestamp(&replay.replay_file.meta);
 
@@ -162,6 +179,9 @@ impl PlayerTracker {
             if tracked_player.arena_ids.contains(&report.arena_id()) {
                 continue;
             }
+            // Past that guard this battle is new for the player, whether or not
+            // the player themselves is.
+            ingested_any = true;
 
             let mut update_metadata = false;
 
@@ -192,6 +212,10 @@ impl PlayerTracker {
             tracked_player.arena_ids.insert(report.arena_id());
 
             tracked_players_by_ts.entry(timestamp).or_default().push(player_state.db_id());
+        }
+
+        if ingested_any {
+            self.note_encounters_changed();
         }
     }
 }

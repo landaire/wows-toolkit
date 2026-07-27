@@ -502,6 +502,7 @@ impl ToolkitTabViewer<'_> {
                     if ui.button(t!("ui.player_tracker.clear_stats")).clicked() {
                         player_tracker.tracked_players.clear();
                         player_tracker.tracked_players_by_time.clear();
+                        player_tracker.note_encounters_changed();
                     }
 
                     let selected = &mut player_tracker.filter_time_period;
