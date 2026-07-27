@@ -20,24 +20,29 @@ const UPDATE_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// File name for cached expected values
 const EXPECTED_VALUES_FILENAME: &str = "pr_expected_values.json";
 
-/// A rating badge: the canonical community hue as a fill, with a label colour
-/// chosen for legibility. The hue is never altered, so the scale stays
-/// recognisable; only the text on top of it adapts.
+/// Alpha for the chip background: the canonical hue laid faintly over whatever
+/// row it lands on, so the chip reads the same on card, striped and selected
+/// rows without needing a value per row state.
+const CHIP_TINT_ALPHA: u8 = 46;
+
+/// A rating chip. The canonical hue is preserved exactly: `tint` is that hue at
+/// low alpha, `text` a theme-adjusted version of it that clears the contrast
+/// floor over the tint on every row state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RatingSwatch {
-    pub fill: egui::Color32,
-    pub label: egui::Color32,
+    pub tint: egui::Color32,
+    pub text: egui::Color32,
 }
 
-/// Badge colours per rating category. An extension trait because the enum
+/// Chip colours per rating category. An extension trait because the enum
 /// lives in wows-replay-insights and cannot carry an inherent egui method.
 pub trait PersonalRatingCategorySwatch {
-    fn swatch(&self) -> RatingSwatch;
+    fn swatch(&self, visuals: &egui::Visuals) -> RatingSwatch;
 }
 
 impl PersonalRatingCategorySwatch for PersonalRatingCategory {
-    fn swatch(&self) -> RatingSwatch {
-        let fill = match self {
+    fn swatch(&self, visuals: &egui::Visuals) -> RatingSwatch {
+        let hue = match self {
             Self::Bad => egui::Color32::from_rgb(0xFF, 0x00, 0x00),
             Self::BelowAverage => egui::Color32::from_rgb(0xFE, 0x79, 0x03),
             Self::Average => egui::Color32::from_rgb(0xFF, 0xC7, 0x1F),
@@ -47,7 +52,35 @@ impl PersonalRatingCategorySwatch for PersonalRatingCategory {
             Self::Unicum => egui::Color32::from_rgb(0xD0, 0x42, 0xF3),
             Self::SuperUnicum => egui::Color32::from_rgb(0xA0, 0x0D, 0xC5),
         };
-        RatingSwatch { fill, label: crate::ui::theme::contrast::label_on(fill) }
+        let tint = egui::Color32::from_rgba_unmultiplied(hue.r(), hue.g(), hue.b(), CHIP_TINT_ALPHA);
+        // Solved against the composited chip over card, striped and selected rows.
+        // Several sit just above the floor to keep the chips quiet; retuning any of
+        // those row colours requires re-solving this table, which the contrast test
+        // will catch.
+        let text = if visuals.dark_mode {
+            match self {
+                Self::Bad => egui::Color32::from_rgb(0xF5, 0x68, 0x64),
+                Self::BelowAverage => egui::Color32::from_rgb(0xFB, 0x86, 0x1D),
+                Self::Average => egui::Color32::from_rgb(0xFF, 0xC7, 0x1F),
+                Self::Good => egui::Color32::from_rgb(0x5A, 0xBA, 0x1E),
+                Self::VeryGood => egui::Color32::from_rgb(0x7A, 0xA8, 0x58),
+                Self::Great => egui::Color32::from_rgb(0x02, 0xC9, 0xB3),
+                Self::Unicum => egui::Color32::from_rgb(0xD8, 0x78, 0xEC),
+                Self::SuperUnicum => egui::Color32::from_rgb(0xC3, 0x76, 0xD0),
+            }
+        } else {
+            match self {
+                Self::Bad => egui::Color32::from_rgb(0x9D, 0x04, 0x03),
+                Self::BelowAverage => egui::Color32::from_rgb(0x88, 0x43, 0x05),
+                Self::Average => egui::Color32::from_rgb(0x71, 0x59, 0x12),
+                Self::Good => egui::Color32::from_rgb(0x28, 0x62, 0x04),
+                Self::VeryGood => egui::Color32::from_rgb(0x25, 0x5D, 0x02),
+                Self::Great => egui::Color32::from_rgb(0x06, 0x63, 0x58),
+                Self::Unicum => egui::Color32::from_rgb(0x80, 0x2B, 0x94),
+                Self::SuperUnicum => egui::Color32::from_rgb(0x7F, 0x0C, 0x9B),
+            }
+        };
+        RatingSwatch { tint, text }
     }
 }
 
@@ -209,30 +242,53 @@ mod tests {
         assert!(matches!(validate_expected_values(empty), Err(FetchExpectedValuesError::Empty)));
     }
 
+    const ALL_CATEGORIES: [PersonalRatingCategory; 8] = [
+        PersonalRatingCategory::Bad,
+        PersonalRatingCategory::BelowAverage,
+        PersonalRatingCategory::Average,
+        PersonalRatingCategory::Good,
+        PersonalRatingCategory::VeryGood,
+        PersonalRatingCategory::Great,
+        PersonalRatingCategory::Unicum,
+        PersonalRatingCategory::SuperUnicum,
+    ];
+
     #[test]
     fn swatch_keeps_the_canonical_hue() {
-        assert_eq!(PersonalRatingCategory::Average.swatch().fill, egui::Color32::from_rgb(0xFF, 0xC7, 0x1F));
-        assert_eq!(PersonalRatingCategory::SuperUnicum.swatch().fill, egui::Color32::from_rgb(0xA0, 0x0D, 0xC5));
+        // Compare against the same encoding (hue at CHIP_TINT_ALPHA) rather than
+        // decoding tint back to opaque: Color32's premultiplied storage round-trips
+        // through linear light and can round differently by 1 bit at low alpha.
+        let average = PersonalRatingCategory::Average.swatch(&egui::Visuals::dark());
+        assert_eq!(average.tint, egui::Color32::from_rgba_unmultiplied(0xFF, 0xC7, 0x1F, CHIP_TINT_ALPHA));
+        let super_unicum = PersonalRatingCategory::SuperUnicum.swatch(&egui::Visuals::dark());
+        assert_eq!(super_unicum.tint, egui::Color32::from_rgba_unmultiplied(0xA0, 0x0D, 0xC5, CHIP_TINT_ALPHA));
     }
 
     #[test]
-    fn every_tier_badge_is_legible() {
+    fn every_tier_chip_is_legible_on_every_row_state() {
         use crate::ui::theme::contrast::CONTRAST_FLOOR;
         use crate::ui::theme::contrast::contrast_ratio;
+        use crate::ui::theme::palette;
 
-        for category in [
-            PersonalRatingCategory::Bad,
-            PersonalRatingCategory::BelowAverage,
-            PersonalRatingCategory::Average,
-            PersonalRatingCategory::Good,
-            PersonalRatingCategory::VeryGood,
-            PersonalRatingCategory::Great,
-            PersonalRatingCategory::Unicum,
-            PersonalRatingCategory::SuperUnicum,
+        fn over(fg: egui::Color32, bg: egui::Color32) -> egui::Color32 {
+            // Color32 is premultiplied, so the source is already scaled by alpha.
+            let inv = 1.0 - (f32::from(fg.a()) / 255.0);
+            let mix = |f: u8, b: u8| (f32::from(f) + f32::from(b) * inv).round() as u8;
+            egui::Color32::from_rgb(mix(fg.r(), bg.r()), mix(fg.g(), bg.g()), mix(fg.b(), bg.b()))
+        }
+
+        for (visuals, grounds) in [
+            (egui::Visuals::dark(), [palette::dark::CARD, palette::dark::FAINT, palette::dark::SELECTION]),
+            (egui::Visuals::light(), [palette::light::CARD, palette::light::FAINT, palette::light::SELECTION]),
         ] {
-            let swatch = category.swatch();
-            let r = contrast_ratio(swatch.label, swatch.fill);
-            assert!(r >= CONTRAST_FLOOR, "{category:?} badge is {r}, needs {CONTRAST_FLOOR}");
+            for category in ALL_CATEGORIES {
+                let swatch = category.swatch(&visuals);
+                for ground in grounds {
+                    let chip = over(swatch.tint, ground);
+                    let r = contrast_ratio(swatch.text, chip);
+                    assert!(r >= CONTRAST_FLOOR, "{category:?} on {ground:?} is {r}");
+                }
+            }
         }
     }
 }
