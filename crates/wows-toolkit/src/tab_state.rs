@@ -455,6 +455,10 @@ pub struct TabState {
     pub network_job_tx: Option<Sender<NetworkJob>>,
     /// Whether the Settings tab needs attention (e.g. invalid WoWs directory, invalid twitch token).
     pub settings_needs_attention: bool,
+    /// The resolved dark/light theme, refreshed from `Context::theme()` each
+    /// frame before the dock area is built. `TabViewer::tab_style_override`
+    /// has no `Context` of its own, so it reads this instead.
+    pub active_theme: egui::Theme,
     /// Cached builds found to have newer data upstream by the last update check.
     pub game_data_updates: Vec<wows_data_mgr::download_repo::BuildUpdateStatus>,
     /// Whether a game data update check is currently running.
@@ -574,6 +578,7 @@ impl Default for TabState {
             suppress_gpu_encoder_warning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             network_job_tx: None,
             settings_needs_attention: false,
+            active_theme: egui::Theme::Dark,
             game_data_updates: Vec::new(),
             checking_game_data_updates: false,
             game_data_repair: Vec::new(),

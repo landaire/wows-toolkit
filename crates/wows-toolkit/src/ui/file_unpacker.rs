@@ -36,6 +36,8 @@ use wowsunpack::vfs::VfsPath;
 use crate::app::ToolkitTabViewer;
 use crate::ui::plaintext_viewer;
 use crate::ui::plaintext_viewer::FileType;
+use crate::ui::theme::semantic::SemanticExt;
+use crate::ui::theme::semantic::semantic;
 type FilteredFileList = Arc<Vec<(Arc<PathBuf>, VfsPath)>>;
 
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
@@ -334,10 +336,7 @@ impl UnpackerPaneViewer<'_> {
             ui.vertical_centered(|ui| {
                 let avail = ui.available_height();
                 ui.add_space(avail / 2.0 - 10.0);
-                ui.label(
-                    RichText::new(t!("ui.unpacker.load_failed", error = err).as_ref())
-                        .color(egui::Color32::from_rgb(220, 80, 80)),
-                );
+                ui.label(RichText::new(t!("ui.unpacker.load_failed", error = err).as_ref()).color(ui.sem().error));
             });
             return;
         }
@@ -415,9 +414,7 @@ impl UnpackerPaneViewer<'_> {
                             let root_node = egui_ltreeview::NodeBuilder::dir(root_id)
                                 .default_open(true)
                                 .icon(|ui| {
-                                    ui.label(
-                                        RichText::new(icons::FOLDER_OPEN).color(egui::Color32::from_rgb(200, 180, 120)),
-                                    );
+                                    ui.label(RichText::new(icons::FOLDER_OPEN).color(ui.sem().icon_accent));
                                 })
                                 .label("res");
 
@@ -581,7 +578,7 @@ impl UnpackerPaneViewer<'_> {
                 ui.label(RichText::new(format!("{}/{} files, {} hits", searched, total, results_count)).weak());
 
                 if ui
-                    .button(RichText::new(icons::X_CIRCLE).color(egui::Color32::from_rgb(220, 80, 80)))
+                    .button(RichText::new(icons::X_CIRCLE).color(ui.sem().error))
                     .on_hover_text(t!("ui.unpacker.stop_search_tooltip"))
                     .clicked()
                 {
@@ -631,9 +628,9 @@ fn queue_extract(items: &Mutex<Vec<VfsPath>>, path: VfsPath) {
 }
 
 /// Get a RichText icon for a file based on its name and type.
-fn file_icon_rich_text(name: &str, is_dir: bool) -> RichText {
+fn file_icon_rich_text(visuals: &egui::Visuals, name: &str, is_dir: bool) -> RichText {
     if is_dir {
-        return RichText::new(icons::FOLDER).color(egui::Color32::from_rgb(200, 180, 120));
+        return RichText::new(icons::FOLDER).color(semantic(visuals).icon_accent);
     }
     let icon =
         if IMAGE_FILE_TYPES.iter().any(|ext| name.ends_with(ext)) || name.ends_with(".dds") || name.ends_with(".pvr") {
@@ -981,7 +978,7 @@ fn render_file_listing_table(
                 });
 
                 row.col(|ui| {
-                    ui.label(file_icon_rich_text(&entry.name, entry.is_dir));
+                    ui.label(file_icon_rich_text(ui.visuals(), &entry.name, entry.is_dir));
                 });
 
                 let (_, name_response, name_label_response) = {
@@ -1076,7 +1073,7 @@ fn render_filter_results_table(
                 });
 
                 row.col(|ui| {
-                    ui.label(file_icon_rich_text(&filename, false));
+                    ui.label(file_icon_rich_text(ui.visuals(), &filename, false));
                 });
 
                 let (_, path_response, path_label_response) = {
@@ -1178,7 +1175,7 @@ fn render_search_results_table(
                 });
 
                 row.col(|ui| {
-                    ui.label(file_icon_rich_text(&filename, false));
+                    ui.label(file_icon_rich_text(ui.visuals(), &filename, false));
                 });
 
                 let (_, file_response) = row.col(|ui| {
@@ -1298,7 +1295,7 @@ fn render_folder_tree(
         if node.children.is_empty() {
             let leaf = egui_ltreeview::NodeBuilder::leaf(dir_id)
                 .icon(|ui| {
-                    ui.label(RichText::new(icons::FOLDER).color(egui::Color32::from_rgb(200, 180, 120)));
+                    ui.label(RichText::new(icons::FOLDER).color(ui.sem().icon_accent));
                 })
                 .label(&node.name);
             builder.node(leaf);
@@ -1306,7 +1303,7 @@ fn render_folder_tree(
             let dir = egui_ltreeview::NodeBuilder::dir(dir_id)
                 .default_open(false)
                 .icon(|ui| {
-                    ui.label(RichText::new(icons::FOLDER).color(egui::Color32::from_rgb(200, 180, 120)));
+                    ui.label(RichText::new(icons::FOLDER).color(ui.sem().icon_accent));
                 })
                 .label(&node.name);
 
@@ -2013,7 +2010,7 @@ impl ToolkitTabViewer<'_> {
                                                     let is_dir = item.is_dir().unwrap_or(false);
                                                     let icon = if is_dir { icons::FOLDER } else { icons::FILE };
                                                     ui.label(RichText::new(icon).color(if is_dir {
-                                                        egui::Color32::from_rgb(200, 180, 120)
+                                                        ui.sem().icon_accent
                                                     } else {
                                                         ui.style().visuals.text_color()
                                                     }));

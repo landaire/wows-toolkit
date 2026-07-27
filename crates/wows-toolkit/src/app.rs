@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::TryRecvError;
 
-use egui::Color32;
 use egui::Context;
 use egui::KeyboardShortcut;
 use egui::Modifiers;
@@ -50,6 +49,7 @@ use crate::task::NetworkJob;
 use crate::task::NetworkResult;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::ui::file_unpacker::UNPACKER_STOP;
+use crate::ui::theme::semantic::SemanticExt;
 use crate::util::error::ToolkitError;
 
 #[macro_export]
@@ -128,14 +128,17 @@ impl TabViewer for ToolkitTabViewer<'_> {
     fn tab_style_override(&self, tab: &Self::Tab, global_style: &TabStyle) -> Option<TabStyle> {
         if matches!(tab, Tab::Settings) && self.tab_state.settings_needs_attention {
             let mut style = global_style.clone();
-            let red = egui::Color32::from_rgb(255, 80, 80);
-            style.active.text_color = red;
-            style.inactive.text_color = red;
-            style.focused.text_color = red;
-            style.hovered.text_color = red;
-            style.active_with_kb_focus.text_color = red;
-            style.inactive_with_kb_focus.text_color = red;
-            style.focused_with_kb_focus.text_color = red;
+            let error = match self.tab_state.active_theme {
+                egui::Theme::Dark => crate::ui::theme::semantic::DARK.error,
+                egui::Theme::Light => crate::ui::theme::semantic::LIGHT.error,
+            };
+            style.active.text_color = error;
+            style.inactive.text_color = error;
+            style.focused.text_color = error;
+            style.hovered.text_color = error;
+            style.active_with_kb_focus.text_color = error;
+            style.inactive_with_kb_focus.text_color = error;
+            style.focused_with_kb_focus.text_color = error;
             Some(style)
         } else {
             None
@@ -2239,19 +2242,21 @@ impl WowsToolkitApp {
                     ui.collapsing(t!("ui.buttons.more_options"), |ui| {
                         ui.label(t!("ui.dialogs.crash_clear_settings"));
                         ui.scope(|ui| {
+                            let error = ui.sem().error;
+                            let label = crate::ui::theme::contrast::label_on(error);
                             let visuals = &mut ui.style_mut().visuals;
 
-                            visuals.widgets.inactive.bg_fill = Color32::from_rgb(200, 50, 50);
-                            visuals.widgets.hovered.bg_fill = Color32::from_rgb(220, 70, 70);
-                            visuals.widgets.active.bg_fill = Color32::from_rgb(160, 30, 30);
+                            visuals.widgets.inactive.bg_fill = error;
+                            visuals.widgets.hovered.bg_fill = error;
+                            visuals.widgets.active.bg_fill = error;
 
-                            visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(200, 50, 50);
-                            visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(220, 70, 70);
-                            visuals.widgets.active.weak_bg_fill = Color32::from_rgb(160, 30, 30);
+                            visuals.widgets.inactive.weak_bg_fill = error;
+                            visuals.widgets.hovered.weak_bg_fill = error;
+                            visuals.widgets.active.weak_bg_fill = error;
 
-                            visuals.widgets.inactive.fg_stroke.color = Color32::WHITE;
-                            visuals.widgets.hovered.fg_stroke.color = Color32::WHITE;
-                            visuals.widgets.active.fg_stroke.color = Color32::WHITE;
+                            visuals.widgets.inactive.fg_stroke.color = label;
+                            visuals.widgets.hovered.fg_stroke.color = label;
+                            visuals.widgets.active.fg_stroke.color = label;
 
                             if ui.button(t!("ui.buttons.clear_settings")).clicked() {
                                 *self.tab_state.persisted.write() = Default::default();
@@ -3089,6 +3094,8 @@ impl eframe::App for WowsToolkitApp {
         egui::Panel::bottom("status_panel").show(ui, |ui| {
             self.build_bottom_panel(ui);
         });
+
+        self.tab_state.active_theme = ctx.theme();
 
         egui::CentralPanel::default().show(ui, |ui| {
             DockArea::new(&mut self.dock_state)

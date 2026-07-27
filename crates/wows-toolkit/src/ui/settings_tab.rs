@@ -2,7 +2,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use egui::Color32;
 use egui::OpenUrl;
 use egui::RichText;
 use egui::Slider;
@@ -18,6 +17,7 @@ use crate::task::DataExportSettings;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::task::ReplayExportFormat;
 use crate::twitch::Token;
+use crate::ui::theme::semantic::SemanticExt;
 use crate::update_background_task;
 
 /// Render a styled section header with an icon, title, and dimmed description.
@@ -169,7 +169,7 @@ impl ToolkitTabViewer<'_> {
                             egui::TextEdit::singleline(&mut wows_dir)
                                 .interactive(self.tab_state.can_change_wows_dir)
                                 .hint_text(t!("ui.settings.wows.directory_hint"))
-                                .text_color_opt(show_text_error.then_some(Color32::LIGHT_RED)),
+                                .text_color_opt(show_text_error.then_some(ui.sem().error)),
                         );
 
                         // If someone pastes or types a path, revalidate and reload if valid.
@@ -289,7 +289,7 @@ impl ToolkitTabViewer<'_> {
                             ui.horizontal(|ui| {
                                 ui.label(
                                     RichText::new(t!("ui.settings.wows.cache.repair_needed", count = repair_count))
-                                        .color(Color32::LIGHT_RED),
+                                        .color(ui.sem().error),
                                 );
                                 if ui.button(t!("ui.settings.wows.cache.repair")).clicked() {
                                     self.tab_state.repair_game_data_cache();
@@ -376,7 +376,7 @@ impl ToolkitTabViewer<'_> {
                                 ui.available_size(),
                                 egui::TextEdit::singleline(&mut rs.auto_export_path)
                                     .hint_text(t!("ui.settings.replay.export_path_hint"))
-                                    .text_color_opt((!path_is_valid).then_some(Color32::LIGHT_RED)),
+                                    .text_color_opt((!path_is_valid).then_some(ui.sem().error)),
                             );
 
                             if response.lost_focus() {

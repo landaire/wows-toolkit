@@ -141,7 +141,9 @@ pub fn render_line_chart(
                     .collect()
             };
 
-            ship_data.push((t!("chart.combined").into(), points, Color32::from_rgb(100, 180, 255)));
+            let color =
+                crate::ui::theme::contrast::readable_on(Color32::from_rgb(100, 180, 255), ui.visuals().panel_fill);
+            ship_data.push((t!("chart.combined").into(), points, color));
         }
     } else {
         // Per-ship mode — group by ship_id, preserving first-seen order
@@ -154,7 +156,7 @@ pub fn render_line_chart(
 
         for ship_id in &unique_ships {
             let display_name = resolve_ship_name(*ship_id, provider);
-            let color = color_from_id(*ship_id);
+            let color = crate::ui::theme::contrast::readable_on(color_from_id(*ship_id), ui.visuals().panel_fill);
 
             // For win rate with rolling average, we need to track wins separately
             if stat == ChartableStat::WinRate && rolling_average {
@@ -312,7 +314,10 @@ pub fn render_bar_chart(
             ChartableStat::PersonalRating => perf_info.calculate_pr(pr_data).map(|r| r.pr).unwrap_or_default(),
         };
 
-        let color = perf_info.ship_id().map(color_from_id).unwrap_or_else(|| Color32::from_rgb(100, 180, 255));
+        let color = crate::ui::theme::contrast::readable_on(
+            perf_info.ship_id().map(color_from_id).unwrap_or(Color32::from_rgb(100, 180, 255)),
+            ui.visuals().panel_fill,
+        );
         bar_data.push((i, ship_name.to_string(), value, color));
     }
 

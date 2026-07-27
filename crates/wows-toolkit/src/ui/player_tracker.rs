@@ -26,6 +26,18 @@ use wows_replays::types::ArenaId;
 
 use crate::app::ToolkitTabViewer;
 use crate::ui::replay_parser::Replay;
+use crate::ui::theme::semantic::SemanticExt;
+
+/// Colour for the escalating encounter-count severity ramp, or `None` below
+/// the threshold where it becomes notable.
+fn encounter_severity_color(ui: &egui::Ui, times_encountered_in_range: usize) -> Option<Color32> {
+    match times_encountered_in_range {
+        0..=1 => None,
+        2..=3 => Some(ui.sem().division),
+        4..=5 => Some(ui.sem().warn),
+        _ => Some(ui.sem().loss),
+    }
+}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PlayerTracker {
@@ -629,20 +641,18 @@ impl ToolkitTabViewer<'_> {
                                         times_encountered
                                     };
 
-                                    let encounters_color = match times_encountered_in_range {
-                                        0..=1 => None,
-                                        2..=3 => Some(Color32::YELLOW),
-                                        4..=5 => Some(Color32::ORANGE),
-                                        _ => Some(Color32::LIGHT_RED),
-                                    };
-
                                     row.col(|ui| {
                                         ui.label(&player.clan);
                                     });
                                     row.col(|ui| {
                                         let text = RichText::new(&player.last_name);
-                                        let text =
-                                            if let Some(color) = encounters_color { text.color(color) } else { text };
+                                        let text = if let Some(color) =
+                                            encounter_severity_color(ui, times_encountered_in_range)
+                                        {
+                                            text.color(color)
+                                        } else {
+                                            text
+                                        };
 
                                         ui.label(text);
                                     });
@@ -651,14 +661,24 @@ impl ToolkitTabViewer<'_> {
                                     });
                                     row.col(|ui| {
                                         let text = RichText::new(times_encountered.to_string());
-                                        let text =
-                                            if let Some(color) = encounters_color { text.color(color) } else { text };
+                                        let text = if let Some(color) =
+                                            encounter_severity_color(ui, times_encountered_in_range)
+                                        {
+                                            text.color(color)
+                                        } else {
+                                            text
+                                        };
                                         ui.label(text);
                                     });
                                     row.col(|ui| {
                                         let text = RichText::new(times_encountered_in_range.to_string());
-                                        let text =
-                                            if let Some(color) = encounters_color { text.color(color) } else { text };
+                                        let text = if let Some(color) =
+                                            encounter_severity_color(ui, times_encountered_in_range)
+                                        {
+                                            text.color(color)
+                                        } else {
+                                            text
+                                        };
                                         ui.label(text);
                                     });
                                     row.col(|ui| {
