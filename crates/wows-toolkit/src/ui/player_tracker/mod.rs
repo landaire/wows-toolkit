@@ -1,3 +1,4 @@
+mod current_match;
 mod historical;
 mod live;
 mod model;
@@ -13,11 +14,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use jiff::Timestamp;
+use rust_i18n::t;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replays::ReplayMeta;
 use wows_replays::types::AccountId;
 
+use crate::app::ToolkitTabViewer;
 use crate::ui::replay_parser::Replay;
 use crate::util;
 
@@ -116,5 +119,120 @@ impl PlayerTracker {
 
             tracked_players_by_ts.entry(timestamp).or_default().push(player_state.db_id());
         }
+    }
+}
+
+/// The Player Tracker's two views. Neither is closeable: closing one would
+/// leave no way to get it back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PlayerTrackerSubTab {
+    Historical,
+    CurrentMatch,
+}
+
+/// Whether a deserialized layout has lost a sub-tab, either from a corrupt row
+/// or from an older layout that predates a variant.
+pub(crate) fn player_tracker_dock_needs_repair(dock: &egui_dock::DockState<PlayerTrackerSubTab>) -> bool {
+    let has_historical = dock.iter_all_tabs().any(|(_, tab)| matches!(tab, PlayerTrackerSubTab::Historical));
+    let has_current_match = dock.iter_all_tabs().any(|(_, tab)| matches!(tab, PlayerTrackerSubTab::CurrentMatch));
+
+    !has_historical || !has_current_match
+}
+
+struct PlayerTrackerSubTabViewer<'a, 'b> {
+    tab_viewer: &'a mut ToolkitTabViewer<'b>,
+}
+
+impl egui_dock::TabViewer for PlayerTrackerSubTabViewer<'_, '_> {
+    type Tab = PlayerTrackerSubTab;
+
+    fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
+        egui::Id::new(("player_tracker_sub_tab", *tab))
+    }
+
+    fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
+        let key = match tab {
+            PlayerTrackerSubTab::Historical => "ui.player_tracker.subtab_historical",
+            PlayerTrackerSubTab::CurrentMatch => "ui.player_tracker.subtab_current_match",
+        };
+        t!(key).to_string().into()
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
+        match tab {
+            PlayerTrackerSubTab::Historical => self.tab_viewer.build_historical_sub_tab(ui),
+            PlayerTrackerSubTab::CurrentMatch => self.tab_viewer.build_current_match_sub_tab(ui),
+        }
+    }
+
+    fn closeable(&mut self, _tab: &mut Self::Tab) -> bool {
+        false
+    }
+
+    fn allowed_in_windows(&self, _tab: &mut Self::Tab) -> bool {
+        false
+    }
+}
+
+impl ToolkitTabViewer<'_> {
+    pub fn build_player_tracker_tab(&mut self, ui: &mut egui::Ui) {
+        let needs_repair = {
+            let p = self.tab_state.persisted.read();
+            player_tracker_dock_needs_repair(&p.player_tracker_dock_state)
+        };
+        if needs_repair {
+            self.tab_state.persisted.write().player_tracker_dock_state =
+                crate::tab_state::default_player_tracker_dock_state();
+        }
+
+        // Moved out so the sub-tab bodies can take their own locks on `persisted`.
+        let mut dock_state = std::mem::replace(
+            &mut self.tab_state.persisted.write().player_tracker_dock_state,
+            egui_dock::DockState::new(vec![]),
+        );
+
+        let mut viewer = PlayerTrackerSubTabViewer { tab_viewer: self };
+
+        egui_dock::DockArea::new(&mut dock_state)
+            .id(egui::Id::new("player_tracker_dock"))
+            .style(egui_dock::Style::from_egui(ui.style().as_ref()))
+            .show_close_buttons(false)
+            .show_leaf_collapse_buttons(false)
+            .show_leaf_close_all_buttons(false)
+            .allowed_splits(egui_dock::AllowedSplits::All)
+            .show_inside(ui, &mut viewer);
+
+        self.tab_state.persisted.write().player_tracker_dock_state = dock_state;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_complete_dock_layout_needs_no_repair() {
+        let dock = crate::tab_state::default_player_tracker_dock_state();
+        assert!(!player_tracker_dock_needs_repair(&dock));
+    }
+
+    #[test]
+    fn a_layout_missing_current_match_needs_repair() {
+        let dock = egui_dock::DockState::new(vec![PlayerTrackerSubTab::Historical]);
+        assert!(player_tracker_dock_needs_repair(&dock));
+    }
+
+    #[test]
+    fn a_layout_missing_historical_needs_repair() {
+        let dock = egui_dock::DockState::new(vec![PlayerTrackerSubTab::CurrentMatch]);
+        assert!(player_tracker_dock_needs_repair(&dock));
+    }
+
+    #[test]
+    fn the_default_layout_opens_on_historical() {
+        // `find_active_focused` takes `&mut self`.
+        let mut dock = crate::tab_state::default_player_tracker_dock_state();
+        let (_rect, active) = dock.find_active_focused().expect("default layout has an active tab");
+        assert_eq!(*active, PlayerTrackerSubTab::Historical);
     }
 }

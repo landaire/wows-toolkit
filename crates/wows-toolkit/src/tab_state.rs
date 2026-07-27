@@ -43,6 +43,7 @@ use crate::ui::file_unpacker::UnpackerProgress;
 use crate::ui::mod_manager::ModInfo;
 use crate::ui::mod_manager::ModManagerInfo;
 use crate::ui::plaintext_viewer::PlaintextFileViewer;
+use crate::ui::player_tracker::PlayerTrackerSubTab;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::ReplayTab;
 use crate::ui::replay_parser::SharedReplayParserTabState;
@@ -119,6 +120,7 @@ pub struct PersistedState {
     pub auto_load_latest_replay: bool,
     pub mod_manager_info: ModManagerInfo,
     pub stats_dock_state: egui_dock::DockState<StatsSubTab>,
+    pub player_tracker_dock_state: egui_dock::DockState<PlayerTrackerSubTab>,
     pub next_chart_tab_id: u64,
     pub chart_configs: HashMap<u64, SessionStatsChartConfig>,
     pub armor_viewer_defaults: crate::armor_viewer::state::ArmorViewerDefaults,
@@ -133,6 +135,7 @@ impl Default for PersistedState {
             auto_load_latest_replay: true,
             mod_manager_info: Default::default(),
             stats_dock_state: default_stats_dock_state(),
+            player_tracker_dock_state: default_player_tracker_dock_state(),
             next_chart_tab_id: 1,
             chart_configs: HashMap::new(),
             armor_viewer_defaults: Default::default(),
@@ -315,6 +318,16 @@ pub(crate) fn default_stats_dock_state() -> egui_dock::DockState<StatsSubTab> {
         0.5,
         egui_dock::Node::leaf(StatsSubTab::Charts(0)),
     );
+    dock
+}
+
+/// Default player-tracker dock: both sub-tabs in one leaf. Historical is first,
+/// which makes it the active tab on a fresh install.
+pub(crate) fn default_player_tracker_dock_state() -> egui_dock::DockState<PlayerTrackerSubTab> {
+    let mut dock = egui_dock::DockState::new(vec![PlayerTrackerSubTab::Historical, PlayerTrackerSubTab::CurrentMatch]);
+    // `DockState::new` leaves nothing focused; focus the only leaf so
+    // `find_active_focused` resolves without waiting for a first render.
+    dock.set_focused_node_and_surface(egui_dock::NodePath::MAIN_ROOT);
     dock
 }
 

@@ -309,15 +309,21 @@ async fn load_render_options(pool: &SqlitePool, ts: &mut TabState) -> Result<(),
     Ok(())
 }
 
-/// Load stats dock layout.
+/// Load dock layouts.
 async fn load_dock_layout(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx::Error> {
     if let Some(json) = queries::get_dock_layout(pool, "stats").await? {
         match serde_json::from_str(&json) {
             Ok(layout) => ts.persisted.write().stats_dock_state = layout,
-            Err(e) => warn!("Failed to deserialize dock layout: {e}"),
+            Err(e) => warn!("Failed to deserialize stats dock layout: {e}"),
         }
     }
-    info!("  loaded dock layout");
+    if let Some(json) = queries::get_dock_layout(pool, "player_tracker").await? {
+        match serde_json::from_str(&json) {
+            Ok(layout) => ts.persisted.write().player_tracker_dock_state = layout,
+            Err(e) => warn!("Failed to deserialize player tracker dock layout: {e}"),
+        }
+    }
+    info!("  loaded dock layouts");
     Ok(())
 }
 

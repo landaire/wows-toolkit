@@ -352,19 +352,23 @@ async fn save_render_options(pool: &SqlitePool, ctx: &SaveContext) -> Result<(),
     Ok(())
 }
 
-/// Save stats dock layout.
+/// Save dock layouts.
 async fn save_dock_layout(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx::Error> {
-    let json = {
+    let (stats, player_tracker) = {
         let p = ctx.persisted.read();
-        serde_json::to_string(&p.stats_dock_state).ok()
+        (serde_json::to_string(&p.stats_dock_state).ok(), serde_json::to_string(&p.player_tracker_dock_state).ok())
     };
 
-    match json {
+    match stats {
         Some(json) => queries::save_dock_layout(pool, "stats", &json).await?,
-        None => error!("Failed to serialize dock layout"),
+        None => error!("Failed to serialize stats dock layout"),
+    }
+    match player_tracker {
+        Some(json) => queries::save_dock_layout(pool, "player_tracker", &json).await?,
+        None => error!("Failed to serialize player tracker dock layout"),
     }
 
-    trace!("  saved dock layout");
+    trace!("  saved dock layouts");
     Ok(())
 }
 

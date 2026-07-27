@@ -256,6 +256,7 @@ impl LegacyWowsToolkitApp {
             auto_load_latest_replay: ts.auto_load_latest_replay,
             mod_manager_info: ts.mod_manager_info,
             stats_dock_state: ts.stats_dock_state,
+            player_tracker_dock_state: crate::tab_state::default_player_tracker_dock_state(),
             next_chart_tab_id: ts.next_chart_tab_id,
             chart_configs: ts.chart_configs,
             armor_viewer_defaults: ts.armor_viewer_defaults,

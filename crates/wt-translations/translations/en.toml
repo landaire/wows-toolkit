@@ -566,6 +566,8 @@ current_match = "Players in Current Match"
 historical = "Historical Matches"
 seen_minutes = "Seen %{minutes} minutes after match start"
 find_matches = "Find matches"
+subtab_historical = "Historical"
+subtab_current_match = "Current Match"
 
 [ui.player_tracker.column]
 clan = "Clan"
