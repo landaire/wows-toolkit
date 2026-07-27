@@ -43,14 +43,7 @@ pub fn separate_number<T: Separable>(num: T, locale: Option<&str>) -> String {
 }
 
 pub fn player_color_for_team_relation(relation: Relation, visuals: &egui::Visuals) -> Color32 {
-    let sem = semantic(visuals);
-    if relation.is_self() {
-        sem.text_strong
-    } else if relation.is_ally() {
-        sem.win
-    } else {
-        sem.loss
-    }
+    crate::ui::replay_parser::PlayerTint::from_relation(relation).color(visuals)
 }
 
 pub fn build_wows_numbers_url(player: &Player) -> Option<String> {

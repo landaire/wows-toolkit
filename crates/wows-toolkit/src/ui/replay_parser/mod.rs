@@ -121,7 +121,6 @@ use crate::util::build_ship_config_url;
 use crate::util::build_short_ship_config_url;
 use crate::util::build_wows_numbers_url;
 use crate::util::error::ToolkitError;
-use crate::util::personal_rating::PersonalRatingCategorySwatch;
 use crate::util::player_color_for_team_relation;
 use crate::util::separate_number;
 
@@ -2062,13 +2061,8 @@ impl UiReport {
                     }
                     ReplayColumn::PersonalRating => {
                         if let Some(pr) = report.personal_rating.as_ref() {
-                            let swatch = pr.category.swatch();
-                            ui.label(
-                                RichText::new(format!("{:.0}", pr.pr))
-                                    .color(swatch.label)
-                                    .background_color(swatch.fill),
-                            )
-                            .on_hover_text(pr.category.name());
+                            crate::ui::widgets::pr_chip(ui, pr.category, &format!("{:.0}", pr.pr), false)
+                                .on_hover_text(pr.category.name());
                         } else {
                             ui.label("-");
                         }
@@ -3286,11 +3280,11 @@ impl ToolkitTabViewer<'_> {
                 if let Some(battle_stats) = replay_file.to_battle_stats() {
                     let pr_data = self.tab_state.personal_rating_data.read();
                     if let Some(pr_result) = pr_data.calculate_pr(&[battle_stats]) {
-                        let swatch = pr_result.category.swatch();
-                        ui.label(
-                            RichText::new(format!("PR: {:.0} ({})", pr_result.pr, pr_result.category.name()))
-                                .color(swatch.label)
-                                .background_color(swatch.fill),
+                        crate::ui::widgets::pr_chip(
+                            ui,
+                            pr_result.category,
+                            &format!("PR: {:.0} ({})", pr_result.pr, pr_result.category.name()),
+                            false,
                         );
                     }
                 }
@@ -4349,12 +4343,13 @@ impl ToolkitTabViewer<'_> {
                             continue;
                         }
                         ui.horizontal(|ui| {
-                            let color = crate::ui::theme::contrast::readable_on(
-                                Color32::from_rgb(user.color[0], user.color[1], user.color[2]),
-                                ui.visuals().panel_fill,
+                            let color = crate::ui::widgets::identity_dot_color(
+                                ui.visuals(),
+                                user.color[0],
+                                user.color[1],
+                                user.color[2],
                             );
-                            let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
-                            ui.painter().circle_filled(rect.center(), 4.0, color);
+                            crate::ui::widgets::identity_dot(ui, color);
                             ui.label(&user.name);
                             if user.role == crate::collab::PeerRole::CoHost {
                                 ui.label(RichText::new(icons::CROWN).small().color(ui.sem().crown_cohost));
@@ -4421,12 +4416,13 @@ impl ToolkitTabViewer<'_> {
                     let my_id = self.tab_state.session_state.lock().my_user_id;
                     for user in &connected_users {
                         ui.horizontal(|ui| {
-                            let color = crate::ui::theme::contrast::readable_on(
-                                Color32::from_rgb(user.color[0], user.color[1], user.color[2]),
-                                ui.visuals().panel_fill,
+                            let color = crate::ui::widgets::identity_dot_color(
+                                ui.visuals(),
+                                user.color[0],
+                                user.color[1],
+                                user.color[2],
                             );
-                            let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
-                            ui.painter().circle_filled(rect.center(), 4.0, color);
+                            crate::ui::widgets::identity_dot(ui, color);
                             if user.id == my_id {
                                 ui.label(RichText::new(&user.name).italics());
                                 ui.label(RichText::new(t!("ui.collab.you").as_ref()).small().weak());
