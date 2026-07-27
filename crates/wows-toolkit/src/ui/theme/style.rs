@@ -1,6 +1,8 @@
 //! Style construction. Both themes share spacing and interaction; each
-//! supplies its own `Visuals`. Square corners throughout, and active states
-//! invert to the bone accent rather than picking up a hue.
+//! supplies its own `Visuals`. Corners carry a slight radius graded by how
+//! much a surface floats or responds; structure (panels, tables, separators)
+//! stays square. Active states invert to the bone accent rather than picking
+//! up a hue.
 
 use egui::Color32;
 use egui::CornerRadius;
@@ -81,7 +83,7 @@ fn dark_visuals() -> Visuals {
                 bg_fill: p::CARD,
                 weak_bg_fill: p::CARD,
                 bg_stroke: Stroke { width: 1.0, color: p::BORDER },
-                corner_radius: CornerRadius::ZERO,
+                corner_radius: CornerRadius::same(3),
                 fg_stroke: Stroke { width: 1.0, color: p::TEXT_DIM },
                 expansion: 0.0,
             },
@@ -89,7 +91,7 @@ fn dark_visuals() -> Visuals {
                 bg_fill: p::WIDGET,
                 weak_bg_fill: p::WIDGET,
                 bg_stroke: Stroke { width: 1.0, color: p::BORDER },
-                corner_radius: CornerRadius::ZERO,
+                corner_radius: CornerRadius::same(3),
                 fg_stroke: Stroke { width: 1.0, color: p::TEXT },
                 expansion: 0.0,
             },
@@ -97,7 +99,7 @@ fn dark_visuals() -> Visuals {
                 bg_fill: p::WIDGET_HOT,
                 weak_bg_fill: p::WIDGET_HOT,
                 bg_stroke: Stroke { width: 1.0, color: p::BORDER_BRIGHT },
-                corner_radius: CornerRadius::ZERO,
+                corner_radius: CornerRadius::same(3),
                 fg_stroke: Stroke { width: 1.0, color: p::TEXT_BRIGHT },
                 expansion: 1.0,
             },
@@ -105,7 +107,7 @@ fn dark_visuals() -> Visuals {
                 bg_fill: p::ACCENT,
                 weak_bg_fill: p::ACCENT,
                 bg_stroke: Stroke { width: 1.0, color: p::ACCENT },
-                corner_radius: CornerRadius::ZERO,
+                corner_radius: CornerRadius::same(3),
                 fg_stroke: Stroke { width: 1.0, color: p::PANEL },
                 expansion: 1.0,
             },
@@ -113,7 +115,7 @@ fn dark_visuals() -> Visuals {
                 bg_fill: p::WIDGET_HOT,
                 weak_bg_fill: p::WIDGET_HOT,
                 bg_stroke: Stroke { width: 1.0, color: p::BORDER_BRIGHT },
-                corner_radius: CornerRadius::ZERO,
+                corner_radius: CornerRadius::same(3),
                 fg_stroke: Stroke { width: 1.0, color: p::TEXT },
                 expansion: 0.0,
             },
@@ -125,7 +127,7 @@ fn dark_visuals() -> Visuals {
         code_bg_color: p::SURFACE,
         warn_fg_color: semantic::DARK.warn,
         error_fg_color: semantic::DARK.error,
-        window_corner_radius: CornerRadius::ZERO,
+        window_corner_radius: CornerRadius::same(6),
         window_shadow: Shadow {
             spread: 0,
             color: Color32::from_rgba_premultiplied(0, 0, 0, 140),
@@ -134,7 +136,7 @@ fn dark_visuals() -> Visuals {
         },
         window_fill: p::PANEL,
         window_stroke: Stroke { width: 1.0, color: p::BORDER },
-        menu_corner_radius: CornerRadius::ZERO,
+        menu_corner_radius: CornerRadius::same(4),
         panel_fill: p::PANEL,
         popup_shadow: Shadow {
             spread: 0,
@@ -169,7 +171,7 @@ fn light_visuals() -> Visuals {
                 bg_fill: p::CARD,
                 weak_bg_fill: p::CARD,
                 bg_stroke: Stroke { width: 1.0, color: p::BORDER },
-                corner_radius: CornerRadius::ZERO,
+                corner_radius: CornerRadius::same(3),
                 fg_stroke: Stroke { width: 1.0, color: p::TEXT_DIM },
                 expansion: 0.0,
             },
@@ -177,7 +179,7 @@ fn light_visuals() -> Visuals {
                 bg_fill: p::WIDGET,
                 weak_bg_fill: p::WIDGET,
                 bg_stroke: Stroke { width: 1.0, color: p::BORDER },
-                corner_radius: CornerRadius::ZERO,
+                corner_radius: CornerRadius::same(3),
                 fg_stroke: Stroke { width: 1.0, color: p::TEXT },
                 expansion: 0.0,
             },
@@ -185,7 +187,7 @@ fn light_visuals() -> Visuals {
                 bg_fill: p::WIDGET_HOT,
                 weak_bg_fill: p::WIDGET_HOT,
                 bg_stroke: Stroke { width: 1.0, color: p::BORDER_BRIGHT },
-                corner_radius: CornerRadius::ZERO,
+                corner_radius: CornerRadius::same(3),
                 fg_stroke: Stroke { width: 1.0, color: p::TEXT_BRIGHT },
                 expansion: 1.0,
             },
@@ -193,7 +195,7 @@ fn light_visuals() -> Visuals {
                 bg_fill: p::ACCENT,
                 weak_bg_fill: p::ACCENT,
                 bg_stroke: Stroke { width: 1.0, color: p::ACCENT },
-                corner_radius: CornerRadius::ZERO,
+                corner_radius: CornerRadius::same(3),
                 fg_stroke: Stroke { width: 1.0, color: p::PANEL },
                 expansion: 1.0,
             },
@@ -201,7 +203,7 @@ fn light_visuals() -> Visuals {
                 bg_fill: p::WIDGET_HOT,
                 weak_bg_fill: p::WIDGET_HOT,
                 bg_stroke: Stroke { width: 1.0, color: p::BORDER_BRIGHT },
-                corner_radius: CornerRadius::ZERO,
+                corner_radius: CornerRadius::same(3),
                 fg_stroke: Stroke { width: 1.0, color: p::TEXT },
                 expansion: 0.0,
             },
@@ -213,7 +215,7 @@ fn light_visuals() -> Visuals {
         code_bg_color: p::SURFACE,
         warn_fg_color: semantic::LIGHT.warn,
         error_fg_color: semantic::LIGHT.error,
-        window_corner_radius: CornerRadius::ZERO,
+        window_corner_radius: CornerRadius::same(6),
         window_shadow: Shadow {
             spread: 0,
             color: Color32::from_rgba_premultiplied(0, 0, 0, 50),
@@ -222,7 +224,7 @@ fn light_visuals() -> Visuals {
         },
         window_fill: p::PANEL,
         window_stroke: Stroke { width: 1.0, color: p::BORDER },
-        menu_corner_radius: CornerRadius::ZERO,
+        menu_corner_radius: CornerRadius::same(4),
         panel_fill: p::PANEL,
         popup_shadow: Shadow {
             spread: 0,
@@ -280,8 +282,9 @@ pub fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
     let mut style = egui_dock::Style::from_egui(egui_style);
     style.tab_bar.bg_fill = surface;
     style.tab_bar.hline_color = border;
-    // from_egui adds +2 to the noninteractive corner radius unconditionally; square it back off.
-    style.tab_bar.corner_radius = CornerRadius::ZERO;
+    // from_egui adds +2 to the noninteractive corner radius unconditionally and rounds all
+    // four corners; top-only rounding matches the tabs sitting on it.
+    style.tab_bar.corner_radius = CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 };
     style.tab.active.bg_fill = tab_active;
     style.tab.active.text_color = text;
     style.tab.active.outline_color = accent;
@@ -334,10 +337,10 @@ mod tests {
                 ("active", &w.active),
                 ("open", &w.open),
             ] {
-                assert_eq!(visuals.corner_radius, CornerRadius::ZERO, "{name} {state} is rounded");
+                assert_eq!(visuals.corner_radius, CornerRadius::same(3), "{name} {state}");
             }
-            assert_eq!(style.visuals.window_corner_radius, CornerRadius::ZERO, "{name} window is rounded");
-            assert_eq!(style.visuals.menu_corner_radius, CornerRadius::ZERO, "{name} menu is rounded");
+            assert_eq!(style.visuals.window_corner_radius, CornerRadius::same(6), "{name} window");
+            assert_eq!(style.visuals.menu_corner_radius, CornerRadius::same(4), "{name} menu");
         }
     }
 
@@ -381,25 +384,34 @@ mod tests {
             ),
         ] {
             let s = dock_style(&egui_style);
+            let tab_r = CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 };
             assert_eq!(s.tab_bar.bg_fill, surface, "{name} tab_bar.bg_fill");
             assert_eq!(s.tab_bar.hline_color, border, "{name} tab_bar.hline_color");
-            assert_eq!(s.tab_bar.corner_radius, CornerRadius::ZERO, "{name} tab_bar is rounded");
+            assert_eq!(s.tab_bar.corner_radius, tab_r, "{name} tab_bar");
             assert_eq!(s.tab.active.bg_fill, tab_active, "{name} tab.active.bg_fill");
             assert_eq!(s.tab.active.text_color, text, "{name} tab.active.text_color");
             assert_eq!(s.tab.active.outline_color, accent, "{name} tab.active.outline_color");
+            assert_eq!(s.tab.active.corner_radius, tab_r, "{name} tab.active.corner_radius");
             assert_eq!(s.tab.focused.bg_fill, tab_active, "{name} tab.focused.bg_fill");
             assert_eq!(s.tab.focused.text_color, text, "{name} tab.focused.text_color");
             assert_eq!(s.tab.focused.outline_color, accent, "{name} tab.focused.outline_color");
+            assert_eq!(s.tab.focused.corner_radius, tab_r, "{name} tab.focused.corner_radius");
             assert_eq!(s.tab.inactive.bg_fill, surface, "{name} tab.inactive.bg_fill");
             assert_eq!(s.tab.inactive.outline_color, border, "{name} tab.inactive.outline_color");
+            assert_eq!(s.tab.inactive.corner_radius, tab_r, "{name} tab.inactive.corner_radius");
             assert_eq!(s.tab.hovered.bg_fill, widget_hot, "{name} tab.hovered.bg_fill");
             assert_eq!(s.tab.hovered.outline_color, border, "{name} tab.hovered.outline_color");
             assert_eq!(s.tab.hovered.text_color, text_bright, "{name} tab.hovered.text_color");
+            assert_eq!(s.tab.hovered.corner_radius, tab_r, "{name} tab.hovered.corner_radius");
             assert_eq!(s.tab.active_with_kb_focus.bg_fill, tab_active, "{name} tab.active_with_kb_focus.bg_fill");
             assert_eq!(s.tab.active_with_kb_focus.text_color, text, "{name} tab.active_with_kb_focus.text_color");
             assert_eq!(
                 s.tab.active_with_kb_focus.outline_color, accent,
                 "{name} tab.active_with_kb_focus.outline_color"
+            );
+            assert_eq!(
+                s.tab.active_with_kb_focus.corner_radius, tab_r,
+                "{name} tab.active_with_kb_focus.corner_radius"
             );
             assert_eq!(s.tab.focused_with_kb_focus.bg_fill, tab_active, "{name} tab.focused_with_kb_focus.bg_fill");
             assert_eq!(s.tab.focused_with_kb_focus.text_color, text, "{name} tab.focused_with_kb_focus.text_color");
@@ -407,10 +419,18 @@ mod tests {
                 s.tab.focused_with_kb_focus.outline_color, accent,
                 "{name} tab.focused_with_kb_focus.outline_color"
             );
+            assert_eq!(
+                s.tab.focused_with_kb_focus.corner_radius, tab_r,
+                "{name} tab.focused_with_kb_focus.corner_radius"
+            );
             assert_eq!(s.tab.inactive_with_kb_focus.bg_fill, surface, "{name} tab.inactive_with_kb_focus.bg_fill");
             assert_eq!(
                 s.tab.inactive_with_kb_focus.outline_color, accent,
                 "{name} tab.inactive_with_kb_focus.outline_color"
+            );
+            assert_eq!(
+                s.tab.inactive_with_kb_focus.corner_radius, tab_r,
+                "{name} tab.inactive_with_kb_focus.corner_radius"
             );
             assert!(s.tab.hline_below_active_tab_name, "{name} hline_below_active_tab_name");
             assert_eq!(s.tab.tab_body.stroke, Stroke::NONE, "{name} tab_body.stroke");
