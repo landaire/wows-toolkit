@@ -16,9 +16,13 @@ use super::PlayerTracker;
 use super::SortOrder;
 use super::SortedBy;
 use super::TimePeriod;
+use super::detail_rect;
 use super::encounter_severity_color;
+use super::expanded_rows;
 use super::last_seen_text;
 use super::last_seen_timestamp_text;
+use super::row_offset;
+use super::sort_header_label;
 
 /// Columns of the historical table, in render order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,70 +143,9 @@ fn visible_rows(tracker: &PlayerTracker) -> Vec<AccountId> {
         .collect()
 }
 
-/// Header label with the sort arrow appended when this column drives the sort.
-fn header_label(key: &str, sorted_by: SortedBy, is_active: bool) -> String {
-    let label: String = t!(key).into();
-    if is_active { format!("{} {}", label, sorted_by.order().icon()) } else { label }
-}
-
-/// Salted so the animation does not collide with the replay inspector's
-/// row animations, which key on the bare row number.
-fn row_animation_id(row_nr: u64) -> egui::Id {
-    egui::Id::new(("player_tracker_historical_row", row_nr))
-}
-
-/// Per-row expansion factor, projected from the account-keyed open set so that
-/// a re-sort or re-filter carries an open row to the account's new index instead
-/// of leaving it open on whoever landed there.
-///
-/// Stepping every row's animation once here, and keeping only the rows that
-/// still contribute height, is what lets [`row_offset`] walk a map bounded by
-/// the open rows rather than by the whole tracker, without taking a context lock
-/// per step. A row that is closing keeps a factor above zero until its animation
-/// finishes, so the collapse still animates after it leaves `expanded_players`.
-fn expanded_rows(ctx: &egui::Context, rows: &[AccountId], expanded_players: &HashSet<AccountId>) -> BTreeMap<u64, f32> {
-    rows.iter()
-        .enumerate()
-        .filter_map(|(index, id)| {
-            let row_nr = index as u64;
-            let factor = ctx.animate_bool(row_animation_id(row_nr), expanded_players.contains(id));
-            (0.0 < factor).then_some((row_nr, factor))
-        })
-        .collect()
-}
-
-/// Where an open row's detail block goes: the whole visible width of the region
-/// painting it, and the part of the row left below the collapsed content.
-///
-/// The width comes from the clip rather than from the row, because the row ends
-/// at the last column and the block should follow the window instead.
-///
-/// `None` when the region has no usable width, which happens when the panel is
-/// narrower than the sticky columns and the scrollable region collapses. Laying
-/// the notes editor out in that rect would wrap it one glyph per line and feed a
-/// wildly inflated height into every row offset below it.
-fn detail_rect(row_rect: egui::Rect, clip_rect: egui::Rect) -> Option<egui::Rect> {
-    let rect = egui::Rect::from_x_y_ranges(
-        clip_rect.x_range(),
-        egui::Rangef::new(row_rect.top() + HISTORICAL_ROW_HEIGHT, row_rect.bottom()),
-    );
-
-    (0.0 < rect.width()).then_some(rect)
-}
-
-/// Vertical offset of `row_nr` from the top of the table body: one default row
-/// height per row above it, plus the animated extra height of the expanded ones.
-fn row_offset(detail_heights: &BTreeMap<u64, f32>, expandedness: &BTreeMap<u64, f32>, row_nr: u64) -> f32 {
-    expandedness
-        .range(0..row_nr)
-        .map(|(expanded_row_nr, factor)| {
-            // A row that has never been painted has no measured height yet;
-            // contributing zero offset is right until it is measured.
-            factor * detail_heights.get(expanded_row_nr).copied().unwrap_or(0.0)
-        })
-        .sum::<f32>()
-        + row_nr as f32 * HISTORICAL_ROW_HEIGHT
-}
+/// Salts the row animations so they do not collide with another table's, which
+/// key on the bare row number.
+const HISTORICAL_ROW_SALT: &str = "player_tracker_historical_row";
 
 /// Values copied out of one tracked player for a single frame's render. Cheap:
 /// egui_table only paints visible rows.
@@ -412,7 +355,7 @@ impl egui_table::TableDelegate for HistoricalTable<'_> {
         };
 
         egui::Frame::new().inner_margin(egui::Margin::symmetric(4, 0)).show(ui, |ui| {
-            if ui.strong(header_label(key, sorted_by, is_active)).clicked() {
+            if ui.strong(sort_header_label(key, sorted_by.order(), is_active)).clicked() {
                 self.tracker.sort_order.transition_to(target);
                 // The row order was built before the table was shown, so the new
                 // sort lands on the next frame.
@@ -444,7 +387,7 @@ impl egui_table::TableDelegate for HistoricalTable<'_> {
         };
 
         let row_rect = ui.max_rect();
-        let Some(detail_rect) = detail_rect(row_rect, ui.clip_rect()) else {
+        let Some(detail_rect) = detail_rect(row_rect, ui.clip_rect(), HISTORICAL_ROW_HEIGHT) else {
             return;
         };
 
@@ -485,7 +428,7 @@ impl egui_table::TableDelegate for HistoricalTable<'_> {
     }
 
     fn row_top_offset(&self, _ctx: &egui::Context, _table_id: egui::Id, row_nr: u64) -> f32 {
-        row_offset(&self.detail_heights, &self.expanded_rows, row_nr)
+        row_offset(&self.detail_heights, &self.expanded_rows, row_nr, HISTORICAL_ROW_HEIGHT)
     }
 }
 
@@ -583,7 +526,8 @@ impl ToolkitTabViewer<'_> {
                 // Everything the delegate needs from the tracker is read before it takes the
                 // mutable borrow.
                 let rows = visible_rows(player_tracker);
-                let expanded_rows = expanded_rows(ui.ctx(), &rows, &player_tracker.expanded_players);
+                let expanded_rows =
+                    expanded_rows(ui.ctx(), HISTORICAL_ROW_SALT, &rows, &player_tracker.expanded_players);
                 let detail_heights = std::mem::take(&mut player_tracker.historical_detail_heights);
                 let filter_range = player_tracker.filter_time_period.to_date();
 
@@ -801,20 +745,21 @@ mod tests {
 
         let ascending = [AccountId(1), AccountId(2), AccountId(3)];
         assert_eq!(
-            expanded_rows(&egui::Context::default(), &ascending, &open),
+            expanded_rows(&egui::Context::default(), HISTORICAL_ROW_SALT, &ascending, &open),
             BTreeMap::from([(2, 1.0)]),
             "the open account is the last row before the re-sort, and no closed row is carried"
         );
 
         let descending = [AccountId(3), AccountId(2), AccountId(1)];
         assert_eq!(
-            expanded_rows(&egui::Context::default(), &descending, &open),
+            expanded_rows(&egui::Context::default(), HISTORICAL_ROW_SALT, &descending, &open),
             BTreeMap::from([(0, 1.0)]),
             "reversing the order moves the open state with the account, not the index"
         );
 
         assert!(
-            expanded_rows(&egui::Context::default(), &[AccountId(1), AccountId(2)], &open).is_empty(),
+            expanded_rows(&egui::Context::default(), HISTORICAL_ROW_SALT, &[AccountId(1), AccountId(2)], &open)
+                .is_empty(),
             "filtering the open account out leaves no row open"
         );
     }
@@ -824,37 +769,37 @@ mod tests {
         let heights = BTreeMap::from([(0, 100.0), (1, 100.0), (2, 100.0), (3, 100.0)]);
 
         assert_eq!(
-            row_offset(&heights, &BTreeMap::new(), 2),
+            row_offset(&heights, &BTreeMap::new(), 2, HISTORICAL_ROW_HEIGHT),
             2.0 * HISTORICAL_ROW_HEIGHT,
             "with nothing expanded every row is exactly one default height tall"
         );
 
         assert_eq!(
-            row_offset(&heights, &BTreeMap::from([(0, 1.0)]), 2),
+            row_offset(&heights, &BTreeMap::from([(0, 1.0)]), 2, HISTORICAL_ROW_HEIGHT),
             2.0 * HISTORICAL_ROW_HEIGHT + 100.0,
             "an expanded row above the queried one pushes it down by its measured height"
         );
 
         assert_eq!(
-            row_offset(&heights, &BTreeMap::from([(2, 1.0)]), 2),
+            row_offset(&heights, &BTreeMap::from([(2, 1.0)]), 2, HISTORICAL_ROW_HEIGHT),
             2.0 * HISTORICAL_ROW_HEIGHT,
             "the queried row's own expansion does not move its top edge"
         );
 
         assert_eq!(
-            row_offset(&heights, &BTreeMap::from([(3, 1.0)]), 2),
+            row_offset(&heights, &BTreeMap::from([(3, 1.0)]), 2, HISTORICAL_ROW_HEIGHT),
             2.0 * HISTORICAL_ROW_HEIGHT,
             "an expanded row below the queried one does not move it"
         );
 
         assert_eq!(
-            row_offset(&heights, &BTreeMap::from([(0, 0.25)]), 2),
+            row_offset(&heights, &BTreeMap::from([(0, 0.25)]), 2, HISTORICAL_ROW_HEIGHT),
             2.0 * HISTORICAL_ROW_HEIGHT + 25.0,
             "a part-way animation contributes its fraction of the measured height"
         );
 
         assert_eq!(
-            row_offset(&BTreeMap::new(), &BTreeMap::from([(0, 1.0)]), 2),
+            row_offset(&BTreeMap::new(), &BTreeMap::from([(0, 1.0)]), 2, HISTORICAL_ROW_HEIGHT),
             2.0 * HISTORICAL_ROW_HEIGHT,
             "a row expanded but never yet painted contributes nothing until it is measured"
         );
@@ -867,7 +812,8 @@ mod tests {
     fn a_rows_height_is_the_default_plus_its_animated_detail_block() {
         let heights = BTreeMap::from([(1, 80.0)]);
         let height_of_row_1 = |expandedness: &BTreeMap<u64, f32>| {
-            row_offset(&heights, expandedness, 2) - row_offset(&heights, expandedness, 1)
+            row_offset(&heights, expandedness, 2, HISTORICAL_ROW_HEIGHT)
+                - row_offset(&heights, expandedness, 1, HISTORICAL_ROW_HEIGHT)
         };
 
         assert_eq!(
@@ -893,7 +839,7 @@ mod tests {
         // left, which is what the scrollable region hands over.
         let clip = egui::Rect::from_min_max(egui::pos2(290.0, 0.0), egui::pos2(1400.0, 900.0));
 
-        let rect = detail_rect(row, clip).expect("a positive-width region yields a rect");
+        let rect = detail_rect(row, clip, HISTORICAL_ROW_HEIGHT).expect("a positive-width region yields a rect");
         assert_eq!(rect.x_range(), clip.x_range(), "the width follows the region, not the last column");
         assert_eq!(rect.top(), row.top() + HISTORICAL_ROW_HEIGHT, "the block starts below the collapsed content");
         assert_eq!(rect.bottom(), row.bottom(), "the block ends with the row");
@@ -904,9 +850,13 @@ mod tests {
         let row = egui::Rect::from_min_max(egui::pos2(0.0, 100.0), egui::pos2(750.0, 210.0));
 
         let collapsed = egui::Rect::from_min_max(egui::pos2(290.0, 0.0), egui::pos2(290.0, 900.0));
-        assert_eq!(detail_rect(row, collapsed), None, "a panel narrower than the sticky columns yields no block");
+        assert_eq!(
+            detail_rect(row, collapsed, HISTORICAL_ROW_HEIGHT),
+            None,
+            "a panel narrower than the sticky columns yields no block"
+        );
 
         let inverted = egui::Rect::from_min_max(egui::pos2(290.0, 0.0), egui::pos2(250.0, 900.0));
-        assert_eq!(detail_rect(row, inverted), None, "a negative-width region yields no block");
+        assert_eq!(detail_rect(row, inverted, HISTORICAL_ROW_HEIGHT), None, "a negative-width region yields no block");
     }
 }

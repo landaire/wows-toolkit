@@ -1,15 +1,24 @@
+mod clans;
 mod current_match;
 mod historical;
 mod live;
 mod model;
 
+pub(crate) use clans::ClanBreakdown;
+pub(crate) use clans::ClanSortedBy;
 pub(crate) use model::SortOrder;
 pub(crate) use model::SortedBy;
 pub use model::TimePeriod;
 pub use model::TrackedPlayer;
+pub(crate) use model::detail_rect;
 pub(crate) use model::encounter_severity_color;
+pub(crate) use model::exact_timestamp_text;
+pub(crate) use model::expanded_rows;
 pub(crate) use model::last_seen_text;
 pub(crate) use model::last_seen_timestamp_text;
+pub(crate) use model::relative_age_text;
+pub(crate) use model::row_offset;
+pub(crate) use model::sort_header_label;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -37,6 +46,8 @@ pub struct PlayerTracker {
     pub(crate) tracked_players: HashMap<AccountId, TrackedPlayer>,
     pub filter_time_period: TimePeriod,
     pub(crate) sort_order: SortedBy,
+    #[serde(default)]
+    pub(crate) clan_sort_order: ClanSortedBy,
     pub(crate) player_filter: String,
 
     /// Measured height of each open historical row's detail block, keyed by row
@@ -48,6 +59,27 @@ pub struct PlayerTracker {
     /// so a sort or filter change does not move the open row onto another player.
     #[serde(skip)]
     pub(crate) expanded_players: HashSet<AccountId>,
+
+    /// Same role as `historical_detail_heights`, for the clans table.
+    #[serde(skip)]
+    pub(crate) clan_detail_heights: BTreeMap<u64, f32>,
+
+    /// Clans whose member list is open, keyed by tag for the same reason
+    /// `expanded_players` keys by account.
+    #[serde(skip)]
+    pub(crate) expanded_clans: HashSet<String>,
+
+    /// Clan aggregates, rebuilt only when their inputs change: the index queries
+    /// behind them run synchronously on the UI thread.
+    #[serde(skip)]
+    pub(crate) clan_breakdown: Option<ClanBreakdown>,
+
+    /// The period `clan_breakdown` was built for. Held as the period rather than
+    /// as its resolved boundary because `TimePeriod::to_date` is relative to
+    /// `now`: a stored boundary would differ on every frame and re-run the index
+    /// queries on every repaint.
+    #[serde(skip)]
+    pub(crate) clan_breakdown_period: Option<TimePeriod>,
 
     #[serde(skip)]
     pub(crate) live_match: Option<LiveMatch>,
@@ -164,12 +196,13 @@ impl PlayerTracker {
     }
 }
 
-/// The Player Tracker's two views. Neither is closeable: closing one would
-/// leave no way to get it back.
+/// The Player Tracker's views. None is closeable: closing one would leave no
+/// way to get it back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PlayerTrackerSubTab {
     Historical,
     CurrentMatch,
+    Clans,
 }
 
 /// Whether a deserialized layout has lost a sub-tab, either from a corrupt row
@@ -177,8 +210,9 @@ pub enum PlayerTrackerSubTab {
 pub(crate) fn player_tracker_dock_needs_repair(dock: &egui_dock::DockState<PlayerTrackerSubTab>) -> bool {
     let has_historical = dock.iter_all_tabs().any(|(_, tab)| matches!(tab, PlayerTrackerSubTab::Historical));
     let has_current_match = dock.iter_all_tabs().any(|(_, tab)| matches!(tab, PlayerTrackerSubTab::CurrentMatch));
+    let has_clans = dock.iter_all_tabs().any(|(_, tab)| matches!(tab, PlayerTrackerSubTab::Clans));
 
-    !has_historical || !has_current_match
+    !has_historical || !has_current_match || !has_clans
 }
 
 struct PlayerTrackerSubTabViewer<'a, 'b> {
@@ -196,6 +230,7 @@ impl egui_dock::TabViewer for PlayerTrackerSubTabViewer<'_, '_> {
         let key = match tab {
             PlayerTrackerSubTab::Historical => "ui.player_tracker.subtab_historical",
             PlayerTrackerSubTab::CurrentMatch => "ui.player_tracker.subtab_current_match",
+            PlayerTrackerSubTab::Clans => "ui.player_tracker.subtab_clans",
         };
         t!(key).to_string().into()
     }
@@ -204,6 +239,7 @@ impl egui_dock::TabViewer for PlayerTrackerSubTabViewer<'_, '_> {
         match tab {
             PlayerTrackerSubTab::Historical => self.tab_viewer.build_historical_sub_tab(ui),
             PlayerTrackerSubTab::CurrentMatch => self.tab_viewer.build_current_match_sub_tab(ui),
+            PlayerTrackerSubTab::Clans => self.tab_viewer.build_clans_sub_tab(ui),
         }
     }
 
@@ -266,6 +302,32 @@ impl ToolkitTabViewer<'_> {
         });
         self.tab_state.pending_focus_search = true;
     }
+
+    /// Queues an advanced search for matches mentioning this clan tag and
+    /// focuses the Search tab. The index has no clan-only field, so this is a
+    /// substring match over player name and clan alike: a tag that occurs inside
+    /// someone's name matches too.
+    pub(crate) fn queue_clan_search(&mut self, clan: &str) {
+        use crate::db::index::query_model::Chip;
+        use crate::db::index::query_model::Connector;
+        use crate::db::index::query_model::Field;
+        use crate::db::index::query_model::Group;
+        use crate::db::index::query_model::Op;
+        use crate::db::index::query_model::Query;
+        use crate::db::index::query_model::Value;
+
+        self.tab_state.pending_search_query = Some(Query {
+            groups: vec![Group {
+                chips: vec![Chip {
+                    field: Field::PlayerNameOrClan,
+                    op: Op::Contains,
+                    value: Value::Text(clan.to_string()),
+                }],
+            }],
+            connector: Connector::And,
+        });
+        self.tab_state.pending_focus_search = true;
+    }
 }
 
 #[cfg(test)]
@@ -280,13 +342,21 @@ mod tests {
 
     #[test]
     fn a_layout_missing_current_match_needs_repair() {
-        let dock = egui_dock::DockState::new(vec![PlayerTrackerSubTab::Historical]);
+        let dock = egui_dock::DockState::new(vec![PlayerTrackerSubTab::Historical, PlayerTrackerSubTab::Clans]);
         assert!(player_tracker_dock_needs_repair(&dock));
     }
 
     #[test]
     fn a_layout_missing_historical_needs_repair() {
-        let dock = egui_dock::DockState::new(vec![PlayerTrackerSubTab::CurrentMatch]);
+        let dock = egui_dock::DockState::new(vec![PlayerTrackerSubTab::CurrentMatch, PlayerTrackerSubTab::Clans]);
+        assert!(player_tracker_dock_needs_repair(&dock));
+    }
+
+    /// A layout persisted before the Clans sub-tab existed holds exactly the two
+    /// older variants, so it must fail repair and reset to the default.
+    #[test]
+    fn a_layout_missing_clans_needs_repair() {
+        let dock = egui_dock::DockState::new(vec![PlayerTrackerSubTab::Historical, PlayerTrackerSubTab::CurrentMatch]);
         assert!(player_tracker_dock_needs_repair(&dock));
     }
 

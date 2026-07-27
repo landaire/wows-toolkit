@@ -321,10 +321,14 @@ pub(crate) fn default_stats_dock_state() -> egui_dock::DockState<StatsSubTab> {
     dock
 }
 
-/// Default player-tracker dock: both sub-tabs in one leaf. Historical is first,
+/// Default player-tracker dock: every sub-tab in one leaf. Historical is first,
 /// which makes it the active tab on a fresh install.
 pub(crate) fn default_player_tracker_dock_state() -> egui_dock::DockState<PlayerTrackerSubTab> {
-    let mut dock = egui_dock::DockState::new(vec![PlayerTrackerSubTab::Historical, PlayerTrackerSubTab::CurrentMatch]);
+    let mut dock = egui_dock::DockState::new(vec![
+        PlayerTrackerSubTab::Historical,
+        PlayerTrackerSubTab::CurrentMatch,
+        PlayerTrackerSubTab::Clans,
+    ]);
     // `DockState::new` leaves nothing focused; focus the only leaf so
     // `find_active_focused` resolves without waiting for a first render.
     dock.set_focused_node_and_surface(egui_dock::NodePath::MAIN_ROOT);

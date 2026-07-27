@@ -1,5 +1,7 @@
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
+use std::hash::Hash;
 
 use egui::Color32;
 use jiff::Timestamp;
@@ -29,12 +31,9 @@ pub(crate) fn encounter_severity_color(ui: &egui::Ui, times_encountered_in_range
     }
 }
 
-/// Human-readable "how long ago" for a tracked player's most recent encounter.
-pub(crate) fn last_seen_text(player: &TrackedPlayer, now: Timestamp) -> String {
-    let Some(last) = player.timestamps.last() else {
-        return String::new();
-    };
-    let timestamp = last.to_zoned(TimeZone::system());
+/// Human-readable "how long ago" for a past timestamp.
+pub(crate) fn relative_age_text(timestamp: Timestamp, now: Timestamp) -> String {
+    let timestamp = timestamp.to_zoned(TimeZone::system());
     let now = now.to_zoned(TimeZone::system());
     let delta = now
         .since(
@@ -43,9 +42,23 @@ pub(crate) fn last_seen_text(player: &TrackedPlayer, now: Timestamp) -> String {
                 .largest(Unit::Year)
                 .mode(jiff::RoundMode::HalfExpand),
         )
-        .expect("failed to calculate player last seen delta");
+        .expect("failed to calculate the age of an encounter timestamp");
 
     format!("{delta:#}")
+}
+
+/// Absolute local-time rendering of a timestamp, for the hover behind a
+/// relative age.
+pub(crate) fn exact_timestamp_text(timestamp: Timestamp) -> String {
+    timestamp.to_zoned(TimeZone::system()).strftime("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// Human-readable "how long ago" for a tracked player's most recent encounter.
+pub(crate) fn last_seen_text(player: &TrackedPlayer, now: Timestamp) -> String {
+    let Some(last) = player.timestamps.last() else {
+        return String::new();
+    };
+    relative_age_text(*last, now)
 }
 
 /// Absolute local-time stamp of a tracked player's most recent encounter, for
@@ -53,14 +66,85 @@ pub(crate) fn last_seen_text(player: &TrackedPlayer, now: Timestamp) -> String {
 /// at least one timestamp; an empty hover is the right degradation if that
 /// invariant ever breaks, rather than a panic.
 pub(crate) fn last_seen_timestamp_text(player: &TrackedPlayer) -> String {
-    player
-        .timestamps
-        .last()
-        .map(|ts| ts.to_zoned(TimeZone::system()).strftime("%Y-%m-%d %H:%M:%S").to_string())
-        .unwrap_or_default()
+    player.timestamps.last().copied().map(exact_timestamp_text).unwrap_or_default()
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+/// Header label with the sort arrow appended when this column drives the sort.
+pub(crate) fn sort_header_label(key: &str, order: SortOrder, is_active: bool) -> String {
+    let label: String = t!(key).into();
+    if is_active { format!("{} {}", label, order.icon()) } else { label }
+}
+
+/// Per-row expansion factor, projected from the identity-keyed open set so that
+/// a re-sort or re-filter carries an open row to that identity's new index
+/// instead of leaving it open on whoever landed there.
+///
+/// Stepping every row's animation once here, and keeping only the rows that
+/// still contribute height, is what lets [`row_offset`] walk a map bounded by
+/// the open rows rather than by the whole table, without taking a context lock
+/// per step. A row that is closing keeps a factor above zero until its animation
+/// finishes, so the collapse still animates after it leaves the open set.
+///
+/// `salt` separates one table's row animations from another's, since the ids key
+/// on the bare row number.
+pub(crate) fn expanded_rows<'a, K>(
+    ctx: &egui::Context,
+    salt: &'static str,
+    rows: impl IntoIterator<Item = &'a K>,
+    expanded: &HashSet<K>,
+) -> BTreeMap<u64, f32>
+where
+    K: Eq + Hash + 'a,
+{
+    rows.into_iter()
+        .enumerate()
+        .filter_map(|(index, key)| {
+            let row_nr = index as u64;
+            let factor = ctx.animate_bool(egui::Id::new((salt, row_nr)), expanded.contains(key));
+            (0.0 < factor).then_some((row_nr, factor))
+        })
+        .collect()
+}
+
+/// Where an open row's detail block goes: the whole visible width of the region
+/// painting it, and the part of the row left below the collapsed content.
+///
+/// The width comes from the clip rather than from the row, because the row ends
+/// at the last column and the block should follow the window instead.
+///
+/// `None` when the region has no usable width, which happens when the panel is
+/// narrower than the sticky columns and the scrollable region collapses. Laying
+/// content out in that rect would wrap it one glyph per line and feed a wildly
+/// inflated height into every row offset below it.
+pub(crate) fn detail_rect(row_rect: egui::Rect, clip_rect: egui::Rect, row_height: f32) -> Option<egui::Rect> {
+    let rect = egui::Rect::from_x_y_ranges(
+        clip_rect.x_range(),
+        egui::Rangef::new(row_rect.top() + row_height, row_rect.bottom()),
+    );
+
+    (0.0 < rect.width()).then_some(rect)
+}
+
+/// Vertical offset of `row_nr` from the top of the table body: one default row
+/// height per row above it, plus the animated extra height of the expanded ones.
+pub(crate) fn row_offset(
+    detail_heights: &BTreeMap<u64, f32>,
+    expandedness: &BTreeMap<u64, f32>,
+    row_nr: u64,
+    row_height: f32,
+) -> f32 {
+    expandedness
+        .range(0..row_nr)
+        .map(|(expanded_row_nr, factor)| {
+            // A row that has never been painted has no measured height yet;
+            // contributing zero offset is right until it is measured.
+            factor * detail_heights.get(expanded_row_nr).copied().unwrap_or(0.0)
+        })
+        .sum::<f32>()
+        + row_nr as f32 * row_height
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct TrackedPlayer {
     pub(crate) last_name: String,
     pub(crate) db_id: AccountId,
