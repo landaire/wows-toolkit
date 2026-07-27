@@ -460,8 +460,7 @@ fn build_player(
     let ship_name =
         provider.localized_name_from_param(vehicle_param).unwrap_or_else(|| format!("{}", vehicle_param.id()));
 
-    let is_test_ship =
-        vehicle_param.data().vehicle_ref().map(|vehicle| vehicle.is_test_ship()).unwrap_or_default();
+    let is_test_ship = vehicle_param.data().vehicle_ref().map(|vehicle| vehicle.is_test_ship()).unwrap_or_default();
 
     let observed_damage = vehicle.map(|v| v.damage().ceil() as u64).unwrap_or(0);
     let observed_kills = vehicle.map(|v| v.frags().len() as i64).unwrap_or(0);

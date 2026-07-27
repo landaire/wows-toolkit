@@ -214,11 +214,10 @@ pub fn artillery_damage_coeff(
 
 /// Whether a projectile counts as "small" for the burn-chance factor split
 /// (`isSmallProjectile`, Modifiers/__init__.py:5-12). Artillery shells take the
-/// `bulletDiametr <= SMALL_PROJECTILE_MAX_DIAMETER` test (line 10). That threshold is
-/// `0.0` in every deob source (me658a8e4.py:13 is a zeroed placeholder; real value is
-/// in a compiled C++ module), so the caller supplies it. The selected factor
-/// (`burnChanceFactorSmall` vs `burnChanceFactorBig`) is `0.0` for both in the stock
-/// `MODIFIER_SETTINGS`, so the stock burn chance is unaffected by which side is chosen.
+/// `bulletDiametr <= SMALL_PROJECTILE_MAX_DIAMETER` test (line 10). The threshold is
+/// `0.0` in the decompiled source (a zeroed compiled-module float); the real value,
+/// `0.16` m, is recovered from stage4 bytecode and supplied by the caller. See
+/// `docs/FIRE_CHANCE.md` section 2.1.
 pub fn is_small_projectile(bullet_diametr_m: f32, small_projectile_max_diameter_m: f32) -> bool {
     bullet_diametr_m <= small_projectile_max_diameter_m
 }

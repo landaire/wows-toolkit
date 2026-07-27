@@ -594,7 +594,12 @@ pub fn torpedoes<R: Recorder>(
 /// are unaffected (the gated coeffs read identity 1.0/0.0 from an empty bundle).
 /// Passed as `0.0` here, matching the weapon_tables test convention.
 const HEAVY_CRUISER_SHELL_DIAMETER_M: f32 = 0.0;
-const SMALL_PROJECTILE_MAX_DIAMETER_M: f32 = 0.0;
+/// `SMALL_PROJECTILE_MAX_DIAMETER` (meters), the `isSmallProjectile` caliber gate
+/// (Modifiers/__init__.py:10, `bulletDiametr <= SMALL_PROJECTILE_MAX_DIAMETER`).
+/// The straight `.py` decompile zeroes this compiled-module float; the real value
+/// recovered from stage4 bytecode is 0.16 (`LOAD_CONST 0.16 / STORE_NAME
+/// SMALL_PROJECTILE_MAX_DIAMETER`). Distinct from the 0.149 `isSmallGun` gate.
+const SMALL_PROJECTILE_MAX_DIAMETER_M: f32 = 0.16;
 
 /// The `TtxStat` variants a shell row maps to, selected by battery: the main
 /// battery uses `Shell*`, the secondary battery the distinct `Secondary*` set.
@@ -3657,5 +3662,28 @@ mod tests {
         let factory_dmg = stats.damage.expect("damage").value();
         let replayed = ShipStatsProvenance::replay(dmg_attr);
         assert!((replayed - factory_dmg).abs() < 1e-2, "ShellDamage replay got {replayed}, factory={factory_dmg}");
+    }
+
+    /// Victor Lima's split is at 160 mm (SMALL_PROJECTILE_MAX_DIAMETER, recovered
+    /// from stage4 bytecode). A 127 mm shell must take burnChanceFactorSmall.
+    #[test]
+    fn victor_lima_takes_the_small_bonus_below_160mm() {
+        let mods = [modifier("burnChanceFactorSmall", 0.005), modifier("burnChanceFactorBig", 0.01)];
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
+
+        let small =
+            calculate_burn_chance(10, 0.05, &bundle, is_small_projectile(0.127, SMALL_PROJECTILE_MAX_DIAMETER_M));
+        assert!((small.0 - 0.055).abs() < 1e-6, "127mm should take +0.005, got {}", small.0);
+
+        let big = calculate_burn_chance(10, 0.05, &bundle, is_small_projectile(0.203, SMALL_PROJECTILE_MAX_DIAMETER_M));
+        assert!((big.0 - 0.06).abs() < 1e-6, "203mm should take +0.01, got {}", big.0);
+    }
+
+    /// The exact threshold is inclusive: 160 mm is small, 161 mm is not.
+    #[test]
+    fn small_projectile_threshold_is_inclusive_at_160mm() {
+        assert!(is_small_projectile(0.160, SMALL_PROJECTILE_MAX_DIAMETER_M));
+        assert!(!is_small_projectile(0.161, SMALL_PROJECTILE_MAX_DIAMETER_M));
     }
 }
