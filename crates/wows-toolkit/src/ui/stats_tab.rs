@@ -183,8 +183,10 @@ impl ToolkitTabViewer<'_> {
 
         // Sync filter state to session_stats. Untracked: these three fields are
         // `serde(skip)`, so a write that mirrors them changes nothing the save
-        // task would write out, and taking a tracked guard here would re-save the
-        // whole persisted state every second the tab is open.
+        // task would write out. The save task re-serializes the whole persisted
+        // state on a five-second timer regardless; a tracked guard here would
+        // add a debounced full save roughly every second the tab is open on top
+        // of it.
         {
             let mut p = self.tab_state.persisted.write_untracked();
             p.session_stats.game_count_limit =
@@ -206,10 +208,11 @@ impl ToolkitTabViewer<'_> {
         }
 
         // Move dock state out temporarily to avoid double-borrow of tab_state.
-        // Untracked in both directions: taking the layout out and putting it back
-        // leaves the persisted content as it was, and marking it dirty every
-        // frame would re-save the whole persisted state on the save task's timer
-        // for as long as this tab is open.
+        // Untracked in both directions: taking the layout out and putting it
+        // back leaves the persisted content as it was. The save task re-writes
+        // that content on a five-second timer regardless; marking it dirty every
+        // frame would add a debounced full save roughly every second this tab is
+        // open on top of it.
         let mut dock_state = std::mem::replace(
             &mut self.tab_state.persisted.write_untracked().stats_dock_state,
             egui_dock::DockState::new(vec![]),

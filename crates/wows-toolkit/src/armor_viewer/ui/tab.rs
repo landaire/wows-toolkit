@@ -780,8 +780,10 @@ impl ToolkitTabViewer<'_> {
             d.armor_all_visible = armor_all_on;
             d.show_splash_boxes = active_pane.show_splash_boxes;
             d.lighting = active_pane.lighting.clone();
-            // Taking a write guard marks the persisted state dirty, which would
-            // re-save it on the save task's timer for as long as this tab is open.
+            // Taking a write guard marks the persisted state dirty. The save
+            // task re-writes the state on a five-second timer regardless, so an
+            // unconditional guard here would only add a debounced full save
+            // roughly every second this tab is open on top of it.
             if d != was {
                 self.tab_state.persisted.write().armor_viewer_defaults = d;
             }

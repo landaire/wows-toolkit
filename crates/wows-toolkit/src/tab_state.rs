@@ -170,9 +170,15 @@ impl TrackedPersistedState {
 
     /// Acquire a write guard without marking the state dirty, for a mutation the
     /// caller knows leaves the persisted content as it found it: a tab moving a
-    /// field out for the duration of a frame and putting it back, say. A caller
-    /// that does change the content is responsible for taking [`Self::write`]
-    /// instead, or the change is never saved.
+    /// field out for the duration of a frame and putting it back, say.
+    ///
+    /// This defers a save rather than skipping one. The background save task in
+    /// `db::save` re-serializes the whole persisted state on an unconditional
+    /// five-second timer, so a change made under this guard reaches SQLite
+    /// within a few seconds either way. Take [`Self::write`] when a change
+    /// should be saved promptly rather than eventually, and take this one when
+    /// the change is worth nothing to persist and the extra save is worth
+    /// avoiding.
     pub fn write_untracked(&self) -> parking_lot::RwLockWriteGuard<'_, PersistedState> {
         self.inner.write()
     }

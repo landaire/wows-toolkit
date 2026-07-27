@@ -345,9 +345,10 @@ impl ToolkitTabViewer<'_> {
 
         // Moved out so the sub-tab bodies can take their own locks on
         // `persisted`. Untracked in both directions: taking the layout out and
-        // putting it back leaves the persisted content as it was, and marking it
-        // dirty every frame would re-serialize the whole tracker on the save
-        // task's timer for as long as this tab is open.
+        // putting it back leaves the persisted content as it was. The save task
+        // re-serializes the whole tracker on a five-second timer regardless;
+        // marking it dirty every frame would add a debounced full save roughly
+        // every second this tab is open on top of it.
         let mut dock_state = std::mem::replace(
             &mut self.tab_state.persisted.write_untracked().player_tracker_dock_state,
             egui_dock::DockState::new(vec![]),
