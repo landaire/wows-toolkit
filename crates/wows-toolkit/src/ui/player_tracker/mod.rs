@@ -289,11 +289,16 @@ impl ToolkitTabViewer<'_> {
                 crate::tab_state::default_player_tracker_dock_state();
         }
 
-        // Moved out so the sub-tab bodies can take their own locks on `persisted`.
+        // Moved out so the sub-tab bodies can take their own locks on
+        // `persisted`. Untracked in both directions: taking the layout out and
+        // putting it back leaves the persisted content as it was, and marking it
+        // dirty every frame would re-serialize the whole tracker on the save
+        // task's timer for as long as this tab is open.
         let mut dock_state = std::mem::replace(
-            &mut self.tab_state.persisted.write().player_tracker_dock_state,
+            &mut self.tab_state.persisted.write_untracked().player_tracker_dock_state,
             egui_dock::DockState::new(vec![]),
         );
+        let layout_before = crate::tab_state::dock_layout_fingerprint(&dock_state);
 
         let mut viewer = PlayerTrackerSubTabViewer { tab_viewer: self };
 
@@ -306,7 +311,12 @@ impl ToolkitTabViewer<'_> {
             .allowed_splits(egui_dock::AllowedSplits::All)
             .show_inside(ui, &mut viewer);
 
-        self.tab_state.persisted.write().player_tracker_dock_state = dock_state;
+        // A drag, a split or a sub-tab change moves the fingerprint, and only
+        // then is the write worth saving.
+        let changed = crate::tab_state::dock_layout_fingerprint(&dock_state) != layout_before;
+        let mut persisted =
+            if changed { self.tab_state.persisted.write() } else { self.tab_state.persisted.write_untracked() };
+        persisted.player_tracker_dock_state = dock_state;
     }
 
     /// Queues an advanced search for every match this account appeared in and
@@ -384,6 +394,39 @@ mod tests {
     fn a_layout_missing_clans_needs_repair() {
         let dock = egui_dock::DockState::new(vec![PlayerTrackerSubTab::Historical, PlayerTrackerSubTab::CurrentMatch]);
         assert!(player_tracker_dock_needs_repair(&dock));
+    }
+
+    /// The tab moves its layout out of the persisted state and back every frame,
+    /// and only marks that state dirty when this fingerprint moved. So it has to
+    /// move for every change a user can make, and stay put for a frame that
+    /// changed nothing.
+    #[test]
+    fn the_layout_fingerprint_moves_only_when_the_layout_does() {
+        use crate::tab_state::dock_layout_fingerprint;
+
+        let dock = crate::tab_state::default_player_tracker_dock_state();
+        let untouched = dock_layout_fingerprint(&dock);
+
+        // What the take-and-put-back does to a layout nobody touched.
+        let round_tripped = std::mem::replace(&mut dock.clone(), egui_dock::DockState::new(vec![]));
+        assert_eq!(dock_layout_fingerprint(&round_tripped), untouched, "a layout put back unchanged is not a change");
+
+        let mut another_sub_tab = dock.clone();
+        let (_, leaf) = another_sub_tab.iter_leaves_mut().next().expect("the default layout has a leaf");
+        leaf.set_active_tab(2).expect("the default layout holds three sub-tabs");
+        assert_ne!(
+            dock_layout_fingerprint(&another_sub_tab),
+            untouched,
+            "picking another sub-tab has to be persisted, or it does not survive a restart"
+        );
+
+        let mut split = dock.clone();
+        split.main_surface_mut().split_right(
+            egui_dock::NodeIndex::root(),
+            0.5,
+            vec![PlayerTrackerSubTab::Clans],
+        );
+        assert_ne!(dock_layout_fingerprint(&split), untouched, "splitting a pane has to be persisted");
     }
 
     #[test]

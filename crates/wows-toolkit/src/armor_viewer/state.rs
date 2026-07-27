@@ -74,7 +74,7 @@ pub enum AnalysisTab {
 }
 
 /// Persisted default display settings for the armor viewer.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct ArmorViewerDefaults {
     pub show_plate_edges: bool,

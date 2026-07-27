@@ -181,9 +181,12 @@ impl ToolkitTabViewer<'_> {
             }
         });
 
-        // Sync filter state to session_stats
+        // Sync filter state to session_stats. Untracked: these three fields are
+        // `serde(skip)`, so a write that mirrors them changes nothing the save
+        // task would write out, and taking a tracked guard here would re-save the
+        // whole persisted state every second the tab is open.
         {
-            let mut p = self.tab_state.persisted.write();
+            let mut p = self.tab_state.persisted.write_untracked();
             p.session_stats.game_count_limit =
                 if p.settings.stats_filters.limit_enabled { Some(p.settings.stats_filters.game_count) } else { None };
             p.session_stats.division_filter = p.settings.stats_filters.division_filter;
@@ -202,11 +205,16 @@ impl ToolkitTabViewer<'_> {
             }
         }
 
-        // Move dock state out temporarily to avoid double-borrow of tab_state
+        // Move dock state out temporarily to avoid double-borrow of tab_state.
+        // Untracked in both directions: taking the layout out and putting it back
+        // leaves the persisted content as it was, and marking it dirty every
+        // frame would re-save the whole persisted state on the save task's timer
+        // for as long as this tab is open.
         let mut dock_state = std::mem::replace(
-            &mut self.tab_state.persisted.write().stats_dock_state,
+            &mut self.tab_state.persisted.write_untracked().stats_dock_state,
             egui_dock::DockState::new(vec![]),
         );
+        let layout_before = crate::tab_state::dock_layout_fingerprint(&dock_state);
 
         let chart_tab_count =
             dock_state.iter_all_tabs().filter(|(_, tab)| matches!(tab, StatsSubTab::Charts(_))).count();
@@ -235,8 +243,13 @@ impl ToolkitTabViewer<'_> {
             }
         }
 
-        // Put the dock state back
-        self.tab_state.persisted.write().stats_dock_state = dock_state;
+        // Put the dock state back. A drag, a split, a sub-tab change or an added
+        // chart tab moves the fingerprint, and only then is the write worth
+        // saving.
+        let changed = crate::tab_state::dock_layout_fingerprint(&dock_state) != layout_before;
+        let mut persisted =
+            if changed { self.tab_state.persisted.write() } else { self.tab_state.persisted.write_untracked() };
+        persisted.stats_dock_state = dock_state;
     }
 }
 /// Extract the game metadata provider from tab state (if game data is loaded).

@@ -768,8 +768,8 @@ impl ToolkitTabViewer<'_> {
             let armor_all_on = !active_pane.part_visibility.is_empty()
                 && active_pane.part_visibility.values().all(|&v| v)
                 && !active_pane.plate_visibility.values().any(|&v| !v);
-            let mut p = self.tab_state.persisted.write();
-            let d = &mut p.armor_viewer_defaults;
+            let mut d = self.tab_state.persisted.read().armor_viewer_defaults.clone();
+            let was = d.clone();
             d.show_plate_edges = active_pane.show_plate_edges;
             d.show_waterline = active_pane.show_waterline;
             d.show_zero_mm = active_pane.show_zero_mm;
@@ -780,6 +780,11 @@ impl ToolkitTabViewer<'_> {
             d.armor_all_visible = armor_all_on;
             d.show_splash_boxes = active_pane.show_splash_boxes;
             d.lighting = active_pane.lighting.clone();
+            // Taking a write guard marks the persisted state dirty, which would
+            // re-save it on the save task's timer for as long as this tab is open.
+            if d != was {
+                self.tab_state.persisted.write().armor_viewer_defaults = d;
+            }
         }
 
         // Handle export signal from toolbar button

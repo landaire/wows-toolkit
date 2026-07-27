@@ -168,6 +168,15 @@ impl TrackedPersistedState {
         self.inner.write()
     }
 
+    /// Acquire a write guard without marking the state dirty, for a mutation the
+    /// caller knows leaves the persisted content as it found it: a tab moving a
+    /// field out for the duration of a frame and putting it back, say. A caller
+    /// that does change the content is responsible for taking [`Self::write`]
+    /// instead, or the change is never saved.
+    pub fn write_untracked(&self) -> parking_lot::RwLockWriteGuard<'_, PersistedState> {
+        self.inner.write()
+    }
+
     /// Current generation counter. Compared by the app each frame to detect
     /// whether a save is needed.
     pub fn generation(&self) -> u64 {
@@ -182,6 +191,42 @@ impl Default for TrackedPersistedState {
 }
 
 pub type SharedPersistedState = Arc<TrackedPersistedState>;
+
+/// A structural summary of a dock layout: which tabs sit in which node, which
+/// of them is showing, and how the splits divide.
+///
+/// A tab that moves its dock state out of the persisted state for a frame and
+/// puts it back compares this before and after, so an untouched layout is put
+/// back without marking the state dirty. Excludes the rects egui_dock recomputes
+/// on every show, which follow the window rather than the layout, and the
+/// focused node, which follows the pointer.
+pub fn dock_layout_fingerprint<Tab: std::hash::Hash>(dock: &egui_dock::DockState<Tab>) -> u64 {
+    use std::hash::Hash;
+    use std::hash::Hasher;
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for (path, node) in dock.iter_all_nodes() {
+        (path.surface.0, path.node.0).hash(&mut hasher);
+        match node {
+            egui_dock::Node::Empty => 0u8.hash(&mut hasher),
+            egui_dock::Node::Leaf(leaf) => {
+                1u8.hash(&mut hasher);
+                leaf.tabs.hash(&mut hasher);
+                leaf.active.0.hash(&mut hasher);
+                leaf.collapsed.hash(&mut hasher);
+            }
+            egui_dock::Node::Vertical(split) => {
+                2u8.hash(&mut hasher);
+                split.fraction.to_bits().hash(&mut hasher);
+            }
+            egui_dock::Node::Horizontal(split) => {
+                3u8.hash(&mut hasher);
+                split.fraction.to_bits().hash(&mut hasher);
+            }
+        }
+    }
+    hasher.finish()
+}
 
 /// Sub-tab selection for the Stats tab
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
@@ -1119,5 +1164,25 @@ impl TabState {
         });
 
         BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingData }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The save task wakes on any generation change and then re-serializes the
+    /// whole persisted state, so a per-frame mutation that changes nothing has
+    /// to leave the counter alone.
+    #[test]
+    fn only_a_tracked_write_marks_the_state_dirty() {
+        let state = TrackedPersistedState::default();
+        let start = state.generation();
+
+        state.write_untracked().output_dir = "untracked".to_string();
+        assert_eq!(state.generation(), start, "an untracked write must not wake the save task");
+
+        state.write().output_dir = "tracked".to_string();
+        assert_ne!(state.generation(), start, "a tracked write must wake the save task");
     }
 }
