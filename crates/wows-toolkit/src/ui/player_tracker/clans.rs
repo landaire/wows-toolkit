@@ -42,7 +42,7 @@ pub(crate) struct ClanRow {
     pub last_seen: Timestamp,
 }
 
-/// The whole breakdown plus how much of it carries exact attribution.
+/// The clan rows, with the cache key they were built against.
 #[derive(Debug, Clone)]
 pub(crate) struct ClanBreakdown {
     /// [`PlayerTracker::encounter_version`] this was built against, so newly
@@ -51,13 +51,6 @@ pub(crate) struct ClanBreakdown {
     /// timestamps to existing entries and leaves the map the same size.
     pub encounter_version: u64,
     pub rows: Vec<ClanRow>,
-    /// Encounters whose arena the index covers, so their clan label is the clan
-    /// the player was actually in. Computed and asserted by the aggregation
-    /// tests; no surface displays it, so the lint has to be silenced here.
-    #[allow(dead_code)]
-    pub exact_encounters: usize,
-    #[allow(dead_code)]
-    pub total_encounters: usize,
 }
 
 #[derive(Default)]
@@ -74,8 +67,7 @@ struct ClanAccumulator {
 ///
 /// `index_latest_clan` is the index's latest clan per account, which wins over
 /// the tracker's when the index knows the account. `corrections` are the roster
-/// rows whose clan at the time differed from that latest clan. `indexed_arenas`
-/// is only used to report attribution coverage.
+/// rows whose clan at the time differed from that latest clan.
 ///
 /// Matches are counted by distinct arena and in-range matches by distinct
 /// timestamp. Both keys are exact on their own, which is why the tracker's
@@ -89,7 +81,6 @@ pub(crate) fn build_clan_breakdown(
     encounter_version: u64,
     index_latest_clan: &HashMap<AccountId, String>,
     corrections: &[ClanCorrection],
-    indexed_arenas: &HashSet<ArenaId>,
     since: Option<Timestamp>,
 ) -> ClanBreakdown {
     let mut by_arena: HashMap<(AccountId, ArenaId), &str> = HashMap::new();
@@ -100,8 +91,6 @@ pub(crate) fn build_clan_breakdown(
     }
 
     let mut clans: HashMap<String, ClanAccumulator> = HashMap::new();
-    let mut exact_encounters = 0;
-    let mut total_encounters = 0;
 
     for (account_id, player) in tracked {
         // The tracker holds one clan per player, the latest it saw. The index's
@@ -109,11 +98,6 @@ pub(crate) fn build_clan_breakdown(
         let baseline = index_latest_clan.get(account_id).map(String::as_str).unwrap_or(player.clan.as_str());
 
         for arena_id in &player.arena_ids {
-            total_encounters += 1;
-            if indexed_arenas.contains(arena_id) {
-                exact_encounters += 1;
-            }
-
             let clan = by_arena.get(&(*account_id, *arena_id)).copied().unwrap_or(baseline);
             if clan.is_empty() {
                 continue;
@@ -172,7 +156,7 @@ pub(crate) fn build_clan_breakdown(
 
     rows.sort_by(|a, b| b.matches.cmp(&a.matches).then_with(|| a.clan.cmp(&b.clan)));
 
-    ClanBreakdown { encounter_version, rows, exact_encounters, total_encounters }
+    ClanBreakdown { encounter_version, rows }
 }
 
 /// Columns of the clans table, in render order.
@@ -565,13 +549,13 @@ impl egui_table::TableDelegate for ClansTable<'_> {
     }
 }
 
-/// The index's latest clan per account, the per-encounter clan corrections, and
-/// the arenas the index covers. Each degrades to its empty value on query error,
-/// so the tab falls back to current-clan attribution rather than showing nothing.
+/// The index's latest clan per account and the per-encounter clan corrections.
+/// Each degrades to its empty value on query error, so the tab falls back to
+/// current-clan attribution rather than showing nothing.
 fn fetch_index_inputs(
     pool: &sqlx::SqlitePool,
     rt: &tokio::runtime::Runtime,
-) -> (HashMap<AccountId, String>, Vec<ClanCorrection>, HashSet<ArenaId>) {
+) -> (HashMap<AccountId, String>, Vec<ClanCorrection>) {
     use crate::db::index::query;
     use crate::db::index::rows::MatchFilter;
 
@@ -593,15 +577,7 @@ fn fetch_index_inputs(
         }
     };
 
-    let indexed_arenas = match rt.block_on(query::indexed_arena_ids(pool, &filter)) {
-        Ok(arenas) => arenas,
-        Err(e) => {
-            tracing::warn!("clan breakdown: indexed_arena_ids failed: {e}");
-            HashSet::new()
-        }
-    };
-
-    (latest, corrections, indexed_arenas)
+    (latest, corrections)
 }
 
 /// Whether a cached breakdown still matches what it would be built from now.
@@ -641,11 +617,11 @@ fn refresh_clan_breakdown(
         return;
     }
 
-    let (latest, corrections, indexed_arenas) = match (pool, rt) {
+    let (latest, corrections) = match (pool, rt) {
         (Some(pool), Some(rt)) => fetch_index_inputs(pool, rt),
         // With no index open there is nothing to correct against, so every
         // encounter falls back to the player's current clan.
-        _ => (HashMap::new(), Vec::new(), HashSet::new()),
+        _ => (HashMap::new(), Vec::new()),
     };
 
     tracker.clan_breakdown = Some(build_clan_breakdown(
@@ -653,7 +629,6 @@ fn refresh_clan_breakdown(
         tracker.encounter_version,
         &latest,
         &corrections,
-        &indexed_arenas,
         period.to_date(),
     ));
     tracker.clan_breakdown_period = Some(period);
@@ -823,7 +798,7 @@ mod tests {
     fn groups_by_latest_clan_when_the_index_has_no_corrections() {
         let players = tracked(&[(1, player("RAIN", &[(10, 1000), (11, 2000)])), (2, player("RAIN", &[(10, 1000)]))]);
 
-        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], &HashSet::new(), None);
+        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None);
 
         assert_eq!(breakdown.rows.len(), 1);
         let rain = &breakdown.rows[0];
@@ -845,7 +820,7 @@ mod tests {
             clan: "RAIN".into(),
         }];
 
-        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &corrections, &HashSet::new(), None);
+        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &corrections, None);
 
         let wolf = breakdown.rows.iter().find(|r| r.clan == "WOLF").expect("WOLF row");
         let rain = breakdown.rows.iter().find(|r| r.clan == "RAIN").expect("RAIN row");
@@ -858,7 +833,7 @@ mod tests {
         let players = tracked(&[(1, player("STALE", &[(10, 1000)]))]);
         let latest = HashMap::from([(AccountId(1), "FRESH".to_string())]);
 
-        let breakdown = build_clan_breakdown(&players, 0, &latest, &[], &HashSet::new(), None);
+        let breakdown = build_clan_breakdown(&players, 0, &latest, &[], None);
 
         assert_eq!(breakdown.rows.len(), 1);
         assert_eq!(breakdown.rows[0].clan, "FRESH");
@@ -868,7 +843,7 @@ mod tests {
     fn clanless_players_are_excluded() {
         let players = tracked(&[(1, player("", &[(10, 1000)]))]);
 
-        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], &HashSet::new(), None);
+        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None);
 
         assert!(breakdown.rows.is_empty());
     }
@@ -883,7 +858,7 @@ mod tests {
             clan: String::new(),
         }];
 
-        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &corrections, &HashSet::new(), None);
+        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &corrections, None);
 
         assert_eq!(breakdown.rows.len(), 1);
         assert_eq!(breakdown.rows[0].matches, 1);
@@ -898,7 +873,6 @@ mod tests {
             0,
             &HashMap::new(),
             &[],
-            &HashSet::new(),
             Some(Timestamp::from_second(3000).unwrap()),
         );
 
@@ -920,7 +894,6 @@ mod tests {
             7,
             &HashMap::new(),
             &[],
-            &HashSet::new(),
             None,
         );
         let cached = Some(TimePeriod::LastDay);
@@ -965,7 +938,6 @@ mod tests {
             tracker.encounter_version,
             &HashMap::new(),
             &[],
-            &HashSet::new(),
             None,
         );
         let cached = Some(TimePeriod::LastDay);
@@ -1022,16 +994,5 @@ mod tests {
             expanded.id_for(0),
             "sharing an id would leave the column expanded for good once a row had been opened"
         );
-    }
-
-    #[test]
-    fn coverage_counts_encounters_whose_arena_the_index_knows() {
-        let players = tracked(&[(1, player("RAIN", &[(10, 1000), (11, 2000)]))]);
-        let indexed = HashSet::from([ArenaId::new(10)]);
-
-        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], &indexed, None);
-
-        assert_eq!(breakdown.total_encounters, 2);
-        assert_eq!(breakdown.exact_encounters, 1);
     }
 }

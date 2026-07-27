@@ -499,23 +499,6 @@ pub async fn clan_history_corrections(
         .collect()
 }
 
-/// Arena ids the index covers, for reporting how much of the tracker's history
-/// carries exact clan attribution.
-pub async fn indexed_arena_ids(pool: &SqlitePool, filter: &MatchFilter) -> Result<HashSet<ArenaId>, IndexError> {
-    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT arena_id FROM indexed_match");
-    if let Some(sources) = &filter.source_ids {
-        qb.push(" WHERE arena_id IN (SELECT arena_id FROM replay_record WHERE source_id IN (");
-        let mut sep = qb.separated(", ");
-        for s in sources {
-            sep.push_bind(s.0);
-        }
-        qb.push("))");
-    }
-
-    let rows = qb.build().fetch_all(pool).await?;
-    rows.iter().map(|row| Ok(ArenaId::new(row.try_get::<i64, _>("arena_id")?))).collect()
-}
-
 /// Ships the user has played (from `replay_record.self_ship_id`), most-played first.
 pub async fn distinct_self_ships(pool: &SqlitePool, filter: &MatchFilter) -> Result<Vec<ShipFacet>, IndexError> {
     let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(

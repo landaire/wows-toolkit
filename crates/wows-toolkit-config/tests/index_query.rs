@@ -995,15 +995,3 @@ async fn clan_history_corrections_returns_only_rows_that_differ_from_the_latest_
     assert_eq!(corrections[0].clan, "RAIN");
     assert_eq!(corrections[0].timestamp, Timestamp::from_second(1_700_000_100).unwrap());
 }
-
-#[tokio::test]
-async fn indexed_arena_ids_returns_every_indexed_match() {
-    use wows_toolkit_config::index::rows::MatchFilter;
-
-    let pool = seeded_pool().await;
-    let arenas = query::indexed_arena_ids(&pool, &MatchFilter::default()).await.unwrap();
-
-    assert_eq!(arenas.len(), 2);
-    assert!(arenas.contains(&ArenaId::new(100)));
-    assert!(arenas.contains(&ArenaId::new(101)));
-}
