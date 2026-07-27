@@ -191,6 +191,15 @@ pub struct MatchHit {
     pub file_mtime: Option<i64>,
 }
 
+/// A roster row whose clan differed from that account's latest known clan.
+#[derive(Debug, Clone)]
+pub struct ClanCorrection {
+    pub account_id: AccountId,
+    pub arena_id: ArenaId,
+    pub timestamp: Timestamp,
+    pub clan: String,
+}
+
 /// A distinct player seen in the index (for palette/Search facets).
 #[derive(Debug, Clone)]
 pub struct PlayerFacet {

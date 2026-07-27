@@ -19,6 +19,7 @@ use super::query_model::Op;
 use super::query_model::Query;
 use super::query_model::Subject;
 use super::query_model::Value;
+use super::rows::ClanCorrection;
 use super::rows::IndexError;
 use super::rows::IndexSource;
 use super::rows::IndexedVehicleRow;
@@ -446,6 +447,70 @@ pub async fn self_account_ids(pool: &SqlitePool, filter: &MatchFilter) -> Result
 
     let rows: Vec<(i64,)> = qb.build_query_as().fetch_all(pool).await?;
     Ok(rows.into_iter().map(|(a,)| AccountId::from(a)).collect())
+}
+
+/// Encounters whose clan at the time differs from the account's latest clan.
+/// Only the differences, so the result stays small on a large index: most
+/// accounts never changed clan.
+pub async fn clan_history_corrections(
+    pool: &SqlitePool,
+    filter: &MatchFilter,
+) -> Result<Vec<ClanCorrection>, IndexError> {
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "WITH latest AS ( \
+           SELECT v.account_id AS account_id, \
+                  (SELECT v2.clan FROM indexed_vehicle v2 \
+                     JOIN indexed_match m2 ON m2.arena_id = v2.arena_id \
+                    WHERE v2.account_id = v.account_id \
+                    ORDER BY m2.timestamp DESC LIMIT 1) AS clan \
+             FROM indexed_vehicle v WHERE v.account_id <> 0 GROUP BY v.account_id \
+         ) \
+         SELECT v.account_id, v.arena_id, m.timestamp, v.clan \
+           FROM indexed_vehicle v \
+           JOIN indexed_match m ON m.arena_id = v.arena_id \
+           JOIN latest l ON l.account_id = v.account_id \
+          WHERE v.account_id <> 0 AND v.clan <> l.clan",
+    );
+    if let Some(sources) = &filter.source_ids {
+        qb.push(" AND v.arena_id IN (SELECT arena_id FROM replay_record WHERE source_id IN (");
+        let mut sep = qb.separated(", ");
+        for s in sources {
+            sep.push_bind(s.0);
+        }
+        qb.push("))");
+    }
+
+    let rows = qb.build().fetch_all(pool).await?;
+    rows.iter()
+        .map(|row| {
+            Ok(ClanCorrection {
+                account_id: AccountId::from(row.try_get::<i64, _>("account_id")?),
+                arena_id: ArenaId::new(row.try_get::<i64, _>("arena_id")?),
+                // Matches how `matches_with_player` degrades an unrepresentable
+                // stored second; `IndexError` has no timestamp variant.
+                timestamp: jiff::Timestamp::from_second(row.try_get::<i64, _>("timestamp")?)
+                    .unwrap_or(jiff::Timestamp::UNIX_EPOCH),
+                clan: row.try_get::<Option<String>, _>("clan")?.unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+/// Arena ids the index covers, for reporting how much of the tracker's history
+/// carries exact clan attribution.
+pub async fn indexed_arena_ids(pool: &SqlitePool, filter: &MatchFilter) -> Result<HashSet<ArenaId>, IndexError> {
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT arena_id FROM indexed_match");
+    if let Some(sources) = &filter.source_ids {
+        qb.push(" WHERE arena_id IN (SELECT arena_id FROM replay_record WHERE source_id IN (");
+        let mut sep = qb.separated(", ");
+        for s in sources {
+            sep.push_bind(s.0);
+        }
+        qb.push("))");
+    }
+
+    let rows = qb.build().fetch_all(pool).await?;
+    rows.iter().map(|row| Ok(ArenaId::new(row.try_get::<i64, _>("arena_id")?))).collect()
 }
 
 /// Ships the user has played (from `replay_record.self_ship_id`), most-played first.

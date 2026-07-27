@@ -929,3 +929,81 @@ async fn search_by_query_contains_stream_sniper_is_match_level_and_null_safe() {
     let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
     assert!(!hits.iter().any(|h| h.arena_id.raw() == 100), "IsNot true must exclude the flagged arena");
 }
+
+/// Two matches for account 501: arena 100 as RAIN, then the later arena 101 as
+/// WOLF. WOLF is therefore the account's latest clan and arena 100 the only
+/// encounter whose clan differs from it.
+async fn seeded_pool() -> sqlx::SqlitePool {
+    let pool = mem_pool().await;
+
+    let clan_vehicle = |arena: i64, clan: &str| IndexedVehicleRow {
+        arena_id: ArenaId::new(arena),
+        account_id: AccountId(501),
+        player_name: "Wanderer".into(),
+        clan: clan.into(),
+        realm: Some("na".into()),
+        ship_id: GameParamId::from(111u64),
+        ship_index: "PJSB018".into(),
+        ship_name: "Yamato".into(),
+        nation: "japan".into(),
+        species: "Battleship".into(),
+        tier: 10,
+        relation: VehicleRelation::Enemy,
+        division_id: None,
+        survived: Some(true),
+        damage: Some(50_000),
+        kills: Some(1),
+        spotting: Some(0),
+        potential: Some(0),
+        received: Some(0),
+        pr: Some(1200.0),
+        is_test_ship: false,
+        disconnected: None,
+        is_stream_sniper: None,
+        sniper_twitch_login: None,
+    };
+
+    for (arena, second, clan) in [(100, 1_700_000_100, "RAIN"), (101, 1_700_000_200, "WOLF")] {
+        let objective = ObjectiveMatch {
+            arena_id: ArenaId::new(arena),
+            timestamp: Timestamp::from_second(second).unwrap(),
+            map: "Ocean".into(),
+            game_mode: "Domination".into(),
+            game_type: "pvp".into(),
+            match_group: "pvp".into(),
+            version_build: Some(1234),
+        };
+        query::upsert_match(&pool, &objective).await.unwrap();
+        query::upsert_vehicles(&pool, &[clan_vehicle(arena, clan)]).await.unwrap();
+    }
+
+    pool
+}
+
+#[tokio::test]
+async fn clan_history_corrections_returns_only_rows_that_differ_from_the_latest_clan() {
+    use wows_toolkit_config::index::rows::MatchFilter;
+
+    let pool = seeded_pool().await;
+    // Account 501 played arena 100 as RAIN and the later arena 101 as WOLF.
+    // Only the RAIN row is a correction, because WOLF is the latest clan.
+    let corrections = query::clan_history_corrections(&pool, &MatchFilter::default()).await.unwrap();
+
+    assert_eq!(corrections.len(), 1);
+    assert_eq!(corrections[0].account_id, AccountId(501));
+    assert_eq!(corrections[0].arena_id, ArenaId::new(100));
+    assert_eq!(corrections[0].clan, "RAIN");
+    assert_eq!(corrections[0].timestamp, Timestamp::from_second(1_700_000_100).unwrap());
+}
+
+#[tokio::test]
+async fn indexed_arena_ids_returns_every_indexed_match() {
+    use wows_toolkit_config::index::rows::MatchFilter;
+
+    let pool = seeded_pool().await;
+    let arenas = query::indexed_arena_ids(&pool, &MatchFilter::default()).await.unwrap();
+
+    assert_eq!(arenas.len(), 2);
+    assert!(arenas.contains(&ArenaId::new(100)));
+    assert!(arenas.contains(&ArenaId::new(101)));
+}
