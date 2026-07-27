@@ -449,12 +449,11 @@ impl ToolkitTabViewer<'_> {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     if ui.button(t!("ui.player_tracker.clear_stats")).clicked() {
+                        // The division marks go with the players holding them.
+                        // Nothing has to re-read the index for them: whatever
+                        // repopulates the tracker marks as it goes, either from
+                        // the replay it parses or from `populate_from_index`.
                         player_tracker.tracked_players.clear();
-                        // Division marks live on the players just cleared, so
-                        // the index has to be read again for whatever repopulates
-                        // them. Leaving the latch set would hold an emptied
-                        // filter over a repopulated tracker for the session.
-                        player_tracker.division_mates_synced = false;
                         player_tracker.note_encounters_changed();
                     }
 
