@@ -29,6 +29,14 @@ const BANNED: &[&str] = &[
     "Color32::ORANGE",
     "Color32::RED",
     "Color32::GREEN",
+    "Color32::PURPLE",
+    "Color32::BROWN",
+    "Color32::CYAN",
+    "Color32::MAGENTA",
+    "Color32::KHAKI",
+    "Color32::DARK_RED",
+    "Color32::DARK_GREEN",
+    "Color32::DARK_BLUE",
 ];
 
 /// Paths that draw over imagery or a 3D scene, where the theme does not apply,

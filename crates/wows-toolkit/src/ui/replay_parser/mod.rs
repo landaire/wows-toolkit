@@ -153,7 +153,7 @@ fn colorize_label(
 ) -> RichText {
     let sem = crate::ui::theme::semantic::semantic(visuals);
     if is_selected {
-        RichText::new(label).color(sem.text_strong)
+        RichText::new(label).color(sem.text_strong).background_color(visuals.selection.bg_fill)
     } else {
         match battle_result {
             Some(BattleResult::Win(_)) => RichText::new(label).color(sem.win),

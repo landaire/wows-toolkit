@@ -1773,8 +1773,9 @@ impl RealtimeArmorViewer {
 
         let sel_bg = ui.visuals().selection.bg_fill;
         let normal_bg = ui.visuals().widgets.noninteractive.bg_fill;
-        // Near the playhead, not a status: reuse the selection tint rather than a sem role.
-        let active_bg = ui.visuals().selection.bg_fill;
+        // Near the playhead, not a status: reuse the selection tint rather than a sem role,
+        // but dimmed so it reads as a weaker cue than an actual selection.
+        let active_bg = sel_bg.gamma_multiply(0.45);
 
         // Auto-scroll toggle + current clock
         let current_clock = self.bridge.lock().last_clock;

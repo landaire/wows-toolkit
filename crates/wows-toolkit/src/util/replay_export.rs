@@ -126,7 +126,7 @@ pub struct Player {
 /// files already sent to ShipBuilds.com don't change meaning.
 const EXPORT_FALLBACK_CLAN_COLOR_SELF: u32 = 0x00_FF_FF_FF;
 const EXPORT_FALLBACK_CLAN_COLOR_ALLY: u32 = 0x00_90_EE_90;
-const EXPORT_FALLBACK_CLAN_COLOR_ENEMY: u32 = 0x00_FF_88_88;
+const EXPORT_FALLBACK_CLAN_COLOR_ENEMY: u32 = 0x00_FF_80_80;
 
 impl From<&wows_replays::analyzer::battle_controller::Player> for Player {
     fn from(value: &wows_replays::analyzer::battle_controller::Player) -> Self {

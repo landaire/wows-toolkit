@@ -493,6 +493,7 @@ impl WowsToolkitApp {
 
         // Restore theme choice from persisted settings.
         crate::ui::theme::apply(&cc.egui_ctx, state.tab_state.persisted.read().settings.app.theme);
+        state.tab_state.active_theme = cc.egui_ctx.theme();
 
         // Apply locale to rust-i18n
         if let Some(locale) = &state.tab_state.persisted.read().settings.app.locale {
