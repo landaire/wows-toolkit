@@ -442,6 +442,7 @@ impl ToolkitTabViewer<'_> {
         // player-tracker write lock is held while rendering rows, so we can't
         // touch other `self.tab_state` fields from inside a cell body).
         let mut find_matches_target: Option<AccountId> = None;
+        let mut copy_text: Option<String> = None;
 
         // Scoped so the write guard is released before the deferred actions run.
         {
@@ -569,13 +570,15 @@ impl ToolkitTabViewer<'_> {
                     .show(ui, &mut delegate);
 
                 find_matches_target = delegate.find_matches_target;
-                if let Some(text) = delegate.copy_text {
-                    ui.ctx().copy_text(text);
-                }
+                copy_text = delegate.copy_text;
                 player_tracker.historical_detail_heights = delegate.detail_heights;
             });
         }
 
+        if let Some(text) = copy_text {
+            self.tab_state.toasts.lock().success(t!("ui.player_tracker.copied_wg_id", id = &text).to_string());
+            ui.ctx().copy_text(text);
+        }
         if let Some(id) = find_matches_target {
             self.queue_player_search(id);
         }

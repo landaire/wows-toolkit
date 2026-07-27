@@ -580,23 +580,53 @@ fn fetch_index_inputs(
     (latest, corrections)
 }
 
-/// Whether a cached breakdown still matches what it would be built from now.
+/// `boundary` with everything below the minute cleared.
 ///
-/// The period is compared as the [`TimePeriod`] rather than as its resolved
-/// boundary: `TimePeriod::to_date` is relative to `Timestamp::now`, so a stored
-/// boundary would differ on every frame and re-run the index queries on every
-/// repaint. `cached_period` is `None` after the Refresh button clears it.
+/// Truncation is what lets a wall-clock boundary sit in a cache key at all: an
+/// exact boundary moves on every repaint, and the index queries behind the
+/// breakdown would run on every frame.
+fn truncate_to_minute(boundary: Timestamp) -> Timestamp {
+    let second = boundary.as_second();
+    // `rem_euclid` truncates backwards for pre-epoch timestamps too. The
+    // subtraction can only leave the representable range within a minute of its
+    // lower bound, where the untruncated boundary is the honest answer.
+    Timestamp::from_second(second - second.rem_euclid(60)).unwrap_or(boundary)
+}
+
+/// The window a breakdown's in-range counts were built for.
+///
+/// The resolved boundary belongs in the key alongside the period because it
+/// moves as wall-clock advances while the period does not. Without it the Clans
+/// tab keeps counting a window the Historical tab, which resolves its own
+/// boundary every paint, has already left.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BreakdownWindow {
+    period: TimePeriod,
+    /// The period's boundary, truncated to the minute. `None` is the all-time
+    /// period, which has no boundary.
+    since: Option<Timestamp>,
+}
+
+impl BreakdownWindow {
+    /// Resolve `period` against the current clock.
+    fn resolve(period: TimePeriod) -> Self {
+        Self { period, since: period.to_date().map(truncate_to_minute) }
+    }
+}
+
+/// Whether a cached breakdown still matches what it would be built from now.
 ///
 /// `encounter_version` moves on every ingest, including a battle against
 /// players the tracker already holds, which is exactly the population this tab
 /// exists to surface.
 fn breakdown_is_current(
     breakdown: Option<&ClanBreakdown>,
-    cached_period: Option<TimePeriod>,
-    period: TimePeriod,
+    cached_window: Option<BreakdownWindow>,
+    window: BreakdownWindow,
     encounter_version: u64,
 ) -> bool {
-    breakdown.is_some_and(|breakdown| breakdown.encounter_version == encounter_version) && cached_period == Some(period)
+    breakdown.is_some_and(|breakdown| breakdown.encounter_version == encounter_version)
+        && cached_window == Some(window)
 }
 
 /// Rebuild the breakdown when one of its inputs changed. The index queries run
@@ -607,11 +637,11 @@ fn refresh_clan_breakdown(
     pool: Option<&sqlx::SqlitePool>,
     rt: Option<&tokio::runtime::Runtime>,
 ) {
-    let period = tracker.filter_time_period;
+    let window = BreakdownWindow::resolve(tracker.filter_time_period);
     if breakdown_is_current(
         tracker.clan_breakdown.as_ref(),
-        tracker.clan_breakdown_period,
-        period,
+        tracker.clan_breakdown_window,
+        window,
         tracker.encounter_version,
     ) {
         return;
@@ -624,14 +654,16 @@ fn refresh_clan_breakdown(
         _ => (HashMap::new(), Vec::new()),
     };
 
+    // Built from the same truncated boundary the key carries, so the rows and
+    // the key describe the same window.
     tracker.clan_breakdown = Some(build_clan_breakdown(
         &tracker.tracked_players,
         tracker.encounter_version,
         &latest,
         &corrections,
-        period.to_date(),
+        window.since,
     ));
-    tracker.clan_breakdown_period = Some(period);
+    tracker.clan_breakdown_window = Some(window);
 }
 
 impl ToolkitTabViewer<'_> {
@@ -691,12 +723,6 @@ impl ToolkitTabViewer<'_> {
                             );
                             ui.selectable_value(selected, TimePeriod::AllTime, t!("ui.player_tracker.period.all_time"));
                         });
-
-                    if ui.button(t!("ui.player_tracker.clan_refresh")).clicked() {
-                        // Clearing the key is the whole refresh, and it survives
-                        // the breakdown being put back at the end of this frame.
-                        player_tracker.clan_breakdown_period = None;
-                    }
                 });
 
                 ui.add_space(10.0);
@@ -778,6 +804,8 @@ impl ToolkitTabViewer<'_> {
 
 #[cfg(test)]
 mod tests {
+    use jiff::ToSpan;
+
     use super::*;
 
     fn player(clan: &str, encounters: &[(i64, i64)]) -> TrackedPlayer {
@@ -884,39 +912,78 @@ mod tests {
     }
 
     /// The index queries behind the breakdown run synchronously on the UI
-    /// thread, so an unchanged frame must not invalidate the cache, and the
-    /// period must be compared as the enum: `TimePeriod::to_date` resolves
-    /// against `now` and would differ on every frame.
+    /// thread, so an unchanged frame must not invalidate the cache.
     #[test]
     fn the_cached_breakdown_is_invalidated_by_its_inputs_and_nothing_else() {
-        let breakdown = build_clan_breakdown(
-            &tracked(&[(1, player("RAIN", &[(10, 1000)]))]),
-            7,
-            &HashMap::new(),
-            &[],
-            None,
-        );
-        let cached = Some(TimePeriod::LastDay);
+        let breakdown =
+            build_clan_breakdown(&tracked(&[(1, player("RAIN", &[(10, 1000)]))]), 7, &HashMap::new(), &[], None);
+        let window = BreakdownWindow::resolve(TimePeriod::LastDay);
+        let cached = Some(window);
 
         assert!(
-            breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastDay, 7),
+            breakdown_is_current(Some(&breakdown), cached, window, 7),
             "an unchanged frame must reuse the cache rather than re-run the index queries"
         );
         assert!(
-            !breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastWeek, 7),
+            !breakdown_is_current(Some(&breakdown), cached, BreakdownWindow::resolve(TimePeriod::LastWeek), 7),
             "changing the period on either sub-tab must invalidate the cache"
         );
         assert!(
-            !breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastDay, 8),
+            !breakdown_is_current(Some(&breakdown), cached, window, 8),
             "newly ingested history must invalidate the cache"
         );
+        assert!(!breakdown_is_current(None, cached, window, 7), "the first paint of the tab has nothing cached");
+    }
+
+    /// The Clans tab and the Historical tab share one period, and Historical
+    /// resolves its boundary every paint. If the cached window did not move with
+    /// the clock the two would report different counts for the same window.
+    #[test]
+    fn the_cached_breakdown_expires_when_its_boundary_moves_past_a_minute() {
+        let breakdown =
+            build_clan_breakdown(&tracked(&[(1, player("RAIN", &[(10, 1000)]))]), 7, &HashMap::new(), &[], None);
+        let window = BreakdownWindow::resolve(TimePeriod::LastHour);
+        let since = window.since.expect("an hour-long period has a boundary");
+
+        let a_minute_later = BreakdownWindow { since: Some(since + 1.minute()), ..window };
         assert!(
-            !breakdown_is_current(Some(&breakdown), None, TimePeriod::LastDay, 7),
-            "the Refresh button clears the period, which must invalidate the cache"
+            !breakdown_is_current(Some(&breakdown), Some(window), a_minute_later, 7),
+            "a boundary that has moved on must rebuild, or the two sub-tabs disagree"
         );
+
+        // What repainting a few seconds later resolves to: the same key, so the
+        // index queries stay put.
+        let within_the_same_minute = BreakdownWindow { since: Some(truncate_to_minute(since + 20.seconds())), ..window };
         assert!(
-            !breakdown_is_current(None, cached, TimePeriod::LastDay, 7),
-            "the first paint of the tab has nothing cached"
+            breakdown_is_current(Some(&breakdown), Some(window), within_the_same_minute, 7),
+            "a frame inside the same minute must reuse the cache"
+        );
+    }
+
+    /// The all-time period has no boundary to move, so its key is the period
+    /// alone and every frame reuses the cache.
+    #[test]
+    fn the_all_time_window_has_no_boundary() {
+        let window = BreakdownWindow::resolve(TimePeriod::AllTime);
+        assert_eq!(window.since, None);
+        assert_eq!(window, BreakdownWindow::resolve(TimePeriod::AllTime));
+    }
+
+    #[test]
+    fn truncating_a_boundary_clears_everything_below_the_minute() {
+        let ts = Timestamp::from_second(1_700_000_059).unwrap();
+        assert_eq!(truncate_to_minute(ts), Timestamp::from_second(1_700_000_040).unwrap());
+        assert_eq!(
+            truncate_to_minute(Timestamp::from_second(1_700_000_040).unwrap()),
+            Timestamp::from_second(1_700_000_040).unwrap(),
+            "a boundary already on the minute is left alone"
+        );
+
+        let before_epoch = Timestamp::from_second(-59).unwrap();
+        assert_eq!(
+            truncate_to_minute(before_epoch),
+            Timestamp::from_second(-60).unwrap(),
+            "a pre-epoch boundary truncates backwards, not towards zero"
         );
     }
 
@@ -933,15 +1000,11 @@ mod tests {
         }
         tracker.note_encounters_changed();
 
-        let breakdown = build_clan_breakdown(
-            &tracker.tracked_players,
-            tracker.encounter_version,
-            &HashMap::new(),
-            &[],
-            None,
-        );
-        let cached = Some(TimePeriod::LastDay);
-        assert!(breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastDay, tracker.encounter_version));
+        let breakdown =
+            build_clan_breakdown(&tracker.tracked_players, tracker.encounter_version, &HashMap::new(), &[], None);
+        let window = BreakdownWindow::resolve(TimePeriod::LastDay);
+        let cached = Some(window);
+        assert!(breakdown_is_current(Some(&breakdown), cached, window, tracker.encounter_version));
 
         // What a second battle against the same player does to the tracker.
         let players_before = tracker.tracked_players.len();
@@ -952,8 +1015,8 @@ mod tests {
 
         assert_eq!(tracker.tracked_players.len(), players_before, "a repeat encounter adds no tracked player");
         assert!(
-            !breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastDay, tracker.encounter_version),
-            "a repeat encounter must invalidate the cache, or the tab shows stale counts until Refresh"
+            !breakdown_is_current(Some(&breakdown), cached, window, tracker.encounter_version),
+            "a repeat encounter must invalidate the cache, or the tab shows stale counts"
         );
     }
 

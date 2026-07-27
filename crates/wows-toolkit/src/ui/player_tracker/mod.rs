@@ -4,6 +4,7 @@ mod historical;
 mod live;
 mod model;
 
+pub(crate) use clans::BreakdownWindow;
 pub(crate) use clans::ClanBreakdown;
 pub(crate) use clans::ClanSortedBy;
 pub(crate) use model::ExpandingColumn;
@@ -86,12 +87,10 @@ pub struct PlayerTracker {
     #[serde(skip)]
     pub(crate) clan_breakdown: Option<ClanBreakdown>,
 
-    /// The period `clan_breakdown` was built for. Held as the period rather than
-    /// as its resolved boundary because `TimePeriod::to_date` is relative to
-    /// `now`: a stored boundary would differ on every frame and re-run the index
-    /// queries on every repaint.
+    /// The window `clan_breakdown` was built for, so a period change or the
+    /// passage of wall-clock time rebuilds it.
     #[serde(skip)]
-    pub(crate) clan_breakdown_period: Option<TimePeriod>,
+    pub(crate) clan_breakdown_window: Option<BreakdownWindow>,
 
     #[serde(skip)]
     pub(crate) live_match: Option<LiveMatch>,
