@@ -29,6 +29,7 @@ use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
 use wowsunpack::game_types::PlaneId;
 use wowsunpack::game_types::Ribbon;
+use wowsunpack::models::fire_nodes::BurnNodeIndex;
 
 use crate::units::MatchWinner;
 use crate::units::SecondsRemaining;
@@ -282,3 +283,33 @@ pub enum HydrophoneContactPosition {
     /// From `SUBMARINE_HYDROPHONE_TARGET_INFO`: full pose and ship identity.
     Pose { params_id: GameParamId, position: WorldPos, yaw: f32, pitch: f32 },
 }
+
+/// `burningFlags` bits 0-3 (ma779114d BURN_MASK). Bits 4-7 are floods, 8 acid,
+/// 9 wild fire.
+pub const BURN_MASK: u16 = 0x000F;
+
+/// One change to a vehicle's burn-node bitmask.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BurnStateChange {
+    pub victim: EntityId,
+    pub clock: GameClock,
+    /// burningFlags & BURN_MASK before the change.
+    pub previous: u16,
+    /// burningFlags & BURN_MASK after the change.
+    pub current: u16,
+}
+
+impl BurnStateChange {
+    /// Nodes that went from clear to burning in this change.
+    pub fn newly_lit(&self) -> impl Iterator<Item = BurnNodeIndex> + '_ {
+        let rising = self.current & !self.previous;
+        (0..BurnNodeIndex::MAX_NODES).filter_map(move |i| {
+            let index = BurnNodeIndex::new(i)?;
+            (rising & index.bit_mask() != 0).then_some(index)
+        })
+    }
+}
+
+/// Ordered log of every burn-bit transition observed on any vehicle.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct BurnStateLog(pub Vec<BurnStateChange>);

@@ -21,6 +21,7 @@ use crate::ids::ShotTracking;
 use crate::ids::SourceTeam;
 use crate::resources::ActiveShotOrder;
 use crate::resources::ActiveTorpedoOrder;
+use crate::resources::BurnStateLog;
 use crate::resources::CapturePointOrder;
 use crate::resources::CapturedBuffs;
 use crate::resources::ChatLog;
@@ -237,6 +238,7 @@ fn insert_empty_resources(world: &mut World) {
     world.insert_resource(DeadShips::default());
     world.insert_resource(PlayerIndex::default());
     world.insert_resource(ReplayVehicles::default());
+    world.insert_resource(BurnStateLog::default());
 }
 
 /// Build MetadataPlayers from the replay vehicles list.

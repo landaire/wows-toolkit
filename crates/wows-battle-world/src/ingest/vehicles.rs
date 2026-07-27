@@ -3,6 +3,7 @@
 use bevy_ecs::world::World;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::types::EntityId;
+use wows_replays::types::GameClock;
 use wows_replays::types::GameParamId;
 use wowsunpack::data::Version;
 use wowsunpack::game_types::WeaponType;
@@ -12,6 +13,9 @@ use wowsunpack::rpc::typedefs::ArgValue;
 use crate::components::Aim;
 use crate::components::Vehicle;
 use crate::components::VehicleState;
+use crate::resources::BURN_MASK;
+use crate::resources::BurnStateChange;
+use crate::resources::BurnStateLog;
 use crate::resources::EntityIndex;
 use crate::units::Radians;
 
@@ -25,6 +29,7 @@ pub fn handle_vehicle_property(
     world: &mut World,
     version: Version,
     constants: &GameConstants,
+    clock: GameClock,
 ) {
     let Some(ecs_entity) = world.resource::<EntityIndex>().get(entity_id) else {
         return;
@@ -36,10 +41,23 @@ pub fn handle_vehicle_property(
         return;
     }
 
+    // The entity borrow (er/vs) must be dropped before BurnStateLog can be
+    // borrowed, so the pending change is staged here and pushed afterward.
+    let mut burn_change: Option<BurnStateChange> = None;
     if let Ok(mut er) = world.get_entity_mut(ecs_entity)
         && let Some(mut vs) = er.get_mut::<VehicleState>()
     {
+        // Compare masked values so a flood or acid bit change does not log as a
+        // fire transition; bits 4-9 share this property (ma779114d BURN_MASK).
+        let previous = vs.0.burning_flags() & BURN_MASK;
         vs.0.update_by_name(property, value, version, constants);
+        let current = vs.0.burning_flags() & BURN_MASK;
+        if previous != current {
+            burn_change = Some(BurnStateChange { victim: entity_id, clock, previous, current });
+        }
+    }
+    if let Some(change) = burn_change {
+        world.resource_mut::<BurnStateLog>().0.push(change);
     }
 
     // targetLocalPos: lo byte encodes world-space yaw as (lo/256)*TAU - PI.
@@ -135,5 +153,77 @@ pub fn apply_player_create_props(
         && let Some(mut vs) = er.get_mut::<VehicleState>()
     {
         vs.0.update_from_args(props, version, constants);
+    }
+}
+
+#[cfg(test)]
+mod burn_state_tests {
+    use bevy_ecs::world::World;
+    use wows_replays::analyzer::battle_controller::VehicleProps;
+    use wows_replays::game_constants::GameConstants;
+    use wows_replays::types::EntityId;
+    use wows_replays::types::GameClock;
+    use wowsunpack::data::Version;
+    use wowsunpack::rpc::typedefs::ArgValue;
+
+    use super::*;
+    use crate::components::GameId;
+    use crate::resources::BurnStateLog;
+    use crate::resources::EntityIndex;
+
+    /// Spawn a vehicle entity carrying `Vehicle` + `VehicleState`, indexed in
+    /// `EntityIndex`, matching the shape `handle_vehicle_property` expects.
+    fn test_world_with_vehicle(id: EntityId) -> World {
+        let mut world = World::new();
+        world.insert_resource(EntityIndex::default());
+        world.insert_resource(BurnStateLog::default());
+        let entity = world.spawn((GameId(id), Vehicle, VehicleState(VehicleProps::default()))).id();
+        world.resource_mut::<EntityIndex>().insert(id, entity);
+        world
+    }
+
+    fn set_burning_flags(world: &mut World, id: EntityId, flags: u16, clock: GameClock) {
+        let version = Version::default();
+        let constants = GameConstants::defaults();
+        handle_vehicle_property(id, "burningFlags", &ArgValue::Uint16(flags), world, version, &constants, clock);
+    }
+
+    /// Only burn bits (0-3) produce entries. A flood starting must not read as
+    /// a fire: bits 4-7 are floods and share the same property.
+    #[test]
+    fn only_burn_bits_produce_transitions() {
+        let mut world = test_world_with_vehicle(EntityId::from(7u32));
+
+        set_burning_flags(&mut world, EntityId::from(7u32), 0b0000_0001, GameClock(10.0));
+        set_burning_flags(&mut world, EntityId::from(7u32), 0b0001_0001, GameClock(11.0));
+        set_burning_flags(&mut world, EntityId::from(7u32), 0b0001_0101, GameClock(12.0));
+
+        let log = &world.resource::<BurnStateLog>().0;
+        assert_eq!(log.len(), 2, "the flood-only change must not log: {log:?}");
+        assert_eq!(log[0].current, 0b0001);
+        assert_eq!(log[1].previous, 0b0001);
+        assert_eq!(log[1].current, 0b0101);
+    }
+
+    #[test]
+    fn newly_lit_reports_only_the_rising_bits() {
+        let change =
+            BurnStateChange { victim: EntityId::from(1u32), clock: GameClock(1.0), previous: 0b0001, current: 0b0101 };
+        let lit: Vec<u8> = change.newly_lit().map(|n| n.get()).collect();
+        assert_eq!(lit, vec![2]);
+    }
+
+    /// A fire going out is a transition too: the DCP model reads extinguish
+    /// events, so a falling edge must not be dropped.
+    #[test]
+    fn extinguish_is_logged() {
+        let mut world = test_world_with_vehicle(EntityId::from(7u32));
+        set_burning_flags(&mut world, EntityId::from(7u32), 0b0011, GameClock(10.0));
+        set_burning_flags(&mut world, EntityId::from(7u32), 0b0000, GameClock(15.0));
+
+        let log = &world.resource::<BurnStateLog>().0;
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[1].previous, 0b0011);
+        assert_eq!(log[1].current, 0b0000);
     }
 }
