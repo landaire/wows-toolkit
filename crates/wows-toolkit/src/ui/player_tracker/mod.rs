@@ -48,7 +48,6 @@ use live::ResolvedRoster;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PlayerTracker {
-    pub(crate) tracked_players_by_time: BTreeMap<Timestamp, Vec<AccountId>>,
     pub(crate) tracked_players: HashMap<AccountId, TrackedPlayer>,
     pub filter_time_period: TimePeriod,
     pub(crate) sort_order: SortedBy,
@@ -193,7 +192,6 @@ impl PlayerTracker {
         timestamp: Timestamp,
     ) {
         let tracked_players = &mut self.tracked_players;
-        let tracked_players_by_ts = &mut self.tracked_players_by_time;
         let mut ingested_any = false;
         let mut marked_any = false;
 
@@ -259,8 +257,6 @@ impl PlayerTracker {
             tracked_player.clan_id = player_state.clan_id();
             tracked_player.timestamps.insert(timestamp);
             tracked_player.arena_ids.insert(arena_id);
-
-            tracked_players_by_ts.entry(timestamp).or_default().push(player_state.db_id());
         }
 
         // A fresh mark changes which encounters the tables count just as much as
@@ -614,9 +610,11 @@ mod tests {
     /// names and types. This pins that, because the failure mode is a tracker
     /// that silently loads empty on the first run after an update.
     ///
-    /// The payload also carries the per-account `division_mates` set a previous
-    /// build persisted. It has no per-encounter reading, so it is dropped rather
-    /// than migrated, and dropping it must not fail the whole load.
+    /// The payload also carries two keys the tracker no longer has fields for:
+    /// the per-account `division_mates` set, which has no per-encounter reading
+    /// and so is dropped rather than migrated, and `tracked_players_by_time`,
+    /// whose contents are all derivable from `tracked_players`. Dropping either
+    /// must not fail the whole load.
     #[test]
     fn a_payload_holding_only_the_older_fields_still_loads() {
         let saved = r#"{
@@ -641,7 +639,6 @@ mod tests {
         let tracker: PlayerTracker = serde_json::from_str(saved).expect("a payload without the newer fields loads");
 
         let timestamp = jiff::Timestamp::from_second(1_700_000_000).expect("fixture timestamp is in range");
-        assert_eq!(tracker.tracked_players_by_time.get(&timestamp), Some(&vec![AccountId(501)]));
 
         let player = tracker.tracked_players.get(&AccountId(501)).expect("the saved player is tracked");
         assert_eq!(player.last_name, "Enemy");

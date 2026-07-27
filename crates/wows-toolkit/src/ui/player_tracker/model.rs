@@ -438,7 +438,6 @@ impl PlayerTracker {
             for hit in hits {
                 entry.timestamps.insert(hit.timestamp);
                 entry.arena_ids.insert(hit.arena_id);
-                self.tracked_players_by_time.entry(hit.timestamp).or_default().push(facet.account_id);
             }
         }
 
@@ -658,9 +657,6 @@ mod tests {
         assert_eq!(enemy.clan, "CLAN");
         assert!(enemy.arena_ids.contains(&ArenaId::new(100)));
         assert_eq!(enemy.timestamps.len(), 1);
-
-        let timestamp = *enemy.timestamps.iter().next().unwrap();
-        assert_eq!(tracker.tracked_players_by_time.get(&timestamp).map(|v| v.len()), Some(1));
     }
 
     #[test]

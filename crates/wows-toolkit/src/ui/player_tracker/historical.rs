@@ -450,7 +450,6 @@ impl ToolkitTabViewer<'_> {
                 ui.horizontal(|ui| {
                     if ui.button(t!("ui.player_tracker.clear_stats")).clicked() {
                         player_tracker.tracked_players.clear();
-                        player_tracker.tracked_players_by_time.clear();
                         // Division marks live on the players just cleared, so
                         // the index has to be read again for whatever repopulates
                         // them. Leaving the latch set would hold an emptied
@@ -626,17 +625,12 @@ mod tests {
         assert!(player.division_encounters.mark(arena_id, timestamp), "a fresh mark is new under both keys");
     }
 
-    /// A tracker holding `players`, with `tracked_players_by_time` derived from
-    /// their timestamps the way the live and index ingest paths build it. Without
-    /// that index every player falls outside `player_range` and nothing renders.
+    /// A tracker holding `players` under the filter and sort the table is being
+    /// exercised with.
     fn tracker(period: TimePeriod, sort_order: SortedBy, players: Vec<TrackedPlayer>) -> PlayerTracker {
         let mut tracker = PlayerTracker { filter_time_period: period, sort_order, ..Default::default() };
         for player in players {
-            let id = player.db_id;
-            for ts in &player.timestamps {
-                tracker.tracked_players_by_time.entry(*ts).or_default().push(id);
-            }
-            tracker.tracked_players.insert(id, player);
+            tracker.tracked_players.insert(player.db_id, player);
         }
         tracker
     }
