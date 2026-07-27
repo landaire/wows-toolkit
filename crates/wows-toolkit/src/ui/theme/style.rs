@@ -1,8 +1,8 @@
 //! Style construction. Both themes share spacing and interaction; each
 //! supplies its own `Visuals`. Corners carry a slight radius graded by how
 //! much a surface floats or responds; structure (panels, tables, separators)
-//! stays square. Active states invert to the bone accent rather than picking
-//! up a hue.
+//! stays square. Active states raise to a hot surface with bright text and an
+//! accent border rather than inverting to a filled block.
 
 use egui::Color32;
 use egui::CornerRadius;
@@ -104,11 +104,11 @@ fn dark_visuals() -> Visuals {
                 expansion: 1.0,
             },
             active: WidgetVisuals {
-                bg_fill: p::ACCENT,
-                weak_bg_fill: p::ACCENT,
+                bg_fill: p::WIDGET_HOT,
+                weak_bg_fill: p::WIDGET_HOT,
                 bg_stroke: Stroke { width: 1.0, color: p::ACCENT },
                 corner_radius: CornerRadius::same(3),
-                fg_stroke: Stroke { width: 1.0, color: p::PANEL },
+                fg_stroke: Stroke { width: 1.0, color: p::TEXT_BRIGHT },
                 expansion: 1.0,
             },
             open: WidgetVisuals {
@@ -192,11 +192,11 @@ fn light_visuals() -> Visuals {
                 expansion: 1.0,
             },
             active: WidgetVisuals {
-                bg_fill: p::ACCENT,
-                weak_bg_fill: p::ACCENT,
+                bg_fill: p::WIDGET_HOT,
+                weak_bg_fill: p::WIDGET_HOT,
                 bg_stroke: Stroke { width: 1.0, color: p::ACCENT },
                 corner_radius: CornerRadius::same(3),
-                fg_stroke: Stroke { width: 1.0, color: p::PANEL },
+                fg_stroke: Stroke { width: 1.0, color: p::TEXT_BRIGHT },
                 expansion: 1.0,
             },
             open: WidgetVisuals {
@@ -307,8 +307,8 @@ pub fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
     // Tab and its panel read as one shape; the panel fill provides the boundary.
     style.tab.tab_body.stroke = egui::Stroke::NONE;
     style.tab.tab_body.bg_fill = panel;
-    // from_egui derives this from widgets.active.fg_stroke, which this theme sets to
-    // PANEL for the knocked-out label. That would make a dragged separator invisible.
+    // from_egui derives this from widgets.active.fg_stroke; the accent reads as a
+    // clearer drag indicator than the plain bright text tone it would default to.
     style.separator.color_dragged = accent;
     // egui_dock halves selection.bg_fill for this, which the theme's dim
     // selection renders invisible. The overlay marks where a dragged tab will
@@ -345,14 +345,14 @@ mod tests {
     }
 
     #[test]
-    fn active_state_inverts_to_the_bone_accent() {
+    fn active_state_uses_bright_text_not_an_inverted_block() {
         let dark = dark_style();
-        assert_eq!(dark.visuals.widgets.active.bg_fill, palette::dark::ACCENT);
-        assert_eq!(dark.visuals.widgets.active.fg_stroke.color, palette::dark::PANEL);
+        assert_eq!(dark.visuals.widgets.active.bg_fill, palette::dark::WIDGET_HOT);
+        assert_eq!(dark.visuals.widgets.active.fg_stroke.color, palette::dark::TEXT_BRIGHT);
 
         let light = light_style();
-        assert_eq!(light.visuals.widgets.active.bg_fill, palette::light::ACCENT);
-        assert_eq!(light.visuals.widgets.active.fg_stroke.color, palette::light::PANEL);
+        assert_eq!(light.visuals.widgets.active.bg_fill, palette::light::WIDGET_HOT);
+        assert_eq!(light.visuals.widgets.active.fg_stroke.color, palette::light::TEXT_BRIGHT);
     }
 
     #[test]
@@ -448,5 +448,62 @@ mod tests {
     fn themes_declare_their_own_mode() {
         assert!(dark_style().visuals.dark_mode);
         assert!(!light_style().visuals.dark_mode);
+    }
+
+    #[test]
+    fn every_tab_style_variant_is_legible() {
+        use crate::ui::theme::contrast::CONTRAST_FLOOR;
+        use crate::ui::theme::contrast::contrast_ratio;
+
+        // Color32 is premultiplied; a translucent fill must be composited over
+        // what it actually sits on (the tab bar) before measuring contrast.
+        fn over(fg: egui::Color32, bg: egui::Color32) -> egui::Color32 {
+            let inv = 1.0 - (f32::from(fg.a()) / 255.0);
+            let mix = |f: u8, b: u8| (f32::from(f) + f32::from(b) * inv).round() as u8;
+            egui::Color32::from_rgb(mix(fg.r(), bg.r()), mix(fg.g(), bg.g()), mix(fg.b(), bg.b()))
+        }
+
+        for (name, egui_style) in [("dark", dark_style()), ("light", light_style())] {
+            let s = dock_style(&egui_style);
+            let tab_bar_bg = s.tab_bar.bg_fill;
+            for (variant, style) in [
+                ("active", &s.tab.active),
+                ("inactive", &s.tab.inactive),
+                ("focused", &s.tab.focused),
+                ("hovered", &s.tab.hovered),
+                ("active_with_kb_focus", &s.tab.active_with_kb_focus),
+                ("inactive_with_kb_focus", &s.tab.inactive_with_kb_focus),
+                ("focused_with_kb_focus", &s.tab.focused_with_kb_focus),
+            ] {
+                let bg = over(style.bg_fill, tab_bar_bg);
+                let ratio = contrast_ratio(style.text_color, bg);
+                assert!(
+                    ratio >= CONTRAST_FLOOR,
+                    "{name} tab.{variant}: text {:?} on bg_fill {:?} (composited over tab_bar {:?}) only reached {ratio}",
+                    style.text_color,
+                    style.bg_fill,
+                    bg
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn derived_text_colors_are_legible_on_their_surfaces() {
+        use crate::ui::theme::contrast::CONTRAST_FLOOR;
+        use crate::ui::theme::contrast::contrast_ratio;
+
+        for (name, style) in [("dark", dark_style()), ("light", light_style())] {
+            let v = &style.visuals;
+            // egui derives these from widget fields; a theme that repurposes
+            // those fields can make them collide with the surfaces they land on.
+            for (what, fg) in [("text_color", v.text_color()), ("strong_text_color", v.strong_text_color())] {
+                for (sname, bg) in [("panel", v.panel_fill), ("window", v.window_fill), ("extreme", v.extreme_bg_color)]
+                {
+                    let r = contrast_ratio(fg, bg);
+                    assert!(r >= CONTRAST_FLOOR, "{name} {what} on {sname} is {r}");
+                }
+            }
+        }
     }
 }
