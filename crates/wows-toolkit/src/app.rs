@@ -1219,6 +1219,9 @@ impl WowsToolkitApp {
                     let update_ui = !matches!(source, ReplaySource::SessionStatsOnly);
                     let open_tab =
                         matches!(source, ReplaySource::ManualOpen | ReplaySource::AutoLoad | ReplaySource::Reload);
+                    // Jump the outer dock to the replay tab only on an explicit open
+                    // (search result, palette, file open), not on passive auto-loads.
+                    let focus_replay_tab = matches!(source, ReplaySource::ManualOpen);
 
                     // A replay newly written by the game (the watcher's Added
                     // path) is read and built on the background thread; add it to
@@ -1247,6 +1250,9 @@ impl WowsToolkitApp {
                         self.tab_state.player_tracker.write().update_from_replay(&replay.read());
                         if open_tab {
                             self.tab_state.open_replay_in_focused_tab(replay);
+                            if focus_replay_tab {
+                                self.focus_tab(&Tab::ReplayParser);
+                            }
                         }
                         self.tab_state.toasts.lock().success(t!("ui.messages.replay_loaded"));
                         self.try_update_constants();

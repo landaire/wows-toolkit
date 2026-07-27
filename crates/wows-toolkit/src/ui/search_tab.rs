@@ -470,145 +470,152 @@ impl ToolkitTabViewer<'_> {
 
                 for group_idx in 0..num_groups {
                     ui.group(|ui| {
-                        ui.set_max_width(GROUP_MAX_WIDTH);
+                        // Groups sit in a horizontal row, so `ui.group` inherits a
+                        // LeftToRight layout. Force the body vertical so it stacks
+                        // top-down and `ui.indent` (which requires a vertical layout)
+                        // does not panic.
+                        ui.vertical(|ui| {
+                            ui.set_max_width(GROUP_MAX_WIDTH);
 
-                        ui.horizontal(|ui| {
-                            ui.strong(t!("ui.search.group_label", index = group_idx + 1));
-                            if ui.small_button(t!("ui.search.remove_group")).clicked() {
-                                group_to_remove = Some(group_idx);
-                            }
-                        });
+                            ui.horizontal(|ui| {
+                                ui.strong(t!("ui.search.group_label", index = group_idx + 1));
+                                if ui.small_button(t!("ui.search.remove_group")).clicked() {
+                                    group_to_remove = Some(group_idx);
+                                }
+                            });
 
-                        ui.horizontal_wrapped(|ui| {
-                            let chips = search_tab.query.groups[group_idx].chips.clone();
-                            for (chip_idx, chip) in chips.iter().enumerate() {
-                                egui::Frame::group(ui.style()).show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.label(chip_pill_label(
-                                            chip,
-                                            &search_tab.resolved_ships,
-                                            &search_tab.resolved_players,
-                                            &search_tab.sources,
-                                            locale.as_deref(),
-                                        ));
-                                        if ui.small_button("x").on_hover_text(t!("ui.search.remove")).clicked() {
-                                            chip_to_remove = Some((group_idx, chip_idx));
-                                        }
-                                    });
-                                });
-                            }
-                        });
-
-                        let mut draft = search_tab.add_drafts[group_idx].clone();
-                        let sources_snapshot = search_tab.sources.clone();
-                        let mut draft_open = search_tab.add_draft_open[group_idx];
-
-                        if !draft_open {
-                            if ui.button(t!("ui.search.add_filter")).clicked() {
-                                draft_open = true;
-                            }
-                            search_tab.add_draft_open[group_idx] = draft_open;
-                        } else {
-                            ui.separator();
-                            ui.indent(("search_add_draft", group_idx), |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(t!("ui.search.field_label"));
-                                    let prev_field = draft.field;
-                                    egui::ComboBox::from_id_salt(("search_add_field", group_idx))
-                                        .selected_text(field_display_label(draft.field))
-                                        .show_ui(ui, |ui| {
-                                            for &f in NON_STAT_FIELDS {
-                                                ui.selectable_value(&mut draft.field, f, field_display_label(f));
-                                            }
-                                            ui.separator();
-                                            for kind in StatKind::ALL {
-                                                let selected =
-                                                    matches!(draft.field, Field::Stat { kind: k, .. } if k == kind);
-                                                if ui.selectable_label(selected, stat_kind_label(kind)).clicked() {
-                                                    // Subject is finalized just below once we know whether
-                                                    // the previous field was already a Stat (preserve) or not
-                                                    // (default to Me); this placeholder subject is discarded.
-                                                    draft.field = Field::Stat { kind, subject: Subject::SelfPlayer };
-                                                }
+                            ui.horizontal_wrapped(|ui| {
+                                let chips = search_tab.query.groups[group_idx].chips.clone();
+                                for (chip_idx, chip) in chips.iter().enumerate() {
+                                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label(chip_pill_label(
+                                                chip,
+                                                &search_tab.resolved_ships,
+                                                &search_tab.resolved_players,
+                                                &search_tab.sources,
+                                                locale.as_deref(),
+                                            ));
+                                            if ui.small_button("x").on_hover_text(t!("ui.search.remove")).clicked() {
+                                                chip_to_remove = Some((group_idx, chip_idx));
                                             }
                                         });
-                                    if draft.field != prev_field {
-                                        if let Field::Stat { kind, .. } = draft.field {
-                                            let subject = match prev_field {
-                                                Field::Stat { subject, .. } => subject,
-                                                _ => Subject::SelfPlayer,
-                                            };
-                                            draft.field = Field::Stat { kind, subject };
-                                            draft.subject = subject;
-                                        } else {
-                                            draft.subject = Subject::SelfPlayer;
-                                            draft.subject_picking_player = false;
-                                        }
-                                        draft.reset_for_field(draft.field);
-                                    }
-                                });
-
-                                if let Field::Stat { kind, subject } = draft.field {
-                                    ui.horizontal(|ui| {
-                                        ui.label(t!("ui.search.subject_label"));
-                                        egui::ComboBox::from_id_salt(("search_add_subject", group_idx))
-                                            .selected_text(subject_combo_label(
-                                                subject,
-                                                draft.subject_picking_player,
-                                                &search_tab.resolved_players,
-                                            ))
-                                            .show_ui(ui, |ui| {
-                                                let me_selected =
-                                                    !draft.subject_picking_player && subject == Subject::SelfPlayer;
-                                                if ui
-                                                    .selectable_label(me_selected, t!("ui.search.subject_me"))
-                                                    .clicked()
-                                                {
-                                                    draft.subject = Subject::SelfPlayer;
-                                                    draft.subject_picking_player = false;
-                                                    draft.field = Field::Stat { kind, subject: Subject::SelfPlayer };
-                                                }
-                                                let any_selected =
-                                                    !draft.subject_picking_player && subject == Subject::AnyPlayer;
-                                                if ui
-                                                    .selectable_label(any_selected, t!("ui.search.subject_any"))
-                                                    .clicked()
-                                                {
-                                                    draft.subject = Subject::AnyPlayer;
-                                                    draft.subject_picking_player = false;
-                                                    draft.field = Field::Stat { kind, subject: Subject::AnyPlayer };
-                                                }
-                                                let specific_selected = draft.subject_picking_player
-                                                    || matches!(subject, Subject::Player(_));
-                                                if ui
-                                                    .selectable_label(
-                                                        specific_selected,
-                                                        t!("ui.search.subject_specific"),
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    draft.subject_picking_player = true;
-                                                }
-                                            });
                                     });
+                                }
+                            });
 
-                                    if draft.subject_picking_player {
-                                        ui.indent(("search_add_subject_player", group_idx), |ui| {
-                                            if ui.text_edit_singleline(&mut draft.subject_player_search).changed()
-                                                && let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref())
-                                            {
-                                                match rt.block_on(query::search_players(
-                                                    pool,
-                                                    &draft.subject_player_search,
-                                                    50,
-                                                )) {
-                                                    Ok(results) => draft.subject_player_results = results,
-                                                    Err(e) => {
-                                                        tracing::warn!("search: subject search_players failed: {e}")
+                            let mut draft = search_tab.add_drafts[group_idx].clone();
+                            let sources_snapshot = search_tab.sources.clone();
+                            let mut draft_open = search_tab.add_draft_open[group_idx];
+
+                            if !draft_open {
+                                if ui.button(t!("ui.search.add_filter")).clicked() {
+                                    draft_open = true;
+                                }
+                                search_tab.add_draft_open[group_idx] = draft_open;
+                            } else {
+                                ui.separator();
+                                ui.indent(("search_add_draft", group_idx), |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(t!("ui.search.field_label"));
+                                        let prev_field = draft.field;
+                                        egui::ComboBox::from_id_salt(("search_add_field", group_idx))
+                                            .selected_text(field_display_label(draft.field))
+                                            .show_ui(ui, |ui| {
+                                                for &f in NON_STAT_FIELDS {
+                                                    ui.selectable_value(&mut draft.field, f, field_display_label(f));
+                                                }
+                                                ui.separator();
+                                                for kind in StatKind::ALL {
+                                                    let selected =
+                                                        matches!(draft.field, Field::Stat { kind: k, .. } if k == kind);
+                                                    if ui.selectable_label(selected, stat_kind_label(kind)).clicked() {
+                                                        // Subject is finalized just below once we know whether
+                                                        // the previous field was already a Stat (preserve) or not
+                                                        // (default to Me); this placeholder subject is discarded.
+                                                        draft.field =
+                                                            Field::Stat { kind, subject: Subject::SelfPlayer };
                                                     }
                                                 }
+                                            });
+                                        if draft.field != prev_field {
+                                            if let Field::Stat { kind, .. } = draft.field {
+                                                let subject = match prev_field {
+                                                    Field::Stat { subject, .. } => subject,
+                                                    _ => Subject::SelfPlayer,
+                                                };
+                                                draft.field = Field::Stat { kind, subject };
+                                                draft.subject = subject;
+                                            } else {
+                                                draft.subject = Subject::SelfPlayer;
+                                                draft.subject_picking_player = false;
                                             }
-                                            egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+                                            draft.reset_for_field(draft.field);
+                                        }
+                                    });
+
+                                    if let Field::Stat { kind, subject } = draft.field {
+                                        ui.horizontal(|ui| {
+                                            ui.label(t!("ui.search.subject_label"));
+                                            egui::ComboBox::from_id_salt(("search_add_subject", group_idx))
+                                                .selected_text(subject_combo_label(
+                                                    subject,
+                                                    draft.subject_picking_player,
+                                                    &search_tab.resolved_players,
+                                                ))
+                                                .show_ui(ui, |ui| {
+                                                    let me_selected =
+                                                        !draft.subject_picking_player && subject == Subject::SelfPlayer;
+                                                    if ui
+                                                        .selectable_label(me_selected, t!("ui.search.subject_me"))
+                                                        .clicked()
+                                                    {
+                                                        draft.subject = Subject::SelfPlayer;
+                                                        draft.subject_picking_player = false;
+                                                        draft.field =
+                                                            Field::Stat { kind, subject: Subject::SelfPlayer };
+                                                    }
+                                                    let any_selected =
+                                                        !draft.subject_picking_player && subject == Subject::AnyPlayer;
+                                                    if ui
+                                                        .selectable_label(any_selected, t!("ui.search.subject_any"))
+                                                        .clicked()
+                                                    {
+                                                        draft.subject = Subject::AnyPlayer;
+                                                        draft.subject_picking_player = false;
+                                                        draft.field = Field::Stat { kind, subject: Subject::AnyPlayer };
+                                                    }
+                                                    let specific_selected = draft.subject_picking_player
+                                                        || matches!(subject, Subject::Player(_));
+                                                    if ui
+                                                        .selectable_label(
+                                                            specific_selected,
+                                                            t!("ui.search.subject_specific"),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        draft.subject_picking_player = true;
+                                                    }
+                                                });
+                                        });
+
+                                        if draft.subject_picking_player {
+                                            ui.indent(("search_add_subject_player", group_idx), |ui| {
+                                                if ui.text_edit_singleline(&mut draft.subject_player_search).changed()
+                                                    && let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref())
+                                                {
+                                                    match rt.block_on(query::search_players(
+                                                        pool,
+                                                        &draft.subject_player_search,
+                                                        50,
+                                                    )) {
+                                                        Ok(results) => draft.subject_player_results = results,
+                                                        Err(e) => {
+                                                            tracing::warn!("search: subject search_players failed: {e}")
+                                                        }
+                                                    }
+                                                }
+                                                egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
                                                 for p in draft.subject_player_results.clone() {
                                                     let label = if p.clan.is_empty() {
                                                         p.latest_name.clone()
@@ -631,156 +638,165 @@ impl ToolkitTabViewer<'_> {
                                                     }
                                                 }
                                             });
-                                        });
+                                            });
+                                        }
                                     }
-                                }
 
-                                ui.horizontal(|ui| {
-                                    ui.label(t!("ui.search.op_label"));
-                                    egui::ComboBox::from_id_salt(("search_add_op", group_idx))
-                                        .selected_text(op_label(draft.op))
-                                        .show_ui(ui, |ui| {
-                                            for &o in draft.field.allowed_ops() {
-                                                ui.selectable_value(&mut draft.op, o, op_label(o));
-                                            }
-                                        });
-                                });
-
-                                ui.separator();
-
-                                match draft.field.value_kind() {
-                                    ValueKind::Text => {
-                                        ui.text_edit_singleline(&mut draft.text);
-                                    }
-                                    ValueKind::Int => {
-                                        ui.add(egui::DragValue::new(&mut draft.int_val));
-                                    }
-                                    ValueKind::Outcome => {
-                                        egui::ComboBox::from_id_salt(("search_add_outcome", group_idx))
-                                            .selected_text(outcome_label(draft.outcome))
+                                    ui.horizontal(|ui| {
+                                        ui.label(t!("ui.search.op_label"));
+                                        egui::ComboBox::from_id_salt(("search_add_op", group_idx))
+                                            .selected_text(op_label(draft.op))
                                             .show_ui(ui, |ui| {
-                                                for o in [
-                                                    MatchOutcome::Win,
-                                                    MatchOutcome::Loss,
-                                                    MatchOutcome::Draw,
-                                                    MatchOutcome::Unknown,
-                                                ] {
-                                                    ui.selectable_value(&mut draft.outcome, o, outcome_label(o));
+                                                for &o in draft.field.allowed_ops() {
+                                                    ui.selectable_value(&mut draft.op, o, op_label(o));
                                                 }
                                             });
-                                    }
-                                    ValueKind::Bool => {
-                                        egui::ComboBox::from_id_salt(("search_add_bool", group_idx))
-                                            .selected_text(bool_label(draft.bool_val))
-                                            .show_ui(ui, |ui| {
-                                                ui.selectable_value(&mut draft.bool_val, true, bool_label(true));
-                                                ui.selectable_value(&mut draft.bool_val, false, bool_label(false));
-                                            });
-                                    }
-                                    ValueKind::Class => {
-                                        egui::ComboBox::from_id_salt(("search_add_class", group_idx))
-                                            .selected_text(species_name(&draft.species))
-                                            .show_ui(ui, |ui| {
-                                                for &s in SHIP_SPECIES {
-                                                    ui.selectable_value(&mut draft.species, s, species_name(&s));
-                                                }
-                                            });
-                                    }
-                                    ValueKind::Ship => {
-                                        ui.text_edit_singleline(&mut draft.ship_search);
-                                        match ship_catalog {
-                                            Some(catalog) => {
-                                                egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-                                                    for entry in catalog.search(&draft.ship_search, 30) {
-                                                        let selected = draft.ship_id == Some(entry.ship_id);
-                                                        let label = format!(
-                                                            "{} (T{})",
-                                                            entry.display_name,
-                                                            tier_roman(entry.tier)
-                                                        );
-                                                        if ui.selectable_label(selected, label).clicked() {
-                                                            draft.ship_id = Some(entry.ship_id);
-                                                            draft.ship_label = entry.display_name.clone();
-                                                        }
+                                    });
+
+                                    ui.separator();
+
+                                    match draft.field.value_kind() {
+                                        ValueKind::Text => {
+                                            ui.text_edit_singleline(&mut draft.text);
+                                        }
+                                        ValueKind::Int => {
+                                            ui.add(egui::DragValue::new(&mut draft.int_val));
+                                        }
+                                        ValueKind::Outcome => {
+                                            egui::ComboBox::from_id_salt(("search_add_outcome", group_idx))
+                                                .selected_text(outcome_label(draft.outcome))
+                                                .show_ui(ui, |ui| {
+                                                    for o in [
+                                                        MatchOutcome::Win,
+                                                        MatchOutcome::Loss,
+                                                        MatchOutcome::Draw,
+                                                        MatchOutcome::Unknown,
+                                                    ] {
+                                                        ui.selectable_value(&mut draft.outcome, o, outcome_label(o));
                                                     }
                                                 });
-                                            }
-                                            None => {
-                                                ui.label(t!("ui.search.ship_catalog_unavailable"));
-                                            }
                                         }
-                                    }
-                                    ValueKind::Account => {
-                                        if ui.text_edit_singleline(&mut draft.player_search).changed()
-                                            && let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref())
-                                        {
-                                            match rt.block_on(query::search_players(pool, &draft.player_search, 50)) {
-                                                Ok(results) => draft.player_results = results,
-                                                Err(e) => tracing::warn!("search: search_players failed: {e}"),
-                                            }
+                                        ValueKind::Bool => {
+                                            egui::ComboBox::from_id_salt(("search_add_bool", group_idx))
+                                                .selected_text(bool_label(draft.bool_val))
+                                                .show_ui(ui, |ui| {
+                                                    ui.selectable_value(&mut draft.bool_val, true, bool_label(true));
+                                                    ui.selectable_value(&mut draft.bool_val, false, bool_label(false));
+                                                });
                                         }
-                                        egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-                                            for p in draft.player_results.clone() {
-                                                let label = if p.clan.is_empty() {
-                                                    p.latest_name.clone()
-                                                } else {
-                                                    format!("[{}] {}", p.clan, p.latest_name)
-                                                };
-                                                let selected = draft.player_id == Some(p.account_id);
-                                                if ui.selectable_label(selected, label.clone()).clicked() {
-                                                    draft.player_id = Some(p.account_id);
-                                                    draft.player_label = label;
+                                        ValueKind::Class => {
+                                            egui::ComboBox::from_id_salt(("search_add_class", group_idx))
+                                                .selected_text(species_name(&draft.species))
+                                                .show_ui(ui, |ui| {
+                                                    for &s in SHIP_SPECIES {
+                                                        ui.selectable_value(&mut draft.species, s, species_name(&s));
+                                                    }
+                                                });
+                                        }
+                                        ValueKind::Ship => {
+                                            ui.text_edit_singleline(&mut draft.ship_search);
+                                            match ship_catalog {
+                                                Some(catalog) => {
+                                                    egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+                                                        for entry in catalog.search(&draft.ship_search, 30) {
+                                                            let selected = draft.ship_id == Some(entry.ship_id);
+                                                            let label = format!(
+                                                                "{} (T{})",
+                                                                entry.display_name,
+                                                                tier_roman(entry.tier)
+                                                            );
+                                                            if ui.selectable_label(selected, label).clicked() {
+                                                                draft.ship_id = Some(entry.ship_id);
+                                                                draft.ship_label = entry.display_name.clone();
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                                None => {
+                                                    ui.label(t!("ui.search.ship_catalog_unavailable"));
                                                 }
                                             }
-                                        });
-                                    }
-                                    ValueKind::Timestamp => {
-                                        let date_salt = format!("search_add_date_{group_idx}");
-                                        ui.add(egui_extras::DatePickerButton::new(&mut draft.date).id_salt(&date_salt));
-                                    }
-                                    ValueKind::Source => {
-                                        let selected_name = draft
-                                            .source_id
-                                            .and_then(|id| sources_snapshot.iter().find(|s| s.id == id))
-                                            .map(|s| s.name.clone())
-                                            .unwrap_or_else(|| t!("ui.search.source_any").into());
-                                        egui::ComboBox::from_id_salt(("search_add_source", group_idx))
-                                            .selected_text(selected_name)
-                                            .show_ui(ui, |ui| {
-                                                for s in &sources_snapshot {
-                                                    ui.selectable_value(
-                                                        &mut draft.source_id,
-                                                        Some(s.id),
-                                                        s.name.clone(),
-                                                    );
+                                        }
+                                        ValueKind::Account => {
+                                            if ui.text_edit_singleline(&mut draft.player_search).changed()
+                                                && let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref())
+                                            {
+                                                match rt.block_on(query::search_players(pool, &draft.player_search, 50))
+                                                {
+                                                    Ok(results) => draft.player_results = results,
+                                                    Err(e) => tracing::warn!("search: search_players failed: {e}"),
+                                                }
+                                            }
+                                            egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+                                                for p in draft.player_results.clone() {
+                                                    let label = if p.clan.is_empty() {
+                                                        p.latest_name.clone()
+                                                    } else {
+                                                        format!("[{}] {}", p.clan, p.latest_name)
+                                                    };
+                                                    let selected = draft.player_id == Some(p.account_id);
+                                                    if ui.selectable_label(selected, label.clone()).clicked() {
+                                                        draft.player_id = Some(p.account_id);
+                                                        draft.player_label = label;
+                                                    }
                                                 }
                                             });
+                                        }
+                                        ValueKind::Timestamp => {
+                                            let date_salt = format!("search_add_date_{group_idx}");
+                                            ui.add(
+                                                egui_extras::DatePickerButton::new(&mut draft.date).id_salt(&date_salt),
+                                            );
+                                        }
+                                        ValueKind::Source => {
+                                            let selected_name = draft
+                                                .source_id
+                                                .and_then(|id| sources_snapshot.iter().find(|s| s.id == id))
+                                                .map(|s| s.name.clone())
+                                                .unwrap_or_else(|| t!("ui.search.source_any").into());
+                                            egui::ComboBox::from_id_salt(("search_add_source", group_idx))
+                                                .selected_text(selected_name)
+                                                .show_ui(ui, |ui| {
+                                                    for s in &sources_snapshot {
+                                                        ui.selectable_value(
+                                                            &mut draft.source_id,
+                                                            Some(s.id),
+                                                            s.name.clone(),
+                                                        );
+                                                    }
+                                                });
+                                        }
                                     }
-                                }
 
-                                ui.separator();
-                                ui.horizontal(|ui| {
-                                    let add_disabled =
-                                        matches!(draft.field, Field::Stat { .. }) && draft.subject_picking_player;
-                                    if ui.add_enabled(!add_disabled, egui::Button::new(t!("ui.search.add"))).clicked()
-                                        && let Some(value) = draft.to_value()
-                                    {
-                                        let label = draft.value_display_label();
-                                        new_chip =
-                                            Some((group_idx, Chip { field: draft.field, op: draft.op, value }, label));
-                                        draft = AddFilterDraft::default();
-                                        draft_open = false;
-                                    }
-                                    if ui.button(t!("ui.buttons.cancel")).clicked() {
-                                        draft = AddFilterDraft::default();
-                                        draft_open = false;
-                                    }
+                                    ui.separator();
+                                    ui.horizontal(|ui| {
+                                        let add_disabled =
+                                            matches!(draft.field, Field::Stat { .. }) && draft.subject_picking_player;
+                                        if ui
+                                            .add_enabled(!add_disabled, egui::Button::new(t!("ui.search.add")))
+                                            .clicked()
+                                            && let Some(value) = draft.to_value()
+                                        {
+                                            let label = draft.value_display_label();
+                                            new_chip = Some((
+                                                group_idx,
+                                                Chip { field: draft.field, op: draft.op, value },
+                                                label,
+                                            ));
+                                            draft = AddFilterDraft::default();
+                                            draft_open = false;
+                                        }
+                                        if ui.button(t!("ui.buttons.cancel")).clicked() {
+                                            draft = AddFilterDraft::default();
+                                            draft_open = false;
+                                        }
+                                    });
                                 });
-                            });
-                            search_tab.add_draft_open[group_idx] = draft_open;
-                        }
+                                search_tab.add_draft_open[group_idx] = draft_open;
+                            }
 
-                        search_tab.add_drafts[group_idx] = draft;
+                            search_tab.add_drafts[group_idx] = draft;
+                        });
                     });
 
                     if group_idx + 1 < num_groups {
