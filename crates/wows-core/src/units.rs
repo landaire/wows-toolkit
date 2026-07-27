@@ -13,8 +13,10 @@ use std::ops::Sub;
 /// Conversion factor: 1 BigWorld unit = 30 meters.
 const BW_TO_METERS: f32 = 30.0;
 
-/// Conversion factor: 1 ship-model unit = 15 meters.
-const BW_TO_SHIP: f32 = 15.0;
+/// Conversion factor: 1 ship-model unit = 15 meters. The engine's own name for
+/// this number is `BW_TO_SHIP`, which reads as a BigWorld-to-ship ratio and is
+/// not what it does; the client multiplies by it to leave ship space for meters.
+const SHIP_TO_METERS: f32 = 15.0;
 
 /// Distance in meters.
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
@@ -32,14 +34,23 @@ pub struct BigWorldDistance(f32);
 /// uses this space: `.visual` node matrices, the `.skel_ext` nodes hung off them,
 /// and the meshes they position.
 ///
-/// Measured against the live roster, not assumed: for 1158 hulls the root
-/// visual's longitudinal extent times 15 reproduces `A_Hull.size[0]` with a
-/// median ratio of 1.014 (p5..p95 of 1.001..1.070, the residual being bow and
-/// stern overhang the published length excludes). The exported hierarchy carries
-/// no scale of its own; `Scene Root`, `export` and the hull nodes are identity.
-/// The same 15 falls out of the main-battery dispersion formula against published
-/// port values (`wowsunpack::game_params::ttx::constants::BW_TO_SHIP`). See
-/// `docs/FIRE_CHANCE.md` section 5.1.
+/// The 15 is measured, and good to roughly +/-3%. That is the precision budget
+/// of anything derived from it: a position 100 m from the hull origin carries
+/// about 3 m of scale uncertainty.
+///
+/// The tightest evidence does not come from geometry at all. Solving the
+/// main-battery dispersion formula against published port dispersion gives
+/// 14.976 for North Carolina and 14.851 for Yamato
+/// (`wowsunpack::game_params::ttx::constants::BW_TO_SHIP`). That route is only
+/// independent of the geometry if the dispersion formula's ship space and the
+/// `.visual`/`.skel_ext` space are the same space, which is inferred from the
+/// shared engine import name and not otherwise established.
+///
+/// Geometric measurements agree but individually are looser: Iowa's waterline
+/// beam puts the scale at 15.06 m/unit, while the model bounding box against
+/// `A_Hull.size[0]` implies about 14.8 across the roster. The exported hierarchy
+/// carries no scale of its own; `Scene Root`, `export` and the hull nodes are
+/// identity. See `docs/FIRE_CHANCE.md` section 5.1.
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -140,7 +151,7 @@ impl Meters {
     /// Use this for distances that will be compared against ship geometry
     /// (hull models, armor meshes), which are in ship-model coordinates.
     pub fn to_ship_model(self) -> ShipModelDistance {
-        ShipModelDistance(self.0 / BW_TO_SHIP)
+        ShipModelDistance(self.0 / SHIP_TO_METERS)
     }
     pub fn to_km(self) -> Km {
         Km(self.0 / 1000.0)
@@ -167,7 +178,7 @@ impl ShipModelDistance {
         self.0
     }
     pub fn to_meters(self) -> Meters {
-        Meters(self.0 * BW_TO_SHIP)
+        Meters(self.0 * SHIP_TO_METERS)
     }
     pub fn to_bigworld(self) -> BigWorldDistance {
         self.to_meters().to_bigworld()

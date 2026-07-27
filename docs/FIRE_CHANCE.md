@@ -386,58 +386,73 @@ each section's extender:
 Monotonic bow to stern, one per hull section. Model space is right-handed with
 +Z toward the bow.
 
-**Model space is a fixed 15 meters per unit.** There is no scale anywhere in the
-exported hierarchy to compose: on every hull checked, `Scene Root`, `export` and
-each `HP_<Section>` node are identity with unit column lengths, so the raw node
-translation is already hull-local and only needs multiplying.
+**Model space is a fixed 15 meters per unit, to within about 3%.** There is no
+scale anywhere in the exported hierarchy to compose: on every hull checked,
+`Scene Root`, `export` and each `HP_<Section>` node are identity with unit
+column lengths, so the raw node translation is already hull-local and only needs
+multiplying. The 3% is the precision budget of everything downstream: a node
+100 m from the hull origin carries about 3 m of scale uncertainty.
 
-The constant is 15, measured across the roster. For each of 1158 ships the root
-visual's z extent times 15 was compared against `A_Hull.size[0]`:
+The strongest evidence for the value does not come from geometry. Solving the
+main-battery dispersion formula against published port dispersion gives 14.976
+for North Carolina and 14.851 for Yamato, recorded as
+`wowsunpack::game_params::ttx::constants::BW_TO_SHIP`. That is only independent
+of the geometry if the dispersion formula's ship space and the
+`.visual`/`.skel_ext` space are the same space. They share the engine import
+name `BW_TO_SHIP`, and the client mixes the two freely (`DecalsComponent.py:33`
+offsets a model-space splash-box point by `hull.size[1] / BW_TO_SHIP`, meters
+over the scale), but nothing pins them together beyond that.
 
-| | ratio |
-| --- | --- |
-| p5 | 1.001 |
-| p25 | 1.009 |
-| median | 1.014 |
-| p75 | 1.021 |
-| p95 | 1.070 |
+The geometric measurements agree with 14.9..15.1 and are individually looser
+than the +/-3% band, so they corroborate the constant rather than fixing it.
 
-The model is consistently a little longer than the published length, which is
-what a bounding box over the whole hull should be: it covers bow and stern
-overhang that `size[0]` excludes. The top of the band is carriers, whose flight
-decks project past the hull at both ends (Langley 1.166, Hosho 1.152, Bogue
-1.220). The tail below 1.0 is event and joke hulls (Battle Duck, Crab
-Battleship, Transylvania) and ships whose GameParams points at a stand-in model.
+The tightest of them uses the hull's own waterline splines, `..YHWL..` to port
+and `..YHWR..` to starboard, whose nodes sit at y = 0 in matched port/starboard
+stations. The widest station is the maximum beam, which on a flush-sided surface
+ship is at the waterline:
 
-The three validation ships:
+| Ship | widest station | published beam | implied scale |
+| --- | --- | --- | --- |
+| `PASB018_Iowa_1944` | 2.1896 | 32.97 m | 15.058 |
+| `PFSD110_Kleber` | 0.8846 | 13.2 m | 14.923 |
 
-| Ship | `size[0]` | z extent | extent x 15 | ratio |
-| --- | --- | --- | --- | --- |
-| `PASB018_Iowa_1944` | 262.1 m | 18.326 | 274.9 m | 1.049 |
-| `PFSD110_Kleber` | 141.0 m | 9.567 | 143.5 m | 1.018 |
-| `PASS110_Balao` | 94.99 m | 6.391 | 95.9 m | 1.009 |
+Across 512 hulls carrying both splines the implied scale runs p25 14.90, median
+15.09, p75 15.68, with the high tail being carriers (`size[1]` is the flight
+deck, wider than the hull) and submarines (widest below the waterline, so the
+waterline station undersamples). This is the check
+`the_model_scale_matches_the_waterline_beam` pins on Iowa.
 
-Iowa is the loosest of the three because its `size[0]` is the waterline length;
-against the real 270.4 m overall the model is 1.7% long, in line with the rest.
+The bounding-box route is looser still, and cannot pin the constant better than
+about 10%. Iowa's root box is 18.326 units in z and 2.498 in x. At 15 m/unit
+that is 274.9 m against a published 262.1 m length, +4.9%, but 37.5 m against a
+published 32.97 m beam, +13.7%. The same box reads two different errors on two
+axes, because it covers only its own lod4 shape and because deck overhang and
+sponsons project past both the published length and the published beam. Swept
+over 1158 hulls, `z extent * 15 / A_Hull.size[0]` has a median of 1.014
+(p5..p95 1.001..1.070), which taken at face value would put the scale at about
+14.8 rather than 15.0.
 
-Deriving the scale per hull instead (`size[0]` over the z extent) would give
-14.30 for Iowa and 14.86 for Balao, and would absorb a carrier's flight-deck
-overhang into a 15% scale error. It is the wrong model: the scale is a property
-of the engine, not of the hull.
+That sweep has a tail below 1.0, models shorter than their published length,
+which is the direction a bounding box should not go. Event and joke hulls
+(Battle Duck 0.503, Crab Battleship 0.617, Transylvania 0.886) and stand-in
+models account for the far end, but not the near end: Mutsu sits at 0.9747,
+Hatsuharu 0.9815 and Nikolay I 0.9852, and those are real ships on their own
+models. That is unexplained. Read literally, a floor at 1.0 would demand a scale
+of at least 15 / 0.9747 = 15.39, which the dispersion derivation and the
+waterline beam both contradict, so the sub-1.0 band is more likely telling us
+something about how `size[0]` is authored than about the scale.
 
-The same 15 was already recovered independently, from the main-battery
-dispersion formula against published port values, as
-`wowsunpack::game_params::ttx::constants::BW_TO_SHIP`. Two unrelated derivations
-agreeing is why `crates/wows-core/src/units.rs` now documents
-`ShipModelDistance` as 15 m per unit; its previous claim of 2 m
-(`BW_TO_METERS / BW_TO_SHIP`, 30/15) was arithmetic on a misreading and had no
-callers.
+Deriving the scale per hull instead (`size[0]` over the z extent) is wrong
+whatever the constant is: it would give 14.30 for Iowa and 14.86 for Balao, a 4%
+spread on one engine space, and would absorb a carrier's flight-deck overhang
+into a 15% scale error. The scale is a property of the engine, not of the hull.
 
 The resolver is `wowsunpack::models::fire_nodes::resolve_fire_sections`, which
-returns positions in meters so consumers never handle the scale. Across the
-whole roster 1197 of 1199 hulls resolve; the two that do not are a ship whose
-model is absent from `assets.bin` and one event submarine whose GameParams
-claims four burn nodes for a model carrying two.
+returns positions in meters so consumers never handle the scale. Sweeping every
+hull upgrade of every ship, 1578 of 1582 resolve. The four that do not are two
+upgrades of a ship whose model is absent from `assets.bin`, an event submarine
+whose GameParams claims four burn nodes for a model carrying two, and an event
+auxiliary whose GameParams claims two for a model carrying four.
 
 `EP_Fire_5` and `EP_Fire_5_1` also exist on 452 hulls. These are **not** burn
 nodes: they are the extra emitters of the `fireResistance` effect group, which
@@ -446,8 +461,17 @@ replaces `fire2`'s group when the target has Fire Prevention Expert. Only
 
 Surveyed across every `_ep.skel_ext` in the live build: 1027 models carry four
 distinct fire nodes, 452 carry five (four plus the `fireResistance` extra), and
-the rest are submarines and special entities carrying one or two, consistent with
-their `burnNodes` length.
+the rest are submarines and special entities carrying one or two.
+
+Which model node belongs to which section is settled per hull by
+`A_Hull.effects.fire{i+1}`, and the roster splits cleanly in two. Of the 1272
+hulls carrying `burnNodes`, 1233 have four, with `HP_FX_Fire_{i}` the principal
+emitter of `fire{i}` for each. The other 39 have one, and 38 of those give
+`fire1` both `HP_FX_Fire_1` and `HP_FX_Fire_2`: one section, two emitters. A
+one-section hull whose model carries a second bare ordinal is therefore normal
+rather than a disagreement, and the resolver accepts it. For any hull with two or
+more sections, a bare ordinal above the section count is a disagreement and an
+error, since the section it would be assigned to is then in question.
 
 Two hypotheses remain open:
 
