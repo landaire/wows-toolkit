@@ -16,6 +16,7 @@ use crate::icons;
 
 use super::PlayerTracker;
 use super::SortOrder;
+use super::TimePeriod;
 use super::detail_rect;
 use super::encounter_severity_color;
 use super::exact_timestamp_text;
@@ -46,8 +47,11 @@ pub(crate) struct ClanBreakdown {
     pub tracked_count: usize,
     pub rows: Vec<ClanRow>,
     /// Encounters whose arena the index covers, so their clan label is the clan
-    /// the player was actually in.
+    /// the player was actually in. Computed and asserted by the aggregation
+    /// tests; no surface displays it, so the lint has to be silenced here.
+    #[allow(dead_code)]
     pub exact_encounters: usize,
+    #[allow(dead_code)]
     pub total_encounters: usize,
 }
 
@@ -554,6 +558,21 @@ fn fetch_index_inputs(
     (latest, corrections, indexed_arenas)
 }
 
+/// Whether a cached breakdown still matches what it would be built from now.
+///
+/// The period is compared as the [`TimePeriod`] rather than as its resolved
+/// boundary: `TimePeriod::to_date` is relative to `Timestamp::now`, so a stored
+/// boundary would differ on every frame and re-run the index queries on every
+/// repaint. `cached_period` is `None` after the Refresh button clears it.
+fn breakdown_is_current(
+    breakdown: Option<&ClanBreakdown>,
+    cached_period: Option<TimePeriod>,
+    period: TimePeriod,
+    tracked_count: usize,
+) -> bool {
+    breakdown.is_some_and(|breakdown| breakdown.tracked_count == tracked_count) && cached_period == Some(period)
+}
+
 /// Rebuild the breakdown when one of its inputs changed. The index queries run
 /// synchronously on the UI thread, the way `populate_from_index` does on its
 /// button press, so this must not fire on an unchanged frame.
@@ -563,18 +582,19 @@ fn refresh_clan_breakdown(
     rt: Option<&tokio::runtime::Runtime>,
 ) {
     let period = tracker.filter_time_period;
-    let current = tracker.clan_breakdown.as_ref().is_some_and(|breakdown| {
-        breakdown.tracked_count == tracker.tracked_players.len() && tracker.clan_breakdown_period == Some(period)
-    });
-    if current {
+    if breakdown_is_current(
+        tracker.clan_breakdown.as_ref(),
+        tracker.clan_breakdown_period,
+        period,
+        tracker.tracked_players.len(),
+    ) {
         return;
     }
 
     let (latest, corrections, indexed_arenas) = match (pool, rt) {
         (Some(pool), Some(rt)) => fetch_index_inputs(pool, rt),
         // With no index open there is nothing to correct against, so every
-        // encounter falls back to the player's current clan and the attribution
-        // line reports zero coverage.
+        // encounter falls back to the player's current clan.
         _ => (HashMap::new(), Vec::new(), HashSet::new()),
     };
 
@@ -611,16 +631,41 @@ impl ToolkitTabViewer<'_> {
                 };
 
                 ui.horizontal(|ui| {
+                    // The same field the Historical tab's combo edits, so the two
+                    // stay in sync in both directions with no extra state.
+                    let selected = &mut player_tracker.filter_time_period;
+                    egui::ComboBox::from_id_salt("player_tracker_clans_time_period_selection")
+                        .selected_text(selected.description())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                selected,
+                                TimePeriod::LastHour,
+                                t!("ui.player_tracker.period.past_hour"),
+                            );
+                            ui.selectable_value(
+                                selected,
+                                TimePeriod::LastSixHours,
+                                t!("ui.player_tracker.period.past_six_hours"),
+                            );
+                            ui.selectable_value(selected, TimePeriod::LastDay, t!("ui.player_tracker.period.past_day"));
+                            ui.selectable_value(
+                                selected,
+                                TimePeriod::LastWeek,
+                                t!("ui.player_tracker.period.past_week"),
+                            );
+                            ui.selectable_value(
+                                selected,
+                                TimePeriod::LastMonth,
+                                t!("ui.player_tracker.period.past_month"),
+                            );
+                            ui.selectable_value(selected, TimePeriod::AllTime, t!("ui.player_tracker.period.all_time"));
+                        });
+
                     if ui.button(t!("ui.player_tracker.clan_refresh")).clicked() {
                         // Clearing the key is the whole refresh, and it survives
                         // the breakdown being put back at the end of this frame.
                         player_tracker.clan_breakdown_period = None;
                     }
-                    ui.label(t!(
-                        "ui.player_tracker.clan_attribution",
-                        exact = breakdown.exact_encounters,
-                        total = breakdown.total_encounters
-                    ));
                 });
 
                 ui.add_space(10.0);
@@ -803,6 +848,43 @@ mod tests {
         assert_eq!(rain.matches_in_range, 1);
         assert_eq!(rain.sightings_in_range, 1);
         assert_eq!(rain.last_seen, Timestamp::from_second(5000).unwrap());
+    }
+
+    /// The index queries behind the breakdown run synchronously on the UI
+    /// thread, so an unchanged frame must not invalidate the cache, and the
+    /// period must be compared as the enum: `TimePeriod::to_date` resolves
+    /// against `now` and would differ on every frame.
+    #[test]
+    fn the_cached_breakdown_is_invalidated_by_its_inputs_and_nothing_else() {
+        let breakdown = build_clan_breakdown(
+            &tracked(&[(1, player("RAIN", &[(10, 1000)]))]),
+            &HashMap::new(),
+            &[],
+            &HashSet::new(),
+            None,
+        );
+        let cached = Some(TimePeriod::LastDay);
+
+        assert!(
+            breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastDay, 1),
+            "an unchanged frame must reuse the cache rather than re-run the index queries"
+        );
+        assert!(
+            !breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastWeek, 1),
+            "changing the period on either sub-tab must invalidate the cache"
+        );
+        assert!(
+            !breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastDay, 2),
+            "newly tracked history must invalidate the cache"
+        );
+        assert!(
+            !breakdown_is_current(Some(&breakdown), None, TimePeriod::LastDay, 1),
+            "the Refresh button clears the period, which must invalidate the cache"
+        );
+        assert!(
+            !breakdown_is_current(None, cached, TimePeriod::LastDay, 1),
+            "the first paint of the tab has nothing cached"
+        );
     }
 
     #[test]
