@@ -14,10 +14,11 @@ pub struct ChatColors {
 
 /// Colours for the armor viewer's angle bands and penetration outcomes.
 ///
-/// `pen` and `angle_bad` currently share a value, as do `overpen` and
-/// `angle_mid`. They stay separate fields because they are separate meanings
-/// on separate widgets, and either may be retuned without disturbing the
-/// other. Do not collapse them.
+/// `overpen` and `angle_mid` currently share a value. `pen` and `angle_bad`
+/// do not: `pen` reads green (a shell getting through is the answer the
+/// viewer exists to give), while `angle_bad` stays red. They stay separate
+/// fields because they are separate meanings on separate widgets, and either
+/// may be retuned without disturbing the other. Do not collapse them.
 pub struct ArmorColors {
     pub angle_good: Color32,
     pub angle_mid: Color32,
@@ -48,6 +49,12 @@ pub struct SemanticColors {
     pub icon_accent: Color32,
     /// Players flagged by the abuse list.
     pub abuser: Color32,
+    /// Session host marker. Distinct from `division`, which is a division mate.
+    pub crown_host: Color32,
+    /// Session co-host marker. Distinct from `abuser`, which flags a reported player.
+    pub crown_cohost: Color32,
+    /// A value worth noticing that is not a warning.
+    pub notice: Color32,
     pub chat: ChatColors,
     pub armor: ArmorColors,
 }
@@ -64,6 +71,9 @@ pub const DARK: SemanticColors = SemanticColors {
     division: Color32::from_rgb(0xE5, 0xC1, 0x58),
     icon_accent: Color32::from_rgb(0xE5, 0xC1, 0x58),
     abuser: Color32::from_rgb(0xF0, 0x9B, 0xC0),
+    crown_host: Color32::from_rgb(0xE5, 0xC1, 0x58),
+    crown_cohost: Color32::from_rgb(0xF0, 0x9B, 0xC0),
+    notice: Color32::from_rgb(0xE5, 0xC1, 0x58),
     chat: ChatColors {
         division: Color32::from_rgb(0xE5, 0xC1, 0x58),
         global: Color32::from_rgb(0xDE, 0xDB, 0xD2),
@@ -74,7 +84,7 @@ pub const DARK: SemanticColors = SemanticColors {
         angle_good: Color32::from_rgb(0x64, 0xD9, 0x8A),
         angle_mid: Color32::from_rgb(0xE0, 0xBE, 0x64),
         angle_bad: Color32::from_rgb(0xE8, 0x73, 0x7B),
-        pen: Color32::from_rgb(0xE8, 0x73, 0x7B),
+        pen: Color32::from_rgb(0x6F, 0xD9, 0x8A),
         overpen: Color32::from_rgb(0xE0, 0xBE, 0x64),
         ricochet: Color32::from_rgb(0x7F, 0xB4, 0xE8),
         shatter: Color32::from_rgb(0xA9, 0xA4, 0x9A),
@@ -93,6 +103,9 @@ pub const LIGHT: SemanticColors = SemanticColors {
     division: Color32::from_rgb(0x77, 0x58, 0x00),
     icon_accent: Color32::from_rgb(0x77, 0x58, 0x00),
     abuser: Color32::from_rgb(0xA3, 0x32, 0x70),
+    crown_host: Color32::from_rgb(0x77, 0x58, 0x00),
+    crown_cohost: Color32::from_rgb(0xA3, 0x32, 0x70),
+    notice: Color32::from_rgb(0x77, 0x58, 0x00),
     chat: ChatColors {
         division: Color32::from_rgb(0x77, 0x58, 0x00),
         global: Color32::from_rgb(0x1A, 0x1A, 0x17),
@@ -103,7 +116,7 @@ pub const LIGHT: SemanticColors = SemanticColors {
         angle_good: Color32::from_rgb(0x11, 0x6B, 0x34),
         angle_mid: Color32::from_rgb(0x78, 0x58, 0x08),
         angle_bad: Color32::from_rgb(0xAE, 0x22, 0x30),
-        pen: Color32::from_rgb(0xAE, 0x22, 0x30),
+        pen: Color32::from_rgb(0x10, 0x6C, 0x34),
         overpen: Color32::from_rgb(0x78, 0x58, 0x08),
         ricochet: Color32::from_rgb(0x1B, 0x5F, 0xA8),
         shatter: Color32::from_rgb(0x5F, 0x5C, 0x52),
@@ -155,6 +168,9 @@ mod tests {
             ("division", sem.division),
             ("icon_accent", sem.icon_accent),
             ("abuser", sem.abuser),
+            ("crown_host", sem.crown_host),
+            ("crown_cohost", sem.crown_cohost),
+            ("notice", sem.notice),
             ("chat.division", sem.chat.division),
             ("chat.global", sem.chat.global),
             ("chat.team", sem.chat.team),

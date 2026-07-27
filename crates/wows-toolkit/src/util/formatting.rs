@@ -90,7 +90,7 @@ impl SkillTier {
         match self {
             Self::Poor => sem.loss,
             Self::Mediocre => sem.warn,
-            Self::Good => sem.division,
+            Self::Good => sem.notice,
             Self::Great => sem.win,
         }
     }

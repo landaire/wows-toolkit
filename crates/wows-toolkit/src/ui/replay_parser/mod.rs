@@ -4435,11 +4435,11 @@ impl ToolkitTabViewer<'_> {
                             }
                             match user.role {
                                 crate::collab::PeerRole::Host => {
-                                    ui.label(RichText::new(icons::CROWN).small().color(ui.sem().division))
+                                    ui.label(RichText::new(icons::CROWN).small().color(ui.sem().crown_host))
                                         .on_hover_text(t!("ui.collab.role_host"));
                                 }
                                 crate::collab::PeerRole::CoHost => {
-                                    ui.label(RichText::new(icons::CROWN).small().color(ui.sem().abuser))
+                                    ui.label(RichText::new(icons::CROWN).small().color(ui.sem().crown_cohost))
                                         .on_hover_text(t!("ui.collab.role_cohost"));
                                 }
                                 _ => {}
@@ -5161,9 +5161,7 @@ impl ToolkitTabViewer<'_> {
                                         } else {
                                             cmd.key1.clone()
                                         };
-                                        ui.label(
-                                            egui::RichText::new(binding).monospace().color(ui.sem().armor.ricochet),
-                                        );
+                                        ui.label(egui::RichText::new(binding).monospace().color(ui.sem().text_dim));
                                         ui.end_row();
                                     }
                                 },
