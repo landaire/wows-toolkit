@@ -46,11 +46,11 @@ fn ttx_consumables_non_empty() {
     );
 }
 
-/// Iowa's `A_Hull` burnNodes and length against real GameParams (jaq-verified):
-/// 4 fire-section nodes, each `probability` 0.6004, hull length (`size[0]`) 262.1m.
+/// Iowa's `A_Hull` burnNodes against real GameParams (jaq-verified): 4
+/// fire-section nodes, each `probability` 0.6004.
 #[test]
 #[ignore]
-fn ttx_iowa_burn_nodes_and_hull_length() {
+fn ttx_iowa_burn_nodes() {
     let Some(provider) = load_provider() else {
         panic!("could not build a provider; set WOWS_DIR to your World_of_Warships install");
     };
@@ -65,8 +65,6 @@ fn ttx_iowa_burn_nodes_and_hull_length() {
     for node in &hull.burn_nodes {
         assert!((node.probability - 0.6004).abs() < 1e-3, "got {}", node.probability);
     }
-    let length = hull.hull_length_m.expect("hull length present");
-    assert!((length.value() - 262.1).abs() < 0.5, "got {}", length.value());
 }
 
 /// One expected-vs-computed check; a tolerance band around a published port value.

@@ -734,7 +734,6 @@ mod tests {
             battery_capacity: None,
             battery_regen_rate: None,
             burn_nodes: Vec::new(),
-            hull_length_m: None,
         }
     }
 

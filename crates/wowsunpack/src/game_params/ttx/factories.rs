@@ -767,7 +767,7 @@ pub fn shell_stats<R: Recorder>(
     // burnChance: calculateBurnChance(level, burnProb) for HE (line 171) and AP (line 188);
     // CS sets no burnChance. burnProb -0.5 (AP "N/A") clamps to 0.
     // Stored as a percent (burnProb 0.12 -> 12%).
-    let is_small = caliber_m.is_some_and(|c| is_small_projectile(c, SMALL_PROJECTILE_MAX_DIAMETER_M));
+    let is_small = is_small_projectile(caliber_m, SMALL_PROJECTILE_MAX_DIAMETER_M);
     let burn_chance = match weapon {
         StatWeaponType::MainHe | StatWeaponType::MainAp | StatWeaponType::AtbaHe | StatWeaponType::AtbaAp => {
             projectile.burn_prob().map(|bp| {
@@ -1527,7 +1527,6 @@ mod tests {
             battery_capacity: None,
             battery_regen_rate: None,
             burn_nodes: Vec::new(),
-            hull_length_m: None,
         }
     }
 
@@ -3675,17 +3674,18 @@ mod tests {
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
 
         let small =
-            calculate_burn_chance(10, 0.05, &bundle, is_small_projectile(0.127, SMALL_PROJECTILE_MAX_DIAMETER_M));
+            calculate_burn_chance(10, 0.05, &bundle, is_small_projectile(Some(0.127), SMALL_PROJECTILE_MAX_DIAMETER_M));
         assert!((small.0 - 0.055).abs() < 1e-6, "127mm should take +0.005, got {}", small.0);
 
-        let big = calculate_burn_chance(10, 0.05, &bundle, is_small_projectile(0.203, SMALL_PROJECTILE_MAX_DIAMETER_M));
+        let big =
+            calculate_burn_chance(10, 0.05, &bundle, is_small_projectile(Some(0.203), SMALL_PROJECTILE_MAX_DIAMETER_M));
         assert!((big.0 - 0.06).abs() < 1e-6, "203mm should take +0.01, got {}", big.0);
     }
 
     /// The exact threshold is inclusive: 160 mm is small, 161 mm is not.
     #[test]
     fn small_projectile_threshold_is_inclusive_at_160mm() {
-        assert!(is_small_projectile(0.160, SMALL_PROJECTILE_MAX_DIAMETER_M));
-        assert!(!is_small_projectile(0.161, SMALL_PROJECTILE_MAX_DIAMETER_M));
+        assert!(is_small_projectile(Some(0.160), SMALL_PROJECTILE_MAX_DIAMETER_M));
+        assert!(!is_small_projectile(Some(0.161), SMALL_PROJECTILE_MAX_DIAMETER_M));
     }
 }

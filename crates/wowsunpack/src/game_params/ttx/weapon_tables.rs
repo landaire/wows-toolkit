@@ -214,12 +214,13 @@ pub fn artillery_damage_coeff(
 
 /// Whether a projectile counts as "small" for the burn-chance factor split
 /// (`isSmallProjectile`, Modifiers/__init__.py:5-12). Artillery shells take the
-/// `bulletDiametr <= SMALL_PROJECTILE_MAX_DIAMETER` test (line 10). The threshold is
-/// `0.0` in the decompiled source (a zeroed compiled-module float); the real value,
-/// `0.16` m, is recovered from stage4 bytecode and supplied by the caller. See
-/// `docs/FIRE_CHANCE.md` section 2.1.
-pub fn is_small_projectile(bullet_diametr_m: f32, small_projectile_max_diameter_m: f32) -> bool {
-    bullet_diametr_m <= small_projectile_max_diameter_m
+/// `bulletDiametr <= SMALL_PROJECTILE_MAX_DIAMETER` test (line 10); a projectile
+/// carrying no `bulletDiametr` at all falls through to `return True` (line 12),
+/// so `None` is small. The threshold is `0.0` in the decompiled source (a zeroed
+/// compiled-module float); the real value, `0.16` m, is recovered from stage4
+/// bytecode and supplied by the caller. See `docs/FIRE_CHANCE.md` section 2.1.
+pub fn is_small_projectile(bullet_diametr_m: Option<f32>, small_projectile_max_diameter_m: f32) -> bool {
+    bullet_diametr_m.is_none_or(|d| d <= small_projectile_max_diameter_m)
 }
 
 /// `calculateBurnChance(ammoOwnerLevel, ammoParams, modifier, initialBurnProb)` for the
@@ -475,7 +476,15 @@ mod tests {
     #[test]
     fn small_projectile_threshold() {
         // Threshold 0.149 is the wowsdeob-recovered SMALL_SHELL_MAX_DIAMETER.
-        assert!(is_small_projectile(0.1, 0.149));
-        assert!(!is_small_projectile(0.152, 0.149));
+        assert!(is_small_projectile(Some(0.1), 0.149));
+        assert!(!is_small_projectile(Some(0.152), 0.149));
+    }
+
+    /// `isSmallProjectile` returns True when the projectile has no `bulletDiametr`
+    /// attribute at all (Modifiers/__init__.py:10-12), so an absent caliber is
+    /// small, not big.
+    #[test]
+    fn a_projectile_without_a_caliber_is_small() {
+        assert!(is_small_projectile(None, 0.149));
     }
 }

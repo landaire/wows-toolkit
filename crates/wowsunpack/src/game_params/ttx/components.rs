@@ -91,9 +91,6 @@ pub struct HullComponentStats {
     /// count and is per-hull: surface combatants carry four, most submarines one,
     /// some auxiliaries two. Empty when the hull has no `burnNodes` key.
     pub burn_nodes: Vec<BurnNode>,
-    /// Hull length in meters, `size[0]`. Used to scale model-space fire node
-    /// positions, which are not in meters. `None` when `size` is absent.
-    pub hull_length_m: Option<Meters>,
 }
 
 /// Base engine-component stats, raw from the `*_Engine` component sub-object.
