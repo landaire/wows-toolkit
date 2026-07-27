@@ -625,8 +625,7 @@ fn breakdown_is_current(
     window: BreakdownWindow,
     encounter_version: u64,
 ) -> bool {
-    breakdown.is_some_and(|breakdown| breakdown.encounter_version == encounter_version)
-        && cached_window == Some(window)
+    breakdown.is_some_and(|breakdown| breakdown.encounter_version == encounter_version) && cached_window == Some(window)
 }
 
 /// Rebuild the breakdown when one of its inputs changed. The index queries run
@@ -896,13 +895,8 @@ mod tests {
     fn the_range_filter_counts_only_timestamps_after_since() {
         let players = tracked(&[(1, player("RAIN", &[(10, 1000), (11, 5000)]))]);
 
-        let breakdown = build_clan_breakdown(
-            &players,
-            0,
-            &HashMap::new(),
-            &[],
-            Some(Timestamp::from_second(3000).unwrap()),
-        );
+        let breakdown =
+            build_clan_breakdown(&players, 0, &HashMap::new(), &[], Some(Timestamp::from_second(3000).unwrap()));
 
         let rain = &breakdown.rows[0];
         assert_eq!(rain.matches, 2);
@@ -953,7 +947,8 @@ mod tests {
 
         // What repainting a few seconds later resolves to: the same key, so the
         // index queries stay put.
-        let within_the_same_minute = BreakdownWindow { since: Some(truncate_to_minute(since + 20.seconds())), ..window };
+        let within_the_same_minute =
+            BreakdownWindow { since: Some(truncate_to_minute(since + 20.seconds())), ..window };
         assert!(
             breakdown_is_current(Some(&breakdown), Some(window), within_the_same_minute, 7),
             "a frame inside the same minute must reuse the cache"

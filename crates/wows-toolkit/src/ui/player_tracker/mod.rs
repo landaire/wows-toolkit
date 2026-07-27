@@ -421,11 +421,7 @@ mod tests {
         );
 
         let mut split = dock.clone();
-        split.main_surface_mut().split_right(
-            egui_dock::NodeIndex::root(),
-            0.5,
-            vec![PlayerTrackerSubTab::Clans],
-        );
+        split.main_surface_mut().split_right(egui_dock::NodeIndex::root(), 0.5, vec![PlayerTrackerSubTab::Clans]);
         assert_ne!(dock_layout_fingerprint(&split), untouched, "splitting a pane has to be persisted");
     }
 
@@ -490,4 +486,3 @@ mod tests {
         assert!(tracker.resolved_roster.is_none());
     }
 }
-
