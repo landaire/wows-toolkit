@@ -173,13 +173,18 @@ impl ExpandingColumn {
 /// `cell_rect` on screen.
 ///
 /// A sticky column's cells are walked once for the sticky region and once for
-/// the scrollable one, whose clip meets the cell only at its edge. The two
-/// edges are computed by different association orders, so they can differ by an
-/// ULP and leave the scrollable region a sub-pixel sliver of the cell; testing
-/// the cell's centre instead of the clip's width is immune to that. Painting a
-/// detail block in both regions would run it twice and record its height twice.
+/// the scrollable one, and painting a detail block in both would run it twice
+/// and record its height twice.
+///
+/// Discriminating on the cell's left edge is what egui_table does for its own
+/// header groups: the sticky region's clip starts at or left of a sticky cell's
+/// left edge, while the scrollable region's starts where the sticky columns end,
+/// a whole column to its right. Testing the cell's centre picks the same region
+/// while the panel is wide enough to show the middle of the column, but below
+/// that the clip is cut short on the right and the cell lands in no region at
+/// all, so the block neither paints nor measures.
 pub(crate) fn cell_is_in_this_region(clip_rect: egui::Rect, cell_rect: egui::Rect) -> bool {
-    clip_rect.x_range().contains(cell_rect.center().x)
+    clip_rect.x_range().contains(cell_rect.left())
 }
 
 /// Vertical offset of `row_nr` from the top of the table body: one default row
@@ -409,8 +414,8 @@ mod tests {
 
     /// The two edges that have to coincide are built by different association
     /// orders, so they can differ by an ULP and leave the scrollable region a
-    /// sub-pixel sliver of a sticky cell. Testing whether the cell's centre is
-    /// in the clip leaves half a column of margin instead of an ULP.
+    /// sub-pixel sliver of a sticky cell. The cell's left edge sits a whole
+    /// column away from either, so no sliver reaches it.
     #[test]
     fn a_sticky_cell_belongs_to_exactly_one_region() {
         let cursor_x = 3.3_f32;
@@ -432,6 +437,30 @@ mod tests {
             !cell_is_in_this_region(sliver, cell),
             "a sub-pixel overlap is still the region the cell only borders on"
         );
+    }
+
+    /// egui_table hands a cell a clip already intersected with the cell's own
+    /// rect, so in a panel narrower than the sticky columns the clip is cut well
+    /// left of the cell's centre. The cell is still the sticky region's to paint,
+    /// and a block that neither paints nor measures leaves the expand toggle
+    /// doing nothing a user can see.
+    #[test]
+    fn a_sticky_cell_in_a_narrow_panel_still_belongs_to_its_region() {
+        let cursor_x = 3.3_f32;
+        let cell = egui::Rect::from_min_max(egui::pos2(cursor_x, 100.0), egui::pos2(cursor_x + 320.0, 210.0));
+
+        let cut_clip = egui::Rect::from_min_max(egui::pos2(cursor_x, 0.0), egui::pos2(cursor_x + 150.0, 900.0));
+        assert!(
+            !cut_clip.x_range().contains(cell.center().x),
+            "the panel is narrow enough that the cell's centre is off the clip"
+        );
+        assert!(cell_is_in_this_region(cut_clip, cell), "the sticky region still owns a cell it shows the left of");
+
+        // The same cell as the scrollable region sees it: the clip collapses onto
+        // the cell's right edge, a whole column away from its left.
+        let collapsed =
+            egui::Rect::from_min_max(egui::pos2(cell.right(), 0.0), egui::pos2(cell.right() + 900.0, 900.0));
+        assert!(!cell_is_in_this_region(collapsed, cell), "the scrollable region must not paint it a second time");
     }
 
     #[test]
