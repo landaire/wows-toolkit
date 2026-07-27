@@ -47,6 +47,7 @@ const NON_STAT_FIELDS: &[Field] = &[
     Field::Tier,
     Field::Date,
     Field::PlayerPresent,
+    Field::PlayerNameOrClan,
     Field::EnemyShip,
     Field::AllyShip,
     Field::Group,
@@ -63,6 +64,7 @@ fn field_display_label(field: Field) -> String {
         Field::Tier => t!("ui.search.field.tier").into(),
         Field::Date => t!("ui.search.field.date").into(),
         Field::PlayerPresent => t!("ui.search.field.player_present").into(),
+        Field::PlayerNameOrClan => t!("ui.search.field.player_name_or_clan").into(),
         Field::EnemyShip => t!("ui.search.field.enemy_ship").into(),
         Field::AllyShip => t!("ui.search.field.ally_ship").into(),
         Field::Group => t!("ui.search.field.group").into(),
@@ -130,6 +132,30 @@ fn outcome_label(o: MatchOutcome) -> String {
 
 fn bool_label(b: bool) -> String {
     if b { t!("ui.search.bool_true") } else { t!("ui.search.bool_false") }.into()
+}
+
+/// Renders a prominent "locked in" badge for a committed player selection: a
+/// check icon plus the player's label in an accented frame, with a clear
+/// button. Used by both the `PlayerPresent` value picker and the `Stat`
+/// subject picker so a committed selection is unmistakable, instead of the
+/// only feedback being a subtly-highlighted row in the results list. Returns
+/// true if the clear button was clicked this frame.
+fn player_locked_badge(ui: &mut egui::Ui, label: &str) -> bool {
+    let mut clear = false;
+    egui::Frame::new()
+        .fill(ui.visuals().selection.bg_fill)
+        .stroke(ui.visuals().selection.stroke)
+        .corner_radius(egui::CornerRadius::same(4))
+        .inner_margin(egui::Margin::symmetric(6, 3))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.strong(format!("{} {label}", icons::CHECK));
+                if ui.small_button(icons::X).on_hover_text(t!("ui.search.clear_selection")).clicked() {
+                    clear = true;
+                }
+            });
+        });
+    clear
 }
 
 /// Compact display text for a chip's value. Ship/account ids are resolved
@@ -655,7 +681,20 @@ impl ToolkitTabViewer<'_> {
                                                     }
                                                 });
 
-                                            if draft.subject_picking_player
+                                            if !draft.subject_picking_player
+                                                && let Subject::Player(id) = subject
+                                            {
+                                                let label = search_tab
+                                                    .resolved_players
+                                                    .get(&id)
+                                                    .cloned()
+                                                    .unwrap_or_else(|| format!("#{}", id.raw()));
+                                                if player_locked_badge(ui, &label) {
+                                                    draft.subject_picking_player = true;
+                                                    draft.subject_player_search = String::new();
+                                                    draft.subject_player_results = Vec::new();
+                                                }
+                                            } else if draft.subject_picking_player
                                                 && ui.text_edit_singleline(&mut draft.subject_player_search).changed()
                                                 && let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref())
                                             {
@@ -739,7 +778,14 @@ impl ToolkitTabViewer<'_> {
                                                 ui.text_edit_singleline(&mut draft.ship_search);
                                             }
                                             ValueKind::Account => {
-                                                if ui.text_edit_singleline(&mut draft.player_search).changed()
+                                                if draft.player_id.is_some() {
+                                                    if player_locked_badge(ui, &draft.player_label) {
+                                                        draft.player_id = None;
+                                                        draft.player_label = String::new();
+                                                        draft.player_search = String::new();
+                                                        draft.player_results = Vec::new();
+                                                    }
+                                                } else if ui.text_edit_singleline(&mut draft.player_search).changed()
                                                     && let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref())
                                                 {
                                                     match rt.block_on(query::search_players(
@@ -825,7 +871,7 @@ impl ToolkitTabViewer<'_> {
                                                 ui.label(t!("ui.search.ship_catalog_unavailable"));
                                             }
                                         },
-                                        ValueKind::Account => {
+                                        ValueKind::Account if draft.player_id.is_none() => {
                                             egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
                                                 for p in draft.player_results.clone() {
                                                     let label = if p.clan.is_empty() {

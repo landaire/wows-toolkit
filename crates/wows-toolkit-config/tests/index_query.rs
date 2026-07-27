@@ -729,6 +729,95 @@ async fn search_by_query_stat_disconnected_subject_scoped() {
 }
 
 #[tokio::test]
+async fn search_by_query_player_name_or_clan_matches_either_column_case_insensitively() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+
+    // Arena 100: player_name contains "foo", clan does not.
+    let name_hit = IndexedVehicleRow {
+        arena_id: ArenaId::new(100),
+        account_id: AccountId(501),
+        player_name: "FooBar".into(),
+        clan: "AAA".into(),
+        realm: None,
+        ship_id: GameParamId::from(111u64),
+        ship_index: "PJSB018".into(),
+        ship_name: "Yamato".into(),
+        nation: "japan".into(),
+        species: "Battleship".into(),
+        tier: 10,
+        relation: VehicleRelation::Enemy,
+        division_id: None,
+        survived: Some(true),
+        damage: Some(0),
+        kills: Some(0),
+        spotting: Some(0),
+        potential: Some(0),
+        received: Some(0),
+        pr: None,
+        is_test_ship: false,
+        disconnected: None,
+        is_stream_sniper: None,
+        sniper_twitch_login: None,
+    };
+    query::upsert_vehicles(&pool, &[name_hit]).await.unwrap();
+
+    // Arena 200: clan contains "foo", player_name does not.
+    let clan_hit = IndexedVehicleRow {
+        arena_id: ArenaId::new(200),
+        account_id: AccountId(777),
+        player_name: "Baz".into(),
+        clan: "TeamFoo".into(),
+        realm: None,
+        ship_id: GameParamId::from(222u64),
+        ship_index: "PJSD718".into(),
+        ship_name: "Shimakaze".into(),
+        nation: "japan".into(),
+        species: "Destroyer".into(),
+        tier: 10,
+        relation: VehicleRelation::Enemy,
+        division_id: None,
+        survived: Some(true),
+        damage: Some(0),
+        kills: Some(0),
+        spotting: Some(0),
+        potential: Some(0),
+        received: Some(0),
+        pr: None,
+        is_test_ship: false,
+        disconnected: None,
+        is_stream_sniper: None,
+        sniper_twitch_login: None,
+    };
+    query::upsert_vehicles(&pool, &[clan_hit]).await.unwrap();
+
+    // Non-vacuous: matching both arenas proves both player_name and clan are
+    // checked; an implementation that checked only one column would miss the
+    // other arena.
+    let q = one(Field::PlayerNameOrClan, Op::Contains, Value::Text("foo".into()));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    let mut arenas = hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>();
+    arenas.sort();
+    assert_eq!(
+        arenas,
+        vec![100, 200],
+        "Contains \"foo\" must match via player_name in arena 100 and clan in arena 200"
+    );
+
+    // Case-insensitive: uppercase needle matches the same rows.
+    let q = one(Field::PlayerNameOrClan, Op::Contains, Value::Text("FOO".into()));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    let mut arenas = hits.iter().map(|h| h.arena_id.raw()).collect::<Vec<_>>();
+    arenas.sort();
+    assert_eq!(arenas, vec![100, 200], "match must be case-insensitive");
+
+    // A needle matching neither column returns no results.
+    let q = one(Field::PlayerNameOrClan, Op::Contains, Value::Text("zzz".into()));
+    let hits = query::search_by_query(&pool, &q, 500).await.unwrap();
+    assert!(hits.is_empty(), "needle matching neither player_name nor clan must return empty");
+}
+
+#[tokio::test]
 async fn ship_name_resolves_seeded_ship_and_none_for_unknown() {
     let pool = mem_pool().await;
     seed_two_matches(&pool).await;

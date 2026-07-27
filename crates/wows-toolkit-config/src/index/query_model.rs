@@ -15,6 +15,10 @@ pub enum Field {
     Tier,
     Date,
     PlayerPresent,
+    /// Match-level: does any roster row's `player_name` or `clan` contain the
+    /// given substring (case-insensitive)? Unlike `PlayerPresent`, this has no
+    /// resolved identity; it is a free-text substring search over both columns.
+    PlayerNameOrClan,
     EnemyShip,
     AllyShip,
     Group,
@@ -165,6 +169,7 @@ const TEXT_OPS: &[Op] = &[Op::Contains, Op::Equals, Op::NotEquals];
 const NUM_OPS: &[Op] = &[Op::Eq, Op::Ne, Op::Gt, Op::Ge, Op::Lt, Op::Le];
 const ENUM_OPS: &[Op] = &[Op::Is, Op::IsNot];
 const PRESENCE_OPS: &[Op] = &[Op::Present, Op::NotPresent];
+const CONTAINS_ONLY_OPS: &[Op] = &[Op::Contains];
 
 impl Field {
     pub fn value_kind(self) -> ValueKind {
@@ -176,6 +181,7 @@ impl Field {
             Field::Tier => ValueKind::Int,
             Field::Date => ValueKind::Timestamp,
             Field::PlayerPresent => ValueKind::Account,
+            Field::PlayerNameOrClan => ValueKind::Text,
             Field::EnemyShip | Field::AllyShip => ValueKind::Ship,
             Field::Group => ValueKind::Source,
             Field::ContainsStreamSniper => ValueKind::Bool,
@@ -196,6 +202,7 @@ impl Field {
             Field::Outcome | Field::Class | Field::Group => ENUM_OPS,
             Field::SelfShip => ENUM_OPS,
             Field::PlayerPresent | Field::EnemyShip | Field::AllyShip => PRESENCE_OPS,
+            Field::PlayerNameOrClan => CONTAINS_ONLY_OPS,
             Field::ContainsStreamSniper => ENUM_OPS,
             Field::Stat { kind, .. } => {
                 if kind.is_bool() {

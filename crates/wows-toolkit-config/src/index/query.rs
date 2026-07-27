@@ -623,6 +623,7 @@ fn push_chip(qb: &mut QueryBuilder<'_, Sqlite>, chip: &Chip) {
         (Field::PlayerPresent, Value::Account(a)) => {
             push_presence(qb, "v.account_id = ", ExistsBind::Int(a.raw()), chip.op)
         }
+        (Field::PlayerNameOrClan, Value::Text(needle)) => push_player_name_or_clan(qb, needle),
         (Field::EnemyShip, Value::Ship(id)) => {
             push_presence(qb, "v.relation='enemy' AND v.ship_id = ", ExistsBind::Int(id.raw() as i64), chip.op)
         }
@@ -746,4 +747,14 @@ fn push_presence(qb: &mut QueryBuilder<'_, Sqlite>, inner: &str, bind: ExistsBin
         qb.push("NOT ");
     }
     push_exists(qb, inner, bind);
+}
+
+/// `EXISTS` over the roster, arena-scoped, matching `needle` (case-insensitive
+/// substring) against either `player_name` or `clan`. The needle is bound
+/// twice, once per column comparison.
+fn push_player_name_or_clan(qb: &mut QueryBuilder<'_, Sqlite>, needle: &str) {
+    qb.push("EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND (");
+    qb.push("LOWER(v.player_name) LIKE '%' || LOWER(").push_bind(needle.to_string()).push(") || '%'");
+    qb.push(" OR LOWER(v.clan) LIKE '%' || LOWER(").push_bind(needle.to_string()).push(") || '%'");
+    qb.push("))");
 }
