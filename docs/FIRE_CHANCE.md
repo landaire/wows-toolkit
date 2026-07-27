@@ -98,10 +98,10 @@ Note 160 mm, not the 139 mm / 149 mm thresholds used elsewhere. This matches the
 signal flags: Victor Lima and India X-Ray give `+0.005` to guns up to 160 mm and
 `+0.01` above it.
 
-**Known defect:** `wowsunpack/src/game_params/ttx/factories.rs:597` still carries the
-zeroed placeholder `SMALL_PROJECTILE_MAX_DIAMETER_M: f32 = 0.0`, so every shell is
-classified "big" and the port stat card overstates the Victor Lima / India X-Ray
-bonus by 0.5 pp for guns of 160 mm and under.
+The toolkit carries the recovered value as
+`SMALL_PROJECTILE_MAX_DIAMETER_M: f32 = 0.16` in
+`wowsunpack/src/game_params/ttx/factories.rs`, so a shell of 160 mm or under takes
+`burnChanceFactorSmall` and anything larger takes `burnChanceFactorBig`.
 
 ### 2.2 Where each modifier comes from (live GameParams)
 

@@ -28,15 +28,41 @@ use crate::models::skeleton_extender;
 #[cfg(feature = "models")]
 const EFFECT_EXTENDER_SUFFIX: &str = "_ep.skel_ext";
 
+/// An index that is not a fire section: past the burn bits of `burningFlags`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("a fire section is 0..{max}, got {index}")]
+pub struct InvalidBurnNodeIndex {
+    pub index: u8,
+    pub max: u8,
+}
+
 /// The identity of one fire section: its `burningFlags` bit index, which is also
 /// its `hull.burnNodes` index and its `fire{i+1}` effect-group ordinal minus one.
 ///
-/// Constructed only through [`BurnNodeIndex::new`], so an out-of-range index
-/// cannot exist.
+/// Every construction path is checked, including deserialization, so an
+/// out-of-range index cannot exist and [`BurnNodeIndex::bit_mask`] always names a
+/// real burn bit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
 pub struct BurnNodeIndex(u8);
+
+impl TryFrom<u8> for BurnNodeIndex {
+    type Error = InvalidBurnNodeIndex;
+
+    fn try_from(index: u8) -> Result<BurnNodeIndex, InvalidBurnNodeIndex> {
+        if index >= BurnNodeIndex::MAX_NODES {
+            return Err(InvalidBurnNodeIndex { index, max: BurnNodeIndex::MAX_NODES });
+        }
+        Ok(BurnNodeIndex(index))
+    }
+}
+
+impl From<BurnNodeIndex> for u8 {
+    fn from(index: BurnNodeIndex) -> u8 {
+        index.0
+    }
+}
 
 impl BurnNodeIndex {
     /// Upper bound on fire sections per hull: `burningFlags`' burn mask is `0x000F`.
@@ -44,7 +70,7 @@ impl BurnNodeIndex {
 
     /// `None` when `index` is outside `0..MAX_NODES`.
     pub fn new(index: u8) -> Option<BurnNodeIndex> {
-        (index < Self::MAX_NODES).then_some(BurnNodeIndex(index))
+        BurnNodeIndex::try_from(index).ok()
     }
 
     pub fn get(self) -> u8 {
@@ -284,9 +310,10 @@ mod tests {
         assert!(FireSectionGeometry::from_longitudinal(vec![Meters::from(0.0); 4]).is_some());
     }
 
-    /// Deserializing must not route around the node-count invariant: a cached
-    /// geometry with five sections would make `nearest_node` hand out an index
-    /// `BurnNodeIndex` cannot represent.
+    /// Deserializing must not route around either invariant. A cached geometry with
+    /// five sections would make `nearest_node` hand out an index `BurnNodeIndex`
+    /// cannot represent, and a cached index past the burn bits would make
+    /// `bit_mask` name a different section's bit.
     #[cfg(feature = "serde")]
     #[test]
     fn deserializing_rejects_an_impossible_node_count() {
@@ -294,6 +321,12 @@ mod tests {
         assert!(serde_json::from_str::<FireSectionGeometry>("[]").is_err());
         let round_tripped: FireSectionGeometry = serde_json::from_str("[1.0,2.0]").expect("two nodes");
         assert_eq!(round_tripped.node_count(), 2);
+
+        assert!(serde_json::from_str::<BurnNodeIndex>("200").is_err());
+        assert!(serde_json::from_str::<BurnNodeIndex>("4").is_err());
+        let index: BurnNodeIndex = serde_json::from_str("3").expect("last section");
+        assert_eq!(index.get(), 3);
+        assert_eq!(serde_json::to_string(&index).expect("serialize"), "3");
     }
 
     #[test]
