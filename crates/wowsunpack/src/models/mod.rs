@@ -2,6 +2,10 @@ pub mod assets_bin;
 /// Fire-section (burn node) geometry. The resolver needs the `models` feature;
 /// the geometry and index types do not, so replay analysis can consume them.
 pub mod fire_nodes;
+/// On-disk cache of fire-section geometry, keyed by game build, so resolving
+/// from assets.bin is paid once per hull per build rather than per replay.
+#[cfg(feature = "json")]
+pub mod fire_nodes_cache;
 #[cfg(feature = "models")]
 pub mod forest;
 #[cfg(feature = "models")]
