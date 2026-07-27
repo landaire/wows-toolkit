@@ -6,10 +6,12 @@ mod model;
 
 pub(crate) use clans::ClanBreakdown;
 pub(crate) use clans::ClanSortedBy;
+pub(crate) use model::ExpandingColumn;
 pub(crate) use model::SortOrder;
 pub(crate) use model::SortedBy;
 pub use model::TimePeriod;
 pub use model::TrackedPlayer;
+pub(crate) use model::cell_is_in_this_region;
 pub(crate) use model::detail_rect;
 pub(crate) use model::encounter_severity_color;
 pub(crate) use model::exact_timestamp_text;

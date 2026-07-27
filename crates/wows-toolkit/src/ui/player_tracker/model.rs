@@ -106,24 +106,70 @@ where
         .collect()
 }
 
-/// Where an open row's detail block goes: the horizontal extent of
-/// `width_source`, and the part of `row_rect` left below the collapsed content.
+/// Where an open row's detail block goes inside the cell that names the row:
+/// the cell's full width, and the part of its band left below the collapsed
+/// content.
 ///
-/// A block that spans the scrollable region takes its width from that region's
-/// clip, since the row itself ends at the last column. A block that lives inside
-/// one cell passes that cell as both arguments, so it stays within its column.
+/// Taking the width from the cell rather than from the scrollable region is
+/// what keeps the block within its column, so it can never be drawn across a
+/// column separator.
 ///
-/// `None` when the width source has nothing usable, which happens when the panel
-/// is narrower than the sticky columns and the scrollable region collapses.
-/// Laying content out in that rect would wrap it one glyph per line and feed a
-/// wildly inflated height into every row offset below it.
-pub(crate) fn detail_rect(row_rect: egui::Rect, width_source: egui::Rect, row_height: f32) -> Option<egui::Rect> {
+/// `None` when the cell has no usable width. Laying content out in a degenerate
+/// rect would wrap it one glyph per line and feed a wildly inflated height into
+/// every row offset below it.
+pub(crate) fn detail_rect(cell_rect: egui::Rect, row_height: f32) -> Option<egui::Rect> {
     let rect = egui::Rect::from_x_y_ranges(
-        width_source.x_range(),
-        egui::Rangef::new(row_rect.top() + row_height, row_rect.bottom()),
+        cell_rect.x_range(),
+        egui::Rangef::new(cell_rect.top() + row_height, cell_rect.bottom()),
     );
 
     (0.0 < rect.width()).then_some(rect)
+}
+
+/// A sticky column that hosts its rows' detail blocks, so it has to be wider
+/// while one is open than it needs to be when every row is collapsed.
+pub(crate) struct ExpandingColumn {
+    pub(crate) collapsed_width: f32,
+    pub(crate) expanded_width: f32,
+    /// Narrowest the column can be dragged to while every row is collapsed. The
+    /// expanded regime cannot go below `expanded_width`, which is what forces
+    /// the column open.
+    pub(crate) min_width: f32,
+    /// Widest the column can be dragged to, in either regime.
+    pub(crate) max_width: f32,
+    /// egui_table remembers a column's width against its id and only ever grows
+    /// it, so the two regimes carry separate ids: sharing one would leave the
+    /// column at its expanded width for good once a row had been opened. The
+    /// cost is that a column dragged wider than `expanded_width` narrows to it
+    /// on expand, since the drag was recorded against the collapsed id.
+    pub(crate) collapsed_id: &'static str,
+    pub(crate) expanded_id: &'static str,
+}
+
+impl ExpandingColumn {
+    /// The column, sized for whether a detail block is currently showing.
+    pub(crate) fn column(&self, any_expanded: bool) -> egui_table::Column {
+        let (current, min, id) = if any_expanded {
+            (self.expanded_width, self.expanded_width, self.expanded_id)
+        } else {
+            (self.collapsed_width, self.min_width, self.collapsed_id)
+        };
+
+        egui_table::Column::new(current).range(min..=self.max_width).id(egui::Id::new(id)).resizable(true)
+    }
+}
+
+/// Whether the region egui_table is currently walking is the one that puts
+/// `cell_rect` on screen.
+///
+/// A sticky column's cells are walked once for the sticky region and once for
+/// the scrollable one, whose clip meets the cell only at its edge. The two
+/// edges are computed by different association orders, so they can differ by an
+/// ULP and leave the scrollable region a sub-pixel sliver of the cell; testing
+/// the cell's centre instead of the clip's width is immune to that. Painting a
+/// detail block in both regions would run it twice and record its height twice.
+pub(crate) fn cell_is_in_this_region(clip_rect: egui::Rect, cell_rect: egui::Rect) -> bool {
+    clip_rect.x_range().contains(cell_rect.center().x)
 }
 
 /// Vertical offset of `row_nr` from the top of the table body: one default row
@@ -341,6 +387,33 @@ mod tests {
         let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
         sqlx::migrate!("../wows-toolkit-config/migrations").run(&pool).await.unwrap();
         pool
+    }
+
+    /// The two edges that have to coincide are built by different association
+    /// orders, so they can differ by an ULP and leave the scrollable region a
+    /// sub-pixel sliver of a sticky cell. Testing whether the cell's centre is
+    /// in the clip leaves half a column of margin instead of an ULP.
+    #[test]
+    fn a_sticky_cell_belongs_to_exactly_one_region() {
+        let cursor_x = 3.3_f32;
+        let scrollable_left = (cursor_x + 70.0) + 420.0;
+        let sticky_right = cursor_x + (70.0 + 420.0);
+        let cell = egui::Rect::from_min_max(egui::pos2(cursor_x + 70.0, 100.0), egui::pos2(sticky_right, 210.0));
+
+        let sticky_clip = egui::Rect::from_min_max(egui::pos2(cursor_x, 0.0), egui::pos2(sticky_right, 900.0));
+        assert!(cell_is_in_this_region(sticky_clip, cell), "the region that puts the cell on screen owns it");
+
+        let scrollable_clip = egui::Rect::from_min_max(egui::pos2(scrollable_left, 0.0), egui::pos2(1400.0, 900.0));
+        assert!(
+            !cell_is_in_this_region(scrollable_clip, cell),
+            "the region the cell only borders on must not paint it a second time"
+        );
+
+        let sliver = egui::Rect::from_min_max(egui::pos2(sticky_right - 1e-5, 0.0), egui::pos2(1400.0, 900.0));
+        assert!(
+            !cell_is_in_this_region(sliver, cell),
+            "a sub-pixel overlap is still the region the cell only borders on"
+        );
     }
 
     #[test]

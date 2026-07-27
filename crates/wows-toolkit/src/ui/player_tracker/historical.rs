@@ -12,10 +12,12 @@ use crate::app::ToolkitTabViewer;
 use crate::icons;
 use crate::task;
 
+use super::ExpandingColumn;
 use super::PlayerTracker;
 use super::SortOrder;
 use super::SortedBy;
 use super::TimePeriod;
+use super::cell_is_in_this_region;
 use super::detail_rect;
 use super::encounter_severity_color;
 use super::expanded_rows;
@@ -46,40 +48,18 @@ const HISTORICAL_COLUMNS: [HistoricalColumn; 6] = [
 
 const HISTORICAL_ROW_HEIGHT: f32 = 30.0;
 
-/// Width of the Player column while every row is collapsed.
-const PLAYER_COLUMN_WIDTH: f32 = 220.0;
-
-/// Width the Player column holds while a row's detail block is showing. The
-/// block is painted inside that column, so this is the width the notes editor
-/// gets, less the block's own margins.
-const PLAYER_COLUMN_EXPANDED_WIDTH: f32 = 420.0;
-
-/// Widest the Player column can be dragged to, in either regime.
-const PLAYER_COLUMN_MAX_WIDTH: f32 = 600.0;
-
-/// Narrowest the Player column can be dragged to while every row is collapsed.
-const PLAYER_COLUMN_MIN_WIDTH: f32 = 120.0;
-
-/// egui_table remembers a column's width against this id and only ever grows it,
-/// so the collapsed and expanded regimes carry separate ids: sharing one would
-/// leave the column at its expanded width for good once a row had been opened.
-const PLAYER_COLUMN_ID: &str = "player_tracker_historical_player";
-const PLAYER_COLUMN_EXPANDED_ID: &str = "player_tracker_historical_player_expanded";
-
-/// The Player column, sized for whether a detail block is currently showing.
-fn player_column(any_expanded: bool) -> egui_table::Column {
-    if any_expanded {
-        egui_table::Column::new(PLAYER_COLUMN_EXPANDED_WIDTH)
-            .range(PLAYER_COLUMN_EXPANDED_WIDTH..=PLAYER_COLUMN_MAX_WIDTH)
-            .id(egui::Id::new(PLAYER_COLUMN_EXPANDED_ID))
-            .resizable(true)
-    } else {
-        egui_table::Column::new(PLAYER_COLUMN_WIDTH)
-            .range(PLAYER_COLUMN_MIN_WIDTH..=PLAYER_COLUMN_MAX_WIDTH)
-            .id(egui::Id::new(PLAYER_COLUMN_ID))
-            .resizable(true)
-    }
-}
+/// The Player column. `expanded_width` is what the notes editor gets, less the
+/// detail block's own margins, since the block is painted inside this column.
+/// A column the user dragged wider than that narrows back to it on expand; see
+/// [`ExpandingColumn`] for why the two regimes cannot share a remembered width.
+const PLAYER_COLUMN: ExpandingColumn = ExpandingColumn {
+    collapsed_width: 220.0,
+    expanded_width: 420.0,
+    min_width: 120.0,
+    max_width: 600.0,
+    collapsed_id: "player_tracker_historical_player",
+    expanded_id: "player_tracker_historical_player_expanded",
+};
 
 /// Accounts to render, filtered by the active time range and name filter, in
 /// the order the active sort puts them.
@@ -372,18 +352,14 @@ impl HistoricalTable<'_> {
             return;
         }
 
-        // The Player column is sticky, so egui_table walks this cell once for the
-        // sticky region and once for the scrollable one. Only the region whose
-        // clip still covers the cell puts it on screen; painting an editor into
-        // the other one would duplicate it against the same notes field.
-        if ui.clip_rect().width() <= 0.0 {
+        if !cell_is_in_this_region(ui.clip_rect(), cell_rect) {
             return;
         }
 
         let Some(view) = self.row_view(row_nr) else {
             return;
         };
-        let Some(detail_rect) = detail_rect(cell_rect, cell_rect, HISTORICAL_ROW_HEIGHT) else {
+        let Some(detail_rect) = detail_rect(cell_rect, HISTORICAL_ROW_HEIGHT) else {
             return;
         };
 
@@ -601,7 +577,7 @@ impl ToolkitTabViewer<'_> {
 
                 let columns = vec![
                     egui_table::Column::new(70.0).range(40.0..=200.0).resizable(true),
-                    player_column(any_expanded),
+                    PLAYER_COLUMN.column(any_expanded),
                     egui_table::Column::new(110.0).range(60.0..=250.0).resizable(true),
                     egui_table::Column::new(150.0).range(60.0..=300.0).resizable(true),
                     egui_table::Column::new(130.0).range(80.0..=300.0).resizable(true),
@@ -888,34 +864,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_detail_rect_takes_its_width_from_the_region_and_its_band_from_the_row() {
-        let row = egui::Rect::from_min_max(egui::pos2(0.0, 100.0), egui::pos2(750.0, 210.0));
-        // Wider than the row on the right and clipped by the sticky columns on the
-        // left, which is what the scrollable region hands over.
-        let clip = egui::Rect::from_min_max(egui::pos2(290.0, 0.0), egui::pos2(1400.0, 900.0));
-
-        let rect = detail_rect(row, clip, HISTORICAL_ROW_HEIGHT).expect("a positive-width region yields a rect");
-        assert_eq!(rect.x_range(), clip.x_range(), "the width follows the region, not the last column");
-        assert_eq!(rect.top(), row.top() + HISTORICAL_ROW_HEIGHT, "the block starts below the collapsed content");
-        assert_eq!(rect.bottom(), row.bottom(), "the block ends with the row");
-    }
-
-    #[test]
-    fn the_detail_rect_is_none_when_the_region_has_no_width() {
-        let row = egui::Rect::from_min_max(egui::pos2(0.0, 100.0), egui::pos2(750.0, 210.0));
-
-        let collapsed = egui::Rect::from_min_max(egui::pos2(290.0, 0.0), egui::pos2(290.0, 900.0));
-        assert_eq!(
-            detail_rect(row, collapsed, HISTORICAL_ROW_HEIGHT),
-            None,
-            "a panel narrower than the sticky columns yields no block"
-        );
-
-        let inverted = egui::Rect::from_min_max(egui::pos2(290.0, 0.0), egui::pos2(250.0, 900.0));
-        assert_eq!(detail_rect(row, inverted, HISTORICAL_ROW_HEIGHT), None, "a negative-width region yields no block");
-    }
-
     /// The historical block lives inside the Player cell, so it spans exactly
     /// that column and cannot reach across a column separator.
     #[test]
@@ -924,10 +872,19 @@ mod tests {
         // range, and the row's whole band including the block.
         let cell = egui::Rect::from_min_max(egui::pos2(70.0, 100.0), egui::pos2(490.0, 210.0));
 
-        let rect = detail_rect(cell, cell, HISTORICAL_ROW_HEIGHT).expect("a cell with width yields a rect");
-        assert_eq!(rect.x_range(), cell.x_range(), "the block takes the column's width, not the region's");
+        let rect = detail_rect(cell, HISTORICAL_ROW_HEIGHT).expect("a cell with width yields a rect");
+        assert_eq!(rect.x_range(), cell.x_range(), "the block takes the column's width, and no more");
         assert_eq!(rect.top(), cell.top() + HISTORICAL_ROW_HEIGHT, "the block starts below the collapsed content");
         assert_eq!(rect.bottom(), cell.bottom(), "the block ends with the row, which is what the height feeds");
+    }
+
+    #[test]
+    fn the_detail_rect_is_none_when_the_cell_has_no_width() {
+        let collapsed = egui::Rect::from_min_max(egui::pos2(290.0, 100.0), egui::pos2(290.0, 210.0));
+        assert_eq!(detail_rect(collapsed, HISTORICAL_ROW_HEIGHT), None, "a zero-width cell yields no block");
+
+        let inverted = egui::Rect::from_min_max(egui::pos2(290.0, 100.0), egui::pos2(250.0, 210.0));
+        assert_eq!(detail_rect(inverted, HISTORICAL_ROW_HEIGHT), None, "a negative-width cell yields no block");
     }
 
     /// The block is as wide as the column, so an open row has to widen it or the
@@ -935,11 +892,11 @@ mod tests {
     /// so the two regimes must not share a column id.
     #[test]
     fn the_player_column_widens_while_a_row_is_open() {
-        let collapsed = player_column(false);
-        let expanded = player_column(true);
+        let collapsed = PLAYER_COLUMN.column(false);
+        let expanded = PLAYER_COLUMN.column(true);
 
-        assert_eq!(collapsed.current, PLAYER_COLUMN_WIDTH);
-        assert_eq!(expanded.current, PLAYER_COLUMN_EXPANDED_WIDTH);
+        assert_eq!(collapsed.current, PLAYER_COLUMN.collapsed_width);
+        assert_eq!(expanded.current, PLAYER_COLUMN.expanded_width);
         assert!(
             collapsed.range.max >= expanded.range.min,
             "the expanded width has to be reachable by the collapsed range too, or a drag cannot follow it"

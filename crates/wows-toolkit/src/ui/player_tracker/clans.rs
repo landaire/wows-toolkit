@@ -14,9 +14,11 @@ use crate::app::ToolkitTabViewer;
 use crate::db::index::rows::ClanCorrection;
 use crate::icons;
 
+use super::ExpandingColumn;
 use super::PlayerTracker;
 use super::SortOrder;
 use super::TimePeriod;
+use super::cell_is_in_this_region;
 use super::detail_rect;
 use super::encounter_severity_color;
 use super::exact_timestamp_text;
@@ -197,6 +199,21 @@ const CLAN_COLUMNS: [ClanColumn; 7] = [
 
 const CLAN_ROW_HEIGHT: f32 = 30.0;
 
+/// The Clan column, which hosts the expanded member list. `expanded_width` only
+/// has to fit one member per line (a search button, a player name and its match
+/// count), which is narrower than the Historical tab's notes editor needs: the
+/// list grows downwards, not sideways, and the row stretches to match.
+/// A column the user dragged wider than that narrows back to it on expand; see
+/// [`ExpandingColumn`] for why the two regimes cannot share a remembered width.
+const CLAN_COLUMN: ExpandingColumn = ExpandingColumn {
+    collapsed_width: 110.0,
+    expanded_width: 320.0,
+    min_width: 60.0,
+    max_width: 450.0,
+    collapsed_id: "player_tracker_clans_clan",
+    expanded_id: "player_tracker_clans_clan_expanded",
+};
+
 /// Salts the row animations so they do not collide with another table's, which
 /// key on the bare row number.
 const CLAN_ROW_SALT: &str = "player_tracker_clan_row";
@@ -288,9 +305,6 @@ struct ClansTable<'a> {
     /// Height each open row's detail block adds on top of the default row height,
     /// measured as it is painted and used to lay the next frame out.
     detail_heights: BTreeMap<u64, f32>,
-    /// Rows whose detail block has already been claimed this frame, since
-    /// `row_ui` is called once per split-scroll region.
-    detail_rows_painted: HashSet<u64>,
     /// Animation factor per open or still-closing row, derived from
     /// `expanded_clans` each frame because `row_top_offset` addresses rows
     /// positionally. Rows contributing no extra height are absent.
@@ -320,8 +334,7 @@ impl ClansTable<'_> {
         })
     }
 
-    /// The collapsed content of one cell. The expanded member list is painted by
-    /// [`egui_table::TableDelegate::row_ui`] instead, so it can span the row.
+    /// The collapsed content of one cell, pinned to the top of the row.
     fn cell_content_ui(&mut self, row_nr: u64, column: ClanColumn, ui: &mut egui::Ui) {
         let Some(view) = self.row_view(row_nr) else {
             return;
@@ -383,8 +396,11 @@ impl ClansTable<'_> {
         }
     }
 
-    /// The member list of an open row, filling the row below the collapsed
-    /// content. Returns its height, which is what the row is stretched by.
+    /// The member list of an open row, filling the Clan cell below the collapsed
+    /// content. Returns its height, which is what the row is stretched by. The
+    /// height is the list's natural one even while the row is part-way through
+    /// its animation and only a slice of it is on screen, so the row settles at
+    /// exactly this height once the animation completes.
     fn detail_ui(&mut self, row_nr: u64, ui: &mut egui::Ui) -> f32 {
         // Cloned so the buttons below can write back to `self`; only ever runs for
         // the handful of rows that are open.
@@ -393,6 +409,12 @@ impl ClansTable<'_> {
         };
 
         let inner_response = egui::Frame::new().inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
+            // egui_table runs the whole table on `TextWrapMode::Extend`, which suits
+            // single-line cells but would push a long player name out past the
+            // column's edge. Wrapping keeps the list inside its column and folds
+            // the extra lines into the height the row is stretched by.
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+
             for (account_id, matches) in members {
                 // A member the tracker has no entry for cannot happen (the
                 // breakdown is built from the tracker), but the account id is a
@@ -418,6 +440,36 @@ impl ClansTable<'_> {
         });
 
         inner_response.response.rect.height()
+    }
+
+    /// Paints an open row's member list into the part of the Clan cell left
+    /// below the collapsed content, and records the height the row is stretched
+    /// by. `cell_rect` supplies both the column's width and the row's full band,
+    /// which is what keeps the list inside its column separators.
+    fn detail_block_ui(&mut self, row_nr: u64, ui: &mut egui::Ui, cell_rect: egui::Rect) {
+        // Absent means the row adds no height this frame: either it is closed, or
+        // its collapse animation has already run out.
+        let expandedness = self.expanded_rows.get(&row_nr).copied().unwrap_or(0.0);
+        if expandedness <= 0.0 {
+            return;
+        }
+
+        if !cell_is_in_this_region(ui.clip_rect(), cell_rect) {
+            return;
+        }
+
+        let Some(detail_rect) = detail_rect(cell_rect, CLAN_ROW_HEIGHT) else {
+            return;
+        };
+
+        let mut detail_ui =
+            ui.new_child(egui::UiBuilder::new().max_rect(detail_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+
+        // Deliberately not advancing the cell's cursor: the list is measured for
+        // the row height alone and must not feed egui_table's per-column sizing,
+        // which would ratchet the column wider on every frame it is open.
+        let height = self.detail_ui(row_nr, &mut detail_ui);
+        self.detail_heights.insert(row_nr, height);
     }
 }
 
@@ -471,58 +523,37 @@ impl egui_table::TableDelegate for ClansTable<'_> {
 
     fn row_ui(&mut self, ui: &mut egui::Ui, row_nr: u64) {
         // Striping belongs here rather than in `cell_ui`, which runs afterwards and
-        // would paint over the member list.
+        // would paint over the cell contents.
         if row_nr % 2 == 1 {
             ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().faint_bg_color);
         }
-
-        // egui_table drives `row_ui` once per split-scroll region, so the block has
-        // to be claimed by exactly one of them. The fully scrollable region always
-        // runs first and is the wide one, so the first call for a row wins.
-        if !self.detail_rows_painted.insert(row_nr) {
-            return;
-        }
-
-        let expandedness = self.expanded_rows.get(&row_nr).copied().unwrap_or(0.0);
-        if expandedness <= 0.0 {
-            return;
-        }
-
-        let row_rect = ui.max_rect();
-        let Some(detail_rect) = detail_rect(row_rect, ui.clip_rect(), CLAN_ROW_HEIGHT) else {
-            return;
-        };
-
-        let mut detail_ui =
-            ui.new_child(egui::UiBuilder::new().max_rect(detail_rect).layout(egui::Layout::top_down(egui::Align::Min)));
-        // `row_ui` is not clipped to its own row, so without this the block would
-        // paint over the rows below it while the row is still animating open.
-        detail_ui.shrink_clip_rect(row_rect);
-
-        // Deliberately not advancing the row's cursor: the block is measured for the
-        // row height alone and must not feed egui_table's per-column sizing.
-        let height = self.detail_ui(row_nr, &mut detail_ui);
-        self.detail_heights.insert(row_nr, height);
     }
 
     fn cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::CellInfo) {
+        let column = CLAN_COLUMNS[cell.col_nr];
+        let cell_rect = ui.max_rect();
+
         // Cells are handed the whole row, member list included. Pin the collapsed
         // content to the top of it, or a vertically centred layout would drift it
         // into the middle of an open row.
-        let mut content_rect = ui.max_rect();
+        let mut content_rect = cell_rect;
         content_rect.max.y = content_rect.min.y + CLAN_ROW_HEIGHT;
         let mut content_ui = ui.new_child(
             egui::UiBuilder::new().max_rect(content_rect).layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
 
         egui::Frame::new().inner_margin(egui::Margin::symmetric(4, 4)).show(&mut content_ui, |ui| {
-            self.cell_content_ui(cell.row_nr, CLAN_COLUMNS[cell.col_nr], ui);
+            self.cell_content_ui(cell.row_nr, column, ui);
         });
 
         // A child `Ui` does not grow its parent, and egui_table sizes columns from
         // the cell's `min_size`. Without this every column would fit to nothing on
         // the sizing pass and land on its minimum width.
         ui.advance_cursor_after_rect(content_ui.min_rect());
+
+        if column == ClanColumn::Clan {
+            self.detail_block_ui(cell.row_nr, ui, cell_rect);
+        }
     }
 
     fn default_row_height(&self) -> f32 {
@@ -710,13 +741,15 @@ impl ToolkitTabViewer<'_> {
                     &player_tracker.expanded_clans,
                 );
                 let detail_heights = std::mem::take(&mut player_tracker.clan_detail_heights);
+                // A row still animating shut keeps its factor, so the column stays
+                // wide for as long as any of the list is on screen.
+                let any_expanded = !expanded_rows.is_empty();
 
                 let mut delegate = ClansTable {
                     tracker: player_tracker,
                     breakdown,
                     order,
                     detail_heights,
-                    detail_rows_painted: Default::default(),
                     expanded_rows,
                     now,
                     find_matches_target: None,
@@ -724,7 +757,7 @@ impl ToolkitTabViewer<'_> {
                 };
 
                 let columns = vec![
-                    egui_table::Column::new(110.0).range(60.0..=250.0).resizable(true),
+                    CLAN_COLUMN.column(any_expanded),
                     egui_table::Column::new(90.0).range(50.0..=200.0).resizable(true),
                     egui_table::Column::new(90.0).range(50.0..=200.0).resizable(true),
                     egui_table::Column::new(150.0).range(60.0..=300.0).resizable(true),
@@ -949,6 +982,45 @@ mod tests {
         assert!(
             !breakdown_is_current(Some(&breakdown), cached, TimePeriod::LastDay, tracker.encounter_version),
             "a repeat encounter must invalidate the cache, or the tab shows stale counts until Refresh"
+        );
+    }
+
+    /// The member list lives inside the Clan cell, so it spans exactly that
+    /// column and cannot reach across a column separator.
+    #[test]
+    fn the_member_list_spans_the_clan_cell_and_no_more() {
+        // What egui_table hands a Clan cell of an open row: the column's x
+        // range, and the row's whole band including the member list.
+        let cell = egui::Rect::from_min_max(egui::pos2(4.0, 100.0), egui::pos2(324.0, 260.0));
+
+        let rect = detail_rect(cell, CLAN_ROW_HEIGHT).expect("a cell with width yields a rect");
+        assert_eq!(rect.x_range(), cell.x_range(), "the list takes the column's width, and no more");
+        assert_eq!(rect.top(), cell.top() + CLAN_ROW_HEIGHT, "the list starts below the collapsed content");
+        assert_eq!(rect.bottom(), cell.bottom(), "the list ends with the row, which is what the height feeds");
+    }
+
+    /// The member list is as wide as the column, so an open row has to widen it
+    /// or the names are unreadable. egui_table only ever grows a remembered
+    /// width, so the two regimes must not share a column id.
+    #[test]
+    fn the_clan_column_widens_while_a_row_is_open() {
+        let collapsed = CLAN_COLUMN.column(false);
+        let expanded = CLAN_COLUMN.column(true);
+
+        assert_eq!(collapsed.current, CLAN_COLUMN.collapsed_width);
+        assert_eq!(expanded.current, CLAN_COLUMN.expanded_width);
+        assert!(
+            collapsed.range.max >= expanded.range.min,
+            "the expanded width has to be reachable by the collapsed range too, or a drag cannot follow it"
+        );
+        assert!(
+            expanded.range.min > collapsed.current,
+            "an open row must force the column past the width it sits at when closed"
+        );
+        assert_ne!(
+            collapsed.id_for(0),
+            expanded.id_for(0),
+            "sharing an id would leave the column expanded for good once a row had been opened"
         );
     }
 
