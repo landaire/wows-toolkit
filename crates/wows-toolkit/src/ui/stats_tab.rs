@@ -508,7 +508,7 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
                         }
                     });
                     if ui
-                        .small_button(icons::TRASH)
+                        .button(icons::TRASH)
                         .on_hover_text(t!("ui.stats.remove_games_hint", ship = ship_name))
                         .clicked()
                     {
