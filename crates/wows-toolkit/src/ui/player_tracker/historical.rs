@@ -420,3 +420,166 @@ impl ToolkitTabViewer<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use jiff::ToSpan;
+
+    use super::*;
+    use crate::ui::player_tracker::TrackedPlayer;
+
+    fn player(id: i64, clan: &str, last_name: &str, aliases: &[&str], timestamps: &[Timestamp]) -> TrackedPlayer {
+        TrackedPlayer {
+            last_name: last_name.to_string(),
+            db_id: AccountId(id),
+            names: aliases.iter().map(|name| name.to_string()).collect(),
+            clan_id: 0,
+            clan: clan.to_string(),
+            timestamps: timestamps.iter().copied().collect(),
+            arena_ids: Default::default(),
+            notes: String::new(),
+        }
+    }
+
+    /// A tracker holding `players`, with `tracked_players_by_time` derived from
+    /// their timestamps the way the live and index ingest paths build it. Without
+    /// that index every player falls outside `player_range` and nothing renders.
+    fn tracker(period: TimePeriod, sort_order: SortedBy, players: Vec<TrackedPlayer>) -> PlayerTracker {
+        let mut tracker = PlayerTracker { filter_time_period: period, sort_order, ..Default::default() };
+        for player in players {
+            let id = player.db_id;
+            for ts in &player.timestamps {
+                tracker.tracked_players_by_time.entry(*ts).or_default().push(id);
+            }
+            tracker.tracked_players.insert(id, player);
+        }
+        tracker
+    }
+
+    /// Three players whose clan, name, last-encounter and encounter-count keys
+    /// each produce a different order, so a comparator wired into the wrong
+    /// `SortedBy` arm cannot pass. Every key is distinct across the three, so no
+    /// tie is left to `HashMap`'s iteration order.
+    ///
+    /// Ascending: clan `[1, 2, 3]`, name `[2, 3, 1]`, last encountered
+    /// `[3, 1, 2]`, times encountered `[2, 1, 3]`.
+    fn discriminating_tracker(sort_order: SortedBy) -> PlayerTracker {
+        let t0 = Timestamp::from_second(1_700_000_000).expect("fixture timestamp is in range");
+        tracker(
+            TimePeriod::AllTime,
+            sort_order,
+            vec![
+                player(1, "AAA", "cyd", &[], &[t0 + 10.seconds(), t0 + 11.seconds()]),
+                player(2, "BBB", "ana", &[], &[t0 + 20.seconds()]),
+                player(3, "CCC", "bob", &[], &[t0 + 1.second(), t0 + 2.seconds(), t0 + 3.seconds()]),
+            ],
+        )
+    }
+
+    #[test]
+    fn clan_sort_orders_by_clan_tag_in_both_directions() {
+        let asc = discriminating_tracker(SortedBy::Clan(SortOrder::Asc));
+        assert_eq!(visible_rows(&asc), vec![AccountId(1), AccountId(2), AccountId(3)]);
+
+        let desc = discriminating_tracker(SortedBy::Clan(SortOrder::Desc));
+        assert_eq!(visible_rows(&desc), vec![AccountId(3), AccountId(2), AccountId(1)]);
+    }
+
+    #[test]
+    fn name_sort_orders_by_current_name_in_both_directions() {
+        let asc = discriminating_tracker(SortedBy::Name(SortOrder::Asc));
+        assert_eq!(visible_rows(&asc), vec![AccountId(2), AccountId(3), AccountId(1)]);
+
+        let desc = discriminating_tracker(SortedBy::Name(SortOrder::Desc));
+        assert_eq!(visible_rows(&desc), vec![AccountId(1), AccountId(3), AccountId(2)]);
+    }
+
+    #[test]
+    fn last_encountered_sort_orders_by_most_recent_timestamp_in_both_directions() {
+        let asc = discriminating_tracker(SortedBy::LastEncountered(SortOrder::Asc));
+        assert_eq!(visible_rows(&asc), vec![AccountId(3), AccountId(1), AccountId(2)]);
+
+        let desc = discriminating_tracker(SortedBy::LastEncountered(SortOrder::Desc));
+        assert_eq!(visible_rows(&desc), vec![AccountId(2), AccountId(1), AccountId(3)]);
+    }
+
+    #[test]
+    fn times_encountered_sort_orders_by_encounter_count_in_both_directions() {
+        let asc = discriminating_tracker(SortedBy::TimesEncountered(SortOrder::Asc));
+        assert_eq!(visible_rows(&asc), vec![AccountId(2), AccountId(1), AccountId(3)]);
+
+        let desc = discriminating_tracker(SortedBy::TimesEncountered(SortOrder::Desc));
+        assert_eq!(visible_rows(&desc), vec![AccountId(3), AccountId(1), AccountId(2)]);
+    }
+
+    #[test]
+    fn in_range_sort_falls_back_to_the_total_count_over_all_time() {
+        let asc = discriminating_tracker(SortedBy::TimesEncounteredInTimeRange(SortOrder::Asc));
+        assert_eq!(visible_rows(&asc), vec![AccountId(2), AccountId(1), AccountId(3)]);
+
+        let desc = discriminating_tracker(SortedBy::TimesEncounteredInTimeRange(SortOrder::Desc));
+        assert_eq!(visible_rows(&desc), vec![AccountId(3), AccountId(1), AccountId(2)]);
+    }
+
+    #[test]
+    fn in_range_sort_counts_only_encounters_inside_the_period() {
+        let now = Timestamp::now();
+        // Player 1 has the larger total but the smaller in-range count, so the
+        // two encounter sorts must disagree. This arm re-derives the range
+        // itself rather than reusing the one the row filter applied.
+        let players = || {
+            vec![
+                player(1, "", "bulk", &[], &[now - 30.hours(), now - 29.hours(), now - 28.hours(), now - 2.hours()]),
+                player(2, "", "recent", &[], &[now - 3.hours(), now - 2.hours(), now - 1.hour()]),
+            ]
+        };
+
+        let by_total = tracker(TimePeriod::LastDay, SortedBy::TimesEncountered(SortOrder::Asc), players());
+        assert_eq!(visible_rows(&by_total), vec![AccountId(2), AccountId(1)]);
+
+        let by_range = tracker(TimePeriod::LastDay, SortedBy::TimesEncounteredInTimeRange(SortOrder::Asc), players());
+        assert_eq!(visible_rows(&by_range), vec![AccountId(1), AccountId(2)]);
+
+        let by_range_desc =
+            tracker(TimePeriod::LastDay, SortedBy::TimesEncounteredInTimeRange(SortOrder::Desc), players());
+        assert_eq!(visible_rows(&by_range_desc), vec![AccountId(2), AccountId(1)]);
+    }
+
+    #[test]
+    fn the_time_period_excludes_players_not_seen_inside_it() {
+        let now = Timestamp::now();
+        let players = || {
+            vec![player(1, "", "inside", &[], &[now - 1.hour()]), player(2, "", "outside", &[], &[now - 48.hours()])]
+        };
+
+        let last_day = tracker(TimePeriod::LastDay, SortedBy::Name(SortOrder::Asc), players());
+        assert_eq!(visible_rows(&last_day), vec![AccountId(1)]);
+
+        let all_time = tracker(TimePeriod::AllTime, SortedBy::Name(SortOrder::Asc), players());
+        assert_eq!(visible_rows(&all_time), vec![AccountId(1), AccountId(2)]);
+    }
+
+    #[test]
+    fn the_name_filter_matches_clan_current_name_and_aliases_case_insensitively() {
+        let base = Timestamp::from_second(1_700_000_000).expect("fixture timestamp is in range");
+        let filtered = |filter: &str| {
+            let mut tracker = tracker(
+                TimePeriod::AllTime,
+                SortedBy::Name(SortOrder::Asc),
+                vec![
+                    player(1, "ZULU", "helm", &[], &[base]),
+                    player(2, "", "Tirpitz", &[], &[base]),
+                    player(3, "", "keel", &["OldHandle"], &[base]),
+                    player(4, "", "rudder", &[], &[base]),
+                ],
+            );
+            tracker.player_filter = filter.to_string();
+            visible_rows(&tracker)
+        };
+
+        assert_eq!(filtered("zul"), vec![AccountId(1)], "matches on clan");
+        assert_eq!(filtered("TIRP"), vec![AccountId(2)], "matches on current name, ignoring case");
+        assert_eq!(filtered("oldhandle"), vec![AccountId(3)], "matches on an alias, ignoring case");
+        assert!(filtered("zzzz").is_empty(), "a filter matching nothing yields no rows");
+    }
+}
