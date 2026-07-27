@@ -106,19 +106,20 @@ where
         .collect()
 }
 
-/// Where an open row's detail block goes: the whole visible width of the region
-/// painting it, and the part of the row left below the collapsed content.
+/// Where an open row's detail block goes: the horizontal extent of
+/// `width_source`, and the part of `row_rect` left below the collapsed content.
 ///
-/// The width comes from the clip rather than from the row, because the row ends
-/// at the last column and the block should follow the window instead.
+/// A block that spans the scrollable region takes its width from that region's
+/// clip, since the row itself ends at the last column. A block that lives inside
+/// one cell passes that cell as both arguments, so it stays within its column.
 ///
-/// `None` when the region has no usable width, which happens when the panel is
-/// narrower than the sticky columns and the scrollable region collapses. Laying
-/// content out in that rect would wrap it one glyph per line and feed a wildly
-/// inflated height into every row offset below it.
-pub(crate) fn detail_rect(row_rect: egui::Rect, clip_rect: egui::Rect, row_height: f32) -> Option<egui::Rect> {
+/// `None` when the width source has nothing usable, which happens when the panel
+/// is narrower than the sticky columns and the scrollable region collapses.
+/// Laying content out in that rect would wrap it one glyph per line and feed a
+/// wildly inflated height into every row offset below it.
+pub(crate) fn detail_rect(row_rect: egui::Rect, width_source: egui::Rect, row_height: f32) -> Option<egui::Rect> {
     let rect = egui::Rect::from_x_y_ranges(
-        clip_rect.x_range(),
+        width_source.x_range(),
         egui::Rangef::new(row_rect.top() + row_height, row_rect.bottom()),
     );
 

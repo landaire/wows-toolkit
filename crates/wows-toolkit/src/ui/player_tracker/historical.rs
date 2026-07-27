@@ -46,6 +46,41 @@ const HISTORICAL_COLUMNS: [HistoricalColumn; 6] = [
 
 const HISTORICAL_ROW_HEIGHT: f32 = 30.0;
 
+/// Width of the Player column while every row is collapsed.
+const PLAYER_COLUMN_WIDTH: f32 = 220.0;
+
+/// Width the Player column holds while a row's detail block is showing. The
+/// block is painted inside that column, so this is the width the notes editor
+/// gets, less the block's own margins.
+const PLAYER_COLUMN_EXPANDED_WIDTH: f32 = 420.0;
+
+/// Widest the Player column can be dragged to, in either regime.
+const PLAYER_COLUMN_MAX_WIDTH: f32 = 600.0;
+
+/// Narrowest the Player column can be dragged to while every row is collapsed.
+const PLAYER_COLUMN_MIN_WIDTH: f32 = 120.0;
+
+/// egui_table remembers a column's width against this id and only ever grows it,
+/// so the collapsed and expanded regimes carry separate ids: sharing one would
+/// leave the column at its expanded width for good once a row had been opened.
+const PLAYER_COLUMN_ID: &str = "player_tracker_historical_player";
+const PLAYER_COLUMN_EXPANDED_ID: &str = "player_tracker_historical_player_expanded";
+
+/// The Player column, sized for whether a detail block is currently showing.
+fn player_column(any_expanded: bool) -> egui_table::Column {
+    if any_expanded {
+        egui_table::Column::new(PLAYER_COLUMN_EXPANDED_WIDTH)
+            .range(PLAYER_COLUMN_EXPANDED_WIDTH..=PLAYER_COLUMN_MAX_WIDTH)
+            .id(egui::Id::new(PLAYER_COLUMN_EXPANDED_ID))
+            .resizable(true)
+    } else {
+        egui_table::Column::new(PLAYER_COLUMN_WIDTH)
+            .range(PLAYER_COLUMN_MIN_WIDTH..=PLAYER_COLUMN_MAX_WIDTH)
+            .id(egui::Id::new(PLAYER_COLUMN_ID))
+            .resizable(true)
+    }
+}
+
 /// Accounts to render, filtered by the active time range and name filter, in
 /// the order the active sort puts them.
 fn visible_rows(tracker: &PlayerTracker) -> Vec<AccountId> {
@@ -167,9 +202,6 @@ struct HistoricalTable<'a> {
     /// Height each open row's detail block adds on top of the default row height,
     /// measured as it is painted and used to lay the next frame out.
     detail_heights: BTreeMap<u64, f32>,
-    /// Rows whose detail block has already been claimed this frame, since
-    /// `row_ui` is called once per split-scroll region.
-    detail_rows_painted: HashSet<u64>,
     /// Animation factor per open or still-closing row, derived from
     /// `expanded_players` each frame because `row_top_offset` addresses rows
     /// positionally. Rows contributing no extra height are absent.
@@ -212,8 +244,7 @@ impl HistoricalTable<'_> {
         })
     }
 
-    /// The collapsed content of one cell. The expanded detail block is painted by
-    /// [`egui_table::TableDelegate::row_ui`] instead, so it can span the row.
+    /// The collapsed content of one cell, pinned to the top of the row.
     fn cell_content_ui(&mut self, row_nr: u64, column: HistoricalColumn, ui: &mut egui::Ui) {
         let Some(view) = self.row_view(row_nr) else {
             return;
@@ -299,10 +330,19 @@ impl HistoricalTable<'_> {
         }
     }
 
-    /// The detail block of an open row, filling the row below the collapsed
-    /// content. Returns its height, which is what the row is stretched by.
+    /// The detail block of an open row, filling the Player cell below the
+    /// collapsed content. Returns its height, which is what the row is stretched
+    /// by. The height is the block's natural one even while the row is part-way
+    /// through its animation and only a slice of the block is on screen, so the
+    /// row settles at exactly this height once the animation completes.
     fn detail_ui(&mut self, view: &RowView, ui: &mut egui::Ui) -> f32 {
         let inner_response = egui::Frame::new().inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
+            // egui_table runs the whole table on `TextWrapMode::Extend`, which suits
+            // single-line cells but would push a long alias list out past the
+            // column's edge. Wrapping keeps the block inside its column and folds
+            // the extra lines into the height the row is stretched by.
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+
             if !view.aliases.is_empty() {
                 ui.label(t!("ui.player_tracker.aliases_hover", names = view.aliases.join(", ")));
             }
@@ -318,6 +358,43 @@ impl HistoricalTable<'_> {
         });
 
         inner_response.response.rect.height()
+    }
+
+    /// Paints an open row's detail block into the part of the Player cell left
+    /// below the collapsed content, and records the height the row is stretched
+    /// by. `cell_rect` supplies both the column's width and the row's full band,
+    /// which is what keeps the block inside its column separators.
+    fn detail_block_ui(&mut self, row_nr: u64, ui: &mut egui::Ui, cell_rect: egui::Rect) {
+        // Absent means the row adds no height this frame: either it is closed, or
+        // its collapse animation has already run out.
+        let expandedness = self.expanded_rows.get(&row_nr).copied().unwrap_or(0.0);
+        if expandedness <= 0.0 {
+            return;
+        }
+
+        // The Player column is sticky, so egui_table walks this cell once for the
+        // sticky region and once for the scrollable one. Only the region whose
+        // clip still covers the cell puts it on screen; painting an editor into
+        // the other one would duplicate it against the same notes field.
+        if ui.clip_rect().width() <= 0.0 {
+            return;
+        }
+
+        let Some(view) = self.row_view(row_nr) else {
+            return;
+        };
+        let Some(detail_rect) = detail_rect(cell_rect, cell_rect, HISTORICAL_ROW_HEIGHT) else {
+            return;
+        };
+
+        let mut detail_ui =
+            ui.new_child(egui::UiBuilder::new().max_rect(detail_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+
+        // Deliberately not advancing the cell's cursor: the block is measured for
+        // the row height alone and must not feed egui_table's per-column sizing,
+        // which would ratchet the column wider on every frame it is open.
+        let height = self.detail_ui(&view, &mut detail_ui);
+        self.detail_heights.insert(row_nr, height);
     }
 }
 
@@ -366,61 +443,37 @@ impl egui_table::TableDelegate for HistoricalTable<'_> {
 
     fn row_ui(&mut self, ui: &mut egui::Ui, row_nr: u64) {
         // Striping belongs here rather than in `cell_ui`, which runs afterwards and
-        // would paint over the detail block.
+        // would paint over the cell contents.
         if row_nr % 2 == 1 {
             ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().faint_bg_color);
         }
-
-        // egui_table drives `row_ui` once per split-scroll region, so the block has
-        // to be claimed by exactly one of them. The fully scrollable region always
-        // runs first and is the wide one, so the first call for a row wins.
-        if !self.detail_rows_painted.insert(row_nr) {
-            return;
-        }
-
-        let expandedness = self.expanded_rows.get(&row_nr).copied().unwrap_or(0.0);
-        if expandedness <= 0.0 {
-            return;
-        }
-        let Some(view) = self.row_view(row_nr) else {
-            return;
-        };
-
-        let row_rect = ui.max_rect();
-        let Some(detail_rect) = detail_rect(row_rect, ui.clip_rect(), HISTORICAL_ROW_HEIGHT) else {
-            return;
-        };
-
-        let mut detail_ui =
-            ui.new_child(egui::UiBuilder::new().max_rect(detail_rect).layout(egui::Layout::top_down(egui::Align::Min)));
-        // `row_ui` is not clipped to its own row, so without this the block would
-        // paint over the rows below it while the row is still animating open.
-        detail_ui.shrink_clip_rect(row_rect);
-
-        // Deliberately not advancing the row's cursor: the block is measured for the
-        // row height alone and must not feed egui_table's per-column sizing.
-        let height = self.detail_ui(&view, &mut detail_ui);
-        self.detail_heights.insert(row_nr, height);
     }
 
     fn cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::CellInfo) {
+        let column = HISTORICAL_COLUMNS[cell.col_nr];
+        let cell_rect = ui.max_rect();
+
         // Cells are handed the whole row, detail block included. Pin the collapsed
         // content to the top of it, or a vertically centred layout would drift it
         // into the middle of an open row.
-        let mut content_rect = ui.max_rect();
+        let mut content_rect = cell_rect;
         content_rect.max.y = content_rect.min.y + HISTORICAL_ROW_HEIGHT;
         let mut content_ui = ui.new_child(
             egui::UiBuilder::new().max_rect(content_rect).layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
 
         egui::Frame::new().inner_margin(egui::Margin::symmetric(4, 4)).show(&mut content_ui, |ui| {
-            self.cell_content_ui(cell.row_nr, HISTORICAL_COLUMNS[cell.col_nr], ui);
+            self.cell_content_ui(cell.row_nr, column, ui);
         });
 
         // A child `Ui` does not grow its parent, and egui_table sizes columns from
         // the cell's `min_size`. Without this every column would fit to nothing on
         // the sizing pass and land on its minimum width.
         ui.advance_cursor_after_rect(content_ui.min_rect());
+
+        if column == HistoricalColumn::Player {
+            self.detail_block_ui(cell.row_nr, ui, cell_rect);
+        }
     }
 
     fn default_row_height(&self) -> f32 {
@@ -530,12 +583,14 @@ impl ToolkitTabViewer<'_> {
                     expanded_rows(ui.ctx(), HISTORICAL_ROW_SALT, &rows, &player_tracker.expanded_players);
                 let detail_heights = std::mem::take(&mut player_tracker.historical_detail_heights);
                 let filter_range = player_tracker.filter_time_period.to_date();
+                // A row still animating shut keeps its factor, so the column stays
+                // wide for as long as any of the block is on screen.
+                let any_expanded = !expanded_rows.is_empty();
 
                 let mut delegate = HistoricalTable {
                     tracker: player_tracker,
                     rows,
                     detail_heights,
-                    detail_rows_painted: Default::default(),
                     expanded_rows,
                     now,
                     filter_range,
@@ -545,7 +600,7 @@ impl ToolkitTabViewer<'_> {
 
                 let columns = vec![
                     egui_table::Column::new(70.0).range(40.0..=200.0).resizable(true),
-                    egui_table::Column::new(220.0).range(120.0..=600.0).resizable(true),
+                    player_column(any_expanded),
                     egui_table::Column::new(110.0).range(60.0..=250.0).resizable(true),
                     egui_table::Column::new(150.0).range(60.0..=300.0).resizable(true),
                     egui_table::Column::new(130.0).range(80.0..=300.0).resizable(true),
@@ -858,5 +913,44 @@ mod tests {
 
         let inverted = egui::Rect::from_min_max(egui::pos2(290.0, 0.0), egui::pos2(250.0, 900.0));
         assert_eq!(detail_rect(row, inverted, HISTORICAL_ROW_HEIGHT), None, "a negative-width region yields no block");
+    }
+
+    /// The historical block lives inside the Player cell, so it spans exactly
+    /// that column and cannot reach across a column separator.
+    #[test]
+    fn the_detail_block_spans_the_player_cell_and_no_more() {
+        // What egui_table hands a Player cell of an open row: the column's x
+        // range, and the row's whole band including the block.
+        let cell = egui::Rect::from_min_max(egui::pos2(70.0, 100.0), egui::pos2(490.0, 210.0));
+
+        let rect = detail_rect(cell, cell, HISTORICAL_ROW_HEIGHT).expect("a cell with width yields a rect");
+        assert_eq!(rect.x_range(), cell.x_range(), "the block takes the column's width, not the region's");
+        assert_eq!(rect.top(), cell.top() + HISTORICAL_ROW_HEIGHT, "the block starts below the collapsed content");
+        assert_eq!(rect.bottom(), cell.bottom(), "the block ends with the row, which is what the height feeds");
+    }
+
+    /// The block is as wide as the column, so an open row has to widen it or the
+    /// notes editor is unusable. egui_table only ever grows a remembered width,
+    /// so the two regimes must not share a column id.
+    #[test]
+    fn the_player_column_widens_while_a_row_is_open() {
+        let collapsed = player_column(false);
+        let expanded = player_column(true);
+
+        assert_eq!(collapsed.current, PLAYER_COLUMN_WIDTH);
+        assert_eq!(expanded.current, PLAYER_COLUMN_EXPANDED_WIDTH);
+        assert!(
+            collapsed.range.max >= expanded.range.min,
+            "the expanded width has to be reachable by the collapsed range too, or a drag cannot follow it"
+        );
+        assert!(
+            expanded.range.min > collapsed.current,
+            "an open row must force the column past the width it sits at when closed"
+        );
+        assert_ne!(
+            collapsed.id_for(1),
+            expanded.id_for(1),
+            "sharing an id would leave the column expanded for good once a row had been opened"
+        );
     }
 }
