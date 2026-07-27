@@ -371,8 +371,8 @@ pub(crate) fn default_stats_dock_state() -> egui_dock::DockState<StatsSubTab> {
 pub(crate) fn default_player_tracker_dock_state() -> egui_dock::DockState<PlayerTrackerSubTab> {
     let mut dock = egui_dock::DockState::new(vec![
         PlayerTrackerSubTab::Historical,
-        PlayerTrackerSubTab::CurrentMatch,
         PlayerTrackerSubTab::Clans,
+        PlayerTrackerSubTab::CurrentMatch,
     ]);
     // `DockState::new` leaves nothing focused; focus the only leaf so
     // `find_active_focused` resolves without waiting for a first render.
