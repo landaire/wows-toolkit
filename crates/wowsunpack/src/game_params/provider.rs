@@ -700,29 +700,31 @@ fn read_pair_both(v: &Value) -> Option<[f32; 2]> {
     }
 }
 
+/// Read a 3-element float triple from a list-or-tuple value.
+fn read_vec3_value(elem: &Value) -> Option<[f32; 3]> {
+    if let Some(l) = elem.list_ref() {
+        let g = l.inner();
+        if g.len() != 3 {
+            return None;
+        }
+        Some([value_f32(&g[0])?, value_f32(&g[1])?, value_f32(&g[2])?])
+    } else if let Some(t) = elem.tuple_ref() {
+        let s = t.inner();
+        if s.len() != 3 {
+            return None;
+        }
+        Some([value_f32(&s[0])?, value_f32(&s[1])?, value_f32(&s[2])?])
+    } else {
+        None
+    }
+}
+
 /// Read a 3-element float triple from the element at `idx` of a nested list-or-tuple.
 fn read_vec3_at(v: &Value, idx: usize) -> Option<[f32; 3]> {
-    fn triple(elem: &Value) -> Option<[f32; 3]> {
-        if let Some(l) = elem.list_ref() {
-            let g = l.inner();
-            if g.len() != 3 {
-                return None;
-            }
-            Some([value_f32(&g[0])?, value_f32(&g[1])?, value_f32(&g[2])?])
-        } else if let Some(t) = elem.tuple_ref() {
-            let s = t.inner();
-            if s.len() != 3 {
-                return None;
-            }
-            Some([value_f32(&s[0])?, value_f32(&s[1])?, value_f32(&s[2])?])
-        } else {
-            None
-        }
-    }
     if let Some(l) = v.list_ref() {
-        triple(l.inner().get(idx)?)
+        read_vec3_value(l.inner().get(idx)?)
     } else if let Some(t) = v.tuple_ref() {
-        triple(t.inner().get(idx)?)
+        read_vec3_value(t.inner().get(idx)?)
     } else {
         None
     }
@@ -740,6 +742,32 @@ fn read_flood_prob(hull_data: &pickled::Dict) -> Option<f32> {
     } else {
         Some((DEFAULT_UW_DAMAGE_COEFF - node0) / DEFAULT_UW_DAMAGE_COEFF)
     }
+}
+
+/// Read hull `burnNodes`: a list of `(probability, damage, duration)` triples,
+/// one per fire section. Returns empty when the key is absent so callers can
+/// tell "no sections known" from "four sections"; there is no correct default.
+fn read_burn_nodes(hull_data: &pickled::Dict) -> Vec<crate::game_params::ttx::components::BurnNode> {
+    let Some(list) = hull_data.get(&pk(keys::BURN_NODES)).and_then(|v| v.list_ref()) else {
+        return Vec::new();
+    };
+    list.inner()
+        .iter()
+        .filter_map(|entry| {
+            let t = read_vec3_value(entry)?;
+            Some(crate::game_params::ttx::components::BurnNode {
+                probability: t[0],
+                damage_fraction_per_sec: t[1],
+                duration_secs: t[2],
+            })
+        })
+        .collect()
+}
+
+/// Read `size[0]`, the hull length in meters.
+fn read_hull_length(hull_data: &pickled::Dict) -> Option<Meters> {
+    let size = hull_data.get(&pk(keys::SIZE))?;
+    Some(Meters::from(read_vec3_value(size)?[0]))
 }
 
 /// Read the submarine `SubmarineBattery` sub-object's `capacity` and `regenRate`
@@ -1347,6 +1375,8 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                     flood_prob: read_flood_prob(&hull_data),
                     battery_capacity,
                     battery_regen_rate,
+                    burn_nodes: read_burn_nodes(&hull_data),
+                    hull_length_m: read_hull_length(&hull_data),
                 },
             );
         }
@@ -2473,6 +2503,68 @@ mod camera_tests {
 
         let engine = ttx.engine("PAUE903_D10_ENG_STOCK").expect("engine stats present");
         assert_eq!(engine.speed_coef, Some(0.0));
+    }
+
+    /// Build a minimal ship dict with just an `A_Hull` component carrying
+    /// `burnNodes` and `size`, mirroring Iowa's (`PASB018_Iowa_1944`) real
+    /// GameParams values (jaq-verified).
+    fn hull_with_burn_nodes_and_size(entries: Vec<(HashableValue, Value)>) -> pickled::Dict {
+        let a_hull = dict(entries);
+        let hull_components = dict(vec![(pk("hull"), list(vec![sv("A_Hull")]))]);
+        let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
+        let upgrade_info = dict(vec![(pk("PAUH911_Iowa_1944"), hull_upgrade)]);
+
+        vec![
+            (pk("level"), Value::I64(10)),
+            (pk("group"), sv("special")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    /// burnNodes is the per-hull fire-resistance stat plus the section count. Both
+    /// are per-hull: surface combatants carry four nodes, most submarines one.
+    #[test]
+    fn hull_burn_nodes_and_length_are_extracted() {
+        let ship_data = hull_with_burn_nodes_and_size(vec![
+            (
+                pk(keys::BURN_NODES),
+                list(vec![
+                    list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
+                    list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
+                    list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
+                    list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
+                ]),
+            ),
+            (pk(keys::SIZE), list(vec![fv(262.1), fv(32.97), fv(35.4)])),
+        ]);
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+        let hull = ttx.hull("PAUH911_Iowa_1944").expect("hull stats present");
+
+        assert_eq!(hull.burn_nodes.len(), 4);
+        assert!((hull.burn_nodes[0].probability - 0.6004).abs() < 1e-6);
+        assert!((hull.burn_nodes[0].damage_fraction_per_sec - 0.3).abs() < 1e-6);
+        assert!((hull.burn_nodes[0].duration_secs - 60.0).abs() < 1e-6);
+        assert_eq!(hull.hull_length_m, Some(Meters::from(262.1)));
+    }
+
+    /// A hull with no burnNodes/size keys yields an empty list and no length,
+    /// never a fabricated four-node default. A fabricated count would later make
+    /// fire sections "eligible" that do not exist on the ship.
+    #[test]
+    fn hull_without_burn_nodes_yields_empty_and_no_length() {
+        let ship_data = hull_with_burn_nodes_and_size(vec![]);
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+        let hull = ttx.hull("PAUH911_Iowa_1944").expect("hull stats present");
+
+        assert!(hull.burn_nodes.is_empty());
+        assert_eq!(hull.hull_length_m, None);
     }
 
     /// Build a ship dict mirroring Gearing's (`PASD013_Gearing_1945`) real

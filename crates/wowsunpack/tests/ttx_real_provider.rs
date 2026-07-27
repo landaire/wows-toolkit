@@ -21,6 +21,7 @@ use wowsunpack::data::idx;
 use wowsunpack::data::idx_vfs::IdxVfs;
 use wowsunpack::data::wrappers::mmap::MmapPkgSource;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::ttx::ship_stats_stock;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
@@ -43,6 +44,29 @@ fn ttx_consumables_non_empty() {
         "Worcester must have a crashCrew consumable; found: {:?}",
         stats.consumables.iter().map(|c| c.label.as_str()).collect::<Vec<_>>()
     );
+}
+
+/// Iowa's `A_Hull` burnNodes and length against real GameParams (jaq-verified):
+/// 4 fire-section nodes, each `probability` 0.6004, hull length (`size[0]`) 262.1m.
+#[test]
+#[ignore]
+fn ttx_iowa_burn_nodes_and_hull_length() {
+    let Some(provider) = load_provider() else {
+        panic!("could not build a provider; set WOWS_DIR to your World_of_Warships install");
+    };
+    let ship_name = "PASB018_Iowa_1944";
+    let ship = provider.game_param_by_name(ship_name).unwrap_or_else(|| panic!("ship {ship_name} not in params"));
+    let ttx = ship.vehicle().and_then(|v| v.ttx_components()).expect("ttx components extracted");
+    let selection = ShipUpgradeSelection::stock(&ship);
+    let hull_upgrade = selection.hull.expect("Iowa has a stock hull upgrade selection");
+    let hull = ttx.hull(&hull_upgrade).expect("hull stats present");
+
+    assert_eq!(hull.burn_nodes.len(), 4, "Iowa A_Hull should carry 4 burn nodes");
+    for node in &hull.burn_nodes {
+        assert!((node.probability - 0.6004).abs() < 1e-3, "got {}", node.probability);
+    }
+    let length = hull.hull_length_m.expect("hull length present");
+    assert!((length.value() - 262.1).abs() < 0.5, "got {}", length.value());
 }
 
 /// One expected-vs-computed check; a tolerance band around a published port value.

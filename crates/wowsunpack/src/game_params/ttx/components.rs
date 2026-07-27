@@ -20,6 +20,20 @@ use crate::game_params::ttx::model::Seconds;
 use crate::game_params::types::Km;
 use crate::game_params::types::Meters;
 
+/// One hull burn node: a fire section's resistance, damage rate and duration.
+///
+/// `probability` is the ship's hidden fire-resistance coefficient, multiplied
+/// into the attacker's burn chance server side. `damage_fraction_per_sec` is a
+/// fraction of max HP. Live values run 0.2 to 1.0 for `probability`.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct BurnNode {
+    pub probability: f32,
+    pub damage_fraction_per_sec: f32,
+    pub duration_secs: f32,
+}
+
 /// Base hull-component stats, raw from the `*_Hull` component sub-object.
 /// Fields are `Option` and left `None` when the source field is absent; nothing
 /// is defaulted. Values are unconverted GameParams units (the factory layer
@@ -73,6 +87,13 @@ pub struct HullComponentStats {
     /// Submarine `SubmarineBattery.regenRate` (charge units per second). `None` for
     /// non-subs.
     pub battery_regen_rate: Option<f32>,
+    /// Hull `burnNodes`, one entry per fire section. The length is the section
+    /// count and is per-hull: surface combatants carry four, most submarines one,
+    /// some auxiliaries two. Empty when the hull has no `burnNodes` key.
+    pub burn_nodes: Vec<BurnNode>,
+    /// Hull length in meters, `size[0]`. Used to scale model-space fire node
+    /// positions, which are not in meters. `None` when `size` is absent.
+    pub hull_length_m: Option<Meters>,
 }
 
 /// Base engine-component stats, raw from the `*_Engine` component sub-object.

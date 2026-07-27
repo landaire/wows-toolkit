@@ -733,6 +733,8 @@ mod tests {
             flood_prob: Some(0.0),
             battery_capacity: None,
             battery_regen_rate: None,
+            burn_nodes: Vec::new(),
+            hull_length_m: None,
         }
     }
 
