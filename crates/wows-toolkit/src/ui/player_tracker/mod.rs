@@ -51,14 +51,19 @@ impl PlayerTracker {
 
     /// The current roster, resolved against `wows_data` and tracked history.
     /// Rebuilds when the match changes, when game data arrives after a roster was
-    /// resolved without it, or when the tracked-player set grows.
+    /// resolved without it, or when the tracked-player set changes.
     pub(crate) fn roster(&mut self, wows_data: Option<&WorldOfWarshipsData>) -> Option<&ResolvedRoster> {
         let live = self.live_match.as_ref()?;
+
+        // The game-data test must match what `ships_resolved` records: params
+        // present, not merely a loaded build. A build whose params failed to
+        // load would otherwise look perpetually stale and re-resolve every frame.
+        let metadata_available = wows_data.and_then(|data| data.game_metadata.as_ref()).is_some();
 
         let stale = match self.resolved_roster.as_ref() {
             Some(resolved) => {
                 resolved.started_at != live.started_at
-                    || (!resolved.ships_resolved && wows_data.is_some())
+                    || (!resolved.ships_resolved && metadata_available)
                     || resolved.tracked_count != self.tracked_players.len()
             }
             None => true,

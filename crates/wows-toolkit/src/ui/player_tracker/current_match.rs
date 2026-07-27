@@ -18,6 +18,7 @@ use crate::twitch::TwitchState;
 use crate::ui::replay_parser::ship_class_icon_from_species;
 use crate::ui::theme::semantic::SemanticExt;
 
+use super::PlayerTracker;
 use super::TrackedPlayer;
 use super::encounter_severity_color;
 use super::last_seen_text;
@@ -41,21 +42,21 @@ impl ToolkitTabViewer<'_> {
             // guard needs three derefs to reach the data itself.
             let wows_data_ref: Option<&WorldOfWarshipsData> = wows_data_guard.as_ref().map(|guard| &***guard);
 
-            // Scoped so the roster borrow ends before `tracked_players` is read.
-            let (started_at, friendly, enemy) = {
-                let Some(roster) = player_tracker.roster(wows_data_ref) else {
-                    ui.label(RichText::new(t!("ui.player_tracker.no_live_match")).weak());
-                    return;
-                };
-                (roster.started_at, roster.friendly.clone(), roster.enemy.clone())
+            // Resolve first, then reborrow the tracker's fields disjointly so the
+            // roster and the tracked-player map can be read at the same time.
+            player_tracker.roster(wows_data_ref);
+            let PlayerTracker { resolved_roster, tracked_players, .. } = &*player_tracker;
+            let Some(roster) = resolved_roster.as_ref() else {
+                ui.label(RichText::new(t!("ui.player_tracker.no_live_match")).weak());
+                return;
             };
 
             let twitch_state = self.tab_state.twitch_state.read();
             let ctx = TeamContext {
-                tracked: &player_tracker.tracked_players,
+                tracked: tracked_players,
                 wows_data: wows_data_ref,
                 twitch_state: &twitch_state,
-                started_at,
+                started_at: roster.started_at,
                 now,
                 filter_range,
             };
@@ -64,9 +65,9 @@ impl ToolkitTabViewer<'_> {
                 let win = columns[0].sem().win;
                 render_team(
                     &mut columns[0],
-                    t!("ui.player_tracker.your_team", count = friendly.len()).to_string(),
+                    t!("ui.player_tracker.your_team", count = roster.friendly.len()).to_string(),
                     win,
-                    &friendly,
+                    &roster.friendly,
                     "current_match_friendly",
                     &ctx,
                     &mut actions,
@@ -75,9 +76,9 @@ impl ToolkitTabViewer<'_> {
                 let loss = columns[1].sem().loss;
                 render_team(
                     &mut columns[1],
-                    t!("ui.player_tracker.enemy_team", count = enemy.len()).to_string(),
+                    t!("ui.player_tracker.enemy_team", count = roster.enemy.len()).to_string(),
                     loss,
-                    &enemy,
+                    &roster.enemy,
                     "current_match_enemy",
                     &ctx,
                     &mut actions,

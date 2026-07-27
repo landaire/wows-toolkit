@@ -134,6 +134,8 @@ pub(crate) fn resolve_roster(
             _ => None,
         };
         let species_text = match (metadata, species.as_ref()) {
+            // A missing class translation degrades to the raw class name, which
+            // is the true species rather than a stand-in for an unknown one.
             (Some(provider), Some(species)) => provider
                 .localized_name_from_id(&TranslationKey::new(species.translation_id()))
                 .or_else(|| Some(species.name().to_string())),

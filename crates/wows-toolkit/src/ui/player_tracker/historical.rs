@@ -260,13 +260,13 @@ impl ToolkitTabViewer<'_> {
                                         }
                                     }
                                     SortedBy::LastEncountered(sort_order) => {
-                                        let playera_last = playera.timestamps.last().unwrap();
-                                        let playerb_last = playerb.timestamps.last().unwrap();
+                                        let playera_last = playera.timestamps.last().copied();
+                                        let playerb_last = playerb.timestamps.last().copied();
 
                                         if sort_order == SortOrder::Asc {
-                                            playera_last.cmp(playerb_last)
+                                            playera_last.cmp(&playerb_last)
                                         } else {
-                                            playerb_last.cmp(playera_last)
+                                            playerb_last.cmp(&playera_last)
                                         }
                                     }
                                     SortedBy::TimesEncountered(sort_order) => {
