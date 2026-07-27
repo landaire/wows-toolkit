@@ -151,11 +151,38 @@ fn row_animation_id(row_nr: u64) -> egui::Id {
     egui::Id::new(("player_tracker_historical_row", row_nr))
 }
 
-/// Positional expansion state for `rows`, projected from the account-keyed set
-/// so that a re-sort or re-filter carries an open row to the account's new
-/// index instead of leaving it open on whoever landed there.
-fn expanded_rows(rows: &[AccountId], expanded_players: &HashSet<AccountId>) -> BTreeMap<u64, bool> {
-    rows.iter().enumerate().map(|(index, id)| (index as u64, expanded_players.contains(id))).collect()
+/// Per-row expansion factor, projected from the account-keyed open set so that
+/// a re-sort or re-filter carries an open row to the account's new index instead
+/// of leaving it open on whoever landed there.
+///
+/// Stepping every row's animation once here, and keeping only the rows that
+/// still contribute height, is what lets [`row_offset`] walk a map bounded by
+/// the open rows rather than by the whole tracker, without taking a context lock
+/// per step. A row that is closing keeps a factor above zero until its animation
+/// finishes, so the collapse still animates after it leaves `expanded_players`.
+fn expanded_rows(ctx: &egui::Context, rows: &[AccountId], expanded_players: &HashSet<AccountId>) -> BTreeMap<u64, f32> {
+    rows.iter()
+        .enumerate()
+        .filter_map(|(index, id)| {
+            let row_nr = index as u64;
+            let factor = ctx.animate_bool(row_animation_id(row_nr), expanded_players.contains(id));
+            (0.0 < factor).then_some((row_nr, factor))
+        })
+        .collect()
+}
+
+/// Vertical offset of `row_nr` from the top of the table body: one default row
+/// height per row above it, plus the animated extra height of the expanded ones.
+fn row_offset(heights: &BTreeMap<u64, f32>, expandedness: &BTreeMap<u64, f32>, row_nr: u64) -> f32 {
+    expandedness
+        .range(0..row_nr)
+        .map(|(expanded_row_nr, factor)| {
+            // A row that has never been painted has no measured height yet;
+            // contributing zero offset is right until it is measured.
+            factor * heights.get(expanded_row_nr).copied().unwrap_or(0.0)
+        })
+        .sum::<f32>()
+        + row_nr as f32 * HISTORICAL_ROW_HEIGHT
 }
 
 /// Values copied out of one tracked player for a single frame's render. Cheap:
@@ -176,9 +203,10 @@ struct HistoricalTable<'a> {
     tracker: &'a mut PlayerTracker,
     rows: Vec<AccountId>,
     row_heights: BTreeMap<u64, f32>,
-    /// Per-row expansion derived from `expanded_players` each frame, because
-    /// `row_top_offset` addresses rows positionally.
-    expanded_rows: BTreeMap<u64, bool>,
+    /// Animation factor per open or still-closing row, derived from
+    /// `expanded_players` each frame because `row_top_offset` addresses rows
+    /// positionally. Rows contributing no extra height are absent.
+    expanded_rows: BTreeMap<u64, f32>,
     now: Timestamp,
     filter_range: Option<Timestamp>,
     find_matches_target: Option<AccountId>,
@@ -200,7 +228,15 @@ impl HistoricalTable<'_> {
             account_id,
             clan: player.clan.clone(),
             last_name: player.last_name.clone(),
-            aliases: player.names.iter().sorted().cloned().collect(),
+            // A player who reverts to an earlier name lands their current name in
+            // `names`; listing it as an alias would only repeat the row's own label.
+            aliases: player
+                .names
+                .iter()
+                .filter(|name| name.as_str() != player.last_name.as_str())
+                .sorted()
+                .cloned()
+                .collect(),
             notes: player.notes.clone(),
             total_encounters,
             encounters_in_range,
@@ -214,8 +250,9 @@ impl HistoricalTable<'_> {
             return;
         };
 
-        let is_expanded = self.expanded_rows.get(&row_nr).copied().unwrap_or_default();
-        let expandedness = ui.ctx().animate_bool(row_animation_id(row_nr), is_expanded);
+        // Absent means the row adds no height this frame: either it is closed, or
+        // its collapse animation has already run out.
+        let expandedness = self.expanded_rows.get(&row_nr).copied().unwrap_or(0.0);
         let mut toggle_expand = false;
 
         let inner_response = ui.vertical(|ui| {
@@ -306,12 +343,12 @@ impl HistoricalTable<'_> {
         });
 
         if toggle_expand {
-            // `remove` reports whether it was there, which is the toggle.
+            // `remove` reports whether it was there, which is the toggle. The row's
+            // animation factor only picks the change up on the next frame, which is
+            // also when the new height gets measured.
             if !self.tracker.expanded_players.remove(&view.account_id) {
                 self.tracker.expanded_players.insert(view.account_id);
             }
-            let now_expanded = self.tracker.expanded_players.contains(&view.account_id);
-            self.expanded_rows.insert(row_nr, now_expanded);
             // Force a re-measure at the new height.
             self.row_heights.remove(&row_nr);
         }
@@ -382,17 +419,8 @@ impl egui_table::TableDelegate for HistoricalTable<'_> {
         HISTORICAL_ROW_HEIGHT
     }
 
-    fn row_top_offset(&self, ctx: &egui::Context, _table_id: egui::Id, row_nr: u64) -> f32 {
-        self.expanded_rows
-            .range(0..row_nr)
-            .map(|(expanded_row_nr, expanded)| {
-                let how_expanded = ctx.animate_bool(row_animation_id(*expanded_row_nr), *expanded);
-                // A row that has never been painted has no measured height yet;
-                // contributing zero offset is right until it is measured.
-                how_expanded * self.row_heights.get(expanded_row_nr).copied().unwrap_or(0.0)
-            })
-            .sum::<f32>()
-            + row_nr as f32 * HISTORICAL_ROW_HEIGHT
+    fn row_top_offset(&self, _ctx: &egui::Context, _table_id: egui::Id, row_nr: u64) -> f32 {
+        row_offset(&self.row_heights, &self.expanded_rows, row_nr)
     }
 }
 
@@ -490,7 +518,7 @@ impl ToolkitTabViewer<'_> {
                 // Everything the delegate needs from the tracker is read before it takes the
                 // mutable borrow.
                 let rows = visible_rows(player_tracker);
-                let expanded_rows = expanded_rows(&rows, &player_tracker.expanded_players);
+                let expanded_rows = expanded_rows(ui.ctx(), &rows, &player_tracker.expanded_players);
                 let row_heights = std::mem::take(&mut player_tracker.historical_row_heights);
                 let filter_range = player_tracker.filter_time_period.to_date();
 
@@ -699,27 +727,64 @@ mod tests {
         assert!(filtered("zzzz").is_empty(), "a filter matching nothing yields no rows");
     }
 
+    /// A row's first animation step lands on its target immediately, so a fresh
+    /// context yields exactly 1.0 for an open row and drops the closed ones.
     #[test]
     fn an_open_row_follows_its_account_when_the_order_changes() {
         let open = HashSet::from([AccountId(3)]);
 
         let ascending = [AccountId(1), AccountId(2), AccountId(3)];
         assert_eq!(
-            expanded_rows(&ascending, &open),
-            BTreeMap::from([(0, false), (1, false), (2, true)]),
-            "the open account is the last row before the re-sort"
+            expanded_rows(&egui::Context::default(), &ascending, &open),
+            BTreeMap::from([(2, 1.0)]),
+            "the open account is the last row before the re-sort, and no closed row is carried"
         );
 
         let descending = [AccountId(3), AccountId(2), AccountId(1)];
         assert_eq!(
-            expanded_rows(&descending, &open),
-            BTreeMap::from([(0, true), (1, false), (2, false)]),
+            expanded_rows(&egui::Context::default(), &descending, &open),
+            BTreeMap::from([(0, 1.0)]),
             "reversing the order moves the open state with the account, not the index"
         );
 
         assert!(
-            expanded_rows(&[AccountId(1), AccountId(2)], &open).values().all(|expanded| !expanded),
+            expanded_rows(&egui::Context::default(), &[AccountId(1), AccountId(2)], &open).is_empty(),
             "filtering the open account out leaves no row open"
+        );
+    }
+
+    #[test]
+    fn the_row_offset_stacks_only_the_expanded_rows_above_the_queried_one() {
+        let heights = BTreeMap::from([(0, 100.0), (1, 100.0), (2, 100.0)]);
+
+        assert_eq!(
+            row_offset(&heights, &BTreeMap::new(), 2),
+            2.0 * HISTORICAL_ROW_HEIGHT,
+            "with nothing expanded every row is exactly one default height tall"
+        );
+
+        assert_eq!(
+            row_offset(&heights, &BTreeMap::from([(0, 1.0)]), 2),
+            2.0 * HISTORICAL_ROW_HEIGHT + 100.0,
+            "an expanded row above the queried one pushes it down by its measured height"
+        );
+
+        assert_eq!(
+            row_offset(&heights, &BTreeMap::from([(2, 1.0)]), 2),
+            2.0 * HISTORICAL_ROW_HEIGHT,
+            "an expanded row at or below the queried one does not move it"
+        );
+
+        assert_eq!(
+            row_offset(&heights, &BTreeMap::from([(0, 0.25)]), 2),
+            2.0 * HISTORICAL_ROW_HEIGHT + 25.0,
+            "a part-way animation contributes its fraction of the measured height"
+        );
+
+        assert_eq!(
+            row_offset(&BTreeMap::new(), &BTreeMap::from([(0, 1.0)]), 2),
+            2.0 * HISTORICAL_ROW_HEIGHT,
+            "a row expanded but never yet painted contributes nothing until it is measured"
         );
     }
 }

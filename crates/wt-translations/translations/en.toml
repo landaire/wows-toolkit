@@ -584,7 +584,6 @@ encounters = "Seen"
 total_encounters = "Total Encounters"
 encounters_in_range = "Encounters in Time Range"
 last_encountered = "Last Encountered"
-notes = "Notes"
 
 [ui.player_tracker.period]
 past_hour = "Past Hour"
