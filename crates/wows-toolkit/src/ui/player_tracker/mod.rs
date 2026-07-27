@@ -39,10 +39,10 @@ pub struct PlayerTracker {
     pub(crate) sort_order: SortedBy,
     pub(crate) player_filter: String,
 
-    /// Measured heights of the historical table's rows, keyed by row number, so
-    /// `egui_table` can offset rows whose content is taller than the default.
+    /// Measured height of each open historical row's detail block, keyed by row
+    /// number, so `egui_table` can stretch those rows past the default height.
     #[serde(skip)]
-    pub(crate) historical_row_heights: BTreeMap<u64, f32>,
+    pub(crate) historical_detail_heights: BTreeMap<u64, f32>,
 
     /// Accounts whose detail row is open. Keyed by account rather than row index
     /// so a sort or filter change does not move the open row onto another player.

@@ -173,13 +173,13 @@ fn expanded_rows(ctx: &egui::Context, rows: &[AccountId], expanded_players: &Has
 
 /// Vertical offset of `row_nr` from the top of the table body: one default row
 /// height per row above it, plus the animated extra height of the expanded ones.
-fn row_offset(heights: &BTreeMap<u64, f32>, expandedness: &BTreeMap<u64, f32>, row_nr: u64) -> f32 {
+fn row_offset(detail_heights: &BTreeMap<u64, f32>, expandedness: &BTreeMap<u64, f32>, row_nr: u64) -> f32 {
     expandedness
         .range(0..row_nr)
         .map(|(expanded_row_nr, factor)| {
             // A row that has never been painted has no measured height yet;
             // contributing zero offset is right until it is measured.
-            factor * heights.get(expanded_row_nr).copied().unwrap_or(0.0)
+            factor * detail_heights.get(expanded_row_nr).copied().unwrap_or(0.0)
         })
         .sum::<f32>()
         + row_nr as f32 * HISTORICAL_ROW_HEIGHT
@@ -202,7 +202,12 @@ struct RowView {
 struct HistoricalTable<'a> {
     tracker: &'a mut PlayerTracker,
     rows: Vec<AccountId>,
-    row_heights: BTreeMap<u64, f32>,
+    /// Height each open row's detail block adds on top of the default row height,
+    /// measured as it is painted and used to lay the next frame out.
+    detail_heights: BTreeMap<u64, f32>,
+    /// Rows whose detail block has already been claimed this frame, since
+    /// `row_ui` is called once per split-scroll region.
+    detail_rows_painted: HashSet<u64>,
     /// Animation factor per open or still-closing row, derived from
     /// `expanded_players` each frame because `row_top_offset` addresses rows
     /// positionally. Rows contributing no extra height are absent.
@@ -245,6 +250,8 @@ impl HistoricalTable<'_> {
         })
     }
 
+    /// The collapsed content of one cell. The expanded detail block is painted by
+    /// [`egui_table::TableDelegate::row_ui`] instead, so it can span the row.
     fn cell_content_ui(&mut self, row_nr: u64, column: HistoricalColumn, ui: &mut egui::Ui) {
         let Some(view) = self.row_view(row_nr) else {
             return;
@@ -255,111 +262,100 @@ impl HistoricalTable<'_> {
         let expandedness = self.expanded_rows.get(&row_nr).copied().unwrap_or(0.0);
         let mut toggle_expand = false;
 
-        let inner_response = ui.vertical(|ui| {
-            ui.horizontal(|ui| match column {
-                HistoricalColumn::Clan => {
-                    ui.label(&view.clan);
+        ui.horizontal(|ui| match column {
+            HistoricalColumn::Clan => {
+                ui.label(&view.clan);
+            }
+            HistoricalColumn::Player => {
+                let (_, response) = ui.allocate_exact_size(egui::Vec2::splat(10.0), egui::Sense::click());
+                egui::collapsing_header::paint_default_icon(ui, expandedness, &response);
+                if response.clicked() {
+                    toggle_expand = true;
                 }
-                HistoricalColumn::Player => {
-                    let (_, response) = ui.allocate_exact_size(egui::Vec2::splat(10.0), egui::Sense::click());
-                    egui::collapsing_header::paint_default_icon(ui, expandedness, &response);
-                    if response.clicked() {
-                        toggle_expand = true;
-                    }
 
-                    let mut name = RichText::new(&view.last_name);
-                    if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
-                        name = name.color(color);
-                    }
-                    ui.label(name);
+                let mut name = RichText::new(&view.last_name);
+                if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
+                    name = name.color(color);
+                }
+                ui.label(name);
 
-                    let account_text = view.account_id.to_string();
-                    if ui
-                        .add(egui::Label::new(RichText::new(&account_text).small().weak()).sense(egui::Sense::click()))
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .on_hover_text(t!("ui.player_tracker.copy_wg_id"))
-                        .clicked()
-                    {
-                        self.copy_text = Some(account_text);
-                    }
+                let account_text = view.account_id.to_string();
+                if ui
+                    .add(egui::Label::new(RichText::new(&account_text).small().weak()).sense(egui::Sense::click()))
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text(t!("ui.player_tracker.copy_wg_id"))
+                    .clicked()
+                {
+                    self.copy_text = Some(account_text);
+                }
 
-                    if !view.aliases.is_empty() {
-                        ui.label(icons::USERS_THREE)
-                            .on_hover_text(t!("ui.player_tracker.aliases_hover", names = view.aliases.join(", ")));
-                    }
-                }
-                HistoricalColumn::TotalEncounters => {
-                    let mut text = RichText::new(view.total_encounters.to_string());
-                    if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
-                        text = text.color(color);
-                    }
-                    ui.label(text);
-                }
-                HistoricalColumn::EncountersInRange => {
-                    let mut text = RichText::new(view.encounters_in_range.to_string());
-                    if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
-                        text = text.color(color);
-                    }
-                    ui.label(text);
-                }
-                HistoricalColumn::LastEncountered => {
-                    ui.label(&view.last_seen).on_hover_text(&view.last_seen_exact);
-                }
-                HistoricalColumn::Actions => {
-                    if !view.notes.is_empty()
-                        && ui
-                            .add(egui::Label::new(icons::NOTE_PENCIL).sense(egui::Sense::click()))
-                            .on_hover_cursor(egui::CursorIcon::PointingHand)
-                            .on_hover_text(&view.notes)
-                            .clicked()
-                    {
-                        toggle_expand = true;
-                    }
-
-                    if ui.button(icons::MAGNIFYING_GLASS).on_hover_text(t!("ui.player_tracker.find_matches")).clicked()
-                    {
-                        self.find_matches_target = Some(view.account_id);
-                    }
-                }
-            });
-
-            // Only the Player column paints the detail block, so it is not repeated
-            // once per column. Every other column contributes its collapsed height.
-            if 0.0 < expandedness && matches!(column, HistoricalColumn::Player) {
-                ui.add_space(4.0);
                 if !view.aliases.is_empty() {
-                    ui.label(t!("ui.player_tracker.aliases_hover", names = view.aliases.join(", ")));
+                    ui.label(icons::USERS_THREE)
+                        .on_hover_text(t!("ui.player_tracker.aliases_hover", names = view.aliases.join(", ")));
                 }
-                ui.label(t!("ui.player_tracker.last_encountered_exact", timestamp = &view.last_seen_exact));
-                ui.label(t!("ui.player_tracker.arena_count", count = view.total_encounters));
-                ui.add_space(4.0);
-                ui.label(t!("ui.player_tracker.notes_hint"));
+            }
+            HistoricalColumn::TotalEncounters => {
+                let mut text = RichText::new(view.total_encounters.to_string());
+                if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
+                    text = text.color(color);
+                }
+                ui.label(text);
+            }
+            HistoricalColumn::EncountersInRange => {
+                let mut text = RichText::new(view.encounters_in_range.to_string());
+                if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
+                    text = text.color(color);
+                }
+                ui.label(text);
+            }
+            HistoricalColumn::LastEncountered => {
+                ui.label(&view.last_seen).on_hover_text(&view.last_seen_exact);
+            }
+            HistoricalColumn::Actions => {
+                if !view.notes.is_empty()
+                    && ui
+                        .add(egui::Label::new(icons::NOTE_PENCIL).sense(egui::Sense::click()))
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text(&view.notes)
+                        .clicked()
+                {
+                    toggle_expand = true;
+                }
 
-                // `view` is a snapshot, so the editor takes its own mutable borrow here.
-                if let Some(player) = self.tracker.tracked_players.get_mut(&view.account_id) {
-                    ui.add(egui::TextEdit::multiline(&mut player.notes).desired_width(f32::INFINITY).desired_rows(3));
+                if ui.button(icons::MAGNIFYING_GLASS).on_hover_text(t!("ui.player_tracker.find_matches")).clicked() {
+                    self.find_matches_target = Some(view.account_id);
                 }
             }
         });
 
         if toggle_expand {
             // `remove` reports whether it was there, which is the toggle. The row's
-            // animation factor only picks the change up on the next frame, which is
-            // also when the new height gets measured.
+            // animation factor only picks the change up on the next frame.
             if !self.tracker.expanded_players.remove(&view.account_id) {
                 self.tracker.expanded_players.insert(view.account_id);
             }
-            // Force a re-measure at the new height.
-            self.row_heights.remove(&row_nr);
         }
+    }
 
-        let cell_height = inner_response.response.rect.height();
-        // A row that has never been painted has no measured height yet, so seed it
-        // with what this cell just measured and only ever grow it afterwards.
-        let previous_height = self.row_heights.entry(row_nr).or_insert(cell_height);
-        if *previous_height < cell_height {
-            *previous_height = cell_height;
-        }
+    /// The detail block of an open row, filling the row below the collapsed
+    /// content. Returns its height, which is what the row is stretched by.
+    fn detail_ui(&mut self, view: &RowView, ui: &mut egui::Ui) -> f32 {
+        let inner_response = egui::Frame::new().inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
+            if !view.aliases.is_empty() {
+                ui.label(t!("ui.player_tracker.aliases_hover", names = view.aliases.join(", ")));
+            }
+            ui.label(t!("ui.player_tracker.last_encountered_exact", timestamp = &view.last_seen_exact));
+            ui.label(t!("ui.player_tracker.arena_count", count = view.total_encounters));
+            ui.add_space(4.0);
+            ui.label(t!("ui.player_tracker.notes_hint"));
+
+            // `view` is a snapshot, so the editor takes its own mutable borrow here.
+            if let Some(player) = self.tracker.tracked_players.get_mut(&view.account_id) {
+                ui.add(egui::TextEdit::multiline(&mut player.notes).desired_width(f32::INFINITY).desired_rows(3));
+            }
+        });
+
+        inner_response.response.rect.height()
     }
 }
 
@@ -406,13 +402,66 @@ impl egui_table::TableDelegate for HistoricalTable<'_> {
         });
     }
 
-    fn cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::CellInfo) {
-        if cell.row_nr % 2 == 1 {
+    fn row_ui(&mut self, ui: &mut egui::Ui, row_nr: u64) {
+        // Striping belongs here rather than in `cell_ui`, which runs afterwards and
+        // would paint over the detail block.
+        if row_nr % 2 == 1 {
             ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().faint_bg_color);
         }
-        egui::Frame::new().inner_margin(egui::Margin::symmetric(4, 4)).show(ui, |ui| {
+
+        // egui_table drives `row_ui` once per split-scroll region, so the block has
+        // to be claimed by exactly one of them. The fully scrollable region always
+        // runs first and is the wide one, so the first call for a row wins.
+        if !self.detail_rows_painted.insert(row_nr) {
+            return;
+        }
+
+        let expandedness = self.expanded_rows.get(&row_nr).copied().unwrap_or(0.0);
+        if expandedness <= 0.0 {
+            return;
+        }
+        let Some(view) = self.row_view(row_nr) else {
+            return;
+        };
+
+        // The block hangs below the collapsed content and spans the region's
+        // visible width, so the notes editor is not boxed into one column.
+        let row_rect = ui.max_rect();
+        let detail_rect = egui::Rect::from_x_y_ranges(
+            row_rect.x_range().intersection(ui.clip_rect().x_range()),
+            egui::Rangef::new(row_rect.top() + HISTORICAL_ROW_HEIGHT, row_rect.bottom()),
+        );
+
+        let mut detail_ui =
+            ui.new_child(egui::UiBuilder::new().max_rect(detail_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+        // `row_ui` is not clipped to its own row, so without this the block would
+        // paint over the rows below it while the row is still animating open.
+        detail_ui.shrink_clip_rect(row_rect);
+
+        // Deliberately not advancing the row's cursor: the block is measured for the
+        // row height alone and must not feed egui_table's per-column sizing.
+        let height = self.detail_ui(&view, &mut detail_ui);
+        self.detail_heights.insert(row_nr, height);
+    }
+
+    fn cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::CellInfo) {
+        // Cells are handed the whole row, detail block included. Pin the collapsed
+        // content to the top of it, or a vertically centred layout would drift it
+        // into the middle of an open row.
+        let mut content_rect = ui.max_rect();
+        content_rect.max.y = content_rect.min.y + HISTORICAL_ROW_HEIGHT;
+        let mut content_ui = ui.new_child(
+            egui::UiBuilder::new().max_rect(content_rect).layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(4, 4)).show(&mut content_ui, |ui| {
             self.cell_content_ui(cell.row_nr, HISTORICAL_COLUMNS[cell.col_nr], ui);
         });
+
+        // A child `Ui` does not grow its parent, and egui_table sizes columns from
+        // the cell's `min_size`. Without this every column would fit to nothing on
+        // the sizing pass and land on its minimum width.
+        ui.advance_cursor_after_rect(content_ui.min_rect());
     }
 
     fn default_row_height(&self) -> f32 {
@@ -420,7 +469,7 @@ impl egui_table::TableDelegate for HistoricalTable<'_> {
     }
 
     fn row_top_offset(&self, _ctx: &egui::Context, _table_id: egui::Id, row_nr: u64) -> f32 {
-        row_offset(&self.row_heights, &self.expanded_rows, row_nr)
+        row_offset(&self.detail_heights, &self.expanded_rows, row_nr)
     }
 }
 
@@ -519,13 +568,14 @@ impl ToolkitTabViewer<'_> {
                 // mutable borrow.
                 let rows = visible_rows(player_tracker);
                 let expanded_rows = expanded_rows(ui.ctx(), &rows, &player_tracker.expanded_players);
-                let row_heights = std::mem::take(&mut player_tracker.historical_row_heights);
+                let detail_heights = std::mem::take(&mut player_tracker.historical_detail_heights);
                 let filter_range = player_tracker.filter_time_period.to_date();
 
                 let mut delegate = HistoricalTable {
                     tracker: player_tracker,
                     rows,
-                    row_heights,
+                    detail_heights,
+                    detail_rows_painted: Default::default(),
                     expanded_rows,
                     now,
                     filter_range,
@@ -555,7 +605,7 @@ impl ToolkitTabViewer<'_> {
                 if let Some(text) = delegate.copy_text {
                     ui.ctx().copy_text(text);
                 }
-                player_tracker.historical_row_heights = delegate.row_heights;
+                player_tracker.historical_detail_heights = delegate.detail_heights;
             });
         }
 
