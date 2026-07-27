@@ -18,12 +18,12 @@ use super::ExpandingColumn;
 use super::PlayerTracker;
 use super::SortOrder;
 use super::TimePeriod;
+use super::TrackedPlayer;
 use super::cell_is_in_this_region;
 use super::detail_rect;
 use super::encounter_severity_color;
 use super::exact_timestamp_text;
 use super::expanded_rows;
-use super::model::TrackedPlayer;
 use super::relative_age_text;
 use super::row_offset;
 use super::sort_header_label;
@@ -276,7 +276,7 @@ fn sorted_order(rows: &[ClanRow], sort: ClanSortedBy) -> Vec<usize> {
             ClanSortedBy::Sightings(_) => a.sightings.cmp(&b.sightings),
             ClanSortedBy::LastSeen(_) => a.last_seen.cmp(&b.last_seen),
         };
-        let ordering = if sort.order() == SortOrder::Asc { ordering } else { ordering.reverse() };
+        let ordering = sort.order().direct(ordering);
         // Tags are unique, so this makes the order total whatever the key ties on.
         ordering.then_with(|| a.clan.cmp(&b.clan))
     });

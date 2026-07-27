@@ -61,6 +61,16 @@ pub(crate) fn last_seen_text(player: &TrackedPlayer, now: Timestamp) -> String {
     relative_age_text(*last, now)
 }
 
+/// How many of a player's encounters fall inside the active period. `since` is
+/// the period's resolved boundary; `None` is the all-time period, where every
+/// encounter counts.
+pub(crate) fn encounters_in_range(player: &TrackedPlayer, since: Option<Timestamp>) -> usize {
+    match since {
+        Some(since) => player.timestamps.iter().filter(|ts| **ts > since).count(),
+        None => player.timestamps.len(),
+    }
+}
+
 /// Absolute local-time stamp of a tracked player's most recent encounter, for
 /// the hover behind the relative "last seen" text. A tracked player always has
 /// at least one timestamp; an empty hover is the right degradation if that
@@ -222,6 +232,14 @@ pub(crate) enum SortOrder {
 }
 
 impl SortOrder {
+    /// `ordering`, as computed ascending, turned to face this direction.
+    pub(crate) fn direct(self, ordering: std::cmp::Ordering) -> std::cmp::Ordering {
+        match self {
+            SortOrder::Asc => ordering,
+            SortOrder::Desc => ordering.reverse(),
+        }
+    }
+
     pub(crate) fn icon(&self) -> &'static str {
         match self {
             SortOrder::Asc => icons::SORT_ASCENDING,

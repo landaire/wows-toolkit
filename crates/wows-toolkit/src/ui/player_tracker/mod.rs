@@ -14,6 +14,7 @@ pub use model::TrackedPlayer;
 pub(crate) use model::cell_is_in_this_region;
 pub(crate) use model::detail_rect;
 pub(crate) use model::encounter_severity_color;
+pub(crate) use model::encounters_in_range;
 pub(crate) use model::exact_timestamp_text;
 pub(crate) use model::expanded_rows;
 pub(crate) use model::last_seen_text;

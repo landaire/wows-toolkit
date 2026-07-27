@@ -17,9 +17,11 @@ use super::PlayerTracker;
 use super::SortOrder;
 use super::SortedBy;
 use super::TimePeriod;
+use super::TrackedPlayer;
 use super::cell_is_in_this_region;
 use super::detail_rect;
 use super::encounter_severity_color;
+use super::encounters_in_range;
 use super::expanded_rows;
 use super::last_seen_text;
 use super::last_seen_timestamp_text;
@@ -68,8 +70,12 @@ fn visible_rows(tracker: &PlayerTracker) -> Vec<AccountId> {
     let sorted_by = tracker.sort_order;
     let tracked_players_by_ts = &tracker.tracked_players_by_time;
 
+    // Resolved once for the whole call: `to_date` reads the clock, so a
+    // comparator that called it would not be a fixed total order.
+    let filter_range = tracker.filter_time_period.to_date();
+
     // Filter by the date range
-    let player_range: HashSet<_> = if let Some(filter_range) = tracker.filter_time_period.to_date() {
+    let player_range: HashSet<_> = if let Some(filter_range) = filter_range {
         tracked_players_by_ts
             .iter()
             .filter_map(|(ts, ids)| if *ts > filter_range { Some(ids) } else { None })
@@ -80,7 +86,7 @@ fn visible_rows(tracker: &PlayerTracker) -> Vec<AccountId> {
         tracked_players_by_ts.iter().flat_map(|(_ts, ids)| ids).cloned().collect()
     };
 
-    tracker
+    let mut rows: Vec<(AccountId, &TrackedPlayer)> = tracker
         .tracked_players
         .iter()
         .filter(|(id, player)| {
@@ -93,69 +99,38 @@ fn visible_rows(tracker: &PlayerTracker) -> Vec<AccountId> {
                 player_range.contains(id)
             }
         })
-        .sorted_by(|(_ida, playera), (_idb, playerb)| match sorted_by {
-            SortedBy::Name(sort_order) => {
-                let playera_name = &playera.last_name;
-                let playerb_name = &playerb.last_name;
+        .map(|(id, player)| (*id, player))
+        .collect();
 
-                if sort_order == SortOrder::Asc {
-                    playera_name.cmp(playerb_name)
-                } else {
-                    playerb_name.cmp(playera_name)
-                }
-            }
-            SortedBy::Clan(sort_order) => {
-                let playera_clan = &playera.clan;
-                let playerb_clan = &playerb.clan;
+    let ids = |rows: Vec<(AccountId, &TrackedPlayer)>| rows.into_iter().map(|(id, _)| id).collect();
 
-                if sort_order == SortOrder::Asc {
-                    playera_clan.cmp(playerb_clan)
-                } else {
-                    playerb_clan.cmp(playera_clan)
-                }
-            }
-            SortedBy::LastEncountered(sort_order) => {
-                let playera_last = playera.timestamps.last().copied();
-                let playerb_last = playerb.timestamps.last().copied();
-
-                if sort_order == SortOrder::Asc {
-                    playera_last.cmp(&playerb_last)
-                } else {
-                    playerb_last.cmp(&playera_last)
-                }
-            }
-            SortedBy::TimesEncountered(sort_order) => {
-                let playera_count = playera.timestamps.len();
-                let playerb_count = playerb.timestamps.len();
-
-                if sort_order == SortOrder::Asc {
-                    playera_count.cmp(&playerb_count)
-                } else {
-                    playerb_count.cmp(&playera_count)
-                }
-            }
-            SortedBy::TimesEncounteredInTimeRange(sort_order) => {
-                let (playera_count, playerb_count) = if let Some(filter_range) = tracker.filter_time_period.to_date() {
-                    let playera_count = playera.timestamps.iter().filter(|ts| **ts > filter_range).count();
-                    let playerb_count = playerb.timestamps.iter().filter(|ts| **ts > filter_range).count();
-
-                    (playera_count, playerb_count)
-                } else {
-                    let playera_count = playera.timestamps.len();
-                    let playerb_count = playerb.timestamps.len();
-
-                    (playera_count, playerb_count)
-                };
-
-                if sort_order == SortOrder::Asc {
-                    playera_count.cmp(&playerb_count)
-                } else {
-                    playerb_count.cmp(&playera_count)
-                }
-            }
-        })
-        .map(|(id, _)| *id)
-        .collect()
+    match sorted_by {
+        SortedBy::Name(order) => {
+            rows.sort_by(|(_, a), (_, b)| order.direct(a.last_name.cmp(&b.last_name)));
+            ids(rows)
+        }
+        SortedBy::Clan(order) => {
+            rows.sort_by(|(_, a), (_, b)| order.direct(a.clan.cmp(&b.clan)));
+            ids(rows)
+        }
+        SortedBy::LastEncountered(order) => {
+            rows.sort_by(|(_, a), (_, b)| order.direct(a.timestamps.last().cmp(&b.timestamps.last())));
+            ids(rows)
+        }
+        SortedBy::TimesEncountered(order) => {
+            rows.sort_by(|(_, a), (_, b)| order.direct(a.timestamps.len().cmp(&b.timestamps.len())));
+            ids(rows)
+        }
+        // The only key that costs a scan of a player's whole history, and the
+        // default sort: decorated onto the row so the scan runs once per player
+        // instead of once per comparison.
+        SortedBy::TimesEncounteredInTimeRange(order) => {
+            let mut decorated: Vec<(usize, AccountId)> =
+                rows.into_iter().map(|(id, player)| (encounters_in_range(player, filter_range), id)).collect();
+            decorated.sort_by(|(a, _), (b, _)| order.direct(a.cmp(b)));
+            decorated.into_iter().map(|(_, id)| id).collect()
+        }
+    }
 }
 
 /// Salts the row animations so they do not collide with another table's, which
@@ -612,7 +587,6 @@ mod tests {
     use jiff::ToSpan;
 
     use super::*;
-    use crate::ui::player_tracker::TrackedPlayer;
 
     fn player(id: i64, clan: &str, last_name: &str, aliases: &[&str], timestamps: &[Timestamp]) -> TrackedPlayer {
         TrackedPlayer {
