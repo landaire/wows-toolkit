@@ -166,6 +166,8 @@ pub enum FireNodeError {
     ExtenderUnreadable { hull: String, extender: String, detail: String },
     #[error("hull {hull}: fire node EP_Fire_{ordinal} is defined by more than one skeleton extender")]
     DuplicateNode { hull: String, ordinal: u8 },
+    #[error("hull {hull}: fire node EP_Fire_{ordinal} is missing")]
+    MissingNode { hull: String, ordinal: u8 },
     #[error("hull {hull}: expected {expected} fire nodes, found {found}")]
     NodeCountMismatch { hull: String, expected: usize, found: usize },
 }
@@ -207,7 +209,11 @@ pub fn resolve_fire_sections(
     let directory_id = db.paths_storage[entry_index].parent_id;
     let prefix = format!("{stem}_");
 
-    let mut longitudinal: Vec<Option<Meters>> = vec![None; expected_nodes];
+    // Indexed by ordinal minus one, over every ordinal a hull could use, not just
+    // the ones this hull claims: a model carrying more bare-ordinal nodes than the
+    // hull declares is a disagreement, and taking the bow-most subset of it would
+    // silently place the sections on a different hull's geometry.
+    let mut longitudinal: Vec<Option<Meters>> = vec![None; BurnNodeIndex::MAX_NODES as usize];
     for entry in &db.paths_storage {
         if entry.parent_id != directory_id
             || !entry.name.starts_with(&prefix)
@@ -224,9 +230,10 @@ pub fn resolve_fire_sections(
         for (node, &name_id) in extender.name_ids.iter().enumerate() {
             let Some(name) = db.strings.get_string_by_id(name_id) else { continue };
             let Some(ordinal) = burn_node_ordinal(name) else { continue };
-            // Ordinals past the hull's burn-node count are the fireResistance
-            // effect group's extra emitters, not burn nodes.
-            let Some(slot) = (ordinal as usize).checked_sub(1).filter(|slot| *slot < expected_nodes) else {
+            // `burningFlags` has four burn bits, so EP_Fire_5 and above cannot be a
+            // burn node whatever the hull declares; they are the fireResistance
+            // effect group's extra emitters.
+            let Some(slot) = (ordinal as usize).checked_sub(1).filter(|slot| *slot < longitudinal.len()) else {
                 continue;
             };
             let Some(matrix) = extender.matrices.get(node) else { continue };
@@ -238,10 +245,26 @@ pub fn resolve_fire_sections(
     }
 
     let found = longitudinal.iter().filter(|node| node.is_some()).count();
-    if found != expected_nodes {
+    // A shortfall and a surplus are both disagreements, with one exception a
+    // single-section hull earns from GameParams: such a hull has one `fire1`
+    // effect group that owns every emitter it uses, and 38 of the 39 one-section
+    // hulls in the live build list both `HP_FX_Fire_1` and `HP_FX_Fire_2` under
+    // it. The extra ordinal is a second emitter for the same section, and with
+    // one section `nearest_node` has a single answer, so it cannot pick wrong.
+    let surplus_is_extra_emitters = expected_nodes == 1 && found > expected_nodes;
+    if found != expected_nodes && !surplus_is_extra_emitters {
         return Err(FireNodeError::NodeCountMismatch { hull: hull(), expected: expected_nodes, found });
     }
-    Ok(FireSectionGeometry { longitudinal: longitudinal.into_iter().flatten().collect() })
+    // The counts agree, so any gap below `expected_nodes` means an ordinal above it
+    // stood in for a missing one and the sections would be misnumbered.
+    longitudinal.truncate(expected_nodes);
+    let longitudinal = longitudinal
+        .iter()
+        .enumerate()
+        .map(|(slot, node)| node.ok_or(slot))
+        .collect::<Result<Vec<Meters>, usize>>()
+        .map_err(|slot| FireNodeError::MissingNode { hull: hull(), ordinal: slot as u8 + 1 })?;
+    Ok(FireSectionGeometry { longitudinal })
 }
 
 /// Read and parse one skeleton-extender record, describing any failure in a way

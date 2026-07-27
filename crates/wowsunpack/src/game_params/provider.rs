@@ -744,30 +744,43 @@ fn read_flood_prob(hull_data: &pickled::Dict) -> Option<f32> {
     }
 }
 
-/// Read hull `burnNodes`: a list of `(probability, damage, duration)` triples,
-/// one per fire section. Returns empty when the key is absent so callers can
-/// tell "no sections known" from "four sections"; there is no correct default.
+/// Read hull `burnNodes`: a list or tuple of `(probability, damage, duration)`
+/// triples, one per fire section. Returns empty when the key is absent so callers
+/// can tell "no sections known" from "four sections"; there is no correct default.
 fn read_burn_nodes(hull_data: &pickled::Dict) -> Vec<crate::game_params::ttx::components::BurnNode> {
-    let Some(list) = hull_data.get(&pk(keys::BURN_NODES)).and_then(|v| v.list_ref()) else {
+    let Some(value) = hull_data.get(&pk(keys::BURN_NODES)) else {
         return Vec::new();
     };
-    list.inner()
-        .iter()
-        .filter_map(|entry| {
-            let t = read_vec3_value(entry)?;
-            Some(crate::game_params::ttx::components::BurnNode {
-                probability: t[0],
-                damage_fraction_per_sec: t[1],
-                duration_secs: t[2],
-            })
-        })
-        .collect()
+    if let Some(l) = value.list_ref() {
+        burn_nodes_from_entries(l.inner().as_slice())
+    } else if let Some(t) = value.tuple_ref() {
+        burn_nodes_from_entries(t.inner().as_slice())
+    } else {
+        tracing::warn!("burnNodes is neither a list nor a tuple");
+        Vec::new()
+    }
 }
 
-/// Read `size[0]`, the hull length in meters.
-fn read_hull_length(hull_data: &pickled::Dict) -> Option<Meters> {
-    let size = hull_data.get(&pk(keys::SIZE))?;
-    Some(Meters::from(read_vec3_value(size)?[0]))
+/// All or nothing: the length of the result is the hull's fire-section count, so
+/// dropping one unreadable triple would silently turn a four-section hull into a
+/// three-section one for every consumer downstream.
+fn burn_nodes_from_entries(entries: &[Value]) -> Vec<crate::game_params::ttx::components::BurnNode> {
+    let mut nodes = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let Some(t) = read_vec3_value(entry) else {
+            tracing::warn!(
+                entries = entries.len(),
+                "burnNodes entry is not a float triple; treating the hull as having none"
+            );
+            return Vec::new();
+        };
+        nodes.push(crate::game_params::ttx::components::BurnNode {
+            probability: t[0],
+            damage_fraction_per_sec: t[1],
+            duration_secs: t[2],
+        });
+    }
+    nodes
 }
 
 /// Read the submarine `SubmarineBattery` sub-object's `capacity` and `regenRate`
@@ -1376,7 +1389,6 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                     battery_capacity,
                     battery_regen_rate,
                     burn_nodes: read_burn_nodes(&hull_data),
-                    hull_length_m: read_hull_length(&hull_data),
                 },
             );
         }
@@ -2201,6 +2213,10 @@ mod camera_tests {
         Value::List(Shared::new(items))
     }
 
+    fn tuple(items: Vec<Value>) -> Value {
+        Value::Tuple(pickled::value::SharedFrozen::new(items))
+    }
+
     fn dict(entries: Vec<(HashableValue, Value)>) -> Value {
         Value::Dict(Shared::new(entries.into_iter().collect()))
     }
@@ -2508,7 +2524,7 @@ mod camera_tests {
     /// Build a minimal ship dict with just an `A_Hull` component carrying
     /// `burnNodes` and `size`, mirroring Iowa's (`PASB018_Iowa_1944`) real
     /// GameParams values (jaq-verified).
-    fn hull_with_burn_nodes_and_size(entries: Vec<(HashableValue, Value)>) -> pickled::Dict {
+    fn hull_with_burn_nodes(entries: Vec<(HashableValue, Value)>) -> pickled::Dict {
         let a_hull = dict(entries);
         let hull_components = dict(vec![(pk("hull"), list(vec![sv("A_Hull")]))]);
         let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
@@ -2527,19 +2543,16 @@ mod camera_tests {
     /// burnNodes is the per-hull fire-resistance stat plus the section count. Both
     /// are per-hull: surface combatants carry four nodes, most submarines one.
     #[test]
-    fn hull_burn_nodes_and_length_are_extracted() {
-        let ship_data = hull_with_burn_nodes_and_size(vec![
-            (
-                pk(keys::BURN_NODES),
-                list(vec![
-                    list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
-                    list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
-                    list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
-                    list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
-                ]),
-            ),
-            (pk(keys::SIZE), list(vec![fv(262.1), fv(32.97), fv(35.4)])),
-        ]);
+    fn hull_burn_nodes_are_extracted() {
+        let ship_data = hull_with_burn_nodes(vec![(
+            pk(keys::BURN_NODES),
+            list(vec![
+                list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
+                list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
+                list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
+                list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
+            ]),
+        )]);
 
         let vehicle = build_ship(&ship_data);
         let ttx = vehicle.ttx_components().expect("ttx components extracted");
@@ -2549,22 +2562,59 @@ mod camera_tests {
         assert!((hull.burn_nodes[0].probability - 0.6004).abs() < 1e-6);
         assert!((hull.burn_nodes[0].damage_fraction_per_sec - 0.3).abs() < 1e-6);
         assert!((hull.burn_nodes[0].duration_secs - 60.0).abs() < 1e-6);
-        assert_eq!(hull.hull_length_m, Some(Meters::from(262.1)));
     }
 
-    /// A hull with no burnNodes/size keys yields an empty list and no length,
-    /// never a fabricated four-node default. A fabricated count would later make
-    /// fire sections "eligible" that do not exist on the ship.
+    /// One unreadable triple must not shrink the section count. The length of
+    /// `burnNodes` is the authority on how many fire sections a hull has, and a
+    /// silently shortened list would hand a four-section hull to the geometry
+    /// resolver as a three-section one.
     #[test]
-    fn hull_without_burn_nodes_yields_empty_and_no_length() {
-        let ship_data = hull_with_burn_nodes_and_size(vec![]);
+    fn hull_burn_nodes_are_all_or_nothing() {
+        let ship_data = hull_with_burn_nodes(vec![(
+            pk(keys::BURN_NODES),
+            list(vec![
+                list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
+                list(vec![fv(0.6004), fv(0.3)]),
+                list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
+                list(vec![fv(0.6004), fv(0.3), fv(60.0)]),
+            ]),
+        )]);
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+        let hull = ttx.hull("PAUH911_Iowa_1944").expect("hull stats present");
+
+        assert!(hull.burn_nodes.is_empty(), "got {:?}", hull.burn_nodes);
+    }
+
+    /// `burnNodes` is read from a list or a tuple, like every other nested
+    /// vector-of-triples field. Older builds pickle these containers either way.
+    #[test]
+    fn hull_burn_nodes_read_from_a_tuple_container() {
+        let triple = || tuple(vec![fv(0.6004), fv(0.3), fv(60.0)]);
+        let ship_data =
+            hull_with_burn_nodes(vec![(pk(keys::BURN_NODES), tuple(vec![triple(), triple(), triple(), triple()]))]);
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+        let hull = ttx.hull("PAUH911_Iowa_1944").expect("hull stats present");
+
+        assert_eq!(hull.burn_nodes.len(), 4);
+        assert!((hull.burn_nodes[3].duration_secs - 60.0).abs() < 1e-6);
+    }
+
+    /// A hull with no burnNodes key yields an empty list, never a fabricated
+    /// four-node default. A fabricated count would later make fire sections
+    /// "eligible" that do not exist on the ship.
+    #[test]
+    fn hull_without_burn_nodes_yields_empty() {
+        let ship_data = hull_with_burn_nodes(vec![]);
 
         let vehicle = build_ship(&ship_data);
         let ttx = vehicle.ttx_components().expect("ttx components extracted");
         let hull = ttx.hull("PAUH911_Iowa_1944").expect("hull stats present");
 
         assert!(hull.burn_nodes.is_empty());
-        assert_eq!(hull.hull_length_m, None);
     }
 
     /// Build a ship dict mirroring Gearing's (`PASD013_Gearing_1945`) real
