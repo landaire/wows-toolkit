@@ -171,6 +171,25 @@ fn expanded_rows(ctx: &egui::Context, rows: &[AccountId], expanded_players: &Has
         .collect()
 }
 
+/// Where an open row's detail block goes: the whole visible width of the region
+/// painting it, and the part of the row left below the collapsed content.
+///
+/// The width comes from the clip rather than from the row, because the row ends
+/// at the last column and the block should follow the window instead.
+///
+/// `None` when the region has no usable width, which happens when the panel is
+/// narrower than the sticky columns and the scrollable region collapses. Laying
+/// the notes editor out in that rect would wrap it one glyph per line and feed a
+/// wildly inflated height into every row offset below it.
+fn detail_rect(row_rect: egui::Rect, clip_rect: egui::Rect) -> Option<egui::Rect> {
+    let rect = egui::Rect::from_x_y_ranges(
+        clip_rect.x_range(),
+        egui::Rangef::new(row_rect.top() + HISTORICAL_ROW_HEIGHT, row_rect.bottom()),
+    );
+
+    (0.0 < rect.width()).then_some(rect)
+}
+
 /// Vertical offset of `row_nr` from the top of the table body: one default row
 /// height per row above it, plus the animated extra height of the expanded ones.
 fn row_offset(detail_heights: &BTreeMap<u64, f32>, expandedness: &BTreeMap<u64, f32>, row_nr: u64) -> f32 {
@@ -424,13 +443,10 @@ impl egui_table::TableDelegate for HistoricalTable<'_> {
             return;
         };
 
-        // The block hangs below the collapsed content and spans the region's
-        // visible width, so the notes editor is not boxed into one column.
         let row_rect = ui.max_rect();
-        let detail_rect = egui::Rect::from_x_y_ranges(
-            row_rect.x_range().intersection(ui.clip_rect().x_range()),
-            egui::Rangef::new(row_rect.top() + HISTORICAL_ROW_HEIGHT, row_rect.bottom()),
-        );
+        let Some(detail_rect) = detail_rect(row_rect, ui.clip_rect()) else {
+            return;
+        };
 
         let mut detail_ui =
             ui.new_child(egui::UiBuilder::new().max_rect(detail_rect).layout(egui::Layout::top_down(egui::Align::Min)));
@@ -805,7 +821,7 @@ mod tests {
 
     #[test]
     fn the_row_offset_stacks_only_the_expanded_rows_above_the_queried_one() {
-        let heights = BTreeMap::from([(0, 100.0), (1, 100.0), (2, 100.0)]);
+        let heights = BTreeMap::from([(0, 100.0), (1, 100.0), (2, 100.0), (3, 100.0)]);
 
         assert_eq!(
             row_offset(&heights, &BTreeMap::new(), 2),
@@ -822,7 +838,13 @@ mod tests {
         assert_eq!(
             row_offset(&heights, &BTreeMap::from([(2, 1.0)]), 2),
             2.0 * HISTORICAL_ROW_HEIGHT,
-            "an expanded row at or below the queried one does not move it"
+            "the queried row's own expansion does not move its top edge"
+        );
+
+        assert_eq!(
+            row_offset(&heights, &BTreeMap::from([(3, 1.0)]), 2),
+            2.0 * HISTORICAL_ROW_HEIGHT,
+            "an expanded row below the queried one does not move it"
         );
 
         assert_eq!(
@@ -836,5 +858,55 @@ mod tests {
             2.0 * HISTORICAL_ROW_HEIGHT,
             "a row expanded but never yet painted contributes nothing until it is measured"
         );
+    }
+
+    /// The identity the whole layout rests on: a row is exactly as tall as the
+    /// collapsed content plus however much of its detail block is showing. If this
+    /// drifts, rows overlap or gap and nothing else catches it.
+    #[test]
+    fn a_rows_height_is_the_default_plus_its_animated_detail_block() {
+        let heights = BTreeMap::from([(1, 80.0)]);
+        let height_of_row_1 = |expandedness: &BTreeMap<u64, f32>| {
+            row_offset(&heights, expandedness, 2) - row_offset(&heights, expandedness, 1)
+        };
+
+        assert_eq!(
+            height_of_row_1(&BTreeMap::new()),
+            HISTORICAL_ROW_HEIGHT,
+            "a closed row is exactly the default height"
+        );
+
+        // 0.25 and 1.0 are exact in binary, so these compare without a tolerance.
+        for factor in [0.25_f32, 1.0] {
+            assert_eq!(
+                height_of_row_1(&BTreeMap::from([(1, factor)])),
+                HISTORICAL_ROW_HEIGHT + factor * 80.0,
+                "a row {factor} of the way open is the default height plus that share of its block"
+            );
+        }
+    }
+
+    #[test]
+    fn the_detail_rect_takes_its_width_from_the_region_and_its_band_from_the_row() {
+        let row = egui::Rect::from_min_max(egui::pos2(0.0, 100.0), egui::pos2(750.0, 210.0));
+        // Wider than the row on the right and clipped by the sticky columns on the
+        // left, which is what the scrollable region hands over.
+        let clip = egui::Rect::from_min_max(egui::pos2(290.0, 0.0), egui::pos2(1400.0, 900.0));
+
+        let rect = detail_rect(row, clip).expect("a positive-width region yields a rect");
+        assert_eq!(rect.x_range(), clip.x_range(), "the width follows the region, not the last column");
+        assert_eq!(rect.top(), row.top() + HISTORICAL_ROW_HEIGHT, "the block starts below the collapsed content");
+        assert_eq!(rect.bottom(), row.bottom(), "the block ends with the row");
+    }
+
+    #[test]
+    fn the_detail_rect_is_none_when_the_region_has_no_width() {
+        let row = egui::Rect::from_min_max(egui::pos2(0.0, 100.0), egui::pos2(750.0, 210.0));
+
+        let collapsed = egui::Rect::from_min_max(egui::pos2(290.0, 0.0), egui::pos2(290.0, 900.0));
+        assert_eq!(detail_rect(row, collapsed), None, "a panel narrower than the sticky columns yields no block");
+
+        let inverted = egui::Rect::from_min_max(egui::pos2(290.0, 0.0), egui::pos2(250.0, 900.0));
+        assert_eq!(detail_rect(row, inverted), None, "a negative-width region yields no block");
     }
 }
