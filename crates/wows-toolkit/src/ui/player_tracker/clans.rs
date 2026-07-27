@@ -42,14 +42,53 @@ pub(crate) struct ClanRow {
     pub last_seen: Timestamp,
 }
 
+/// What the index-sourced inputs to a breakdown were fetched against.
+///
+/// Neither [`query::distinct_players`] nor [`query::clan_history_corrections`]
+/// takes the time window, so nothing the user does to the period or the
+/// division toggle can move their results. Only two things can: the tracker
+/// ingesting history, and the replay index gaining rows.
+///
+/// [`query::distinct_players`]: crate::db::index::query::distinct_players
+/// [`query::clan_history_corrections`]: crate::db::index::query::clan_history_corrections
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct IndexInputsKey {
+    /// [`PlayerTracker::encounter_version`] at fetch time, so newly ingested
+    /// history invalidates. A count of tracked players would not: a battle
+    /// against players already in the tracker adds arena ids and timestamps to
+    /// existing entries and leaves the map the same size.
+    pub encounter_version: u64,
+    /// [`crate::data::replay_index::index_generation`] at fetch time.
+    /// Background indexing writes rows the queries read without touching the
+    /// tracker, so on the all-time period, whose window never moves, this is
+    /// the only thing that can invalidate clan attribution.
+    pub index_generation: u64,
+}
+
+/// The index's latest clan per account and the per-encounter clan corrections,
+/// with the key they were fetched against.
+///
+/// Held across frames rather than fetched per rebuild: the queries run
+/// synchronously on the UI thread, and the window in the rows' key moves with
+/// wall-clock time while this key does not. The memory is one clan string per
+/// account the index knows plus one row per historical clan change.
+#[derive(Debug, Clone)]
+pub(crate) struct ClanIndexInputs {
+    pub key: IndexInputsKey,
+    /// When the queries behind these answers ran, which bounds how often an
+    /// index that is still growing may re-run them. See
+    /// [`INDEX_REFETCH_INTERVAL`].
+    pub fetched_at: Timestamp,
+    pub latest: HashMap<AccountId, String>,
+    pub corrections: Vec<ClanCorrection>,
+}
+
 /// The clan rows, with the cache key they were built against.
 #[derive(Debug, Clone)]
 pub(crate) struct ClanBreakdown {
-    /// [`PlayerTracker::encounter_version`] this was built against, so newly
-    /// ingested history invalidates it. A count of tracked players would not:
-    /// a battle against players already in the tracker adds arena ids and
-    /// timestamps to existing entries and leaves the map the same size.
-    pub encounter_version: u64,
+    /// The inputs key these rows were counted over. Rows built from one set of
+    /// index answers cannot outlive them.
+    pub inputs_key: IndexInputsKey,
     /// The division-mate toggle these rows were counted under, so flipping it
     /// rebuilds them rather than leaving counts taken over the other set of
     /// encounters on screen.
@@ -84,11 +123,11 @@ struct ClanAccumulator {
 /// per encounter under each of the two keys, so a player met both in and out of
 /// your division still contributes the meetings outside it.
 ///
-/// `encounter_version` is the tracker's version of `tracked` at the time of the
-/// call, carried on the result as its cache key.
+/// `inputs_key` describes where `index_latest_clan` and `corrections` came
+/// from, and is carried on the result as part of its cache key.
 pub(crate) fn build_clan_breakdown(
     tracked: &HashMap<AccountId, TrackedPlayer>,
-    encounter_version: u64,
+    inputs_key: IndexInputsKey,
     index_latest_clan: &HashMap<AccountId, String>,
     corrections: &[ClanCorrection],
     since: Option<Timestamp>,
@@ -167,7 +206,7 @@ pub(crate) fn build_clan_breakdown(
 
     rows.sort_by(|a, b| b.matches.cmp(&a.matches).then_with(|| a.clan.cmp(&b.clan)));
 
-    ClanBreakdown { encounter_version, show_division_mates, rows }
+    ClanBreakdown { inputs_key, show_division_mates, rows }
 }
 
 /// Columns of the clans table, in render order.
@@ -627,59 +666,108 @@ impl BreakdownWindow {
 
 /// Whether a cached breakdown still matches what it would be built from now.
 ///
-/// `encounter_version` moves on every ingest, including a battle against
-/// players the tracker already holds, which is exactly the population this tab
-/// exists to surface. The division-mate toggle rides on the breakdown itself,
-/// beside the version, because it decides which accounts were counted at all.
+/// The inputs key moves on every ingest, including a battle against players the
+/// tracker already holds, which is exactly the population this tab exists to
+/// surface, and on every index write. The division-mate toggle rides on the
+/// breakdown itself, beside the key, because it decides which accounts were
+/// counted at all. The window is cached separately because it belongs to the
+/// clock rather than to the rows' contents.
 fn breakdown_is_current(
     breakdown: Option<&ClanBreakdown>,
     cached_window: Option<BreakdownWindow>,
     window: BreakdownWindow,
-    encounter_version: u64,
+    inputs_key: IndexInputsKey,
     show_division_mates: bool,
 ) -> bool {
     breakdown.is_some_and(|breakdown| {
-        breakdown.encounter_version == encounter_version && breakdown.show_division_mates == show_division_mates
+        breakdown.inputs_key == inputs_key && breakdown.show_division_mates == show_division_mates
     }) && cached_window == Some(window)
 }
 
-/// Rebuild the breakdown when one of its inputs changed. The index queries run
-/// synchronously on the UI thread, the way `populate_from_index` does on its
-/// button press, so this must not fire on an unchanged frame.
+/// How long a set of index answers is kept while the index is still growing.
+///
+/// An indexing pass writes one row set per replay, so a backfill moves the
+/// generation many times a second. Acting on each move would put both queries
+/// back on every frame, which is the stall this cache exists to prevent. The
+/// interval only ever delays a fetch the index has already earned: with the
+/// index idle the generation never moves and no frame queries at all.
+const INDEX_REFETCH_INTERVAL: jiff::SignedDuration = jiff::SignedDuration::from_secs(5);
+
+/// Whether the cached index answers have to be fetched again.
+///
+/// A tracker ingest is one discrete event carrying the counts the tab is open
+/// for, so it fetches on the spot. Index writes arrive in bursts, so they fetch
+/// at most once per [`INDEX_REFETCH_INTERVAL`]; the generation they moved to is
+/// still there on the frame the interval runs out.
+fn inputs_are_stale(cached: &ClanIndexInputs, key: IndexInputsKey, now: Timestamp) -> bool {
+    cached.key.encounter_version != key.encounter_version
+        || (cached.key.index_generation != key.index_generation
+            && now.duration_since(cached.fetched_at) >= INDEX_REFETCH_INTERVAL)
+}
+
+/// Rebuild whatever the cached breakdown's inputs invalidated.
+///
+/// `fetch` runs the index queries, which are synchronous on the UI thread the
+/// way `populate_from_index` is on its button press. It only runs when the
+/// index-sourced inputs themselves are stale, so a window that moved with the
+/// clock re-counts the rows out of the cached inputs and touches no SQLite, and
+/// an unchanged frame does neither.
+fn refresh_clan_breakdown_with<F>(tracker: &mut PlayerTracker, index_generation: u64, now: Timestamp, fetch: F)
+where
+    F: FnOnce() -> (HashMap<AccountId, String>, Vec<ClanCorrection>),
+{
+    let key = IndexInputsKey { encounter_version: tracker.encounter_version, index_generation };
+    let window = BreakdownWindow::resolve(tracker.filter_time_period);
+
+    // Taken out so the fetch and the build below can borrow the tracker; put
+    // back at the end whichever branch ran.
+    let inputs = match tracker.clan_index_inputs.take() {
+        Some(cached) if !inputs_are_stale(&cached, key, now) => cached,
+        _ => {
+            let (latest, corrections) = fetch();
+            ClanIndexInputs { key, fetched_at: now, latest, corrections }
+        }
+    };
+
+    // The answers' own key rather than `key`: a coalesced index write leaves
+    // the two apart, and the rows describe the answers they were counted over.
+    if !breakdown_is_current(
+        tracker.clan_breakdown.as_ref(),
+        tracker.clan_breakdown_window,
+        window,
+        inputs.key,
+        tracker.show_division_mates,
+    ) {
+        // Built from the same truncated boundary the key carries, so the rows
+        // and the key describe the same window.
+        tracker.clan_breakdown = Some(build_clan_breakdown(
+            &tracker.tracked_players,
+            inputs.key,
+            &inputs.latest,
+            &inputs.corrections,
+            window.since,
+            tracker.show_division_mates,
+        ));
+        tracker.clan_breakdown_window = Some(window);
+    }
+
+    tracker.clan_index_inputs = Some(inputs);
+}
+
+/// [`refresh_clan_breakdown_with`] against the live index.
 fn refresh_clan_breakdown(
     tracker: &mut PlayerTracker,
     pool: Option<&sqlx::SqlitePool>,
     rt: Option<&tokio::runtime::Runtime>,
+    now: Timestamp,
 ) {
-    let window = BreakdownWindow::resolve(tracker.filter_time_period);
-    if breakdown_is_current(
-        tracker.clan_breakdown.as_ref(),
-        tracker.clan_breakdown_window,
-        window,
-        tracker.encounter_version,
-        tracker.show_division_mates,
-    ) {
-        return;
-    }
-
-    let (latest, corrections) = match (pool, rt) {
+    let generation = crate::data::replay_index::index_generation();
+    refresh_clan_breakdown_with(tracker, generation, now, || match (pool, rt) {
         (Some(pool), Some(rt)) => fetch_index_inputs(pool, rt),
         // With no index open there is nothing to correct against, so every
         // encounter falls back to the player's current clan.
         _ => (HashMap::new(), Vec::new()),
-    };
-
-    // Built from the same truncated boundary the key carries, so the rows and
-    // the key describe the same window.
-    tracker.clan_breakdown = Some(build_clan_breakdown(
-        &tracker.tracked_players,
-        tracker.encounter_version,
-        &latest,
-        &corrections,
-        window.since,
-        tracker.show_division_mates,
-    ));
-    tracker.clan_breakdown_window = Some(window);
+    });
 }
 
 impl ToolkitTabViewer<'_> {
@@ -704,6 +792,7 @@ impl ToolkitTabViewer<'_> {
                 player_tracker,
                 self.tab_state.db_pool.as_ref(),
                 self.tab_state.tokio_runtime.as_deref(),
+                now,
             );
 
             ui.vertical(|ui| {
@@ -856,11 +945,35 @@ mod tests {
         entries.iter().map(|(id, p)| (AccountId(*id), p.clone())).collect()
     }
 
+    /// An inputs key for a tracker at `encounter_version` over an index that
+    /// has written nothing this session.
+    fn key(encounter_version: u64) -> IndexInputsKey {
+        IndexInputsKey { encounter_version, index_generation: 0 }
+    }
+
+    /// `seconds` into a run, as the clock the refetch interval is measured on.
+    /// Independent of the wall clock the window is resolved against, which the
+    /// interval has no say over.
+    fn fetch_clock(seconds: i64) -> Timestamp {
+        Timestamp::from_second(1_700_000_000 + seconds).expect("fixture timestamp is in range")
+    }
+
+    /// A refresh whose index queries answer nothing and count their own calls,
+    /// which is what tells a re-fetch from a re-count of the cached answers.
+    fn counting_refresh(fetches: &std::cell::Cell<usize>) -> impl Fn(&mut PlayerTracker, u64, Timestamp) + '_ {
+        move |tracker, index_generation, now| {
+            refresh_clan_breakdown_with(tracker, index_generation, now, || {
+                fetches.set(fetches.get() + 1);
+                (HashMap::new(), Vec::new())
+            });
+        }
+    }
+
     #[test]
     fn groups_by_latest_clan_when_the_index_has_no_corrections() {
         let players = tracked(&[(1, player("RAIN", &[(10, 1000), (11, 2000)])), (2, player("RAIN", &[(10, 1000)]))]);
 
-        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, false);
+        let breakdown = build_clan_breakdown(&players, key(0), &HashMap::new(), &[], None, false);
 
         assert_eq!(breakdown.rows.len(), 1);
         let rain = &breakdown.rows[0];
@@ -882,7 +995,7 @@ mod tests {
             clan: "RAIN".into(),
         }];
 
-        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &corrections, None, false);
+        let breakdown = build_clan_breakdown(&players, key(0), &HashMap::new(), &corrections, None, false);
 
         let wolf = breakdown.rows.iter().find(|r| r.clan == "WOLF").expect("WOLF row");
         let rain = breakdown.rows.iter().find(|r| r.clan == "RAIN").expect("RAIN row");
@@ -895,7 +1008,7 @@ mod tests {
         let players = tracked(&[(1, player("STALE", &[(10, 1000)]))]);
         let latest = HashMap::from([(AccountId(1), "FRESH".to_string())]);
 
-        let breakdown = build_clan_breakdown(&players, 0, &latest, &[], None, false);
+        let breakdown = build_clan_breakdown(&players, key(0), &latest, &[], None, false);
 
         assert_eq!(breakdown.rows.len(), 1);
         assert_eq!(breakdown.rows[0].clan, "FRESH");
@@ -905,7 +1018,7 @@ mod tests {
     fn clanless_players_are_excluded() {
         let players = tracked(&[(1, player("", &[(10, 1000)]))]);
 
-        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, false);
+        let breakdown = build_clan_breakdown(&players, key(0), &HashMap::new(), &[], None, false);
 
         assert!(breakdown.rows.is_empty());
     }
@@ -920,7 +1033,7 @@ mod tests {
             clan: String::new(),
         }];
 
-        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &corrections, None, false);
+        let breakdown = build_clan_breakdown(&players, key(0), &HashMap::new(), &corrections, None, false);
 
         assert_eq!(breakdown.rows.len(), 1);
         assert_eq!(breakdown.rows[0].matches, 1);
@@ -930,8 +1043,14 @@ mod tests {
     fn the_range_filter_counts_only_timestamps_after_since() {
         let players = tracked(&[(1, player("RAIN", &[(10, 1000), (11, 5000)]))]);
 
-        let breakdown =
-            build_clan_breakdown(&players, 0, &HashMap::new(), &[], Some(Timestamp::from_second(3000).unwrap()), false);
+        let breakdown = build_clan_breakdown(
+            &players,
+            key(0),
+            &HashMap::new(),
+            &[],
+            Some(Timestamp::from_second(3000).unwrap()),
+            false,
+        );
 
         let rain = &breakdown.rows[0];
         assert_eq!(rain.matches, 2);
@@ -944,26 +1063,51 @@ mod tests {
     /// thread, so an unchanged frame must not invalidate the cache.
     #[test]
     fn the_cached_breakdown_is_invalidated_by_its_inputs_and_nothing_else() {
-        let breakdown =
-            build_clan_breakdown(&tracked(&[(1, player("RAIN", &[(10, 1000)]))]), 7, &HashMap::new(), &[], None, false);
+        let breakdown = build_clan_breakdown(
+            &tracked(&[(1, player("RAIN", &[(10, 1000)]))]),
+            key(7),
+            &HashMap::new(),
+            &[],
+            None,
+            false,
+        );
         let window = BreakdownWindow::resolve(TimePeriod::LastDay);
         let cached = Some(window);
 
         assert!(
-            breakdown_is_current(Some(&breakdown), cached, window, 7, false),
-            "an unchanged frame must reuse the cache rather than re-run the index queries"
+            breakdown_is_current(Some(&breakdown), cached, window, key(7), false),
+            "an unchanged frame must reuse the cache rather than re-count the rows"
         );
         assert!(
-            !breakdown_is_current(Some(&breakdown), cached, BreakdownWindow::resolve(TimePeriod::LastWeek), 7, false),
+            !breakdown_is_current(
+                Some(&breakdown),
+                cached,
+                BreakdownWindow::resolve(TimePeriod::LastWeek),
+                key(7),
+                false
+            ),
             "changing the period on either sub-tab must invalidate the cache"
         );
         assert!(
-            !breakdown_is_current(Some(&breakdown), cached, window, 8, false),
+            !breakdown_is_current(Some(&breakdown), cached, window, key(8), false),
             "newly ingested history must invalidate the cache"
         );
-        assert!(!breakdown_is_current(None, cached, window, 7, false), "the first paint of the tab has nothing cached");
         assert!(
-            !breakdown_is_current(Some(&breakdown), cached, window, 7, true),
+            !breakdown_is_current(
+                Some(&breakdown),
+                cached,
+                window,
+                IndexInputsKey { encounter_version: 7, index_generation: 1 },
+                false
+            ),
+            "an index that gained rows must invalidate the cache"
+        );
+        assert!(
+            !breakdown_is_current(None, cached, window, key(7), false),
+            "the first paint of the tab has nothing cached"
+        );
+        assert!(
+            !breakdown_is_current(Some(&breakdown), cached, window, key(7), true),
             "flipping the division-mate toggle must invalidate the cache, or the counts stay as they were"
         );
     }
@@ -979,7 +1123,7 @@ mod tests {
             (2, with_division(player("RAIN", &[(10, 1000), (12, 3000)]), &[(12, 3000)])),
         ]);
 
-        let hidden = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, false);
+        let hidden = build_clan_breakdown(&players, key(0), &HashMap::new(), &[], None, false);
         assert_eq!(hidden.rows.len(), 1);
         let rain = &hidden.rows[0];
         assert_eq!(rain.members.len(), 2, "the opponent encounter keeps account 2 a member");
@@ -989,7 +1133,7 @@ mod tests {
         assert_eq!(rain.sightings_in_range, 3);
         assert_eq!(rain.last_seen, Timestamp::from_second(2000).unwrap(), "the division battle is not the last seen");
 
-        let shown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, true);
+        let shown = build_clan_breakdown(&players, key(0), &HashMap::new(), &[], None, true);
         let rain = &shown.rows[0];
         assert_eq!(rain.members.len(), 2);
         assert_eq!(rain.matches, 3);
@@ -1008,11 +1152,11 @@ mod tests {
             (2, with_division(player("WOLF", &[(11, 2000)]), &[(11, 2000)])),
         ]);
 
-        let hidden = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, false);
+        let hidden = build_clan_breakdown(&players, key(0), &HashMap::new(), &[], None, false);
         assert_eq!(hidden.rows.len(), 1);
         assert_eq!(hidden.rows[0].clan, "RAIN");
 
-        let shown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, true);
+        let shown = build_clan_breakdown(&players, key(0), &HashMap::new(), &[], None, true);
         assert_eq!(shown.rows.len(), 2);
     }
 
@@ -1021,24 +1165,140 @@ mod tests {
     /// the clock the two would report different counts for the same window.
     #[test]
     fn the_cached_breakdown_expires_when_its_boundary_moves_past_a_minute() {
-        let breakdown =
-            build_clan_breakdown(&tracked(&[(1, player("RAIN", &[(10, 1000)]))]), 7, &HashMap::new(), &[], None, false);
+        let breakdown = build_clan_breakdown(
+            &tracked(&[(1, player("RAIN", &[(10, 1000)]))]),
+            key(7),
+            &HashMap::new(),
+            &[],
+            None,
+            false,
+        );
         let window = BreakdownWindow::resolve(TimePeriod::LastHour);
         let since = window.since.expect("an hour-long period has a boundary");
 
         let a_minute_later = BreakdownWindow { since: Some(since + 1.minute()), ..window };
         assert!(
-            !breakdown_is_current(Some(&breakdown), Some(window), a_minute_later, 7, false),
+            !breakdown_is_current(Some(&breakdown), Some(window), a_minute_later, key(7), false),
             "a boundary that has moved on must rebuild, or the two sub-tabs disagree"
         );
 
         // What repainting a few seconds later resolves to: the same key, so the
-        // index queries stay put.
+        // rows stay put.
         let within_the_same_minute =
             BreakdownWindow { since: Some(truncate_to_minute(since + 20.seconds())), ..window };
         assert!(
-            breakdown_is_current(Some(&breakdown), Some(window), within_the_same_minute, 7, false),
+            breakdown_is_current(Some(&breakdown), Some(window), within_the_same_minute, key(7), false),
             "a frame inside the same minute must reuse the cache"
+        );
+    }
+
+    /// Rebuilding the rows for a window that moved with the clock is pure work
+    /// over the cached inputs. Only a tracker ingest or an index write can move
+    /// what the index queries answer, so only those may pay for them.
+    #[test]
+    fn a_window_that_moved_re_counts_the_rows_without_re_fetching() {
+        let mut tracker = PlayerTracker { filter_time_period: TimePeriod::LastHour, ..PlayerTracker::default() };
+        let window = BreakdownWindow::resolve(TimePeriod::LastHour);
+        let boundary = window.since.expect("an hour-long period has a boundary");
+
+        // One encounter exactly on the current boundary, which `timestamp >
+        // since` leaves outside the window and inside the one a minute older.
+        // So a re-count against the window that moved is visible in the counts.
+        let mut met = player("RAIN", &[]);
+        met.arena_ids.insert(ArenaId::new(10));
+        met.timestamps.insert(boundary);
+        tracker.tracked_players.insert(AccountId(1), met);
+
+        let seeded = IndexInputsKey { encounter_version: tracker.encounter_version, index_generation: 3 };
+        let stale_window = BreakdownWindow { since: Some(boundary - 1.minute()), ..window };
+        tracker.clan_index_inputs = Some(ClanIndexInputs {
+            key: seeded,
+            fetched_at: fetch_clock(0),
+            latest: HashMap::new(),
+            corrections: Vec::new(),
+        });
+        tracker.clan_breakdown = Some(build_clan_breakdown(
+            &tracker.tracked_players,
+            seeded,
+            &HashMap::new(),
+            &[],
+            stale_window.since,
+            false,
+        ));
+        tracker.clan_breakdown_window = Some(stale_window);
+
+        let in_range = |tracker: &PlayerTracker| {
+            tracker.clan_breakdown.as_ref().expect("the breakdown is seeded").rows[0].matches_in_range
+        };
+        assert_eq!(in_range(&tracker), 1, "the older boundary has the encounter inside the window");
+
+        let fetches = std::cell::Cell::new(0usize);
+        let refresh = counting_refresh(&fetches);
+
+        refresh(&mut tracker, 3, fetch_clock(1));
+        assert_eq!(fetches.get(), 0, "a window that only moved with the clock must not re-run the index queries");
+        assert_eq!(in_range(&tracker), 0, "the rows must be re-counted against the window that moved");
+
+        refresh(&mut tracker, 3, fetch_clock(2));
+        assert_eq!(fetches.get(), 0, "an unchanged frame must do neither");
+
+        tracker.note_encounters_changed();
+        refresh(&mut tracker, 3, fetch_clock(3));
+        assert_eq!(fetches.get(), 1, "newly ingested history must re-run the index queries");
+
+        refresh(&mut tracker, 4, fetch_clock(100));
+        assert_eq!(fetches.get(), 2, "an index that gained rows must re-run the index queries");
+    }
+
+    /// The all-time window never moves and background indexing never touches
+    /// the tracker, so without the index generation in the key an indexing pass
+    /// could leave clan attribution stale for the whole session.
+    #[test]
+    fn the_all_time_period_still_re_fetches_when_the_index_gains_rows() {
+        let mut tracker = PlayerTracker { filter_time_period: TimePeriod::AllTime, ..PlayerTracker::default() };
+        tracker.tracked_players.insert(AccountId(1), player("RAIN", &[(10, 1000)]));
+
+        let fetches = std::cell::Cell::new(0usize);
+        let refresh = counting_refresh(&fetches);
+
+        refresh(&mut tracker, 0, fetch_clock(0));
+        assert_eq!(fetches.get(), 1, "the first paint of the tab has nothing cached");
+        refresh(&mut tracker, 0, fetch_clock(1));
+        assert_eq!(fetches.get(), 1, "an all-time window never moves, so the frames after it are free");
+
+        refresh(&mut tracker, 1, fetch_clock(100));
+        assert_eq!(fetches.get(), 2, "an index write is the all-time period's only invalidator");
+        assert_eq!(
+            tracker.clan_breakdown.as_ref().expect("the breakdown is built").inputs_key.index_generation,
+            1,
+            "and the rows have to be re-counted over the answers it fetched"
+        );
+    }
+
+    /// An indexing pass moves the generation once per replay. Following each
+    /// move would put both queries back on every frame of a backfill, so they
+    /// are coalesced onto one fetch per interval.
+    #[test]
+    fn a_burst_of_index_writes_fetches_once_per_interval() {
+        let mut tracker = PlayerTracker { filter_time_period: TimePeriod::AllTime, ..PlayerTracker::default() };
+        tracker.tracked_players.insert(AccountId(1), player("RAIN", &[(10, 1000)]));
+
+        let fetches = std::cell::Cell::new(0usize);
+        let refresh = counting_refresh(&fetches);
+
+        refresh(&mut tracker, 0, fetch_clock(0));
+        assert_eq!(fetches.get(), 1, "the first paint of the tab has nothing cached");
+
+        refresh(&mut tracker, 1, fetch_clock(1));
+        refresh(&mut tracker, 2, fetch_clock(4));
+        assert_eq!(fetches.get(), 1, "writes inside the interval wait for it rather than querying per frame");
+
+        refresh(&mut tracker, 3, fetch_clock(5));
+        assert_eq!(fetches.get(), 2, "and the interval running out picks the generation up as it stands then");
+        assert_eq!(
+            tracker.clan_breakdown.as_ref().expect("the breakdown is built").inputs_key.index_generation,
+            3,
+            "the writes it waited through are all in that one fetch"
         );
     }
 
@@ -1084,7 +1344,7 @@ mod tests {
 
         let breakdown = build_clan_breakdown(
             &tracker.tracked_players,
-            tracker.encounter_version,
+            key(tracker.encounter_version),
             &HashMap::new(),
             &[],
             None,
@@ -1092,7 +1352,7 @@ mod tests {
         );
         let window = BreakdownWindow::resolve(TimePeriod::LastDay);
         let cached = Some(window);
-        assert!(breakdown_is_current(Some(&breakdown), cached, window, tracker.encounter_version, false));
+        assert!(breakdown_is_current(Some(&breakdown), cached, window, key(tracker.encounter_version), false));
 
         // What a second battle against the same player does to the tracker.
         let players_before = tracker.tracked_players.len();
@@ -1103,7 +1363,7 @@ mod tests {
 
         assert_eq!(tracker.tracked_players.len(), players_before, "a repeat encounter adds no tracked player");
         assert!(
-            !breakdown_is_current(Some(&breakdown), cached, window, tracker.encounter_version, false),
+            !breakdown_is_current(Some(&breakdown), cached, window, key(tracker.encounter_version), false),
             "a repeat encounter must invalidate the cache, or the tab shows stale counts"
         );
     }

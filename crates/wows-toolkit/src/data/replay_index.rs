@@ -1,6 +1,9 @@
 //! Map a parsed `Replay` into replay-index rows (objective match, roster, record).
 //! Mirrors `PerGameStat::from_replay` and `Vehicle::new` for field extraction.
 
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+
 use jiff::Timestamp;
 use sqlx::SqlitePool;
 use tokio::runtime::Runtime;
@@ -183,10 +186,29 @@ pub fn apply_sniper_flags(vehicles: &mut [IndexedVehicleRow], observations: &[(S
     }
 }
 
+/// Counts the index writes this process has made.
+///
+/// Every write goes through [`write_index`] on one of this process's own
+/// background parser threads, so a process-local counter sees all of them and
+/// costs a query nothing. A UI cache fed by index queries holds the value it
+/// last read and rebuilds when it moves, which is what lets background indexing
+/// invalidate a cache that no user action touched.
+static INDEX_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// How many times index rows have been written since launch.
+///
+/// Relaxed: the rows behind a bump are committed to SQLite before it happens, so
+/// a reader that sees the new value queries data that is already there, and one
+/// that reads the old value picks the change up on a later frame.
+pub fn index_generation() -> u64 {
+    INDEX_GENERATION.load(Ordering::Relaxed)
+}
+
 pub async fn write_index(pool: &SqlitePool, rows: &MappedRows) -> Result<(), IndexError> {
     query::upsert_match(pool, &rows.objective).await?;
     query::upsert_vehicles(pool, &rows.vehicles).await?;
     query::upsert_record(pool, &rows.record).await?;
+    INDEX_GENERATION.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
 

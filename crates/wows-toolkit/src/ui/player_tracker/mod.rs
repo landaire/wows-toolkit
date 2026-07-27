@@ -6,6 +6,7 @@ mod model;
 
 pub(crate) use clans::BreakdownWindow;
 pub(crate) use clans::ClanBreakdown;
+pub(crate) use clans::ClanIndexInputs;
 pub(crate) use clans::ClanSortedBy;
 pub(crate) use model::ExpandingColumn;
 pub(crate) use model::SortOrder;
@@ -95,8 +96,15 @@ pub struct PlayerTracker {
     #[serde(skip)]
     pub(crate) encounter_version: u64,
 
-    /// Clan aggregates, rebuilt only when their inputs change: the index queries
-    /// behind them run synchronously on the UI thread.
+    /// The index answers the clan aggregates are counted over, fetched only
+    /// when the tracker ingests or the index gains rows: the queries behind
+    /// them run synchronously on the UI thread.
+    #[serde(skip)]
+    pub(crate) clan_index_inputs: Option<ClanIndexInputs>,
+
+    /// Clan aggregates, re-counted whenever their inputs or their window
+    /// change. Re-counting is pure work over `clan_index_inputs` and the
+    /// tracker, so it costs no query.
     #[serde(skip)]
     pub(crate) clan_breakdown: Option<ClanBreakdown>,
 
@@ -661,6 +669,7 @@ mod tests {
         assert!(!tracker.show_division_mates, "the division-mate filter defaults to hiding them");
         assert!(!tracker.division_mates_synced, "a restored tracker still asks the index once");
         assert_eq!(tracker.encounter_version, 0);
+        assert!(tracker.clan_index_inputs.is_none());
         assert!(tracker.clan_breakdown.is_none());
         assert!(tracker.clan_breakdown_window.is_none());
         assert!(tracker.expanded_players.is_empty());
