@@ -621,7 +621,7 @@ mod tests {
     fn mark_division(player: &mut TrackedPlayer, nth: usize) {
         let arena_id = ArenaId::new(player.db_id.raw() * 100 + nth as i64);
         let timestamp = *player.timestamps.iter().nth(nth).expect("the fixture has that many encounters");
-        assert!(player.division_encounters.mark(arena_id, timestamp), "a fresh mark is new under both keys");
+        assert!(player.division_encounters.mark(arena_id, timestamp), "the fixture marks each encounter only once");
     }
 
     /// A tracker holding `players` under the filter and sort the table is being

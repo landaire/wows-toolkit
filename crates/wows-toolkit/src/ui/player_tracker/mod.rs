@@ -670,4 +670,40 @@ mod tests {
         assert!(tracker.live_match.is_none());
         assert!(tracker.resolved_roster.is_none());
     }
+
+    /// A `division_encounters` object carrying one key and not the other has to
+    /// load as the half it does carry. Without a default on each set the missing
+    /// key would fail the player, and with it the whole tracker, which is the
+    /// same silent-empty-load failure the test above guards.
+    #[test]
+    fn a_half_written_division_encounters_object_loads_the_half_it_has() {
+        let saved = r#"{
+            "tracked_players": {
+                "501": {
+                    "last_name": "Enemy",
+                    "db_id": 501,
+                    "names": [],
+                    "clan_id": 7,
+                    "clan": "RAIN",
+                    "timestamps": ["2023-11-14T22:13:20Z"],
+                    "arena_ids": [100],
+                    "division_encounters": { "arena_ids": [100] }
+                }
+            },
+            "filter_time_period": "LastWeek",
+            "sort_order": { "TimesEncountered": "Desc" },
+            "player_filter": ""
+        }"#;
+
+        let tracker: PlayerTracker =
+            serde_json::from_str(saved).expect("a partial division_encounters object still loads the tracker");
+
+        let player = tracker.tracked_players.get(&AccountId(501)).expect("the saved player is tracked");
+        assert_eq!(player.visible_arena_ids(false).count(), 0, "the arena key that was written still hides its battle");
+        assert_eq!(
+            player.visible_timestamps(false).count(),
+            1,
+            "and the key that was not written hides nothing, rather than failing the load"
+        );
+    }
 }

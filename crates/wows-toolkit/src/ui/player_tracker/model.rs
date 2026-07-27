@@ -214,20 +214,36 @@ pub(crate) fn row_offset(
 /// player's `arena_ids` and `timestamps` are unpaired sets, so a mark recorded
 /// under only one of them would leave the two column families disagreeing about
 /// which encounters are hidden.
+///
+/// Both sets are private so [`mark`](Self::mark) is the only way to add to
+/// either: nothing outside this module can write one key and forget the other.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct DivisionEncounters {
-    pub(crate) arena_ids: BTreeSet<ArenaId>,
-    pub(crate) timestamps: BTreeSet<Timestamp>,
+    #[serde(default)]
+    arena_ids: BTreeSet<ArenaId>,
+    #[serde(default)]
+    timestamps: BTreeSet<Timestamp>,
 }
 
 impl DivisionEncounters {
-    /// Record one encounter as a division one. Returns whether that added a
-    /// mark, so a caller can tell a first marking from a re-parse of a battle
-    /// already marked.
+    /// Record one encounter as a division one, under both keys at once.
+    ///
+    /// Returns whether either set gained the encounter, which is what tells a
+    /// caller a first marking from a re-parse of a battle already marked. It is
+    /// not a claim that both sets grew: two battles sharing a timestamp add the
+    /// second arena without adding a second timestamp.
     pub(crate) fn mark(&mut self, arena_id: ArenaId, timestamp: Timestamp) -> bool {
         let arena_is_new = self.arena_ids.insert(arena_id);
         let timestamp_is_new = self.timestamps.insert(timestamp);
         arena_is_new || timestamp_is_new
+    }
+
+    fn hides_arena(&self, arena_id: &ArenaId) -> bool {
+        self.arena_ids.contains(arena_id)
+    }
+
+    fn hides_timestamp(&self, timestamp: &Timestamp) -> bool {
+        self.timestamps.contains(timestamp)
     }
 }
 
@@ -256,12 +272,18 @@ impl TrackedPlayer {
         self.arena_ids
             .iter()
             .copied()
-            .filter(move |arena_id| show_division_mates || !self.division_encounters.arena_ids.contains(arena_id))
+            .filter(move |arena_id| show_division_mates || !self.division_encounters.hides_arena(arena_id))
     }
 
     /// The same encounters keyed by timestamp, which is what the in-range counts
     /// dedup on. Filtered against the marks recorded under the same key, so the
     /// two families always hide the same battles.
+    ///
+    /// Assumes distinct battles carry distinct replay timestamps, which the
+    /// whole timestamp-keyed side of the tracker rests on. Where two battles do
+    /// share one, they already counted as a single encounter here; a division
+    /// mark on that timestamp additionally hides both of them from the in-range
+    /// counts while the arena key hides only the battle actually marked.
     pub(crate) fn visible_timestamps(
         &self,
         show_division_mates: bool,
@@ -269,7 +291,7 @@ impl TrackedPlayer {
         self.timestamps
             .iter()
             .copied()
-            .filter(move |timestamp| show_division_mates || !self.division_encounters.timestamps.contains(timestamp))
+            .filter(move |timestamp| show_division_mates || !self.division_encounters.hides_timestamp(timestamp))
     }
 
     /// The most recent visible encounter, or `None` when every encounter with
@@ -865,9 +887,9 @@ mod tests {
         tracker.sync_division_mates_from_index(&pool, &rt);
 
         let mate = &tracker.tracked_players[&AccountId(9)];
-        assert!(mate.division_encounters.arena_ids.contains(&arena), "the encounter is marked under the arena key");
+        assert!(mate.division_encounters.hides_arena(&arena), "the encounter is marked under the arena key");
         assert!(
-            mate.division_encounters.timestamps.contains(&timestamp),
+            mate.division_encounters.hides_timestamp(&timestamp),
             "and under the timestamp key, or the two counts would disagree"
         );
         assert_eq!(mate.visible_arena_ids(false).count(), 0, "the division battle is all this player has");
