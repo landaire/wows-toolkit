@@ -6,20 +6,24 @@
 pub mod dark {
     use egui::Color32;
 
-    pub const SURFACE: Color32 = Color32::from_rgb(0x0B, 0x0B, 0x0A);
-    pub const PANEL: Color32 = Color32::from_rgb(0x12, 0x12, 0x11);
-    pub const CARD: Color32 = Color32::from_rgb(0x19, 0x19, 0x18);
-    pub const WIDGET: Color32 = Color32::from_rgb(0x1F, 0x1F, 0x1D);
-    pub const WIDGET_HOT: Color32 = Color32::from_rgb(0x2E, 0x2E, 0x2B);
-    pub const EXTREME: Color32 = Color32::from_rgb(0x07, 0x07, 0x06);
-    pub const BORDER: Color32 = Color32::from_rgb(0x30, 0x2F, 0x2C);
-    pub const BORDER_BRIGHT: Color32 = Color32::from_rgb(0x4A, 0x49, 0x45);
-    pub const FAINT: Color32 = Color32::from_rgb(0x16, 0x16, 0x15);
-    pub const SELECTION: Color32 = Color32::from_rgb(0x2F, 0x2F, 0x2A);
-    pub const ACCENT: Color32 = Color32::from_rgb(0xE8, 0xE4, 0xD8);
-    pub const TEXT: Color32 = Color32::from_rgb(0xDE, 0xDB, 0xD2);
-    pub const TEXT_DIM: Color32 = Color32::from_rgb(0x9C, 0x99, 0x90);
-    pub const TEXT_BRIGHT: Color32 = Color32::from_rgb(0xFA, 0xF8, 0xF1);
+    pub const SURFACE: Color32 = Color32::from_rgb(0x10, 0x10, 0x10);
+    pub const PANEL: Color32 = Color32::from_rgb(0x18, 0x18, 0x16);
+    pub const CARD: Color32 = Color32::from_rgb(0x1F, 0x1F, 0x1C);
+    pub const WIDGET: Color32 = Color32::from_rgb(0x25, 0x25, 0x22);
+    pub const WIDGET_HOT: Color32 = Color32::from_rgb(0x2F, 0x2F, 0x29);
+    pub const EXTREME: Color32 = Color32::from_rgb(0x0C, 0x0C, 0x0B);
+    pub const BORDER: Color32 = Color32::from_rgb(0x38, 0x37, 0x33);
+    pub const BORDER_BRIGHT: Color32 = Color32::from_rgb(0x52, 0x4F, 0x4A);
+    pub const FAINT: Color32 = Color32::from_rgb(0x1C, 0x1C, 0x1A);
+    pub const SELECTION: Color32 = Color32::from_rgb(0x28, 0x28, 0x20);
+    pub const ACCENT: Color32 = Color32::from_rgb(0xC7, 0xC3, 0xB8);
+    pub const TEXT: Color32 = Color32::from_rgb(0xC9, 0xC6, 0xBE);
+    pub const TEXT_DIM: Color32 = Color32::from_rgb(0x97, 0x97, 0x89);
+    pub const TEXT_BRIGHT: Color32 = Color32::from_rgb(0xE8, 0xE5, 0xDC);
+
+    /// Fill for the active dock tab. A raised surface rather than an inverted
+    /// block; only ever carries the tab label, never dimmed text.
+    pub const TAB_ACTIVE: Color32 = Color32::from_rgb(0x34, 0x34, 0x30);
 }
 
 /// Light theme surfaces and chrome. Same neutrals, inverted value scale.
@@ -40,4 +44,8 @@ pub mod light {
     pub const TEXT: Color32 = Color32::from_rgb(0x1A, 0x1A, 0x17);
     pub const TEXT_DIM: Color32 = Color32::from_rgb(0x5C, 0x5A, 0x53);
     pub const TEXT_BRIGHT: Color32 = Color32::from_rgb(0x0A, 0x0A, 0x08);
+
+    /// Fill for the active dock tab. A raised surface rather than an inverted
+    /// block; only ever carries the tab label, never dimmed text.
+    pub const TAB_ACTIVE: Color32 = Color32::from_rgb(0xDF, 0xDC, 0xD3);
 }

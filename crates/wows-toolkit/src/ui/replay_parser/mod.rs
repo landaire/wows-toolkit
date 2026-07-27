@@ -4357,7 +4357,7 @@ impl ToolkitTabViewer<'_> {
                             ui.painter().circle_filled(rect.center(), 4.0, color);
                             ui.label(&user.name);
                             if user.role == crate::collab::PeerRole::CoHost {
-                                ui.label(RichText::new(icons::CROWN).small().color(ui.sem().division));
+                                ui.label(RichText::new(icons::CROWN).small().color(ui.sem().crown_cohost));
                             }
                             if user.role != crate::collab::PeerRole::Host
                                 && user.role != crate::collab::PeerRole::CoHost
