@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use egui::RichText;
@@ -68,39 +67,25 @@ const PLAYER_COLUMN: ExpandingColumn = ExpandingColumn {
 fn visible_rows(tracker: &PlayerTracker) -> Vec<AccountId> {
     let filter_lower = tracker.player_filter.to_ascii_lowercase();
     let sorted_by = tracker.sort_order;
-    let tracked_players_by_ts = &tracker.tracked_players_by_time;
+    let show = tracker.show_division_mates;
 
     // Resolved once for the whole call: `to_date` reads the clock, so a
     // comparator that called it would not be a fixed total order.
     let filter_range = tracker.filter_time_period.to_date();
 
-    // Filter by the date range
-    let player_range: HashSet<_> = if let Some(filter_range) = filter_range {
-        tracked_players_by_ts
-            .iter()
-            .filter_map(|(ts, ids)| if *ts > filter_range { Some(ids) } else { None })
-            .flatten()
-            .cloned()
-            .collect()
-    } else {
-        tracked_players_by_ts.iter().flat_map(|(_ts, ids)| ids).cloned().collect()
-    };
-
     let mut rows: Vec<(AccountId, &TrackedPlayer)> = tracker
         .tracked_players
         .iter()
-        .filter(|(id, player)| {
-            if tracker.is_hidden_division_mate(id) {
+        .filter(|(_, player)| {
+            // A player whose every encounter inside the period was a division
+            // one leaves the table exactly like one never met inside it.
+            if encounters_in_range(player, filter_range, show) == 0 {
                 return false;
             }
-            if !tracker.player_filter.is_empty() {
-                player_range.contains(id)
-                    && (player.clan.to_ascii_lowercase().contains(&filter_lower)
-                        || player.last_name.to_ascii_lowercase().contains(&filter_lower)
-                        || player.names.iter().any(|name| name.to_ascii_lowercase().contains(&filter_lower)))
-            } else {
-                player_range.contains(id)
-            }
+            tracker.player_filter.is_empty()
+                || player.clan.to_ascii_lowercase().contains(&filter_lower)
+                || player.last_name.to_ascii_lowercase().contains(&filter_lower)
+                || player.names.iter().any(|name| name.to_ascii_lowercase().contains(&filter_lower))
         })
         .map(|(id, player)| (*id, player))
         .collect();
@@ -117,11 +102,15 @@ fn visible_rows(tracker: &PlayerTracker) -> Vec<AccountId> {
             ids(rows)
         }
         SortedBy::LastEncountered(order) => {
-            rows.sort_by(|(_, a), (_, b)| order.direct(a.timestamps.last().cmp(&b.timestamps.last())));
+            rows.sort_by(|(_, a), (_, b)| {
+                order.direct(a.last_visible_timestamp(show).cmp(&b.last_visible_timestamp(show)))
+            });
             ids(rows)
         }
         SortedBy::TimesEncountered(order) => {
-            rows.sort_by(|(_, a), (_, b)| order.direct(a.timestamps.len().cmp(&b.timestamps.len())));
+            rows.sort_by(|(_, a), (_, b)| {
+                order.direct(a.visible_timestamps(show).count().cmp(&b.visible_timestamps(show).count()))
+            });
             ids(rows)
         }
         // The only key that costs a scan of a player's whole history, and the
@@ -129,7 +118,7 @@ fn visible_rows(tracker: &PlayerTracker) -> Vec<AccountId> {
         // instead of once per comparison.
         SortedBy::TimesEncounteredInTimeRange(order) => {
             let mut decorated: Vec<(usize, AccountId)> =
-                rows.into_iter().map(|(id, player)| (encounters_in_range(player, filter_range), id)).collect();
+                rows.into_iter().map(|(id, player)| (encounters_in_range(player, filter_range, show), id)).collect();
             decorated.sort_by(|(a, _), (b, _)| order.direct(a.cmp(b)));
             decorated.into_iter().map(|(_, id)| id).collect()
         }
@@ -175,11 +164,11 @@ impl HistoricalTable<'_> {
         let account_id = self.rows.get(row_nr as usize).copied()?;
         let player = self.tracker.tracked_players.get(&account_id)?;
 
-        let total_encounters = player.arena_ids.len();
-        let encounters_in_range = match self.filter_range {
-            Some(range) => player.timestamps.iter().filter(|ts| **ts > range).count(),
-            None => total_encounters,
-        };
+        // The two counts dedup on different keys, so each has to drop the
+        // division encounters under its own key rather than share one filter.
+        let show = self.tracker.show_division_mates;
+        let total_encounters = player.visible_arena_ids(show).count();
+        let encounters_in_range = encounters_in_range(player, self.filter_range, show);
 
         Some(RowView {
             account_id,
@@ -197,8 +186,8 @@ impl HistoricalTable<'_> {
             notes: player.notes.clone(),
             total_encounters,
             encounters_in_range,
-            last_seen: last_seen_text(player, self.now),
-            last_seen_exact: last_seen_timestamp_text(player),
+            last_seen: last_seen_text(player.last_visible_timestamp(show), self.now),
+            last_seen_exact: last_seen_timestamp_text(player.last_visible_timestamp(show)),
         })
     }
 
@@ -462,6 +451,11 @@ impl ToolkitTabViewer<'_> {
                     if ui.button(t!("ui.player_tracker.clear_stats")).clicked() {
                         player_tracker.tracked_players.clear();
                         player_tracker.tracked_players_by_time.clear();
+                        // Division marks live on the players just cleared, so
+                        // the index has to be read again for whatever repopulates
+                        // them. Leaving the latch set would hold an emptied
+                        // filter over a repopulated tracker for the session.
+                        player_tracker.division_mates_synced = false;
                         player_tracker.note_encounters_changed();
                     }
 
@@ -600,11 +594,17 @@ impl ToolkitTabViewer<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use jiff::ToSpan;
+    use wows_replays::types::ArenaId;
 
     use super::*;
 
     fn player(id: i64, clan: &str, last_name: &str, aliases: &[&str], timestamps: &[Timestamp]) -> TrackedPlayer {
+        // One arena per timestamp, numbered off the account, the way both
+        // ingest paths record a battle under each key.
+        let arena_ids = (0..timestamps.len()).map(|nth| ArenaId::new(id * 100 + nth as i64)).collect();
         TrackedPlayer {
             last_name: last_name.to_string(),
             db_id: AccountId(id),
@@ -612,9 +612,18 @@ mod tests {
             clan_id: 0,
             clan: clan.to_string(),
             timestamps: timestamps.iter().copied().collect(),
-            arena_ids: Default::default(),
+            arena_ids,
             notes: String::new(),
+            division_encounters: Default::default(),
         }
+    }
+
+    /// Marks the `nth` encounter of a player built by [`player`] as a division
+    /// one, under both the arena key and the timestamp key.
+    fn mark_division(player: &mut TrackedPlayer, nth: usize) {
+        let arena_id = ArenaId::new(player.db_id.raw() * 100 + nth as i64);
+        let timestamp = *player.timestamps.iter().nth(nth).expect("the fixture has that many encounters");
+        assert!(player.division_encounters.mark(arena_id, timestamp), "a fresh mark is new under both keys");
     }
 
     /// A tracker holding `players`, with `tracked_players_by_time` derived from
@@ -735,47 +744,64 @@ mod tests {
         assert_eq!(visible_rows(&all_time), vec![AccountId(1), AccountId(2)]);
     }
 
-    /// Division mates are recorded like anyone else, so the only thing keeping
-    /// them off the table is the toggle.
+    /// A player met once in your division and once as an opponent keeps the
+    /// opponent encounter while the toggle is off, under both the all-time key
+    /// and the in-range one, and only loses the division battle's contribution.
     #[test]
-    fn a_division_mate_is_listed_only_while_the_toggle_is_on() {
+    fn a_division_encounter_is_hidden_while_the_rest_of_that_players_history_stays() {
         let base = Timestamp::from_second(1_700_000_000).expect("fixture timestamp is in range");
-        let with_toggle = |show: bool| {
+        let counts = |show: bool| {
+            let mut divisioned = player(2, "", "divmate", &[], &[base, base + 1.hour()]);
+            mark_division(&mut divisioned, 1);
             let mut tracker = tracker(
                 TimePeriod::AllTime,
                 SortedBy::Name(SortOrder::Asc),
-                vec![player(1, "", "enemy", &[], &[base]), player(2, "", "divmate", &[], &[base])],
+                vec![player(1, "", "enemy", &[], &[base]), divisioned],
             );
-            tracker.division_mates.insert(AccountId(2));
+            tracker.show_division_mates = show;
+
+            let rows = visible_rows(&tracker);
+            let player = &tracker.tracked_players[&AccountId(2)];
+            (
+                rows,
+                player.visible_arena_ids(show).count(),
+                encounters_in_range(player, Some(base - 1.hour()), show),
+                player.last_visible_timestamp(show),
+            )
+        };
+
+        let (rows, all_time, in_range, last_seen) = counts(false);
+        assert_eq!(rows, vec![AccountId(2), AccountId(1)], "the opponent encounter keeps the player on the table");
+        assert_eq!(all_time, 1, "the all-time count drops the division battle");
+        assert_eq!(in_range, 1, "the in-range count, on its own key, drops the same one");
+        assert_eq!(last_seen, Some(base), "last seen is the most recent battle still counted");
+
+        let (rows, all_time, in_range, last_seen) = counts(true);
+        assert_eq!(rows, vec![AccountId(2), AccountId(1)]);
+        assert_eq!(all_time, 2, "the toggle brings the division battle back");
+        assert_eq!(in_range, 2);
+        assert_eq!(last_seen, Some(base + 1.hour()));
+    }
+
+    /// A player every one of whose encounters was a division one has nothing
+    /// left to show while the toggle is off, so they leave the table entirely.
+    #[test]
+    fn a_player_met_only_in_division_leaves_the_table_while_the_toggle_is_off() {
+        let base = Timestamp::from_second(1_700_000_000).expect("fixture timestamp is in range");
+        let with_toggle = |show: bool| {
+            let mut divisioned = player(2, "", "divmate", &[], &[base]);
+            mark_division(&mut divisioned, 0);
+            let mut tracker = tracker(
+                TimePeriod::AllTime,
+                SortedBy::Name(SortOrder::Asc),
+                vec![player(1, "", "enemy", &[], &[base]), divisioned],
+            );
             tracker.show_division_mates = show;
             visible_rows(&tracker)
         };
 
-        assert_eq!(with_toggle(false), vec![AccountId(1)], "a division mate is filtered out by default");
-        assert_eq!(with_toggle(true), vec![AccountId(2), AccountId(1)], "the toggle brings the mate back");
-    }
-
-    /// The self player is never recorded on either ingest path, so no toggle
-    /// position can put them on the table. Marking them a division mate, which
-    /// they are of themselves, must not become a back door either.
-    #[test]
-    fn the_self_player_is_absent_whatever_the_toggle_says() {
-        let base = Timestamp::from_second(1_700_000_000).expect("fixture timestamp is in range");
-        let self_account = AccountId(7);
-
-        for show in [false, true] {
-            let mut tracker = tracker(
-                TimePeriod::AllTime,
-                SortedBy::Name(SortOrder::Asc),
-                vec![player(1, "", "enemy", &[], &[base])],
-            );
-            tracker.division_mates.insert(self_account);
-            tracker.show_division_mates = show;
-
-            let rows = visible_rows(&tracker);
-            assert!(!rows.contains(&self_account), "an account the ingest paths never record cannot be listed");
-            assert_eq!(rows, vec![AccountId(1)]);
-        }
+        assert_eq!(with_toggle(false), vec![AccountId(1)], "nothing visible is left of the division-only player");
+        assert_eq!(with_toggle(true), vec![AccountId(2), AccountId(1)], "the toggle brings the whole player back");
     }
 
     #[test]

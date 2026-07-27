@@ -53,30 +53,31 @@ pub(crate) fn exact_timestamp_text(timestamp: Timestamp) -> String {
     timestamp.to_zoned(TimeZone::system()).strftime("%Y-%m-%d %H:%M:%S").to_string()
 }
 
-/// Human-readable "how long ago" for a tracked player's most recent encounter.
-pub(crate) fn last_seen_text(player: &TrackedPlayer, now: Timestamp) -> String {
-    let Some(last) = player.timestamps.last() else {
-        return String::new();
-    };
-    relative_age_text(*last, now)
-}
-
-/// How many of a player's encounters fall inside the active period. `since` is
-/// the period's resolved boundary; `None` is the all-time period, where every
-/// encounter counts.
-pub(crate) fn encounters_in_range(player: &TrackedPlayer, since: Option<Timestamp>) -> usize {
-    match since {
-        Some(since) => player.timestamps.iter().filter(|ts| **ts > since).count(),
-        None => player.timestamps.len(),
+/// Human-readable "how long ago" for an encounter timestamp. Empty when there
+/// is no encounter to describe, which is the right degradation for a hover.
+pub(crate) fn last_seen_text(last_seen: Option<Timestamp>, now: Timestamp) -> String {
+    match last_seen {
+        Some(last) => relative_age_text(last, now),
+        None => String::new(),
     }
 }
 
-/// Absolute local-time stamp of a tracked player's most recent encounter, for
-/// the hover behind the relative "last seen" text. A tracked player always has
-/// at least one timestamp; an empty hover is the right degradation if that
-/// invariant ever breaks, rather than a panic.
-pub(crate) fn last_seen_timestamp_text(player: &TrackedPlayer) -> String {
-    player.timestamps.last().copied().map(exact_timestamp_text).unwrap_or_default()
+/// How many of a player's encounters fall inside the active period, counting
+/// only the ones the division-mate toggle leaves visible. `since` is the
+/// period's resolved boundary; `None` is the all-time period, where every
+/// visible encounter counts.
+pub(crate) fn encounters_in_range(
+    player: &TrackedPlayer,
+    since: Option<Timestamp>,
+    show_division_mates: bool,
+) -> usize {
+    player.visible_timestamps(show_division_mates).filter(|ts| since.is_none_or(|since| *ts > since)).count()
+}
+
+/// Absolute local-time stamp behind the relative "last seen" text. Empty for
+/// the same reason [`last_seen_text`] is.
+pub(crate) fn last_seen_timestamp_text(last_seen: Option<Timestamp>) -> String {
+    last_seen.map(exact_timestamp_text).unwrap_or_default()
 }
 
 /// Header label with the sort arrow appended when this column drives the sort.
@@ -206,6 +207,30 @@ pub(crate) fn row_offset(
         + row_nr as f32 * row_height
 }
 
+/// The encounters in which a tracked player shared your division.
+///
+/// Marked under both keys the encounter counts are taken with: distinct arena
+/// for the all-time count, distinct timestamp for the in-range one. A tracked
+/// player's `arena_ids` and `timestamps` are unpaired sets, so a mark recorded
+/// under only one of them would leave the two column families disagreeing about
+/// which encounters are hidden.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct DivisionEncounters {
+    pub(crate) arena_ids: BTreeSet<ArenaId>,
+    pub(crate) timestamps: BTreeSet<Timestamp>,
+}
+
+impl DivisionEncounters {
+    /// Record one encounter as a division one. Returns whether that added a
+    /// mark, so a caller can tell a first marking from a re-parse of a battle
+    /// already marked.
+    pub(crate) fn mark(&mut self, arena_id: ArenaId, timestamp: Timestamp) -> bool {
+        let arena_is_new = self.arena_ids.insert(arena_id);
+        let timestamp_is_new = self.timestamps.insert(timestamp);
+        arena_is_new || timestamp_is_new
+    }
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct TrackedPlayer {
     pub(crate) last_name: String,
@@ -217,6 +242,41 @@ pub struct TrackedPlayer {
     pub(crate) arena_ids: BTreeSet<ArenaId>,
     #[serde(default)]
     pub(crate) notes: String,
+    /// Which of this player's encounters were division ones. Per encounter, not
+    /// per account: divisioning with someone once hides those battles and
+    /// leaves every other meeting with them on the tables.
+    #[serde(default)]
+    pub(crate) division_encounters: DivisionEncounters,
+}
+
+impl TrackedPlayer {
+    /// The battles this player was met in that the division-mate toggle leaves
+    /// visible, keyed by arena. Drives the all-time counts.
+    pub(crate) fn visible_arena_ids(&self, show_division_mates: bool) -> impl Iterator<Item = ArenaId> + '_ {
+        self.arena_ids
+            .iter()
+            .copied()
+            .filter(move |arena_id| show_division_mates || !self.division_encounters.arena_ids.contains(arena_id))
+    }
+
+    /// The same encounters keyed by timestamp, which is what the in-range counts
+    /// dedup on. Filtered against the marks recorded under the same key, so the
+    /// two families always hide the same battles.
+    pub(crate) fn visible_timestamps(
+        &self,
+        show_division_mates: bool,
+    ) -> impl DoubleEndedIterator<Item = Timestamp> + '_ {
+        self.timestamps
+            .iter()
+            .copied()
+            .filter(move |timestamp| show_division_mates || !self.division_encounters.timestamps.contains(timestamp))
+    }
+
+    /// The most recent visible encounter, or `None` when every encounter with
+    /// this player was a division one and the toggle is off.
+    pub(crate) fn last_visible_timestamp(&self, show_division_mates: bool) -> Option<Timestamp> {
+        self.visible_timestamps(show_division_mates).next_back()
+    }
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -362,14 +422,6 @@ impl PlayerTracker {
         // dominate the default times-encountered sort.
         let self_accounts = rt.block_on(query::self_account_ids(pool, &MatchFilter::default())).unwrap_or_default();
 
-        // The index knows every division the self player was in, which is what
-        // the live path marks as it parses. Populating without this would leave
-        // index-sourced mates unmarked and the filter showing an arbitrary
-        // subset of them. Unconditional: the button is a deliberate request to
-        // re-read the index, whatever an earlier sync already found.
-        self.refresh_division_mates_from_index(pool, rt);
-        self.division_mates_synced = true;
-
         for facet in players {
             if self_accounts.contains(&facet.account_id) {
                 continue;
@@ -390,33 +442,54 @@ impl PlayerTracker {
             }
         }
 
+        // The index knows every division the self player was in, which is what
+        // the live path marks as it parses. Populating without this would leave
+        // index-sourced encounters unmarked and the filter hiding an arbitrary
+        // subset of them. Runs after the loop above, because a mark only lands
+        // on a player the tracker already holds. Unconditional: the button is a
+        // deliberate request to re-read the index, whatever an earlier sync
+        // already found.
+        self.refresh_division_mates_from_index(pool, rt);
+        self.division_mates_synced = true;
+
         self.note_encounters_changed();
         true
     }
 
-    /// Union the index's division mates into the tracker's set. Returns whether
-    /// the set grew, which is what tells a caller the tables have to be rebuilt.
+    /// Fold the index's division encounters into the tracked players. Returns
+    /// whether any mark is new, which is what tells a caller the tables have to
+    /// be rebuilt.
+    ///
+    /// Only accounts the tracker already holds are marked: an encounter with an
+    /// untracked account has no row to hide, and creating an entry for it would
+    /// invent a player the tracker never recorded. Since the self account is
+    /// never tracked, that is also what keeps this path from marking it.
     fn refresh_division_mates_from_index(&mut self, pool: &sqlx::SqlitePool, rt: &tokio::runtime::Runtime) -> bool {
         use crate::db::index::query;
         use crate::db::index::rows::MatchFilter;
 
-        let mates = match rt.block_on(query::division_mate_account_ids(pool, &MatchFilter::default())) {
-            Ok(mates) => mates,
+        let encounters = match rt.block_on(query::division_mate_encounters(pool, &MatchFilter::default())) {
+            Ok(encounters) => encounters,
             Err(e) => {
                 tracing::warn!("player tracker: division-mate query failed: {e}");
                 return false;
             }
         };
 
-        let before = self.division_mates.len();
-        self.division_mates.extend(mates);
-        before < self.division_mates.len()
+        let mut marked_any = false;
+        for encounter in encounters {
+            if let Some(player) = self.tracked_players.get_mut(&encounter.account_id) {
+                marked_any |= player.division_encounters.mark(encounter.arena_id, encounter.timestamp);
+            }
+        }
+        marked_any
     }
 
-    /// Read the index's division mates back into the tracker, once per session.
+    /// Read the index's division encounters back into the tracker, once per
+    /// session.
     ///
-    /// A tracker populated before mates were marked holds them unmarked, and so
-    /// does one whose live-path marking predates an account joining your
+    /// A tracker populated before encounters were marked holds them unmarked,
+    /// and so does one whose live-path marking predates an account joining your
     /// division. Folding the index's answer in on the first paint corrects both
     /// without asking the user to populate again.
     pub(crate) fn sync_division_mates_from_index(&mut self, pool: &sqlx::SqlitePool, rt: &tokio::runtime::Runtime) {
@@ -700,11 +773,12 @@ mod tests {
         assert!(tracker.tracked_players.contains_key(&AccountId(501)), "opponent account must still be tracked");
     }
 
-    /// A tracker whose history predates division marking holds its mates
-    /// unmarked. The index knows which they were, so reading it back on the
-    /// first paint corrects the filter without a fresh Populate run.
+    /// A tracker whose history predates division marking holds its encounters
+    /// unmarked, and so does one upgraded from the per-account set that came
+    /// before. The index knows which battles were division ones, so reading it
+    /// back on the first paint corrects the filter without a fresh Populate run.
     #[test]
-    fn syncing_from_the_index_marks_mates_an_older_tracker_recorded_unmarked() {
+    fn syncing_from_the_index_marks_encounters_an_older_tracker_recorded_unmarked() {
         let rt = build_runtime();
         let pool = rt.block_on(async {
             let pool = mem_pool().await;
@@ -779,19 +853,32 @@ mod tests {
             pool
         });
 
-        // What an earlier Populate run left behind: both accounts tracked, and
-        // no idea which of them was in the division.
+        // What an earlier Populate run left behind: both accounts tracked with
+        // their encounter, and no idea which of them was a division one.
+        let arena = ArenaId::new(100);
+        let timestamp = Timestamp::from_second(1_700_000_100).unwrap();
         let mut tracker = PlayerTracker::default();
         for id in [AccountId(9), AccountId(501)] {
-            tracker.tracked_players.entry(id).or_default().db_id = id;
+            let player = tracker.tracked_players.entry(id).or_default();
+            player.db_id = id;
+            player.arena_ids.insert(arena);
+            player.timestamps.insert(timestamp);
         }
-        assert!(tracker.division_mates.is_empty());
 
         let version_before = tracker.encounter_version;
         tracker.sync_division_mates_from_index(&pool, &rt);
 
-        assert!(tracker.division_mates.contains(&AccountId(9)), "the mate the index knows about is marked");
-        assert!(!tracker.division_mates.contains(&AccountId(501)), "a solo opponent is not a mate");
+        let mate = &tracker.tracked_players[&AccountId(9)];
+        assert!(mate.division_encounters.arena_ids.contains(&arena), "the encounter is marked under the arena key");
+        assert!(
+            mate.division_encounters.timestamps.contains(&timestamp),
+            "and under the timestamp key, or the two counts would disagree"
+        );
+        assert_eq!(mate.visible_arena_ids(false).count(), 0, "the division battle is all this player has");
+
+        let opponent = &tracker.tracked_players[&AccountId(501)];
+        assert_eq!(opponent.visible_arena_ids(false).count(), 1, "a solo opponent's encounter is untouched");
+
         assert!(!tracker.tracked_players.contains_key(&AccountId(7)), "syncing never adds the self account");
         assert!(
             version_before < tracker.encounter_version,
@@ -799,15 +886,19 @@ mod tests {
         );
 
         // One attempt per session: the query is synchronous on the UI thread.
-        tracker.division_mates.remove(&AccountId(9));
+        tracker.tracked_players.get_mut(&AccountId(9)).unwrap().division_encounters = Default::default();
         tracker.sync_division_mates_from_index(&pool, &rt);
-        assert!(tracker.division_mates.is_empty(), "a second sync in the same session must not re-run the query");
+        assert_eq!(
+            tracker.tracked_players[&AccountId(9)].visible_arena_ids(false).count(),
+            1,
+            "a second sync in the same session must not re-run the query"
+        );
     }
 
     /// The Populate button re-reads the index whatever an earlier sync found,
     /// and still refuses to track the self account.
     #[test]
-    fn populating_marks_division_mates_and_still_excludes_self() {
+    fn populating_marks_division_encounters_and_still_excludes_self() {
         let rt = build_runtime();
         let pool = rt.block_on(async {
             let pool = mem_pool().await;
@@ -887,9 +978,13 @@ mod tests {
 
         assert!(tracker.populate_from_index(&pool, &rt), "index had a match to populate from");
 
-        assert!(tracker.tracked_players.contains_key(&AccountId(9)), "a division mate is recorded, not dropped");
-        assert!(tracker.division_mates.contains(&AccountId(9)), "and it is marked, so the filter can hide it");
+        let mate = tracker.tracked_players.get(&AccountId(9)).expect("a division mate is recorded, not dropped");
+        assert_eq!(mate.visible_arena_ids(false).count(), 0, "and its encounter is marked, so the filter can hide it");
+        assert_eq!(mate.visible_arena_ids(true).count(), 1, "the toggle brings that encounter back");
+
         assert!(!tracker.tracked_players.contains_key(&AccountId(7)), "the self account is still never tracked");
-        assert!(!tracker.division_mates.contains(&AccountId(501)), "a solo opponent is not a mate");
+
+        let opponent = tracker.tracked_players.get(&AccountId(501)).expect("a solo opponent is tracked");
+        assert_eq!(opponent.visible_arena_ids(false).count(), 1, "and nothing about them is a division encounter");
     }
 }

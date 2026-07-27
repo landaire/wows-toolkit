@@ -204,7 +204,10 @@ fn render_team(
                             Some(range) => player.timestamps.iter().filter(|ts| **ts > range).count(),
                             None => total,
                         };
-                        let last = last_seen_text(player, ctx.now);
+                        // The live roster is about who is in front of you now, so
+                        // it counts every past meeting: the division-mate toggle
+                        // belongs to the Historical and Clans tables.
+                        let last = last_seen_text(player.timestamps.last().copied(), ctx.now);
 
                         let mut text = RichText::new(format!("x{total}"));
                         if let Some(color) = encounter_severity_color(ui, in_range) {

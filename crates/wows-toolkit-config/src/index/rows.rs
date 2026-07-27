@@ -200,6 +200,18 @@ pub struct ClanCorrection {
     pub clan: String,
 }
 
+/// One encounter in which an account shared the self player's division.
+///
+/// Carries the arena and the timestamp because a consumer that dedups
+/// encounters under either key has to be able to mark the same encounter under
+/// both.
+#[derive(Debug, Clone)]
+pub struct DivisionMateEncounter {
+    pub account_id: AccountId,
+    pub arena_id: ArenaId,
+    pub timestamp: Timestamp,
+}
+
 /// A distinct player seen in the index (for palette/Search facets).
 #[derive(Debug, Clone)]
 pub struct PlayerFacet {

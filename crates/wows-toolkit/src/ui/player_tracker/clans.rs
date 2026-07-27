@@ -51,7 +51,8 @@ pub(crate) struct ClanBreakdown {
     /// timestamps to existing entries and leaves the map the same size.
     pub encounter_version: u64,
     /// The division-mate toggle these rows were counted under, so flipping it
-    /// rebuilds them rather than leaving inflated counts on screen.
+    /// rebuilds them rather than leaving counts taken over the other set of
+    /// encounters on screen.
     pub show_division_mates: bool,
     pub rows: Vec<ClanRow>,
 }
@@ -77,9 +78,11 @@ struct ClanAccumulator {
 /// unpaired `arena_ids` and `timestamps` sets need no reconciliation: every
 /// player in a battle shares that battle's timestamp.
 ///
-/// `division_mates` are the accounts that have shared a division with you;
-/// while `show_division_mates` is off they contribute nothing at all, so they
-/// cannot inflate a clan's matches, sightings or member count.
+/// While `show_division_mates` is off, the encounters marked as division ones
+/// contribute nothing at all, so a clan's matches, sightings and member count
+/// are not inflated by the battles you arranged with them. Filtering happens
+/// per encounter under each of the two keys, so a player met both in and out of
+/// your division still contributes the meetings outside it.
 ///
 /// `encounter_version` is the tracker's version of `tracked` at the time of the
 /// call, carried on the result as its cache key.
@@ -89,7 +92,6 @@ pub(crate) fn build_clan_breakdown(
     index_latest_clan: &HashMap<AccountId, String>,
     corrections: &[ClanCorrection],
     since: Option<Timestamp>,
-    division_mates: &HashSet<AccountId>,
     show_division_mates: bool,
 ) -> ClanBreakdown {
     let mut by_arena: HashMap<(AccountId, ArenaId), &str> = HashMap::new();
@@ -102,35 +104,31 @@ pub(crate) fn build_clan_breakdown(
     let mut clans: HashMap<String, ClanAccumulator> = HashMap::new();
 
     for (account_id, player) in tracked {
-        if !show_division_mates && division_mates.contains(account_id) {
-            continue;
-        }
-
         // The tracker holds one clan per player, the latest it saw. The index's
         // latest is fresher wherever the index knows the account at all.
         let baseline = index_latest_clan.get(account_id).map(String::as_str).unwrap_or(player.clan.as_str());
 
-        for arena_id in &player.arena_ids {
-            let clan = by_arena.get(&(*account_id, *arena_id)).copied().unwrap_or(baseline);
+        for arena_id in player.visible_arena_ids(show_division_mates) {
+            let clan = by_arena.get(&(*account_id, arena_id)).copied().unwrap_or(baseline);
             if clan.is_empty() {
                 continue;
             }
             let entry = clans.entry(clan.to_string()).or_default();
-            entry.arenas.insert(*arena_id);
+            entry.arenas.insert(arena_id);
             entry.sightings += 1;
             *entry.members.entry(*account_id).or_default() += 1;
         }
 
-        for timestamp in &player.timestamps {
-            let clan = by_timestamp.get(&(*account_id, *timestamp)).copied().unwrap_or(baseline);
+        for timestamp in player.visible_timestamps(show_division_mates) {
+            let clan = by_timestamp.get(&(*account_id, timestamp)).copied().unwrap_or(baseline);
             if clan.is_empty() {
                 continue;
             }
             let entry = clans.entry(clan.to_string()).or_default();
-            entry.last_seen = Some(entry.last_seen.map_or(*timestamp, |seen| seen.max(*timestamp)));
+            entry.last_seen = Some(entry.last_seen.map_or(timestamp, |seen| seen.max(timestamp)));
 
-            if since.is_none_or(|since| *timestamp > since) {
-                entry.range_timestamps.insert(*timestamp);
+            if since.is_none_or(|since| timestamp > since) {
+                entry.range_timestamps.insert(timestamp);
                 entry.sightings_in_range += 1;
             }
         }
@@ -679,7 +677,6 @@ fn refresh_clan_breakdown(
         &latest,
         &corrections,
         window.since,
-        &tracker.division_mates,
         tracker.show_division_mates,
     ));
     tracker.clan_breakdown_window = Some(window);
@@ -846,6 +843,15 @@ mod tests {
         p
     }
 
+    /// Marks the listed `(arena, second)` encounters as division ones, under
+    /// both keys, the way either ingest path does.
+    fn with_division(mut player: TrackedPlayer, encounters: &[(i64, i64)]) -> TrackedPlayer {
+        for (arena, second) in encounters {
+            player.division_encounters.mark(ArenaId::new(*arena), Timestamp::from_second(*second).unwrap());
+        }
+        player
+    }
+
     fn tracked(entries: &[(i64, TrackedPlayer)]) -> HashMap<AccountId, TrackedPlayer> {
         entries.iter().map(|(id, p)| (AccountId(*id), p.clone())).collect()
     }
@@ -854,7 +860,7 @@ mod tests {
     fn groups_by_latest_clan_when_the_index_has_no_corrections() {
         let players = tracked(&[(1, player("RAIN", &[(10, 1000), (11, 2000)])), (2, player("RAIN", &[(10, 1000)]))]);
 
-        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, &HashSet::new(), false);
+        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, false);
 
         assert_eq!(breakdown.rows.len(), 1);
         let rain = &breakdown.rows[0];
@@ -876,7 +882,7 @@ mod tests {
             clan: "RAIN".into(),
         }];
 
-        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &corrections, None, &HashSet::new(), false);
+        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &corrections, None, false);
 
         let wolf = breakdown.rows.iter().find(|r| r.clan == "WOLF").expect("WOLF row");
         let rain = breakdown.rows.iter().find(|r| r.clan == "RAIN").expect("RAIN row");
@@ -889,7 +895,7 @@ mod tests {
         let players = tracked(&[(1, player("STALE", &[(10, 1000)]))]);
         let latest = HashMap::from([(AccountId(1), "FRESH".to_string())]);
 
-        let breakdown = build_clan_breakdown(&players, 0, &latest, &[], None, &HashSet::new(), false);
+        let breakdown = build_clan_breakdown(&players, 0, &latest, &[], None, false);
 
         assert_eq!(breakdown.rows.len(), 1);
         assert_eq!(breakdown.rows[0].clan, "FRESH");
@@ -899,7 +905,7 @@ mod tests {
     fn clanless_players_are_excluded() {
         let players = tracked(&[(1, player("", &[(10, 1000)]))]);
 
-        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, &HashSet::new(), false);
+        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, false);
 
         assert!(breakdown.rows.is_empty());
     }
@@ -914,7 +920,7 @@ mod tests {
             clan: String::new(),
         }];
 
-        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &corrections, None, &HashSet::new(), false);
+        let breakdown = build_clan_breakdown(&players, 0, &HashMap::new(), &corrections, None, false);
 
         assert_eq!(breakdown.rows.len(), 1);
         assert_eq!(breakdown.rows[0].matches, 1);
@@ -924,15 +930,8 @@ mod tests {
     fn the_range_filter_counts_only_timestamps_after_since() {
         let players = tracked(&[(1, player("RAIN", &[(10, 1000), (11, 5000)]))]);
 
-        let breakdown = build_clan_breakdown(
-            &players,
-            0,
-            &HashMap::new(),
-            &[],
-            Some(Timestamp::from_second(3000).unwrap()),
-            &HashSet::new(),
-            false,
-        );
+        let breakdown =
+            build_clan_breakdown(&players, 0, &HashMap::new(), &[], Some(Timestamp::from_second(3000).unwrap()), false);
 
         let rain = &breakdown.rows[0];
         assert_eq!(rain.matches, 2);
@@ -945,15 +944,8 @@ mod tests {
     /// thread, so an unchanged frame must not invalidate the cache.
     #[test]
     fn the_cached_breakdown_is_invalidated_by_its_inputs_and_nothing_else() {
-        let breakdown = build_clan_breakdown(
-            &tracked(&[(1, player("RAIN", &[(10, 1000)]))]),
-            7,
-            &HashMap::new(),
-            &[],
-            None,
-            &HashSet::new(),
-            false,
-        );
+        let breakdown =
+            build_clan_breakdown(&tracked(&[(1, player("RAIN", &[(10, 1000)]))]), 7, &HashMap::new(), &[], None, false);
         let window = BreakdownWindow::resolve(TimePeriod::LastDay);
         let cached = Some(window);
 
@@ -976,42 +968,51 @@ mod tests {
         );
     }
 
-    /// A division mate contributes nothing while the toggle is off: not a
-    /// match, not a sighting, and not a member. Turning it on brings the whole
-    /// contribution back.
+    /// A division encounter contributes nothing while the toggle is off: not a
+    /// match, not a sighting, and not a membership. The same player's other
+    /// battles still do, so their clan keeps them as a member on the strength of
+    /// the encounters you did not arrange.
     #[test]
-    fn a_division_mate_is_counted_only_while_the_toggle_is_on() {
-        let players =
-            tracked(&[(1, player("RAIN", &[(10, 1000), (11, 2000)])), (2, player("RAIN", &[(10, 1000), (12, 3000)]))]);
-        let mates = HashSet::from([AccountId(2)]);
+    fn a_division_encounter_is_counted_only_while_the_toggle_is_on() {
+        let players = tracked(&[
+            (1, player("RAIN", &[(10, 1000), (11, 2000)])),
+            (2, with_division(player("RAIN", &[(10, 1000), (12, 3000)]), &[(12, 3000)])),
+        ]);
 
-        let hidden = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, &mates, false);
+        let hidden = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, false);
         assert_eq!(hidden.rows.len(), 1);
         let rain = &hidden.rows[0];
-        assert_eq!(rain.members.len(), 1, "the division mate is not a member while hidden");
-        assert_eq!(rain.members[0].0, AccountId(1));
-        assert_eq!(rain.matches, 2, "arena 12 belongs to the hidden mate alone");
-        assert_eq!(rain.sightings, 2, "the mate's two sightings are not counted");
+        assert_eq!(rain.members.len(), 2, "the opponent encounter keeps account 2 a member");
+        assert_eq!(rain.matches, 2, "arena 12 was a division battle and does not count");
+        assert_eq!(rain.sightings, 3, "only the mate's division sighting is dropped");
+        assert_eq!(rain.matches_in_range, 2, "the in-range key hides the same encounter as the all-time one");
+        assert_eq!(rain.sightings_in_range, 3);
+        assert_eq!(rain.last_seen, Timestamp::from_second(2000).unwrap(), "the division battle is not the last seen");
 
-        let shown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, &mates, true);
+        let shown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, true);
         let rain = &shown.rows[0];
         assert_eq!(rain.members.len(), 2);
         assert_eq!(rain.matches, 3);
         assert_eq!(rain.sightings, 4);
+        assert_eq!(rain.matches_in_range, 3);
+        assert_eq!(rain.sightings_in_range, 4);
     }
 
-    /// A clan whose only tracked member is a division mate has no row at all
-    /// while the toggle is off, rather than a row with zeroed counts.
+    /// A clan whose only tracked member was met exclusively in your division has
+    /// no row at all while the toggle is off, rather than a row with zeroed
+    /// counts.
     #[test]
-    fn a_clan_of_division_mates_only_disappears_while_the_toggle_is_off() {
-        let players = tracked(&[(1, player("RAIN", &[(10, 1000)])), (2, player("WOLF", &[(11, 2000)]))]);
-        let mates = HashSet::from([AccountId(2)]);
+    fn a_clan_met_only_in_division_disappears_while_the_toggle_is_off() {
+        let players = tracked(&[
+            (1, player("RAIN", &[(10, 1000)])),
+            (2, with_division(player("WOLF", &[(11, 2000)]), &[(11, 2000)])),
+        ]);
 
-        let hidden = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, &mates, false);
+        let hidden = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, false);
         assert_eq!(hidden.rows.len(), 1);
         assert_eq!(hidden.rows[0].clan, "RAIN");
 
-        let shown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, &mates, true);
+        let shown = build_clan_breakdown(&players, 0, &HashMap::new(), &[], None, true);
         assert_eq!(shown.rows.len(), 2);
     }
 
@@ -1020,15 +1021,8 @@ mod tests {
     /// the clock the two would report different counts for the same window.
     #[test]
     fn the_cached_breakdown_expires_when_its_boundary_moves_past_a_minute() {
-        let breakdown = build_clan_breakdown(
-            &tracked(&[(1, player("RAIN", &[(10, 1000)]))]),
-            7,
-            &HashMap::new(),
-            &[],
-            None,
-            &HashSet::new(),
-            false,
-        );
+        let breakdown =
+            build_clan_breakdown(&tracked(&[(1, player("RAIN", &[(10, 1000)]))]), 7, &HashMap::new(), &[], None, false);
         let window = BreakdownWindow::resolve(TimePeriod::LastHour);
         let since = window.since.expect("an hour-long period has a boundary");
 
@@ -1094,7 +1088,6 @@ mod tests {
             &HashMap::new(),
             &[],
             None,
-            &HashSet::new(),
             false,
         );
         let window = BreakdownWindow::resolve(TimePeriod::LastDay);

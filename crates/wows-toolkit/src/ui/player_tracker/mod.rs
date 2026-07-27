@@ -27,14 +27,16 @@ pub(crate) use model::sort_header_label;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use jiff::Timestamp;
 use rust_i18n::t;
 use serde::Deserialize;
 use serde::Serialize;
+use wows_replays::Rc;
 use wows_replays::ReplayMeta;
+use wows_replays::analyzer::decoder::PlayerStateData;
 use wows_replays::types::AccountId;
+use wows_replays::types::ArenaId;
 
 use crate::app::ToolkitTabViewer;
 use crate::data::wows_data::WorldOfWarshipsData;
@@ -54,20 +56,13 @@ pub struct PlayerTracker {
     pub(crate) clan_sort_order: ClanSortedBy,
     pub(crate) player_filter: String,
 
-    /// Accounts that shared a division with you in at least one match. Persisted
-    /// because the live path is the only witness for a battle the replay index
-    /// has not reached yet, and re-deriving it would lose that battle's mates.
-    /// Membership is per account, not per encounter: someone you divisioned with
-    /// once stays a division mate on every row they appear in.
-    #[serde(default)]
-    pub(crate) division_mates: HashSet<AccountId>,
-
-    /// Whether the Historical and Clans tables count the accounts in
-    /// `division_mates`. Shared by both sub-tabs so the two cannot disagree.
+    /// Whether the Historical and Clans tables count the encounters marked in
+    /// each player's [`TrackedPlayer::division_encounters`]. Shared by both
+    /// sub-tabs so the two cannot disagree.
     #[serde(default)]
     pub show_division_mates: bool,
 
-    /// Whether the index has already been asked for its division mates. One
+    /// Whether the index has already been asked for its division encounters. One
     /// attempt per session: the query is synchronous on the UI thread, and a
     /// failed one that retried would run on every frame.
     #[serde(skip)]
@@ -157,22 +152,10 @@ impl PlayerTracker {
         self.encounter_version = self.encounter_version.saturating_add(1);
     }
 
-    /// Whether the division-mate filter currently hides this account.
-    pub(crate) fn is_hidden_division_mate(&self, account: &AccountId) -> bool {
-        !self.show_division_mates && self.division_mates.contains(account)
-    }
-
     pub fn update_from_replay(&mut self, replay: &Replay) {
         let Some(report) = replay.battle_report.as_ref() else {
             return;
         };
-
-        let tracked_players = &mut self.tracked_players;
-        let tracked_players_by_ts = &mut self.tracked_players_by_time;
-        let mut ingested_any = false;
-        // Collected here and folded in after the loop, which holds a mutable
-        // borrow of the tracker's player maps.
-        let mut division_mates: HashSet<AccountId> = HashSet::new();
 
         let timestamp = util::replay_timestamp(&replay.replay_file.meta);
 
@@ -186,29 +169,63 @@ impl PlayerTracker {
                 .is_some_and(|meta_player| meta_player.relation == 0)
         });
 
-        for player in report.players() {
-            let player_state = player.initial_state();
+        self.ingest_roster(
+            report.players(),
+            self_player,
+            |player| player.initial_state(),
+            report.arena_id(),
+            timestamp,
+        );
+    }
+
+    /// Fold one battle's roster into the tracker.
+    ///
+    /// Generic over the roster's element type so the self guard can be tested
+    /// without a parsed replay: that guard is identity-based, and pointer
+    /// identity is the only thing separating the recording player from a roster
+    /// entry that reports the same account.
+    fn ingest_roster<P>(
+        &mut self,
+        players: &[Rc<P>],
+        self_player: Option<&Rc<P>>,
+        state_of: impl Fn(&P) -> &PlayerStateData,
+        arena_id: ArenaId,
+        timestamp: Timestamp,
+    ) {
+        let tracked_players = &mut self.tracked_players;
+        let tracked_players_by_ts = &mut self.tracked_players_by_time;
+        let mut ingested_any = false;
+        let mut marked_any = false;
+
+        for player in players {
+            let player_state = state_of(player);
 
             // Skip bots
             if player_state.is_bot() {
                 continue;
             }
 
+            let mut is_division_mate = false;
             if let Some(self_player) = self_player {
-                let self_state = self_player.initial_state();
                 // Ignore ourselves
-                if Arc::ptr_eq(self_player, player) {
+                if Rc::ptr_eq(self_player, player) {
                     continue;
                 }
-                // Division mates are recorded like anyone else and marked, so
-                // the tables can filter them without losing the encounter.
-                if self_state.is_division_mate(player_state) {
-                    division_mates.insert(player_state.db_id());
-                }
+                is_division_mate = state_of(self_player).is_division_mate(player_state);
             }
 
             let tracked_player = tracked_players.entry(player_state.db_id()).or_default();
-            if tracked_player.arena_ids.contains(&report.arena_id()) {
+
+            // Division encounters are recorded like any other and marked, so the
+            // tables can hide this battle without losing the ones where the same
+            // player was an opponent. Marked before the arena guard below: a
+            // re-parse of a battle already ingested is still the first chance to
+            // mark it.
+            if is_division_mate {
+                marked_any |= tracked_player.division_encounters.mark(arena_id, timestamp);
+            }
+
+            if tracked_player.arena_ids.contains(&arena_id) {
                 continue;
             }
             // Past that guard this battle is new for the player, whether or not
@@ -241,14 +258,15 @@ impl PlayerTracker {
             tracked_player.db_id = player_state.db_id();
             tracked_player.clan_id = player_state.clan_id();
             tracked_player.timestamps.insert(timestamp);
-            tracked_player.arena_ids.insert(report.arena_id());
+            tracked_player.arena_ids.insert(arena_id);
 
             tracked_players_by_ts.entry(timestamp).or_default().push(player_state.db_id());
         }
 
-        self.division_mates.extend(division_mates);
-
-        if ingested_any {
+        // A fresh mark changes which encounters the tables count just as much as
+        // a fresh encounter does, so the aggregates cached over the tracker have
+        // to rebuild for either.
+        if ingested_any || marked_any {
             self.note_encounters_changed();
         }
     }
@@ -402,6 +420,132 @@ impl ToolkitTabViewer<'_> {
 mod tests {
     use super::*;
 
+    /// The roster entry `ingest_roster` reads through its `state_of` accessor.
+    /// `BattleReport` cannot be built outside the parser, but the ingest core is
+    /// generic over the element type precisely so the guards it applies can be
+    /// exercised on a hand-built roster.
+    struct RosterEntry(PlayerStateData);
+
+    /// One roster entry, deserialized because `PlayerStateData`'s fields are
+    /// crate-private to the parser.
+    fn roster_entry(db_id: i64, name: &str, division: i64, is_bot: bool) -> Rc<RosterEntry> {
+        let state = serde_json::from_value(serde_json::json!({
+            "username": name,
+            "clan": "RAIN",
+            "clan_id": 7,
+            "clan_color": 0,
+            "db_id": db_id,
+            "realm": "na",
+            "meta_ship_id": 0,
+            "entity_id": 0,
+            "team_id": 0,
+            "max_health": 40_000,
+            "is_abuser": false,
+            "is_hidden": false,
+            "is_bot": is_bot,
+            "human_properties": {
+                "avatar_id": 0,
+                // The parser's name for the division id. Zero means no division.
+                "prebattle_id": division,
+                "is_client_loaded": true,
+                "is_connected": true,
+            },
+        }))
+        .expect("the roster fixture matches PlayerStateData's shape");
+
+        Rc::new(RosterEntry(state))
+    }
+
+    fn ingest(tracker: &mut PlayerTracker, roster: &[Rc<RosterEntry>], self_index: usize, arena: i64, second: i64) {
+        tracker.ingest_roster(
+            roster,
+            Some(&roster[self_index]),
+            |entry| &entry.0,
+            ArenaId::new(arena),
+            Timestamp::from_second(second).expect("fixture timestamp is in range"),
+        );
+    }
+
+    /// The live path's self guard is pointer identity, so it holds even against
+    /// a roster entry reporting the same account, and it runs before the
+    /// division marking that the self player would otherwise match on.
+    #[test]
+    fn the_live_path_never_records_the_recording_player() {
+        let self_entry = roster_entry(7, "Me", 3, false);
+        let roster = vec![
+            Rc::clone(&self_entry),
+            roster_entry(9, "Mate", 3, false),
+            roster_entry(501, "Enemy", 0, false),
+            roster_entry(0, "Bot", 0, true),
+            // A second entry for the same account: only the one the report named
+            // as the self player is the recording player.
+            roster_entry(7, "MyOtherShip", 3, false),
+        ];
+
+        let mut tracker = PlayerTracker::default();
+        ingest(&mut tracker, &roster, 0, 100, 1000);
+
+        assert!(!tracker.tracked_players.contains_key(&AccountId(0)), "bots are not players to track");
+        assert!(tracker.tracked_players.contains_key(&AccountId(9)));
+        assert!(tracker.tracked_players.contains_key(&AccountId(501)));
+
+        // The duplicate entry is recorded, but through its own identity: what
+        // must never happen is the recording player's own entry landing here.
+        let self_player = tracker.tracked_players.get(&AccountId(7)).expect("the duplicate entry is a roster row");
+        assert_eq!(self_player.last_name, "MyOtherShip", "the recording player's own entry was skipped");
+        assert_eq!(self_player.arena_ids.len(), 1, "and was not recorded a second time under the same account");
+    }
+
+    /// A division mate's battle is marked under both keys, and only that battle:
+    /// meeting the same account again outside a division leaves that encounter
+    /// counted.
+    #[test]
+    fn the_live_path_marks_the_division_battle_and_leaves_the_others() {
+        let mut tracker = PlayerTracker::default();
+
+        let divisioned = vec![roster_entry(7, "Me", 3, false), roster_entry(9, "Mate", 3, false)];
+        ingest(&mut tracker, &divisioned, 0, 100, 1000);
+
+        // The same account met again, this time in nobody's division.
+        let opposed = vec![roster_entry(7, "Me", 0, false), roster_entry(9, "Mate", 0, false)];
+        ingest(&mut tracker, &opposed, 0, 101, 2000);
+
+        let mate = &tracker.tracked_players[&AccountId(9)];
+        assert_eq!(mate.arena_ids.len(), 2, "both battles are recorded");
+        assert_eq!(mate.visible_arena_ids(false).collect::<Vec<_>>(), vec![ArenaId::new(101)]);
+        assert_eq!(
+            mate.visible_timestamps(false).collect::<Vec<_>>(),
+            vec![Timestamp::from_second(2000).unwrap()],
+            "the timestamp key hides the same battle the arena key does"
+        );
+        assert_eq!(mate.visible_arena_ids(true).count(), 2, "the toggle brings the division battle back");
+    }
+
+    /// Re-parsing a battle already ingested still marks it, and the aggregates
+    /// cached over the tracker have to be told: a mate marked for the first time
+    /// changes what they count just as much as a new encounter does.
+    #[test]
+    fn marking_a_battle_already_ingested_still_bumps_the_encounter_version() {
+        let mut tracker = PlayerTracker::default();
+
+        // What an index-sourced populate leaves behind: the encounter recorded,
+        // and no division marking on it.
+        let solo = vec![roster_entry(7, "Me", 0, false), roster_entry(9, "Mate", 0, false)];
+        ingest(&mut tracker, &solo, 0, 100, 1000);
+
+        let version_before = tracker.encounter_version;
+        let divisioned = vec![roster_entry(7, "Me", 3, false), roster_entry(9, "Mate", 3, false)];
+        ingest(&mut tracker, &divisioned, 0, 100, 1000);
+
+        assert_eq!(tracker.tracked_players[&AccountId(9)].visible_arena_ids(false).count(), 0, "the battle is marked");
+        assert!(version_before < tracker.encounter_version, "a first marking has to invalidate the cached aggregates");
+
+        // A re-parse that marks nothing new leaves the caches alone.
+        let version_after = tracker.encounter_version;
+        ingest(&mut tracker, &divisioned, 0, 100, 1000);
+        assert_eq!(tracker.encounter_version, version_after, "an unchanged re-parse must not force a rebuild");
+    }
+
     #[test]
     fn a_complete_dock_layout_needs_no_repair() {
         let dock = crate::tab_state::default_player_tracker_dock_state();
@@ -469,6 +613,10 @@ mod tests {
     /// either `serde(skip)` or `serde(default)`, and the older fields keep their
     /// names and types. This pins that, because the failure mode is a tracker
     /// that silently loads empty on the first run after an update.
+    ///
+    /// The payload also carries the per-account `division_mates` set a previous
+    /// build persisted. It has no per-encounter reading, so it is dropped rather
+    /// than migrated, and dropping it must not fail the whole load.
     #[test]
     fn a_payload_holding_only_the_older_fields_still_loads() {
         let saved = r#"{
@@ -484,6 +632,7 @@ mod tests {
                     "arena_ids": [100]
                 }
             },
+            "division_mates": [501],
             "filter_time_period": "LastWeek",
             "sort_order": { "TimesEncountered": "Desc" },
             "player_filter": "yamato"
@@ -507,7 +656,11 @@ mod tests {
         assert_eq!(tracker.player_filter, "yamato");
 
         assert_eq!(tracker.clan_sort_order, ClanSortedBy::default(), "the clan sort falls back to its default");
-        assert!(tracker.division_mates.is_empty(), "a tracker saved before mates were marked loads with none");
+        assert_eq!(
+            player.visible_arena_ids(false).count(),
+            1,
+            "the retired per-account set marks nothing: only the index and the live path can, per encounter"
+        );
         assert!(!tracker.show_division_mates, "the division-mate filter defaults to hiding them");
         assert!(!tracker.division_mates_synced, "a restored tracker still asks the index once");
         assert_eq!(tracker.encounter_version, 0);

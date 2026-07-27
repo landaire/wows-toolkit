@@ -20,6 +20,7 @@ use super::query_model::Query;
 use super::query_model::Subject;
 use super::query_model::Value;
 use super::rows::ClanCorrection;
+use super::rows::DivisionMateEncounter;
 use super::rows::IndexError;
 use super::rows::IndexSource;
 use super::rows::IndexedVehicleRow;
@@ -449,21 +450,24 @@ pub async fn self_account_ids(pool: &SqlitePool, filter: &MatchFilter) -> Result
     Ok(rows.into_iter().map(|(a,)| AccountId::from(a)).collect())
 }
 
-/// Accounts that shared a division with the replay's self player in some match.
+/// The encounters in which an account shared a division with the replay's self
+/// player, one row per (account, match).
 ///
-/// Membership is per account, not per encounter: an account that divisioned with
-/// you once counts as a division mate everywhere. `indexed_vehicle.division_id`
-/// is NULL for a player who is not in a division, so a NULL on either side never
-/// pairs. The self account of the record is never returned.
+/// Per encounter, not per account: an account that divisioned with you in one
+/// match and fought you in another is only returned for the first.
+/// `indexed_vehicle.division_id` is NULL for a player who is not in a division,
+/// so a NULL on either side never pairs, and the writer stores NULL rather than
+/// 0 for "no division". The self account of the record is never returned.
 ///
 /// `filter.source_ids` scopes to groups; other filter fields are ignored here.
-pub async fn division_mate_account_ids(
+pub async fn division_mate_encounters(
     pool: &SqlitePool,
     filter: &MatchFilter,
-) -> Result<HashSet<AccountId>, IndexError> {
+) -> Result<Vec<DivisionMateEncounter>, IndexError> {
     let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
-        "SELECT DISTINCT mate.account_id \
+        "SELECT DISTINCT mate.account_id, r.arena_id, m.timestamp \
            FROM replay_record r \
+           JOIN indexed_match m ON m.arena_id = r.arena_id \
            JOIN indexed_vehicle me ON me.arena_id = r.arena_id AND me.account_id = r.self_account_id \
            JOIN indexed_vehicle mate ON mate.arena_id = r.arena_id AND mate.division_id = me.division_id \
           WHERE r.self_account_id IS NOT NULL AND me.division_id IS NOT NULL \
@@ -478,8 +482,19 @@ pub async fn division_mate_account_ids(
         qb.push(")");
     }
 
-    let rows: Vec<(i64,)> = qb.build_query_as().fetch_all(pool).await?;
-    Ok(rows.into_iter().map(|(a,)| AccountId::from(a)).collect())
+    let rows = qb.build().fetch_all(pool).await?;
+    rows.iter()
+        .map(|row| {
+            Ok(DivisionMateEncounter {
+                account_id: AccountId::from(row.try_get::<i64, _>("account_id")?),
+                arena_id: ArenaId::new(row.try_get::<i64, _>("arena_id")?),
+                // Matches how `matches_with_player` degrades an unrepresentable
+                // stored second; `IndexError` has no timestamp variant.
+                timestamp: jiff::Timestamp::from_second(row.try_get::<i64, _>("timestamp")?)
+                    .unwrap_or(jiff::Timestamp::UNIX_EPOCH),
+            })
+        })
+        .collect()
 }
 
 /// Encounters whose clan at the time differs from the account's latest clan.
