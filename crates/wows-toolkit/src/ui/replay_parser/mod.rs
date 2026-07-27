@@ -49,6 +49,7 @@ use crate::task::BackgroundTaskKind;
 use crate::task::ReplayExportFormat;
 use crate::task::ReplaySource;
 use crate::task::ToastMessage;
+use crate::ui::theme::semantic::SemanticExt;
 use crate::update_background_task;
 use crate::util::replay_export::FlattenedVehicle;
 use crate::util::replay_export::Match;
@@ -143,15 +144,21 @@ type ReplayGroup = (String, Vec<ReplayEntry>);
 
 use std::cmp::Reverse;
 
-/// Colorize a label based on battle result. Selected items get white-on-dark.
-fn colorize_label(label: &str, battle_result: Option<BattleResult>, is_selected: bool) -> RichText {
+/// Colorize a label based on battle result. Selected items get the strong text role.
+fn colorize_label(
+    label: &str,
+    battle_result: Option<BattleResult>,
+    is_selected: bool,
+    visuals: &egui::Visuals,
+) -> RichText {
+    let sem = crate::ui::theme::semantic::semantic(visuals);
     if is_selected {
-        RichText::new(label).color(Color32::WHITE).background_color(Color32::DARK_GRAY)
+        RichText::new(label).color(sem.text_strong)
     } else {
         match battle_result {
-            Some(BattleResult::Win(_)) => RichText::new(label).color(Color32::LIGHT_GREEN),
-            Some(BattleResult::Loss(_)) => RichText::new(label).color(Color32::LIGHT_RED),
-            Some(BattleResult::Draw) => RichText::new(label).color(Color32::LIGHT_YELLOW),
+            Some(BattleResult::Win(_)) => RichText::new(label).color(sem.win),
+            Some(BattleResult::Loss(_)) => RichText::new(label).color(sem.loss),
+            Some(BattleResult::Draw) => RichText::new(label).color(sem.draw),
             None => RichText::new(label),
         }
     }
@@ -1280,11 +1287,7 @@ impl UiReport {
                     };
                     match icon {
                         Some(icon) => {
-                            let tint = if skill.learned {
-                                Color32::WHITE
-                            } else {
-                                Color32::from_rgba_unmultiplied(255, 255, 255, 55)
-                            };
+                            let tint = if skill.learned { ui.sem().text_strong } else { ui.sem().text_dim };
                             if let Some(tex) = self.icon_texture(ui.ctx(), icon) {
                                 let image =
                                     egui::Image::new((tex.id(), egui::Vec2::new(ICON_SIZE, ICON_SIZE))).tint(tint);
@@ -2045,7 +2048,7 @@ impl UiReport {
                         } else if !report.has_vehicle_entity {
                             ui.label(
                                 RichText::new(wt_translations::icon_t(icons::EXCLAMATION_MARK, "-"))
-                                    .color(Color32::LIGHT_RED),
+                                    .color(ui.sem().loss),
                             )
                             .on_hover_text(t!("ui.replay.build.not_spotted"));
                         } else {
@@ -3257,23 +3260,24 @@ impl ToolkitTabViewer<'_> {
             ui.horizontal(|ui| {
                 if replay_file.battle_results_are_pending() {
                     let text = RichText::new(wt_translations::icon_t(icons::INFO, &t!("ui.replay.incomplete_results")))
-                        .color(Color32::ORANGE);
+                        .color(ui.sem().warn);
                     ui.strong(text).on_hover_text(t!("ui.replay.incomplete_results_tooltip"));
                 }
 
                 if let Some(battle_result) = replay_file.battle_result() {
+                    let sem = ui.sem();
                     let text = match battle_result {
                         BattleResult::Win(_) => {
                             RichText::new(wt_translations::icon_t(icons::TROPHY, &t!("ui.replay.results.victory")))
-                                .color(Color32::LIGHT_GREEN)
+                                .color(sem.win)
                         }
                         BattleResult::Loss(_) => {
                             RichText::new(wt_translations::icon_t(icons::SMILEY_SAD, &t!("ui.replay.results.defeat")))
-                                .color(Color32::LIGHT_RED)
+                                .color(sem.loss)
                         }
                         BattleResult::Draw => {
                             RichText::new(wt_translations::icon_t(icons::NOTCHES, &t!("ui.replay.results.draw")))
-                                .color(Color32::LIGHT_YELLOW)
+                                .color(sem.draw)
                         }
                     };
                     ui.label(text);
@@ -3650,13 +3654,13 @@ impl ToolkitTabViewer<'_> {
                     job.append(
                         &separate_number(team_damage, locale),
                         0.0,
-                        TextFormat { color: Color32::LIGHT_GREEN, ..Default::default() },
+                        TextFormat { color: ui.sem().win, ..Default::default() },
                     );
                     job.append(" : ", 0.0, weak_fmt.clone());
                     job.append(
                         &separate_number(red_team_damage, locale),
                         0.0,
-                        TextFormat { color: Color32::LIGHT_RED, ..Default::default() },
+                        TextFormat { color: ui.sem().loss, ..Default::default() },
                     );
                     job.append(
                         &format!(" ({})", separate_number(team_damage + red_team_damage, locale)),
@@ -3716,7 +3720,7 @@ impl ToolkitTabViewer<'_> {
                         drop(replay_guard);
 
                         let is_selected = focused.as_ref().map(|c| Arc::ptr_eq(c, &replay)).unwrap_or(false);
-                        let label_text = colorize_label(&label, battle_result, is_selected);
+                        let label_text = colorize_label(&label, battle_result, is_selected, ui.visuals());
 
                         let replay_weak = Arc::downgrade(&replay);
                         let path_clone = path.clone();
@@ -3821,6 +3825,7 @@ impl ToolkitTabViewer<'_> {
         }
 
         let fallback_maps = tree_maps.clone();
+        let visuals = ui.visuals().clone();
 
         let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id(tree_id_salt))
             .allow_multi_selection(true)
@@ -3866,7 +3871,7 @@ impl ToolkitTabViewer<'_> {
                         };
                         drop(replay_guard);
 
-                        let label_text = colorize_label(&label, battle_result, false);
+                        let label_text = colorize_label(&label, battle_result, false, &visuals);
                         let node = egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
                             show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir);
                         });
@@ -4207,13 +4212,14 @@ impl ToolkitTabViewer<'_> {
 
         // Session button (turns red when active).
         let label = if any_active {
-            RichText::new(wt_translations::icon_t(icons::BROADCAST, &t!("ui.collab.session"))).color(Color32::WHITE)
+            RichText::new(wt_translations::icon_t(icons::BROADCAST, &t!("ui.collab.session")))
+                .color(ui.sem().text_strong)
         } else {
             RichText::new(wt_translations::icon_t(icons::BROADCAST, &t!("ui.collab.session")))
         };
         let mut button = egui::Button::new(label);
         if any_active {
-            button = button.fill(Color32::from_rgb(220, 50, 50));
+            button = button.fill(ui.sem().error);
         }
         let btn = ui.add(button);
 
@@ -4253,11 +4259,7 @@ impl ToolkitTabViewer<'_> {
                 } else if host_active {
                     // ── Active host session controls ──
                     ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(t!("ui.collab.session_active").as_ref())
-                                .strong()
-                                .color(Color32::from_rgb(220, 50, 50)),
-                        );
+                        ui.label(RichText::new(t!("ui.collab.session_active").as_ref()).strong().color(ui.sem().error));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.small_button(t!("ui.buttons.stop")).clicked() {
                                 if let Some(ref handle) = self.tab_state.host_session {
@@ -4347,12 +4349,15 @@ impl ToolkitTabViewer<'_> {
                             continue;
                         }
                         ui.horizontal(|ui| {
-                            let color = Color32::from_rgb(user.color[0], user.color[1], user.color[2]);
+                            let color = crate::ui::theme::contrast::readable_on(
+                                Color32::from_rgb(user.color[0], user.color[1], user.color[2]),
+                                ui.visuals().panel_fill,
+                            );
                             let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
                             ui.painter().circle_filled(rect.center(), 4.0, color);
                             ui.label(&user.name);
                             if user.role == crate::collab::PeerRole::CoHost {
-                                ui.label(RichText::new(icons::CROWN).small().color(Color32::from_rgb(255, 195, 0)));
+                                ui.label(RichText::new(icons::CROWN).small().color(ui.sem().division));
                             }
                             if user.role != crate::collab::PeerRole::Host
                                 && user.role != crate::collab::PeerRole::CoHost
@@ -4416,7 +4421,10 @@ impl ToolkitTabViewer<'_> {
                     let my_id = self.tab_state.session_state.lock().my_user_id;
                     for user in &connected_users {
                         ui.horizontal(|ui| {
-                            let color = Color32::from_rgb(user.color[0], user.color[1], user.color[2]);
+                            let color = crate::ui::theme::contrast::readable_on(
+                                Color32::from_rgb(user.color[0], user.color[1], user.color[2]),
+                                ui.visuals().panel_fill,
+                            );
                             let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
                             ui.painter().circle_filled(rect.center(), 4.0, color);
                             if user.id == my_id {
@@ -4427,14 +4435,12 @@ impl ToolkitTabViewer<'_> {
                             }
                             match user.role {
                                 crate::collab::PeerRole::Host => {
-                                    ui.label(RichText::new(icons::CROWN).small().color(Color32::from_rgb(255, 195, 0)))
+                                    ui.label(RichText::new(icons::CROWN).small().color(ui.sem().division))
                                         .on_hover_text(t!("ui.collab.role_host"));
                                 }
                                 crate::collab::PeerRole::CoHost => {
-                                    ui.label(
-                                        RichText::new(icons::CROWN).small().color(Color32::from_rgb(136, 84, 208)),
-                                    )
-                                    .on_hover_text(t!("ui.collab.role_cohost"));
+                                    ui.label(RichText::new(icons::CROWN).small().color(ui.sem().abuser))
+                                        .on_hover_text(t!("ui.collab.role_cohost"));
                                 }
                                 _ => {}
                             }
@@ -4448,9 +4454,7 @@ impl ToolkitTabViewer<'_> {
                     // Display name (shared for host + join)
                     if self.tab_state.show_display_name_error {
                         ui.label(
-                            RichText::new(t!("ui.collab.display_name_error").as_ref())
-                                .color(Color32::from_rgb(220, 50, 50))
-                                .small(),
+                            RichText::new(t!("ui.collab.display_name_error").as_ref()).color(ui.sem().error).small(),
                         );
                     }
                     ui.label(t!("ui.collab.display_name"));
@@ -4460,7 +4464,7 @@ impl ToolkitTabViewer<'_> {
                             .hint_text(t!("ui.collab.display_name_hint"))
                             .desired_width(160.0)
                             .text_color(if self.tab_state.show_display_name_error {
-                                Color32::from_rgb(220, 50, 50)
+                                ui.sem().error
                             } else {
                                 ui.visuals().text_color()
                             }),
@@ -4472,7 +4476,7 @@ impl ToolkitTabViewer<'_> {
                         ui.painter().rect_stroke(
                             name_response.rect,
                             name_response.rect.height() * 0.15,
-                            egui::Stroke::new(1.5, Color32::from_rgb(220, 50, 50)),
+                            egui::Stroke::new(1.5, ui.sem().error),
                             egui::StrokeKind::Outside,
                         );
                     }
@@ -4733,7 +4737,7 @@ impl ToolkitTabViewer<'_> {
                                 .lines()
                                 .map(|line| {
                                     ui.painter()
-                                        .layout_no_wrap(line.to_string(), font_id.clone(), Color32::WHITE)
+                                        .layout_no_wrap(line.to_string(), font_id.clone(), ui.sem().text_strong)
                                         .size()
                                         .x
                                 })
@@ -5158,9 +5162,7 @@ impl ToolkitTabViewer<'_> {
                                             cmd.key1.clone()
                                         };
                                         ui.label(
-                                            egui::RichText::new(binding)
-                                                .monospace()
-                                                .color(egui::Color32::from_rgb(180, 210, 255)),
+                                            egui::RichText::new(binding).monospace().color(ui.sem().armor.ricochet),
                                         );
                                         ui.end_row();
                                     }
@@ -5800,7 +5802,7 @@ fn build_replay_chat_content(
         let name_color = if let Some(relation) = sender_relation {
             player_color_for_team_relation(*relation, ui.visuals())
         } else {
-            Color32::GRAY
+            ui.sem().text_dim
         };
 
         let mut job = LayoutJob::default();
@@ -5816,10 +5818,10 @@ fn build_replay_chat_content(
         job.append(&format!("{sender_name}:\n"), 0.0, TextFormat { color: name_color, ..Default::default() });
 
         let text_color = match channel {
-            ChatChannel::Division => Color32::GOLD,
-            ChatChannel::Global => Color32::WHITE,
-            ChatChannel::Team => Color32::LIGHT_GREEN,
-            _ => Color32::ORANGE,
+            ChatChannel::Division => ui.sem().chat.division,
+            ChatChannel::Global => ui.sem().chat.global,
+            ChatChannel::Team => ui.sem().chat.team,
+            _ => ui.sem().chat.other,
         };
 
         job.append(&message, 0.0, TextFormat { color: text_color, ..Default::default() });

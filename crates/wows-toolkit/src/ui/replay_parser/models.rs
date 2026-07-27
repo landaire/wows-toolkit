@@ -80,7 +80,8 @@ pub enum ClanColor {
 impl ClanColor {
     pub fn color(self, visuals: &egui::Visuals) -> Color32 {
         match self {
-            Self::Fixed(color) => color,
+            // Server-supplied, arbitrary RGB, no legibility guarantee.
+            Self::Fixed(color) => crate::ui::theme::contrast::readable_on(color, visuals.panel_fill),
             Self::Relation(tint) => tint.color(visuals),
         }
     }
@@ -523,5 +524,24 @@ mod tests {
         let dark = PlayerTint::SelfPlayer.color(&Visuals::dark());
         let light = PlayerTint::SelfPlayer.color(&Visuals::light());
         assert_ne!(dark, light, "SelfPlayer tint must resolve differently between themes");
+    }
+
+    /// A deliberately awful server-supplied clan colour (worst case: no
+    /// contrast at all against the panel) must still clear the floor once
+    /// resolved, in both themes.
+    #[test]
+    fn fixed_clan_color_is_repaired_against_the_panel_in_both_themes() {
+        use crate::ui::theme::contrast::CONTRAST_FLOOR;
+        use crate::ui::theme::contrast::contrast_ratio;
+
+        let dark_visuals = Visuals::dark();
+        let black = ClanColor::Fixed(Color32::BLACK).color(&dark_visuals);
+        let r = contrast_ratio(black, dark_visuals.panel_fill);
+        assert!(r >= CONTRAST_FLOOR, "black clan colour on dark panel only reached {r}");
+
+        let light_visuals = Visuals::light();
+        let white = ClanColor::Fixed(Color32::WHITE).color(&light_visuals);
+        let r = contrast_ratio(white, light_visuals.panel_fill);
+        assert!(r >= CONTRAST_FLOOR, "white clan colour on light panel only reached {r}");
     }
 }
