@@ -362,6 +362,14 @@ impl PlayerTracker {
         // dominate the default times-encountered sort.
         let self_accounts = rt.block_on(query::self_account_ids(pool, &MatchFilter::default())).unwrap_or_default();
 
+        // The index knows every division the self player was in, which is what
+        // the live path marks as it parses. Populating without this would leave
+        // index-sourced mates unmarked and the filter showing an arbitrary
+        // subset of them. Unconditional: the button is a deliberate request to
+        // re-read the index, whatever an earlier sync already found.
+        self.refresh_division_mates_from_index(pool, rt);
+        self.division_mates_synced = true;
+
         for facet in players {
             if self_accounts.contains(&facet.account_id) {
                 continue;
@@ -384,6 +392,44 @@ impl PlayerTracker {
 
         self.note_encounters_changed();
         true
+    }
+
+    /// Union the index's division mates into the tracker's set. Returns whether
+    /// the set grew, which is what tells a caller the tables have to be rebuilt.
+    fn refresh_division_mates_from_index(&mut self, pool: &sqlx::SqlitePool, rt: &tokio::runtime::Runtime) -> bool {
+        use crate::db::index::query;
+        use crate::db::index::rows::MatchFilter;
+
+        let mates = match rt.block_on(query::division_mate_account_ids(pool, &MatchFilter::default())) {
+            Ok(mates) => mates,
+            Err(e) => {
+                tracing::warn!("player tracker: division-mate query failed: {e}");
+                return false;
+            }
+        };
+
+        let before = self.division_mates.len();
+        self.division_mates.extend(mates);
+        before < self.division_mates.len()
+    }
+
+    /// Read the index's division mates back into the tracker, once per session.
+    ///
+    /// A tracker populated before mates were marked holds them unmarked, and so
+    /// does one whose live-path marking predates an account joining your
+    /// division. Folding the index's answer in on the first paint corrects both
+    /// without asking the user to populate again.
+    pub(crate) fn sync_division_mates_from_index(&mut self, pool: &sqlx::SqlitePool, rt: &tokio::runtime::Runtime) {
+        if self.division_mates_synced {
+            return;
+        }
+        self.division_mates_synced = true;
+
+        if self.refresh_division_mates_from_index(pool, rt) {
+            // Aggregates cached over the tracker were built counting accounts
+            // this just marked, so they no longer describe what is on screen.
+            self.note_encounters_changed();
+        }
     }
 }
 
@@ -652,5 +698,198 @@ mod tests {
 
         assert!(!tracker.tracked_players.contains_key(&AccountId(7)), "self-perspective account must not be tracked");
         assert!(tracker.tracked_players.contains_key(&AccountId(501)), "opponent account must still be tracked");
+    }
+
+    /// A tracker whose history predates division marking holds its mates
+    /// unmarked. The index knows which they were, so reading it back on the
+    /// first paint corrects the filter without a fresh Populate run.
+    #[test]
+    fn syncing_from_the_index_marks_mates_an_older_tracker_recorded_unmarked() {
+        let rt = build_runtime();
+        let pool = rt.block_on(async {
+            let pool = mem_pool().await;
+            let now = Timestamp::from_second(1_700_000_000).unwrap();
+            let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+            let objective = ObjectiveMatch {
+                arena_id: ArenaId::new(100),
+                timestamp: Timestamp::from_second(1_700_000_100).unwrap(),
+                map: "Ocean".into(),
+                game_mode: "Domination".into(),
+                game_type: "pvp".into(),
+                match_group: "pvp".into(),
+                version_build: Some(1234),
+            };
+            query::upsert_match(&pool, &objective).await.unwrap();
+
+            let vehicle = |account: i64, relation: VehicleRelation, division: Option<i64>| IndexedVehicleRow {
+                arena_id: ArenaId::new(100),
+                account_id: AccountId(account),
+                player_name: format!("Player{account}"),
+                clan: "CLAN".into(),
+                realm: Some("na".into()),
+                ship_id: GameParamId::from(111u64),
+                ship_index: "PJSB018".into(),
+                ship_name: "Yamato".into(),
+                nation: "japan".into(),
+                species: "Battleship".into(),
+                tier: 10,
+                relation,
+                division_id: division,
+                survived: Some(true),
+                damage: Some(50_000),
+                kills: Some(1),
+                spotting: Some(0),
+                potential: Some(0),
+                received: Some(0),
+                pr: Some(1200.0),
+                is_test_ship: false,
+                disconnected: None,
+                is_stream_sniper: None,
+                sniper_twitch_login: None,
+            };
+            query::upsert_vehicles(
+                &pool,
+                &[
+                    vehicle(7, VehicleRelation::SelfPlayer, Some(3)),
+                    vehicle(9, VehicleRelation::Ally, Some(3)),
+                    vehicle(501, VehicleRelation::Enemy, None),
+                ],
+            )
+            .await
+            .unwrap();
+
+            let record = ReplayRecord {
+                arena_id: ArenaId::new(100),
+                source_id: src,
+                replay_path: PathBuf::from("a.wowsreplay"),
+                file_mtime: Some(1),
+                outcome: MatchOutcome::Win,
+                self_account_id: Some(AccountId(7)),
+                self_ship_id: Some(GameParamId::from(999u64)),
+                self_survived: Some(true),
+                self_damage: Some(120_000),
+                self_kills: Some(2),
+                self_pr: Some(1500.0),
+                results_available: true,
+                indexed_at: now,
+            };
+            query::upsert_record(&pool, &record).await.unwrap();
+
+            pool
+        });
+
+        // What an earlier Populate run left behind: both accounts tracked, and
+        // no idea which of them was in the division.
+        let mut tracker = PlayerTracker::default();
+        for id in [AccountId(9), AccountId(501)] {
+            tracker.tracked_players.entry(id).or_default().db_id = id;
+        }
+        assert!(tracker.division_mates.is_empty());
+
+        let version_before = tracker.encounter_version;
+        tracker.sync_division_mates_from_index(&pool, &rt);
+
+        assert!(tracker.division_mates.contains(&AccountId(9)), "the mate the index knows about is marked");
+        assert!(!tracker.division_mates.contains(&AccountId(501)), "a solo opponent is not a mate");
+        assert!(!tracker.tracked_players.contains_key(&AccountId(7)), "syncing never adds the self account");
+        assert!(
+            version_before < tracker.encounter_version,
+            "marking changes what the aggregates count, so they have to rebuild"
+        );
+
+        // One attempt per session: the query is synchronous on the UI thread.
+        tracker.division_mates.remove(&AccountId(9));
+        tracker.sync_division_mates_from_index(&pool, &rt);
+        assert!(tracker.division_mates.is_empty(), "a second sync in the same session must not re-run the query");
+    }
+
+    /// The Populate button re-reads the index whatever an earlier sync found,
+    /// and still refuses to track the self account.
+    #[test]
+    fn populating_marks_division_mates_and_still_excludes_self() {
+        let rt = build_runtime();
+        let pool = rt.block_on(async {
+            let pool = mem_pool().await;
+            let now = Timestamp::from_second(1_700_000_000).unwrap();
+            let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+            let objective = ObjectiveMatch {
+                arena_id: ArenaId::new(100),
+                timestamp: Timestamp::from_second(1_700_000_100).unwrap(),
+                map: "Ocean".into(),
+                game_mode: "Domination".into(),
+                game_type: "pvp".into(),
+                match_group: "pvp".into(),
+                version_build: Some(1234),
+            };
+            query::upsert_match(&pool, &objective).await.unwrap();
+
+            let vehicle = |account: i64, relation: VehicleRelation, division: Option<i64>| IndexedVehicleRow {
+                arena_id: ArenaId::new(100),
+                account_id: AccountId(account),
+                player_name: format!("Player{account}"),
+                clan: "CLAN".into(),
+                realm: Some("na".into()),
+                ship_id: GameParamId::from(111u64),
+                ship_index: "PJSB018".into(),
+                ship_name: "Yamato".into(),
+                nation: "japan".into(),
+                species: "Battleship".into(),
+                tier: 10,
+                relation,
+                division_id: division,
+                survived: Some(true),
+                damage: Some(50_000),
+                kills: Some(1),
+                spotting: Some(0),
+                potential: Some(0),
+                received: Some(0),
+                pr: Some(1200.0),
+                is_test_ship: false,
+                disconnected: None,
+                is_stream_sniper: None,
+                sniper_twitch_login: None,
+            };
+            query::upsert_vehicles(
+                &pool,
+                &[
+                    vehicle(7, VehicleRelation::SelfPlayer, Some(3)),
+                    vehicle(9, VehicleRelation::Ally, Some(3)),
+                    vehicle(501, VehicleRelation::Enemy, None),
+                ],
+            )
+            .await
+            .unwrap();
+
+            let record = ReplayRecord {
+                arena_id: ArenaId::new(100),
+                source_id: src,
+                replay_path: PathBuf::from("a.wowsreplay"),
+                file_mtime: Some(1),
+                outcome: MatchOutcome::Win,
+                self_account_id: Some(AccountId(7)),
+                self_ship_id: Some(GameParamId::from(999u64)),
+                self_survived: Some(true),
+                self_damage: Some(120_000),
+                self_kills: Some(2),
+                self_pr: Some(1500.0),
+                results_available: true,
+                indexed_at: now,
+            };
+            query::upsert_record(&pool, &record).await.unwrap();
+
+            pool
+        });
+
+        // An earlier sync in this session must not stop the button working.
+        let mut tracker = PlayerTracker { division_mates_synced: true, ..Default::default() };
+
+        assert!(tracker.populate_from_index(&pool, &rt), "index had a match to populate from");
+
+        assert!(tracker.tracked_players.contains_key(&AccountId(9)), "a division mate is recorded, not dropped");
+        assert!(tracker.division_mates.contains(&AccountId(9)), "and it is marked, so the filter can hide it");
+        assert!(!tracker.tracked_players.contains_key(&AccountId(7)), "the self account is still never tracked");
+        assert!(!tracker.division_mates.contains(&AccountId(501)), "a solo opponent is not a mate");
     }
 }

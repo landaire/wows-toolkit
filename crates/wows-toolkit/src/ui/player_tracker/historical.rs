@@ -63,8 +63,8 @@ const PLAYER_COLUMN: ExpandingColumn = ExpandingColumn {
     expanded_id: "player_tracker_historical_player_expanded",
 };
 
-/// Accounts to render, filtered by the active time range and name filter, in
-/// the order the active sort puts them.
+/// Accounts to render, filtered by the active time range, name filter and
+/// division-mate toggle, in the order the active sort puts them.
 fn visible_rows(tracker: &PlayerTracker) -> Vec<AccountId> {
     let filter_lower = tracker.player_filter.to_ascii_lowercase();
     let sorted_by = tracker.sort_order;
@@ -90,6 +90,9 @@ fn visible_rows(tracker: &PlayerTracker) -> Vec<AccountId> {
         .tracked_players
         .iter()
         .filter(|(id, player)| {
+            if tracker.is_hidden_division_mate(id) {
+                return false;
+            }
             if !tracker.player_filter.is_empty() {
                 player_range.contains(id)
                     && (player.clan.to_ascii_lowercase().contains(&filter_lower)
@@ -449,6 +452,11 @@ impl ToolkitTabViewer<'_> {
             let mut player_tracker_settings = self.tab_state.player_tracker.write();
             let player_tracker = &mut *player_tracker_settings;
             let now = Timestamp::now();
+
+            if let (Some(pool), Some(rt)) = (self.tab_state.db_pool.as_ref(), self.tab_state.tokio_runtime.as_deref()) {
+                player_tracker.sync_division_mates_from_index(pool, rt);
+            }
+
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     if ui.button(t!("ui.player_tracker.clear_stats")).clicked() {
@@ -484,6 +492,11 @@ impl ToolkitTabViewer<'_> {
                             );
                             ui.selectable_value(selected, TimePeriod::AllTime, t!("ui.player_tracker.period.all_time"));
                         });
+                    // The same field the Clans tab's checkbox edits, so the two
+                    // stay in sync in both directions with no extra state.
+                    ui.checkbox(&mut player_tracker.show_division_mates, t!("ui.player_tracker.show_division_mates"))
+                        .on_hover_text(t!("ui.player_tracker.show_division_mates_hover"));
+
                     ui.label(t!("ui.player_tracker.player_filter"));
                     ui.text_edit_singleline(&mut player_tracker.player_filter);
 
@@ -720,6 +733,49 @@ mod tests {
 
         let all_time = tracker(TimePeriod::AllTime, SortedBy::Name(SortOrder::Asc), players());
         assert_eq!(visible_rows(&all_time), vec![AccountId(1), AccountId(2)]);
+    }
+
+    /// Division mates are recorded like anyone else, so the only thing keeping
+    /// them off the table is the toggle.
+    #[test]
+    fn a_division_mate_is_listed_only_while_the_toggle_is_on() {
+        let base = Timestamp::from_second(1_700_000_000).expect("fixture timestamp is in range");
+        let with_toggle = |show: bool| {
+            let mut tracker = tracker(
+                TimePeriod::AllTime,
+                SortedBy::Name(SortOrder::Asc),
+                vec![player(1, "", "enemy", &[], &[base]), player(2, "", "divmate", &[], &[base])],
+            );
+            tracker.division_mates.insert(AccountId(2));
+            tracker.show_division_mates = show;
+            visible_rows(&tracker)
+        };
+
+        assert_eq!(with_toggle(false), vec![AccountId(1)], "a division mate is filtered out by default");
+        assert_eq!(with_toggle(true), vec![AccountId(2), AccountId(1)], "the toggle brings the mate back");
+    }
+
+    /// The self player is never recorded on either ingest path, so no toggle
+    /// position can put them on the table. Marking them a division mate, which
+    /// they are of themselves, must not become a back door either.
+    #[test]
+    fn the_self_player_is_absent_whatever_the_toggle_says() {
+        let base = Timestamp::from_second(1_700_000_000).expect("fixture timestamp is in range");
+        let self_account = AccountId(7);
+
+        for show in [false, true] {
+            let mut tracker = tracker(
+                TimePeriod::AllTime,
+                SortedBy::Name(SortOrder::Asc),
+                vec![player(1, "", "enemy", &[], &[base])],
+            );
+            tracker.division_mates.insert(self_account);
+            tracker.show_division_mates = show;
+
+            let rows = visible_rows(&tracker);
+            assert!(!rows.contains(&self_account), "an account the ingest paths never record cannot be listed");
+            assert_eq!(rows, vec![AccountId(1)]);
+        }
     }
 
     #[test]

@@ -54,6 +54,25 @@ pub struct PlayerTracker {
     pub(crate) clan_sort_order: ClanSortedBy,
     pub(crate) player_filter: String,
 
+    /// Accounts that shared a division with you in at least one match. Persisted
+    /// because the live path is the only witness for a battle the replay index
+    /// has not reached yet, and re-deriving it would lose that battle's mates.
+    /// Membership is per account, not per encounter: someone you divisioned with
+    /// once stays a division mate on every row they appear in.
+    #[serde(default)]
+    pub(crate) division_mates: HashSet<AccountId>,
+
+    /// Whether the Historical and Clans tables count the accounts in
+    /// `division_mates`. Shared by both sub-tabs so the two cannot disagree.
+    #[serde(default)]
+    pub show_division_mates: bool,
+
+    /// Whether the index has already been asked for its division mates. One
+    /// attempt per session: the query is synchronous on the UI thread, and a
+    /// failed one that retried would run on every frame.
+    #[serde(skip)]
+    pub(crate) division_mates_synced: bool,
+
     /// Measured height of each open historical row's detail block, keyed by row
     /// number, so `egui_table` can stretch those rows past the default height.
     #[serde(skip)]
@@ -138,6 +157,11 @@ impl PlayerTracker {
         self.encounter_version = self.encounter_version.saturating_add(1);
     }
 
+    /// Whether the division-mate filter currently hides this account.
+    pub(crate) fn is_hidden_division_mate(&self, account: &AccountId) -> bool {
+        !self.show_division_mates && self.division_mates.contains(account)
+    }
+
     pub fn update_from_replay(&mut self, replay: &Replay) {
         let Some(report) = replay.battle_report.as_ref() else {
             return;
@@ -146,6 +170,9 @@ impl PlayerTracker {
         let tracked_players = &mut self.tracked_players;
         let tracked_players_by_ts = &mut self.tracked_players_by_time;
         let mut ingested_any = false;
+        // Collected here and folded in after the loop, which holds a mutable
+        // borrow of the tracker's player maps.
+        let mut division_mates: HashSet<AccountId> = HashSet::new();
 
         let timestamp = util::replay_timestamp(&replay.replay_file.meta);
 
@@ -169,11 +196,14 @@ impl PlayerTracker {
 
             if let Some(self_player) = self_player {
                 let self_state = self_player.initial_state();
-                // Ignore ourselves and people in our division
-                if Arc::ptr_eq(self_player, player)
-                    || (self_state.division_id() > 0 && player_state.division_id() == self_state.division_id())
-                {
+                // Ignore ourselves
+                if Arc::ptr_eq(self_player, player) {
                     continue;
+                }
+                // Division mates are recorded like anyone else and marked, so
+                // the tables can filter them without losing the encounter.
+                if self_state.is_division_mate(player_state) {
+                    division_mates.insert(player_state.db_id());
                 }
             }
 
@@ -215,6 +245,8 @@ impl PlayerTracker {
 
             tracked_players_by_ts.entry(timestamp).or_default().push(player_state.db_id());
         }
+
+        self.division_mates.extend(division_mates);
 
         if ingested_any {
             self.note_encounters_changed();
@@ -475,6 +507,9 @@ mod tests {
         assert_eq!(tracker.player_filter, "yamato");
 
         assert_eq!(tracker.clan_sort_order, ClanSortedBy::default(), "the clan sort falls back to its default");
+        assert!(tracker.division_mates.is_empty(), "a tracker saved before mates were marked loads with none");
+        assert!(!tracker.show_division_mates, "the division-mate filter defaults to hiding them");
+        assert!(!tracker.division_mates_synced, "a restored tracker still asks the index once");
         assert_eq!(tracker.encounter_version, 0);
         assert!(tracker.clan_breakdown.is_none());
         assert!(tracker.clan_breakdown_window.is_none());

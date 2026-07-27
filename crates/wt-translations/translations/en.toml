@@ -581,6 +581,8 @@ clan_no_data = "No clan encounters recorded yet."
 find_clan_matches = "Find matches mentioning this tag. The index has no clan-only field, so player names containing the tag match too."
 clan_sightings_hover = "%{range} of these fall in the selected time range."
 clan_member_matches = "seen in %{count} matches"
+show_division_mates = "Show division mates"
+show_division_mates_hover = "Include players who have been in a division with you. Off by default, since you meet them because you invited them."
 
 [ui.player_tracker.column]
 clan = "Clan"

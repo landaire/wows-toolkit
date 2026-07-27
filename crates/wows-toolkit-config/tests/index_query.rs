@@ -995,3 +995,117 @@ async fn clan_history_corrections_returns_only_rows_that_differ_from_the_latest_
     assert_eq!(corrections[0].clan, "RAIN");
     assert_eq!(corrections[0].timestamp, Timestamp::from_second(1_700_000_100).unwrap());
 }
+
+/// One match seen from account 7's perspective: 9 shares the self player's
+/// division, 8 is in a division of its own, and 501 is a solo enemy.
+async fn division_pool() -> sqlx::SqlitePool {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+    let vehicle = |account: i64, division: Option<i64>| IndexedVehicleRow {
+        arena_id: ArenaId::new(100),
+        account_id: AccountId(account),
+        player_name: format!("Player{account}"),
+        clan: "CLAN".into(),
+        realm: Some("na".into()),
+        ship_id: GameParamId::from(111u64),
+        ship_index: "PJSB018".into(),
+        ship_name: "Yamato".into(),
+        nation: "japan".into(),
+        species: "Battleship".into(),
+        tier: 10,
+        relation: VehicleRelation::Enemy,
+        division_id: division,
+        survived: Some(true),
+        damage: Some(50_000),
+        kills: Some(1),
+        spotting: Some(0),
+        potential: Some(0),
+        received: Some(0),
+        pr: Some(1200.0),
+        is_test_ship: false,
+        disconnected: None,
+        is_stream_sniper: None,
+        sniper_twitch_login: None,
+    };
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_vehicles(
+        &pool,
+        &[
+            IndexedVehicleRow { relation: VehicleRelation::SelfPlayer, ..vehicle(7, Some(3)) },
+            vehicle(9, Some(3)),
+            vehicle(8, Some(4)),
+            vehicle(501, None),
+        ],
+    )
+    .await
+    .unwrap();
+    // `sample_record` records account 7 as the self player.
+    query::upsert_record(&pool, &sample_record(100, src, "a.wowsreplay")).await.unwrap();
+
+    pool
+}
+
+#[tokio::test]
+async fn division_mate_account_ids_returns_only_accounts_that_shared_the_self_division() {
+    use wows_toolkit_config::index::rows::MatchFilter;
+
+    let pool = division_pool().await;
+    let mates = query::division_mate_account_ids(&pool, &MatchFilter::default()).await.unwrap();
+
+    assert!(mates.contains(&AccountId(9)), "an account in the self player's division is a mate");
+    assert!(!mates.contains(&AccountId(8)), "another division's id must not pair with the self player's");
+    assert!(!mates.contains(&AccountId(501)), "a player in no division is never a mate");
+    assert!(!mates.contains(&AccountId(7)), "the self player is not their own division mate");
+    assert_eq!(mates.len(), 1);
+}
+
+/// A player who was never in a division has a NULL `division_id`, and NULL never
+/// equals NULL in SQL. Pinning that: if the self player's own division were
+/// NULL, every other soloist would otherwise pair with them.
+#[tokio::test]
+async fn division_mate_account_ids_is_empty_when_the_self_player_had_no_division() {
+    use wows_toolkit_config::index::rows::MatchFilter;
+
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+    let vehicle = |account: i64, relation: VehicleRelation| IndexedVehicleRow {
+        arena_id: ArenaId::new(100),
+        account_id: AccountId(account),
+        player_name: format!("Player{account}"),
+        clan: "CLAN".into(),
+        realm: Some("na".into()),
+        ship_id: GameParamId::from(111u64),
+        ship_index: "PJSB018".into(),
+        ship_name: "Yamato".into(),
+        nation: "japan".into(),
+        species: "Battleship".into(),
+        tier: 10,
+        relation,
+        division_id: None,
+        survived: Some(true),
+        damage: Some(50_000),
+        kills: Some(1),
+        spotting: Some(0),
+        potential: Some(0),
+        received: Some(0),
+        pr: Some(1200.0),
+        is_test_ship: false,
+        disconnected: None,
+        is_stream_sniper: None,
+        sniper_twitch_login: None,
+    };
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_vehicles(&pool, &[vehicle(7, VehicleRelation::SelfPlayer), vehicle(501, VehicleRelation::Enemy)])
+        .await
+        .unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "a.wowsreplay")).await.unwrap();
+
+    let mates = query::division_mate_account_ids(&pool, &MatchFilter::default()).await.unwrap();
+    assert!(mates.is_empty(), "a solo self player has no division mates");
+}

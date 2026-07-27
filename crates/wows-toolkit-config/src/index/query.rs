@@ -449,6 +449,39 @@ pub async fn self_account_ids(pool: &SqlitePool, filter: &MatchFilter) -> Result
     Ok(rows.into_iter().map(|(a,)| AccountId::from(a)).collect())
 }
 
+/// Accounts that shared a division with the replay's self player in some match.
+///
+/// Membership is per account, not per encounter: an account that divisioned with
+/// you once counts as a division mate everywhere. `indexed_vehicle.division_id`
+/// is NULL for a player who is not in a division, so a NULL on either side never
+/// pairs. The self account of the record is never returned.
+///
+/// `filter.source_ids` scopes to groups; other filter fields are ignored here.
+pub async fn division_mate_account_ids(
+    pool: &SqlitePool,
+    filter: &MatchFilter,
+) -> Result<HashSet<AccountId>, IndexError> {
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "SELECT DISTINCT mate.account_id \
+           FROM replay_record r \
+           JOIN indexed_vehicle me ON me.arena_id = r.arena_id AND me.account_id = r.self_account_id \
+           JOIN indexed_vehicle mate ON mate.arena_id = r.arena_id AND mate.division_id = me.division_id \
+          WHERE r.self_account_id IS NOT NULL AND me.division_id IS NOT NULL \
+            AND mate.account_id <> 0 AND mate.account_id <> r.self_account_id",
+    );
+    if let Some(sources) = &filter.source_ids {
+        qb.push(" AND r.source_id IN (");
+        let mut sep = qb.separated(", ");
+        for s in sources {
+            sep.push_bind(s.0);
+        }
+        qb.push(")");
+    }
+
+    let rows: Vec<(i64,)> = qb.build_query_as().fetch_all(pool).await?;
+    Ok(rows.into_iter().map(|(a,)| AccountId::from(a)).collect())
+}
+
 /// Encounters whose clan at the time differs from the account's latest clan.
 /// Only the differences, so the result stays small on a large index: most
 /// accounts never changed clan.
