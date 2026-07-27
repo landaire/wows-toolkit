@@ -36,6 +36,7 @@ use crate::icons;
 use crate::replay::renderer::RealtimeArmorBridge;
 use crate::replay::renderer::ReplayPlayerInfo;
 use crate::tab_state::WindowSettingsEguiExt;
+use crate::ui::theme::semantic::SemanticExt;
 use crate::viewport_3d::GpuPipeline;
 use crate::viewport_3d::Vec3;
 use rust_i18n::t;
@@ -1612,24 +1613,27 @@ impl RealtimeArmorViewer {
         let rect = response.rect;
 
         // Background
-        painter.rect_filled(rect, 2.0, egui::Color32::from_gray(30));
+        painter.rect_filled(rect, 2.0, ui.visuals().extreme_bg_color);
 
         let map_x = |clock: f32| -> f32 {
             let t = ((clock - first_clock) / time_span).clamp(0.0, 1.0);
             rect.left() + t * rect.width()
         };
 
-        // Draw shot impact ticks (red vertical lines at bottom)
+        // Draw shot impact ticks
+        let hit_tick_color = ui.sem().armor.pen;
+        let hit_tick_color =
+            egui::Color32::from_rgba_unmultiplied(hit_tick_color.r(), hit_tick_color.g(), hit_tick_color.b(), 140);
         let tick_height = rect.height() * 0.2;
         for pre_hit in &timeline.hits {
             let x = map_x(pre_hit.clock.seconds());
             painter.line_segment(
                 [egui::pos2(x, rect.bottom() - tick_height), egui::pos2(x, rect.bottom())],
-                egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 60, 60, 140)),
+                egui::Stroke::new(1.0, hit_tick_color),
             );
         }
 
-        // Draw health line (green)
+        // Draw health line
         let health_points: Vec<egui::Pos2> = timeline
             .health_history
             .iter()
@@ -1643,16 +1647,15 @@ impl RealtimeArmorViewer {
 
         if health_points.len() >= 2 {
             for window in health_points.windows(2) {
-                painter
-                    .line_segment([window[0], window[1]], egui::Stroke::new(1.5, egui::Color32::from_rgb(80, 220, 80)));
+                painter.line_segment([window[0], window[1]], egui::Stroke::new(1.5, ui.sem().ok));
             }
         }
 
-        // Current time marker (white vertical line)
+        // Current time marker
         let current_x = map_x(current_clock.seconds());
         painter.line_segment(
             [egui::pos2(current_x, rect.top()), egui::pos2(current_x, rect.bottom())],
-            egui::Stroke::new(1.5, egui::Color32::WHITE),
+            egui::Stroke::new(1.5, ui.sem().text_strong),
         );
 
         // Time labels
@@ -1665,14 +1668,14 @@ impl RealtimeArmorViewer {
             egui::Align2::LEFT_TOP,
             format!("{}:{:02}", start_min, start_sec),
             egui::FontId::proportional(9.0),
-            egui::Color32::from_gray(160),
+            ui.sem().text_dim,
         );
         painter.text(
             rect.right_top() + egui::vec2(-2.0, 1.0),
             egui::Align2::RIGHT_TOP,
             format!("{}:{:02}", end_min, end_sec),
             egui::FontId::proportional(9.0),
-            egui::Color32::from_gray(160),
+            ui.sem().text_dim,
         );
 
         // Click to seek
@@ -1770,7 +1773,8 @@ impl RealtimeArmorViewer {
 
         let sel_bg = ui.visuals().selection.bg_fill;
         let normal_bg = ui.visuals().widgets.noninteractive.bg_fill;
-        let active_bg = egui::Color32::from_rgba_unmultiplied(255, 200, 60, 30);
+        let warn = ui.sem().warn;
+        let active_bg = egui::Color32::from_rgba_unmultiplied(warn.r(), warn.g(), warn.b(), 30);
 
         // Auto-scroll toggle + current clock
         let current_clock = self.bridge.lock().last_clock;
@@ -2079,13 +2083,13 @@ impl RealtimeArmorViewer {
         if let Some(ref cmp) = shell_entry.comparison {
             // Server outcome line
             let server_color = match cmp.server_outcome {
-                ServerOutcome::Penetration => egui::Color32::from_rgb(255, 140, 40),
-                ServerOutcome::Citadel => egui::Color32::from_rgb(255, 80, 80),
-                ServerOutcome::Ricochet => egui::Color32::from_rgb(120, 120, 255),
-                ServerOutcome::Shatter => egui::Color32::RED,
-                ServerOutcome::Overpenetration => egui::Color32::YELLOW,
-                ServerOutcome::Underwater => egui::Color32::from_rgb(80, 180, 255),
-                ServerOutcome::Unknown(_) => egui::Color32::GRAY,
+                ServerOutcome::Penetration => ui.sem().armor.pen,
+                ServerOutcome::Citadel => ui.sem().armor.pen,
+                ServerOutcome::Ricochet => ui.sem().armor.ricochet,
+                ServerOutcome::Shatter => ui.sem().armor.shatter,
+                ServerOutcome::Overpenetration => ui.sem().armor.overpen,
+                ServerOutcome::Underwater => ui.sem().armor.ricochet,
+                ServerOutcome::Unknown(_) => ui.sem().text_dim,
             };
             ui.label(
                 egui::RichText::new(format!("Server: {}", cmp.server_outcome.display_name()))
@@ -2098,9 +2102,7 @@ impl RealtimeArmorViewer {
             match &cmp.verdict {
                 ComparisonVerdict::Match => {
                     ui.label(
-                        egui::RichText::new(t!("ui.armor.realtime.sim_agrees").as_ref())
-                            .small()
-                            .color(egui::Color32::from_rgb(80, 220, 80)),
+                        egui::RichText::new(t!("ui.armor.realtime.sim_agrees").as_ref()).small().color(ui.sem().ok),
                     );
                 }
                 ComparisonVerdict::RicochetRngDefer { angle_deg, range_start_deg, range_end_deg } => {
@@ -2110,14 +2112,14 @@ impl RealtimeArmorViewer {
                             angle_deg, range_start_deg, range_end_deg,
                         ))
                         .small()
-                        .color(egui::Color32::YELLOW),
+                        .color(ui.sem().warn),
                     );
                 }
                 ComparisonVerdict::Mismatch { sim_desc, server_desc } => {
                     ui.label(
                         egui::RichText::new(format!("Sim: {} / Server: {}", sim_desc, server_desc))
                             .small()
-                            .color(egui::Color32::from_rgb(255, 80, 80)),
+                            .color(ui.sem().error),
                     );
                 }
             }
@@ -2126,17 +2128,15 @@ impl RealtimeArmorViewer {
             if let Some(ref exit_div) = cmp.exit_divergence {
                 if let Some(dist) = exit_div.distance {
                     let div_color = if dist < 0.5 {
-                        egui::Color32::from_rgb(80, 220, 80)
+                        ui.sem().ok
                     } else if dist < 2.0 {
-                        egui::Color32::YELLOW
+                        ui.sem().warn
                     } else {
-                        egui::Color32::from_rgb(255, 80, 80)
+                        ui.sem().error
                     };
                     ui.label(egui::RichText::new(format!("Exit divergence: {dist:.2} units")).small().color(div_color));
                 } else if exit_div.sim_exit_pos.is_none() {
-                    ui.label(
-                        egui::RichText::new("Exit divergence: sim has no exit").small().color(egui::Color32::GRAY),
-                    );
+                    ui.label(egui::RichText::new("Exit divergence: sim has no exit").small().color(ui.sem().text_dim));
                 }
             }
         } else {
@@ -2147,11 +2147,14 @@ impl RealtimeArmorViewer {
                     result.hits.first().map(|hit| {
                         if pen >= hit.thickness_mm {
                             (
-                                egui::Color32::from_rgb(255, 140, 40),
+                                ui.sem().armor.pen,
                                 format!("HE detonates — {:.0}mm pen vs {:.0}mm", pen, hit.thickness_mm),
                             )
                         } else {
-                            (egui::Color32::RED, format!("HE shatter — {:.0}mm pen < {:.0}mm", pen, hit.thickness_mm))
+                            (
+                                ui.sem().armor.shatter,
+                                format!("HE shatter — {:.0}mm pen < {:.0}mm", pen, hit.thickness_mm),
+                            )
                         }
                     })
                 }
@@ -2159,12 +2162,12 @@ impl RealtimeArmorViewer {
                     let pen = shell.sap_pen_mm.unwrap_or(0.0);
                     result.hits.first().map(|hit| {
                         if pen >= hit.thickness_mm {
-                            (
-                                egui::Color32::from_rgb(255, 140, 40),
-                                format!("SAP pen — {:.0}mm vs {:.0}mm", pen, hit.thickness_mm),
-                            )
+                            (ui.sem().armor.pen, format!("SAP pen — {:.0}mm vs {:.0}mm", pen, hit.thickness_mm))
                         } else {
-                            (egui::Color32::RED, format!("SAP shatter — {:.0}mm pen < {:.0}mm", pen, hit.thickness_mm))
+                            (
+                                ui.sem().armor.shatter,
+                                format!("SAP shatter — {:.0}mm pen < {:.0}mm", pen, hit.thickness_mm),
+                            )
                         }
                     })
                 }
@@ -2193,18 +2196,18 @@ impl RealtimeArmorViewer {
                 }
 
                 let plate_color = if is_post_detonation {
-                    egui::Color32::GRAY
+                    ui.sem().text_dim
                 } else if hit.angle_deg < 30.0 {
-                    egui::Color32::from_rgb(80, 220, 80)
+                    ui.sem().armor.angle_good
                 } else if hit.angle_deg < 45.0 {
-                    egui::Color32::from_rgb(220, 180, 50)
+                    ui.sem().armor.angle_mid
                 } else {
-                    egui::Color32::from_rgb(220, 80, 80)
+                    ui.sem().armor.angle_bad
                 };
 
                 // Plate header
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("#{}", i + 1)).small().color(egui::Color32::GRAY));
+                    ui.label(egui::RichText::new(format!("#{}", i + 1)).small().color(ui.sem().text_dim));
                     ui.label(
                         egui::RichText::new(format!("{:.0}mm", hit.thickness_mm)).strong().small().color(plate_color),
                     );
@@ -2215,14 +2218,12 @@ impl RealtimeArmorViewer {
                         ui.label(
                             egui::RichText::new(format!("(Server: {:.1}°)", server_angle.to_degrees()))
                                 .small()
-                                .color(egui::Color32::GRAY),
+                                .color(ui.sem().text_dim),
                         );
                     }
                 });
                 ui.label(
-                    egui::RichText::new(format!("  {} / {}", hit.zone, hit.material))
-                        .small()
-                        .color(egui::Color32::GRAY),
+                    egui::RichText::new(format!("  {} / {}", hit.zone, hit.material)).small().color(ui.sem().text_dim),
                 );
 
                 // Per-plate penetration outcome (AP)
@@ -2233,7 +2234,7 @@ impl RealtimeArmorViewer {
                     let (icon, detail_color, detail) = match plate.outcome {
                         PlateOutcome::Overmatch => (
                             ">>",
-                            egui::Color32::from_rgb(80, 220, 80),
+                            ui.sem().armor.pen,
                             format!(
                                 "overmatch — {:.0}mm pen, v={:.0} m/s",
                                 plate.raw_pen_before_mm, plate.velocity_before
@@ -2241,18 +2242,18 @@ impl RealtimeArmorViewer {
                         ),
                         PlateOutcome::Penetrate => (
                             ">>",
-                            egui::Color32::from_rgb(80, 220, 80),
+                            ui.sem().armor.pen,
                             format!(
                                 "{:.0}/{:.0}mm eff — v={:.0} m/s",
                                 plate.raw_pen_before_mm, plate.effective_thickness_mm, plate.velocity_before
                             ),
                         ),
                         PlateOutcome::Ricochet => {
-                            ("X", egui::Color32::RED, format!("ricochet @ {:.1}°", hit.angle_deg))
+                            ("X", ui.sem().armor.ricochet, format!("ricochet @ {:.1}°", hit.angle_deg))
                         }
                         PlateOutcome::Shatter => (
                             "X",
-                            egui::Color32::RED,
+                            ui.sem().armor.shatter,
                             format!(
                                 "shatter — {:.0} < {:.0}mm eff",
                                 plate.raw_pen_before_mm, plate.effective_thickness_mm
@@ -2283,7 +2284,7 @@ impl RealtimeArmorViewer {
                                 i + 1,
                             ))
                             .small()
-                            .color(egui::Color32::from_rgb(255, 140, 40)),
+                            .color(ui.sem().armor.pen),
                         );
                     });
                 }
