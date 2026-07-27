@@ -9,6 +9,7 @@ pub use model::TimePeriod;
 pub use model::TrackedPlayer;
 pub(crate) use model::encounter_severity_color;
 pub(crate) use model::last_seen_text;
+pub(crate) use model::last_seen_timestamp_text;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -37,6 +38,10 @@ pub struct PlayerTracker {
     pub(crate) sort_order: SortedBy,
     pub(crate) player_filter: String,
 
+    /// Measured heights of the historical table's rows, keyed by row number, so
+    /// `egui_table` can offset rows whose content is taller than the default.
+    #[serde(skip)]
+    pub(crate) historical_row_heights: BTreeMap<u64, f32>,
     #[serde(skip)]
     pub(crate) live_match: Option<LiveMatch>,
     #[serde(skip)]

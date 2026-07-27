@@ -1,45 +1,311 @@
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use egui::RichText;
-use egui_extras::Column;
-use egui_extras::TableBuilder;
 use itertools::Itertools;
 use jiff::Timestamp;
-use jiff::tz::TimeZone;
 use rust_i18n::t;
 use wows_replays::types::AccountId;
 
 use crate::app::ToolkitTabViewer;
 use crate::task;
 
+use super::PlayerTracker;
 use super::SortOrder;
 use super::SortedBy;
 use super::TimePeriod;
 use super::encounter_severity_color;
 use super::last_seen_text;
+use super::last_seen_timestamp_text;
+
+/// Columns of the historical table, in render order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HistoricalColumn {
+    Clan,
+    Player,
+    TotalEncounters,
+    EncountersInRange,
+    LastEncountered,
+    Actions,
+}
+
+const HISTORICAL_COLUMNS: [HistoricalColumn; 6] = [
+    HistoricalColumn::Clan,
+    HistoricalColumn::Player,
+    HistoricalColumn::TotalEncounters,
+    HistoricalColumn::EncountersInRange,
+    HistoricalColumn::LastEncountered,
+    HistoricalColumn::Actions,
+];
+
+const HISTORICAL_ROW_HEIGHT: f32 = 30.0;
+
+/// Accounts to render, filtered by the active time range and name filter, in
+/// the order the active sort puts them.
+fn visible_rows(tracker: &PlayerTracker) -> Vec<AccountId> {
+    let filter_lower = tracker.player_filter.to_ascii_lowercase();
+    let sorted_by = tracker.sort_order;
+    let tracked_players_by_ts = &tracker.tracked_players_by_time;
+
+    // Filter by the date range
+    let player_range: HashSet<_> = if let Some(filter_range) = tracker.filter_time_period.to_date() {
+        tracked_players_by_ts
+            .iter()
+            .filter_map(|(ts, ids)| if *ts > filter_range { Some(ids) } else { None })
+            .flatten()
+            .cloned()
+            .collect()
+    } else {
+        tracked_players_by_ts.iter().flat_map(|(_ts, ids)| ids).cloned().collect()
+    };
+
+    tracker
+        .tracked_players
+        .iter()
+        .filter(|(id, player)| {
+            if !tracker.player_filter.is_empty() {
+                player_range.contains(id)
+                    && (player.clan.to_ascii_lowercase().contains(&filter_lower)
+                        || player.last_name.to_ascii_lowercase().contains(&filter_lower)
+                        || player.names.iter().any(|name| name.to_ascii_lowercase().contains(&filter_lower)))
+            } else {
+                player_range.contains(id)
+            }
+        })
+        .sorted_by(|(_ida, playera), (_idb, playerb)| match sorted_by {
+            SortedBy::Name(sort_order) => {
+                let playera_name = &playera.last_name;
+                let playerb_name = &playerb.last_name;
+
+                if sort_order == SortOrder::Asc {
+                    playera_name.cmp(playerb_name)
+                } else {
+                    playerb_name.cmp(playera_name)
+                }
+            }
+            SortedBy::Clan(sort_order) => {
+                let playera_clan = &playera.clan;
+                let playerb_clan = &playerb.clan;
+
+                if sort_order == SortOrder::Asc {
+                    playera_clan.cmp(playerb_clan)
+                } else {
+                    playerb_clan.cmp(playera_clan)
+                }
+            }
+            SortedBy::LastEncountered(sort_order) => {
+                let playera_last = playera.timestamps.last().copied();
+                let playerb_last = playerb.timestamps.last().copied();
+
+                if sort_order == SortOrder::Asc {
+                    playera_last.cmp(&playerb_last)
+                } else {
+                    playerb_last.cmp(&playera_last)
+                }
+            }
+            SortedBy::TimesEncountered(sort_order) => {
+                let playera_count = playera.timestamps.len();
+                let playerb_count = playerb.timestamps.len();
+
+                if sort_order == SortOrder::Asc {
+                    playera_count.cmp(&playerb_count)
+                } else {
+                    playerb_count.cmp(&playera_count)
+                }
+            }
+            SortedBy::TimesEncounteredInTimeRange(sort_order) => {
+                let (playera_count, playerb_count) = if let Some(filter_range) = tracker.filter_time_period.to_date() {
+                    let playera_count = playera.timestamps.iter().filter(|ts| **ts > filter_range).count();
+                    let playerb_count = playerb.timestamps.iter().filter(|ts| **ts > filter_range).count();
+
+                    (playera_count, playerb_count)
+                } else {
+                    let playera_count = playera.timestamps.len();
+                    let playerb_count = playerb.timestamps.len();
+
+                    (playera_count, playerb_count)
+                };
+
+                if sort_order == SortOrder::Asc {
+                    playera_count.cmp(&playerb_count)
+                } else {
+                    playerb_count.cmp(&playera_count)
+                }
+            }
+        })
+        .map(|(id, _)| *id)
+        .collect()
+}
+
+/// Header label with the sort arrow appended when this column drives the sort.
+fn header_label(key: &str, sorted_by: SortedBy, is_active: bool) -> String {
+    let label: String = t!(key).into();
+    if is_active { format!("{} {}", label, sorted_by.order().icon()) } else { label }
+}
+
+/// Values copied out of one tracked player for a single frame's render. Cheap:
+/// egui_table only paints visible rows.
+struct RowView {
+    account_id: AccountId,
+    clan: String,
+    last_name: String,
+    total_encounters: usize,
+    encounters_in_range: usize,
+    last_seen: String,
+    last_seen_exact: String,
+}
+
+struct HistoricalTable<'a> {
+    tracker: &'a mut PlayerTracker,
+    rows: Vec<AccountId>,
+    row_heights: BTreeMap<u64, f32>,
+    now: Timestamp,
+    filter_range: Option<Timestamp>,
+    find_matches_target: Option<AccountId>,
+}
+
+impl HistoricalTable<'_> {
+    fn row_view(&self, row_nr: u64) -> Option<RowView> {
+        let account_id = self.rows.get(row_nr as usize).copied()?;
+        let player = self.tracker.tracked_players.get(&account_id)?;
+
+        let total_encounters = player.arena_ids.len();
+        let encounters_in_range = match self.filter_range {
+            Some(range) => player.timestamps.iter().filter(|ts| **ts > range).count(),
+            None => total_encounters,
+        };
+
+        Some(RowView {
+            account_id,
+            clan: player.clan.clone(),
+            last_name: player.last_name.clone(),
+            total_encounters,
+            encounters_in_range,
+            last_seen: last_seen_text(player, self.now),
+            last_seen_exact: last_seen_timestamp_text(player),
+        })
+    }
+
+    fn cell_content_ui(&mut self, row_nr: u64, column: HistoricalColumn, ui: &mut egui::Ui) {
+        let Some(view) = self.row_view(row_nr) else {
+            return;
+        };
+
+        match column {
+            HistoricalColumn::Clan => {
+                ui.label(&view.clan);
+            }
+            HistoricalColumn::Player => {
+                let mut text = RichText::new(&view.last_name);
+                if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
+                    text = text.color(color);
+                }
+                ui.label(text);
+            }
+            HistoricalColumn::TotalEncounters => {
+                let mut text = RichText::new(view.total_encounters.to_string());
+                if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
+                    text = text.color(color);
+                }
+                ui.label(text);
+            }
+            HistoricalColumn::EncountersInRange => {
+                let mut text = RichText::new(view.encounters_in_range.to_string());
+                if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
+                    text = text.color(color);
+                }
+                ui.label(text);
+            }
+            HistoricalColumn::LastEncountered => {
+                ui.label(&view.last_seen).on_hover_text(&view.last_seen_exact);
+            }
+            HistoricalColumn::Actions => {
+                if ui.button(t!("ui.player_tracker.find_matches")).clicked() {
+                    self.find_matches_target = Some(view.account_id);
+                }
+            }
+        }
+    }
+}
+
+impl egui_table::TableDelegate for HistoricalTable<'_> {
+    fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::HeaderCellInfo) {
+        let column = HISTORICAL_COLUMNS[cell.group_index];
+        let sorted_by = self.tracker.sort_order;
+        let (key, target, is_active) = match column {
+            HistoricalColumn::Clan => (
+                "ui.player_tracker.column.clan",
+                SortedBy::Clan(SortOrder::Asc),
+                matches!(sorted_by, SortedBy::Clan(_)),
+            ),
+            HistoricalColumn::Player => (
+                "ui.player_tracker.column.player_name",
+                SortedBy::Name(SortOrder::Asc),
+                matches!(sorted_by, SortedBy::Name(_)),
+            ),
+            HistoricalColumn::TotalEncounters => (
+                "ui.player_tracker.column.total_encounters",
+                SortedBy::TimesEncountered(SortOrder::Asc),
+                matches!(sorted_by, SortedBy::TimesEncountered(_)),
+            ),
+            HistoricalColumn::EncountersInRange => (
+                "ui.player_tracker.column.encounters_in_range",
+                SortedBy::TimesEncounteredInTimeRange(SortOrder::Asc),
+                matches!(sorted_by, SortedBy::TimesEncounteredInTimeRange(_)),
+            ),
+            HistoricalColumn::LastEncountered => (
+                "ui.player_tracker.column.last_encountered",
+                SortedBy::LastEncountered(SortOrder::Asc),
+                matches!(sorted_by, SortedBy::LastEncountered(_)),
+            ),
+            HistoricalColumn::Actions => return,
+        };
+
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(4, 0)).show(ui, |ui| {
+            if ui.strong(header_label(key, sorted_by, is_active)).clicked() {
+                self.tracker.sort_order.transition_to(target);
+                // The row order was built before the table was shown, so the new
+                // sort lands on the next frame.
+                ui.ctx().request_repaint();
+            }
+        });
+    }
+
+    fn cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::CellInfo) {
+        if cell.row_nr % 2 == 1 {
+            ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().faint_bg_color);
+        }
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(4, 4)).show(ui, |ui| {
+            self.cell_content_ui(cell.row_nr, HISTORICAL_COLUMNS[cell.col_nr], ui);
+        });
+    }
+
+    fn default_row_height(&self) -> f32 {
+        HISTORICAL_ROW_HEIGHT
+    }
+}
 
 impl ToolkitTabViewer<'_> {
     pub(crate) fn build_historical_sub_tab(&mut self, ui: &mut egui::Ui) {
         // Collected during the table pass and applied after the table (the
         // player-tracker write lock is held while rendering rows, so we can't
-        // touch other `self.tab_state` fields from inside a row closure).
+        // touch other `self.tab_state` fields from inside a cell body).
         let mut find_matches_target: Option<AccountId> = None;
 
         // Scoped so the write guard is released before the deferred actions run.
         {
             let mut player_tracker_settings = self.tab_state.player_tracker.write();
-            let player_tracker_settings = &mut *player_tracker_settings;
-            let filter_lower = player_tracker_settings.player_filter.to_ascii_lowercase();
+            let player_tracker = &mut *player_tracker_settings;
             let now = Timestamp::now();
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     if ui.button(t!("ui.player_tracker.clear_stats")).clicked() {
-                        player_tracker_settings.tracked_players.clear();
-                        player_tracker_settings.tracked_players_by_time.clear();
+                        player_tracker.tracked_players.clear();
+                        player_tracker.tracked_players_by_time.clear();
                     }
 
-                    let selected = &mut player_tracker_settings.filter_time_period;
+                    let selected = &mut player_tracker.filter_time_period;
                     egui::ComboBox::from_id_salt("player_inspector_time_period_selection")
                         .selected_text(selected.description())
                         .show_ui(ui, |ui| {
@@ -67,7 +333,7 @@ impl ToolkitTabViewer<'_> {
                             ui.selectable_value(selected, TimePeriod::AllTime, t!("ui.player_tracker.period.all_time"));
                         });
                     ui.label(t!("ui.player_tracker.player_filter"));
-                    ui.text_edit_singleline(&mut player_tracker_settings.player_filter);
+                    ui.text_edit_singleline(&mut player_tracker.player_filter);
 
                     // Never a silent no-op: only enable the button when at least one of the
                     // two population paths (durable index, or on-demand replay re-parse) has
@@ -87,7 +353,7 @@ impl ToolkitTabViewer<'_> {
                         // background re-parse task when the index has nothing yet.
                         let populated_from_index =
                             match (self.tab_state.db_pool.as_ref(), self.tab_state.tokio_runtime.as_ref()) {
-                                (Some(pool), Some(rt)) => player_tracker_settings.populate_from_index(pool, rt),
+                                (Some(pool), Some(rt)) => player_tracker.populate_from_index(pool, rt),
                                 _ => false,
                             };
 
@@ -111,272 +377,41 @@ impl ToolkitTabViewer<'_> {
 
                 ui.separator();
 
-                egui::ScrollArea::horizontal().id_salt("player_tracker_central").show(ui, |ui| {
-                    let table = TableBuilder::new(ui)
-                        .striped(true)
-                        .resizable(true)
-                        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                        .column(Column::initial(60.0).clip(true))
-                        .column(Column::initial(115.0).clip(true))
-                        .column(Column::initial(65.0).clip(true))
-                        .column(Column::initial(115.0).clip(true))
-                        .column(Column::initial(165.0).clip(true))
-                        .column(Column::initial(130.0).clip(true))
-                        .column(Column::initial(200.0).clip(true))
-                        .column(Column::initial(110.0).clip(true))
-                        .column(Column::remainder())
-                        .min_scrolled_height(0.0);
+                // Everything the delegate needs from the tracker is read before it takes the
+                // mutable borrow.
+                let rows = visible_rows(player_tracker);
+                let row_heights = std::mem::take(&mut player_tracker.historical_row_heights);
+                let filter_range = player_tracker.filter_time_period.to_date();
 
-                    let sorted_by = player_tracker_settings.sort_order;
-                    table
-                        .header(20.0, |mut header| {
-                            header.col(|ui| {
-                                let raw_text: String = t!("ui.player_tracker.column.clan").into();
-                                let text = if let SortedBy::Clan(sort_order) = sorted_by {
-                                    format!("{} {}", raw_text, sort_order.icon())
-                                } else {
-                                    raw_text
-                                };
+                let mut delegate = HistoricalTable {
+                    tracker: player_tracker,
+                    rows,
+                    row_heights,
+                    now,
+                    filter_range,
+                    find_matches_target: None,
+                };
 
-                                if ui.strong(text).clicked() {
-                                    player_tracker_settings.sort_order.transition_to(SortedBy::Clan(SortOrder::Asc));
-                                }
-                            });
-                            header.col(|ui| {
-                                let raw_text: String = t!("ui.player_tracker.column.player_name").into();
-                                let text = if let SortedBy::Name(sort_order) = sorted_by {
-                                    format!("{} {}", raw_text, sort_order.icon())
-                                } else {
-                                    raw_text
-                                };
+                let columns = vec![
+                    egui_table::Column::new(70.0).range(40.0..=200.0).resizable(true),
+                    egui_table::Column::new(220.0).range(120.0..=600.0).resizable(true),
+                    egui_table::Column::new(110.0).range(60.0..=250.0).resizable(true),
+                    egui_table::Column::new(150.0).range(60.0..=300.0).resizable(true),
+                    egui_table::Column::new(130.0).range(80.0..=300.0).resizable(true),
+                    egui_table::Column::new(70.0).resizable(false),
+                ];
 
-                                if ui.strong(text).clicked() {
-                                    player_tracker_settings.sort_order.transition_to(SortedBy::Name(SortOrder::Asc));
-                                }
-                            });
-                            header.col(|ui| {
-                                ui.strong(t!("ui.player_tracker.column.wg_id"));
-                            });
-                            header.col(|ui| {
-                                let raw_text: String = t!("ui.player_tracker.column.total_encounters").into();
-                                let text = if let SortedBy::TimesEncountered(sort_order) = sorted_by {
-                                    format!("{} {}", raw_text, sort_order.icon())
-                                } else {
-                                    raw_text
-                                };
+                egui_table::Table::new()
+                    .id_salt("player_tracker_historical")
+                    .num_rows(delegate.rows.len() as u64)
+                    .columns(columns)
+                    .num_sticky_cols(2)
+                    .headers([egui_table::HeaderRow { height: 20.0, groups: Default::default() }])
+                    .auto_size_mode(egui_table::AutoSizeMode::Never)
+                    .show(ui, &mut delegate);
 
-                                if ui.strong(text).clicked() {
-                                    player_tracker_settings
-                                        .sort_order
-                                        .transition_to(SortedBy::TimesEncountered(SortOrder::Asc));
-                                }
-                            });
-                            header.col(|ui| {
-                                let raw_text: String = t!("ui.player_tracker.column.encounters_in_range").into();
-                                let text = if let SortedBy::TimesEncounteredInTimeRange(sort_order) = sorted_by {
-                                    format!("{} {}", raw_text, sort_order.icon())
-                                } else {
-                                    raw_text
-                                };
-
-                                if ui.strong(text).clicked() {
-                                    player_tracker_settings
-                                        .sort_order
-                                        .transition_to(SortedBy::TimesEncounteredInTimeRange(SortOrder::Asc));
-                                }
-                            });
-                            header.col(|ui| {
-                                let raw_text: String = t!("ui.player_tracker.column.last_encountered").into();
-                                let text = if let SortedBy::LastEncountered(sort_order) = sorted_by {
-                                    format!("{} {}", raw_text, sort_order.icon())
-                                } else {
-                                    raw_text
-                                };
-
-                                if ui.strong(text).clicked() {
-                                    player_tracker_settings
-                                        .sort_order
-                                        .transition_to(SortedBy::LastEncountered(SortOrder::Asc));
-                                }
-                            });
-                            header.col(|ui| {
-                                ui.strong(t!("ui.player_tracker.column.aliases"));
-                            });
-                            header.col(|_ui| {});
-                            header.col(|ui| {
-                                ui.strong(t!("ui.player_tracker.column.notes"));
-                            });
-                        })
-                        .body(|mut body| {
-                            let tracked_players_by_ts = &player_tracker_settings.tracked_players_by_time;
-                            // Filter by the date range
-                            let player_range: HashSet<_> =
-                                if let Some(filter_range) = player_tracker_settings.filter_time_period.to_date() {
-                                    tracked_players_by_ts
-                                        .iter()
-                                        .filter_map(|(ts, ids)| if *ts > filter_range { Some(ids) } else { None })
-                                        .flatten()
-                                        .cloned()
-                                        .collect()
-                                } else {
-                                    tracked_players_by_ts.iter().flat_map(|(_ts, ids)| ids).cloned().collect()
-                                };
-
-                            let tracked_players = &mut player_tracker_settings.tracked_players;
-                            let players = tracked_players
-                                .iter_mut()
-                                .filter(|(id, player)| {
-                                    if !player_tracker_settings.player_filter.is_empty() {
-                                        player_range.contains(id)
-                                            && (player.clan.to_ascii_lowercase().contains(&filter_lower)
-                                                || player.last_name.to_ascii_lowercase().contains(&filter_lower)
-                                                || player
-                                                    .names
-                                                    .iter()
-                                                    .any(|name| name.to_ascii_lowercase().contains(&filter_lower)))
-                                    } else {
-                                        player_range.contains(id)
-                                    }
-                                })
-                                .sorted_by(|(_ida, playera), (_idb, playerb)| match sorted_by {
-                                    SortedBy::Name(sort_order) => {
-                                        let playera_name = &playera.last_name;
-                                        let playerb_name = &playerb.last_name;
-
-                                        if sort_order == SortOrder::Asc {
-                                            playera_name.cmp(playerb_name)
-                                        } else {
-                                            playerb_name.cmp(playera_name)
-                                        }
-                                    }
-                                    SortedBy::Clan(sort_order) => {
-                                        let playera_clan = &playera.clan;
-                                        let playerb_clan = &playerb.clan;
-
-                                        if sort_order == SortOrder::Asc {
-                                            playera_clan.cmp(playerb_clan)
-                                        } else {
-                                            playerb_clan.cmp(playera_clan)
-                                        }
-                                    }
-                                    SortedBy::LastEncountered(sort_order) => {
-                                        let playera_last = playera.timestamps.last().copied();
-                                        let playerb_last = playerb.timestamps.last().copied();
-
-                                        if sort_order == SortOrder::Asc {
-                                            playera_last.cmp(&playerb_last)
-                                        } else {
-                                            playerb_last.cmp(&playera_last)
-                                        }
-                                    }
-                                    SortedBy::TimesEncountered(sort_order) => {
-                                        let playera_count = playera.timestamps.len();
-                                        let playerb_count = playerb.timestamps.len();
-
-                                        if sort_order == SortOrder::Asc {
-                                            playera_count.cmp(&playerb_count)
-                                        } else {
-                                            playerb_count.cmp(&playera_count)
-                                        }
-                                    }
-                                    SortedBy::TimesEncounteredInTimeRange(sort_order) => {
-                                        let (playera_count, playerb_count) = if let Some(filter_range) =
-                                            player_tracker_settings.filter_time_period.to_date()
-                                        {
-                                            let playera_count =
-                                                playera.timestamps.iter().filter(|ts| **ts > filter_range).count();
-                                            let playerb_count =
-                                                playerb.timestamps.iter().filter(|ts| **ts > filter_range).count();
-
-                                            (playera_count, playerb_count)
-                                        } else {
-                                            let playera_count = playera.timestamps.len();
-                                            let playerb_count = playerb.timestamps.len();
-
-                                            (playera_count, playerb_count)
-                                        };
-
-                                        if sort_order == SortOrder::Asc {
-                                            playera_count.cmp(&playerb_count)
-                                        } else {
-                                            playerb_count.cmp(&playera_count)
-                                        }
-                                    }
-                                });
-
-                            for (player_id, player) in players {
-                                body.row(30.0, |mut row| {
-                                    let times_encountered = player.arena_ids.len();
-                                    let times_encountered_in_range = if let Some(filter_range) =
-                                        player_tracker_settings.filter_time_period.to_date()
-                                    {
-                                        player.timestamps.iter().filter(|ts| **ts > filter_range).count()
-                                    } else {
-                                        times_encountered
-                                    };
-
-                                    row.col(|ui| {
-                                        ui.label(&player.clan);
-                                    });
-                                    row.col(|ui| {
-                                        let text = RichText::new(&player.last_name);
-                                        let text = if let Some(color) =
-                                            encounter_severity_color(ui, times_encountered_in_range)
-                                        {
-                                            text.color(color)
-                                        } else {
-                                            text
-                                        };
-
-                                        ui.label(text);
-                                    });
-                                    row.col(|ui| {
-                                        ui.label(player_id.to_string());
-                                    });
-                                    row.col(|ui| {
-                                        let text = RichText::new(times_encountered.to_string());
-                                        let text = if let Some(color) =
-                                            encounter_severity_color(ui, times_encountered_in_range)
-                                        {
-                                            text.color(color)
-                                        } else {
-                                            text
-                                        };
-                                        ui.label(text);
-                                    });
-                                    row.col(|ui| {
-                                        let text = RichText::new(times_encountered_in_range.to_string());
-                                        let text = if let Some(color) =
-                                            encounter_severity_color(ui, times_encountered_in_range)
-                                        {
-                                            text.color(color)
-                                        } else {
-                                            text
-                                        };
-                                        ui.label(text);
-                                    });
-                                    row.col(|ui| {
-                                        let label = ui.label(last_seen_text(player, now));
-                                        if let Some(last) = player.timestamps.last() {
-                                            let timestamp = last.to_zoned(TimeZone::system());
-                                            label.on_hover_text(timestamp.strftime("%Y-%m-%d %H:%M:%S").to_string());
-                                        }
-                                    });
-                                    row.col(|ui| {
-                                        ui.label(player.names.iter().join(", "));
-                                    });
-                                    row.col(|ui| {
-                                        if ui.button(t!("ui.player_tracker.find_matches")).clicked() {
-                                            find_matches_target = Some(*player_id);
-                                        }
-                                    });
-                                    row.col(|ui| {
-                                        ui.text_edit_singleline(&mut player.notes);
-                                    });
-                                });
-                            }
-                        });
-                });
+                find_matches_target = delegate.find_matches_target;
+                player_tracker.historical_row_heights = delegate.row_heights;
             });
         }
 

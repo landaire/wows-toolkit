@@ -48,6 +48,18 @@ pub(crate) fn last_seen_text(player: &TrackedPlayer, now: Timestamp) -> String {
     format!("{delta:#}")
 }
 
+/// Absolute local-time stamp of a tracked player's most recent encounter, for
+/// the hover behind the relative "last seen" text. A tracked player always has
+/// at least one timestamp; an empty hover is the right degradation if that
+/// invariant ever breaks, rather than a panic.
+pub(crate) fn last_seen_timestamp_text(player: &TrackedPlayer) -> String {
+    player
+        .timestamps
+        .last()
+        .map(|ts| ts.to_zoned(TimeZone::system()).strftime("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_default()
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct TrackedPlayer {
     pub(crate) last_name: String,
@@ -104,6 +116,17 @@ pub(crate) enum SortedBy {
 }
 
 impl SortedBy {
+    /// The direction this sort is currently running in, whichever column it is on.
+    pub(crate) fn order(&self) -> SortOrder {
+        match self {
+            SortedBy::Name(order)
+            | SortedBy::Clan(order)
+            | SortedBy::LastEncountered(order)
+            | SortedBy::TimesEncountered(order)
+            | SortedBy::TimesEncounteredInTimeRange(order) => *order,
+        }
+    }
+
     pub(crate) fn transition_to(&mut self, new: SortedBy) {
         match (self, new) {
             (SortedBy::Name(sort_order), SortedBy::Name(_)) => sort_order.toggle(),
