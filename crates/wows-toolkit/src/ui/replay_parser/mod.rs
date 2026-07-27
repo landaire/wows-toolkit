@@ -4213,7 +4213,7 @@ impl ToolkitTabViewer<'_> {
         // Session button (turns red when active).
         let label = if any_active {
             RichText::new(wt_translations::icon_t(icons::BROADCAST, &t!("ui.collab.session")))
-                .color(ui.sem().text_strong)
+                .color(crate::ui::theme::contrast::label_on(ui.sem().error))
         } else {
             RichText::new(wt_translations::icon_t(icons::BROADCAST, &t!("ui.collab.session")))
         };

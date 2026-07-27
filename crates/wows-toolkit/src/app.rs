@@ -132,13 +132,21 @@ impl TabViewer for ToolkitTabViewer<'_> {
                 egui::Theme::Dark => crate::ui::theme::semantic::DARK.error,
                 egui::Theme::Light => crate::ui::theme::semantic::LIGHT.error,
             };
-            style.active.text_color = error;
-            style.inactive.text_color = error;
-            style.focused.text_color = error;
-            style.hovered.text_color = error;
-            style.active_with_kb_focus.text_color = error;
-            style.inactive_with_kb_focus.text_color = error;
-            style.focused_with_kb_focus.text_color = error;
+            let label = crate::ui::theme::contrast::label_on(error);
+            style.active.bg_fill = error;
+            style.active.text_color = label;
+            style.inactive.bg_fill = error;
+            style.inactive.text_color = label;
+            style.focused.bg_fill = error;
+            style.focused.text_color = label;
+            style.hovered.bg_fill = error;
+            style.hovered.text_color = label;
+            style.active_with_kb_focus.bg_fill = error;
+            style.active_with_kb_focus.text_color = label;
+            style.inactive_with_kb_focus.bg_fill = error;
+            style.inactive_with_kb_focus.text_color = label;
+            style.focused_with_kb_focus.bg_fill = error;
+            style.focused_with_kb_focus.text_color = label;
             Some(style)
         } else {
             None
