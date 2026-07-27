@@ -35,6 +35,9 @@ pub struct SemanticColors {
     pub draw: Color32,
     pub warn: Color32,
     pub error: Color32,
+    /// A check passed or a scan found no problems. Distinct from `win`, which
+    /// is a battle result.
+    pub ok: Color32,
     /// Emphasised body text. Replaces bare `Color32::WHITE`.
     pub text_strong: Color32,
     /// De-emphasised detail text. Replaces bare `Color32::GRAY`.
@@ -55,6 +58,7 @@ pub const DARK: SemanticColors = SemanticColors {
     draw: Color32::from_rgb(0xCF, 0xC8, 0xB6),
     warn: Color32::from_rgb(0xE8, 0xA5, 0x4A),
     error: Color32::from_rgb(0xF2, 0x72, 0x7C),
+    ok: Color32::from_rgb(0x6F, 0xD9, 0x8A),
     text_strong: Color32::from_rgb(0xFA, 0xF8, 0xF1),
     text_dim: Color32::from_rgb(0x9C, 0x99, 0x90),
     division: Color32::from_rgb(0xE5, 0xC1, 0x58),
@@ -83,6 +87,7 @@ pub const LIGHT: SemanticColors = SemanticColors {
     draw: Color32::from_rgb(0x5F, 0x5C, 0x52),
     warn: Color32::from_rgb(0x8A, 0x4B, 0x00),
     error: Color32::from_rgb(0xA8, 0x1F, 0x2A),
+    ok: Color32::from_rgb(0x10, 0x6C, 0x34),
     text_strong: Color32::from_rgb(0x0A, 0x0A, 0x08),
     text_dim: Color32::from_rgb(0x5C, 0x5A, 0x53),
     division: Color32::from_rgb(0x77, 0x58, 0x00),
@@ -144,6 +149,7 @@ mod tests {
             ("draw", sem.draw),
             ("warn", sem.warn),
             ("error", sem.error),
+            ("ok", sem.ok),
             ("text_strong", sem.text_strong),
             ("text_dim", sem.text_dim),
             ("division", sem.division),

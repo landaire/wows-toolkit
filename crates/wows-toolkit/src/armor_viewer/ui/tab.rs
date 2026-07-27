@@ -34,6 +34,7 @@ use crate::armor_viewer::state::ZonePart;
 use crate::armor_viewer::ui::analysis::focus_analysis_tab;
 use crate::armor_viewer::ui::legend::show_armor_legend;
 use crate::icons;
+use crate::ui::theme::semantic::SemanticExt;
 use crate::viewport_3d::GpuPipeline;
 use crate::viewport_3d::LAYER_DEFAULT;
 use crate::viewport_3d::LAYER_HULL;
@@ -202,7 +203,7 @@ impl ToolkitTabViewer<'_> {
                     ui.vertical_centered(|ui| {
                         let available = ui.available_height();
                         ui.add_space(available * 0.4);
-                        ui.colored_label(egui::Color32::RED, t!("ui.armor.load_failed", error = e).as_ref());
+                        ui.colored_label(ui.sem().error, t!("ui.armor.load_failed", error = e).as_ref());
                     });
                     return;
                 }
@@ -1641,9 +1642,9 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                             wt_translations::icon_t(icons::WARNING, &t!("ui.armor.gaps"))
                         };
                         let gap_color = if pane.show_gaps && pane.gap_count > 0 {
-                            Some(egui::Color32::from_rgb(255, 100, 100))
+                            Some(ui.sem().warn)
                         } else if pane.show_gaps {
-                            Some(egui::Color32::from_rgb(100, 200, 100))
+                            Some(ui.sem().ok)
                         } else {
                             None
                         };
@@ -1750,8 +1751,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                             t!("ui.armor.trajectory").to_string()
                         };
                         let btn = egui::Button::new(traj_label);
-                        let btn =
-                            if pane.trajectory_mode { btn.fill(egui::Color32::from_rgb(80, 60, 20)) } else { btn };
+                        let btn = if pane.trajectory_mode { btn.fill(ui.visuals().selection.bg_fill) } else { btn };
                         if ui.add(btn).on_hover_text(t!("ui.armor.trajectory_tooltip").as_ref()).clicked() {
                             pane.trajectory_mode = !pane.trajectory_mode;
                             if pane.trajectory_mode {
@@ -1796,7 +1796,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                             t!("ui.armor.splash_mode").to_string()
                         };
                         let btn = egui::Button::new(splash_label);
-                        let btn = if pane.splash_mode { btn.fill(egui::Color32::from_rgb(80, 40, 10)) } else { btn };
+                        let btn = if pane.splash_mode { btn.fill(ui.visuals().selection.bg_fill) } else { btn };
                         let enabled = has_splash && has_he_shell;
                         let resp = ui.add_enabled(enabled, btn);
                         let resp = if !has_splash {
@@ -2822,7 +2822,7 @@ pub(crate) fn show_armor_tooltip(
         ui.label(
             egui::RichText::new(format!("{} layers for this part:", info.layers.len()))
                 .small()
-                .color(egui::Color32::GRAY),
+                .color(ui.sem().text_dim),
         );
 
         // Individual layers with swatches
@@ -2846,7 +2846,7 @@ pub(crate) fn show_armor_tooltip(
         ui.separator();
         ui.label(egui::RichText::new(t!("ui.armor.pen_check_label").as_ref()).small().strong());
         if ifhe_enabled {
-            ui.label(egui::RichText::new("IFHE active (+25% HE pen)").small().color(egui::Color32::YELLOW));
+            ui.label(egui::RichText::new("IFHE active (+25% HE pen)").small().color(ui.sem().warn));
         }
 
         for ship in comparison_ships {
@@ -2863,10 +2863,10 @@ pub(crate) fn show_armor_tooltip(
             for shell in &ship.shells {
                 let result = check_penetration(shell, info.thickness_mm, ifhe_enabled);
                 let (icon, color) = match result {
-                    Some(PenResult::Penetrates) => ("\u{2705}", egui::Color32::from_rgb(100, 220, 100)),
-                    Some(PenResult::Bounces) => ("\u{274C}", egui::Color32::from_rgb(220, 100, 100)),
-                    Some(PenResult::AngleDependent) => ("\u{2796}", egui::Color32::GRAY),
-                    None => ("\u{2753}", egui::Color32::GRAY),
+                    Some(PenResult::Penetrates) => ("\u{2705}", ui.sem().armor.pen),
+                    Some(PenResult::Bounces) => ("\u{274C}", ui.sem().armor.ricochet),
+                    Some(PenResult::AngleDependent) => ("\u{2796}", ui.sem().text_dim),
+                    None => ("\u{2753}", ui.sem().text_dim),
                 };
                 let pen_info = match &shell.ammo_type {
                     AmmoType::HE => {
