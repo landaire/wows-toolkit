@@ -1873,27 +1873,13 @@ impl UiReport {
                             }
 
                             // Stream sniper icon
-                            if let Some(timestamps) = self.twitch_state.read().player_is_potential_stream_sniper(
+                            if let Some(candidates) = self.twitch_state.read().player_is_potential_stream_sniper(
                                 player.initial_state().username(),
                                 self.match_timestamp,
-                            ) {
-                                let hover_text = timestamps
-                                    .iter()
-                                    .map(|(name, timestamps)| {
-                                        format!(
-                                            "Possible stream name: {}\nSeen: {} minutes after match start",
-                                            name,
-                                            timestamps
-                                                .iter()
-                                                .map(|ts| {
-                                                    let delta = *ts - self.match_timestamp;
-                                                    delta.total(jiff::Unit::Minute).unwrap_or(0.0) as i64
-                                                })
-                                                .join(", ")
-                                        )
-                                    })
-                                    .join("\n\n");
-                                ui.label(icons::TWITCH_LOGO).on_hover_text(hover_text);
+                            ) && let Some(login) =
+                                crate::ui::widgets::twitch_chip(ui, &candidates, self.match_timestamp)
+                            {
+                                ui.ctx().copy_text(login);
                             }
 
                             let disconnect_hover_text = if player.connection_change_info().is_empty() {

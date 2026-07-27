@@ -588,6 +588,12 @@ past_week = "Past Week"
 past_month = "Past Month"
 all_time = "All Time"
 
+[ui.twitch]
+possible_name = "Possible stream name: %{name}"
+seen_minutes = "Seen: %{minutes} minutes after match start"
+click_to_copy = "Click to copy"
+copied = "Copied %{name}"
+
 # -- Search --
 
 [ui.search]
