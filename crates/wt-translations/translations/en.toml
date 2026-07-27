@@ -580,7 +580,7 @@ clan_refresh = "Refresh"
 clan_no_data = "No clan encounters recorded yet."
 find_clan_matches = "Find matches mentioning this tag. The index has no clan-only field, so player names containing the tag match too."
 clan_sightings_hover = "%{range} of these fall in the selected time range."
-clan_member_matches = "matches: %{count}"
+clan_member_matches = "seen in %{count} matches"
 
 [ui.player_tracker.column]
 clan = "Clan"

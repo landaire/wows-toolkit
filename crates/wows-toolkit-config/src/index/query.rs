@@ -490,7 +490,10 @@ pub async fn clan_history_corrections(
                 // stored second; `IndexError` has no timestamp variant.
                 timestamp: jiff::Timestamp::from_second(row.try_get::<i64, _>("timestamp")?)
                     .unwrap_or(jiff::Timestamp::UNIX_EPOCH),
-                clan: row.try_get::<Option<String>, _>("clan")?.unwrap_or_default(),
+                // `indexed_vehicle.clan` is NOT NULL and selected directly, so
+                // reading it as nullable would only map an impossible NULL onto
+                // a clanless player.
+                clan: row.try_get::<String, _>("clan")?,
             })
         })
         .collect()
