@@ -5,10 +5,13 @@ use wows_replays::ReplayMeta;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
 use wows_replays::types::Relation;
+use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::TranslationKey;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::types::Species;
 
 use super::model::TrackedPlayer;
+use crate::data::wows_data::WorldOfWarshipsData;
 use crate::ui::replay_parser::PlayerTint;
 
 /// The roster of the match currently in progress, captured from the game's
@@ -96,6 +99,69 @@ pub(crate) fn order_roster(rows: &mut [LiveRosterRow]) {
             .then_with(|| a.ship_name.cmp(&b.ship_name))
             .then_with(|| a.name.cmp(&b.name))
     });
+}
+
+/// A `LiveMatch` resolved against game data and tracked history, split by team.
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedRoster {
+    pub started_at: Timestamp,
+    /// Whether game data for the roster's build was loaded when this was built.
+    /// Drives a retry, so the roster fills in once a lazy build load completes.
+    pub ships_resolved: bool,
+    /// Tracked-player count the name join was built against, so the join is
+    /// rebuilt after new replays are indexed.
+    pub tracked_count: usize,
+    pub friendly: Vec<LiveRosterRow>,
+    pub enemy: Vec<LiveRosterRow>,
+}
+
+pub(crate) fn resolve_roster(
+    live: &LiveMatch,
+    tracked: &HashMap<AccountId, TrackedPlayer>,
+    wows_data: Option<&WorldOfWarshipsData>,
+) -> ResolvedRoster {
+    let metadata = wows_data.and_then(|data| data.game_metadata.as_ref());
+    let name_index = build_name_index(tracked);
+
+    let mut friendly = Vec::new();
+    let mut enemy = Vec::new();
+
+    for player in &live.players {
+        let param = metadata.and_then(|provider| provider.game_param_by_id(player.ship_id));
+        let species = param.as_ref().and_then(|p| p.species()).and_then(|r| r.known().cloned());
+        let ship_name = match (metadata, param.as_ref()) {
+            (Some(provider), Some(param)) => provider.localized_name_from_param(param),
+            _ => None,
+        };
+        let species_text = match (metadata, species.as_ref()) {
+            (Some(provider), Some(species)) => provider
+                .localized_name_from_id(&TranslationKey::new(species.translation_id()))
+                .or_else(|| Some(species.name().to_string())),
+            _ => None,
+        };
+
+        let row = LiveRosterRow {
+            tint: PlayerTint::from_relation(player.relation),
+            species,
+            ship_name,
+            species_text,
+            tracked: name_index.get(&player.name.to_ascii_lowercase()).copied(),
+            name: player.name.clone(),
+        };
+
+        if player.relation.is_enemy() { enemy.push(row) } else { friendly.push(row) }
+    }
+
+    order_roster(&mut friendly);
+    order_roster(&mut enemy);
+
+    ResolvedRoster {
+        started_at: live.started_at,
+        ships_resolved: metadata.is_some(),
+        tracked_count: tracked.len(),
+        friendly,
+        enemy,
+    }
 }
 
 #[cfg(test)]
@@ -230,5 +296,58 @@ mod tests {
 
         assert_eq!(rows[0].name, "Known");
         assert_eq!(rows[1].name, "Unknown");
+    }
+
+    #[test]
+    fn resolve_roster_splits_teams_and_keeps_self_with_allies() {
+        let json = meta_json(
+            "13, 11, 0, 12668706",
+            &format!("{},{},{}", vehicle("Me", 100, 0), vehicle("Ally", 101, 1), vehicle("Foe", 200, 2)),
+        );
+        let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
+        let live = LiveMatch::from_meta(&meta);
+
+        let resolved = resolve_roster(&live, &HashMap::new(), None);
+
+        let friendly: Vec<&str> = resolved.friendly.iter().map(|r| r.name.as_str()).collect();
+        let enemy: Vec<&str> = resolved.enemy.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(friendly.len(), 2);
+        assert!(friendly.contains(&"Me"));
+        assert!(friendly.contains(&"Ally"));
+        assert_eq!(enemy, ["Foe"]);
+    }
+
+    #[test]
+    fn resolve_roster_marks_ships_unresolved_without_game_data() {
+        let json = meta_json("13, 11, 0, 12668706", &vehicle("Ally", 100, 1));
+        let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
+        let live = LiveMatch::from_meta(&meta);
+
+        let resolved = resolve_roster(&live, &HashMap::new(), None);
+
+        assert!(!resolved.ships_resolved);
+        assert_eq!(resolved.friendly[0].ship_name, None);
+        assert_eq!(resolved.friendly[0].species, None);
+    }
+
+    #[test]
+    fn resolve_roster_joins_tracked_players_by_name() {
+        let json = meta_json(
+            "13, 11, 0, 12668706",
+            &format!("{},{}", vehicle("Harvey635", 100, 2), vehicle("Stranger", 101, 2)),
+        );
+        let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
+        let live = LiveMatch::from_meta(&meta);
+
+        let mut players = HashMap::new();
+        players.insert(AccountId(42), tracked("Harvey635", &[]));
+
+        let resolved = resolve_roster(&live, &players, None);
+
+        let harvey = resolved.enemy.iter().find(|r| r.name == "Harvey635").expect("roster keeps the tracked player");
+        let stranger = resolved.enemy.iter().find(|r| r.name == "Stranger").expect("roster keeps the unknown player");
+        assert_eq!(harvey.tracked, Some(AccountId(42)));
+        assert_eq!(stranger.tracked, None);
+        assert_eq!(resolved.tracked_count, 1);
     }
 }

@@ -8,6 +8,7 @@ pub(crate) use model::SortedBy;
 pub use model::TimePeriod;
 pub use model::TrackedPlayer;
 pub(crate) use model::encounter_severity_color;
+pub(crate) use model::last_seen_text;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -21,8 +22,12 @@ use wows_replays::ReplayMeta;
 use wows_replays::types::AccountId;
 
 use crate::app::ToolkitTabViewer;
+use crate::data::wows_data::WorldOfWarshipsData;
 use crate::ui::replay_parser::Replay;
 use crate::util;
+
+use live::LiveMatch;
+use live::ResolvedRoster;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PlayerTracker {
@@ -33,19 +38,39 @@ pub struct PlayerTracker {
     pub(crate) player_filter: String,
 
     #[serde(skip)]
-    pub(crate) live_game_players: Option<(Timestamp, Vec<String>)>,
+    pub(crate) live_match: Option<LiveMatch>,
+    #[serde(skip)]
+    pub(crate) resolved_roster: Option<ResolvedRoster>,
 }
 
 impl PlayerTracker {
     pub fn update_from_live_arena_info(&mut self, meta: &ReplayMeta) {
-        // Clear the data from the last game
-        self.live_game_players = None;
-
-        let timestamp = util::replay_timestamp(meta);
-        let players = meta.vehicles.iter().map(|player| player.name.clone()).collect();
-
-        self.live_game_players = Some((timestamp, players))
+        self.live_match = Some(LiveMatch::from_meta(meta));
+        self.resolved_roster = None;
     }
+
+    /// The current roster, resolved against `wows_data` and tracked history.
+    /// Rebuilds when the match changes, when game data arrives after a roster was
+    /// resolved without it, or when the tracked-player set grows.
+    pub(crate) fn roster(&mut self, wows_data: Option<&WorldOfWarshipsData>) -> Option<&ResolvedRoster> {
+        let live = self.live_match.as_ref()?;
+
+        let stale = match self.resolved_roster.as_ref() {
+            Some(resolved) => {
+                resolved.started_at != live.started_at
+                    || (!resolved.ships_resolved && wows_data.is_some())
+                    || resolved.tracked_count != self.tracked_players.len()
+            }
+            None => true,
+        };
+
+        if stale {
+            self.resolved_roster = Some(live::resolve_roster(live, &self.tracked_players, wows_data));
+        }
+
+        self.resolved_roster.as_ref()
+    }
+
     pub fn update_from_replay(&mut self, replay: &Replay) {
         let Some(report) = replay.battle_report.as_ref() else {
             return;
@@ -203,6 +228,26 @@ impl ToolkitTabViewer<'_> {
             .show_inside(ui, &mut viewer);
 
         self.tab_state.persisted.write().player_tracker_dock_state = dock_state;
+    }
+
+    /// Queues an advanced search for every match this account appeared in and
+    /// focuses the Search tab.
+    pub(crate) fn queue_player_search(&mut self, id: AccountId) {
+        use crate::db::index::query_model::Chip;
+        use crate::db::index::query_model::Connector;
+        use crate::db::index::query_model::Field;
+        use crate::db::index::query_model::Group;
+        use crate::db::index::query_model::Op;
+        use crate::db::index::query_model::Query;
+        use crate::db::index::query_model::Value;
+
+        self.tab_state.pending_search_query = Some(Query {
+            groups: vec![Group {
+                chips: vec![Chip { field: Field::PlayerPresent, op: Op::Present, value: Value::Account(id) }],
+            }],
+            connector: Connector::And,
+        });
+        self.tab_state.pending_focus_search = true;
     }
 }
 

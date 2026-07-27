@@ -4,6 +4,9 @@ use std::collections::HashSet;
 use egui::Color32;
 use jiff::Timestamp;
 use jiff::ToSpan;
+use jiff::Unit;
+use jiff::ZonedDifference;
+use jiff::tz::TimeZone;
 use rust_i18n::t;
 use serde::Deserialize;
 use serde::Serialize;
@@ -24,6 +27,25 @@ pub(crate) fn encounter_severity_color(ui: &egui::Ui, times_encountered_in_range
         4..=5 => Some(ui.sem().warn),
         _ => Some(ui.sem().loss),
     }
+}
+
+/// Human-readable "how long ago" for a tracked player's most recent encounter.
+pub(crate) fn last_seen_text(player: &TrackedPlayer, now: Timestamp) -> String {
+    let Some(last) = player.timestamps.last() else {
+        return String::new();
+    };
+    let timestamp = last.to_zoned(TimeZone::system());
+    let now = now.to_zoned(TimeZone::system());
+    let delta = now
+        .since(
+            ZonedDifference::new(&timestamp)
+                .smallest(Unit::Minute)
+                .largest(Unit::Year)
+                .mode(jiff::RoundMode::HalfExpand),
+        )
+        .expect("failed to calculate player last seen delta");
+
+    format!("{delta:#}")
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
