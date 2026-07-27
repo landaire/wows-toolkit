@@ -1,8 +1,8 @@
 //! Distance newtypes and their unit conversions.
 //!
 //! The game mixes several distance units: real meters, BigWorld engine units
-//! (1 BW unit = 30 m), ship-model units (used by armor/hull geometry), plus
-//! kilometers and millimeters. These newtypes keep units honest at the type
+//! (1 BW unit = 30 m), ship-model units (1 unit = 15 m, used by hull geometry),
+//! plus kilometers and millimeters. These newtypes keep units honest at the type
 //! level; cross-unit arithmetic and comparison convert to a common unit.
 
 use std::fmt;
@@ -13,9 +13,7 @@ use std::ops::Sub;
 /// Conversion factor: 1 BigWorld unit = 30 meters.
 const BW_TO_METERS: f32 = 30.0;
 
-/// Conversion factor: 1 BigWorld unit = 15 ship-model units.
-/// Ship geometry (armor meshes, hull models) uses this coordinate space
-/// where 1 ship-model unit = 2 real meters (= 30 / 15).
+/// Conversion factor: 1 ship-model unit = 15 meters.
 const BW_TO_SHIP: f32 = 15.0;
 
 /// Distance in meters.
@@ -30,10 +28,18 @@ pub struct Meters(f32);
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct BigWorldDistance(f32);
 
-/// Distance in ship-model coordinate units (1 unit = 2 meters).
-/// Ship geometry (armor meshes, hull visual models) uses this coordinate space.
-/// The game defines BW_TO_SHIP = 15, meaning 1 BigWorld unit = 15 ship-model units,
-/// so 1 ship-model unit = BW_TO_METERS / BW_TO_SHIP = 30 / 15 = 2 meters.
+/// Distance in ship-model coordinate units (1 unit = 15 meters). Hull geometry
+/// uses this space: `.visual` node matrices, the `.skel_ext` nodes hung off them,
+/// and the meshes they position.
+///
+/// Measured against the live roster, not assumed: for 1158 hulls the root
+/// visual's longitudinal extent times 15 reproduces `A_Hull.size[0]` with a
+/// median ratio of 1.014 (p5..p95 of 1.001..1.070, the residual being bow and
+/// stern overhang the published length excludes). The exported hierarchy carries
+/// no scale of its own; `Scene Root`, `export` and the hull nodes are identity.
+/// The same 15 falls out of the main-battery dispersion formula against published
+/// port values (`wowsunpack::game_params::ttx::constants::BW_TO_SHIP`). See
+/// `docs/FIRE_CHANCE.md` section 5.1.
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -76,6 +82,12 @@ impl From<f32> for BigWorldDistance {
 impl From<i32> for BigWorldDistance {
     fn from(v: i32) -> Self {
         Self(v as f32)
+    }
+}
+
+impl From<f32> for ShipModelDistance {
+    fn from(v: f32) -> Self {
+        Self(v)
     }
 }
 
@@ -124,11 +136,11 @@ impl Meters {
     pub fn to_bigworld(self) -> BigWorldDistance {
         BigWorldDistance(self.0 / BW_TO_METERS)
     }
-    /// Convert to ship-model units (1 unit = 2 meters).
+    /// Convert to ship-model units (1 unit = 15 meters).
     /// Use this for distances that will be compared against ship geometry
-    /// (armor meshes, hull models), which are in ship-model coordinates.
+    /// (hull models, armor meshes), which are in ship-model coordinates.
     pub fn to_ship_model(self) -> ShipModelDistance {
-        ShipModelDistance(self.0 * BW_TO_SHIP / BW_TO_METERS)
+        ShipModelDistance(self.0 / BW_TO_SHIP)
     }
     pub fn to_km(self) -> Km {
         Km(self.0 / 1000.0)
@@ -155,10 +167,10 @@ impl ShipModelDistance {
         self.0
     }
     pub fn to_meters(self) -> Meters {
-        Meters(self.0 * BW_TO_METERS / BW_TO_SHIP)
+        Meters(self.0 * BW_TO_SHIP)
     }
     pub fn to_bigworld(self) -> BigWorldDistance {
-        BigWorldDistance(self.0 / BW_TO_SHIP)
+        self.to_meters().to_bigworld()
     }
 }
 
@@ -463,5 +475,13 @@ mod tests {
     #[test]
     fn meters_per_second_display_rounds_to_whole() {
         assert_eq!(MetersPerSecond::from(820.0).to_string(), "820 m/s");
+    }
+
+    /// Iowa's bow fire node sits at model z 6.489, which is 97.3 m forward of the
+    /// hull origin on a 262 m ship.
+    #[test]
+    fn ship_model_units_are_fifteen_meters() {
+        assert_eq!(ShipModelDistance::from(6.489).to_meters().value(), 97.335);
+        assert_eq!(Meters::from(97.335).to_ship_model().value(), 6.489);
     }
 }

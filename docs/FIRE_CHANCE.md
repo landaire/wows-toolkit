@@ -376,30 +376,68 @@ A hull is built from section parts. Iowa's root visual carries `HP_Bow`,
 `HP_MidFront`, `HP_MidBack` and `HP_Stern`, and exactly one fire node lives in
 each section's extender:
 
-| Node | Section | Local z |
-| --- | --- | --- |
-| `EP_Fire_1` | Bow | +6.489 |
-| `EP_Fire_2` | MidFront | +1.317 |
-| `EP_Fire_3` | MidBack | -2.480 |
-| `EP_Fire_4` | Stern | -6.912 |
+| Node | Section | Local z | Meters |
+| --- | --- | --- | --- |
+| `EP_Fire_1` | Bow | +6.489 | +97.3 |
+| `EP_Fire_2` | MidFront | +1.317 | +19.8 |
+| `EP_Fire_3` | MidBack | -2.480 | -37.2 |
+| `EP_Fire_4` | Stern | -6.912 | -103.7 |
 
 Monotonic bow to stern, one per hull section. Model space is right-handed with
 +Z toward the bow.
 
-**The scale of those numbers is unresolved.** They are raw node translations,
-read without composing the parent chain. Iowa's root bounding box spans z
--9.026..9.300, i.e. 18.33 units for a 262.1 m ship (`A_Hull.size[0]`), implying
-about 14.3 m per unit. That matches neither `ShipModelDistance`'s documented 2 m
-per unit (`BW_TO_METERS / BW_TO_SHIP`, 30/15, in `crates/wows-core/src/units.rs`)
-nor BigWorld's 30 m per unit. The likely explanation is a uniform scale on
-`Scene Root` or `export` that the raw read skipped; skeleton-extender nodes name
-`Scene Root` as their parent, so that is exactly the transform they are missing.
-The bounding-box ratio is also not a reliable substitute: on Iowa the same ratio
-taken across the beam gives 13.2 rather than 14.3, because the root box covers
-only its own lod4 shape.
+**Model space is a fixed 15 meters per unit.** There is no scale anywhere in the
+exported hierarchy to compose: on every hull checked, `Scene Root`, `export` and
+each `HP_<Section>` node are identity with unit column lengths, so the raw node
+translation is already hull-local and only needs multiplying.
 
-Anything consuming these positions must establish the scale first, and validate
-it against ships of very different length. Do not assume 14.3.
+The constant is 15, measured across the roster. For each of 1158 ships the root
+visual's z extent times 15 was compared against `A_Hull.size[0]`:
+
+| | ratio |
+| --- | --- |
+| p5 | 1.001 |
+| p25 | 1.009 |
+| median | 1.014 |
+| p75 | 1.021 |
+| p95 | 1.070 |
+
+The model is consistently a little longer than the published length, which is
+what a bounding box over the whole hull should be: it covers bow and stern
+overhang that `size[0]` excludes. The top of the band is carriers, whose flight
+decks project past the hull at both ends (Langley 1.166, Hosho 1.152, Bogue
+1.220). The tail below 1.0 is event and joke hulls (Battle Duck, Crab
+Battleship, Transylvania) and ships whose GameParams points at a stand-in model.
+
+The three validation ships:
+
+| Ship | `size[0]` | z extent | extent x 15 | ratio |
+| --- | --- | --- | --- | --- |
+| `PASB018_Iowa_1944` | 262.1 m | 18.326 | 274.9 m | 1.049 |
+| `PFSD110_Kleber` | 141.0 m | 9.567 | 143.5 m | 1.018 |
+| `PASS110_Balao` | 94.99 m | 6.391 | 95.9 m | 1.009 |
+
+Iowa is the loosest of the three because its `size[0]` is the waterline length;
+against the real 270.4 m overall the model is 1.7% long, in line with the rest.
+
+Deriving the scale per hull instead (`size[0]` over the z extent) would give
+14.30 for Iowa and 14.86 for Balao, and would absorb a carrier's flight-deck
+overhang into a 15% scale error. It is the wrong model: the scale is a property
+of the engine, not of the hull.
+
+The same 15 was already recovered independently, from the main-battery
+dispersion formula against published port values, as
+`wowsunpack::game_params::ttx::constants::BW_TO_SHIP`. Two unrelated derivations
+agreeing is why `crates/wows-core/src/units.rs` now documents
+`ShipModelDistance` as 15 m per unit; its previous claim of 2 m
+(`BW_TO_METERS / BW_TO_SHIP`, 30/15) was arithmetic on a misreading and had no
+callers.
+
+The resolver is `wowsunpack::models::fire_nodes::resolve_fire_sections`, which
+returns positions in meters so consumers never handle the scale. Across the
+whole roster 1197 of 1199 hulls resolve; the two that do not are a ship whose
+model is absent from `assets.bin` and one event submarine whose GameParams
+claims four burn nodes for a model carrying two.
 
 `EP_Fire_5` and `EP_Fire_5_1` also exist on 452 hulls. These are **not** burn
 nodes: they are the extra emitters of the `fireResistance` effect group, which

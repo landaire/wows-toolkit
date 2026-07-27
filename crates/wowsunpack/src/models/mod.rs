@@ -1,4 +1,7 @@
 pub mod assets_bin;
+/// Fire-section (burn node) geometry. The resolver needs the `models` feature;
+/// the geometry and index types do not, so replay analysis can consume them.
+pub mod fire_nodes;
 #[cfg(feature = "models")]
 pub mod forest;
 #[cfg(feature = "models")]
