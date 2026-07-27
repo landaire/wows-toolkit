@@ -535,12 +535,12 @@ mod tests {
         use crate::ui::theme::contrast::contrast_ratio;
 
         let dark_visuals = Visuals::dark();
-        let black = ClanColor::Fixed(Color32::BLACK).color(&dark_visuals);
+        let black = ClanColor::Fixed(Color32::BLACK).color(&dark_visuals); // theme-exempt: worst-case test input
         let r = contrast_ratio(black, dark_visuals.panel_fill);
         assert!(r >= CONTRAST_FLOOR, "black clan colour on dark panel only reached {r}");
 
         let light_visuals = Visuals::light();
-        let white = ClanColor::Fixed(Color32::WHITE).color(&light_visuals);
+        let white = ClanColor::Fixed(Color32::WHITE).color(&light_visuals); // theme-exempt: worst-case test input
         let r = contrast_ratio(white, light_visuals.panel_fill);
         assert!(r >= CONTRAST_FLOOR, "white clan colour on light panel only reached {r}");
     }

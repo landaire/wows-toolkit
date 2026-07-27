@@ -1881,7 +1881,7 @@ impl WowsToolkitApp {
                     Align2::CENTER_CENTER,
                     text,
                     TextStyle::Heading.resolve(&ctx.global_style()),
-                    Color32::WHITE,
+                    Color32::WHITE, // theme-exempt: sits on this overlay's own opaque scrim
                 );
             }
         }
