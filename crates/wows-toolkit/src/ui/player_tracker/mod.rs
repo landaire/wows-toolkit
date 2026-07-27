@@ -436,4 +436,58 @@ mod tests {
         let (_rect, active) = dock.find_active_focused().expect("default layout has an active tab");
         assert_eq!(*active, PlayerTrackerSubTab::Historical);
     }
+
+    /// The tracker gained fields that no saved state carries: everything new is
+    /// either `serde(skip)` or `serde(default)`, and the older fields keep their
+    /// names and types. This pins that, because the failure mode is a tracker
+    /// that silently loads empty on the first run after an update.
+    #[test]
+    fn a_payload_holding_only_the_older_fields_still_loads() {
+        let saved = r#"{
+            "tracked_players_by_time": { "2023-11-14T22:13:20Z": [501] },
+            "tracked_players": {
+                "501": {
+                    "last_name": "Enemy",
+                    "db_id": 501,
+                    "names": ["OldHandle"],
+                    "clan_id": 7,
+                    "clan": "RAIN",
+                    "timestamps": ["2023-11-14T22:13:20Z"],
+                    "arena_ids": [100]
+                }
+            },
+            "filter_time_period": "LastWeek",
+            "sort_order": { "TimesEncountered": "Desc" },
+            "player_filter": "yamato"
+        }"#;
+
+        let tracker: PlayerTracker = serde_json::from_str(saved).expect("a payload without the newer fields loads");
+
+        let timestamp = jiff::Timestamp::from_second(1_700_000_000).expect("fixture timestamp is in range");
+        assert_eq!(tracker.tracked_players_by_time.get(&timestamp), Some(&vec![AccountId(501)]));
+
+        let player = tracker.tracked_players.get(&AccountId(501)).expect("the saved player is tracked");
+        assert_eq!(player.last_name, "Enemy");
+        assert_eq!(player.clan, "RAIN");
+        assert_eq!(player.clan_id, 7);
+        assert_eq!(player.timestamps.iter().copied().collect::<Vec<_>>(), vec![timestamp]);
+        assert_eq!(player.arena_ids.len(), 1);
+        assert_eq!(player.notes, "", "a player saved before notes existed loads without any");
+
+        assert_eq!(tracker.filter_time_period, TimePeriod::LastWeek);
+        assert_eq!(tracker.sort_order, SortedBy::TimesEncountered(SortOrder::Desc));
+        assert_eq!(tracker.player_filter, "yamato");
+
+        assert_eq!(tracker.clan_sort_order, ClanSortedBy::default(), "the clan sort falls back to its default");
+        assert_eq!(tracker.encounter_version, 0);
+        assert!(tracker.clan_breakdown.is_none());
+        assert!(tracker.clan_breakdown_window.is_none());
+        assert!(tracker.expanded_players.is_empty());
+        assert!(tracker.expanded_clans.is_empty());
+        assert!(tracker.historical_detail_heights.is_empty());
+        assert!(tracker.clan_detail_heights.is_empty());
+        assert!(tracker.live_match.is_none());
+        assert!(tracker.resolved_roster.is_none());
+    }
 }
+

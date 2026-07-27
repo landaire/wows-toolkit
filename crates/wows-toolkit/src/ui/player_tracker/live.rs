@@ -10,7 +10,7 @@ use wowsunpack::data::TranslationKey;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::types::Species;
 
-use super::model::TrackedPlayer;
+use super::TrackedPlayer;
 use crate::data::wows_data::WorldOfWarshipsData;
 use crate::ui::replay_parser::PlayerTint;
 
