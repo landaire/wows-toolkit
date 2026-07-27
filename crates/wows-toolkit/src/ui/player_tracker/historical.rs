@@ -9,6 +9,7 @@ use rust_i18n::t;
 use wows_replays::types::AccountId;
 
 use crate::app::ToolkitTabViewer;
+use crate::icons;
 use crate::task;
 
 use super::PlayerTracker;
@@ -144,12 +145,27 @@ fn header_label(key: &str, sorted_by: SortedBy, is_active: bool) -> String {
     if is_active { format!("{} {}", label, sorted_by.order().icon()) } else { label }
 }
 
+/// Salted so the animation does not collide with the replay inspector's
+/// row animations, which key on the bare row number.
+fn row_animation_id(row_nr: u64) -> egui::Id {
+    egui::Id::new(("player_tracker_historical_row", row_nr))
+}
+
+/// Positional expansion state for `rows`, projected from the account-keyed set
+/// so that a re-sort or re-filter carries an open row to the account's new
+/// index instead of leaving it open on whoever landed there.
+fn expanded_rows(rows: &[AccountId], expanded_players: &HashSet<AccountId>) -> BTreeMap<u64, bool> {
+    rows.iter().enumerate().map(|(index, id)| (index as u64, expanded_players.contains(id))).collect()
+}
+
 /// Values copied out of one tracked player for a single frame's render. Cheap:
 /// egui_table only paints visible rows.
 struct RowView {
     account_id: AccountId,
     clan: String,
     last_name: String,
+    aliases: Vec<String>,
+    notes: String,
     total_encounters: usize,
     encounters_in_range: usize,
     last_seen: String,
@@ -160,9 +176,13 @@ struct HistoricalTable<'a> {
     tracker: &'a mut PlayerTracker,
     rows: Vec<AccountId>,
     row_heights: BTreeMap<u64, f32>,
+    /// Per-row expansion derived from `expanded_players` each frame, because
+    /// `row_top_offset` addresses rows positionally.
+    expanded_rows: BTreeMap<u64, bool>,
     now: Timestamp,
     filter_range: Option<Timestamp>,
     find_matches_target: Option<AccountId>,
+    copy_text: Option<String>,
 }
 
 impl HistoricalTable<'_> {
@@ -180,6 +200,8 @@ impl HistoricalTable<'_> {
             account_id,
             clan: player.clan.clone(),
             last_name: player.last_name.clone(),
+            aliases: player.names.iter().sorted().cloned().collect(),
+            notes: player.notes.clone(),
             total_encounters,
             encounters_in_range,
             last_seen: last_seen_text(player, self.now),
@@ -192,39 +214,114 @@ impl HistoricalTable<'_> {
             return;
         };
 
-        match column {
-            HistoricalColumn::Clan => {
-                ui.label(&view.clan);
-            }
-            HistoricalColumn::Player => {
-                let mut text = RichText::new(&view.last_name);
-                if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
-                    text = text.color(color);
+        let is_expanded = self.expanded_rows.get(&row_nr).copied().unwrap_or_default();
+        let expandedness = ui.ctx().animate_bool(row_animation_id(row_nr), is_expanded);
+        let mut toggle_expand = false;
+
+        let inner_response = ui.vertical(|ui| {
+            ui.horizontal(|ui| match column {
+                HistoricalColumn::Clan => {
+                    ui.label(&view.clan);
                 }
-                ui.label(text);
-            }
-            HistoricalColumn::TotalEncounters => {
-                let mut text = RichText::new(view.total_encounters.to_string());
-                if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
-                    text = text.color(color);
+                HistoricalColumn::Player => {
+                    let (_, response) = ui.allocate_exact_size(egui::Vec2::splat(10.0), egui::Sense::click());
+                    egui::collapsing_header::paint_default_icon(ui, expandedness, &response);
+                    if response.clicked() {
+                        toggle_expand = true;
+                    }
+
+                    let mut name = RichText::new(&view.last_name);
+                    if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
+                        name = name.color(color);
+                    }
+                    ui.label(name);
+
+                    let account_text = view.account_id.to_string();
+                    if ui
+                        .add(egui::Label::new(RichText::new(&account_text).small().weak()).sense(egui::Sense::click()))
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text(t!("ui.player_tracker.copy_wg_id"))
+                        .clicked()
+                    {
+                        self.copy_text = Some(account_text);
+                    }
+
+                    if !view.aliases.is_empty() {
+                        ui.label(icons::USERS_THREE)
+                            .on_hover_text(t!("ui.player_tracker.aliases_hover", names = view.aliases.join(", ")));
+                    }
                 }
-                ui.label(text);
-            }
-            HistoricalColumn::EncountersInRange => {
-                let mut text = RichText::new(view.encounters_in_range.to_string());
-                if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
-                    text = text.color(color);
+                HistoricalColumn::TotalEncounters => {
+                    let mut text = RichText::new(view.total_encounters.to_string());
+                    if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
+                        text = text.color(color);
+                    }
+                    ui.label(text);
                 }
-                ui.label(text);
-            }
-            HistoricalColumn::LastEncountered => {
-                ui.label(&view.last_seen).on_hover_text(&view.last_seen_exact);
-            }
-            HistoricalColumn::Actions => {
-                if ui.button(t!("ui.player_tracker.find_matches")).clicked() {
-                    self.find_matches_target = Some(view.account_id);
+                HistoricalColumn::EncountersInRange => {
+                    let mut text = RichText::new(view.encounters_in_range.to_string());
+                    if let Some(color) = encounter_severity_color(ui, view.encounters_in_range) {
+                        text = text.color(color);
+                    }
+                    ui.label(text);
+                }
+                HistoricalColumn::LastEncountered => {
+                    ui.label(&view.last_seen).on_hover_text(&view.last_seen_exact);
+                }
+                HistoricalColumn::Actions => {
+                    if !view.notes.is_empty()
+                        && ui
+                            .add(egui::Label::new(icons::NOTE_PENCIL).sense(egui::Sense::click()))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .on_hover_text(&view.notes)
+                            .clicked()
+                    {
+                        toggle_expand = true;
+                    }
+
+                    if ui.button(icons::MAGNIFYING_GLASS).on_hover_text(t!("ui.player_tracker.find_matches")).clicked()
+                    {
+                        self.find_matches_target = Some(view.account_id);
+                    }
+                }
+            });
+
+            // Only the Player column paints the detail block, so it is not repeated
+            // once per column. Every other column contributes its collapsed height.
+            if 0.0 < expandedness && matches!(column, HistoricalColumn::Player) {
+                ui.add_space(4.0);
+                if !view.aliases.is_empty() {
+                    ui.label(t!("ui.player_tracker.aliases_hover", names = view.aliases.join(", ")));
+                }
+                ui.label(t!("ui.player_tracker.last_encountered_exact", timestamp = &view.last_seen_exact));
+                ui.label(t!("ui.player_tracker.arena_count", count = view.total_encounters));
+                ui.add_space(4.0);
+                ui.label(t!("ui.player_tracker.notes_hint"));
+
+                // `view` is a snapshot, so the editor takes its own mutable borrow here.
+                if let Some(player) = self.tracker.tracked_players.get_mut(&view.account_id) {
+                    ui.add(egui::TextEdit::multiline(&mut player.notes).desired_width(f32::INFINITY).desired_rows(3));
                 }
             }
+        });
+
+        if toggle_expand {
+            // `remove` reports whether it was there, which is the toggle.
+            if !self.tracker.expanded_players.remove(&view.account_id) {
+                self.tracker.expanded_players.insert(view.account_id);
+            }
+            let now_expanded = self.tracker.expanded_players.contains(&view.account_id);
+            self.expanded_rows.insert(row_nr, now_expanded);
+            // Force a re-measure at the new height.
+            self.row_heights.remove(&row_nr);
+        }
+
+        let cell_height = inner_response.response.rect.height();
+        // A row that has never been painted has no measured height yet, so seed it
+        // with what this cell just measured and only ever grow it afterwards.
+        let previous_height = self.row_heights.entry(row_nr).or_insert(cell_height);
+        if *previous_height < cell_height {
+            *previous_height = cell_height;
         }
     }
 }
@@ -283,6 +380,19 @@ impl egui_table::TableDelegate for HistoricalTable<'_> {
 
     fn default_row_height(&self) -> f32 {
         HISTORICAL_ROW_HEIGHT
+    }
+
+    fn row_top_offset(&self, ctx: &egui::Context, _table_id: egui::Id, row_nr: u64) -> f32 {
+        self.expanded_rows
+            .range(0..row_nr)
+            .map(|(expanded_row_nr, expanded)| {
+                let how_expanded = ctx.animate_bool(row_animation_id(*expanded_row_nr), *expanded);
+                // A row that has never been painted has no measured height yet;
+                // contributing zero offset is right until it is measured.
+                how_expanded * self.row_heights.get(expanded_row_nr).copied().unwrap_or(0.0)
+            })
+            .sum::<f32>()
+            + row_nr as f32 * HISTORICAL_ROW_HEIGHT
     }
 }
 
@@ -380,6 +490,7 @@ impl ToolkitTabViewer<'_> {
                 // Everything the delegate needs from the tracker is read before it takes the
                 // mutable borrow.
                 let rows = visible_rows(player_tracker);
+                let expanded_rows = expanded_rows(&rows, &player_tracker.expanded_players);
                 let row_heights = std::mem::take(&mut player_tracker.historical_row_heights);
                 let filter_range = player_tracker.filter_time_period.to_date();
 
@@ -387,9 +498,11 @@ impl ToolkitTabViewer<'_> {
                     tracker: player_tracker,
                     rows,
                     row_heights,
+                    expanded_rows,
                     now,
                     filter_range,
                     find_matches_target: None,
+                    copy_text: None,
                 };
 
                 let columns = vec![
@@ -411,6 +524,9 @@ impl ToolkitTabViewer<'_> {
                     .show(ui, &mut delegate);
 
                 find_matches_target = delegate.find_matches_target;
+                if let Some(text) = delegate.copy_text {
+                    ui.ctx().copy_text(text);
+                }
                 player_tracker.historical_row_heights = delegate.row_heights;
             });
         }
@@ -581,5 +697,29 @@ mod tests {
         assert_eq!(filtered("TIRP"), vec![AccountId(2)], "matches on current name, ignoring case");
         assert_eq!(filtered("oldhandle"), vec![AccountId(3)], "matches on an alias, ignoring case");
         assert!(filtered("zzzz").is_empty(), "a filter matching nothing yields no rows");
+    }
+
+    #[test]
+    fn an_open_row_follows_its_account_when_the_order_changes() {
+        let open = HashSet::from([AccountId(3)]);
+
+        let ascending = [AccountId(1), AccountId(2), AccountId(3)];
+        assert_eq!(
+            expanded_rows(&ascending, &open),
+            BTreeMap::from([(0, false), (1, false), (2, true)]),
+            "the open account is the last row before the re-sort"
+        );
+
+        let descending = [AccountId(3), AccountId(2), AccountId(1)];
+        assert_eq!(
+            expanded_rows(&descending, &open),
+            BTreeMap::from([(0, true), (1, false), (2, false)]),
+            "reversing the order moves the open state with the account, not the index"
+        );
+
+        assert!(
+            expanded_rows(&[AccountId(1), AccountId(2)], &open).values().all(|expanded| !expanded),
+            "filtering the open account out leaves no row open"
+        );
     }
 }

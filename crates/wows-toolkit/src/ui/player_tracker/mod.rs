@@ -13,6 +13,7 @@ pub(crate) use model::last_seen_timestamp_text;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use jiff::Timestamp;
@@ -42,6 +43,12 @@ pub struct PlayerTracker {
     /// `egui_table` can offset rows whose content is taller than the default.
     #[serde(skip)]
     pub(crate) historical_row_heights: BTreeMap<u64, f32>,
+
+    /// Accounts whose detail row is open. Keyed by account rather than row index
+    /// so a sort or filter change does not move the open row onto another player.
+    #[serde(skip)]
+    pub(crate) expanded_players: HashSet<AccountId>,
+
     #[serde(skip)]
     pub(crate) live_match: Option<LiveMatch>,
     #[serde(skip)]
