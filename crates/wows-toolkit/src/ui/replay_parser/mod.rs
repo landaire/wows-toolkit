@@ -5254,6 +5254,7 @@ fn exclusion_reason_label(reason: ExclusionReason) -> Cow<'static, str> {
         ExclusionReason::SectionSuppressibleVictimBuildUnknown => {
             t!("ui.replay.sections.fire_chance_exclusion_victim_build_unknown")
         }
+        ExclusionReason::VictimPoseUnknown => t!("ui.replay.sections.fire_chance_exclusion_victim_pose_unknown"),
         ExclusionReason::DamageControlActive => t!("ui.replay.sections.fire_chance_exclusion_damage_control_active"),
         ExclusionReason::DamageControlUnknown => t!("ui.replay.sections.fire_chance_exclusion_damage_control_unknown"),
         ExclusionReason::ObservationGap => t!("ui.replay.sections.fire_chance_exclusion_observation_gap"),

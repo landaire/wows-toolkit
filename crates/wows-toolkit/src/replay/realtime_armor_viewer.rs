@@ -160,10 +160,12 @@ struct ShellEntry {
     /// Server vs simulation comparison (AP only).
     comparison: Option<ServerVsSimComparison>,
     server_outcome: ServerOutcome,
-    /// Victim ship roll at impact time (radians). Used to set viewport model roll on selection.
-    victim_roll: f32,
-    /// Victim ship yaw at impact time (radians). Used to set viewport model yaw on selection.
-    victim_yaw: f32,
+    /// Victim ship roll at impact time (radians). Used to set viewport model roll
+    /// on selection. `None` when the victim's pose was not known at impact.
+    victim_roll: Option<f32>,
+    /// Victim ship yaw at impact time (radians). Used to set viewport model yaw
+    /// on selection. `None` when the victim's pose was not known at impact.
+    victim_yaw: Option<f32>,
     /// Server-reported impact angle against armor (radians), from terminal ballistics.
     server_material_angle: Option<f32>,
 }
@@ -493,8 +495,8 @@ impl RealtimeArmorViewer {
             trajectory_id,
             comparison,
             server_outcome,
-            victim_roll: hit.victim_roll,
-            victim_yaw: hit.victim_yaw,
+            victim_roll: hit.victim_pose.as_ref().map(|p| p.roll),
+            victim_yaw: hit.victim_pose.as_ref().map(|p| p.yaw),
             server_material_angle: hit.hit.terminal_ballistics.as_ref().map(|tb| tb.material_angle),
         };
 
@@ -592,14 +594,15 @@ impl RealtimeArmorViewer {
         shell: &ShellInfo,
         server_outcome: &ServerOutcome,
     ) -> Option<TrajectorySimResult> {
-        let ship_yaw = hit.victim_yaw;
-        let ship_world_pos = hit.victim_position;
+        let pose = hit.victim_pose.as_ref()?;
+        let ship_yaw = pose.yaw;
+        let ship_world_pos = pose.position;
         let salvo_shots: Vec<_> = hit.salvo.as_ref().map(|s| s.shots.clone()).unwrap_or_default();
         let impact_pos = hit.hit.position;
         let matched_shot = salvo_shots.iter().find(|s| s.shot_id == hit.hit.shot_id);
         let firing_range: Meters = matched_shot.map(|s| s.origin.distance_xz(&impact_pos)).unwrap_or(Meters::new(0.0));
 
-        let rot = Self::inverse_ship_rotation(ship_yaw, hit.victim_pitch, hit.victim_roll);
+        let rot = Self::inverse_ship_rotation(ship_yaw, pose.pitch, pose.roll);
 
         let shot = matched_shot?;
 
@@ -800,16 +803,11 @@ impl RealtimeArmorViewer {
                 && group.server_outcome == ServerOutcome::Overpenetration
                 && let Some(ref cmp) = sim_result.comparison
             {
-                let rot = Self::inverse_ship_rotation(hit.victim_yaw, hit.victim_pitch, hit.victim_roll);
+                let Some(pose) = hit.victim_pose.as_ref() else { continue };
+                let rot = Self::inverse_ship_rotation(pose.yaw, pose.pitch, pose.roll);
                 let mc = self.pane.loaded_armor.as_ref().map(|a| a.center()).unwrap_or(Vec3::zeros());
-                let exit_div = self.compute_exit_divergence(
-                    group,
-                    &cmp.sim,
-                    &sim_result.traj_hits,
-                    &hit.victim_position,
-                    &rot,
-                    &mc,
-                );
+                let exit_div =
+                    self.compute_exit_divergence(group, &cmp.sim, &sim_result.traj_hits, &pose.position, &rot, &mc);
                 // Patch exit divergence into the comparison
                 if let Some(ref mut s) = sim
                     && let Some(ref mut c) = s.comparison
@@ -986,7 +984,7 @@ impl RealtimeArmorViewer {
                 .iter()
                 .flat_map(|g| &g.shells)
                 .find(|s| s.trajectory_id == Some(tid))
-                .map(|s| s.victim_roll)
+                .and_then(|s| s.victim_roll)
         })
         .unwrap_or(0.0)
     }
@@ -1006,7 +1004,7 @@ impl RealtimeArmorViewer {
                 .iter()
                 .flat_map(|g| &g.shells)
                 .find(|s| s.trajectory_id == Some(tid))
-                .map(|s| s.victim_yaw)
+                .and_then(|s| s.victim_yaw)
         })
         .unwrap_or(0.0)
     }

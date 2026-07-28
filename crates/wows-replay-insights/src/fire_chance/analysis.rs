@@ -130,6 +130,9 @@ pub enum HitEligibility {
     /// on that hull. `victim_entity_id` is a nearest-ship heuristic, so this is
     /// what a hit keyed to a neighbour in a tight formation looks like.
     ImpactOffTheHull,
+    /// The victim's position and orientation were not known at the moment of
+    /// the hit, so where on the hull the shell landed cannot be established.
+    VictimPoseUnknown,
     /// Another shell of ours that cannot be ruled out as the cause landed in the
     /// same section inside the contest window, so a SetFire ribbon there cannot
     /// be assigned to this hit rather than to that one. See
@@ -160,6 +163,7 @@ pub enum ExclusionReason {
     HitTypeDoesNotRoll,
     NoSectionGeometry,
     ImpactOffTheHull,
+    VictimPoseUnknown,
     AmbiguousWithAnotherHit,
     SameTickSectionAmbiguous,
 }
@@ -187,6 +191,7 @@ impl HitEligibility {
             HitEligibility::HitTypeDoesNotRoll(_) => Some(ExclusionReason::HitTypeDoesNotRoll),
             HitEligibility::NoSectionGeometry => Some(ExclusionReason::NoSectionGeometry),
             HitEligibility::ImpactOffTheHull => Some(ExclusionReason::ImpactOffTheHull),
+            HitEligibility::VictimPoseUnknown => Some(ExclusionReason::VictimPoseUnknown),
             HitEligibility::AmbiguousWithAnotherHit => Some(ExclusionReason::AmbiguousWithAnotherHit),
             HitEligibility::SameTickSectionAmbiguous => Some(ExclusionReason::SameTickSectionAmbiguous),
         }
@@ -529,6 +534,9 @@ enum SectionGap {
     NoGeometry,
     /// The impact is too far from the hull's nodes to have been a hit on it.
     OffTheHull,
+    /// The victim's position and orientation were not known at the moment of
+    /// the hit, so the impact cannot be placed against the hull at all.
+    NoVictimPose,
 }
 
 /// Effective fire chance for one attacker.
@@ -684,9 +692,9 @@ fn section_of(
     hit: &ResolvedShotHit,
 ) -> Result<BurnNodeIndex, SectionGap> {
     let geom = geometry.get(&hit.victim_entity_id).ok_or(SectionGap::NoGeometry)?;
-    let section =
-        section_for_hit(geom, hit.hit.position, hit.victim_position, hit.victim_yaw, hit.victim_pitch, hit.victim_roll)
-            .ok_or(SectionGap::OffTheHull)?;
+    let pose = hit.victim_pose.as_ref().ok_or(SectionGap::NoVictimPose)?;
+    let section = section_for_hit(geom, hit.hit.position, pose.position, pose.yaw, pose.pitch, pose.roll)
+        .ok_or(SectionGap::OffTheHull)?;
     // The hull's `burnNodes` list is what makes a section's probability
     // readable; a geometry longer than it would index past the hull's own data.
     let victim = input.victims.get(&hit.victim_entity_id).ok_or(SectionGap::NoGeometry)?;
@@ -841,6 +849,7 @@ fn classify(
         Ok(section) => section,
         Err(SectionGap::NoGeometry) => return HitEligibility::NoSectionGeometry,
         Err(SectionGap::OffTheHull) => return HitEligibility::ImpactOffTheHull,
+        Err(SectionGap::NoVictimPose) => return HitEligibility::VictimPoseUnknown,
     };
     let Some(victim) = input.victims.get(&hit.victim_entity_id) else {
         return HitEligibility::NoSectionGeometry;
@@ -1186,6 +1195,7 @@ mod tests {
     use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
     use wows_replays::analyzer::battle_controller::state::ConsumableInventory;
     use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
+    use wows_replays::analyzer::battle_controller::state::VictimPose;
     use wows_replays::analyzer::decoder::ArtillerySalvo;
     use wows_replays::analyzer::decoder::HitType;
     use wows_replays::analyzer::decoder::ShotHit;
@@ -1861,10 +1871,7 @@ mod tests {
             victim_entity_id: victim,
             salvo: Some(ArtillerySalvo { owner_id: attacker_id(), params_id: shell, salvo_id: 1, shots: Vec::new() }),
             fired_at: Some(GameClock(clock.0 - 5.0)),
-            victim_position: WorldPos::new(0.0, 0.0, 0.0),
-            victim_yaw: 0.0,
-            victim_pitch: 0.0,
-            victim_roll: 0.0,
+            victim_pose: Some(VictimPose { position: WorldPos::new(0.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, roll: 0.0 }),
         }
     }
 
