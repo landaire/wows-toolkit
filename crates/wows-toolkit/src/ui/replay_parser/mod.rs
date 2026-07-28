@@ -1678,29 +1678,22 @@ impl UiReport {
         lines.join("\n")
     }
 
-    /// Best-effort localized name for a formula step's source identifier.
-    /// Tries an equipped upgrade or signal's GameParams entry first, then a
-    /// crew skill's translation keys (a skill carries no `Param` of its own,
-    /// A victim ship's display name, translated from its GameParams index.
+    /// A victim ship's display name, resolved from its GameParams index.
     ///
     /// The insights crate carries no translations, so it reports the raw index
-    /// (`PWSB010_Thor`). Falls back to the name it recorded when the index does
-    /// not resolve against this replay's build.
+    /// alongside the raw internal name (`PJSB018_Yamato_1944`). Resolved by
+    /// index, the way the armor viewer's ship lookup does it; falls back to the
+    /// internal name when the index does not resolve against this build.
     fn localize_ship_name(&self, ship: &PerShipFireChance) -> String {
         let metadata_provider = self.metadata_provider();
-        <GameMetadataProvider as GameParamProvider>::game_param_by_name(&metadata_provider, &ship.victim_ship_index)
-            .and_then(|param| {
-                let ctx = wowsunpack::game_params::describe::DescribeContext {
-                    resource_loader: metadata_provider.as_ref(),
-                    version: &self.version,
-                    species: None,
-                    param_name: None,
-                };
-                param.display_name(&ctx)
-            })
+        <GameMetadataProvider as GameParamProvider>::game_param_by_index(&metadata_provider, &ship.victim_ship_index)
+            .and_then(|param| metadata_provider.localized_name_from_param(&param))
             .unwrap_or_else(|| ship.victim_ship_name.clone())
     }
 
+    /// Best-effort localized name for a formula step's source identifier.
+    /// Tries an equipped upgrade or signal's GameParams entry first, then a
+    /// crew skill's translation keys (a skill carries no `Param` of its own,
     /// so it cannot be found the first way); falls back to the raw identifier
     /// when neither resolves.
     fn localize_modifier_source(&self, source: &str) -> String {
