@@ -2,6 +2,9 @@ use std::time::Duration;
 
 use wowsunpack::Rc;
 use wowsunpack::data::Version;
+use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
+use wowsunpack::game_params::ttx::modifiers::ModifierError;
+use wowsunpack::game_params::types::CrewSkillModifier;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Species;
@@ -33,6 +36,11 @@ pub struct ResolvedBuild {
     pub signals: Vec<Rc<Param>>,
     pub slots: Vec<ConsumableSlot>,
     pub modifiers: ModifierSet,
+    /// Every modifier this build contributes, in application order: upgrades,
+    /// then captain skills, then signals. Collected alongside `modifiers` in
+    /// `from_ids` so this list and the folded `ModifierSet` can never disagree
+    /// about what was applied.
+    raw: Vec<CrewSkillModifier>,
 }
 
 impl ResolvedBuild {
@@ -82,14 +90,15 @@ impl ResolvedBuild {
         let signals = resolve_ids(signals, gp);
 
         let mut modifiers = ModifierSet::new();
+        let mut raw = Vec::new();
         for upgrade in &upgrades {
-            modifiers.apply_modernization(upgrade, &species);
+            raw.extend(modifiers.apply_modernization(upgrade, &species));
         }
         if let Some(c) = captain.as_deref() {
-            modifiers.apply_captain_skills(c, skill_types, &species);
+            raw.extend(modifiers.apply_captain_skills(c, skill_types, &species));
         }
         for signal in &signals {
-            modifiers.apply_exterior(signal, &species);
+            raw.extend(modifiers.apply_exterior(signal, &species));
         }
 
         let slots = resolve_slots(&ship, abilities, gp, version, &modifiers);
@@ -104,6 +113,7 @@ impl ResolvedBuild {
             signals,
             slots,
             modifiers,
+            raw,
         })
     }
 
@@ -111,6 +121,20 @@ impl ResolvedBuild {
     /// if the ship has no slot of that type.
     pub fn slot_for(&self, consumable_type: wowsunpack::game_types::Consumable) -> Option<&ConsumableSlot> {
         self.slots.iter().find(|s| s.consumable_type.known() == Some(&consumable_type))
+    }
+
+    /// Every modifier this build contributes, in application order: upgrades,
+    /// then captain skills, then signals. Kept raw so callers can fold them
+    /// with a different rule than `ModifierSet` uses.
+    pub fn raw_modifiers(&self) -> &[CrewSkillModifier] {
+        &self.raw
+    }
+
+    /// The build's modifiers folded for `ttx`. `Err` when a modifier name is
+    /// absent from the version's MODIFIER_SETTINGS table, which means the
+    /// table needs regenerating for this build.
+    pub fn modifier_bundle(&self, version: Version) -> Result<ModifierBundle, ModifierError> {
+        ModifierBundle::from_modifiers(self.raw_modifiers(), self.species, version)
     }
 }
 
@@ -212,4 +236,199 @@ fn resolve_slots<P: GameParamProvider>(
         });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wowsunpack::game_params::types::Achievement;
+    use wowsunpack::game_params::types::Crew;
+    use wowsunpack::game_params::types::CrewPersonality;
+    use wowsunpack::game_params::types::CrewPersonalityShips;
+    use wowsunpack::game_params::types::CrewSkill;
+    use wowsunpack::game_params::types::CrewSkillName;
+    use wowsunpack::game_params::types::CrewSkillTiers;
+    use wowsunpack::game_params::types::CrewSkillType;
+    use wowsunpack::game_params::types::GameParams;
+    use wowsunpack::game_params::types::Modernization;
+    use wowsunpack::game_params::types::ParamData;
+    use wowsunpack::game_params::types::SkillPointCost;
+
+    const VERSION: Version = Version::base(15, 0, 0);
+
+    /// Arbitrary skill_type id for the fixture "Fire Prevention Expert" style
+    /// skill; only needs to be consistent between the captain fixture and the
+    /// `skill_types` passed into `from_ids`.
+    const DEFENCE_FIRE_PROBABILITY_SKILL: u8 = 42;
+
+    fn burn_modifier(value: f32) -> CrewSkillModifier {
+        CrewSkillModifier::builder()
+            .name("burnProb".to_owned())
+            .aircraft_carrier(value)
+            .auxiliary(value)
+            .battleship(value)
+            .cruiser(value)
+            .destroyer(value)
+            .submarine(value)
+            .excluded_consumables(Vec::new())
+            .build()
+    }
+
+    fn skill_tiers() -> CrewSkillTiers {
+        CrewSkillTiers::builder()
+            .aircraft_carrier(SkillPointCost::new(1))
+            .auxiliary(SkillPointCost::new(1))
+            .battleship(SkillPointCost::new(1))
+            .cruiser(SkillPointCost::new(1))
+            .destroyer(SkillPointCost::new(1))
+            .submarine(SkillPointCost::new(1))
+            .build()
+    }
+
+    fn personality() -> CrewPersonality {
+        CrewPersonality::builder()
+            .can_reset_skills_for_free(false)
+            .cost_credits(0)
+            .cost_elite_xp(0)
+            .cost_gold(0)
+            .cost_xp(0)
+            .person_name(String::new())
+            .ships(
+                CrewPersonalityShips::builder()
+                    .groups(Vec::new())
+                    .nation(Vec::new())
+                    .peculiarity(Vec::new())
+                    .ships(Vec::new())
+                    .build(),
+            )
+            .tags(Vec::new())
+            .build()
+    }
+
+    fn ship_param(id: GameParamId) -> Param {
+        Param::builder()
+            .id(id)
+            .index("SHIP01".to_owned())
+            .name("SHIP01".to_owned())
+            .nation("USA".to_owned())
+            .data(ParamData::Achievement(
+                Achievement::builder()
+                    .is_group(false)
+                    .one_per_battle(false)
+                    .ui_type(String::new())
+                    .ui_name(String::new())
+                    .build(),
+            ))
+            .build()
+    }
+
+    /// Only fixture upgrade the tests need: Damage Control System Modification
+    /// 1's `burnProb: 0.95`. Other names carry no modifiers.
+    fn upgrade_param(id: GameParamId, index: &str) -> Param {
+        let modifiers = match index {
+            "PCM020_DamageControl_Mod_I" => vec![burn_modifier(0.95)],
+            _ => Vec::new(),
+        };
+        Param::builder()
+            .id(id)
+            .index(index.to_owned())
+            .name(index.to_owned())
+            .nation("USA".to_owned())
+            .data(ParamData::Modernization(Modernization::new(
+                modifiers,
+                None,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            )))
+            .build()
+    }
+
+    /// Captain carrying one learned-skill fixture: `DEFENCE_FIRE_PROBABILITY_SKILL`
+    /// contributing `burnProb: 0.9`. Whether it is actually applied is controlled
+    /// by the `skill_types` passed into `from_ids`, not by this fixture.
+    fn captain_param(id: GameParamId) -> Param {
+        let skill = CrewSkill::builder()
+            .internal_name(CrewSkillName::from("FireResistance"))
+            .can_be_learned(true)
+            .is_epic(false)
+            .skill_type(CrewSkillType::from(DEFENCE_FIRE_PROBABILITY_SKILL))
+            .tier(skill_tiers())
+            .ui_treat_as_trigger(false)
+            .modifiers(vec![burn_modifier(0.9)])
+            .build();
+
+        let crew =
+            Crew::builder().money_training_level(0).personality(personality()).maybe_skills(Some(vec![skill])).build();
+
+        Param::builder()
+            .id(id)
+            .index("PAW001".to_owned())
+            .name("PAW001_Captain".to_owned())
+            .nation("USA".to_owned())
+            .data(ParamData::Crew(crew))
+            .build()
+    }
+
+    fn build_with(upgrade_names: &[&str], skill_types: &[u8]) -> ResolvedBuild {
+        let ship_id = GameParamId::from(1u32);
+        let mut params = vec![ship_param(ship_id)];
+
+        let mut upgrade_ids = Vec::new();
+        for (i, name) in upgrade_names.iter().enumerate() {
+            let id = GameParamId::from(100u32 + i as u32);
+            params.push(upgrade_param(id, name));
+            upgrade_ids.push(id);
+        }
+
+        let captain_id = GameParamId::from(999u32);
+        params.push(captain_param(captain_id));
+
+        let gp = GameParams::from(params);
+
+        ResolvedBuild::from_ids(
+            ship_id,
+            &[],
+            &upgrade_ids,
+            Some(captain_id),
+            skill_types,
+            &[],
+            &[],
+            Species::Cruiser,
+            VERSION,
+            &gp,
+        )
+        .expect("test fixture resolves")
+    }
+
+    /// Fire Prevention Expert and Damage Control System Modification 1 both fold
+    /// into burnProb multiplicatively: 0.9 * 0.95.
+    #[test]
+    fn burn_prob_folds_multiplicatively_across_skill_and_upgrade() {
+        let build = build_with(&["PCM020_DamageControl_Mod_I"], &[DEFENCE_FIRE_PROBABILITY_SKILL]);
+        let bundle = build.modifier_bundle(VERSION).expect("known modifiers");
+        assert!((bundle.coef("burnProb") - 0.855).abs() < 1e-5, "got {}", bundle.coef("burnProb"));
+    }
+
+    /// A build with neither reads the identity, not zero.
+    #[test]
+    fn burn_prob_defaults_to_one_without_either() {
+        let build = build_with(&[], &[]);
+        let bundle = build.modifier_bundle(VERSION).expect("known modifiers");
+        assert!((bundle.coef("burnProb") - 1.0).abs() < 1e-6);
+    }
+
+    /// Order matters for the bundle's own folding rules, so the raw list must be
+    /// upgrades, then skills, then signals.
+    #[test]
+    fn raw_modifiers_are_in_application_order() {
+        let build = build_with(&["PCM020_DamageControl_Mod_I"], &[DEFENCE_FIRE_PROBABILITY_SKILL]);
+        let names: Vec<&str> = build.raw_modifiers().iter().map(|m| m.name()).collect();
+        let upgrade_at = names.iter().position(|n| *n == "burnProb").expect("upgrade burnProb");
+        let skill_at = names.iter().rposition(|n| *n == "burnProb").expect("skill burnProb");
+        assert!(upgrade_at < skill_at);
+    }
 }

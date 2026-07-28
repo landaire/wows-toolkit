@@ -63,19 +63,33 @@ impl ModifierSet {
         }
     }
 
-    pub fn apply_modernization(&mut self, modernization: &Param, species: &Species) {
+    /// Applies `modernization`'s modifiers and returns the ones that were
+    /// applied, so a caller can also keep the raw list without walking the
+    /// param a second time.
+    pub fn apply_modernization(&mut self, modernization: &Param, species: &Species) -> Vec<CrewSkillModifier> {
         let Some(m) = modernization.modernization() else {
-            return;
+            return Vec::new();
         };
-        for modifier in m.modifiers() {
+        let applied = m.modifiers().to_vec();
+        for modifier in &applied {
             self.apply(modifier, species);
         }
+        applied
     }
 
-    pub fn apply_captain_skills(&mut self, captain: &Param, skill_types: &[u8], species: &Species) {
+    /// Applies the learned skills' modifiers and returns the ones that were
+    /// applied, so a caller can also keep the raw list without walking the
+    /// captain a second time.
+    pub fn apply_captain_skills(
+        &mut self,
+        captain: &Param,
+        skill_types: &[u8],
+        species: &Species,
+    ) -> Vec<CrewSkillModifier> {
         let Some(crew) = captain.crew() else {
-            return;
+            return Vec::new();
         };
+        let mut applied = Vec::new();
         for &skill_type in skill_types {
             let Some(skill) = crew.skill_by_type(wowsunpack::game_params::types::CrewSkillType::from(skill_type))
             else {
@@ -86,17 +100,24 @@ impl ModifierSet {
             };
             for modifier in modifiers {
                 self.apply(modifier, species);
+                applied.push(modifier.clone());
             }
         }
+        applied
     }
 
-    pub fn apply_exterior(&mut self, exterior: &Param, species: &Species) {
+    /// Applies `exterior`'s modifiers and returns the ones that were applied,
+    /// so a caller can also keep the raw list without walking the param a
+    /// second time.
+    pub fn apply_exterior(&mut self, exterior: &Param, species: &Species) -> Vec<CrewSkillModifier> {
         let Some(ext) = exterior.exterior() else {
-            return;
+            return Vec::new();
         };
-        for modifier in ext.modifiers() {
+        let applied = ext.modifiers().to_vec();
+        for modifier in &applied {
             self.apply(modifier, species);
         }
+        applied
     }
 
     /// Effective reload coefficient for a given consumable type (raw GameParams
@@ -154,6 +175,12 @@ impl ModifierSet {
     }
 }
 
+/// `artilleryBurnChanceBonus`, `burnChanceFactorSmall` and `burnChanceFactorBig`
+/// are additive in the client but are not listed here, so this folds them
+/// multiplicatively, which is wrong for those names. The burn-chance path
+/// reads modifiers through `wowsunpack::game_params::ttx::modifiers::ModifierBundle`
+/// instead, which classifies each name from the version's `MODIFIER_SETTINGS`
+/// table and gets it right. Do not assume `ModifierSet` is safe for those names.
 fn is_additive(name: &str) -> bool {
     name == "additionalConsumables"
         || name == "additionalFighters"
