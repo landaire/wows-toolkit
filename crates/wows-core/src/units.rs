@@ -23,17 +23,27 @@ const BW_TO_METERS: f32 = 30.0;
 /// not what it does; the client multiplies by it to leave ship space for meters.
 const SHIP_TO_METERS: f32 = 15.0;
 
-/// Conversion factor: 1 replay world unit = 30 meters.
+/// Conversion factor: 1 replay world unit = 15 meters.
 ///
-/// Replay world space measures the same as GameParams BigWorld space, not the
-/// same as ship-model space. `Vec3::distance_xz` in `wows-core::game_types`
-/// applies this factor to produce the firing range the ballistics solver runs
-/// on, so a different number here would put every armor-viewer trajectory at
-/// the wrong range. Corroborated by GameParams values that cross the wire
-/// unconverted (a 15.0 smoke radius is 450 m, a 116.667 patrol radius is
-/// 3.5 km) and by measuring the longest observed salvo against each ship's
-/// artillery `maxDist` over 416 shooters, which lands on a median of 31.09.
-const WORLD_TO_METERS: f32 = BW_TO_METERS;
+/// This is the factor that places a shell impact against a victim's hull, and
+/// it is anchored on the hull geometry itself: at 15 the body-frame impacts sit
+/// within a real ship's beam and freeboard, and predicted fire sections agree
+/// with the server 0.711 of the time against 0.401 for the best position-blind
+/// guess. At 30 the same impacts land a p99 of 46 m off the centreline of a
+/// hull whose widest half-beam is 21 m, and agreement collapses to 0.469. A
+/// sweep is single-peaked at 16-18.
+///
+/// Two other measurements want 30 for the same coordinates and are NOT
+/// reconciled with this: `Vec3::distance_xz` scales by 30 to produce the firing
+/// range the ballistics solver runs on, and the longest observed salvo measured
+/// against each ship's artillery `maxDist` over 416 shooters lands on a median
+/// of 31.09. Those read a separation between two distant points; this reads an
+/// offset between an impact and the ship it struck. Both cannot be right about
+/// one space, so one of the two position sources is not in the units the other
+/// assumes. Until that is settled, do not change this constant to satisfy the
+/// range evidence: the hull geometry is what this factor exists to serve, and
+/// 30 puts impacts inside no ship that exists.
+const WORLD_TO_METERS: f32 = SHIP_TO_METERS;
 
 /// Distance in meters.
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
@@ -602,25 +612,23 @@ mod tests {
         assert_eq!(Meters::from(97.335).to_ship_model().value(), 6.489);
     }
 
-    /// `Vec3::distance_xz` scales a world-space separation by 30 to reach the
-    /// firing range the ballistics solver runs on, so this factor is already
-    /// load-bearing outside this module.
+    /// A shell impact 8 world units from a battleship's hull origin is 120 m
+    /// out, which is a bow hit. At 30 it would be 240 m out, off the end of any
+    /// ship that exists.
     #[test]
-    fn replay_world_units_are_thirty_meters() {
-        assert_eq!(WorldDistance::from(8.0).to_meters().value(), 240.0);
-        assert_eq!(Meters::from(240.0).to_world().value(), 8.0);
+    fn replay_world_units_are_fifteen_meters() {
+        assert_eq!(WorldDistance::from(8.0).to_meters().value(), 120.0);
+        assert_eq!(Meters::from(120.0).to_world().value(), 8.0);
     }
 
-    /// Replay world space and GameParams BigWorld space measure the same, which
-    /// is why a GameParams radius crosses the wire unconverted and is still
-    /// comparable against positions. Ship-model space is the odd one at 15, so
-    /// placing an impact against a hull's nodes spans both scales.
+    /// The two spaces differ by exactly 2, which is small enough that a value in
+    /// the wrong one still looks plausible. Pinned so neither can drift into the
+    /// other unnoticed.
     #[test]
-    fn replay_and_game_params_spaces_agree_and_the_ship_model_does_not() {
+    fn game_params_and_replay_spaces_are_not_the_same() {
         let one = 1.0f32;
-        assert_eq!(WorldDistance::from(one).to_meters().value(), 30.0);
         assert_eq!(BigWorldDistance::from(one).to_meters().value(), 30.0);
-        assert_eq!(ShipModelDistance::from(one).to_meters().value(), 15.0);
+        assert_eq!(WorldDistance::from(one).to_meters().value(), 15.0);
     }
 
     /// Hydroacoustic Search `C_4_7` carries `distShip = 133.3333` and detects
