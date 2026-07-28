@@ -63,10 +63,14 @@ use std::sync::OnceLock;
 
 use wows_battle_world::BattleWorld;
 use wows_battle_world::report::BattleReport;
+use wows_replay_insights::battle_report::HITS_MAIN_AP;
+use wows_replay_insights::battle_report::HITS_MAIN_CS;
+use wows_replay_insights::battle_report::HITS_MAIN_HE;
 use wows_replay_insights::battle_report::resolve_battle_results;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::fire_chance::analysis::ExclusionReason;
 use wows_replay_insights::fire_chance::analysis::FireChanceInput;
+use wows_replay_insights::fire_chance::analysis::NarrowingReason;
 use wows_replay_insights::fire_chance::analysis::analyze;
 use wows_replay_insights::fire_chance::geometry::section_for_hit;
 use wows_replay_insights::fire_chance::geometry::world_offset_to_body;
@@ -147,7 +151,25 @@ struct Measurement {
     /// The server's own `(HE, all shell types)` main-battery shot counts from
     /// the post-battle results, which the two counts above are checked against.
     server_main_shots: Option<(u64, u64)>,
-    shells_on_target: u32,
+    /// The server's own main-battery hit counts as `(HE, AP, SAP)`, from
+    /// `hits_main_he` / `hits_main_ap` / `hits_main_cs`. `None` when the replay
+    /// carries no results blob or none of those fields.
+    server_main_hits: Option<(u64, u64, u64)>,
+    /// Every shell of ours that landed and was classified, whatever it was and
+    /// whatever it struck.
+    hits: u32,
+    /// Of those, the main-battery HE ones that landed on a ship, which is the
+    /// population the eligibility model was asked about and the population the
+    /// server counts as `hits_main_he`.
+    he_hits_on_a_ship: u32,
+    /// Why the rest were never that population's members.
+    narrowed: BTreeMap<NarrowingReason, u32>,
+    /// Hits keyed to a ship with no per-ship row, the remainder that makes the
+    /// rows add back up to `hits`.
+    hits_without_a_target_ship: u32,
+    /// The per-ship rows' own hit counts, summed. With the terrain hits and the
+    /// remainder above it this has to come back to `hits`.
+    per_ship_hits: u32,
     /// Of those, the ones that landed on a ship that was already dead.
     not_applicable: u32,
     eligible_hits: u32,
@@ -165,9 +187,10 @@ struct Measurement {
     exclusions: BTreeMap<ExclusionReason, u32>,
     /// Attributed fires per victim ship index.
     fires_by_ship: BTreeMap<String, u64>,
-    /// `(shells on target, eligible, refused, not applicable)` per victim ship
-    /// row, for the same partition check the aggregate gets.
-    per_ship_partition: Vec<(u32, u32, u32, u32)>,
+    /// `(hits, HE hits on a ship, narrowed, eligible, refused, not applicable)`
+    /// per victim ship row, for the same two partition checks the aggregate
+    /// gets.
+    per_ship_partition: Vec<(u32, u32, u32, u32, u32, u32)>,
     /// One row per victim ship. The per-ship row is the only level
     /// `EffectiveFireChance` states a rate at, so this is what the corpus
     /// summary reduces when it wants a corpus-wide figure, and what the printed
@@ -385,6 +408,32 @@ fn server_main_shots(report: &BattleReport, constants: &serde_json::Value) -> Op
     Some((he, he + shots("shots_main_ap").unwrap_or(0) + shots("shots_main_cs").unwrap_or(0)))
 }
 
+/// The server's own count of the main-battery shells the recording player
+/// landed on a ship, as `(HE, AP, SAP)`.
+///
+/// The counterpart to [`server_main_shots`] on the hit side, and the external
+/// check on the narrowing step: our "HE hits on a ship" is exactly what
+/// `hits_main_he` counts, and the shells our narrowing calls unable to burn are
+/// exactly `hits_main_ap + hits_main_cs`. `None` when the replay carries no
+/// results blob or none of the three fields.
+fn server_main_hits(report: &BattleReport, constants: &serde_json::Value) -> Option<(u64, u64, u64)> {
+    let raw: serde_json::Value = serde_json::from_str(report.battle_results()?).ok()?;
+    let resolved = resolve_battle_results(raw, constants);
+    let self_db_id = report.self_player().initial_state().db_id();
+    let info = resolved.pointer(&format!("/playersPublicInfo/{self_db_id}"))?.as_object()?;
+    let hits = |key: &str| info.get(key).and_then(|v| v.as_u64());
+    let he = hits(HITS_MAIN_HE);
+    let ap = hits(HITS_MAIN_AP);
+    let cs = hits(HITS_MAIN_CS);
+    // A player who landed no shell of one type carries no key for it, which is
+    // a real zero. All three absent is a results blob that does not carry the
+    // fields at all, which is not.
+    if he.is_none() && ap.is_none() && cs.is_none() {
+        return None;
+    }
+    Some((he.unwrap_or(0), ap.unwrap_or(0), cs.unwrap_or(0)))
+}
+
 /// Ribbons the game raises when one of our main-battery shells strikes a ship.
 ///
 /// HE and SAP hits raise [`Ribbon::MainCaliber`]; AP hits raise the outcome
@@ -431,6 +480,27 @@ struct HitReconciliation {
     /// whose salvo matched and named a shell from the equipped main battery.
     /// This is the population the projection runs over.
     main_battery_on_ship: u32,
+    /// [`Self::main_battery_on_ship`] split by the projectile's own `ammoType`,
+    /// as `(HE, AP, SAP)`. Counted here rather than taken off the analysis
+    /// because the analysis has no reason to separate AP from SAP: both simply
+    /// cannot burn. The server counts these three separately, so this is what
+    /// its `hits_main_he` / `hits_main_ap` / `hits_main_cs` are checked against.
+    main_battery_he_on_ship: u32,
+    main_battery_ap_on_ship: u32,
+    main_battery_cs_on_ship: u32,
+    /// Of the three counts above, the ones keyed to an entity the roster does
+    /// not name a player for: an operation's forts, transports and other
+    /// scoring-exempt targets, plus the occasional impact keyed to our own
+    /// ship. The server's hit counts are per player interaction, so these are
+    /// hits it has nobody to credit.
+    main_battery_he_off_roster: u32,
+    main_battery_ap_off_roster: u32,
+    main_battery_cs_off_roster: u32,
+    /// And the ones that landed on a roster ship at or after it died. The
+    /// client is told about these; the server has already closed the books.
+    main_battery_he_after_death: u32,
+    main_battery_ap_after_death: u32,
+    main_battery_cs_after_death: u32,
     /// Of [`Self::main_battery_on_ship`], those keyed to a ship the client was
     /// observing at that instant. The rest are the visibility carve-out.
     observed: u32,
@@ -559,6 +629,10 @@ fn reconcile_hits(
     }
     reconciliation.damage_stat_hits = damage_stat_main_battery_hits(report);
 
+    let roster: std::collections::HashSet<wows_replays::types::EntityId> =
+        report.players().iter().map(|player| player.initial_state().entity_id()).collect();
+    let deaths = report.deaths_by_victim();
+
     for hit in report.hit_history() {
         if hit.hit.owner_id != input.attacker.entity {
             continue;
@@ -603,6 +677,26 @@ fn reconcile_hits(
             continue;
         }
         reconciliation.main_battery_on_ship += 1;
+        let off_roster = !roster.contains(&hit.victim_entity_id) || hit.victim_entity_id == input.self_entity;
+        let after_death = deaths.get(&hit.victim_entity_id).is_some_and(|died_at| hit.clock >= *died_at);
+        match param.projectile().map(|projectile| projectile.ammo_type()) {
+            Some("HE") => {
+                reconciliation.main_battery_he_on_ship += 1;
+                reconciliation.main_battery_he_off_roster += u32::from(off_roster);
+                reconciliation.main_battery_he_after_death += u32::from(after_death && !off_roster);
+            }
+            Some("AP") => {
+                reconciliation.main_battery_ap_on_ship += 1;
+                reconciliation.main_battery_ap_off_roster += u32::from(off_roster);
+                reconciliation.main_battery_ap_after_death += u32::from(after_death && !off_roster);
+            }
+            Some("CS") => {
+                reconciliation.main_battery_cs_on_ship += 1;
+                reconciliation.main_battery_cs_off_roster += u32::from(off_roster);
+                reconciliation.main_battery_cs_after_death += u32::from(after_death && !off_roster);
+            }
+            _ => {}
+        }
 
         // A point query at the impact clock, the same one `classify` makes.
         if !report.presence().continuously_observed(hit.victim_entity_id, hit.clock, hit.clock) {
@@ -846,7 +940,12 @@ fn measure(
             .map(|salvo| (salvo.salvo_id, salvo.params_id.raw(), salvo.first_shot.map(|shot| shot.raw())))
             .collect::<std::collections::BTreeSet<_>>()
             .len() as u32,
-        shells_on_target: out.shells_on_target,
+        server_main_hits: data.constants_json.as_ref().and_then(|constants| server_main_hits(&report, constants)),
+        hits: out.hits,
+        he_hits_on_a_ship: out.he_hits_on_a_ship,
+        narrowed: out.narrowed.clone(),
+        hits_without_a_target_ship: out.hits_without_a_target_ship,
+        per_ship_hits: out.per_ship.iter().map(|ship| ship.hits).sum(),
         not_applicable: out.not_applicable,
         eligible_hits: out.eligible_hits,
         fires: out.fires,
@@ -864,7 +963,14 @@ fn measure(
             .per_ship
             .iter()
             .map(|ship| {
-                (ship.shells_on_target, ship.eligible_hits, ship.exclusions.values().sum(), ship.not_applicable)
+                (
+                    ship.hits,
+                    ship.he_hits_on_a_ship,
+                    ship.narrowed.values().sum(),
+                    ship.eligible_hits,
+                    ship.exclusions.values().sum(),
+                    ship.not_applicable,
+                )
             })
             .collect(),
         per_ship_trials,
@@ -1056,6 +1162,42 @@ fn print_corpus_summary_once(corpus: &Corpus) {
     }
 
     print_rate_summary(corpus);
+    print_widest_breakdown(corpus);
+}
+
+/// The counts one real replay's breakdown is rendered from, for the replay with
+/// the most main-battery HE hits on a ship.
+///
+/// The app formats these into the narrowing step and the eligibility listing, so
+/// this is what says the structure holds up on a real match rather than only on
+/// a fixture: the narrowing entries have to account for `hits` minus
+/// `he_hits_on_a_ship`, the eligibility entries have to sum to
+/// `he_hits_on_a_ship`, and the per-ship rows plus the terrain hits plus the
+/// remainder have to come back to `hits`.
+fn print_widest_breakdown(corpus: &Corpus) {
+    let Some(widest) = corpus.measurements.iter().max_by_key(|m| m.he_hits_on_a_ship) else {
+        return;
+    };
+    println!("breakdown counts for {}:", widest.name);
+    println!("  {} HE shells fired", widest.he_shells_fired);
+    println!("  {} hits", widest.hits);
+    println!("  {} HE hits on a ship, narrowed by {:?}", widest.he_hits_on_a_ship, widest.narrowed);
+    println!("    {} eligible", widest.eligible_hits);
+    for (reason, count) in &widest.exclusions {
+        println!("    {count} {reason:?}");
+    }
+    println!("    {} not applicable", widest.not_applicable);
+    println!(
+        "  per-ship rows carry {} hits, {} struck no ship, {} have no row",
+        widest.per_ship_hits,
+        widest.narrowed.get(&NarrowingReason::ImpactNotOnAShip).copied().unwrap_or(0),
+        widest.hits_without_a_target_ship
+    );
+    for (hits, he_hits, narrowed, eligible, refused, not_applicable) in &widest.per_ship_partition {
+        println!(
+            "    {hits} hits, {he_hits} HE ({narrowed} narrowed), {eligible} eligible, {refused} refused, {not_applicable} not applicable"
+        );
+    }
 }
 
 /// The corpus totals, plus the two ways of reducing them to one number.
@@ -1255,37 +1397,66 @@ fn ribbon_accounting_reconciles() {
             measurement.set_fire_ribbons
         );
 
+        // The first invariant: total hits narrows to the HE hits on a ship, and
+        // the narrowing step accounts for the whole difference.
+        let narrowed_total: u32 = measurement.narrowed.values().sum();
+        assert_eq!(
+            measurement.he_hits_on_a_ship + narrowed_total,
+            measurement.hits,
+            "{}: {} HE hits on a ship + {narrowed_total} narrowed out does not account for the {} hits",
+            measurement.name,
+            measurement.he_hits_on_a_ship,
+            measurement.hits
+        );
+        // The second: everything the eligibility listing shows sums to the HE
+        // hits on a ship, and nothing else does.
         let refused: u32 = measurement.exclusions.values().sum();
         assert_eq!(
             measurement.eligible_hits + refused + measurement.not_applicable,
-            measurement.shells_on_target,
-            "{}: {} eligible + {refused} refused + {} not applicable does not account for the {} shells on target",
+            measurement.he_hits_on_a_ship,
+            "{}: {} eligible + {refused} refused + {} not applicable does not account for the {} HE hits on a ship",
             measurement.name,
             measurement.eligible_hits,
             measurement.not_applicable,
-            measurement.shells_on_target
+            measurement.he_hits_on_a_ship
         );
-        for (index, (on_target, eligible, refused, not_applicable)) in measurement.per_ship_partition.iter().enumerate()
+        // And the rows add back up to the total, with the shells that struck no
+        // ship and the hits no row could carry making up the difference. A
+        // terrain hit filed under a ship, or a hit vanishing between the rows
+        // and the aggregate, breaks exactly this.
+        let terrain = measurement.narrowed.get(&NarrowingReason::ImpactNotOnAShip).copied().unwrap_or(0);
+        assert_eq!(
+            measurement.per_ship_hits + terrain + measurement.hits_without_a_target_ship,
+            measurement.hits,
+            "{}: {} hits in the per-ship rows + {terrain} on no ship + {} with no row does not account for the {} hits",
+            measurement.name,
+            measurement.per_ship_hits,
+            measurement.hits_without_a_target_ship,
+            measurement.hits
+        );
+        for (index, (hits, he_hits, narrowed, eligible, refused, not_applicable)) in
+            measurement.per_ship_partition.iter().enumerate()
         {
             assert_eq!(
                 eligible + refused + not_applicable,
-                *on_target,
+                *he_hits,
+                "{}: per-ship row {index} does not account for its own HE hits",
+                measurement.name
+            );
+            assert_eq!(
+                he_hits + narrowed,
+                *hits,
                 "{}: per-ship row {index} does not account for its own hits",
                 measurement.name
             );
         }
         fired += u64::from(measurement.he_shells_fired);
         // The HE main-battery shells that landed on a ship, i.e. the numerator
-        // the fired count is the denominator of. The two shell-identity
-        // refusals name the shells that were never HE main battery, and
-        // `ImpactNotOnAShip` names the ones that struck water or terrain,
-        // which `receiveShotKills` reports alongside the real hits.
-        let not_he: u32 =
-            [ExclusionReason::ShellCannotBurn, ExclusionReason::NotMainBattery, ExclusionReason::ImpactNotOnAShip]
-                .iter()
-                .filter_map(|reason| measurement.exclusions.get(reason))
-                .sum();
-        he_on_target += u64::from(measurement.shells_on_target.saturating_sub(not_he));
+        // the fired count is the denominator of. The narrowing step is what
+        // takes out the shells that were never that: AP and SAP, our own
+        // secondaries, and the ones that struck water or terrain, which
+        // `receiveShotKills` reports alongside the real hits.
+        he_on_target += u64::from(measurement.he_hits_on_a_ship);
         main_fired += u64::from(measurement.main_battery_shells_fired);
         if let Some((server_he, server_main)) = measurement.server_main_shots {
             server_he_fired += server_he;
@@ -1303,7 +1474,7 @@ fn ribbon_accounting_reconciles() {
         if measurement.self_salvos == 0 {
             silent_builds.entry(measurement.build).or_default().push(&measurement.name);
         }
-        on_target += u64::from(measurement.shells_on_target);
+        on_target += u64::from(measurement.hits);
         not_applicable += u64::from(measurement.not_applicable);
         attributed += measurement.fires;
         unattributed += measurement.unattributed_fires;
@@ -1493,6 +1664,9 @@ struct HitTotals {
     ours_on_ship: u32,
     ours_without_a_salvo: u32,
     main_battery_on_ship: u32,
+    main_battery_he_on_ship: u32,
+    main_battery_ap_on_ship: u32,
+    main_battery_cs_on_ship: u32,
     observed: u32,
     placeable: u32,
     on_hull: u32,
@@ -1523,6 +1697,9 @@ fn hit_totals(corpus: &Corpus) -> HitTotals {
         totals.ours_on_ship += r.ours_on_ship;
         totals.ours_without_a_salvo += r.ours_without_a_salvo;
         totals.main_battery_on_ship += r.main_battery_on_ship;
+        totals.main_battery_he_on_ship += r.main_battery_he_on_ship;
+        totals.main_battery_ap_on_ship += r.main_battery_ap_on_ship;
+        totals.main_battery_cs_on_ship += r.main_battery_cs_on_ship;
         totals.observed += r.observed;
         totals.placeable += r.placeable;
         totals.on_hull += r.on_hull;
@@ -1652,6 +1829,166 @@ bound was set; neither can be used as ground truth without saying which one is w
         "{} of the {game} hits the game credited were never seen by the pipeline ({shortfall_rate:.4}), against \
 the 0.0014 measured when this bound was set",
         totals.shortfall
+    );
+}
+
+/// Our hit counts against the server's own, per shell type.
+///
+/// The restructured breakdown states "N HE hits on a ship" as the figure the
+/// whole eligibility listing sums to, and the server counts the same shells as
+/// `hits_main_he` in the post-battle results. The narrowing step that produces
+/// it also separates the shells that could not burn, which is `hits_main_ap`
+/// plus `hits_main_cs`. Both sides are counted independently, so a terrain hit
+/// filed under a ship, or a shell type sorted into the wrong bucket, moves one
+/// of them and not the other.
+///
+/// Two of our numbers are checked. The first is exact and internal: the figure
+/// `analyze` reports against the same population counted straight off the hit
+/// history in [`reconcile_hits`], which reads the projectile's own `ammoType`
+/// and knows nothing about the eligibility model. They agree to the hit over
+/// this corpus (8150 each), which is what says the narrowing step sorts shells
+/// the way their ammunition does.
+///
+/// The second is against the server, and the two populations are **not** the
+/// same, by two named differences the corpus measures rather than assumes:
+///
+/// - **hits on a ship that was already dead** (993 over this corpus). The client
+///   is told about these; the server has closed that interaction and credits
+///   nobody. `analyze` keeps them and names them `not_applicable` for the same
+///   reason: they landed.
+/// - **hits keyed to an entity the roster names no player for** (233). An
+///   operation's forts and transports are ships that take shells and appear in
+///   no player interaction. The worst single replay is an operation, `Bremen
+///   s10_USS_CL`, with 128 of them.
+///
+/// With both removed, our 12564 main-battery hits become 11338 against the
+/// server's 11485: HE 7270 against 7308, AP 3376 against 3451, SAP 692 against
+/// 726. We are 147 short (1.28%) and never over, in any of the three. That
+/// shortfall is the hit pipeline's own, measured by
+/// [`every_hit_the_game_credited_is_one_we_saw`]: 115 hits arrived with no
+/// matching salvo, so the shell is unnamed and no type bucket can hold them, and
+/// a further 19 hits the game credited never reached the pipeline at all. The
+/// gate is therefore two-sided and derived: we may never claim more hits of a
+/// type than the server credits, and the shortfall may not exceed those two
+/// populations with a factor of two of headroom.
+#[test]
+#[ignore = "requires replays and a game install"]
+fn our_hit_counts_match_the_servers() {
+    let corpus = corpus();
+    print_corpus_summary(corpus);
+
+    let (mut server_he, mut server_ap, mut server_cs) = (0u64, 0u64, 0u64);
+    let (mut ours_he, mut ours_ap, mut ours_cs) = (0u64, 0u64, 0u64);
+    let (mut comparable_he, mut comparable_ap, mut comparable_cs) = (0u64, 0u64, 0u64);
+    let (mut off_roster, mut after_death) = (0u64, 0u64);
+    let mut ours_he_from_analysis = 0u64;
+    let mut unnamed_shell = 0u64;
+    let mut never_seen = 0u64;
+    let mut checked = 0u32;
+    let mut without_results = 0u32;
+    let mut worst: Option<(&str, i64, u64)> = None;
+
+    for measurement in &corpus.measurements {
+        let Some((he, ap, cs)) = measurement.server_main_hits else {
+            without_results += 1;
+            continue;
+        };
+        checked += 1;
+        let r = &measurement.reconciliation;
+        server_he += he;
+        server_ap += ap;
+        server_cs += cs;
+        ours_he += u64::from(r.main_battery_he_on_ship);
+        ours_ap += u64::from(r.main_battery_ap_on_ship);
+        ours_cs += u64::from(r.main_battery_cs_on_ship);
+        ours_he_from_analysis += u64::from(measurement.he_hits_on_a_ship);
+        unnamed_shell += u64::from(r.ours_without_a_salvo);
+        never_seen += u64::from(game_hits(r).saturating_sub(r.ours_on_ship));
+
+        // What the server would have counted: our hits on a live roster ship.
+        let comparable = |on_ship: u32, off: u32, dead: u32| u64::from(on_ship.saturating_sub(off + dead));
+        comparable_he +=
+            comparable(r.main_battery_he_on_ship, r.main_battery_he_off_roster, r.main_battery_he_after_death);
+        comparable_ap +=
+            comparable(r.main_battery_ap_on_ship, r.main_battery_ap_off_roster, r.main_battery_ap_after_death);
+        comparable_cs +=
+            comparable(r.main_battery_cs_on_ship, r.main_battery_cs_off_roster, r.main_battery_cs_after_death);
+        off_roster +=
+            u64::from(r.main_battery_he_off_roster + r.main_battery_ap_off_roster + r.main_battery_cs_off_roster);
+        after_death +=
+            u64::from(r.main_battery_he_after_death + r.main_battery_ap_after_death + r.main_battery_cs_after_death);
+
+        let delta = i64::from(measurement.he_hits_on_a_ship) - i64::try_from(he).unwrap_or(i64::MAX);
+        if delta != 0 {
+            println!(
+                "  {}: HE {} ours vs {he} server ({} off roster, {} after death); AP {} vs {ap} ({} off roster, {} \
+after death); SAP {} vs {cs} ({} off roster, {} after death)",
+                measurement.name,
+                r.main_battery_he_on_ship,
+                r.main_battery_he_off_roster,
+                r.main_battery_he_after_death,
+                r.main_battery_ap_on_ship,
+                r.main_battery_ap_off_roster,
+                r.main_battery_ap_after_death,
+                r.main_battery_cs_on_ship,
+                r.main_battery_cs_off_roster,
+                r.main_battery_cs_after_death,
+            );
+        }
+        if worst.is_none_or(|(_, seen, _)| delta.abs() > seen.abs()) {
+            worst = Some((measurement.name.as_str(), delta, he));
+        }
+    }
+
+    println!("server hit counts checked over {checked} replays, {without_results} carried none");
+    println!(
+        "HE hits on a ship: {ours_he_from_analysis} from the analysis, {ours_he} from the hit history, \
+{server_he} from the server"
+    );
+    println!("AP hits: {ours_ap} ours, {server_ap} the server's");
+    println!("SAP hits: {ours_cs} ours, {server_cs} the server's");
+    println!("shells that could not burn: {} ours, {} the server's", ours_ap + ours_cs, server_ap + server_cs);
+    if let Some((name, delta, server)) = worst {
+        println!("worst single replay by HE: {name}, {delta:+} against the server's {server}");
+    }
+    println!(
+        "of our {} main-battery hits, {off_roster} were keyed to an entity the roster names no player for and \
+{after_death} landed on a roster ship at or after it died",
+        ours_he + ours_ap + ours_cs
+    );
+    println!(
+        "leaving HE {comparable_he} vs {server_he}, AP {comparable_ap} vs {server_ap}, SAP {comparable_cs} vs \
+{server_cs}"
+    );
+
+    assert!(checked > 0, "no replay carried the server's own hit counts");
+
+    // The narrowing step against an independent read of the same shells. Exact:
+    // both sides are counting our main-battery HE impacts on a ship, one through
+    // `analyze` and one through the projectile's `ammoType`.
+    assert_eq!(
+        ours_he_from_analysis, ours_he,
+        "the analysis counts {ours_he_from_analysis} main-battery HE hits on a ship, the hit history {ours_he}"
+    );
+
+    // And against the server, over the population the server can see.
+    let server_total = server_he + server_ap + server_cs;
+    let comparable_total = comparable_he + comparable_ap + comparable_cs;
+    for (label, ours, theirs) in
+        [("HE", comparable_he, server_he), ("AP", comparable_ap, server_ap), ("SAP", comparable_cs, server_cs)]
+    {
+        assert!(
+            ours <= theirs,
+            "we claim {ours} main-battery {label} hits on a live roster ship, more than the {theirs} the server \
+credits; a hit filed under the wrong ship or the wrong shell type looks exactly like this"
+        );
+    }
+    let shortfall = server_total - comparable_total;
+    let explained = unnamed_shell + never_seen;
+    assert!(
+        shortfall <= 2 * explained,
+        "we are {shortfall} main-battery hits short of the server's {server_total}, against {explained} we know we \
+cannot name ({unnamed_shell} arrived with no matching salvo, {never_seen} never reached the pipeline at all)"
     );
 }
 

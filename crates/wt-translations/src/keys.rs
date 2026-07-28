@@ -4,6 +4,7 @@ use wows_core::game_types::AdvantageLevel;
 use wows_core::game_types::BattleResult;
 use wows_core::game_types::ExclusionReason;
 use wows_core::game_types::FinishType;
+use wows_core::game_types::NarrowingReason;
 
 // -- Battle result keys --
 
@@ -58,13 +59,26 @@ pub const fn exclusion_reason_key(reason: ExclusionReason) -> &'static str {
         ExclusionReason::ObservationGap => "ui.replay.sections.fire_chance_exclusion_observation_gap",
         ExclusionReason::ConsumableModelUnreliable => "ui.replay.sections.fire_chance_exclusion_consumable_unreliable",
         ExclusionReason::VictimFateUnknown => "ui.replay.sections.fire_chance_exclusion_victim_fate_unknown",
-        ExclusionReason::ShellCannotBurn => "ui.replay.sections.fire_chance_exclusion_shell_cannot_burn",
-        ExclusionReason::NotMainBattery => "ui.replay.sections.fire_chance_exclusion_not_main_battery",
         ExclusionReason::HitTypeDoesNotRoll => "ui.replay.sections.fire_chance_exclusion_hit_type_does_not_roll",
         ExclusionReason::NoSectionGeometry => "ui.replay.sections.fire_chance_exclusion_no_geometry",
-        ExclusionReason::ImpactNotOnAShip => "ui.replay.sections.fire_chance_exclusion_impact_not_on_a_ship",
         ExclusionReason::ImpactUnplaceableOnVictim => "ui.replay.sections.fire_chance_exclusion_impact_unplaceable",
         ExclusionReason::VictimPoseUnknown => "ui.replay.sections.fire_chance_exclusion_victim_pose_unknown",
         ExclusionReason::AmbiguousWithAnotherHit => "ui.replay.sections.fire_chance_exclusion_ambiguous_hit",
+    }
+}
+
+/// The narrowing-step labels, which carry their count inline (`%{count}`)
+/// because they read as a parenthetical clause beside the line they explain
+/// rather than as a row in a tally. `singular` picks the form for a count of
+/// one; the translation layer has no plural machinery, so each form is its own
+/// key the way the target-ship count's is.
+pub const fn narrowing_reason_key(reason: NarrowingReason, singular: bool) -> &'static str {
+    match (reason, singular) {
+        (NarrowingReason::ShellCannotBurn, false) => "ui.replay.sections.fire_chance_narrowed_cannot_burn",
+        (NarrowingReason::ShellCannotBurn, true) => "ui.replay.sections.fire_chance_narrowed_cannot_burn_one",
+        (NarrowingReason::NotMainBattery, false) => "ui.replay.sections.fire_chance_narrowed_not_main_battery",
+        (NarrowingReason::NotMainBattery, true) => "ui.replay.sections.fire_chance_narrowed_not_main_battery_one",
+        (NarrowingReason::ImpactNotOnAShip, false) => "ui.replay.sections.fire_chance_narrowed_terrain",
+        (NarrowingReason::ImpactNotOnAShip, true) => "ui.replay.sections.fire_chance_narrowed_terrain_one",
     }
 }

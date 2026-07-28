@@ -2911,9 +2911,11 @@ impl fmt::Display for DamageStatCategory {
 /// key. Separate from `HitEligibility` because the tally counts reasons, not
 /// instances, and `BurnNodeIndex`/`ShellHitType` payloads would fragment it.
 ///
-/// Only refusals appear here. A hit the model was never asked to judge, such as
-/// one landing on a ship that was already dead, is outside the population
-/// rather than excluded from it and is counted apart from this tally.
+/// Only refusals appear here, and only over the population the eligibility
+/// model was asked about: our own main-battery HE hits on a ship. A shell that
+/// was never that population's member is a [`NarrowingReason`] instead, and a
+/// hit the model was never asked to judge, such as one landing on a ship that
+/// was already dead, is counted apart from both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ExclusionReason {
     SectionAlreadyBurning,
@@ -2923,14 +2925,32 @@ pub enum ExclusionReason {
     ObservationGap,
     ConsumableModelUnreliable,
     VictimFateUnknown,
-    ShellCannotBurn,
-    NotMainBattery,
     HitTypeDoesNotRoll,
     NoSectionGeometry,
-    ImpactNotOnAShip,
     ImpactUnplaceableOnVictim,
     VictimPoseUnknown,
     AmbiguousWithAnotherHit,
+}
+
+/// Why one of our hits was never a main-battery HE hit on a ship, and so was
+/// never a question the eligibility model could answer.
+///
+/// Apart from [`ExclusionReason`] because these are filters on the shell and on
+/// what it struck, not outcomes the model reached. Every HE shell that lands on
+/// a ship can start a fire; listing "this was an AP shell" beside "the section
+/// was already burning" reads as though some HE shells could not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NarrowingReason {
+    /// AP, SAP, or a main-battery shell whose folded burn chance is not
+    /// positive.
+    ShellCannotBurn,
+    /// A secondary shell. Secondary fire arrives on the same packet path as the
+    /// main battery and is separable only by the equipped battery's `ammoList`.
+    NotMainBattery,
+    /// The shell's collision type says it struck terrain, water, a wave or
+    /// nothing at all, so it landed on no ship whatever the nearest-ship
+    /// heuristic keyed it to.
+    ImpactNotOnAShip,
 }
 
 #[cfg(test)]

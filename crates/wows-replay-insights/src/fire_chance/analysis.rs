@@ -45,6 +45,7 @@ use crate::fire_chance::victim::DamageControlState;
 use crate::fire_chance::victim::VictimTrack;
 
 pub use wows_core::game_types::ExclusionReason;
+pub use wows_core::game_types::NarrowingReason;
 
 /// One server tick (`TICKS_PER_SECOND` = 7, `ma779114d`) plus packet jitter. The
 /// ribbon and the `burningFlags` update are separate packets from the same tick.
@@ -173,17 +174,21 @@ pub enum HitEligibility {
     AmbiguousWithAnotherHit,
 }
 
-/// Which of the three buckets a classified hit falls in.
+/// Which of the four buckets a classified hit falls in.
 ///
-/// Three rather than two because "refused" and "never in the population" are
-/// different claims. A refusal is a hit that might have started a fire and
-/// could not be proven either way, and its count is the cost of the model's
-/// caution. A hit on a ship that was already dead is neither: there was nothing
-/// left to set alight, so nothing about it was ever in question.
+/// Four rather than two because "was never this model's question", "refused"
+/// and "never in the population" are different claims. A narrowed hit is one
+/// the eligibility model was never asked about: an AP shell, a secondary, or a
+/// shell that landed in the water. A refusal is a hit that might have started a
+/// fire and could not be proven either way, and its count is the cost of the
+/// model's caution. A hit on a ship that was already dead is neither: there was
+/// nothing left to set alight, so nothing about it was ever in question.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HitDisposition {
     /// A trial: it enters the denominator.
     Trial,
+    /// Not a main-battery HE hit on a ship, so outside the population entirely.
+    Narrowed(NarrowingReason),
     Excluded(ExclusionReason),
     NotApplicable,
 }
@@ -193,6 +198,9 @@ impl HitEligibility {
         match self {
             HitEligibility::Eligible { .. } => HitDisposition::Trial,
             HitEligibility::VictimDead => HitDisposition::NotApplicable,
+            HitEligibility::ShellCannotBurn => HitDisposition::Narrowed(NarrowingReason::ShellCannotBurn),
+            HitEligibility::NotMainBattery => HitDisposition::Narrowed(NarrowingReason::NotMainBattery),
+            HitEligibility::ImpactNotOnAShip => HitDisposition::Narrowed(NarrowingReason::ImpactNotOnAShip),
             HitEligibility::SectionAlreadyBurning(_) => {
                 HitDisposition::Excluded(ExclusionReason::SectionAlreadyBurning)
             }
@@ -206,11 +214,8 @@ impl HitEligibility {
                 HitDisposition::Excluded(ExclusionReason::ConsumableModelUnreliable)
             }
             HitEligibility::VictimFateUnknown => HitDisposition::Excluded(ExclusionReason::VictimFateUnknown),
-            HitEligibility::ShellCannotBurn => HitDisposition::Excluded(ExclusionReason::ShellCannotBurn),
-            HitEligibility::NotMainBattery => HitDisposition::Excluded(ExclusionReason::NotMainBattery),
             HitEligibility::HitTypeDoesNotRoll(_) => HitDisposition::Excluded(ExclusionReason::HitTypeDoesNotRoll),
             HitEligibility::NoSectionGeometry => HitDisposition::Excluded(ExclusionReason::NoSectionGeometry),
-            HitEligibility::ImpactNotOnAShip => HitDisposition::Excluded(ExclusionReason::ImpactNotOnAShip),
             HitEligibility::ImpactUnplaceableOnVictim => {
                 HitDisposition::Excluded(ExclusionReason::ImpactUnplaceableOnVictim)
             }
@@ -252,19 +257,34 @@ pub enum FormulaOp {
 pub struct PerShipFireChance {
     pub victim_ship_index: String,
     pub victim_ship_name: String,
-    /// Every shell of ours the model classified against this ship: the trials,
-    /// the refusals and the hits that were never in the population. Equal to
-    /// `eligible_hits + exclusions.values().sum() + not_applicable`.
+    /// Every shell of ours that landed on this ship, whatever it was: the
+    /// trials, the refusals, the hits that were never in the population, and
+    /// the AP and secondary shells the narrowing step takes out. Equal to
+    /// `he_hits_on_a_ship + narrowed.values().sum()`.
+    ///
+    /// Shells that struck terrain or water are not here. Such a shell hit no
+    /// ship at all, so filing it under whichever hull the nearest-ship
+    /// heuristic keyed it to would state a hit that never happened; they appear
+    /// only in [`EffectiveFireChance::narrowed`].
     ///
     /// There is no per-ship counterpart to
     /// [`EffectiveFireChance::he_shells_fired`]. A salvo is fired at the water,
     /// not at a victim, and its shells can land on several ships, so splitting
     /// a fired count between them would either double-count the salvo or invent
     /// an assignment the replay does not carry.
-    pub shells_on_target: u32,
+    pub hits: u32,
+    /// The main-battery HE shells among [`Self::hits`], i.e. the population the
+    /// eligibility model was asked about. Equal to
+    /// `eligible_hits + exclusions.values().sum() + not_applicable`.
+    pub he_hits_on_a_ship: u32,
+    /// Why the rest of [`Self::hits`] were never that population's members: AP
+    /// and SAP shells, and our own secondaries. The per-ship form of
+    /// [`EffectiveFireChance::narrowed`] minus its terrain entry, which belongs
+    /// to no ship.
+    pub narrowed: BTreeMap<NarrowingReason, u32>,
     pub eligible_hits: u32,
-    /// Why the refused shells against this ship were refused, the per-ship form
-    /// of [`EffectiveFireChance::exclusions`].
+    /// Why the refused HE hits against this ship were refused, the per-ship
+    /// form of [`EffectiveFireChance::exclusions`].
     pub exclusions: BTreeMap<ExclusionReason, u32>,
     /// Shells that landed on this ship at or after it died.
     pub not_applicable: u32,
@@ -312,6 +332,12 @@ impl PerShipFireChance {
     pub fn expected_rate(&self) -> Option<f32> {
         (self.eligible_hits > 0).then(|| Some(self.expected_fires? / self.eligible_hits as f32)).flatten()
     }
+
+    /// How many of [`Self::hits`] the narrowing step took out before the
+    /// eligibility model saw them.
+    pub fn narrowed_total(&self) -> u32 {
+        self.narrowed.values().sum()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -328,27 +354,49 @@ pub struct EffectiveFireChance {
     /// Counted per salvo at its full width, and gated on the same "could this
     /// shell start a fire" test `classify` applies, so AP, SAP and secondary
     /// shells are out. It is a whole-match attacker-side figure with no
-    /// per-ship counterpart; see [`PerShipFireChance::shells_on_target`].
+    /// per-ship counterpart; see [`PerShipFireChance::hits`].
     ///
     /// Zero when the parse ran without `BattleWorld::set_record_salvo_history`,
     /// which is indistinguishable here from a match in which nothing was fired.
     pub he_shells_fired: u32,
-    /// Every shell of ours the eligibility model classified: the trials, the
-    /// refusals and the hits that were never in the population. Equal to
-    /// `eligible_hits + exclusions.values().sum() + not_applicable`, and kept
-    /// as a field so a caller cannot reconstruct the total from a subset of the
-    /// buckets.
+    /// Every shell of ours that landed and was classified, whatever it was and
+    /// whatever it struck. Kept as a field so a caller cannot reconstruct the
+    /// total from a subset of the buckets.
     ///
     /// Every shell, not only the HE ones, which is what makes the partition
-    /// hold: a shell that could not have burned is refused as `ShellCannotBurn`
-    /// or `NotMainBattery` rather than kept out of the total, so the breakdown
-    /// says how many of our hits were not HE instead of quietly dropping them.
-    /// It is therefore not a subset of [`Self::he_shells_fired`], which is
-    /// HE-only.
+    /// hold: an AP shell or one that hit the water is narrowed out rather than
+    /// kept out of the total, so the breakdown says how many of our hits were
+    /// not HE hits on a ship instead of quietly dropping them. It is therefore
+    /// not a subset of [`Self::he_shells_fired`], which is HE-only.
     ///
-    /// The sum over [`Self::per_ship`] can be smaller: a hit keyed to a ship
-    /// whose build never resolved has no row to sit in, and lands only here.
-    pub shells_on_target: u32,
+    /// Equal to `he_hits_on_a_ship + narrowed.values().sum()`.
+    pub hits: u32,
+    /// Why [`Self::hits`] narrows to [`Self::he_hits_on_a_ship`]: how many were
+    /// shells that cannot start fires, how many were secondaries, and how many
+    /// struck terrain or water instead of a ship.
+    ///
+    /// Apart from [`Self::exclusions`] deliberately. These are filters on the
+    /// shell and on what it struck, applied before the eligibility model is
+    /// asked anything; every shell that survives them can start a fire, and
+    /// what varies from there is whether the situation allowed it.
+    pub narrowed: BTreeMap<NarrowingReason, u32>,
+    /// Our main-battery HE shells that landed on a ship: the population the
+    /// eligibility model was asked about, and the total the whole eligibility
+    /// listing sums to. Equal to
+    /// `eligible_hits + exclusions.values().sum() + not_applicable`.
+    ///
+    /// The server counts the same population as `hits_main_he` in the
+    /// post-battle results, which is what the corpus harness checks it against.
+    pub he_hits_on_a_ship: u32,
+    /// Hits of ours that struck a ship no [`Self::per_ship`] row covers, so the
+    /// rows do not sum to [`Self::hits`] without them. A hit keyed to the
+    /// recording player's own ship, or to a player whose build, hull or burn
+    /// nodes never resolved, has no row to sit in.
+    ///
+    /// Reported rather than absorbed, so `hits` reconciles visibly:
+    /// `hits = per_ship.map(|s| s.hits).sum() + narrowed[ImpactNotOnAShip]
+    /// + hits_without_a_target_ship`.
+    pub hits_without_a_target_ship: u32,
     /// Shells that landed on a ship at or after it died. Reported apart from
     /// [`Self::exclusions`] because it is not a refusal: there was no live ship
     /// to set alight, so the eligibility model was never asked anything.
@@ -449,6 +497,19 @@ impl EffectiveFireChance {
     /// because those totals are a sum over this many separate populations.
     pub fn ships_with_trials(&self) -> usize {
         self.per_ship.iter().filter(|ship| ship.eligible_hits > 0).count()
+    }
+
+    /// How many of [`Self::hits`] the narrowing step took out before the
+    /// eligibility model saw them.
+    pub fn narrowed_total(&self) -> u32 {
+        self.narrowed.values().sum()
+    }
+
+    /// Hits of ours that struck terrain, water or nothing at all, the narrowing
+    /// entry that belongs to no target ship and so appears in no
+    /// [`Self::per_ship`] row.
+    pub fn hits_on_no_ship(&self) -> u32 {
+        self.narrowed.get(&NarrowingReason::ImpactNotOnAShip).copied().unwrap_or(0)
     }
 
     /// The attacker-side formula's total as `(raw, clamped)`: the value the
@@ -758,12 +819,32 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
     }
 
     let mut exclusions: BTreeMap<ExclusionReason, u32> = BTreeMap::new();
+    let mut narrowed: BTreeMap<NarrowingReason, u32> = BTreeMap::new();
     let mut not_applicable = 0u32;
+    let mut he_hits_on_a_ship = 0u32;
+    let mut hits_without_a_target_ship = 0u32;
     for record in &classified {
         match record.disposition {
-            HitDisposition::Trial => {}
-            HitDisposition::Excluded(reason) => *exclusions.entry(reason).or_insert(0) += 1,
-            HitDisposition::NotApplicable => not_applicable += 1,
+            HitDisposition::Narrowed(reason) => {
+                *narrowed.entry(reason).or_insert(0) += 1;
+            }
+            HitDisposition::Trial => he_hits_on_a_ship += 1,
+            HitDisposition::Excluded(reason) => {
+                *exclusions.entry(reason).or_insert(0) += 1;
+                he_hits_on_a_ship += 1;
+            }
+            HitDisposition::NotApplicable => {
+                not_applicable += 1;
+                he_hits_on_a_ship += 1;
+            }
+        }
+        // Terrain hits are already visible in `narrowed` and belong to no ship,
+        // so counting them here as well would state the same shell twice in the
+        // reconciliation `hits_without_a_target_ship` exists to close.
+        if record.disposition != HitDisposition::Narrowed(NarrowingReason::ImpactNotOnAShip)
+            && !input.victims.contains_key(&record.victim)
+        {
+            hits_without_a_target_ship += 1;
         }
     }
 
@@ -780,7 +861,10 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
 
     Some(EffectiveFireChance {
         he_shells_fired,
-        shells_on_target: classified.len() as u32,
+        hits: classified.len() as u32,
+        narrowed,
+        he_hits_on_a_ship,
+        hits_without_a_target_ship,
         not_applicable,
         eligible_hits: counted.len() as u32,
         fires: attribution.predictions.len() as u32,
@@ -868,8 +952,8 @@ fn is_secondary_shell(input: &FireChanceInput<'_>, secondary_ammo: &[String], sh
 /// set be credited to a coincident eligible hit, which adds to the numerator
 /// with no matching trial in the denominator.
 ///
-/// `ShellCannotBurn` and `SectionAlreadyBurning` are proofs, so they do not
-/// contest.
+/// `ShellCannotBurn`, `ImpactNotOnAShip` and `SectionAlreadyBurning` are
+/// proofs, so they do not contest.
 ///
 /// A hit refused as [`HitEligibility::MergedSectionVictimBuildUnknown`] returns
 /// two sections rather than one. Which bit it could have lit is precisely what
@@ -885,14 +969,6 @@ fn contesting_sections(
     shell: GameParamId,
     eligibility: &HitEligibility,
 ) -> Vec<BurnNodeIndex> {
-    // A shell that struck terrain or water is a proof like the others, and it
-    // reaches here through the secondary arm: `classify` names a secondary
-    // `NotMainBattery` before it ever reads the collision type. Without this a
-    // secondary of ours that hit an island beside the victim would contest a
-    // main-battery trial it could not possibly have contested.
-    if struck_no_ship(&hit.hit.hit_type.collision) {
-        return Vec::new();
-    }
     let contests = match eligibility {
         HitEligibility::NotMainBattery => is_secondary_shell(input, secondary_ammo, shell),
         HitEligibility::HitTypeDoesNotRoll(_) => true,
@@ -1034,19 +1110,23 @@ fn classify(
     hit: &ResolvedShotHit,
     shell: GameParamId,
 ) -> HitEligibility {
+    // First of everything, because "did this shell land on a ship at all" is
+    // prior to what kind of shell it was. `victim_entity_id` is the nearest ship
+    // to the impact and is never absent, so a shell that hit an island beside a
+    // destroyer is keyed to that destroyer; naming it by its ammunition instead
+    // would file a hit under a ship that was never hit. It is prior to the
+    // hit-type check for the same reason plus a sharper one: such a shell
+    // carries `SHELL_HIT_TYPE_NORMAL`, so `rolls_for_fire` admits it and only
+    // the geometry gate, which exists to catch a mis-keyed victim rather than to
+    // decide what the shell struck, would stand between it and the denominator.
+    if struck_no_ship(&hit.hit.hit_type.collision) {
+        return HitEligibility::ImpactNotOnAShip;
+    }
+
     let chance = match burnable_main_battery_chance(input, bundle, tier, shell) {
         Ok(chance) => chance,
         Err(refusal) => return refusal,
     };
-
-    // Ahead of the hit-type check because it is the more specific fact: a shell
-    // that struck an island carries `SHELL_HIT_TYPE_NORMAL`, so `rolls_for_fire`
-    // admits it and only the geometry gate stands between it and the
-    // denominator. That gate exists to catch a mis-keyed victim, not to decide
-    // what the shell hit, and it lets some of these through onto a hull.
-    if struck_no_ship(&hit.hit.hit_type.collision) {
-        return HitEligibility::ImpactNotOnAShip;
-    }
 
     if !rolls_for_fire(&hit.hit.hit_type.shell_hit) {
         return HitEligibility::HitTypeDoesNotRoll(hit.hit.hit_type.shell_hit.clone());
@@ -1290,7 +1370,9 @@ fn nearest_risen(change: &BurnStateChange, predicted: BurnNodeIndex) -> BurnNode
 /// One target ship's tally, accumulated over the hits keyed to it.
 struct ShipRow {
     ship_name: String,
-    shells_on_target: u32,
+    hits: u32,
+    he_hits_on_a_ship: u32,
+    narrowed: BTreeMap<NarrowingReason, u32>,
     eligible_hits: u32,
     exclusions: BTreeMap<ExclusionReason, u32>,
     not_applicable: u32,
@@ -1299,14 +1381,19 @@ struct ShipRow {
     entities: BTreeSet<EntityId>,
 }
 
-/// A row per target ship, over every hit the model classified rather than only
-/// the trials.
+/// A row per target ship, over every hit that landed on it rather than only the
+/// trials.
 ///
 /// A ship hit only by shells the model refused still gets a row, stating no
 /// rate: what the reader needs there is why none of those hits counted, which
 /// is exactly what the row's exclusion tally says. Hits keyed to a ship that
-/// never resolved to a [`VictimContext`] have no row to sit in and appear only
-/// in the aggregate.
+/// never resolved to a [`VictimContext`] have no row to sit in and land in
+/// [`EffectiveFireChance::hits_without_a_target_ship`] instead.
+///
+/// Hits that struck terrain or water are dropped rather than given a row. Their
+/// `victim_entity_id` is the nearest ship to a splash, so a row built from them
+/// would attribute hits to a hull nothing struck; they belong to the whole
+/// battle's narrowing step alone.
 fn per_ship_breakdown(
     input: &FireChanceInput<'_>,
     classified: &[ClassifiedHit],
@@ -1319,21 +1406,36 @@ fn per_ship_breakdown(
     // means. `BTreeMap` because the row order must not depend on hash seeds.
     let mut rows: BTreeMap<&str, ShipRow> = BTreeMap::new();
     for record in classified {
+        if record.disposition == HitDisposition::Narrowed(NarrowingReason::ImpactNotOnAShip) {
+            continue;
+        }
         let Some(victim) = input.victims.get(&record.victim) else { continue };
         let row = rows.entry(victim.ship_index.as_str()).or_insert_with(|| ShipRow {
             ship_name: victim.ship_name.clone(),
-            shells_on_target: 0,
+            hits: 0,
+            he_hits_on_a_ship: 0,
+            narrowed: BTreeMap::new(),
             eligible_hits: 0,
             exclusions: BTreeMap::new(),
             not_applicable: 0,
             entities: BTreeSet::new(),
         });
-        row.shells_on_target += 1;
+        row.hits += 1;
         row.entities.insert(record.victim);
         match record.disposition {
-            HitDisposition::Trial => row.eligible_hits += 1,
-            HitDisposition::Excluded(reason) => *row.exclusions.entry(reason).or_insert(0) += 1,
-            HitDisposition::NotApplicable => row.not_applicable += 1,
+            HitDisposition::Narrowed(reason) => *row.narrowed.entry(reason).or_insert(0) += 1,
+            HitDisposition::Trial => {
+                row.eligible_hits += 1;
+                row.he_hits_on_a_ship += 1;
+            }
+            HitDisposition::Excluded(reason) => {
+                *row.exclusions.entry(reason).or_insert(0) += 1;
+                row.he_hits_on_a_ship += 1;
+            }
+            HitDisposition::NotApplicable => {
+                row.not_applicable += 1;
+                row.he_hits_on_a_ship += 1;
+            }
         }
     }
 
@@ -1349,7 +1451,9 @@ fn per_ship_breakdown(
         .map(|(ship_index, row)| PerShipFireChance {
             victim_ship_index: ship_index.to_owned(),
             victim_ship_name: row.ship_name,
-            shells_on_target: row.shells_on_target,
+            hits: row.hits,
+            he_hits_on_a_ship: row.he_hits_on_a_ship,
+            narrowed: row.narrowed,
             eligible_hits: row.eligible_hits,
             exclusions: row.exclusions,
             not_applicable: row.not_applicable,
@@ -1506,6 +1610,13 @@ mod tests {
         GameParamId::from(21u32)
     }
 
+    /// A second main-battery projectile carrying AP's `burnProb` sentinel, so a
+    /// scenario can land an AP shell beside an HE one instead of turning every
+    /// main-battery hit in it to AP.
+    fn ap_shell_id() -> GameParamId {
+        GameParamId::from(22u32)
+    }
+
     fn upgrade_id() -> GameParamId {
         GameParamId::from(30u32)
     }
@@ -1517,6 +1628,7 @@ mod tests {
 
     const MAIN_SHELL: &str = "PAPT001_HE";
     const ATBA_SHELL: &str = "PAPT002_ATBA_HE";
+    const AP_SHELL: &str = "PAPT003_AP";
 
     const HULL_MODEL: &str = "content/gameplay/usa/ship/cruiser/ACR001/ACR001.model";
 
@@ -1548,7 +1660,7 @@ mod tests {
         Refund,
     }
 
-    /// One more of our own main-battery shells landing on the victim.
+    /// One more of our own shells landing on the victim.
     struct ExtraHit {
         section: u8,
         /// Seconds from [`HIT_CLOCK`]; zero puts it in the same server tick as
@@ -1556,6 +1668,11 @@ mod tests {
         /// like on the wire.
         offset: f32,
         hit_type: ShellHitType,
+        /// Which projectile fired it. The main battery's HE unless a scenario
+        /// needs a shell of another kind alongside it.
+        shell: GameParamId,
+        /// What the shell's own collision type says it struck.
+        collision: Recognized<wowsunpack::game_types::CollisionType>,
     }
 
     /// A scenario in literal values. Every test perturbs exactly one thing.
@@ -1730,7 +1847,40 @@ mod tests {
         }
 
         fn also_hitting_section_with(mut self, section: u8, offset: f32, hit_type: ShellHitType) -> Fixture {
-            self.extra_main_hits.push(ExtraHit { section, offset, hit_type });
+            self.extra_main_hits.push(ExtraHit {
+                section,
+                offset,
+                hit_type,
+                shell: main_shell_id(),
+                collision: Recognized::Known(wowsunpack::game_types::CollisionType::HitEntity),
+            });
+            self
+        }
+
+        /// One more main-battery shell of ours, landing in the water beside the
+        /// victim. `victim_entity_id` is the nearest ship to the impact and is
+        /// never absent, so this shell is keyed to the victim exactly as a real
+        /// splash beside a hull is.
+        fn also_hitting_terrain(mut self) -> Fixture {
+            self.extra_main_hits.push(ExtraHit {
+                section: 0,
+                offset: 20.0,
+                hit_type: ShellHitType::Normal,
+                shell: main_shell_id(),
+                collision: Recognized::Known(wowsunpack::game_types::CollisionType::HitGround),
+            });
+            self
+        }
+
+        /// One more shell of ours from the same battery, loaded with AP.
+        fn also_hitting_section_with_an_ap_shell(mut self, section: u8) -> Fixture {
+            self.extra_main_hits.push(ExtraHit {
+                section,
+                offset: 20.0,
+                hit_type: ShellHitType::Normal,
+                shell: ap_shell_id(),
+                collision: Recognized::Known(wowsunpack::game_types::CollisionType::HitEntity),
+            });
             self
         }
 
@@ -1866,6 +2016,7 @@ mod tests {
                 ship_param(),
                 shell_param(main_shell_id(), MAIN_SHELL, self.main_burn_prob, 0.203),
                 shell_param(atba_shell_id(), ATBA_SHELL, 0.05, 0.127),
+                shell_param(ap_shell_id(), AP_SHELL, -0.5, 0.203),
                 unclassifiable_upgrade_param(),
             ])));
 
@@ -1886,7 +2037,7 @@ mod tests {
                 .expect("fixture build resolves"),
             ));
 
-            let main_ammo: &'static [String] = Box::leak(Box::new(vec![MAIN_SHELL.to_owned()]));
+            let main_ammo: &'static [String] = Box::leak(Box::new(vec![MAIN_SHELL.to_owned(), AP_SHELL.to_owned()]));
             let atba_ammo: &'static [String] = Box::leak(Box::new(vec![ATBA_SHELL.to_owned()]));
 
             let mut hits = vec![hit(
@@ -1919,13 +2070,10 @@ mod tests {
                 ));
             }
             for extra in &self.extra_main_hits {
-                hits.push(hit(
-                    victim_id(),
-                    main_shell_id(),
-                    GameClock(HIT_CLOCK.0 + extra.offset),
-                    extra.section,
-                    extra.hit_type,
-                ));
+                let mut extra_hit =
+                    hit(victim_id(), extra.shell, GameClock(HIT_CLOCK.0 + extra.offset), extra.section, extra.hit_type);
+                extra_hit.hit.hit_type.collision = extra.collision.clone();
+                hits.push(extra_hit);
             }
             if self.hit_on_a_hull_we_cannot_place {
                 hits.push(hit(other_victim_id(), main_shell_id(), HIT_CLOCK, 0, ShellHitType::Normal));
@@ -2366,18 +2514,26 @@ mod tests {
 
     /// AP carries burnProb -0.5, a sentinel that absorbs every additive bonus.
     /// The gate is calculate_burn_chance > 0, never an ammo-type string test.
+    /// It narrows the hit out of the population rather than refusing it: an AP
+    /// shell was never a question the eligibility model could answer.
     #[test]
-    fn an_ap_hit_is_excluded_by_the_chance_gate() {
+    fn an_ap_hit_is_narrowed_out_by_the_chance_gate() {
         let out = analyze(&fixture().with_shell_burn_prob(-0.5).build()).expect("geometry");
         assert_eq!(out.eligible_hits, 0);
-        assert_eq!(out.exclusions[&ExclusionReason::ShellCannotBurn], 1);
+        assert_eq!(out.narrowed[&NarrowingReason::ShellCannotBurn], 1);
+        assert!(out.exclusions.is_empty(), "got {:?}", out.exclusions);
+        assert_eq!(out.he_hits_on_a_ship, 0);
     }
 
+    /// A secondary is a weapon filter, the same kind of fact as the shell type,
+    /// so it narrows the population rather than joining the eligibility tally.
     #[test]
-    fn a_secondary_hit_is_excluded() {
+    fn a_secondary_hit_is_narrowed_out() {
         let out = analyze(&fixture().with_shell_from_atba().build()).expect("geometry");
         assert_eq!(out.eligible_hits, 0);
-        assert_eq!(out.exclusions[&ExclusionReason::NotMainBattery], 1);
+        assert_eq!(out.narrowed[&NarrowingReason::NotMainBattery], 1);
+        assert!(out.exclusions.is_empty(), "got {:?}", out.exclusions);
+        assert_eq!(out.he_hits_on_a_ship, 0);
     }
 
     /// A main-battery hit is dropped when one of our own secondary shells hit
@@ -2651,7 +2807,7 @@ mod tests {
         let out = analyze(&fixture().with_dcp_unknown().build()).expect("geometry");
         assert_eq!(out.eligible_hits, 0);
         assert_eq!(out.per_ship.len(), 1);
-        assert_eq!(out.per_ship[0].shells_on_target, 1);
+        assert_eq!(out.per_ship[0].hits, 1);
         assert_eq!(out.per_ship[0].exclusions[&ExclusionReason::DamageControlUnknown], 1);
         assert_eq!(out.per_ship[0].rate(), None);
         assert_eq!(out.ships_with_trials(), 0);
@@ -2708,20 +2864,44 @@ mod tests {
 
     /// Every hit the model looked at, trials and refusals alike.
     #[test]
-    fn shells_on_target_total_the_trials_and_every_refusal() {
+    fn hits_total_the_trials_and_every_refusal() {
         let out =
             analyze(&fixture().hitting_section(0).also_hitting_section_with(3, 20.0, ShellHitType::Ricochet).build())
                 .expect("geometry");
         assert_eq!(out.eligible_hits, 1);
         assert_eq!(out.exclusions[&ExclusionReason::HitTypeDoesNotRoll], 1);
-        assert_eq!(out.shells_on_target, 2);
+        assert_eq!(out.hits, 2);
+        assert_eq!(out.he_hits_on_a_ship, 2);
     }
 
-    /// The three buckets partition the shells that landed, at both levels. A
-    /// hit that fell out of the accounting entirely would show up here as a
-    /// shortfall rather than as a quietly better rate.
+    /// The first invariant the breakdown stands on: total hits narrows to the
+    /// HE hits on a ship, and the narrowing steps account for the whole
+    /// difference.
     #[test]
-    fn the_buckets_partition_the_shells_on_target() {
+    fn total_hits_is_the_he_hits_on_a_ship_plus_everything_narrowed_out() {
+        let out = analyze(
+            &fixture()
+                .hitting_section(0)
+                .with_secondary_hit_on_section(3)
+                .also_hitting_terrain()
+                .also_hitting_section_with_an_ap_shell(1)
+                .build(),
+        )
+        .expect("geometry");
+
+        assert_eq!(out.hits, 4);
+        assert_eq!(out.narrowed[&NarrowingReason::NotMainBattery], 1);
+        assert_eq!(out.narrowed[&NarrowingReason::ImpactNotOnAShip], 1);
+        assert_eq!(out.narrowed[&NarrowingReason::ShellCannotBurn], 1);
+        assert_eq!(out.he_hits_on_a_ship, 1);
+        assert_eq!(out.he_hits_on_a_ship + out.narrowed_total(), out.hits);
+    }
+
+    /// The second invariant: everything under "HE hits on a ship" sums to it,
+    /// at both levels. A hit that fell out of the accounting entirely would
+    /// show up here as a shortfall rather than as a quietly better rate.
+    #[test]
+    fn the_eligibility_buckets_partition_the_he_hits_on_a_ship() {
         let out = analyze(
             &fixture()
                 .with_the_victim_dead_at(GameClock(90.0))
@@ -2731,20 +2911,68 @@ mod tests {
         )
         .expect("geometry");
 
-        assert_eq!(out.shells_on_target, 3);
+        assert_eq!(out.hits, 3);
+        assert_eq!(out.he_hits_on_a_ship, 3);
         assert_eq!(out.not_applicable, 2, "both hits on the dead victim");
         assert_eq!(out.exclusions[&ExclusionReason::NoSectionGeometry], 1);
-        assert_eq!(out.eligible_hits + out.exclusions.values().sum::<u32>() + out.not_applicable, out.shells_on_target);
+        assert_eq!(
+            out.eligible_hits + out.exclusions.values().sum::<u32>() + out.not_applicable,
+            out.he_hits_on_a_ship
+        );
 
         for ship in &out.per_ship {
             assert_eq!(
                 ship.eligible_hits + ship.exclusions.values().sum::<u32>() + ship.not_applicable,
-                ship.shells_on_target,
+                ship.he_hits_on_a_ship,
+                "{} does not account for its own HE hits",
+                ship.victim_ship_name
+            );
+            assert_eq!(
+                ship.he_hits_on_a_ship + ship.narrowed.values().sum::<u32>(),
+                ship.hits,
                 "{} does not account for its own hits",
                 ship.victim_ship_name
             );
         }
-        assert_eq!(out.per_ship.iter().map(|ship| ship.shells_on_target).sum::<u32>(), out.shells_on_target);
+    }
+
+    /// The per-ship rows, the shells that struck no ship and the hits keyed to
+    /// a ship with no row add back up to every hit the model classified, so a
+    /// reader summing the rows sees where the rest went instead of a hole.
+    #[test]
+    fn the_per_ship_rows_reconcile_against_the_total_hits() {
+        let out =
+            analyze(&fixture().hitting_section(0).also_hitting_terrain().also_hitting_a_hull_we_cannot_place().build())
+                .expect("geometry");
+
+        assert_eq!(out.hits, 3);
+        let rows: u32 = out.per_ship.iter().map(|ship| ship.hits).sum();
+        assert_eq!(rows + out.hits_on_no_ship() + out.hits_without_a_target_ship, out.hits);
+    }
+
+    /// A shell that hit the water hit no ship, so no target ship's row may
+    /// carry it however near the splash landed. `victim_entity_id` is the
+    /// nearest ship to the impact and is never absent, which is exactly how
+    /// such a hit ends up keyed to a hull it never touched.
+    #[test]
+    fn a_terrain_hit_is_in_no_target_ships_row() {
+        let out = analyze(&fixture().hitting_section(0).also_hitting_terrain().build()).expect("geometry");
+        assert_eq!(out.narrowed[&NarrowingReason::ImpactNotOnAShip], 1);
+        assert_eq!(out.per_ship.len(), 1);
+        assert_eq!(out.per_ship[0].hits, 1, "only the shell that struck the hull");
+        assert!(out.per_ship[0].narrowed.is_empty(), "got {:?}", out.per_ship[0].narrowed);
+    }
+
+    /// An AP shell that splashed short is an AP shell and a splash at once.
+    /// What it struck is the prior fact, so it is narrowed as terrain rather
+    /// than by its ammunition, which is what keeps it off the victim's row.
+    #[test]
+    fn an_ap_shell_that_struck_terrain_is_narrowed_as_terrain() {
+        let out =
+            analyze(&fixture().with_shell_burn_prob(-0.5).with_the_shell_striking_terrain().build()).expect("geometry");
+        assert_eq!(out.narrowed[&NarrowingReason::ImpactNotOnAShip], 1);
+        assert_eq!(out.narrowed.get(&NarrowingReason::ShellCannotBurn), None);
+        assert!(out.per_ship.is_empty(), "got {} rows", out.per_ship.len());
     }
 
     /// A shell landing on a ship that was already dead is not a refusal: there
@@ -2766,7 +2994,7 @@ mod tests {
         let out = analyze(&fixture().with_the_main_salvo_firing(6).hitting_section(0).also_hitting_section(3).build())
             .expect("geometry");
         assert_eq!(out.he_shells_fired, 6);
-        assert_eq!(out.shells_on_target, 2);
+        assert_eq!(out.hits, 2);
     }
 
     /// The point of the fired-side log: a salvo that landed nothing is still
@@ -2777,7 +3005,7 @@ mod tests {
         let out = analyze(&fixture().with_the_main_salvo_firing(6).with_main_salvos_that_missed(3).build())
             .expect("geometry");
         assert_eq!(out.he_shells_fired, 24, "four six-shell salvos, one of which landed a shell");
-        assert_eq!(out.shells_on_target, 1);
+        assert_eq!(out.hits, 1);
     }
 
     /// A merged session hears the same salvo from every perspective that saw
@@ -2809,8 +3037,8 @@ mod tests {
         let out =
             analyze(&fixture().with_shell_burn_prob(-0.5).with_the_main_salvo_firing(6).build()).expect("geometry");
         assert_eq!(out.he_shells_fired, 0);
-        assert_eq!(out.shells_on_target, 1);
-        assert_eq!(out.exclusions[&ExclusionReason::ShellCannotBurn], 1);
+        assert_eq!(out.hits, 1);
+        assert_eq!(out.narrowed[&NarrowingReason::ShellCannotBurn], 1);
     }
 
     /// A hit the parser never matched to a salvo names no shell, and its
@@ -3075,7 +3303,7 @@ mod tests {
     fn a_shell_that_struck_terrain_is_not_a_fire_trial() {
         let out = analyze(&fixture().with_the_shell_striking_terrain().build()).expect("geometry");
         assert_eq!(out.eligible_hits, 0);
-        assert_eq!(out.exclusions[&ExclusionReason::ImpactNotOnAShip], 1);
+        assert_eq!(out.narrowed[&NarrowingReason::ImpactNotOnAShip], 1);
     }
 
     /// A collision id the constants table does not name is an unknown, not a
@@ -3085,7 +3313,7 @@ mod tests {
     fn an_unnamed_collision_type_still_reaches_the_geometry() {
         let out = analyze(&fixture().with_an_unnamed_collision_type().build()).expect("geometry");
         assert_eq!(out.eligible_hits, 1);
-        assert_eq!(out.exclusions.get(&ExclusionReason::ImpactNotOnAShip), None);
+        assert_eq!(out.narrowed.get(&NarrowingReason::ImpactNotOnAShip), None);
     }
 
     /// `victim_entity_id` is the ship whose last known position was nearest the
