@@ -37,6 +37,12 @@ pub struct VictimTrack {
     /// below), since the continuity-based inference (rule 4) does not need a
     /// reload model.
     dcp_reload_secs: Option<f32>,
+    /// Work time for the same slot, again with build modifiers applied. Rule 4
+    /// needs it to know how long after a victim came into view an unseen
+    /// earlier activation could still be covering the query clock. `None` when
+    /// no Damage Control Party slot resolved, which leaves that lead-in
+    /// unbounded and so blocks rule 4 entirely.
+    dcp_work_time_secs: Option<f32>,
     /// Earliest clock this victim was observed from, set only when that
     /// observation is a single presence window still open (`left: None`):
     /// the one case where "unbroken since" holds for any future query clock
@@ -95,10 +101,9 @@ impl VictimTrack {
             activations.iter().filter(|a| a.consumable.known() == Some(&Consumable::DamageControl)).cloned().collect();
         dcp.sort_by_key(|a| a.activated_at);
 
-        let dcp_reload_secs = inventory
-            .iter()
-            .find(|slot| slot.consumable.known() == Some(&Consumable::DamageControl))
-            .map(|slot| slot.reload_time);
+        let dcp_slot = inventory.iter().find(|slot| slot.consumable.known() == Some(&Consumable::DamageControl));
+        let dcp_reload_secs = dcp_slot.map(|slot| slot.reload_time);
+        let dcp_work_time_secs = dcp_slot.map(|slot| slot.work_time);
 
         let cooldown_unreliable = dcp_reload_secs.is_some_and(|reload| {
             dcp.windows(2).any(|pair| (pair[1].activated_at - pair[0].activated_at) < reload - COOLDOWN_TOLERANCE_SECS)
@@ -109,7 +114,15 @@ impl VictimTrack {
             _ => None,
         });
 
-        VictimTrack { changes, dcp, dcp_reload_secs, first_seen, cooldown_unreliable, unrecognized_activation }
+        VictimTrack {
+            changes,
+            dcp,
+            dcp_reload_secs,
+            dcp_work_time_secs,
+            first_seen,
+            cooldown_unreliable,
+            unrecognized_activation,
+        }
     }
 
     /// Burn-node bitmask immediately before `clock`. Changes exactly at
@@ -156,7 +169,17 @@ impl VictimTrack {
         // covering `clock` and none whose cooldown could still be running,
         // provably never used Damage Control Party in that span: an
         // activation would have produced an entry in `dcp`.
-        if self.first_seen.is_some_and(|seen| seen <= clock) {
+        //
+        // That argument only covers activations inside the observed span. One
+        // fired a moment before the ship came into view is invisible here and
+        // still covers the first `work_time` seconds of the span, which is the
+        // ordinary case of a ship popping Damage Control Party on a fire and
+        // being spotted seconds later. Nothing bounds that lead-in without a
+        // work time, so a ship with no resolvable Damage Control Party slot
+        // stays unknown rather than being read as one that cannot use it.
+        if let Some(work_time) = self.dcp_work_time_secs
+            && self.first_seen.is_some_and(|seen| clock >= seen + work_time)
+        {
             return DamageControlState::Down;
         }
 
@@ -381,14 +404,28 @@ mod tests {
         assert_eq!(track.damage_control_at(GameClock(200.0)), DamageControlState::Down);
     }
 
-    /// A ship with no Damage Control Party slot at all still resolves Down
-    /// from continuity alone: rule 4 does not need a reload model, only the
-    /// absence of any covering or cooldown-relevant activation.
+    /// Continuity proves nothing without a work time to bound how long an
+    /// activation fired before the ship came into view could still be running.
+    /// A ship whose Damage Control Party slot did not resolve at all has no
+    /// such bound, so it stays unknown instead of being read as a ship that
+    /// never used it.
     #[test]
-    fn no_dcp_slot_still_resolves_down_from_continuity() {
+    fn no_dcp_slot_leaves_the_state_unknown() {
         let victim = victim_id();
         let track = VictimTrack::build(victim, &[], &[], &[], &observed(GameClock(0.0), GameClock(300.0)), None);
-        assert_eq!(track.damage_control_at(GameClock(200.0)), DamageControlState::Down);
+        assert_eq!(track.damage_control_at(GameClock(200.0)), DamageControlState::Unknown);
+    }
+
+    /// A ship that popped Damage Control Party just before entering AOI is
+    /// still covered by it for `work_time` after it appears, and that
+    /// activation is not in the log to see. Inside the lead-in the state is
+    /// unknown; past it, continuity proves Down.
+    #[test]
+    fn the_work_time_lead_in_after_entering_aoi_is_unknown() {
+        let track = track_with_dcp(&[], 80.0, observed(GameClock(100.0), GameClock(300.0)));
+        assert_eq!(track.damage_control_at(GameClock(102.0)), DamageControlState::Unknown);
+        assert_eq!(track.damage_control_at(GameClock(104.9)), DamageControlState::Unknown);
+        assert_eq!(track.damage_control_at(GameClock(105.0)), DamageControlState::Down);
     }
 
     /// An activation the decoder could not name (thin or shifted per-version

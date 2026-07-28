@@ -20,10 +20,12 @@ use std::collections::HashMap;
 
 use wowsunpack::data::Version;
 use wowsunpack::game_params::ttx::components::ArtilleryGunStats;
+use wowsunpack::game_params::ttx::components::ShipTtxComponents;
 use wowsunpack::game_params::types::CrewSkillType;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::KnownCrewSkill;
 use wowsunpack::game_params::types::Param;
+use wowsunpack::game_params::types::ShipConfigData;
 use wowsunpack::models::fire_nodes::FireSectionGeometry;
 
 use wows_battle_world::report::BattleReport;
@@ -80,6 +82,8 @@ pub enum FireChanceResolveError {
     UnknownUpgrade { ship: String, slot: BatterySlot, upgrade: String },
     #[error("{ship}: {slot} upgrade {upgrade} carries an empty ammoList")]
     EmptyAmmoList { ship: String, slot: BatterySlot, upgrade: String },
+    #[error("{ship}: hull {hull} names no ATBA component, but {ship} carries secondary ammo elsewhere")]
+    UnresolvedSecondaryBattery { ship: String, hull: String },
 }
 
 /// What the per-victim resolution cost, for callers that need to know whether a
@@ -215,13 +219,7 @@ pub fn resolve_fire_chance_input(
             upgrade: hull,
         });
     }
-    // The hull resolved but names no ATBA component: this ship carries no
-    // secondaries, which is a fact, not a gap. `ammo_list` refuses only the
-    // case where a component exists and its ammoList does not.
-    let secondary_ammo = match ttx.secondaries.get(&hull) {
-        Some(component) => ammo_list(Some(component.guns.as_slice()), &ship_name, BatterySlot::Hull, &hull)?,
-        None => Vec::new(),
-    };
+    let secondary_ammo = secondary_ammo_list(ttx, vehicle.config_data(), &ship_name, &hull)?;
 
     // A match observed to its finish saw every `ShipDestroyed` in it, so a
     // victim missing from the kill log survived. Without that, absence proves
@@ -323,6 +321,13 @@ fn fire_prevention(build: &ResolvedBuild) -> FirePrevention {
     let Some(crew) = build.captain.as_deref().and_then(|captain| captain.crew()) else {
         return FirePrevention::Unknown;
     };
+    // The learned-skill list comes off a replay property that is empty both for
+    // a captain with no skills and for any replay shape it did not parse from,
+    // which is ordinary on old builds. The two readings are not separable here,
+    // so an empty list is a gap like every other one in this chain.
+    if build.skills.is_empty() {
+        return FirePrevention::Unknown;
+    }
     for &skill_type in &build.skills {
         let Some(skill) = crew.skill_by_type(CrewSkillType::from(skill_type)) else {
             return FirePrevention::Unknown;
@@ -376,6 +381,37 @@ fn equipped_upgrade<'a>(
         return Err(SlotGap::Ambiguous);
     }
     Ok(only.clone())
+}
+
+/// The equipped hull's secondary-battery ammo, or the empty list that says this
+/// ship carries no secondaries.
+///
+/// An empty list is a claim, not a default. It disables the secondary-contest
+/// guard by leaving it nothing to contest with, so every secondary-set fire
+/// would be credited to whatever main-battery hit landed nearest. It is
+/// produced only where the ship's own GameParams establish the claim.
+///
+/// A missing `ttx.secondaries` entry does not establish it on its own: that is
+/// also what a hull whose ATBA component failed to extract looks like, and the
+/// gun-hardpoint naming that extraction filters on is per-version. The
+/// cross-check is the ship config's `secondary_battery_ammo`, collected from
+/// every hull upgrade's ATBA component with no hardpoint filter at all. A ship
+/// naming no secondary ammo anywhere has no ATBA component to extract; one
+/// naming some has an ATBA that this hull's entry should have carried, so the
+/// gap is refused.
+fn secondary_ammo_list(
+    ttx: &ShipTtxComponents,
+    config: Option<&ShipConfigData>,
+    ship: &str,
+    hull: &str,
+) -> Result<Vec<String>, FireChanceResolveError> {
+    if let Some(component) = ttx.secondaries.get(hull) {
+        return ammo_list(Some(component.guns.as_slice()), ship, BatterySlot::Hull, hull);
+    }
+    if config.is_some_and(|config| config.secondary_battery_ammo.is_empty()) {
+        return Ok(Vec::new());
+    }
+    Err(FireChanceResolveError::UnresolvedSecondaryBattery { ship: ship.to_owned(), hull: hull.to_owned() })
 }
 
 /// The union of every gun's `ammoList` on a battery component.
@@ -498,6 +534,68 @@ mod tests {
                 upgrade: "A_Artillery".to_owned(),
             })
         );
+    }
+
+    fn ttx_with_secondaries(hull: &str, ammo: &[&str]) -> ShipTtxComponents {
+        let mut ttx = ShipTtxComponents::default();
+        ttx.secondaries.insert(
+            hull.to_owned(),
+            wowsunpack::game_params::ttx::components::SecondaryComponentStats {
+                max_dist: None,
+                guns: vec![gun_with_ammo(ammo)],
+            },
+        );
+        ttx
+    }
+
+    fn config_naming_secondary_ammo(ammo: &[&str]) -> ShipConfigData {
+        ShipConfigData {
+            secondary_battery_ammo: ammo.iter().map(|name| (*name).to_owned()).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// The equipped hull's own ATBA component is the answer whenever it exists.
+    #[test]
+    fn the_equipped_hulls_atba_component_names_the_secondary_ammo() {
+        let ttx = ttx_with_secondaries("A_Hull", &["ATBA_HE"]);
+        let config = config_naming_secondary_ammo(&["ATBA_HE"]);
+        assert_eq!(secondary_ammo_list(&ttx, Some(&config), "SHIP", "A_Hull"), Ok(vec!["ATBA_HE".to_owned()]));
+    }
+
+    /// A ship that names no secondary ammo on any hull upgrade has no ATBA
+    /// component to extract, which is the one case where an empty list is a
+    /// fact rather than a guess.
+    #[test]
+    fn a_ship_naming_no_secondary_ammo_anywhere_carries_no_secondaries() {
+        let ttx = ShipTtxComponents::default();
+        let config = config_naming_secondary_ammo(&[]);
+        assert_eq!(secondary_ammo_list(&ttx, Some(&config), "SHIP", "A_Hull"), Ok(Vec::new()));
+    }
+
+    /// A hull with no ATBA entry on a ship that names secondary ammo elsewhere
+    /// is an extraction gap, not a ship without secondaries. Reading it as the
+    /// second would silently disable the secondary-contest guard on exactly the
+    /// brawlers it exists for.
+    #[test]
+    fn a_missing_atba_entry_on_a_ship_with_secondary_ammo_is_refused() {
+        let ttx = ttx_with_secondaries("B_Hull", &["ATBA_HE"]);
+        let config = config_naming_secondary_ammo(&["ATBA_HE"]);
+        assert_eq!(
+            secondary_ammo_list(&ttx, Some(&config), "SHIP", "A_Hull"),
+            Err(FireChanceResolveError::UnresolvedSecondaryBattery {
+                ship: "SHIP".to_owned(),
+                hull: "A_Hull".to_owned(),
+            })
+        );
+    }
+
+    /// With no ship config there is nothing to establish either reading, so the
+    /// gap is refused rather than resolved to "no secondaries".
+    #[test]
+    fn a_missing_atba_entry_without_ship_config_is_refused() {
+        let ttx = ShipTtxComponents::default();
+        assert!(secondary_ammo_list(&ttx, None, "SHIP", "A_Hull").is_err());
     }
 
     fn ship_param(id: GameParamId) -> Param {
@@ -695,7 +793,15 @@ mod tests {
     fn fire_prevention_is_not_learned_when_every_skill_resolves_to_something_else() {
         let build = Fixture::new().learning(&[OTHER_SKILL]).build();
         assert_eq!(fire_prevention(&build), FirePrevention::NotLearned);
-        assert_eq!(fire_prevention(&Fixture::new().build()), FirePrevention::NotLearned);
+    }
+
+    /// An empty learned-skill list is a skill-less captain and a list that did
+    /// not parse, and nothing here separates them. Reading it as `NotLearned`
+    /// would admit node-2 hits on every victim whose skills the replay did not
+    /// carry, which on old builds is most of them.
+    #[test]
+    fn an_empty_learned_skill_list_is_unknown_not_not_learned() {
+        assert_eq!(fire_prevention(&Fixture::new().build()), FirePrevention::Unknown);
     }
 
     /// Every gap in the chain refuses. A learned skill the captain cannot name

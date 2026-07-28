@@ -43,18 +43,28 @@ use crate::fire_chance::victim::VictimTrack;
 /// One server tick (`TICKS_PER_SECOND` = 7, `ma779114d`) plus packet jitter. The
 /// ribbon and the `burningFlags` update are separate packets from the same tick.
 ///
-/// This is a ribbon-relative radius: it bounds how far a hit can sit from the
-/// ribbon it caused.
+/// This is a ribbon-relative radius: it bounds how far *before* its ribbon a
+/// hit can sit, and how far either way a `burningFlags` transition can. How far
+/// after its ribbon a hit can sit is [`RIBBON_REORDER_TOLERANCE`] instead.
 const ATTRIBUTION_WINDOW: f32 = 0.5;
+
+/// How far a hit may sit *after* the ribbon it caused and still be admitted.
+///
+/// The cause precedes the effect, so a hit later than its ribbon is packet
+/// ordering, not physics. Only the jitter that reordering can produce is
+/// allowed, well under [`ATTRIBUTION_WINDOW`], so a hit slightly before the
+/// ribbon always beats one slightly after it.
+const RIBBON_REORDER_TOLERANCE: f32 = 0.15;
 
 /// How far apart two of our own hits can be and still both be plausible causes
 /// of one fire.
 ///
-/// Twice [`ATTRIBUTION_WINDOW`], because this one is hit-relative rather than
-/// ribbon-relative: two hits can each sit inside a single ribbon's window while
-/// lying a full window apart on opposite sides of it. Using the ribbon radius
-/// here would leave a band where a main-battery hit is close enough to the
-/// ribbon to be credited while a secondary of ours nearer the ribbon still
+/// This one is hit-relative rather than ribbon-relative: two hits can each sit
+/// inside a single ribbon's admission band while lying most of that band apart
+/// on opposite sides of the ribbon. It is set at least as wide as the band, so
+/// any two hits that could both match one ribbon do contest each other. A
+/// narrower window would leave a gap where a main-battery hit is close enough to
+/// the ribbon to be credited while a secondary of ours nearer the ribbon still
 /// fails the contest, which inflates the numerator on exactly the secondary
 /// ships the contest exists to protect.
 const CONTEST_WINDOW: f32 = 2.0 * ATTRIBUTION_WINDOW;
@@ -108,10 +118,19 @@ pub enum HitEligibility {
     /// establishes as rolling, and flattening it would lose which one it was.
     HitTypeDoesNotRoll(Recognized<ShellHitType>),
     NoSectionGeometry,
-    /// One of our own secondary shells landed in the same section inside the
-    /// attribution window, so a SetFire ribbon there cannot be assigned to this
-    /// main-battery hit rather than to the secondary.
-    SecondaryFireAmbiguous,
+    /// The impact lies too far from the victim's burn nodes to have been a hit
+    /// on that hull. `victim_entity_id` is a nearest-ship heuristic, so this is
+    /// what a hit keyed to a neighbour in a tight formation looks like.
+    ImpactOffTheHull,
+    /// Another shell of ours that cannot be ruled out as the cause landed in the
+    /// same section inside the contest window, so a SetFire ribbon there cannot
+    /// be assigned to this hit rather than to that one. See
+    /// [`contesting_section`] for what qualifies.
+    AmbiguousWithAnotherHit,
+    /// Several of our own eligible hits landed on this victim's section in one
+    /// server tick. At most one of them could have lit it and which one is not
+    /// recoverable, so the whole group is dropped.
+    SameTickSectionAmbiguous,
 }
 
 /// Payload-free counterpart of [`HitEligibility`], used as the exclusion-tally
@@ -131,7 +150,9 @@ pub enum ExclusionReason {
     NotMainBattery,
     HitTypeDoesNotRoll,
     NoSectionGeometry,
-    SecondaryFireAmbiguous,
+    ImpactOffTheHull,
+    AmbiguousWithAnotherHit,
+    SameTickSectionAmbiguous,
 }
 
 impl HitEligibility {
@@ -153,7 +174,9 @@ impl HitEligibility {
             HitEligibility::NotMainBattery => Some(ExclusionReason::NotMainBattery),
             HitEligibility::HitTypeDoesNotRoll(_) => Some(ExclusionReason::HitTypeDoesNotRoll),
             HitEligibility::NoSectionGeometry => Some(ExclusionReason::NoSectionGeometry),
-            HitEligibility::SecondaryFireAmbiguous => Some(ExclusionReason::SecondaryFireAmbiguous),
+            HitEligibility::ImpactOffTheHull => Some(ExclusionReason::ImpactOffTheHull),
+            HitEligibility::AmbiguousWithAnotherHit => Some(ExclusionReason::AmbiguousWithAnotherHit),
+            HitEligibility::SameTickSectionAmbiguous => Some(ExclusionReason::SameTickSectionAmbiguous),
         }
     }
 }
@@ -213,8 +236,10 @@ pub struct EffectiveFireChance {
     pub per_ship: Vec<PerShipFireChance>,
     pub exclusions: BTreeMap<ExclusionReason, u32>,
     /// Predicted-vs-actual section for every attributed fire. This is the
-    /// evidence for the nearest-node assumption; [`Self::section_agreement`] is
-    /// its ratio. Stored as pairs so a corpus test can build a confusion matrix.
+    /// evidence for the nearest-node assumption;
+    /// [`Self::independent_section_agreement`] is its ratio over the pairs that
+    /// can carry it. Stored as pairs so a corpus test can build a confusion
+    /// matrix.
     pub section_predictions: Vec<SectionPrediction>,
     /// Fires we could not assign to a specific hit: a SetFire ribbon that
     /// matched no eligible hit inside the attribution window.
@@ -223,17 +248,21 @@ pub struct EffectiveFireChance {
     /// itself a fault. The legitimate causes are fires set by our own
     /// secondaries with no main-battery candidate nearby, fires on a victim
     /// outside the recording client's AOI, fires whose causing hit was excluded
-    /// by any of the eligibility rules, and fires whose main-battery candidate
-    /// was dropped as ambiguous with one of our secondaries. What the number is
-    /// for is proportion: an unattributed count far larger than `fires` on a
-    /// ship with no secondaries means something upstream is wrong.
+    /// by any of the eligibility rules, and fires whose only candidates were
+    /// dropped as ambiguous, either with another hit of ours or with each other
+    /// inside one server tick. What the number is for is proportion: an
+    /// unattributed count far larger than `fires` on a ship with no secondaries
+    /// means something upstream is wrong.
     pub unattributed_fires: u32,
     /// The shell's raw `burnProb` before any modifier step in [`Self::formula`]
-    /// is applied, for the hover breakdown's base line. `None` exactly when
-    /// `formula` is empty because no shell resolved to compute it from (no
-    /// eligible hit, or the projectile carries no `burnProb`); a resolved shell
-    /// whose modifiers are all identities still yields `Some`, so `formula`
-    /// itself may be empty while this is not.
+    /// is applied, for the hover breakdown's base line. `None` when no shell
+    /// resolved to compute it from (no eligible hit, or the projectile carries
+    /// no `burnProb`), and when the attacker's modifier bundle could not be
+    /// folded for this game version, which is the same condition that makes
+    /// [`Self::expected_fires`] `None`: the steps would then come from the stock
+    /// table rather than from this build. A resolved shell whose modifiers are
+    /// all identities still yields `Some`, so `formula` itself may be empty
+    /// while this is not.
     pub formula_base: Option<f32>,
     /// The attacker-side formula steps, for the hover breakdown.
     pub formula: Vec<FormulaStep>,
@@ -261,6 +290,21 @@ pub struct SectionPrediction {
     pub predicted: BurnNodeIndex,
     pub actual: BurnNodeIndex,
     pub evidence: SectionEvidence,
+    /// How many fire sections the victim's hull has. A one-section hull can
+    /// only ever predict section 0 and can only ever have lit section 0, so
+    /// such a pair agrees by construction and says nothing about the positional
+    /// model. [`Self::is_independent_evidence`] is what drops those.
+    pub hull_sections: usize,
+}
+
+impl SectionPrediction {
+    /// Whether this pair can be scored as evidence for the nearest-node
+    /// assumption: the matched transition lit exactly one section, so `actual`
+    /// was not chosen with the prediction in hand, and the hull has more than
+    /// one section, so agreeing was not automatic.
+    pub fn is_independent_evidence(&self) -> bool {
+        self.evidence == SectionEvidence::OneSectionRose && self.hull_sections > 1
+    }
 }
 
 impl EffectiveFireChance {
@@ -271,19 +315,25 @@ impl EffectiveFireChance {
     }
 
     /// Fraction of attributed fires whose predicted section is the bit the
-    /// server lit. `None` when no fires were attributed.
+    /// server lit, over the pairs that are evidence for the positional model.
+    /// `None` when there are none.
     ///
-    /// Taken over every pair, including the ones whose `actual` was chosen as
-    /// the risen bit nearest the prediction. Those are not independent of the
-    /// prediction, so a caller measuring how well the positional model works
-    /// should read [`SectionPrediction::evidence`] and compute the rate over
-    /// [`SectionEvidence::OneSectionRose`] alone.
-    pub fn section_agreement(&self) -> Option<f32> {
-        if self.section_predictions.is_empty() {
+    /// Only the independent pairs are scored, because the rest agree for
+    /// reasons that have nothing to do with the prediction: a transition
+    /// lighting several sections at once has its `actual` chosen as the risen
+    /// bit nearest the prediction, and a one-section hull agrees whatever was
+    /// predicted. A rate taken over every pair is biased upward by both, which
+    /// is why this is the only rate exposed. [`Self::section_predictions`]
+    /// carries the raw pairs for a caller that wants to break them down
+    /// differently.
+    pub fn independent_section_agreement(&self) -> Option<f32> {
+        let scored: Vec<&SectionPrediction> =
+            self.section_predictions.iter().filter(|p| p.is_independent_evidence()).collect();
+        if scored.is_empty() {
             return None;
         }
-        let agreed = self.section_predictions.iter().filter(|p| p.predicted == p.actual).count();
-        Some(agreed as f32 / self.section_predictions.len() as f32)
+        let agreed = scored.iter().filter(|p| p.predicted == p.actual).count();
+        Some(agreed as f32 / scored.len() as f32)
     }
 }
 
@@ -397,11 +447,21 @@ struct Candidate<'a> {
     shell: GameParamId,
 }
 
-/// Where one of our own secondary shells landed, for contest detection.
-struct SecondaryImpact {
+/// Where one of our own shells landed that is not a trial itself but cannot be
+/// ruled out as the cause of a fire in its section.
+struct ContestingImpact {
     victim: EntityId,
     section: BurnNodeIndex,
     clock: GameClock,
+}
+
+/// Why a hit could not be placed in one of the victim's fire sections.
+enum SectionGap {
+    /// The victim has no resolvable fire-section geometry, or a section the
+    /// geometry names that the hull's own `burnNodes` list does not.
+    NoGeometry,
+    /// The impact is too far from the hull's nodes to have been a hit on it.
+    OffTheHull,
 }
 
 /// Effective fire chance for one attacker.
@@ -472,7 +532,7 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
         .collect();
 
     let mut candidates: Vec<Candidate<'_>> = Vec::new();
-    let mut secondaries: Vec<SecondaryImpact> = Vec::new();
+    let mut contenders: Vec<ContestingImpact> = Vec::new();
     let mut exclusions: BTreeMap<ExclusionReason, u32> = BTreeMap::new();
 
     for hit in input.hits {
@@ -486,14 +546,9 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
 
         let eligibility = classify(input, &geometry, &tracks, &bundle, tier, formula_applies, hit, salvo.params_id);
 
-        // Our own secondaries contest a main-battery hit in the same window and
-        // section, so record where they landed even though they are not
-        // candidates themselves.
-        if matches!(eligibility, HitEligibility::NotMainBattery)
-            && is_secondary_shell(input, secondary_ammo, salvo.params_id)
-            && let Some(section) = section_of(input, &geometry, hit)
+        if let Some(section) = contesting_section(input, &geometry, secondary_ammo, hit, salvo.params_id, &eligibility)
         {
-            secondaries.push(SecondaryImpact { victim: hit.victim_entity_id, section, clock: hit.clock });
+            contenders.push(ContestingImpact { victim: hit.victim_entity_id, section, clock: hit.clock });
         }
 
         match eligibility {
@@ -520,16 +575,26 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
     // to protect. A ribbon left with no candidate falls to `unattributed_fires`,
     // which is what a fire we cannot assign to a weapon is.
     let (counted, contested): (Vec<&Candidate<'_>>, Vec<&Candidate<'_>>) =
-        candidates.iter().partition(|c| !contested_by_a_secondary(c, &secondaries));
+        candidates.iter().partition(|c| !contested_by_another_hit(c, &contenders));
     if !contested.is_empty() {
-        *exclusions.entry(ExclusionReason::SecondaryFireAmbiguous).or_insert(0) += contested.len() as u32;
+        *exclusions.entry(ExclusionReason::AmbiguousWithAnotherHit).or_insert(0) += contested.len() as u32;
+    }
+
+    let (counted, same_tick) = drop_same_tick_section_groups(counted);
+    if same_tick > 0 {
+        *exclusions.entry(ExclusionReason::SameTickSectionAmbiguous).or_insert(0) += same_tick;
     }
 
     let attribution = attribute(input, &counted);
 
     let per_ship = per_ship_breakdown(input, &counted, &attribution.fires_by_victim, formula_applies);
     let expected_fires = formula_applies.then(|| sum_expected(&counted)).flatten();
-    let (formula_base, formula) = formula_steps(input, &bundle, tier, &counted);
+    // Gated on the same fact as `expected_fires`. Without it the breakdown would
+    // be rendered from `ModifierBundle::empty`, showing a player running IFHE,
+    // Demolition Expert and Victor Lima the stock table's fire chance labelled
+    // as their build's.
+    let (formula_base, formula) =
+        if formula_applies { formula_steps(input, &bundle, tier, &counted) } else { (None, Vec::new()) };
 
     Some(EffectiveFireChance {
         eligible_hits: counted.len() as u32,
@@ -544,33 +609,112 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
     })
 }
 
-/// Which fire section a hit landed in, when the victim's hull has geometry.
+/// Which fire section a hit landed in, when the victim's hull has geometry and
+/// the impact is close enough to it to have been a hit on that hull.
 fn section_of(
     input: &FireChanceInput<'_>,
     geometry: &HashMap<EntityId, FireSectionGeometry>,
     hit: &ResolvedShotHit,
-) -> Option<BurnNodeIndex> {
-    let geom = geometry.get(&hit.victim_entity_id)?;
+) -> Result<BurnNodeIndex, SectionGap> {
+    let geom = geometry.get(&hit.victim_entity_id).ok_or(SectionGap::NoGeometry)?;
     let section =
-        section_for_hit(geom, hit.hit.position, hit.victim_position, hit.victim_yaw, hit.victim_pitch, hit.victim_roll);
+        section_for_hit(geom, hit.hit.position, hit.victim_position, hit.victim_yaw, hit.victim_pitch, hit.victim_roll)
+            .ok_or(SectionGap::OffTheHull)?;
     // The hull's `burnNodes` list is what makes a section's probability
     // readable; a geometry longer than it would index past the hull's own data.
-    let victim = input.victims.get(&hit.victim_entity_id)?;
-    (usize::from(section.get()) < victim.node_probability.len()).then_some(section)
+    let victim = input.victims.get(&hit.victim_entity_id).ok_or(SectionGap::NoGeometry)?;
+    if usize::from(section.get()) >= victim.node_probability.len() {
+        return Err(SectionGap::NoGeometry);
+    }
+    Ok(section)
 }
 
 fn is_secondary_shell(input: &FireChanceInput<'_>, secondary_ammo: &[String], shell: GameParamId) -> bool {
     input.params.game_param_by_id(shell).is_some_and(|param| secondary_ammo.iter().any(|name| name == param.name()))
 }
 
-/// Whether one of our own secondary shells landed on the same victim and
-/// section close enough that a fire there could have been either shell's.
-fn contested_by_a_secondary(candidate: &Candidate<'_>, secondaries: &[SecondaryImpact]) -> bool {
-    secondaries.iter().any(|s| {
-        s.victim == candidate.victim
-            && s.section == candidate.section
-            && clock_distance(s.clock, candidate.hit.clock) <= CONTEST_WINDOW
+/// Where a hit that is not a trial still contests the ribbons near it, if it
+/// does.
+///
+/// A hit contests when nothing establishes that it could not have started the
+/// fire. Our own secondaries are the obvious case: they set fires and the ribbon
+/// does not name the weapon. The rest are hits the eligibility model refused for
+/// want of proof rather than by proof. [`rolls_for_fire`] excludes ricochets,
+/// overpenetrations, underwater hits and ids this build cannot name on the
+/// grounds that nothing establishes they roll, which is an unknown; the same
+/// goes for a node-2 hit refused because the victim's Fire Prevention Expert
+/// could not be read. Leaving those out of the contest lets a fire one of them
+/// set be credited to a coincident eligible hit, which adds to the numerator
+/// with no matching trial in the denominator.
+///
+/// `ShellCannotBurn`, `SectionAlreadyBurning` and a node-2 hit on a victim we
+/// positively read as having learned Fire Prevention Expert are proofs, so they
+/// do not contest.
+///
+/// The contest is section-scoped, which leaves the Fire Prevention branch with
+/// nothing to reach: a suppressed hit is always in node 2, and node 2 is
+/// suppressed for every hit on that victim, so no candidate can be there to
+/// contest. It is stated anyway because it is part of what "cannot be ruled
+/// out" means, and because the suppression rule is a single `burningFlags` bit
+/// that a future game version could soften.
+fn contesting_section(
+    input: &FireChanceInput<'_>,
+    geometry: &HashMap<EntityId, FireSectionGeometry>,
+    secondary_ammo: &[String],
+    hit: &ResolvedShotHit,
+    shell: GameParamId,
+    eligibility: &HitEligibility,
+) -> Option<BurnNodeIndex> {
+    let contests = match eligibility {
+        HitEligibility::NotMainBattery => is_secondary_shell(input, secondary_ammo, shell),
+        HitEligibility::HitTypeDoesNotRoll(_) => true,
+        HitEligibility::SectionSuppressedByFirePrevention => input
+            .victims
+            .get(&hit.victim_entity_id)
+            .is_some_and(|victim| victim.fire_prevention == FirePrevention::Unknown),
+        _ => false,
+    };
+    contests.then(|| section_of(input, geometry, hit).ok()).flatten()
+}
+
+/// Whether one of our own non-trial hits landed on the same victim and section
+/// close enough that a fire there could have been either shell's.
+fn contested_by_another_hit(candidate: &Candidate<'_>, contenders: &[ContestingImpact]) -> bool {
+    contenders.iter().any(|other| {
+        other.victim == candidate.victim
+            && other.section == candidate.section
+            && clock_distance(other.clock, candidate.hit.clock) <= CONTEST_WINDOW
     })
+}
+
+/// Drop every group of eligible hits that shares a victim, a section and a
+/// clock, returning what is left and how many were dropped.
+///
+/// Every hit in one `ShotKills` packet carries that packet's clock, so k shells
+/// of one salvo landing in one victim's section arrive as k entries at the same
+/// clock. They all read the same pre-tick burn mask and all k pass the
+/// already-burning gate, but at most one of them lit the section: once it was
+/// alight the rest provably had no chance, and which one it was is not
+/// recoverable from the logs.
+///
+/// Neither of the two ways to keep such a group is unbiased. Keeping all k
+/// scores at most one fire over k trials, so the group estimates
+/// `(1-(1-p)^k)/k`, well under `p`. Collapsing the group to one trial estimates
+/// `1-(1-p)^k`, well over it. And the deflation is outcome-conditioned in the
+/// worst way: the extra denominator entries only ever appear where a fire did
+/// start. So the group goes whole, decided on the hits alone.
+fn drop_same_tick_section_groups<'a, 'b>(counted: Vec<&'a Candidate<'b>>) -> (Vec<&'a Candidate<'b>>, u32) {
+    let mut group_size: HashMap<(EntityId, BurnNodeIndex, GameClock), u32> = HashMap::new();
+    for candidate in &counted {
+        *group_size.entry((candidate.victim, candidate.section, candidate.hit.clock)).or_insert(0) += 1;
+    }
+    let before = counted.len();
+    let kept: Vec<&'a Candidate<'b>> = counted
+        .into_iter()
+        .filter(|c| group_size.get(&(c.victim, c.section, c.hit.clock)).copied().unwrap_or(0) == 1)
+        .collect();
+    let dropped = (before - kept.len()) as u32;
+    (kept, dropped)
 }
 
 /// Total expected fires over `candidates`.
@@ -629,8 +773,12 @@ fn classify(
     }
 
     // A victim with no context has no hull, so it has no geometry either.
-    let (Some(victim), Some(section)) = (input.victims.get(&hit.victim_entity_id), section_of(input, geometry, hit))
-    else {
+    let section = match section_of(input, geometry, hit) {
+        Ok(section) => section,
+        Err(SectionGap::NoGeometry) => return HitEligibility::NoSectionGeometry,
+        Err(SectionGap::OffTheHull) => return HitEligibility::ImpactOffTheHull,
+    };
+    let Some(victim) = input.victims.get(&hit.victim_entity_id) else {
         return HitEligibility::NoSectionGeometry;
     };
     let Some(track) = tracks.get(&hit.victim_entity_id) else {
@@ -715,6 +863,11 @@ struct Attribution {
 /// `unattributed` here.
 fn attribute(input: &FireChanceInput<'_>, candidates: &[&Candidate<'_>]) -> Attribution {
     let mut consumed = vec![false; candidates.len()];
+    // Indices into `input.burn_state_changes` already claimed by an earlier
+    // ribbon. One transition is one fire starting, so two ribbons reading the
+    // same change would give one of them an `actual` section that belongs to
+    // the other fire while still labelling the pair independent evidence.
+    let mut claimed_changes: Vec<bool> = vec![false; input.burn_state_changes.len()];
     let mut predictions = Vec::new();
     let mut fires_by_victim: HashMap<EntityId, u32> = HashMap::new();
     let mut unattributed = 0u32;
@@ -725,18 +878,20 @@ fn attribute(input: &FireChanceInput<'_>, candidates: &[&Candidate<'_>]) -> Attr
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| !consumed[*i])
-                .filter(|(_, c)| within_window(c.hit.clock, ribbon.clock))
-                .filter_map(|(i, c)| lit_change(input, c, ribbon.clock).map(|change| (i, *c, change)))
+                .filter(|(_, c)| hit_could_have_caused(c.hit.clock, ribbon.clock))
+                .filter_map(|(i, c)| lit_change(input, c, ribbon.clock, &claimed_changes).map(|change| (i, *c, change)))
                 .min_by(|(_, a, _), (_, b, _)| {
                     clock_distance(a.hit.clock, ribbon.clock).total_cmp(&clock_distance(b.hit.clock, ribbon.clock))
                 });
 
-            let Some((index, candidate, change)) = pick else {
+            let Some((index, candidate, change_index)) = pick else {
                 unattributed += 1;
                 continue;
             };
 
             consumed[index] = true;
+            claimed_changes[change_index] = true;
+            let change = &input.burn_state_changes[change_index];
             *fires_by_victim.entry(candidate.victim).or_insert(0) += 1;
             predictions.push(SectionPrediction {
                 predicted: candidate.section,
@@ -746,6 +901,7 @@ fn attribute(input: &FireChanceInput<'_>, candidates: &[&Candidate<'_>]) -> Attr
                 } else {
                     SectionEvidence::NearestOfSeveral
                 },
+                hull_sections: input.victims.get(&candidate.victim).map(|v| v.node_probability.len()).unwrap_or(0),
             });
         }
     }
@@ -757,25 +913,53 @@ fn clock_distance(a: GameClock, b: GameClock) -> f32 {
     (a.seconds() - b.seconds()).abs()
 }
 
+/// Whether a hit at `clock` is close enough to a ribbon to have caused it.
+///
+/// Asymmetric: the causing hit precedes the ribbon, so the band reaches
+/// [`ATTRIBUTION_WINDOW`] back and only [`RIBBON_REORDER_TOLERANCE`] forward.
+/// A symmetric band would let a hit just after the ribbon outrank one further
+/// before it, which reverses cause and effect.
+fn hit_could_have_caused(clock: GameClock, ribbon: GameClock) -> bool {
+    let lead = ribbon.seconds() - clock.seconds();
+    (-RIBBON_REORDER_TOLERANCE..=ATTRIBUTION_WINDOW).contains(&lead)
+}
+
+/// Whether a burn transition and a ribbon are close enough to be the same
+/// event. Symmetric, unlike [`hit_could_have_caused`]: both are effects of the
+/// same server tick arriving in separate packets, with no causal order between
+/// them.
 fn within_window(clock: GameClock, ribbon: GameClock) -> bool {
     clock_distance(clock, ribbon) <= ATTRIBUTION_WINDOW
 }
 
-/// The burn-state change nearest the ribbon that lit at least one section on
-/// this candidate's victim. Any newly lit bit qualifies, not only the predicted
-/// one: requiring the prediction to match would make `section_agreement`
-/// measure nothing.
-fn lit_change<'a>(
-    input: &'a FireChanceInput<'_>,
+/// Index of the unclaimed burn-state change nearest the ribbon that lit at least
+/// one section on this candidate's victim. Any newly lit bit qualifies, not only
+/// the predicted one: requiring the prediction to match would make
+/// [`EffectiveFireChance::independent_section_agreement`] measure nothing.
+///
+/// Transitions at or after the victim's death are skipped for the same reason
+/// [`VictimTrack`] drops them: `onEntityDeath` lights nodes for effect, and a
+/// ribbon matching one of those would credit a fire nothing set.
+fn lit_change(
+    input: &FireChanceInput<'_>,
     candidate: &Candidate<'_>,
     ribbon: GameClock,
-) -> Option<&'a BurnStateChange> {
+    claimed: &[bool],
+) -> Option<usize> {
+    let died_at = match input.victims.get(&candidate.victim).map(|victim| victim.fate) {
+        Some(VictimFate::DiedAt(clock)) => Some(clock),
+        _ => None,
+    };
     input
         .burn_state_changes
         .iter()
-        .filter(|c| c.victim == candidate.victim && within_window(c.clock, ribbon))
-        .filter(|c| c.newly_lit().next().is_some())
-        .min_by(|a, b| clock_distance(a.clock, ribbon).total_cmp(&clock_distance(b.clock, ribbon)))
+        .enumerate()
+        .filter(|(index, _)| !claimed[*index])
+        .filter(|(_, c)| c.victim == candidate.victim && within_window(c.clock, ribbon))
+        .filter(|(_, c)| died_at.is_none_or(|died_at| c.clock < died_at))
+        .filter(|(_, c)| c.newly_lit().next().is_some())
+        .min_by(|(_, a), (_, b)| clock_distance(a.clock, ribbon).total_cmp(&clock_distance(b.clock, ribbon)))
+        .map(|(index, _)| index)
 }
 
 /// The bit that rose nearest the prediction. A single change can light several
@@ -1007,6 +1191,16 @@ mod tests {
         Refund,
     }
 
+    /// One more of our own main-battery shells landing on the victim.
+    struct ExtraHit {
+        section: u8,
+        /// Seconds from [`HIT_CLOCK`]; zero puts it in the same server tick as
+        /// the first hit, which is what a salvo straddling one section looks
+        /// like on the wire.
+        offset: f32,
+        hit_type: ShellHitType,
+    }
+
     /// A scenario in literal values. Every test perturbs exactly one thing.
     struct Fixture {
         main_burn_prob: f32,
@@ -1021,7 +1215,9 @@ mod tests {
         secondary_hit_offset: f32,
         ribbon_offset: f32,
         uncomputable_node_probability: Option<u8>,
-        second_main_hit_section: Option<u8>,
+        extra_main_hits: Vec<ExtraHit>,
+        hit_off_the_hull: bool,
+        burn_change_offset: f32,
         server_lit_section: u8,
         second_server_lit_section: Option<u8>,
         ribbons: bool,
@@ -1052,7 +1248,9 @@ mod tests {
             secondary_hit_offset: 0.1,
             ribbon_offset: 0.0,
             uncomputable_node_probability: None,
-            second_main_hit_section: None,
+            extra_main_hits: Vec::new(),
+            hit_off_the_hull: false,
+            burn_change_offset: 0.0,
             server_lit_section: 0,
             second_server_lit_section: None,
             ribbons: true,
@@ -1145,8 +1343,28 @@ mod tests {
 
         /// A second main-battery hit, placed clear of the ribbon window so it
         /// only adds to the denominator.
-        fn also_hitting_section(mut self, section: u8) -> Fixture {
-            self.second_main_hit_section = Some(section);
+        fn also_hitting_section(self, section: u8) -> Fixture {
+            self.also_hitting_section_at(section, 20.0)
+        }
+
+        fn also_hitting_section_at(self, section: u8, offset: f32) -> Fixture {
+            self.also_hitting_section_with(section, offset, ShellHitType::Normal)
+        }
+
+        fn also_hitting_section_with(mut self, section: u8, offset: f32, hit_type: ShellHitType) -> Fixture {
+            self.extra_main_hits.push(ExtraHit { section, offset, hit_type });
+            self
+        }
+
+        /// Move the first hit's impact far past the hull's ends, which is what
+        /// a hit mis-keyed to a neighbouring ship looks like.
+        fn with_the_impact_off_the_hull(mut self) -> Fixture {
+            self.hit_off_the_hull = true;
+            self
+        }
+
+        fn with_the_burn_change_offset_by(mut self, seconds: f32) -> Fixture {
+            self.burn_change_offset = seconds;
             self
         }
 
@@ -1278,6 +1496,10 @@ mod tests {
             if !self.salvo_matched {
                 hits[0].salvo = None;
             }
+            if self.hit_off_the_hull {
+                let far = wowsunpack::game_params::types::Meters::from(600.0).to_world().value();
+                hits[0].hit.position = WorldPos::new(far, 0.0, 0.0);
+            }
             if self.salvo_from_another_ship
                 && let Some(salvo) = hits[0].salvo.as_mut()
             {
@@ -1292,13 +1514,13 @@ mod tests {
                     ShellHitType::Normal,
                 ));
             }
-            if let Some(section) = self.second_main_hit_section {
+            for extra in &self.extra_main_hits {
                 hits.push(hit(
                     victim_id(),
                     main_shell_id(),
-                    GameClock(HIT_CLOCK.0 + 20.0),
-                    section,
-                    ShellHitType::Normal,
+                    GameClock(HIT_CLOCK.0 + extra.offset),
+                    extra.section,
+                    extra.hit_type,
                 ));
             }
             if self.hit_on_a_hull_we_cannot_place {
@@ -1320,7 +1542,7 @@ mod tests {
             }
             changes.push(BurnStateChange {
                 victim: victim_id(),
-                clock: HIT_CLOCK,
+                clock: GameClock(HIT_CLOCK.0 + self.burn_change_offset),
                 previous: self.burn_mask_before,
                 current: self.burn_mask_before | lit,
             });
@@ -1361,7 +1583,11 @@ mod tests {
             presence.note_seen(other_victim_id(), GameClock(1000.0));
 
             let mut activations: HashMap<EntityId, Vec<ActiveConsumable>> = HashMap::new();
-            let mut consumables = Vec::new();
+            // Every scenario's victim carries a Damage Control Party slot: its
+            // work time is what bounds how long an activation fired just before
+            // the ship entered AOI could still be covering the hit clock, and
+            // without one no continuity argument runs at all.
+            let consumables = vec![dcp_inventory()];
             let activated_at: &[f32] = match self.dcp {
                 Dcp::Running => &[HIT_CLOCK.0 - 5.0],
                 Dcp::Refund => &[20.0, 50.0],
@@ -1380,7 +1606,6 @@ mod tests {
                         })
                         .collect(),
                 );
-                consumables.push(dcp_inventory());
             }
 
             let mut victims = HashMap::new();
@@ -1659,7 +1884,7 @@ mod tests {
         let out = analyze(&fixture().with_coincident_secondary_hit().build()).expect("geometry");
         assert_eq!(out.eligible_hits, 0);
         assert_eq!(out.fires, 0);
-        assert_eq!(out.exclusions[&ExclusionReason::SecondaryFireAmbiguous], 1);
+        assert_eq!(out.exclusions[&ExclusionReason::AmbiguousWithAnotherHit], 1);
         // The fire happened and was ours; with its only candidate dropped there
         // is nothing left to assign it to.
         assert_eq!(out.unattributed_fires, 1);
@@ -1674,7 +1899,7 @@ mod tests {
         let out = analyze(&fixture().with_coincident_secondary_hit().without_ribbons().build()).expect("geometry");
         assert_eq!(out.eligible_hits, 0);
         assert_eq!(out.fires, 0);
-        assert_eq!(out.exclusions[&ExclusionReason::SecondaryFireAmbiguous], 1);
+        assert_eq!(out.exclusions[&ExclusionReason::AmbiguousWithAnotherHit], 1);
         assert_eq!(out.unattributed_fires, 0);
     }
 
@@ -1727,11 +1952,12 @@ mod tests {
     #[test]
     fn section_agreement_is_measured() {
         let agree = analyze(&fixture().server_lights_section(0).hitting_section(0).build()).expect("geometry");
-        assert_eq!(agree.section_agreement(), Some(1.0));
+        assert_eq!(agree.independent_section_agreement(), Some(1.0));
         assert_eq!(agree.section_predictions.len(), 1);
+        assert_eq!(agree.section_predictions[0].hull_sections, NODES.len());
 
         let disagree = analyze(&fixture().server_lights_section(3).hitting_section(0).build()).expect("geometry");
-        assert_eq!(disagree.section_agreement(), Some(0.0));
+        assert_eq!(disagree.independent_section_agreement(), Some(0.0));
         assert_eq!(disagree.section_predictions[0].actual.get(), 3);
         assert_eq!(disagree.section_predictions[0].evidence, SectionEvidence::OneSectionRose);
     }
@@ -1762,14 +1988,17 @@ mod tests {
         assert_eq!(out.section_predictions[0].predicted.get(), 0);
         assert_eq!(out.section_predictions[0].actual.get(), 2);
         assert_eq!(out.section_predictions[0].evidence, SectionEvidence::NearestOfSeveral);
-        assert_eq!(out.section_agreement(), Some(0.0));
+        // Recorded, but not scored: `actual` was picked as the risen bit
+        // nearest the prediction, so the pair is not evidence either way.
+        assert!(!out.section_predictions[0].is_independent_evidence());
+        assert_eq!(out.independent_section_agreement(), None);
     }
 
     /// With no attributed fires there is nothing to agree about.
     #[test]
     fn section_agreement_is_absent_without_fires() {
         let out = analyze(&fixture().without_ribbons().build()).expect("geometry");
-        assert_eq!(out.section_agreement(), None);
+        assert_eq!(out.independent_section_agreement(), None);
     }
 
     /// A rate over zero samples is unknown, not zero.
@@ -1880,7 +2109,7 @@ mod tests {
         .expect("geometry");
         assert_eq!(out.eligible_hits, 0);
         assert_eq!(out.fires, 0);
-        assert_eq!(out.exclusions[&ExclusionReason::SecondaryFireAmbiguous], 1);
+        assert_eq!(out.exclusions[&ExclusionReason::AmbiguousWithAnotherHit], 1);
         assert_eq!(out.unattributed_fires, 1);
     }
 
@@ -1961,5 +2190,151 @@ mod tests {
         assert_eq!(out.rate(), Some(1.0));
         assert_eq!(out.expected_fires, None);
         assert_eq!(out.per_ship[0].expected_fires, None);
+    }
+
+    /// The formula breakdown goes with the expected value. Folded from the
+    /// stock bundle it is a real formula for a build nobody is running, and the
+    /// hover presents it as the player's own.
+    #[test]
+    fn an_unfoldable_build_shows_no_formula_at_all() {
+        let out = analyze(&fixture().with_a_modifier_this_version_cannot_classify().build()).expect("geometry");
+        assert_eq!(out.formula_base, None);
+        assert!(out.formula.is_empty(), "got {:?}", out.formula);
+    }
+
+    /// Every hit in one `ShotKills` packet carries that packet's clock, so a
+    /// salvo putting several shells into one section arrives as several hits at
+    /// one clock, all reading the same pre-tick burn mask. At most one of them
+    /// lit the section and which one is not recoverable, so the group is
+    /// dropped from both counts. Keeping it would score one fire over k trials
+    /// and only ever inflate the denominator where a fire actually started.
+    #[test]
+    fn several_hits_on_one_section_in_one_tick_are_dropped_whole() {
+        let out = analyze(&fixture().hitting_section(0).also_hitting_section_at(0, 0.0).build()).expect("geometry");
+        assert_eq!(out.eligible_hits, 0);
+        assert_eq!(out.fires, 0);
+        assert_eq!(out.exclusions[&ExclusionReason::SameTickSectionAmbiguous], 2);
+        // The fire was ours and did happen; with both candidates gone there is
+        // nothing left to assign it to.
+        assert_eq!(out.unattributed_fires, 1);
+    }
+
+    /// The same group with no fire is dropped identically. The decision is on
+    /// the hits alone, so it cannot depend on the outcome.
+    #[test]
+    fn a_same_tick_section_group_is_dropped_even_when_no_fire_started() {
+        let out = analyze(&fixture().hitting_section(0).also_hitting_section_at(0, 0.0).without_ribbons().build())
+            .expect("geometry");
+        assert_eq!(out.eligible_hits, 0);
+        assert_eq!(out.exclusions[&ExclusionReason::SameTickSectionAmbiguous], 2);
+        assert_eq!(out.unattributed_fires, 0);
+    }
+
+    /// The sections are independent, so two hits sharing a tick but not a
+    /// section are two separate trials.
+    #[test]
+    fn two_hits_in_one_tick_on_different_sections_both_count() {
+        let out = analyze(&fixture().hitting_section(0).also_hitting_section_at(3, 0.0).build()).expect("geometry");
+        assert_eq!(out.eligible_hits, 2);
+        assert!(!out.exclusions.contains_key(&ExclusionReason::SameTickSectionAmbiguous));
+    }
+
+    /// Two hits on one section in different ticks are two separate trials: the
+    /// second reads a burn mask the first's fire is already in.
+    #[test]
+    fn two_hits_on_one_section_in_different_ticks_both_count() {
+        let out = analyze(&fixture().hitting_section(3).also_hitting_section_at(3, 20.0).build()).expect("geometry");
+        assert_eq!(out.eligible_hits, 2);
+        assert!(!out.exclusions.contains_key(&ExclusionReason::SameTickSectionAmbiguous));
+    }
+
+    /// A ricochet is not proof that a shell could not have rolled for fire, only
+    /// an absence of proof that it could. So it contests a coincident eligible
+    /// hit in its section: crediting the ribbon to that hit would add a fire to
+    /// the numerator with no trial behind it in the denominator.
+    #[test]
+    fn a_hit_type_we_cannot_rule_out_contests_a_coincident_eligible_hit() {
+        let out =
+            analyze(&fixture().hitting_section(0).also_hitting_section_with(0, 0.0, ShellHitType::Ricochet).build())
+                .expect("geometry");
+        assert_eq!(out.eligible_hits, 0);
+        assert_eq!(out.fires, 0);
+        assert_eq!(out.exclusions[&ExclusionReason::HitTypeDoesNotRoll], 1);
+        assert_eq!(out.exclusions[&ExclusionReason::AmbiguousWithAnotherHit], 1);
+        assert_eq!(out.unattributed_fires, 1);
+    }
+
+    /// The contest is section-scoped, so an unprovable hit elsewhere on the
+    /// hull leaves the trial alone.
+    #[test]
+    fn a_non_rolling_hit_on_another_section_does_not_contest() {
+        let out =
+            analyze(&fixture().hitting_section(0).also_hitting_section_with(3, 0.0, ShellHitType::Ricochet).build())
+                .expect("geometry");
+        assert_eq!(out.eligible_hits, 1);
+        assert_eq!(out.fires, 1);
+    }
+
+    /// `victim_entity_id` is the ship whose last known position was nearest the
+    /// salvo's target point, which in a tight formation can be a neighbour. An
+    /// impact that far from the hull's nodes would otherwise be clamped onto its
+    /// bow or stern and enter the denominator as a trial that can only miss.
+    #[test]
+    fn an_impact_nowhere_near_the_victims_hull_is_excluded() {
+        let out = analyze(&fixture().with_the_impact_off_the_hull().build()).expect("geometry");
+        assert_eq!(out.eligible_hits, 0);
+        assert_eq!(out.exclusions[&ExclusionReason::ImpactOffTheHull], 1);
+    }
+
+    /// The causing hit precedes its ribbon. A hit after it is packet ordering
+    /// within a tick, so only that much jitter is allowed forward.
+    #[test]
+    fn a_hit_after_its_ribbon_is_attributed_only_within_the_reorder_tolerance() {
+        let jittered = analyze(&fixture().with_the_ribbon_offset_by(-0.1).build()).expect("geometry");
+        assert_eq!(jittered.fires, 1);
+
+        let too_late = analyze(&fixture().with_the_ribbon_offset_by(-0.3).build()).expect("geometry");
+        assert_eq!(too_late.eligible_hits, 1);
+        assert_eq!(too_late.fires, 0);
+        assert_eq!(too_late.unattributed_fires, 1);
+    }
+
+    /// `onEntityDeath` lights burn nodes for effect, so a transition at or after
+    /// the victim died is not a fire anyone set. `VictimTrack` already drops
+    /// those from the burn mask; attribution has to drop them too, or a shell
+    /// that landed just before the kill is credited with a death flare.
+    #[test]
+    fn a_death_flare_transition_cannot_be_attributed() {
+        let out = analyze(
+            &fixture()
+                .with_the_victim_dead_at(GameClock(HIT_CLOCK.0 + 0.2))
+                .with_the_burn_change_offset_by(0.3)
+                .with_the_ribbon_offset_by(0.3)
+                .build(),
+        )
+        .expect("geometry");
+        assert_eq!(out.eligible_hits, 1);
+        assert_eq!(out.fires, 0);
+        assert_eq!(out.unattributed_fires, 1);
+    }
+
+    /// One transition is one fire starting, so two ribbons cannot both read it.
+    /// Letting them would give the second ribbon an `actual` section belonging
+    /// to the first fire while still labelling the pair independent evidence.
+    #[test]
+    fn two_ribbons_cannot_share_one_burn_transition() {
+        let out = analyze(
+            &fixture()
+                .hitting_section(0)
+                .also_hitting_section_at(3, 0.0)
+                .server_lights_section(0)
+                .with_stray_ribbon_at(HIT_CLOCK)
+                .build(),
+        )
+        .expect("geometry");
+        assert_eq!(out.eligible_hits, 2);
+        assert_eq!(out.fires, 1);
+        assert_eq!(out.unattributed_fires, 1);
+        assert_eq!(out.section_predictions.len(), 1);
     }
 }

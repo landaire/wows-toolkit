@@ -5237,7 +5237,9 @@ fn exclusion_reason_label(reason: ExclusionReason) -> Cow<'static, str> {
         ExclusionReason::NotMainBattery => t!("ui.replay.sections.fire_chance_exclusion_not_main_battery"),
         ExclusionReason::HitTypeDoesNotRoll => t!("ui.replay.sections.fire_chance_exclusion_hit_type_does_not_roll"),
         ExclusionReason::NoSectionGeometry => t!("ui.replay.sections.fire_chance_exclusion_no_geometry"),
-        ExclusionReason::SecondaryFireAmbiguous => t!("ui.replay.sections.fire_chance_exclusion_secondary_ambiguous"),
+        ExclusionReason::ImpactOffTheHull => t!("ui.replay.sections.fire_chance_exclusion_impact_off_the_hull"),
+        ExclusionReason::AmbiguousWithAnotherHit => t!("ui.replay.sections.fire_chance_exclusion_ambiguous_hit"),
+        ExclusionReason::SameTickSectionAmbiguous => t!("ui.replay.sections.fire_chance_exclusion_same_tick_section"),
     }
 }
 

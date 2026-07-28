@@ -55,7 +55,6 @@ use wows_battle_world::report::BattleReport;
 use wows_replay_insights::battle_report::resolve_battle_results;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::fire_chance::analysis::ExclusionReason;
-use wows_replay_insights::fire_chance::analysis::SectionEvidence;
 use wows_replay_insights::fire_chance::analysis::analyze;
 use wows_replay_insights::fire_chance::resolve::ResolutionDiagnostics;
 use wows_replay_insights::fire_chance::resolve::resolve_fire_chance_input;
@@ -126,8 +125,10 @@ struct Measurement {
     server_fires_by_ship: Option<BTreeMap<String, u64>>,
     /// `(predicted, actual, independent)` per attributed fire. `independent` is
     /// false when the matched transition lit several sections at once, in which
-    /// case `actual` was chosen as the risen bit nearest the prediction and the
-    /// pair cannot be scored as evidence for the positional model.
+    /// case `actual` was chosen as the risen bit nearest the prediction, and
+    /// when the victim's hull has one fire section, in which case the pair
+    /// agrees by construction. Neither can be scored as evidence for the
+    /// positional model.
     section_predictions: Vec<(u8, u8, bool)>,
     diagnostics: ResolutionDiagnostics,
     /// Presence windows still open at the end of the parse, against the total.
@@ -394,8 +395,24 @@ fn measure(
 fn section_pairs(out: &EffectiveFireChance) -> Vec<(u8, u8, bool)> {
     out.section_predictions
         .iter()
-        .map(|pair| (pair.predicted.get(), pair.actual.get(), pair.evidence == SectionEvidence::OneSectionRose))
+        .map(|pair| (pair.predicted.get(), pair.actual.get(), pair.is_independent_evidence()))
         .collect()
+}
+
+/// Wilson score interval lower bound at 95% for `agreed` successes in `total`
+/// trials.
+///
+/// The gate compares this rather than the point estimate against the baseline,
+/// so it asks whether the corpus establishes the positional model beats a
+/// position-blind one rather than whether this particular draw happened to.
+fn wilson_lower_bound(agreed: u32, total: u32) -> f64 {
+    const Z: f64 = 1.96;
+    let n = f64::from(total);
+    let p = f64::from(agreed) / n;
+    let denominator = 1.0 + Z * Z / n;
+    let center = (p + Z * Z / (2.0 * n)) / denominator;
+    let half_width = Z * (p * (1.0 - p) / n + Z * Z / (4.0 * n * n)).sqrt() / denominator;
+    center - half_width
 }
 
 fn build_corpus() -> Corpus {
@@ -641,17 +658,21 @@ fn ribbon_accounting_reconciles() {
 /// The load-bearing measurement. If nearest-node is what the server does, the
 /// section we predict is the one that lights.
 ///
-/// The gate is on the **single-section** rate. When one transition lights
-/// several sections at once, `analyze` reports the risen bit nearest the
-/// prediction as the actual one, so predicted and actual are not independent
-/// there and scoring those pairs biases the rate upward. A battleship salvo
-/// setting two fires inside one server tick is ordinary, so that share is not
-/// negligible and is printed rather than assumed away. The all-pairs rate is
-/// printed beside it: the gap between the two is the size of the bias.
+/// The gate is on the **independent** pairs. Two kinds are dropped. When one
+/// transition lights several sections at once, `analyze` reports the risen bit
+/// nearest the prediction as the actual one, so predicted and actual are not
+/// independent there and scoring those pairs biases the rate upward; a
+/// battleship salvo setting two fires inside one server tick is ordinary, so
+/// that share is not negligible and is printed rather than assumed away. And a
+/// hull with a single fire section can only predict section 0 and can only have
+/// lit section 0, so those pairs are noise-free padding that would drag the rate
+/// toward 1 whatever the positional model does. The all-pairs rate is printed
+/// beside the gated one: the gap between the two is the size of the bias.
 ///
 /// Chance is not 0.25 either. Sections are not lit uniformly, so the number to
-/// beat is what a predictor reproducing the observed marginal distribution
-/// would score, which is printed too.
+/// beat is what the best predictor that knows the marginal distribution and
+/// nothing about position would score, and the gate is against that computed
+/// baseline rather than a fixed threshold.
 #[test]
 #[ignore = "requires replays and a game install"]
 fn predicted_sections_agree_with_the_server() {
@@ -707,20 +728,31 @@ independent evidence, since the second picks the actual section nearest the pred
         "only {independent} fires lit exactly one section; not enough independent evidence to conclude"
     );
     let rate = f64::from(agreed_independent) / f64::from(independent);
-    // A predictor that knew the marginal distribution and nothing about
-    // position would score this. It is the bar the positional model has to
-    // clear, and it is well above the 0.25 a uniform four-section guess implies.
-    let marginal_chance: f64 = actual_marginal
-        .iter()
-        .map(|count| {
-            let share = f64::from(*count) / f64::from(independent);
-            share * share
-        })
-        .sum();
-    println!("single-section agreement {rate:.3} over {independent} fires (marginal chance {marginal_chance:.3})");
+    let shares: Vec<f64> = actual_marginal.iter().map(|count| f64::from(*count) / f64::from(independent)).collect();
+    // Two different position-blind baselines, and only the second is the bar.
+    // `collision` is the chance two draws from the observed distribution match,
+    // which is what a predictor sampling that distribution scores. The best
+    // position-blind predictor does not sample it, it always names the most
+    // common section, scoring `best_blind = max_i p_i >= collision`. Both are
+    // well above the 0.25 a uniform four-section guess implies.
+    let collision: f64 = shares.iter().map(|share| share * share).sum();
+    let best_blind = shares.iter().copied().fold(0.0f64, f64::max);
+    let lower_bound = wilson_lower_bound(agreed_independent, independent);
+    println!(
+        "single-section agreement {rate:.3} over {independent} fires (95% lower bound {lower_bound:.3}; \
+best position-blind predictor {best_blind:.3}, distribution-sampling predictor {collision:.3})"
+    );
     for (predicted, row) in confusion.iter().enumerate() {
         println!("  predicted {predicted}: {row:?}");
     }
 
-    assert!(rate > 0.6, "section agreement {rate:.3} is near chance; the positional model is wrong");
+    // Against the computed baseline, not a hard-coded number: the bar depends
+    // on how unevenly this corpus's fires are distributed across sections, and
+    // a fixed threshold would move relative to it on a different draw.
+    assert!(
+        lower_bound > best_blind,
+        "section agreement {rate:.3} over {independent} fires (95% lower bound {lower_bound:.3}) does not beat \
+the {best_blind:.3} a predictor that always named the most common section would score; the positional model \
+is not established"
+    );
 }
