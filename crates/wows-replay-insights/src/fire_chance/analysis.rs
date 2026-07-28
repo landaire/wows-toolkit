@@ -81,6 +81,11 @@ pub enum HitEligibility {
     ObservationGap,
     ConsumableModelUnreliable,
     VictimDead,
+    /// The victim's fate could not be resolved, so neither "this hit landed
+    /// after it died" nor "this burn transition is a death flare" can be ruled
+    /// out. Distinct from `VictimDead` so the cost of an unresolved fate is
+    /// visible in the tally instead of hiding inside a real exclusion.
+    VictimFateUnknown,
     ShellCannotBurn,
     NotMainBattery,
     /// Carries the raw `Recognized` rather than a bare [`ShellHitType`]: an id
@@ -89,7 +94,7 @@ pub enum HitEligibility {
     HitTypeDoesNotRoll(Recognized<ShellHitType>),
     NoSectionGeometry,
     /// One of our own secondary shells landed in the same section inside the
-    /// attribution window, so the SetFire ribbon cannot be assigned to this
+    /// attribution window, so a SetFire ribbon there cannot be assigned to this
     /// main-battery hit rather than to the secondary.
     SecondaryFireAmbiguous,
 }
@@ -106,6 +111,7 @@ pub enum ExclusionReason {
     ObservationGap,
     ConsumableModelUnreliable,
     VictimDead,
+    VictimFateUnknown,
     ShellCannotBurn,
     NotMainBattery,
     HitTypeDoesNotRoll,
@@ -127,6 +133,7 @@ impl HitEligibility {
             HitEligibility::ObservationGap => Some(ExclusionReason::ObservationGap),
             HitEligibility::ConsumableModelUnreliable => Some(ExclusionReason::ConsumableModelUnreliable),
             HitEligibility::VictimDead => Some(ExclusionReason::VictimDead),
+            HitEligibility::VictimFateUnknown => Some(ExclusionReason::VictimFateUnknown),
             HitEligibility::ShellCannotBurn => Some(ExclusionReason::ShellCannotBurn),
             HitEligibility::NotMainBattery => Some(ExclusionReason::NotMainBattery),
             HitEligibility::HitTypeDoesNotRoll(_) => Some(ExclusionReason::HitTypeDoesNotRoll),
@@ -184,8 +191,17 @@ pub struct EffectiveFireChance {
     /// evidence for the nearest-node assumption; [`Self::section_agreement`] is
     /// its ratio. Stored as pairs so a corpus test can build a confusion matrix.
     pub section_predictions: Vec<SectionPrediction>,
-    /// SetFire ribbons that matched no eligible hit. Nonzero means something
-    /// upstream is wrong; surfaced rather than swallowed.
+    /// Fires we could not assign to a specific hit: a SetFire ribbon that
+    /// matched no eligible hit inside the attribution window.
+    ///
+    /// A healthy replay carries plenty of these, so a nonzero count is not by
+    /// itself a fault. The legitimate causes are fires set by our own
+    /// secondaries with no main-battery candidate nearby, fires on a victim
+    /// outside the recording client's AOI, fires whose causing hit was excluded
+    /// by any of the eligibility rules, and fires whose main-battery candidate
+    /// was dropped as ambiguous with one of our secondaries. What the number is
+    /// for is proportion: an unattributed count far larger than `fires` on a
+    /// ship with no secondaries means something upstream is wrong.
     pub unattributed_fires: u32,
     /// The attacker-side formula steps, for the hover breakdown.
     pub formula: Vec<FormulaStep>,
@@ -219,6 +235,12 @@ impl EffectiveFireChance {
 /// The firing ship: who, their build, and which shells each battery loads.
 pub struct AttackerContext<'a> {
     /// Vehicle entity id, matched against a salvo's `owner_id`.
+    ///
+    /// This must be the recording player's own vehicle. Attribution runs off
+    /// the SetFire ribbon log, which the server sends only for the recording
+    /// perspective, so any other attacker would take its denominator from one
+    /// player's hits and its numerator from another player's fires.
+    /// [`analyze`] refuses that combination rather than reporting it.
     pub entity: EntityId,
     pub build: &'a ResolvedBuild,
     /// Projectile GameParams names in the equipped main battery's `ammoList`.
@@ -227,7 +249,42 @@ pub struct AttackerContext<'a> {
     /// `ammoList`. Secondary fire arrives on the same `receiveArtilleryShots`
     /// path as the main battery and is only separable by this list, which is
     /// what makes a secondary/main-battery collision detectable at all.
-    pub secondary_ammo: &'a [String],
+    ///
+    /// `Some(&[])` is a ship that carries no secondaries; `None` is a secondary
+    /// battery we could not resolve, which disables the contest guard entirely
+    /// and would credit secondary-set fires to coincident main-battery hits.
+    /// [`analyze`] returns `None` for that rather than reporting a number the
+    /// guard never checked.
+    pub secondary_ammo: Option<&'a [String]>,
+}
+
+/// Whether the victim learned Fire Prevention Expert, which forces
+/// `burningFlags` bit 2 off unconditionally.
+///
+/// Three-valued because `false` would otherwise mean both "did not take it" and
+/// "we could not resolve this victim's build", and the second reading admits
+/// node-2 hits that provably could not have started a fire. Victim skill data
+/// is not reliably resolvable on old replays, so the unresolved case is
+/// ordinary rather than exotic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FirePrevention {
+    Learned,
+    NotLearned,
+    Unknown,
+}
+
+/// What became of the victim.
+///
+/// Three-valued for the same reason as [`FirePrevention`]: `Option<GameClock>`
+/// would conflate "survived" with "we do not know", and under the second
+/// reading post-death hits enter the denominator while the server's
+/// death-flare burn transitions stay in the log where a ribbon can match one.
+/// That corrupts numerator and denominator together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VictimFate {
+    Survived,
+    DiedAt(GameClock),
+    Unknown,
 }
 
 /// One ship that could be hit, with every GameParams fact the eligibility model
@@ -245,12 +302,8 @@ pub struct VictimContext {
     /// The defender's folded `burnProb` coefficient (Damage Control System
     /// Modification 1 `0.95`, Fire Prevention Expert `0.9`).
     pub burn_prob: f32,
-    /// Fire Prevention Expert is learned, so `burningFlags` bit 2 is forced off
-    /// for this ship and a hit there can never start a fire.
-    pub fire_resistance_enabled: bool,
-    /// Clock the victim died at, if it did. Burn transitions at or after it are
-    /// discarded: the server lights extra nodes on death for visual effect.
-    pub died_at: Option<GameClock>,
+    pub fire_prevention: FirePrevention,
+    pub fate: VictimFate,
     /// This victim's own consumable slots, build modifiers already applied.
     pub consumables: Vec<ConsumableInventory>,
 }
@@ -260,6 +313,10 @@ pub struct FireChanceInput<'a> {
     /// Replay version, used to fold the attacker's modifiers.
     pub version: Version,
     pub attacker: AttackerContext<'a>,
+    /// The recording player's vehicle entity, i.e. whose ribbons `ribbons`
+    /// holds. Carried separately from [`AttackerContext::entity`] so the
+    /// self-player invariant is checkable rather than merely documented.
+    pub self_entity: EntityId,
     /// Every ship that could be hit, keyed by vehicle entity id.
     pub victims: &'a HashMap<EntityId, VictimContext>,
     /// Whole-match hit history (`BattleReport::hit_history`).
@@ -294,10 +351,18 @@ struct SecondaryImpact {
 
 /// Effective fire chance for one attacker.
 ///
-/// `None` when the eligibility model cannot be built at all: no victim's hull
-/// resolved to fire-section geometry, or the attacker's ship carries no tier
-/// and so no burn-chance formula. Both mean unavailable, never zero.
+/// `None` when the eligibility model cannot be built at all: the attacker is
+/// not the recording player, whose ribbons are the only fire attribution there
+/// is; the secondary battery's `ammoList` is unresolved, which would leave the
+/// secondary-contamination guard silently disabled; no victim's hull resolved
+/// to fire-section geometry; or the attacker's ship carries no tier and so no
+/// burn-chance formula. Every one means unavailable, never zero.
 pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
+    if input.attacker.entity != input.self_entity {
+        return None;
+    }
+    let secondary_ammo = input.attacker.secondary_ammo?;
+
     let geometry: HashMap<EntityId, FireSectionGeometry> = input
         .victims
         .iter()
@@ -332,13 +397,20 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
             // absent entry means no activation was ever observed for this ship,
             // which is a fact `VictimTrack` reasons from rather than a default.
             let activations = input.activations.get(entity).map(Vec::as_slice).unwrap_or(&[]);
+            // An unknown fate cannot narrow the transition log, so `VictimTrack`
+            // keeps every transition including any death flare. `classify`
+            // refuses every hit on such a victim, so nothing reads that log.
+            let died_at = match victim.fate {
+                VictimFate::DiedAt(clock) => Some(clock),
+                VictimFate::Survived | VictimFate::Unknown => None,
+            };
             let track = VictimTrack::build(
                 *entity,
                 input.burn_state_changes,
                 activations,
                 &victim.consumables,
                 input.presence,
-                victim.died_at,
+                died_at,
             );
             (*entity, track)
         })
@@ -359,11 +431,11 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
 
         let eligibility = classify(input, &geometry, &tracks, &bundle, tier, formula_applies, hit, salvo.params_id);
 
-        // Our own secondaries contest any fire credited to a main-battery hit
-        // in the same window and section, so record where they landed even
-        // though they are not candidates themselves.
+        // Our own secondaries contest a main-battery hit in the same window and
+        // section, so record where they landed even though they are not
+        // candidates themselves.
         if matches!(eligibility, HitEligibility::NotMainBattery)
-            && is_secondary_shell(input, salvo.params_id)
+            && is_secondary_shell(input, secondary_ammo, salvo.params_id)
             && let Some(section) = section_of(input, &geometry, hit)
         {
             secondaries.push(SecondaryImpact { victim: hit.victim_entity_id, section, clock: hit.clock });
@@ -385,17 +457,23 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
         }
     }
 
-    let attribution = attribute(input, &candidates, &secondaries);
-    if !attribution.contested.is_empty() {
-        *exclusions.entry(ExclusionReason::SecondaryFireAmbiguous).or_insert(0) += attribution.contested.len() as u32;
+    // The contest is decided on the hits alone, before any ribbon is looked at.
+    // Deciding it during attribution would drop only the ambiguous hits that
+    // started a fire and keep the ambiguous ones that did not, which is
+    // outcome-conditioned selection: it would depress the reported chance in
+    // proportion to secondary throughput, on exactly the ships the guard exists
+    // to protect. A ribbon left with no candidate falls to `unattributed_fires`,
+    // which is what a fire we cannot assign to a weapon is.
+    let (counted, contested): (Vec<&Candidate<'_>>, Vec<&Candidate<'_>>) =
+        candidates.iter().partition(|c| !contested_by_a_secondary(c, &secondaries));
+    if !contested.is_empty() {
+        *exclusions.entry(ExclusionReason::SecondaryFireAmbiguous).or_insert(0) += contested.len() as u32;
     }
 
-    let counted: Vec<&Candidate<'_>> =
-        candidates.iter().enumerate().filter(|(i, _)| !attribution.contested.contains(i)).map(|(_, c)| c).collect();
+    let attribution = attribute(input, &counted);
 
     let per_ship = per_ship_breakdown(input, &counted, &attribution.fires_by_victim, formula_applies);
-    let expected_fires =
-        formula_applies.then(|| counted.iter().filter_map(|c| c.expected).map(BurnChance::get).sum::<f32>());
+    let expected_fires = formula_applies.then(|| sum_expected(&counted)).flatten();
 
     Some(EffectiveFireChance {
         eligible_hits: counted.len() as u32,
@@ -424,11 +502,26 @@ fn section_of(
     (usize::from(section.get()) < victim.node_probability.len()).then_some(section)
 }
 
-fn is_secondary_shell(input: &FireChanceInput<'_>, shell: GameParamId) -> bool {
-    input
-        .params
-        .game_param_by_id(shell)
-        .is_some_and(|param| input.attacker.secondary_ammo.iter().any(|name| name == param.name()))
+fn is_secondary_shell(input: &FireChanceInput<'_>, secondary_ammo: &[String], shell: GameParamId) -> bool {
+    input.params.game_param_by_id(shell).is_some_and(|param| secondary_ammo.iter().any(|name| name == param.name()))
+}
+
+/// Whether one of our own secondary shells landed on the same victim and
+/// section close enough that a fire there could have been either shell's.
+fn contested_by_a_secondary(candidate: &Candidate<'_>, secondaries: &[SecondaryImpact]) -> bool {
+    secondaries.iter().any(|s| {
+        s.victim == candidate.victim
+            && s.section == candidate.section
+            && clock_distance(s.clock, candidate.hit.clock) <= ATTRIBUTION_WINDOW
+    })
+}
+
+/// Total expected fires over `candidates`.
+///
+/// `None` when any one hit's expectation could not be computed: summing the
+/// rest would silently treat the unknown as zero and understate the total.
+fn sum_expected(candidates: &[&Candidate<'_>]) -> Option<f32> {
+    candidates.iter().try_fold(0.0f32, |total, candidate| Some(total + candidate.expected?.get()))
 }
 
 /// Whether one of our shells could have started a fire where it landed.
@@ -487,8 +580,17 @@ fn classify(
         return HitEligibility::NoSectionGeometry;
     };
 
-    if victim.died_at.is_some_and(|died_at| hit.clock >= died_at) {
-        return HitEligibility::VictimDead;
+    match victim.fate {
+        VictimFate::DiedAt(died_at) if hit.clock >= died_at => return HitEligibility::VictimDead,
+        // An unresolved fate leaves both "this hit landed after it died" and
+        // "one of these transitions is a death flare" open, and a flare left in
+        // the log can be matched to a ribbon, so it corrupts the numerator as
+        // well as the denominator. Refusing the whole victim is blunt and
+        // costs every sample against it, which is why it carries its own tally
+        // key: a large count is the signal that the caller should resolve fate
+        // rather than a defect in the model.
+        VictimFate::Unknown => return HitEligibility::VictimFateUnknown,
+        VictimFate::DiedAt(_) | VictimFate::Survived => {}
     }
 
     // A point query, not a range: a presence window logs a baseline burn mask
@@ -508,7 +610,11 @@ fn classify(
         DamageControlState::Down => {}
     }
 
-    if victim.fire_resistance_enabled && section.get() == FIRE_PREVENTION_SUPPRESSED_NODE {
+    // `Unknown` refuses alongside `Learned`: a node-2 hit on a victim whose
+    // build we could not read might have been impossible, and admitting it is
+    // the direction that corrupts.
+    let suppressed = matches!(victim.fire_prevention, FirePrevention::Learned | FirePrevention::Unknown);
+    if suppressed && section.get() == FIRE_PREVENTION_SUPPRESSED_NODE {
         return HitEligibility::SectionSuppressedByFirePrevention;
     }
 
@@ -539,9 +645,6 @@ fn rolls_for_fire(shell_hit: &Recognized<ShellHitType>) -> bool {
 
 struct Attribution {
     predictions: Vec<SectionPrediction>,
-    /// Candidate indices dropped because one of our secondaries could equally
-    /// have set the fire.
-    contested: Vec<usize>,
     unattributed: u32,
     fires_by_victim: HashMap<EntityId, u32>,
 }
@@ -549,17 +652,12 @@ struct Attribution {
 /// Match each self `SetFire` ribbon to one eligible hit of ours.
 ///
 /// The ribbon says a fire was ours, not which weapon set it, so it separates us
-/// from other attackers but not from our own secondaries. A ribbon whose window
-/// holds both an eligible main-battery hit and one of our secondary hits on the
-/// same victim and section is dropped from numerator and denominator alike,
-/// exactly as a multi-attacker collision would be.
-fn attribute(
-    input: &FireChanceInput<'_>,
-    candidates: &[Candidate<'_>],
-    secondaries: &[SecondaryImpact],
-) -> Attribution {
+/// from other attackers. It cannot separate us from our own secondaries; hits
+/// a secondary could equally have caused were already removed from `candidates`
+/// before this runs, so a ribbon they would have matched falls to
+/// `unattributed` here.
+fn attribute(input: &FireChanceInput<'_>, candidates: &[&Candidate<'_>]) -> Attribution {
     let mut consumed = vec![false; candidates.len()];
-    let mut contested: Vec<usize> = Vec::new();
     let mut predictions = Vec::new();
     let mut fires_by_victim: HashMap<EntityId, u32> = HashMap::new();
     let mut unattributed = 0u32;
@@ -569,9 +667,9 @@ fn attribute(
             let pick = candidates
                 .iter()
                 .enumerate()
-                .filter(|(i, _)| !consumed[*i] && !contested.contains(i))
+                .filter(|(i, _)| !consumed[*i])
                 .filter(|(_, c)| within_window(c.hit.clock, ribbon.clock))
-                .filter_map(|(i, c)| lit_change(input, c, ribbon.clock).map(|change| (i, c, change)))
+                .filter_map(|(i, c)| lit_change(input, c, ribbon.clock).map(|change| (i, *c, change)))
                 .min_by(|(_, a, _), (_, b, _)| {
                     clock_distance(a.hit.clock, ribbon.clock).total_cmp(&clock_distance(b.hit.clock, ribbon.clock))
                 });
@@ -580,16 +678,6 @@ fn attribute(
                 unattributed += 1;
                 continue;
             };
-
-            let ambiguous = secondaries.iter().any(|s| {
-                s.victim == candidate.victim && s.section == candidate.section && within_window(s.clock, ribbon.clock)
-            });
-            if ambiguous {
-                // Neither a fire nor unattributed: the fire is real and ours,
-                // it just cannot be assigned to a weapon.
-                contested.push(index);
-                continue;
-            }
 
             consumed[index] = true;
             *fires_by_victim.entry(candidate.victim).or_insert(0) += 1;
@@ -600,7 +688,7 @@ fn attribute(
         }
     }
 
-    Attribution { predictions, contested, unattributed, fires_by_victim }
+    Attribution { predictions, unattributed, fires_by_victim }
 }
 
 fn clock_distance(a: GameClock, b: GameClock) -> f32 {
@@ -644,38 +732,33 @@ fn per_ship_breakdown(
     fires_by_victim: &HashMap<EntityId, u32>,
     formula_applies: bool,
 ) -> Vec<PerShipFireChance> {
-    // Keyed by ship index rather than entity so two of the same ship on the
+    // Grouped by ship index rather than entity so two of the same ship on the
     // enemy team read as one row, which is what a per-target-ship breakdown
     // means. `BTreeMap` because the row order must not depend on hash seeds.
-    let mut rows: BTreeMap<&str, PerShipFireChance> = BTreeMap::new();
-    let mut victims_seen: BTreeMap<&str, Vec<EntityId>> = BTreeMap::new();
-
+    let mut groups: BTreeMap<&str, Vec<&Candidate<'_>>> = BTreeMap::new();
     for candidate in counted {
         let Some(victim) = input.victims.get(&candidate.victim) else { continue };
-        let row = rows.entry(victim.ship_index.as_str()).or_insert_with(|| PerShipFireChance {
-            victim_ship_index: victim.ship_index.clone(),
-            victim_ship_name: victim.ship_name.clone(),
-            eligible_hits: 0,
-            fires: 0,
-            expected_fires: formula_applies.then_some(0.0),
-        });
-        row.eligible_hits += 1;
-        if let (Some(total), Some(expected)) = (row.expected_fires.as_mut(), candidate.expected) {
-            *total += expected.get();
-        }
-        let seen = victims_seen.entry(victim.ship_index.as_str()).or_default();
-        if !seen.contains(&candidate.victim) {
-            seen.push(candidate.victim);
-        }
+        groups.entry(victim.ship_index.as_str()).or_default().push(candidate);
     }
 
-    for (index, entities) in victims_seen {
-        if let Some(row) = rows.get_mut(index) {
-            row.fires = entities.iter().filter_map(|e| fires_by_victim.get(e)).sum();
-        }
-    }
-
-    rows.into_values().collect()
+    groups
+        .into_values()
+        .filter_map(|group| {
+            let victim = input.victims.get(&group.first()?.victim)?;
+            let mut entities: Vec<EntityId> = group.iter().map(|c| c.victim).collect();
+            entities.sort_unstable();
+            entities.dedup();
+            Some(PerShipFireChance {
+                victim_ship_index: victim.ship_index.clone(),
+                victim_ship_name: victim.ship_name.clone(),
+                eligible_hits: group.len() as u32,
+                fires: entities.iter().filter_map(|e| fires_by_victim.get(e)).sum(),
+                // Same rule as the aggregate: one hit with an uncomputable
+                // expectation makes the row's total unknown, not smaller.
+                expected_fires: formula_applies.then(|| sum_expected(&group)).flatten(),
+            })
+        })
+        .collect()
 }
 
 /// The attacker's burn-chance formula for the shell that produced the most
@@ -850,8 +933,8 @@ mod tests {
         main_burn_prob: f32,
         victim_node_probability: f32,
         victim_burn_prob: f32,
-        victim_fire_resistance: bool,
-        victim_died_at: Option<GameClock>,
+        victim_fire_prevention: FirePrevention,
+        victim_fate: VictimFate,
         hit_section: u8,
         hit_type: ShellHitType,
         hit_from_atba: bool,
@@ -867,6 +950,8 @@ mod tests {
         salvo_from_another_ship: bool,
         hit_on_a_hull_we_cannot_place: bool,
         unclassifiable_modifier: bool,
+        secondary_battery_unresolved: bool,
+        attacker_is_not_the_recording_player: bool,
     }
 
     fn fixture() -> Fixture {
@@ -874,8 +959,8 @@ mod tests {
             main_burn_prob: 0.12,
             victim_node_probability: 0.6,
             victim_burn_prob: 1.0,
-            victim_fire_resistance: false,
-            victim_died_at: None,
+            victim_fire_prevention: FirePrevention::NotLearned,
+            victim_fate: VictimFate::Survived,
             hit_section: 0,
             hit_type: ShellHitType::Normal,
             hit_from_atba: false,
@@ -891,6 +976,8 @@ mod tests {
             salvo_from_another_ship: false,
             hit_on_a_hull_we_cannot_place: false,
             unclassifiable_modifier: false,
+            secondary_battery_unresolved: false,
+            attacker_is_not_the_recording_player: false,
         }
     }
 
@@ -911,7 +998,17 @@ mod tests {
         }
 
         fn with_victim_fire_prevention(mut self) -> Fixture {
-            self.victim_fire_resistance = true;
+            self.victim_fire_prevention = FirePrevention::Learned;
+            self
+        }
+
+        fn with_an_unresolved_victim_build(mut self) -> Fixture {
+            self.victim_fire_prevention = FirePrevention::Unknown;
+            self
+        }
+
+        fn with_an_unresolved_victim_fate(mut self) -> Fixture {
+            self.victim_fate = VictimFate::Unknown;
             self
         }
 
@@ -981,7 +1078,7 @@ mod tests {
         }
 
         fn with_the_victim_dead_at(mut self, clock: GameClock) -> Fixture {
-            self.victim_died_at = Some(clock);
+            self.victim_fate = VictimFate::DiedAt(clock);
             self
         }
 
@@ -1007,6 +1104,16 @@ mod tests {
 
         fn with_a_modifier_this_version_cannot_classify(mut self) -> Fixture {
             self.unclassifiable_modifier = true;
+            self
+        }
+
+        fn with_an_unresolved_secondary_battery(mut self) -> Fixture {
+            self.secondary_battery_unresolved = true;
+            self
+        }
+
+        fn attacking_from_another_perspective(mut self) -> Fixture {
+            self.attacker_is_not_the_recording_player = true;
             self
         }
 
@@ -1144,8 +1251,8 @@ mod tests {
                     hull_model_path: HULL_MODEL.to_owned(),
                     node_probability: vec![self.victim_node_probability; NODES.len()],
                     burn_prob: self.victim_burn_prob,
-                    fire_resistance_enabled: self.victim_fire_resistance,
-                    died_at: self.victim_died_at,
+                    fire_prevention: self.victim_fire_prevention,
+                    fate: self.victim_fate,
                     consumables,
                 },
             );
@@ -1158,8 +1265,8 @@ mod tests {
                         hull_model_path: "content/gameplay/usa/ship/battleship/ASB028/ASB028.model".to_owned(),
                         node_probability: vec![0.6; NODES.len()],
                         burn_prob: 1.0,
-                        fire_resistance_enabled: false,
-                        died_at: None,
+                        fire_prevention: FirePrevention::NotLearned,
+                        fate: VictimFate::Survived,
                         consumables: Vec::new(),
                     },
                 );
@@ -1180,11 +1287,12 @@ mod tests {
             FireChanceInput {
                 version: VERSION,
                 attacker: AttackerContext {
-                    entity: attacker_id(),
+                    entity: if self.attacker_is_not_the_recording_player { other_victim_id() } else { attacker_id() },
                     build,
                     main_battery_ammo: main_ammo,
-                    secondary_ammo: atba_ammo,
+                    secondary_ammo: if self.secondary_battery_unresolved { None } else { Some(atba_ammo) },
                 },
+                self_entity: attacker_id(),
                 victims: Box::leak(Box::new(victims)),
                 hits: Box::leak(Box::new(hits)),
                 ribbons: Box::leak(Box::new(ribbons)),
@@ -1398,6 +1506,22 @@ mod tests {
         assert_eq!(out.eligible_hits, 0);
         assert_eq!(out.fires, 0);
         assert_eq!(out.exclusions[&ExclusionReason::SecondaryFireAmbiguous], 1);
+        // The fire happened and was ours; with its only candidate dropped there
+        // is nothing left to assign it to.
+        assert_eq!(out.unattributed_fires, 1);
+    }
+
+    /// The contest is decided on the hits, not on the outcome. Dropping a
+    /// contested hit only when a ribbon matched it would remove the ambiguous
+    /// successes and keep the ambiguous failures, depressing the reported
+    /// chance in proportion to secondary throughput.
+    #[test]
+    fn a_coincident_secondary_drops_the_hit_even_when_no_fire_started() {
+        let out = analyze(&fixture().with_coincident_secondary_hit().without_ribbons().build()).expect("geometry");
+        assert_eq!(out.eligible_hits, 0);
+        assert_eq!(out.fires, 0);
+        assert_eq!(out.exclusions[&ExclusionReason::SecondaryFireAmbiguous], 1);
+        assert_eq!(out.unattributed_fires, 0);
     }
 
     /// A secondary hit on a different section does not contest the fire.
@@ -1550,6 +1674,48 @@ mod tests {
         let out = analyze(&fixture().also_hitting_a_hull_we_cannot_place().build()).expect("geometry");
         assert_eq!(out.eligible_hits, 1);
         assert_eq!(out.exclusions[&ExclusionReason::NoSectionGeometry], 1);
+    }
+
+    /// A victim whose build we could not read might have Fire Prevention
+    /// Expert, so a node-2 hit on it might have been impossible. Unknown
+    /// refuses alongside Learned; only a build we actually read admits.
+    #[test]
+    fn an_unresolved_victim_build_refuses_a_node_two_hit() {
+        let out = analyze(&fixture().with_an_unresolved_victim_build().hitting_section(2).build()).expect("geometry");
+        assert_eq!(out.eligible_hits, 0);
+        assert_eq!(out.exclusions[&ExclusionReason::SectionSuppressedByFirePrevention], 1);
+
+        // The suppression is node 2 only; other sections are unaffected by an
+        // unresolved build.
+        let elsewhere =
+            analyze(&fixture().with_an_unresolved_victim_build().hitting_section(0).build()).expect("geometry");
+        assert_eq!(elsewhere.eligible_hits, 1);
+    }
+
+    /// An unresolved fate leaves both "this hit landed after it died" and "this
+    /// transition is a death flare" open, so every hit on that victim is
+    /// refused, under its own tally key so the cost is visible.
+    #[test]
+    fn an_unresolved_victim_fate_refuses_the_hit() {
+        let out = analyze(&fixture().with_an_unresolved_victim_fate().build()).expect("geometry");
+        assert_eq!(out.eligible_hits, 0);
+        assert_eq!(out.fires, 0);
+        assert_eq!(out.exclusions[&ExclusionReason::VictimFateUnknown], 1);
+    }
+
+    /// Without the secondary battery's ammoList the contest guard cannot run at
+    /// all, and a number it never checked is worse than no number.
+    #[test]
+    fn an_unresolved_secondary_battery_yields_no_result() {
+        assert!(analyze(&fixture().with_an_unresolved_secondary_battery().build()).is_none());
+    }
+
+    /// Ribbons exist only for the recording perspective, so any other attacker
+    /// would take its denominator from one player's hits and its numerator from
+    /// another player's fires.
+    #[test]
+    fn an_attacker_who_is_not_the_recording_player_yields_no_result() {
+        assert!(analyze(&fixture().attacking_from_another_perspective().build()).is_none());
     }
 
     /// A modifier name this version's table cannot classify makes the attacker
