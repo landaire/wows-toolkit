@@ -24,6 +24,7 @@ const COOLDOWN_TOLERANCE_SECS: f32 = 1.0;
 
 /// Per-victim burn-node transitions and Damage Control Party activations,
 /// reconstructed from the whole-match logs and narrowed to one ship.
+#[derive(Debug)]
 pub struct VictimTrack {
     /// Burn-node bitmask changes for this victim, sorted ascending by clock.
     changes: Vec<BurnStateChange>,
@@ -32,7 +33,9 @@ pub struct VictimTrack {
     dcp: Vec<ActiveConsumable>,
     /// Reload for the victim's Damage Control Party slot, build modifiers
     /// already applied by `ConsumableInventory`. `None` when the ship carries
-    /// no such slot, which makes every cooldown inference `Unknown`.
+    /// no such slot; this only blocks the reload-based inference (rule 3
+    /// below), since the continuity-based inference (rule 4) does not need a
+    /// reload model.
     dcp_reload_secs: Option<f32>,
     /// Earliest clock this victim was observed from, set only when that
     /// observation is a single presence window still open (`left: None`):
@@ -44,9 +47,20 @@ pub struct VictimTrack {
     /// but never turns a real gap into a false `Down`.
     first_seen: Option<GameClock>,
     cooldown_unreliable: bool,
+    /// True when any activation observed for this victim (of any
+    /// consumable, not just the ones filtered into `dcp`) could not be
+    /// named. Numeric consumable ids are a per-version table
+    /// (`Consumable::from_id`), independent of the GameParams string lookup
+    /// `ConsumableInventory` uses, so a build with a thin or shifted id
+    /// table can fail to recognize a real Damage Control Party activation
+    /// while `dcp_reload_secs` still resolves correctly. An activation this
+    /// track cannot name might have been Damage Control Party, so once one
+    /// exists nothing past it is provable from `dcp` alone.
+    unrecognized_activation: bool,
 }
 
 /// What is known about Damage Control Party at a given clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DamageControlState {
     /// Observed activation covering this clock.
     Running,
@@ -75,6 +89,8 @@ impl VictimTrack {
             .collect();
         changes.sort_by_key(|c| c.clock);
 
+        let unrecognized_activation = activations.iter().any(|a| a.consumable.is_unknown());
+
         let mut dcp: Vec<ActiveConsumable> =
             activations.iter().filter(|a| a.consumable.known() == Some(&Consumable::DamageControl)).cloned().collect();
         dcp.sort_by_key(|a| a.activated_at);
@@ -93,7 +109,7 @@ impl VictimTrack {
             _ => None,
         });
 
-        VictimTrack { changes, dcp, dcp_reload_secs, first_seen, cooldown_unreliable }
+        VictimTrack { changes, dcp, dcp_reload_secs, first_seen, cooldown_unreliable, unrecognized_activation }
     }
 
     /// Burn-node bitmask immediately before `clock`. Changes exactly at
@@ -115,6 +131,15 @@ impl VictimTrack {
         }
 
         if self.cooldown_unreliable {
+            return DamageControlState::Unknown;
+        }
+
+        // An activation of an unrecognized consumable might have been Damage
+        // Control Party under a numeric id this build's constants table does
+        // not cover. Rules 3 and 4 both reason from "no activation in `dcp`
+        // means none happened"; that premise is false once one was seen and
+        // could not be named, so neither is provable past this point.
+        if self.unrecognized_activation {
             return DamageControlState::Unknown;
         }
 
@@ -169,18 +194,9 @@ mod tests {
         VictimTrack::build(victim, &changes, &[], &[], &PresenceLog::default(), died_at)
     }
 
-    fn track_with_dcp(activations: &[(GameClock, f32)], reload_time: f32, presence: PresenceLog) -> VictimTrack {
-        let victim = victim_id();
-        let activations: Vec<ActiveConsumable> = activations
-            .iter()
-            .map(|&(activated_at, duration)| ActiveConsumable {
-                consumable: Recognized::Known(Consumable::DamageControl),
-                activated_at,
-                duration,
-                usage_params: None,
-            })
-            .collect();
-        let inventory = vec![ConsumableInventory {
+    /// A single Damage Control Party inventory slot with the given reload.
+    fn dcp_inventory(reload_time: f32) -> ConsumableInventory {
+        ConsumableInventory {
             slot_index: 0,
             consumable_type_raw: "PCY001_CrashCrew".to_string(),
             consumable: Recognized::Known(Consumable::DamageControl),
@@ -192,7 +208,21 @@ mod tests {
             regen_hp_speed: None,
             regen_hp_speed_units: None,
             active_until: None,
-        }];
+        }
+    }
+
+    fn track_with_dcp(activations: &[(GameClock, f32)], reload_time: f32, presence: PresenceLog) -> VictimTrack {
+        let victim = victim_id();
+        let activations: Vec<ActiveConsumable> = activations
+            .iter()
+            .map(|&(activated_at, duration)| ActiveConsumable {
+                consumable: Recognized::Known(Consumable::DamageControl),
+                activated_at,
+                duration,
+                usage_params: None,
+            })
+            .collect();
+        let inventory = vec![dcp_inventory(reload_time)];
         VictimTrack::build(victim, &[], &activations, &inventory, &presence, None)
     }
 
@@ -235,14 +265,37 @@ mod tests {
         assert_eq!(track.burn_mask_before(GameClock(5.0)), 0b0000);
     }
 
+    /// Two transitions sharing one server tick, queried strictly after: the
+    /// result must be the state after BOTH, not an arbitrary one of the tied
+    /// pair. This is the property that requires `partition_point` over
+    /// `binary_search_by`, which the standard library documents as
+    /// returning an arbitrary index among equal keys.
+    #[test]
+    fn burn_mask_before_resolves_a_same_clock_group_to_its_final_state() {
+        let track = track_with_changes(&[(GameClock(20.0), 0b0000, 0b0001), (GameClock(20.0), 0b0001, 0b0011)]);
+        assert_eq!(track.burn_mask_before(GameClock(25.0)), 0b0011);
+    }
+
+    /// A tied group sitting exactly at the query clock must be excluded in
+    /// full, not just its first or last member.
+    #[test]
+    fn burn_mask_before_excludes_every_member_of_a_same_clock_group_at_the_query_clock() {
+        let track = track_with_changes(&[
+            (GameClock(10.0), 0b0000, 0b0001),
+            (GameClock(20.0), 0b0001, 0b0011),
+            (GameClock(20.0), 0b0011, 0b0010),
+        ]);
+        assert_eq!(track.burn_mask_before(GameClock(20.0)), 0b0001);
+    }
+
     /// Inside work time DCP is running; between work time and reload it is
     /// provably down, because the ship cannot reactivate inside reload_time.
     #[test]
     fn dcp_is_running_then_provably_down_through_the_cooldown() {
         let track = track_with_dcp(&[(GameClock(100.0), 15.0)], 80.0, observed_from(GameClock(0.0)));
-        assert!(matches!(track.damage_control_at(GameClock(105.0)), DamageControlState::Running));
-        assert!(matches!(track.damage_control_at(GameClock(120.0)), DamageControlState::Down));
-        assert!(matches!(track.damage_control_at(GameClock(175.0)), DamageControlState::Down));
+        assert_eq!(track.damage_control_at(GameClock(105.0)), DamageControlState::Running);
+        assert_eq!(track.damage_control_at(GameClock(120.0)), DamageControlState::Down);
+        assert_eq!(track.damage_control_at(GameClock(175.0)), DamageControlState::Down);
     }
 
     /// Past the cooldown, a continuously observed ship is still known: we
@@ -251,11 +304,11 @@ mod tests {
     fn dcp_past_cooldown_is_down_while_observed_and_unknown_across_a_gap() {
         let observed = observed_from(GameClock(0.0));
         let track = track_with_dcp(&[(GameClock(100.0), 15.0)], 80.0, observed);
-        assert!(matches!(track.damage_control_at(GameClock(300.0)), DamageControlState::Down));
+        assert_eq!(track.damage_control_at(GameClock(300.0)), DamageControlState::Down);
 
         let gapped = observed_with_gap(GameClock(0.0), GameClock(200.0), GameClock(280.0));
         let track = track_with_dcp(&[(GameClock(100.0), 15.0)], 80.0, gapped);
-        assert!(matches!(track.damage_control_at(GameClock(300.0)), DamageControlState::Unknown));
+        assert_eq!(track.damage_control_at(GameClock(300.0)), DamageControlState::Unknown);
     }
 
     /// Two activations closer than reload_time mean the ship refunds charges
@@ -266,8 +319,19 @@ mod tests {
         let track =
             track_with_dcp(&[(GameClock(100.0), 15.0), (GameClock(130.0), 15.0)], 80.0, observed_from(GameClock(0.0)));
         assert!(track.cooldown_unreliable());
-        assert!(matches!(track.damage_control_at(GameClock(135.0)), DamageControlState::Running));
-        assert!(matches!(track.damage_control_at(GameClock(300.0)), DamageControlState::Unknown));
+        assert_eq!(track.damage_control_at(GameClock(135.0)), DamageControlState::Running);
+        assert_eq!(track.damage_control_at(GameClock(300.0)), DamageControlState::Unknown);
+    }
+
+    /// A gap just under reload_time, within the jitter tolerance, must NOT
+    /// flag as a refund: this is the case that actually exercises
+    /// `COOLDOWN_TOLERANCE_SECS` rather than merely a gap so short any
+    /// reasonable tolerance would catch it.
+    #[test]
+    fn a_near_reload_gap_within_jitter_tolerance_stays_reliable() {
+        let track =
+            track_with_dcp(&[(GameClock(100.0), 15.0), (GameClock(179.5), 15.0)], 80.0, observed_from(GameClock(0.0)));
+        assert!(!track.cooldown_unreliable());
     }
 
     /// On death the server lights extra burn nodes for effect. Those must not
@@ -297,6 +361,36 @@ mod tests {
     #[test]
     fn never_activated_and_always_observed_is_down() {
         let track = track_with_dcp(&[], 80.0, observed_from(GameClock(0.0)));
-        assert!(matches!(track.damage_control_at(GameClock(200.0)), DamageControlState::Down));
+        assert_eq!(track.damage_control_at(GameClock(200.0)), DamageControlState::Down);
+    }
+
+    /// A ship with no Damage Control Party slot at all still resolves Down
+    /// from continuity alone: rule 4 does not need a reload model, only the
+    /// absence of any covering or cooldown-relevant activation.
+    #[test]
+    fn no_dcp_slot_still_resolves_down_from_continuity() {
+        let victim = victim_id();
+        let track = VictimTrack::build(victim, &[], &[], &[], &observed_from(GameClock(0.0)), None);
+        assert_eq!(track.damage_control_at(GameClock(200.0)), DamageControlState::Down);
+    }
+
+    /// An activation the decoder could not name (thin or shifted per-version
+    /// id table) must not be silently dropped and read as "nothing
+    /// happened": it might have been Damage Control Party. Without the
+    /// `unrecognized_activation` guard this ship would otherwise resolve
+    /// Down from continuity alone (see `never_activated_and_always_observed_is_down`),
+    /// which would be a false Down.
+    #[test]
+    fn an_unrecognized_activation_blocks_a_provable_down() {
+        let victim = victim_id();
+        let activations = vec![ActiveConsumable {
+            consumable: Recognized::Unknown("PCY999_SomeUnmappedConsumable".to_string()),
+            activated_at: GameClock(50.0),
+            duration: 5.0,
+            usage_params: None,
+        }];
+        let inventory = vec![dcp_inventory(80.0)];
+        let track = VictimTrack::build(victim, &[], &activations, &inventory, &observed_from(GameClock(0.0)), None);
+        assert_eq!(track.damage_control_at(GameClock(200.0)), DamageControlState::Unknown);
     }
 }
