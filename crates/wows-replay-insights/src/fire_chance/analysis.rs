@@ -193,6 +193,16 @@ pub struct PerShipFireChance {
     pub expected_fires: Option<f32>,
 }
 
+impl PerShipFireChance {
+    /// `None` when there are no eligible hits against this ship: a rate over
+    /// zero samples is not zero, it is unknown. Same rule as
+    /// [`EffectiveFireChance::rate`], kept here so both rate definitions stay
+    /// on this side rather than being reimplemented per caller.
+    pub fn rate(&self) -> Option<f32> {
+        (self.eligible_hits > 0).then(|| self.fires as f32 / self.eligible_hits as f32)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectiveFireChance {
     pub eligible_hits: u32,
@@ -218,6 +228,13 @@ pub struct EffectiveFireChance {
     /// for is proportion: an unattributed count far larger than `fires` on a
     /// ship with no secondaries means something upstream is wrong.
     pub unattributed_fires: u32,
+    /// The shell's raw `burnProb` before any modifier step in [`Self::formula`]
+    /// is applied, for the hover breakdown's base line. `None` exactly when
+    /// `formula` is empty because no shell resolved to compute it from (no
+    /// eligible hit, or the projectile carries no `burnProb`); a resolved shell
+    /// whose modifiers are all identities still yields `Some`, so `formula`
+    /// itself may be empty while this is not.
+    pub formula_base: Option<f32>,
     /// The attacker-side formula steps, for the hover breakdown.
     pub formula: Vec<FormulaStep>,
 }
@@ -512,6 +529,7 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
 
     let per_ship = per_ship_breakdown(input, &counted, &attribution.fires_by_victim, formula_applies);
     let expected_fires = formula_applies.then(|| sum_expected(&counted)).flatten();
+    let (formula_base, formula) = formula_steps(input, &bundle, tier, &counted);
 
     Some(EffectiveFireChance {
         eligible_hits: counted.len() as u32,
@@ -521,7 +539,8 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
         exclusions,
         section_predictions: attribution.predictions,
         unattributed_fires: attribution.unattributed,
-        formula: formula_steps(input, &bundle, tier, &counted),
+        formula_base,
+        formula,
     })
 }
 
@@ -806,13 +825,17 @@ fn per_ship_breakdown(
 }
 
 /// The attacker's burn-chance formula for the shell that produced the most
-/// eligible hits, keeping only the steps that moved the value.
+/// eligible hits: the shell's raw `burnProb` this formula started from, and
+/// the modifier steps that moved it (identities dropped). The base is `Some`
+/// whenever a shell resolved, even if every modifier turned out to be an
+/// identity and the step list is empty: the hover's base line does not depend
+/// on there being any steps to show under it.
 fn formula_steps(
     input: &FireChanceInput<'_>,
     bundle: &ModifierBundle,
     tier: u32,
     counted: &[&Candidate<'_>],
-) -> Vec<FormulaStep> {
+) -> (Option<f32>, Vec<FormulaStep>) {
     let mut hits_per_shell: HashMap<GameParamId, u32> = HashMap::new();
     for candidate in counted {
         *hits_per_shell.entry(candidate.shell).or_insert(0) += 1;
@@ -820,14 +843,14 @@ fn formula_steps(
     // Ties break on the lower id so the rendered breakdown is stable between runs.
     let Some((shell, _)) = hits_per_shell.into_iter().max_by_key(|(id, count)| (*count, std::cmp::Reverse(id.raw())))
     else {
-        return Vec::new();
+        return (None, Vec::new());
     };
 
     let Some(projectile) = input.params.game_param_by_id(shell).and_then(|p| p.projectile().cloned()) else {
-        return Vec::new();
+        return (None, Vec::new());
     };
     let Some(burn_prob) = projectile.burn_prob() else {
-        return Vec::new();
+        return (None, Vec::new());
     };
     let is_small = is_small_projectile(projectile.bullet_diametr(), SMALL_PROJECTILE_MAX_DIAMETER_M);
     let (_, applied) = calculate_burn_chance(tier, burn_prob, bundle, is_small);
@@ -854,7 +877,7 @@ fn formula_steps(
         }
         running = result;
     }
-    steps
+    (Some(burn_prob), steps)
 }
 
 /// The equipped upgrade, learned skill or signal that carries `name`, in the
@@ -1775,11 +1798,13 @@ mod tests {
     }
 
     /// A stock build moves no step of the burn-chance formula, so the hover
-    /// breakdown is empty rather than a list of identities.
+    /// breakdown is empty rather than a list of identities. The base is still
+    /// `Some`: a shell resolved, it just carries no modifier worth showing.
     #[test]
-    fn a_stock_build_has_no_formula_steps() {
+    fn a_stock_build_has_no_formula_steps_but_still_has_a_base() {
         let out = analyze(&fixture().build()).expect("geometry");
         assert!(out.formula.is_empty(), "got {:?}", out.formula);
+        assert_eq!(out.formula_base, Some(0.12));
     }
 
     /// A hit the parser never matched to a salvo names no shell, and its

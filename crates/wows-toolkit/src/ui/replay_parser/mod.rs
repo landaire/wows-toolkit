@@ -102,7 +102,9 @@ use wows_minimap_renderer::renderer::weapon_group_label;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::CrewSkillName;
 use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::game_params::types::skill_translation_keys_for;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::recognized::Recognized;
 
@@ -1580,17 +1582,8 @@ impl UiReport {
     fn render_fire_chance(&self, ui: &mut egui::Ui, fire_chance: &EffectiveFireChance) {
         ui.strong(t!("ui.replay.sections.fire_chance"));
 
-        let mut headline_lines = vec![fire_chance_headline_text(fire_chance)];
-        if let Some(expected) = fire_chance.expected_fires {
-            headline_lines.push(format!(
-                "  {} {:.1}%",
-                t!("ui.replay.sections.fire_chance_expected"),
-                expected * 100.0
-            ));
-        }
-
         let response = ui
-            .add(Label::new(headline_lines.join("\n")).sense(Sense::click()))
+            .add(Label::new(fire_chance_headline_lines(fire_chance).join("\n")).sense(Sense::click()))
             .on_hover_text(RichText::new(self.fire_chance_hover_text(fire_chance)).monospace());
 
         if response.clicked() {
@@ -1616,7 +1609,9 @@ impl UiReport {
 
     /// Formula-and-exclusions breakdown for the effective-fire-chance hover.
     fn fire_chance_hover_text(&self, fire_chance: &EffectiveFireChance) -> String {
-        let mut lines = self.fire_chance_formula_lines(&fire_chance.formula);
+        let mut lines = fire_chance_formula_lines(fire_chance.formula_base, &fire_chance.formula, &|source| {
+            self.localize_modifier_source(source)
+        });
         if !lines.is_empty() {
             lines.push(String::new());
         }
@@ -1624,64 +1619,48 @@ impl UiReport {
         lines.join("\n")
     }
 
-    /// The attacker-side formula steps, in order, with each step's source
-    /// localized where it resolves to a GameParams entry (an equipped upgrade
-    /// or signal). A crew skill's internal name has no Param entry of its own
-    /// and renders as-is. Empty when the attacker's modifiers could not be
-    /// folded for this game version.
-    fn fire_chance_formula_lines(&self, formula: &[FormulaStep]) -> Vec<String> {
-        if formula.is_empty() {
-            return Vec::new();
-        }
-        let names: Vec<String> = formula
-            .iter()
-            .map(|step| match &step.source {
-                Some(source) => format!("{} ({})", step.modifier, self.localize_modifier_source(source)),
-                None => step.modifier.clone(),
-            })
-            .collect();
-        let name_width = names.iter().map(String::len).max().unwrap_or(0);
-
-        let mut lines = vec![t!("ui.replay.sections.fire_chance_formula").into_owned()];
-        for (step, name) in formula.iter().zip(&names) {
-            let (symbol, value_text) = match step.op {
-                FormulaOp::Multiply => ("x", format!("{:.2}", step.value)),
-                FormulaOp::Add => ("+", format!("+{:.1}pp", step.value * 100.0)),
-            };
-            lines.push(format!("  {symbol} {name:<name_width$} {value_text}"));
-        }
-        if let Some(last) = formula.last() {
-            lines.push(format!("  = {:.1}%", last.result * 100.0));
-        }
-        lines
-    }
-
-    /// Best-effort localized name for a formula step's source identifier: an
-    /// equipped upgrade or signal's GameParams name. Crew skill internal names
-    /// carry no Param entry of their own and fall back to the raw identifier.
+    /// Best-effort localized name for a formula step's source identifier.
+    /// Tries an equipped upgrade or signal's GameParams entry first, then a
+    /// crew skill's translation keys (a skill carries no `Param` of its own,
+    /// so it cannot be found the first way); falls back to the raw identifier
+    /// when neither resolves.
     fn localize_modifier_source(&self, source: &str) -> String {
         let metadata_provider = self.metadata_provider();
-        let name = <GameMetadataProvider as GameParamProvider>::game_param_by_name(&metadata_provider, source)
-            .and_then(|param| {
-                let ctx = wowsunpack::game_params::describe::DescribeContext {
-                    resource_loader: metadata_provider.as_ref(),
-                    version: &self.version,
-                    species: None,
-                    param_name: None,
-                };
-                param.display_name(&ctx)
-            });
-        name.unwrap_or_else(|| source.to_owned())
+
+        let upgrade_or_signal_name =
+            <GameMetadataProvider as GameParamProvider>::game_param_by_name(&metadata_provider, source).and_then(
+                |param| {
+                    let ctx = wowsunpack::game_params::describe::DescribeContext {
+                        resource_loader: metadata_provider.as_ref(),
+                        version: &self.version,
+                        species: None,
+                        param_name: None,
+                    };
+                    param.display_name(&ctx)
+                },
+            );
+        if let Some(name) = upgrade_or_signal_name {
+            return name;
+        }
+
+        let skill_name = CrewSkillName::from(source);
+        let (primary, fallback) = skill_translation_keys_for(&skill_name, "IDS_SKILL", &self.version);
+        let skill_display_name = metadata_provider
+            .localized_name_from_id(&TranslationKey::new(primary))
+            .or_else(|| metadata_provider.localized_name_from_id(&TranslationKey::new(fallback)));
+        if let Some(name) = skill_display_name {
+            return name;
+        }
+
+        source.to_owned()
     }
 
     /// The full plain-text breakdown for click-to-copy: headline, formula,
     /// exclusions and every per-ship row, independent of whether the per-ship
     /// expander is open.
     fn fire_chance_copy_text(&self, fire_chance: &EffectiveFireChance) -> String {
-        let mut lines = vec![t!("ui.replay.sections.fire_chance").into_owned(), fire_chance_headline_text(fire_chance)];
-        if let Some(expected) = fire_chance.expected_fires {
-            lines.push(format!("  {} {:.1}%", t!("ui.replay.sections.fire_chance_expected"), expected * 100.0));
-        }
+        let mut lines = vec![t!("ui.replay.sections.fire_chance").into_owned()];
+        lines.extend(fire_chance_headline_lines(fire_chance));
         lines.push(String::new());
         lines.push(self.fire_chance_hover_text(fire_chance));
 
@@ -5119,6 +5098,17 @@ fn fire_chance_headline_text(fire_chance: &EffectiveFireChance) -> String {
     }
 }
 
+/// The headline plus the optional "expected" line beneath it, shared verbatim
+/// between the on-screen block and the copy-to-clipboard text so the two
+/// cannot drift apart.
+fn fire_chance_headline_lines(fire_chance: &EffectiveFireChance) -> Vec<String> {
+    let mut lines = vec![fire_chance_headline_text(fire_chance)];
+    if let Some(expected) = fire_chance.expected_fires {
+        lines.push(format!("  {} {:.1}%", t!("ui.replay.sections.fire_chance_expected"), expected * 100.0));
+    }
+    lines
+}
+
 /// `per_ship`, sorted by eligible hits descending, for both the expander and
 /// the copy-to-clipboard breakdown.
 fn sorted_per_ship(fire_chance: &EffectiveFireChance) -> Vec<&PerShipFireChance> {
@@ -5128,17 +5118,12 @@ fn sorted_per_ship(fire_chance: &EffectiveFireChance) -> Vec<&PerShipFireChance>
 }
 
 /// One target-ship row for the per-ship expander. Same zero-sample rule as the
-/// aggregate headline.
+/// aggregate headline: `PerShipFireChance::rate` is `None` over zero eligible
+/// hits, which is unknown rather than a zero rate.
 fn fire_chance_per_ship_line(ship: &PerShipFireChance) -> String {
-    let rate_text = if ship.eligible_hits > 0 {
-        format!(
-            "{:.1}%  ({} / {})",
-            ship.fires as f32 / ship.eligible_hits as f32 * 100.0,
-            ship.fires,
-            ship.eligible_hits
-        )
-    } else {
-        t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned()
+    let rate_text = match ship.rate() {
+        Some(rate) => format!("{:.1}%  ({} / {})", rate * 100.0, ship.fires, ship.eligible_hits),
+        None => t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned(),
     };
     match ship.expected_fires {
         Some(expected) => format!(
@@ -5149,6 +5134,70 @@ fn fire_chance_per_ship_line(ship: &PerShipFireChance) -> String {
         ),
         None => format!("{}   {rate_text}", ship.victim_ship_name),
     }
+}
+
+/// The attacker-side formula breakdown, in order: a base line for the shell's
+/// raw `burnProb`, then each modifier step that moved the value, then the
+/// resulting total. `localize_source` resolves a step's raw source identifier
+/// to a display name (an equipped upgrade, signal or crew skill); passed in
+/// rather than called directly so this function stays free of the metadata
+/// provider and is testable with a stub. Empty when `base` is `None` (no shell
+/// resolved to compute a formula from at all).
+fn fire_chance_formula_lines(
+    base: Option<f32>,
+    formula: &[FormulaStep],
+    localize_source: &dyn Fn(&str) -> String,
+) -> Vec<String> {
+    let Some(base) = base else {
+        return Vec::new();
+    };
+
+    let names: Vec<String> = formula
+        .iter()
+        .map(|step| match &step.source {
+            Some(source) => format!("{} ({})", step.modifier, localize_source(source)),
+            None => step.modifier.clone(),
+        })
+        .collect();
+    let base_label = t!("ui.replay.sections.fire_chance_formula_base").into_owned();
+    // 2-char slot for the step lines' "x "/"+ " prefix, so the base line's
+    // label starts in the same column as a step's name even though it carries
+    // no operator symbol of its own.
+    let prefix_width = 2;
+    let name_width = names
+        .iter()
+        .map(|name| name.chars().count())
+        .chain(std::iter::once(base_label.chars().count()))
+        .max()
+        .unwrap_or(0);
+
+    let mut lines = vec![t!("ui.replay.sections.fire_chance_formula").into_owned()];
+    lines.push(format!("  {:prefix_width$}{base_label:<name_width$} {:.1}%", "", base * 100.0));
+    for (step, name) in formula.iter().zip(&names) {
+        let (symbol, value_text) = match step.op {
+            FormulaOp::Multiply => ("x", format!("{:.2}", step.value)),
+            FormulaOp::Add => ("+", format!("+{:.1}pp", step.value * 100.0)),
+        };
+        lines.push(format!("  {symbol} {name:<name_width$} {value_text}"));
+    }
+
+    // The clamp mirrors `classify`'s own `chance.clamp(0.0, 1.0)`: this raw
+    // product can run past 100% (additive bonuses have no ceiling on paper),
+    // but the eligibility model and `expected_fires` both read the clamped
+    // value, so showing only the raw one would silently disagree with them.
+    let raw = formula.last().map(|step| step.result).unwrap_or(base);
+    let clamped = raw.clamp(0.0, 1.0);
+    if (raw - clamped).abs() > f32::EPSILON {
+        lines.push(format!(
+            "  = {:.1}%   ({} {:.1}%)",
+            raw * 100.0,
+            t!("ui.replay.sections.fire_chance_formula_clamped"),
+            clamped * 100.0
+        ));
+    } else {
+        lines.push(format!("  = {:.1}%", raw * 100.0));
+    }
+    lines
 }
 
 /// The exclusion tally as display lines: eligible hits pinned first, then the
@@ -5369,8 +5418,19 @@ mod fire_chance_render_tests {
             exclusions: BTreeMap::new(),
             section_predictions: Vec::new(),
             unattributed_fires: 0,
+            formula_base: None,
             formula: Vec::new(),
         }
+    }
+
+    fn formula_step(modifier: &str, source: Option<&str>, op: FormulaOp, value: f32, result: f32) -> FormulaStep {
+        FormulaStep { modifier: modifier.to_owned(), source: source.map(str::to_owned), op, value, result }
+    }
+
+    /// Identity localizer: returns the source string unchanged, for tests that
+    /// don't care about localization.
+    fn no_localization(source: &str) -> String {
+        source.to_owned()
     }
 
     fn ship(name: &str, eligible_hits: u32, fires: u32, expected_fires: Option<f32>) -> PerShipFireChance {
@@ -5447,5 +5507,101 @@ mod fire_chance_render_tests {
         fc.per_ship = vec![ship("Iowa", 11, 1, None), ship("Zao", 12, 2, None)];
         let names: Vec<&str> = sorted_per_ship(&fc).into_iter().map(|s| s.victim_ship_name.as_str()).collect();
         assert_eq!(names, vec!["Zao", "Iowa"]);
+    }
+
+    /// No shell ever resolved to compute a formula from, so there is nothing
+    /// to show at all: not even a base line.
+    #[test]
+    fn formula_lines_are_empty_without_a_base() {
+        assert!(fire_chance_formula_lines(None, &[], &no_localization).is_empty());
+    }
+
+    /// A resolved shell whose modifiers are all identities still shows the
+    /// base and a total, even though there are no steps under it.
+    #[test]
+    fn formula_lines_show_the_base_even_with_no_steps() {
+        let lines = fire_chance_formula_lines(Some(0.12), &[], &no_localization);
+        assert_eq!(
+            lines,
+            vec![
+                "Attacker fire chance formula".to_owned(),
+                "    base burnProb 12.0%".to_owned(),
+                "  = 12.0%".to_owned()
+            ]
+        );
+    }
+
+    /// Each step's source is localized, the value column reflects the op
+    /// (a bare multiplier vs. a "+X.Ypp" bonus), and the total is the last
+    /// step's running result.
+    #[test]
+    fn formula_lines_show_each_localized_step_and_the_total() {
+        let formula = vec![
+            formula_step("burnChanceFactorHighLevel", Some("ifhe_id"), FormulaOp::Multiply, 0.5, 0.06),
+            formula_step("artilleryBurnChanceBonus", Some("de_id"), FormulaOp::Add, 0.01, 0.07),
+        ];
+        let localize = |source: &str| match source {
+            "ifhe_id" => "IFHE".to_owned(),
+            "de_id" => "DE".to_owned(),
+            other => other.to_owned(),
+        };
+        let lines = fire_chance_formula_lines(Some(0.12), &formula, &localize);
+        assert_eq!(
+            lines,
+            vec![
+                "Attacker fire chance formula".to_owned(),
+                "    base burnProb                    12.0%".to_owned(),
+                "  x burnChanceFactorHighLevel (IFHE) 0.50".to_owned(),
+                "  + artilleryBurnChanceBonus (DE)    +1.0pp".to_owned(),
+                "  = 7.0%".to_owned(),
+            ]
+        );
+    }
+
+    /// A step with no source renders its bare modifier name, unparenthesized.
+    #[test]
+    fn formula_lines_render_an_unsourced_step_without_parens() {
+        let formula = vec![formula_step("burnProbModifier", None, FormulaOp::Multiply, 1.5, 0.18)];
+        let lines = fire_chance_formula_lines(Some(0.12), &formula, &no_localization);
+        assert_eq!(lines[1], "    base burnProb    12.0%");
+        assert_eq!(lines[2], "  x burnProbModifier 1.50");
+        assert_eq!(lines[3], "  = 18.0%");
+    }
+
+    /// The eligibility model and `expected_fires` both read the clamped
+    /// chance, so when the raw formula total runs past 100% the hover must
+    /// show both values rather than only the disagreeing raw one.
+    #[test]
+    fn formula_lines_show_both_raw_and_clamped_when_they_disagree() {
+        let formula = vec![formula_step("someBonus", None, FormulaOp::Add, 0.3, 1.2)];
+        let lines = fire_chance_formula_lines(Some(0.9), &formula, &no_localization);
+        let total = lines.last().expect("a total line");
+        assert!(total.contains("120.0%"), "got {total:?}");
+        assert!(total.contains("100.0%"), "got {total:?}");
+    }
+
+    /// The raw and clamped values agree in the ordinary case, so only one
+    /// number is shown.
+    #[test]
+    fn formula_lines_show_one_value_when_raw_and_clamped_agree() {
+        let formula = vec![formula_step("someBonus", None, FormulaOp::Add, 0.01, 0.13)];
+        let lines = fire_chance_formula_lines(Some(0.12), &formula, &no_localization);
+        assert_eq!(lines.last(), Some(&"  = 13.0%".to_owned()));
+    }
+
+    /// Column width is measured in characters, not bytes: a multi-byte
+    /// localized name must not be padded as if it were wider than it displays.
+    #[test]
+    fn formula_lines_pad_by_character_count_not_byte_length() {
+        // Ten U+00E9 ("e" with acute accent): 10 characters, but 20 bytes in
+        // UTF-8, so it is longer than "base burnProb" (13 characters) by
+        // byte count but shorter by character count. A width computed from
+        // `.len()` would inflate the column to 20; the correct, char-counted
+        // width is 13, driven by "base burnProb" instead.
+        let name = "\u{e9}".repeat(10);
+        let formula = vec![formula_step(&name, None, FormulaOp::Multiply, 1.0, 0.12)];
+        let lines = fire_chance_formula_lines(Some(0.12), &formula, &no_localization);
+        assert_eq!(lines[1], "    base burnProb 12.0%");
+        assert_eq!(lines[2], format!("  x {name}    1.00"));
     }
 }

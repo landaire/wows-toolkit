@@ -2154,30 +2154,97 @@ pub struct CrewSkill {
     ui_treat_as_trigger: bool,
 }
 
+/// Build the gettext id pair for a skill string, choosing the key style by
+/// game version, from the internal name alone. The captain-skill rework
+/// ([`CAPTAIN_SKILL_REWORK_VERSION`]) changed both the skill data shape and
+/// the translation keys: pre-rework skills key as `<prefix>_<UPPERCASE>` (the
+/// internal name is the modifier, e.g. `PriorityTargetModifier` ->
+/// `IDS_SKILL_PRIORITYTARGETMODIFIER`), while the rework switched to
+/// `<prefix>_<UPPER_SNAKE>`. The non-matching style is returned as a fallback
+/// so a stray key from either era still resolves.
+///
+/// A free function (not a `CrewSkill` method) because a caller that only has
+/// an internal-name string (e.g. an id recovered from a modifier's source,
+/// with no `CrewSkill` to hand) still needs to build the same keys; species is
+/// not an input here (only `translated_name`'s two lookup keys are), so a bare
+/// name and version are sufficient.
+pub fn skill_translation_keys_for(name: &CrewSkillName, prefix: &str, version: &Version) -> (String, String) {
+    use convert_case::Case;
+    use convert_case::Casing;
+    let snake = format!("{prefix}_{}", name.as_str().to_case(Case::UpperSnake));
+    let plain = format!("{prefix}_{}", name.as_str().to_uppercase());
+    let rework =
+        Version::base(CAPTAIN_SKILL_REWORK_VERSION.0, CAPTAIN_SKILL_REWORK_VERSION.1, CAPTAIN_SKILL_REWORK_VERSION.2);
+    if version.is_at_least(&rework) { (snake, plain) } else { (plain, snake) }
+}
+
+#[cfg(test)]
+mod skill_translation_keys_for_tests {
+    use super::*;
+
+    /// Demolition Expert's internal name, the concrete case this accessor
+    /// exists for: `analysis::modifier_source` in wows-replay-insights hands
+    /// back exactly this string with no `CrewSkill` attached, and a caller
+    /// still needs to build the same two keys `translated_name` would.
+    fn demolition_expert() -> CrewSkillName {
+        CrewSkillName::from("HeFireProbability")
+    }
+
+    #[test]
+    fn post_rework_version_prefers_the_upper_snake_key() {
+        let version = Version::base(15, 0, 0);
+        let (primary, fallback) = skill_translation_keys_for(&demolition_expert(), "IDS_SKILL", &version);
+        assert_eq!(primary, "IDS_SKILL_HE_FIRE_PROBABILITY");
+        assert_eq!(fallback, "IDS_SKILL_HEFIREPROBABILITY");
+    }
+
+    #[test]
+    fn pre_rework_version_prefers_the_plain_uppercase_key() {
+        let version = Version::base(0, 9, 0);
+        let (primary, fallback) = skill_translation_keys_for(&demolition_expert(), "IDS_SKILL", &version);
+        assert_eq!(primary, "IDS_SKILL_HEFIREPROBABILITY");
+        assert_eq!(fallback, "IDS_SKILL_HE_FIRE_PROBABILITY");
+    }
+
+    /// `CrewSkill::skill_translation_keys` must delegate rather than
+    /// reimplement, so a skill built through the normal path yields the same
+    /// keys as calling the free function directly.
+    #[test]
+    fn the_crew_skill_method_delegates_to_the_free_function() {
+        let version = Version::base(15, 0, 0);
+        let skill = CrewSkill::builder()
+            .internal_name(demolition_expert())
+            .can_be_learned(true)
+            .is_epic(false)
+            .skill_type(CrewSkillType::from(0u8))
+            .tier(
+                CrewSkillTiers::builder()
+                    .aircraft_carrier(SkillPointCost::new(1))
+                    .auxiliary(SkillPointCost::new(1))
+                    .battleship(SkillPointCost::new(1))
+                    .cruiser(SkillPointCost::new(1))
+                    .destroyer(SkillPointCost::new(1))
+                    .submarine(SkillPointCost::new(1))
+                    .build(),
+            )
+            .ui_treat_as_trigger(false)
+            .build();
+        assert_eq!(
+            skill.skill_translation_keys("IDS_SKILL", &version),
+            skill_translation_keys_for(&demolition_expert(), "IDS_SKILL", &version)
+        );
+    }
+}
+
 impl CrewSkill {
     pub fn internal_name(&self) -> &CrewSkillName {
         &self.internal_name
     }
 
     /// Build the gettext id for a skill string, choosing the key style by game
-    /// version. The captain-skill rework ([`CAPTAIN_SKILL_REWORK_VERSION`])
-    /// changed both the skill data shape and the translation keys: pre-rework
-    /// skills key as `<prefix>_<UPPERCASE>` (the internal name is the modifier,
-    /// e.g. `PriorityTargetModifier` -> `IDS_SKILL_PRIORITYTARGETMODIFIER`),
-    /// while the rework switched to `<prefix>_<UPPER_SNAKE>`. The non-matching
-    /// style is returned as a fallback so a stray key from either era still
-    /// resolves.
+    /// version. See [`skill_translation_keys_for`] for the rule.
     fn skill_translation_keys(&self, prefix: &str, version: &Version) -> (String, String) {
-        use convert_case::Case;
-        use convert_case::Casing;
-        let snake = format!("{prefix}_{}", self.internal_name().as_str().to_case(Case::UpperSnake));
-        let plain = format!("{prefix}_{}", self.internal_name().as_str().to_uppercase());
-        let rework = Version::base(
-            CAPTAIN_SKILL_REWORK_VERSION.0,
-            CAPTAIN_SKILL_REWORK_VERSION.1,
-            CAPTAIN_SKILL_REWORK_VERSION.2,
-        );
-        if version.is_at_least(&rework) { (snake, plain) } else { (plain, snake) }
+        skill_translation_keys_for(self.internal_name(), prefix, version)
     }
 
     pub fn translated_name(&self, metadata_provider: &GameMetadataProvider, version: &Version) -> Option<String> {
