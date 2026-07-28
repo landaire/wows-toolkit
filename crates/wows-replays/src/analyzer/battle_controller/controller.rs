@@ -1222,7 +1222,14 @@ impl UpdateFromReplayArgs for VehicleProps {
         set_arg_value!(self.respawn_time, args, RESPAWN_TIME_KEY, u16);
         set_arg_value!(self.engine_power, args, ENGINE_POWER_KEY, u8);
         set_arg_value!(self.max_server_speed_raw, args, MAX_SERVER_SPEED_RAW_KEY, u32);
-        set_arg_value!(self.burning_flags, args, BURNING_FLAGS_KEY, u16);
+        // Read leniently, matching visibilityFlags: a strict u16 read drops the
+        // field on any build that encodes it at another width, and a burn mask
+        // stuck at 0 reads downstream as "nothing ever burned" rather than
+        // "unknown". Bits 0-9 are all that is defined, so narrowing to u16
+        // keeps every meaningful bit.
+        if let Some(flags) = args.get(BURNING_FLAGS_KEY).and_then(ArgValue::as_u32) {
+            self.burning_flags = flags as u16;
+        }
     }
 }
 
@@ -1429,5 +1436,23 @@ mod tests {
             [("regenerationHealth", ArgValue::Float32(2295.0))].into_iter().collect();
         props.update_from_args(&args, version, &constants);
         assert_eq!(props.regeneration_health(), 2295.0);
+    }
+
+    /// `burningFlags` must be read leniently across builds. A strict `Uint16`
+    /// read leaves the mask at 0 on any other integer width, and a zero burn
+    /// mask does not read as "unknown" downstream, it reads as "nothing was
+    /// ever burning" and biases the fire statistic instead of emptying it.
+    #[test]
+    fn burning_flags_accepts_every_integer_width() {
+        let version = Version::default();
+        let constants = GameConstants::defaults();
+        for value in
+            [ArgValue::Uint8(0b0101), ArgValue::Uint16(0b0101), ArgValue::Uint32(0b0101), ArgValue::Int32(0b0101)]
+        {
+            let mut props = VehicleProps::default();
+            let args: HashMap<&str, ArgValue<'_>> = [("burningFlags", value.clone())].into_iter().collect();
+            props.update_from_args(&args, version, &constants);
+            assert_eq!(props.burning_flags(), 0b0101, "burningFlags dropped for {value:?}");
+        }
     }
 }
