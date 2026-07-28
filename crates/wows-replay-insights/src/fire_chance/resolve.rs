@@ -167,6 +167,7 @@ impl ResolvedFireChanceInput {
             self_entity: self.self_entity,
             victims: &self.victims,
             hits: report.hit_history(),
+            salvos: report.salvos(),
             ribbons: report.ribbon_events(),
             burn_state_changes: report.burn_state_changes(),
             presence: report.presence(),
@@ -183,7 +184,8 @@ impl ResolvedFireChanceInput {
 /// `report.hit_history()` is empty unless the ingest ran with
 /// `BattleWorld::set_record_hit_history(true)`, which produces a zero-sample
 /// result rather than an error: this function cannot tell an unrecorded parse
-/// from a match in which nothing was hit.
+/// from a match in which nothing was hit. `report.salvos()` is the same for
+/// `BattleWorld::set_record_salvo_history(true)` and the shells-fired count.
 pub fn resolve_fire_chance_input(
     report: &BattleReport,
     params: &dyn GameParamProvider,

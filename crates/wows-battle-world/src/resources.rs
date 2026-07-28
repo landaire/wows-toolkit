@@ -29,6 +29,7 @@ use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
 use wowsunpack::game_types::PlaneId;
 use wowsunpack::game_types::Ribbon;
+use wowsunpack::game_types::ShotId;
 use wowsunpack::models::fire_nodes::BurnNodeIndex;
 
 use crate::units::MatchWinner;
@@ -542,6 +543,68 @@ impl PresenceLog {
 /// hit in one `ShotKills` packet shares a clock.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct HitHistoryLog(pub Vec<ResolvedShotHit>);
+
+/// One artillery salvo the client was told about, recorded when it was fired.
+///
+/// The shells themselves are not kept: what a fired-shell count needs is how
+/// many there were and what they were, and a salvo's shells all carry the same
+/// projectile, so `params_id` identifies every one of them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SalvoEvent {
+    pub clock: GameClock,
+    /// Vehicle entity that fired, i.e. `ArtillerySalvo::owner_id`.
+    pub owner_id: EntityId,
+    /// Projectile GameParams id shared by every shell in the salvo.
+    pub params_id: GameParamId,
+    /// The server's salvo id. **Not unique per record**: one trigger pull can
+    /// arrive as several `SHOTS_PACK` entries sharing a salvo id, and the
+    /// client creates a shell for every shot in every one of them, so summing
+    /// shells per salvo id loses the rest. [`Self::first_shot`] is the
+    /// discriminator.
+    pub salvo_id: u32,
+    /// Shot id of the salvo's first shell. Shot ids come from a per-owner
+    /// counter, so this identifies the shell group within its salvo id and is
+    /// what a shell sum keys on. `None` for a salvo carrying no shells, which
+    /// contributes nothing to such a sum anyway.
+    pub first_shot: Option<ShotId>,
+    /// How many shells the salvo carried.
+    pub shots: u32,
+}
+
+/// Every artillery salvo `receiveArtilleryShots` reported, in packet order.
+///
+/// The point of this log is that it is fed at fire time, so a salvo that landed
+/// nothing is in it on the same terms as one that landed everything. A count
+/// reconstructed from `HitHistoryLog` cannot say that: a `ResolvedShotHit`
+/// carries its originating salvo, but only salvos that produced a hit the
+/// client was told about ever reach it, so the misses vanish and the shots
+/// fired read as far fewer than they were.
+///
+/// Every owner is recorded, not only the recording player's ship, because the
+/// packet already carries `owner_id` and filtering would need a self-ship
+/// lookup per salvo. A consumer interested in one attacker filters on
+/// `owner_id`, the same way the hit path filters `salvo.owner_id`.
+///
+/// Populated only when `IngestOptions::record_salvo_history` is set; it
+/// defaults to `false`, so an empty log does not mean nothing was fired, it may
+/// mean recording was never turned on for this parse. Unlike `HitHistoryLog`
+/// it is not additionally suppressed by `ShotTracking::Untracked`: that mode
+/// skips constructing projectile entities and resolved hits, neither of which
+/// this log needs.
+///
+/// Entries are pushed in packet order, so `clock` is non-decreasing, not
+/// strictly increasing: one `receiveArtilleryShots` call can carry several
+/// salvos, and they all share its clock. `clock` is the raw `packet.clock` seen
+/// by `ingest::dispatch`, not the `Clock` resource, matching [`BurnStateLog`]
+/// and [`RibbonLog`].
+///
+/// A merged multi-perspective session can log one salvo more than once, since
+/// `receiveArtilleryShots` is forwarded from every perspective that saw the
+/// shot. The two clients are told the same server-assigned shot ids, so a
+/// consumer that sums shells keys on `(owner_id, salvo_id, first_shot)` rather
+/// than adding up rows.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct SalvoLog(pub Vec<SalvoEvent>);
 
 /// One observed increment of a self-player ribbon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

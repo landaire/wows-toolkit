@@ -169,7 +169,7 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::CameraMode(_) => {}
         DecodedPacketPayload::CameraFreeLook(_) => {}
         DecodedPacketPayload::ArtilleryShots { avatar_id, salvos } => {
-            projectiles::handle_artillery_shots(avatar_id, salvos, clock, world, options.shot_tracking);
+            projectiles::handle_artillery_shots(avatar_id, salvos, clock, world, options);
         }
         // Secondary fire is rendered from the shared receiveArtilleryShots path
         // (classified by the owner ship's ATBA ammo), so the per-gun fire bitmask

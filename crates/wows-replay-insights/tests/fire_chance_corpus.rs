@@ -129,9 +129,24 @@ enum SkipReason {
 struct Measurement {
     name: String,
     build: u32,
-    /// Fire-capable main-battery shells fired, over the salvos the replay lets
-    /// us see, against how many of them landed on a ship.
+    /// Fire-capable main-battery shells fired, from the salvo log, against how
+    /// many of them landed on a ship.
     he_shells_fired: u32,
+    /// Salvo-log rows this replay produced, in total and for the recording
+    /// player's own ship. A build whose `receiveArtilleryShots` fails to
+    /// resolve leaves both at zero, which is what tells an unpopulated log
+    /// apart from a match in which nothing was fired.
+    salvos_logged: u32,
+    self_salvos: u32,
+    self_shots_raw: u32,
+    self_salvo_ids: u32,
+    /// Main-battery shells fired, HE and AP together, so the fired side can be
+    /// compared against the game's own main-battery hit ribbons, which do not
+    /// separate the two either.
+    main_battery_shells_fired: u32,
+    /// The server's own `(HE, all shell types)` main-battery shot counts from
+    /// the post-battle results, which the two counts above are checked against.
+    server_main_shots: Option<(u64, u64)>,
     shells_on_target: u32,
     /// Of those, the ones that landed on a ship that was already dead.
     not_applicable: u32,
@@ -303,6 +318,8 @@ fn build_report(replay: &ReplayFile, provider: &GameMetadataProvider, constants:
     let mut world = BattleWorld::new(&replay.meta, provider, Some(constants));
     // Without this the hit history is empty and every rate is zero-sample.
     world.set_record_hit_history(true);
+    // And without this the shells-fired count reads zero.
+    world.set_record_salvo_history(true);
 
     let mut parser = wows_replays::packet2::Parser::with_version(provider.entity_specs(), version);
     let mut remaining = replay.packet_data.as_slice();
@@ -348,6 +365,24 @@ fn server_fires_by_ship(report: &BattleReport, constants: &serde_json::Value) ->
         *fires.entry(ship.clone()).or_insert(0) += count;
     }
     Some(fires)
+}
+
+/// The server's own count of the main-battery shells the recording player
+/// fired, as `(HE, every shell type)`.
+///
+/// This is the one external check the fired side has. The post-battle results
+/// carry `shots_main_he`, `shots_main_ap` and `shots_main_cs` for the recording
+/// player, which is the same quantity the salvo log is summing, counted by the
+/// server rather than reconstructed from packets. `None` when the replay
+/// carries no results blob or no shot counts in it.
+fn server_main_shots(report: &BattleReport, constants: &serde_json::Value) -> Option<(u64, u64)> {
+    let raw: serde_json::Value = serde_json::from_str(report.battle_results()?).ok()?;
+    let resolved = resolve_battle_results(raw, constants);
+    let self_db_id = report.self_player().initial_state().db_id();
+    let info = resolved.pointer(&format!("/playersPublicInfo/{self_db_id}"))?.as_object()?;
+    let shots = |key: &str| info.get(key).and_then(|v| v.as_u64());
+    let he = shots("shots_main_he")?;
+    Some((he, he + shots("shots_main_ap").unwrap_or(0) + shots("shots_main_cs").unwrap_or(0)))
 }
 
 /// Ribbons the game raises when one of our main-battery shells strikes a ship.
@@ -790,6 +825,27 @@ fn measure(
         name,
         build,
         he_shells_fired: out.he_shells_fired,
+        salvos_logged: report.salvos().len() as u32,
+        self_salvos: report
+            .salvos()
+            .iter()
+            .filter(|salvo| salvo.owner_id == report.self_player().initial_state().entity_id())
+            .count() as u32,
+        self_shots_raw: report
+            .salvos()
+            .iter()
+            .filter(|salvo| salvo.owner_id == report.self_player().initial_state().entity_id())
+            .map(|salvo| salvo.shots)
+            .sum(),
+        main_battery_shells_fired: main_battery_shells_fired(&report, &input, &data.provider),
+        server_main_shots: data.constants_json.as_ref().and_then(|constants| server_main_shots(&report, constants)),
+        self_salvo_ids: report
+            .salvos()
+            .iter()
+            .filter(|salvo| salvo.owner_id == report.self_player().initial_state().entity_id())
+            .map(|salvo| (salvo.salvo_id, salvo.params_id.raw(), salvo.first_shot.map(|shot| shot.raw())))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len() as u32,
         shells_on_target: out.shells_on_target,
         not_applicable: out.not_applicable,
         eligible_hits: out.eligible_hits,
@@ -819,6 +875,31 @@ fn measure(
         total_windows,
         reconciliation,
     })
+}
+
+/// Main-battery shells the recording player fired, from the salvo log, keyed
+/// the same way `analyze` keys its HE-only count so the two are comparable.
+/// Unlike that count this one keeps AP, because the game's main-battery hit
+/// ribbons do not separate the shell types.
+fn main_battery_shells_fired(
+    report: &BattleReport,
+    input: &FireChanceInput<'_>,
+    params: &dyn wowsunpack::game_params::types::GameParamProvider,
+) -> u32 {
+    let mut per_salvo: BTreeMap<(u32, u64, Option<u32>), u32> = BTreeMap::new();
+    for salvo in report.salvos() {
+        if salvo.owner_id != input.attacker.entity {
+            continue;
+        }
+        let is_main = params
+            .game_param_by_id(salvo.params_id)
+            .is_some_and(|param| input.attacker.main_battery_ammo.iter().any(|name| name == param.name()));
+        if !is_main {
+            continue;
+        }
+        per_salvo.insert((salvo.salvo_id, salvo.params_id.raw(), salvo.first_shot.map(|shot| shot.raw())), salvo.shots);
+    }
+    per_salvo.values().sum()
 }
 
 fn section_pairs(out: &EffectiveFireChance) -> Vec<(u8, u8, bool)> {
@@ -1138,7 +1219,20 @@ fn ribbon_accounting_reconciles() {
     print_corpus_summary(corpus);
     let (mut attributed, mut unattributed, mut observed) = (0u32, 0u32, 0u32);
     let (mut fired, mut on_target, mut not_applicable) = (0u64, 0u64, 0u64);
+    let mut he_on_target = 0u64;
+    let (mut salvo_rows, mut self_salvo_rows) = (0u64, 0u64);
+    let (mut self_shots_raw, mut self_salvo_ids) = (0u64, 0u64);
+    let (mut main_fired, mut main_ribbons) = (0u64, 0u64);
+    let (mut server_he_fired, mut server_main_fired) = (0u64, 0u64);
+    let (mut ours_he_fired_checked, mut ours_main_fired_checked) = (0u64, 0u64);
+    let mut replays_with_server_shots = 0u32;
     let mut drivers: BTreeMap<ExclusionReason, u32> = BTreeMap::new();
+    // Replays whose salvo log came back empty for the recording player,
+    // grouped by build: a whole build going silent is what a mis-resolved
+    // `receiveArtilleryShots` looks like from here, while one replay going
+    // silent is a player who never fired a gun.
+    let mut silent_builds: BTreeMap<u32, Vec<&str>> = BTreeMap::new();
+    let mut builds_seen: BTreeMap<u32, u32> = BTreeMap::new();
 
     for measurement in &corpus.measurements {
         assert_eq!(
@@ -1181,6 +1275,34 @@ fn ribbon_accounting_reconciles() {
             );
         }
         fired += u64::from(measurement.he_shells_fired);
+        // The HE main-battery shells that landed on a ship, i.e. the numerator
+        // the fired count is the denominator of. The two shell-identity
+        // refusals name the shells that were never HE main battery, and
+        // `ImpactNotOnAShip` names the ones that struck water or terrain,
+        // which `receiveShotKills` reports alongside the real hits.
+        let not_he: u32 =
+            [ExclusionReason::ShellCannotBurn, ExclusionReason::NotMainBattery, ExclusionReason::ImpactNotOnAShip]
+                .iter()
+                .filter_map(|reason| measurement.exclusions.get(reason))
+                .sum();
+        he_on_target += u64::from(measurement.shells_on_target.saturating_sub(not_he));
+        main_fired += u64::from(measurement.main_battery_shells_fired);
+        if let Some((server_he, server_main)) = measurement.server_main_shots {
+            server_he_fired += server_he;
+            server_main_fired += server_main;
+            ours_he_fired_checked += u64::from(measurement.he_shells_fired);
+            ours_main_fired_checked += u64::from(measurement.main_battery_shells_fired);
+            replays_with_server_shots += 1;
+        }
+        main_ribbons += u64::from(measurement.reconciliation.main_battery_ribbons);
+        salvo_rows += u64::from(measurement.salvos_logged);
+        self_salvo_rows += u64::from(measurement.self_salvos);
+        self_shots_raw += u64::from(measurement.self_shots_raw);
+        self_salvo_ids += u64::from(measurement.self_salvo_ids);
+        *builds_seen.entry(measurement.build).or_insert(0) += 1;
+        if measurement.self_salvos == 0 {
+            silent_builds.entry(measurement.build).or_default().push(&measurement.name);
+        }
         on_target += u64::from(measurement.shells_on_target);
         not_applicable += u64::from(measurement.not_applicable);
         attributed += measurement.fires;
@@ -1196,11 +1318,59 @@ fn ribbon_accounting_reconciles() {
         "ribbons {observed}: {attributed} attributed, {unattributed} unattributed (rate {:.3})",
         f64::from(unattributed) / f64::from(observed)
     );
-    // Printed rather than gated. The fired count covers only the salvos a hit
-    // led us back to and the on-target count covers every shell of ours that
-    // landed, HE or not, so neither bounds the other; the ratio is a diagnostic
-    // on how much of the shell stream the salvo match recovers.
+    // The fired count comes off the salvo log and covers every salvo, landed or
+    // not; the on-target count covers every shell of ours that landed, HE or
+    // not. `he_on_target` is the HE-only subset, so its ratio to `fired` is the
+    // implied HE hit rate, which is the check that the fired side is complete.
     println!("HE shells fired {fired}, shells on target {on_target}, of which {not_applicable} landed on a dead ship");
+    println!(
+        "HE shells on target {he_on_target}, implied HE hit rate {:.3}",
+        if fired > 0 { he_on_target as f64 / fired as f64 } else { f64::NAN }
+    );
+    println!(
+        "salvo log: {salvo_rows} salvos from every owner, {self_salvo_rows} from the recording player, over {} builds",
+        builds_seen.len()
+    );
+    println!("self salvo rows {self_salvo_rows}, raw shots {self_shots_raw}, distinct salvo records {self_salvo_ids}");
+    // The independent check on the fired side: the game's own main-battery hit
+    // ribbons over the main-battery shells the salvo log says we fired. Both
+    // sides mix HE and AP, so this is the ratio the game itself would report.
+    println!(
+        "main-battery shells fired {main_fired}, game main-battery hit ribbons {main_ribbons}, ratio {:.3}",
+        if main_fired > 0 { main_ribbons as f64 / main_fired as f64 } else { f64::NAN }
+    );
+    println!(
+        "against the server's own shot counts over {replays_with_server_shots} replays: HE {ours_he_fired_checked} ours vs {server_he_fired} theirs ({:.3}), main battery {ours_main_fired_checked} vs {server_main_fired} ({:.3})",
+        if server_he_fired > 0 { ours_he_fired_checked as f64 / server_he_fired as f64 } else { f64::NAN },
+        if server_main_fired > 0 { ours_main_fired_checked as f64 / server_main_fired as f64 } else { f64::NAN }
+    );
+    for (build, replays) in &silent_builds {
+        println!(
+            "  build {build}: {} of {} replays logged no salvo for the recording player: {replays:?}",
+            replays.len(),
+            builds_seen[build]
+        );
+    }
+    // One replay with no salvo is a player who never fired. Every replay on a
+    // build going silent is the decode failing for that build, which reports
+    // zero shells fired rather than an honest gap.
+    let dead_builds: Vec<u32> = silent_builds
+        .iter()
+        .filter(|(build, replays)| replays.len() as u32 == builds_seen[build])
+        .map(|(build, _)| *build)
+        .collect();
+    assert!(dead_builds.is_empty(), "no replay on builds {dead_builds:?} produced a salvo for the recording player");
+
+    // The external check on the fired side. `he_shells_fired` is the
+    // denominator of the headline statistic, and the server counts the same
+    // shells in the post-battle results, so the two have to agree.
+    assert!(replays_with_server_shots > 0, "no replay carried the server's own shot counts");
+    let he_error = (ours_he_fired_checked as f64 - server_he_fired as f64).abs() / server_he_fired as f64;
+    assert!(
+        he_error <= 0.01,
+        "HE shells fired {ours_he_fired_checked} against the server's {server_he_fired} ({:.3} off)",
+        he_error
+    );
 
     let mut ranked: Vec<(ExclusionReason, u32)> = drivers.into_iter().collect();
     ranked.sort_by_key(|(reason, count)| (std::cmp::Reverse(*count), *reason));

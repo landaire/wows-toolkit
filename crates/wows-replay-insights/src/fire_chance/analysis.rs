@@ -24,6 +24,7 @@ use wowsunpack::game_types::CollisionType;
 use wowsunpack::game_types::GameParamId;
 use wowsunpack::game_types::Ribbon;
 use wowsunpack::game_types::ShellHitType;
+use wowsunpack::game_types::ShotId;
 use wowsunpack::models::fire_nodes::BurnNodeIndex;
 use wowsunpack::models::fire_nodes::FireSectionGeometry;
 use wowsunpack::recognized::Recognized;
@@ -31,6 +32,7 @@ use wowsunpack::recognized::Recognized;
 use wows_battle_world::resources::BurnStateChange;
 use wows_battle_world::resources::PresenceLog;
 use wows_battle_world::resources::RibbonEvent;
+use wows_battle_world::resources::SalvoEvent;
 use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
 use wows_replays::analyzer::battle_controller::state::ConsumableInventory;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
@@ -308,26 +310,22 @@ impl PerShipFireChance {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectiveFireChance {
-    /// How many fire-capable main-battery shells we fired, summed over the
-    /// salvos the replay lets us see. An undercount of the match's real shell
-    /// count, and it says so in the UI rather than presenting itself as the
-    /// whole.
+    /// How many fire-capable main-battery shells we fired.
     ///
-    /// It cannot be the whole. A salvo reaches this analysis only through the
-    /// hits it produced: `ResolvedShotHit` is the one record the report keeps,
-    /// and it carries the originating `ArtillerySalvo` with that salvo's full
-    /// shot list, which is where this number comes from. `receiveShotKills`
-    /// does not report every shell that hit nothing, so a salvo that landed no
-    /// impact the client was told about leaves no trace at all, as does one
-    /// whose shells outlived the client's 30-second active-shot window.
-    /// Nothing else in the pipeline retains the `receiveArtilleryShots`
-    /// packets, so a complete count would have to be logged during ingest
-    /// rather than reconstructed here.
+    /// Taken from [`FireChanceInput::salvos`], which the ingest records when a
+    /// salvo is fired, so a salvo that landed nothing counts exactly as one
+    /// that landed everything. It is not derived from the hits: a count taken
+    /// from `ResolvedShotHit`'s originating salvo can only ever see salvos that
+    /// produced an impact the client was told about, which flatters the shooter
+    /// by dropping every miss.
     ///
-    /// Counted per salvo rather than per hit, so a salvo is counted once at its
-    /// full width however many of its shells were seen landing, and gated on
-    /// the same "could this shell start a fire" test `classify` applies, so AP
-    /// and SAP are out.
+    /// Counted per salvo at its full width, and gated on the same "could this
+    /// shell start a fire" test `classify` applies, so AP, SAP and secondary
+    /// shells are out. It is a whole-match attacker-side figure with no
+    /// per-ship counterpart; see [`PerShipFireChance::shells_on_target`].
+    ///
+    /// Zero when the parse ran without `BattleWorld::set_record_salvo_history`,
+    /// which is indistinguishable here from a match in which nothing was fired.
     pub he_shells_fired: u32,
     /// Every shell of ours the eligibility model classified: the trials, the
     /// refusals and the hits that were never in the population. Equal to
@@ -585,6 +583,12 @@ pub struct FireChanceInput<'a> {
     pub victims: &'a HashMap<EntityId, VictimContext>,
     /// Whole-match hit history (`BattleReport::hit_history`).
     pub hits: &'a [ResolvedShotHit],
+    /// Every salvo fired in the match (`BattleReport::salvos`), the fired side
+    /// of the shell accounting. Recorded at fire time, so it holds the salvos
+    /// that missed as well as the ones that landed, which is what makes
+    /// [`EffectiveFireChance::he_shells_fired`] a real count rather than a
+    /// lower bound taken off the hits.
+    pub salvos: &'a [SalvoEvent],
     /// Self-player ribbon increments (`BattleReport::ribbon_events`).
     pub ribbons: &'a [RibbonEvent],
     pub burn_state_changes: &'a [BurnStateChange],
@@ -703,11 +707,7 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
     let mut candidates: Vec<Candidate<'_>> = Vec::new();
     let mut contenders: Vec<ContestingImpact> = Vec::new();
     let mut classified: Vec<ClassifiedHit> = Vec::new();
-    // Keyed on the salvo and its shell rather than the salvo alone: nothing
-    // establishes that a salvo id is unique across the batteries that raise
-    // them, and a main-battery salvo folded into a secondary one would take
-    // that salvo's width. `BTreeMap` so the sum does not depend on hash seeds.
-    let mut shells_per_salvo: BTreeMap<(u32, u64), u32> = BTreeMap::new();
+    let he_shells_fired = he_shells_fired(input, &bundle, tier);
 
     for hit in input.hits {
         // `salvo` is `Some` only for a hit matched to its originating salvo.
@@ -716,10 +716,6 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
         let Some(salvo) = hit.salvo.as_ref() else { continue };
         if salvo.owner_id != input.attacker.entity {
             continue;
-        }
-
-        if burnable_main_battery_chance(input, &bundle, tier, salvo.params_id).is_ok() {
-            shells_per_salvo.insert((salvo.salvo_id, salvo.params_id.raw()), salvo.shots.len() as u32);
         }
 
         let eligibility = classify(input, &geometry, &tracks, &bundle, tier, formula_applies, hit, salvo.params_id);
@@ -777,7 +773,7 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
         if formula_applies { formula_steps(input, &bundle, tier, &counted) } else { (None, Vec::new()) };
 
     Some(EffectiveFireChance {
-        he_shells_fired: shells_per_salvo.values().sum(),
+        he_shells_fired,
         shells_on_target: classified.len() as u32,
         not_applicable,
         eligible_hits: counted.len() as u32,
@@ -790,6 +786,42 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
         formula_base,
         formula,
     })
+}
+
+/// Fire-capable main-battery shells the attacker fired over the whole match.
+///
+/// Reads the fired-side log rather than the hits, so a salvo that landed
+/// nothing is counted; the gate is the same `burnable_main_battery_chance` the
+/// hit path applies, so AP, SAP and secondary shells are out.
+///
+/// Keyed on the salvo id together with the shell and the salvo's first shot id,
+/// because a salvo id names none of them on its own. One trigger pull reaches
+/// the client as several `SHOTS_PACK` entries sharing a salvo id (over the
+/// corpus, 17440 salvo records carry only 11360 distinct salvo ids), and the
+/// game creates a shell for every shot in every one of them, so a key of just
+/// the salvo id would throw away all but one record of each pull. Shot ids come
+/// from a per-owner counter, so the first one separates those records; the
+/// shell is in the key as well since nothing establishes that a salvo id is
+/// unique across the batteries that raise them.
+///
+/// What the key still collapses is the same record arriving twice, which is
+/// what a merged multi-perspective session produces: both clients are told the
+/// same server-assigned shot ids, so the duplicate lands on the same key
+/// instead of multiplying the count by the number of replays merged.
+/// `BTreeMap` so the sum does not depend on hash seeds.
+fn he_shells_fired(input: &FireChanceInput<'_>, bundle: &ModifierBundle, tier: u32) -> u32 {
+    let mut shells_per_salvo: BTreeMap<(u32, u64, Option<u32>), u32> = BTreeMap::new();
+    for salvo in input.salvos {
+        if salvo.owner_id != input.attacker.entity {
+            continue;
+        }
+        if burnable_main_battery_chance(input, bundle, tier, salvo.params_id).is_err() {
+            continue;
+        }
+        let key = (salvo.salvo_id, salvo.params_id.raw(), salvo.first_shot.map(ShotId::raw));
+        shells_per_salvo.insert(key, salvo.shots);
+    }
+    shells_per_salvo.values().sum()
 }
 
 /// Which fire section a hit landed in, when the victim's hull has geometry and
@@ -1534,6 +1566,13 @@ mod tests {
         /// in a scenario belongs to that one salvo, so this is the whole
         /// fired-shell count and is independent of how many of them landed.
         main_salvo_shells: usize,
+        /// How many further main-battery salvos were fired that landed nothing
+        /// at all. They reach the analysis only through the salvo log, which is
+        /// the whole reason that log exists.
+        main_salvos_that_missed: usize,
+        /// Every salvo logged twice, which is what a merged multi-perspective
+        /// session produces when two clients were both told about the shot.
+        every_salvo_delivered_twice: bool,
         secondary_hit_section: Option<u8>,
         secondary_hit_offset: f32,
         ribbon_offset: f32,
@@ -1569,6 +1608,8 @@ mod tests {
             hit_type: ShellHitType::Normal,
             hit_from_atba: false,
             main_salvo_shells: 1,
+            main_salvos_that_missed: 0,
+            every_salvo_delivered_twice: false,
             secondary_hit_section: None,
             secondary_hit_offset: 0.1,
             ribbon_offset: 0.0,
@@ -1710,6 +1751,17 @@ mod tests {
 
         fn with_the_burn_change_offset_by(mut self, seconds: f32) -> Fixture {
             self.burn_change_offset = seconds;
+            self
+        }
+
+        /// Fire `salvos` more main-battery salvos, none of which land a shell.
+        fn with_main_salvos_that_missed(mut self, salvos: usize) -> Fixture {
+            self.main_salvos_that_missed = salvos;
+            self
+        }
+
+        fn with_every_salvo_delivered_twice(mut self) -> Fixture {
+            self.every_salvo_delivered_twice = true;
             self
         }
 
@@ -1882,6 +1934,48 @@ mod tests {
                 }
             }
 
+            // The salvo log the ingest would have recorded: every distinct
+            // salvo among the hits at its full width, plus the salvos this
+            // scenario says landed nothing, which no hit can testify to.
+            let mut salvos: Vec<SalvoEvent> = Vec::new();
+            for hit in &hits {
+                let Some(salvo) = hit.salvo.as_ref() else { continue };
+                let already = salvos.iter().any(|logged| {
+                    logged.owner_id == salvo.owner_id
+                        && logged.salvo_id == salvo.salvo_id
+                        && logged.params_id == salvo.params_id
+                });
+                if already {
+                    continue;
+                }
+                salvos.push(SalvoEvent {
+                    clock: hit.fired_at.unwrap_or(hit.clock),
+                    owner_id: salvo.owner_id,
+                    params_id: salvo.params_id,
+                    salvo_id: salvo.salvo_id,
+                    first_shot: salvo.shots.first().map(|shot| shot.shot_id),
+                    shots: salvo.shots.len() as u32,
+                });
+            }
+            for index in 0..self.main_salvos_that_missed {
+                salvos.push(SalvoEvent {
+                    clock: HIT_CLOCK,
+                    owner_id: attacker_id(),
+                    params_id: main_shell_id(),
+                    // One salvo id shared by every pack, which is what a single
+                    // trigger pull arriving as several `SHOTS_PACK` entries
+                    // looks like on the wire.
+                    salvo_id: 100,
+                    first_shot: Some(ShotId::from(1000 + index as u32)),
+                    shots: self.main_salvo_shells as u32,
+                });
+            }
+
+            if self.every_salvo_delivered_twice {
+                let once = salvos.clone();
+                salvos.extend(once);
+            }
+
             let mut changes = Vec::new();
             if self.burn_mask_before != 0 {
                 changes.push(BurnStateChange {
@@ -2019,6 +2113,7 @@ mod tests {
                 self_entity: attacker_id(),
                 victims: Box::leak(Box::new(victims)),
                 hits: Box::leak(Box::new(hits)),
+                salvos: Box::leak(Box::new(salvos)),
                 ribbons: Box::leak(Box::new(ribbons)),
                 burn_state_changes: Box::leak(Box::new(changes)),
                 presence: Box::leak(Box::new(presence)),
@@ -2666,6 +2761,39 @@ mod tests {
             .expect("geometry");
         assert_eq!(out.he_shells_fired, 6);
         assert_eq!(out.shells_on_target, 2);
+    }
+
+    /// The point of the fired-side log: a salvo that landed nothing is still
+    /// fired, and counting only the salvos seen landing is what made this
+    /// number read as a 75% hit rate across the corpus.
+    #[test]
+    fn shells_fired_counts_the_salvos_that_landed_nothing() {
+        let out = analyze(&fixture().with_the_main_salvo_firing(6).with_main_salvos_that_missed(3).build())
+            .expect("geometry");
+        assert_eq!(out.he_shells_fired, 24, "four six-shell salvos, one of which landed a shell");
+        assert_eq!(out.shells_on_target, 1);
+    }
+
+    /// A merged session hears the same salvo from every perspective that saw
+    /// it. Both records carry the server's own shot ids, so they collapse onto
+    /// one key instead of doubling the count.
+    #[test]
+    fn shells_fired_counts_a_duplicated_salvo_once() {
+        let fixture = fixture()
+            .with_the_main_salvo_firing(6)
+            .with_main_salvos_that_missed(3)
+            .with_every_salvo_delivered_twice()
+            .build();
+        let out = analyze(&fixture).expect("geometry");
+        assert_eq!(out.he_shells_fired, 24);
+    }
+
+    /// Someone else's salvo is in the log too, since the log records every
+    /// owner, and it is not ours to count.
+    #[test]
+    fn shells_fired_ignores_another_ship_salvo() {
+        let out = analyze(&fixture().with_the_main_salvo_firing(6).fired_by_another_ship().build()).expect("geometry");
+        assert_eq!(out.he_shells_fired, 0);
     }
 
     /// The fired count is gated on the same "could this shell start a fire"

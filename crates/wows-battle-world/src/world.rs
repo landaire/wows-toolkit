@@ -42,6 +42,7 @@ use crate::resources::PlayerIndex;
 use crate::resources::PresenceLog;
 use crate::resources::ReplayVehicles;
 use crate::resources::RibbonLog;
+use crate::resources::SalvoLog;
 use crate::resources::ScoringRules;
 use crate::resources::SelfStats;
 use crate::resources::ShotHitLog;
@@ -125,6 +126,16 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
     /// `ResolvedShotHit` is constructed at all in that mode.
     pub fn set_record_hit_history(&mut self, record: bool) {
         self.options.record_hit_history = record;
+    }
+
+    /// Accumulate every artillery salvo fired in `SalvoLog` for the whole parse.
+    ///
+    /// Off by default because only a shots-fired statistic reads it. Any
+    /// consumer of `BattleReport::salvos` must turn it on before feeding
+    /// packets: the log is otherwise empty, which reads as "nothing fired"
+    /// rather than "not recorded".
+    pub fn set_record_salvo_history(&mut self, record: bool) {
+        self.options.record_salvo_history = record;
     }
 
     /// Replace the consumable inventory for one entity.
@@ -268,6 +279,7 @@ fn insert_empty_resources(world: &mut World) {
     world.insert_resource(RibbonLog::default());
     world.insert_resource(PresenceLog::default());
     world.insert_resource(HitHistoryLog::default());
+    world.insert_resource(SalvoLog::default());
 }
 
 /// Build MetadataPlayers from the replay vehicles list.
@@ -355,6 +367,7 @@ mod tests {
     use crate::resources::PlayerIndex;
     use crate::resources::PresenceLog;
     use crate::resources::PresenceWindow;
+    use crate::resources::SalvoLog;
     use crate::test_support::StubResources;
     use crate::test_support::fixture_param;
     use crate::test_support::minimal_meta;
@@ -404,6 +417,30 @@ mod tests {
         }
     }
 
+    /// A three-shell salvo from entity 7.
+    fn a_salvo() -> wows_replays::analyzer::decoder::ArtillerySalvo {
+        use wows_replays::analyzer::decoder::ArtilleryShotData;
+        use wows_replays::types::GameParamId;
+
+        let shot = |id: u32| ArtilleryShotData {
+            origin: WorldPos::new(0.0, 0.0, 0.0),
+            pitch: 0.1,
+            speed: 800.0,
+            target: WorldPos::new(100.0, 0.0, 0.0),
+            shot_id: ShotId::from(id),
+            gun_barrel_id: 0,
+            server_time_left: 5.0,
+            shooter_height: 10.0,
+            hit_distance: 100.0,
+        };
+        wows_replays::analyzer::decoder::ArtillerySalvo {
+            owner_id: EntityId::from(7u32),
+            params_id: GameParamId::from(42u32),
+            salvo_id: 1,
+            shots: vec![shot(1), shot(2), shot(3)],
+        }
+    }
+
     /// The hit history is what every fire-chance measurement divides by, and it
     /// is off by default, so an unset flag reads as "no hits" rather than "not
     /// recorded". Drives the setter through the ingest handler that consults
@@ -432,5 +469,59 @@ mod tests {
 
             assert_eq!(world.world().resource::<HitHistoryLog>().0.len(), expected, "record_hit_history = {record}");
         }
+    }
+
+    /// The salvo log is the fired side of the shell accounting and is likewise
+    /// off by default, so an unset flag reads as "nothing fired". Driven
+    /// through the ingest handler for the same reason as the hit-history test.
+    #[test]
+    fn recording_the_salvo_history_is_off_until_it_is_set() {
+        for (record, expected) in [(false, 0usize), (true, 1usize)] {
+            let meta = minimal_meta();
+            let resources = StubResources(fixture_param());
+            let mut world = BattleWorld::new(&meta, &resources, None);
+
+            world.set_record_salvo_history(record);
+            let options = world.options;
+            crate::ingest::projectiles::handle_artillery_shots(
+                AvatarId::from(1u32),
+                vec![a_salvo()],
+                GameClock(10.0),
+                world.world_mut(),
+                &options,
+            );
+
+            let log = world.world().resource::<SalvoLog>();
+            assert_eq!(log.0.len(), expected, "record_salvo_history = {record}");
+            if record {
+                assert_eq!(log.0[0].shots, 3, "the salvo's full width is recorded, not the shells that landed");
+                assert_eq!(log.0[0].owner_id, EntityId::from(7u32));
+            }
+        }
+    }
+
+    /// A salvo that never produced a hit is still logged: that is the whole
+    /// reason the log exists, since the hit path can only see salvos that
+    /// landed.
+    #[test]
+    fn a_salvo_that_lands_nothing_is_still_recorded() {
+        let meta = minimal_meta();
+        let resources = StubResources(fixture_param());
+        let mut world = BattleWorld::new(&meta, &resources, None);
+        world.set_record_salvo_history(true);
+        world.set_shot_tracking(crate::ids::ShotTracking::Untracked);
+        let options = world.options;
+
+        crate::ingest::projectiles::handle_artillery_shots(
+            AvatarId::from(1u32),
+            vec![a_salvo()],
+            GameClock(10.0),
+            world.world_mut(),
+            &options,
+        );
+
+        assert!(world.world().resource::<crate::resources::ActiveShotOrder>().0.is_empty());
+        assert!(world.world().resource::<HitHistoryLog>().0.is_empty());
+        assert_eq!(world.world().resource::<SalvoLog>().0.len(), 1);
     }
 }

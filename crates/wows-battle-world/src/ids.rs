@@ -26,10 +26,19 @@ pub struct IngestOptions {
     /// Accumulate a whole-match hit history in `HitHistoryLog`. Off by default:
     /// renderers only need the current frame's hits and should not pay the memory.
     pub record_hit_history: bool,
+    /// Accumulate every artillery salvo fired in `SalvoLog`. Off by default:
+    /// only a shots-fired statistic needs it, and a renderer draws shells from
+    /// the active-shot list instead.
+    pub record_salvo_history: bool,
 }
 
 impl Default for IngestOptions {
     fn default() -> Self {
-        Self { shot_tracking: ShotTracking::Tracked, source_team: SourceTeam(None), record_hit_history: false }
+        Self {
+            shot_tracking: ShotTracking::Tracked,
+            source_team: SourceTeam(None),
+            record_hit_history: false,
+            record_salvo_history: false,
+        }
     }
 }

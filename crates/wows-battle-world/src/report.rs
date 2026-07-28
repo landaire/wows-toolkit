@@ -54,6 +54,8 @@ use crate::resources::PlayerIndex;
 use crate::resources::PresenceLog;
 use crate::resources::RibbonEvent;
 use crate::resources::RibbonLog;
+use crate::resources::SalvoEvent;
+use crate::resources::SalvoLog;
 use crate::resources::SelfStats;
 use crate::world::BattleWorld;
 
@@ -90,6 +92,7 @@ pub struct BattleReport {
     ribbon_events: Vec<RibbonEvent>,
     presence: PresenceLog,
     hit_history: Vec<ResolvedShotHit>,
+    salvos: Vec<SalvoEvent>,
     deaths: HashMap<EntityId, GameClock>,
     max_duration: u32,
     played_duration: Option<f32>,
@@ -261,6 +264,25 @@ impl BattleReport {
     /// way either way.
     pub fn hit_history(&self) -> &[ResolvedShotHit] {
         &self.hit_history
+    }
+
+    /// Every artillery salvo the client was told about, in packet order. Empty
+    /// unless `IngestOptions::record_salvo_history` was set during ingest; see
+    /// `SalvoLog`'s doc comment.
+    ///
+    /// This is the fired side of the shell accounting, and it is complete in a
+    /// way [`Self::hit_history`] is not: a salvo is recorded when it is fired,
+    /// so one that landed nothing is here on the same terms as one that landed
+    /// everything. Every owner is present, so a consumer interested in one
+    /// attacker filters on `SalvoEvent::owner_id`, and a merged session can
+    /// carry the same salvo from more than one perspective, so a shell sum must
+    /// key on `(owner_id, salvo_id, params_id)`.
+    ///
+    /// Secondary batteries share this path with the main battery: the packet
+    /// has no weapon-type flag, and the only discriminator is whether
+    /// `params_id` belongs to the owner ship's ATBA ammo set.
+    pub fn salvos(&self) -> &[SalvoEvent] {
+        &self.salvos
     }
 
     /// When each vehicle died, keyed by victim entity id, from `KillLog`.
@@ -479,6 +501,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         let ribbon_events = std::mem::take(&mut self.world_mut().resource_mut::<RibbonLog>().0);
         let presence = std::mem::take(&mut *self.world_mut().resource_mut::<PresenceLog>());
         let hit_history = std::mem::take(&mut self.world_mut().resource_mut::<HitHistoryLog>().0);
+        let salvos = std::mem::take(&mut self.world_mut().resource_mut::<SalvoLog>().0);
 
         BattleReport {
             arena_id,
@@ -509,6 +532,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             ribbon_events,
             presence,
             hit_history,
+            salvos,
             deaths: death_clock_by_victim,
             max_duration,
             played_duration,

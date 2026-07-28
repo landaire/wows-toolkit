@@ -33,20 +33,37 @@ use crate::resources::ActiveShotOrder;
 use crate::resources::ActiveTorpedoOrder;
 use crate::resources::HitHistoryLog;
 use crate::resources::PlayerIndex;
+use crate::resources::SalvoEvent;
+use crate::resources::SalvoLog;
 use crate::resources::ShotHitLog;
 
 /// Spawn one `Projectile` entity per salvo and append to the ordered list.
 ///
-/// Gated on `Tracked`, mirroring BattleController's `track_shots` guard on the
-/// ArtilleryShots arm.
+/// Spawning is gated on `Tracked`, mirroring BattleController's `track_shots`
+/// guard on the ArtilleryShots arm.
+///
+/// When `options.record_salvo_history` is set, each salvo is also recorded in
+/// `SalvoLog` before the tracking gate, since that log is a record of what was
+/// fired rather than of what is in flight and needs no projectile entity.
 pub fn handle_artillery_shots(
     avatar_id: AvatarId,
     salvos: Vec<ArtillerySalvo>,
     clock: GameClock,
     world: &mut World,
-    tracking: ShotTracking,
+    options: &IngestOptions,
 ) {
-    if tracking != ShotTracking::Tracked {
+    if options.record_salvo_history {
+        let mut log = world.resource_mut::<SalvoLog>();
+        log.0.extend(salvos.iter().map(|salvo| SalvoEvent {
+            clock,
+            owner_id: salvo.owner_id,
+            params_id: salvo.params_id,
+            salvo_id: salvo.salvo_id,
+            first_shot: salvo.shots.first().map(|shot| shot.shot_id),
+            shots: salvo.shots.len() as u32,
+        }));
+    }
+    if options.shot_tracking != ShotTracking::Tracked {
         return;
     }
     for salvo in salvos {

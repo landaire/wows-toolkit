@@ -3019,8 +3019,10 @@ impl Replay {
                 BattleWorld::new(&self.replay_file.meta, self.resource_loader.as_ref(), self.game_constants.as_deref());
             // Fire-chance analysis divides by the whole-match hit history, which is
             // otherwise not recorded to save memory for renderers that only need
-            // the current frame's hits.
+            // the current frame's hits. Its shells-fired count reads the salvo
+            // log, which is off by the same default.
             world.set_record_hit_history(true);
+            world.set_record_salvo_history(true);
             let mut p =
                 wows_replays::packet2::Parser::with_version(self.resource_loader.entity_specs(), replay_version);
             let mut remaining = self.replay_file.packet_data.as_slice();
@@ -3053,8 +3055,9 @@ impl Replay {
         )
         .map_err(|e| rootcause::report!("{e}"))?;
         // See the single-replay path above: fire-chance analysis needs the
-        // whole-match hit history, which is off by default.
+        // whole-match hit history and the salvo log, both off by default.
         session.world_mut().set_record_hit_history(true);
+        session.world_mut().set_record_salvo_history(true);
         while session.step().map_err(|e| rootcause::report!("{e}"))?.is_some() {}
         session.finish();
         Ok(session.into_world().into_report())
@@ -5679,7 +5682,7 @@ mod fire_chance_render_tests {
         assert_eq!(
             fire_chance_breakdown_lines(&fc),
             vec![
-                "412 HE shells fired in salvos we saw land".to_owned(),
+                "412 HE shells fired".to_owned(),
                 "  210 hits on target".to_owned(),
                 "    63 eligible".to_owned(),
                 "    98 section already burning".to_owned(),
