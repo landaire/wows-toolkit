@@ -365,7 +365,13 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             .as_ref()
             .and_then(|results| serde_json::Value::from_str(results.as_str()).ok());
 
-        let player_entities: Vec<Rc<Player>> = self.world().resource::<PlayerIndex>().0.values().cloned().collect();
+        // Sorted because PlayerIndex is a HashMap: its iteration order varies per
+        // process, which would otherwise reach every consumer of `players()` and
+        // any snapshot taken of one. Entity id breaks ties so bots sharing an
+        // account id of 0 keep a stable order too.
+        let mut player_entities: Vec<Rc<Player>> =
+            self.world().resource::<PlayerIndex>().0.values().cloned().collect();
+        player_entities.sort_by_key(|player| (player.initial_state().db_id(), player.initial_state().entity_id()));
 
         // Build final Player objects with an owned VehicleEntity. Players without a
         // matching vehicle entity (disconnected, bots without EntityCreate) keep
