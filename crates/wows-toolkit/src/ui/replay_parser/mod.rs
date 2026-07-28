@@ -19,6 +19,7 @@ pub use sorting::SortColumn;
 use sorting::SortKey;
 pub use sorting::SortOrder;
 use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
+use wt_translations::keys;
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -5289,7 +5290,7 @@ fn fire_chance_exclusion_lines(fire_chance: &EffectiveFireChance) -> Vec<String>
     let mut excluded: Vec<(&ExclusionReason, &u32)> =
         fire_chance.exclusions.iter().filter(|(_, count)| **count > 0).collect();
     excluded.sort_by(|a, b| b.1.cmp(a.1));
-    rows.extend(excluded.into_iter().map(|(reason, count)| (*count, exclusion_reason_label(*reason))));
+    rows.extend(excluded.into_iter().map(|(reason, count)| (*count, t!(keys::exclusion_reason_key(*reason)))));
 
     let total = fire_chance.hits_considered();
     let count_width = rows.iter().map(|(count, _)| count.to_string().len()).max().unwrap_or(1);
@@ -5297,35 +5298,6 @@ fn fire_chance_exclusion_lines(fire_chance: &EffectiveFireChance) -> Vec<String>
     let mut lines = vec![t!("ui.replay.sections.fire_chance_hits_considered", count = total).into_owned()];
     lines.extend(rows.into_iter().map(|(count, label)| format!("  {count:>count_width$} {label}")));
     lines
-}
-
-/// Localized label for one exclusion reason, for the hover breakdown.
-fn exclusion_reason_label(reason: ExclusionReason) -> Cow<'static, str> {
-    match reason {
-        ExclusionReason::SectionAlreadyBurning => t!("ui.replay.sections.fire_chance_exclusion_already_burning"),
-        ExclusionReason::SectionSuppressedByFirePrevention => {
-            t!("ui.replay.sections.fire_chance_exclusion_fire_prevention")
-        }
-        ExclusionReason::SectionSuppressibleVictimBuildUnknown => {
-            t!("ui.replay.sections.fire_chance_exclusion_victim_build_unknown")
-        }
-        ExclusionReason::VictimPoseUnknown => t!("ui.replay.sections.fire_chance_exclusion_victim_pose_unknown"),
-        ExclusionReason::DamageControlActive => t!("ui.replay.sections.fire_chance_exclusion_damage_control_active"),
-        ExclusionReason::DamageControlUnknown => t!("ui.replay.sections.fire_chance_exclusion_damage_control_unknown"),
-        ExclusionReason::ObservationGap => t!("ui.replay.sections.fire_chance_exclusion_observation_gap"),
-        ExclusionReason::ConsumableModelUnreliable => {
-            t!("ui.replay.sections.fire_chance_exclusion_consumable_unreliable")
-        }
-        ExclusionReason::VictimDead => t!("ui.replay.sections.fire_chance_exclusion_victim_dead"),
-        ExclusionReason::VictimFateUnknown => t!("ui.replay.sections.fire_chance_exclusion_victim_fate_unknown"),
-        ExclusionReason::ShellCannotBurn => t!("ui.replay.sections.fire_chance_exclusion_shell_cannot_burn"),
-        ExclusionReason::NotMainBattery => t!("ui.replay.sections.fire_chance_exclusion_not_main_battery"),
-        ExclusionReason::HitTypeDoesNotRoll => t!("ui.replay.sections.fire_chance_exclusion_hit_type_does_not_roll"),
-        ExclusionReason::NoSectionGeometry => t!("ui.replay.sections.fire_chance_exclusion_no_geometry"),
-        ExclusionReason::ImpactOffTheHull => t!("ui.replay.sections.fire_chance_exclusion_impact_off_the_hull"),
-        ExclusionReason::AmbiguousWithAnotherHit => t!("ui.replay.sections.fire_chance_exclusion_ambiguous_hit"),
-        ExclusionReason::SameTickSectionAmbiguous => t!("ui.replay.sections.fire_chance_exclusion_same_tick_section"),
-    }
 }
 
 /// Presentation view of a normalized per-victim interaction: the numeric fields

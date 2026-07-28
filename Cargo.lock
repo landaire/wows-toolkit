@@ -11153,6 +11153,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tracing",
  "wows-battle-world",
+ "wows-core",
  "wows-data-mgr",
  "wows_replays",
  "wowsunpack",

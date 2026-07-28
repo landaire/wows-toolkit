@@ -2907,6 +2907,30 @@ impl fmt::Display for DamageStatCategory {
     }
 }
 
+/// Payload-free counterpart of `HitEligibility`, used as the exclusion-tally
+/// key. Separate from `HitEligibility` because the tally counts reasons, not
+/// instances, and `BurnNodeIndex`/`ShellHitType` payloads would fragment it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ExclusionReason {
+    SectionAlreadyBurning,
+    SectionSuppressedByFirePrevention,
+    SectionSuppressibleVictimBuildUnknown,
+    DamageControlActive,
+    DamageControlUnknown,
+    ObservationGap,
+    ConsumableModelUnreliable,
+    VictimDead,
+    VictimFateUnknown,
+    ShellCannotBurn,
+    NotMainBattery,
+    HitTypeDoesNotRoll,
+    NoSectionGeometry,
+    ImpactOffTheHull,
+    VictimPoseUnknown,
+    AmbiguousWithAnotherHit,
+    SameTickSectionAmbiguous,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

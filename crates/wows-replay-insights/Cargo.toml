@@ -9,6 +9,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+wows-core = { workspace = true }
 wowsunpack = { workspace = true, default-features = false, features = ["parsing"] }
 wows_replays = { workspace = true, default-features = false, features = ["parsing"] }
 wows-battle-world = { workspace = true, default-features = false }

@@ -166,6 +166,7 @@ mod tests {
     fn test_key_mappings() {
         use wows_core::game_types::AdvantageLevel;
         use wows_core::game_types::BattleResult;
+        use wows_core::game_types::ExclusionReason;
         use wows_core::game_types::FinishType;
 
         assert_eq!(keys::battle_result_key(BattleResult::Victory), "battle.victory");
@@ -177,6 +178,19 @@ mod tests {
 
         assert_eq!(keys::advantage_key(AdvantageLevel::Strong), "advantage.strong");
         assert_eq!(keys::advantage_key(AdvantageLevel::Moderate), "advantage.moderate");
+
+        assert_eq!(
+            keys::exclusion_reason_key(ExclusionReason::SectionAlreadyBurning),
+            "ui.replay.sections.fire_chance_exclusion_already_burning"
+        );
+        assert_eq!(
+            keys::exclusion_reason_key(ExclusionReason::DamageControlActive),
+            "ui.replay.sections.fire_chance_exclusion_damage_control_active"
+        );
+        assert_eq!(
+            keys::exclusion_reason_key(ExclusionReason::SameTickSectionAmbiguous),
+            "ui.replay.sections.fire_chance_exclusion_same_tick_section"
+        );
     }
 
     #[test]

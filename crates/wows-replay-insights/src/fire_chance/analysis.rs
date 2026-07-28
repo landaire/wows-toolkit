@@ -40,6 +40,8 @@ use crate::fire_chance::geometry::section_for_hit;
 use crate::fire_chance::victim::DamageControlState;
 use crate::fire_chance::victim::VictimTrack;
 
+pub use wows_core::game_types::ExclusionReason;
+
 /// One server tick (`TICKS_PER_SECOND` = 7, `ma779114d`) plus packet jitter. The
 /// ribbon and the `burningFlags` update are separate packets from the same tick.
 ///
@@ -141,30 +143,6 @@ pub enum HitEligibility {
     /// Several of our own eligible hits landed on this victim's section in one
     /// server tick. At most one of them could have lit it and which one is not
     /// recoverable, so the whole group is dropped.
-    SameTickSectionAmbiguous,
-}
-
-/// Payload-free counterpart of [`HitEligibility`], used as the exclusion-tally
-/// key. Separate from `HitEligibility` because the tally counts reasons, not
-/// instances, and `BurnNodeIndex`/`ShellHitType` payloads would fragment it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ExclusionReason {
-    SectionAlreadyBurning,
-    SectionSuppressedByFirePrevention,
-    SectionSuppressibleVictimBuildUnknown,
-    DamageControlActive,
-    DamageControlUnknown,
-    ObservationGap,
-    ConsumableModelUnreliable,
-    VictimDead,
-    VictimFateUnknown,
-    ShellCannotBurn,
-    NotMainBattery,
-    HitTypeDoesNotRoll,
-    NoSectionGeometry,
-    ImpactOffTheHull,
-    VictimPoseUnknown,
-    AmbiguousWithAnotherHit,
     SameTickSectionAmbiguous,
 }
 
