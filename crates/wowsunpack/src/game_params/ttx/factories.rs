@@ -599,7 +599,7 @@ const HEAVY_CRUISER_SHELL_DIAMETER_M: f32 = 0.0;
 /// The straight `.py` decompile zeroes this compiled-module float; the real value
 /// recovered from stage4 bytecode is 0.16 (`LOAD_CONST 0.16 / STORE_NAME
 /// SMALL_PROJECTILE_MAX_DIAMETER`). Distinct from the 0.149 `isSmallGun` gate.
-const SMALL_PROJECTILE_MAX_DIAMETER_M: f32 = 0.16;
+pub const SMALL_PROJECTILE_MAX_DIAMETER_M: f32 = 0.16;
 
 /// The `TtxStat` variants a shell row maps to, selected by battery: the main
 /// battery uses `Shell*`, the secondary battery the distinct `Secondary*` set.
