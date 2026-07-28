@@ -26,9 +26,11 @@ use crate::components::MinimapPlacement;
 use crate::components::Projectile;
 use crate::components::ProjectileState;
 use crate::components::Transform3d;
+use crate::ids::IngestOptions;
 use crate::ids::ShotTracking;
 use crate::resources::ActiveShotOrder;
 use crate::resources::ActiveTorpedoOrder;
+use crate::resources::HitHistoryLog;
 use crate::resources::PlayerIndex;
 use crate::resources::ShotHitLog;
 
@@ -118,14 +120,17 @@ pub fn handle_torpedo_direction(
 /// never populated in that mode). Torpedo cleanup and salvo expiry still run, so
 /// active projectiles do not leak; under Untracked the active lists are empty
 /// anyway because the spawn arms that feed them are gated off.
+///
+/// When `options.record_hit_history` is set, each resolved hit is also pushed
+/// into `HitHistoryLog`, which (unlike `ShotHitLog`) is never cleared.
 pub fn handle_shot_kills(
     avatar_id: AvatarId,
     hits: Vec<ShotHit>,
     clock: GameClock,
     world: &mut World,
-    tracking: ShotTracking,
+    options: &IngestOptions,
 ) {
-    let record = tracking == ShotTracking::Tracked;
+    let record = options.shot_tracking == ShotTracking::Tracked;
 
     let self_ship_id =
         world.resource::<PlayerIndex>().0.iter().find(|(_, p)| p.relation().is_self()).map(|(eid, _)| *eid);
@@ -148,7 +153,7 @@ pub fn handle_shot_kills(
 
         let (victim_position, victim_yaw, victim_pitch, victim_roll) = victim_pose(world, victim_entity_id);
 
-        world.resource_mut::<ShotHitLog>().0.push(ResolvedShotHit {
+        let resolved = ResolvedShotHit {
             clock,
             hit,
             victim_entity_id,
@@ -158,7 +163,11 @@ pub fn handle_shot_kills(
             victim_yaw,
             victim_pitch,
             victim_roll,
-        });
+        };
+        if options.record_hit_history {
+            world.resource_mut::<HitHistoryLog>().0.push(resolved.clone());
+        }
+        world.resource_mut::<ShotHitLog>().0.push(resolved);
     }
 
     expire_stale_salvos(world, clock);

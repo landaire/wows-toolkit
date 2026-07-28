@@ -83,7 +83,7 @@ pub fn dispatch<G: ResourceLoader>(
         }
         DecodedPacketPayload::EntityEnter(_) => {}
         DecodedPacketPayload::EntityLeave(leave) => {
-            entities::handle_entity_leave(leave.entity_id, world);
+            entities::handle_entity_leave(leave.entity_id, clock, world);
         }
         DecodedPacketPayload::EntityCreate(entity_create) => {
             entities::handle_entity_create(clock, entity_create, world, resources, constants, version);
@@ -163,7 +163,7 @@ pub fn dispatch<G: ResourceLoader>(
             projectiles::handle_torpedo_direction(owner_id, shot_id, position, target_yaw, speed_coef, clock, world);
         }
         DecodedPacketPayload::ShotKills { avatar_id, hits } => {
-            projectiles::handle_shot_kills(avatar_id, hits, clock, world, options.shot_tracking);
+            projectiles::handle_shot_kills(avatar_id, hits, clock, world, options);
         }
         DecodedPacketPayload::GunSync { entity_id, weapon_type, gun_id, yaw, .. } => {
             vehicles::handle_gun_sync(entity_id, weapon_type, gun_id, yaw, world);

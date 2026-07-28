@@ -29,6 +29,7 @@ use crate::resources::Clock;
 use crate::resources::DamageLedger;
 use crate::resources::DeadShips;
 use crate::resources::EntityIndex;
+use crate::resources::HitHistoryLog;
 use crate::resources::Hydrophone;
 use crate::resources::InteractiveZoneIndex;
 use crate::resources::KillLog;
@@ -37,6 +38,7 @@ use crate::resources::MetadataPlayers;
 use crate::resources::PendingDropParams;
 use crate::resources::PlaneIndex;
 use crate::resources::PlayerIndex;
+use crate::resources::PresenceLog;
 use crate::resources::ReplayVehicles;
 use crate::resources::RibbonLog;
 use crate::resources::ScoringRules;
@@ -241,6 +243,8 @@ fn insert_empty_resources(world: &mut World) {
     world.insert_resource(ReplayVehicles::default());
     world.insert_resource(BurnStateLog::default());
     world.insert_resource(RibbonLog::default());
+    world.insert_resource(PresenceLog::default());
+    world.insert_resource(HitHistoryLog::default());
 }
 
 /// Build MetadataPlayers from the replay vehicles list.

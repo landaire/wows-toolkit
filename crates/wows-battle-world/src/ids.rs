@@ -23,10 +23,13 @@ pub struct SourceTeam(pub Option<TeamId>);
 pub struct IngestOptions {
     pub shot_tracking: ShotTracking,
     pub source_team: SourceTeam,
+    /// Accumulate a whole-match hit history in `HitHistoryLog`. Off by default:
+    /// renderers only need the current frame's hits and should not pay the memory.
+    pub record_hit_history: bool,
 }
 
 impl Default for IngestOptions {
     fn default() -> Self {
-        Self { shot_tracking: ShotTracking::Tracked, source_team: SourceTeam(None) }
+        Self { shot_tracking: ShotTracking::Tracked, source_team: SourceTeam(None), record_hit_history: false }
     }
 }

@@ -333,6 +333,84 @@ impl BurnStateChange {
 #[derive(Resource, Debug, Clone, Default)]
 pub struct BurnStateLog(pub Vec<BurnStateChange>);
 
+/// A window during which the recording client received updates for a
+/// vehicle, from `EntityCreate`/arena-state seeding to the matching
+/// `EntityLeave`.
+///
+/// `left: None` means the window is still open as of the last packet
+/// processed, either because the vehicle is still present or because the
+/// match ended (or the parse stopped) before an `EntityLeave` arrived for it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PresenceWindow {
+    pub entered: GameClock,
+    pub left: Option<GameClock>,
+}
+
+/// Windows during which the recording client observed each vehicle, keyed by
+/// game `EntityId`.
+///
+/// A window opens in `handle_vehicle_create` or
+/// `seed_vehicles_from_arena_state` and closes in `handle_entity_leave`;
+/// opening is idempotent, so a vehicle that already holds an open window
+/// gets no second one. Only entities that receive the `Vehicle` marker ever
+/// get an entry: smoke screens, buff zones, capture points, and buildings
+/// never appear in this map, so `continuously_observed` is always false for
+/// them.
+///
+/// Entries within one vehicle's `Vec` are pushed in the order the client
+/// observed them, so `entered` is non-decreasing across the `Vec`, not
+/// strictly increasing: bots and players seeded together from one
+/// `OnArenaStateReceived` packet all open windows at the same clock. As with
+/// `BurnStateLog`, `clock` in both `entered` and `left` is the raw
+/// `packet.clock` seen by `ingest::dispatch`, not the `Clock` resource,
+/// which can disagree with it on pre-battle packets.
+///
+/// Coverage boundary: a gap between two windows for one vehicle is a real,
+/// provable blind spot, since an `EntityLeave` was actually observed for it.
+/// The converse is not guaranteed. If an `EntityLeave` for a vehicle is
+/// silently dropped, or the vehicle's underlying game entity id is reused
+/// without one, the window-open call sees an already-open window and does
+/// nothing (that is what idempotency means), so the log reports
+/// uninterrupted presence straight across a gap it has no way to detect.
+/// This is the same class of incompleteness `BurnStateLog` documents;
+/// `PresenceLog` does not resolve it, it only makes the gaps that were
+/// actually observed (a real `EntityLeave` followed by a later create)
+/// usable by `continuously_observed`.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct PresenceLog(pub HashMap<EntityId, Vec<PresenceWindow>>);
+
+impl PresenceLog {
+    /// True when `[from, to]` lies inside a single unbroken window: some
+    /// window's `entered` is at or before `from`, and that same window's
+    /// `left` is either still open (`None`) or at or after `to`. An entity
+    /// with no recorded windows was never observed and is never
+    /// continuously observed, for any range.
+    pub fn continuously_observed(&self, entity: EntityId, from: GameClock, to: GameClock) -> bool {
+        self.0.get(&entity).is_some_and(|windows| {
+            windows.iter().any(|w| {
+                w.entered.seconds() <= from.seconds() && w.left.is_none_or(|left| left.seconds() >= to.seconds())
+            })
+        })
+    }
+}
+
+/// Every resolved hit for the whole match, in arrival order.
+///
+/// Unlike `ShotHitLog`, which `Analyzer::process` clears at the start of
+/// every packet in `Tracked` mode so renderers see only the current frame's
+/// hits, this log is never cleared and accumulates for the whole parse.
+///
+/// Populated only when `IngestOptions::record_hit_history` is set; it
+/// defaults to `false`, so an empty (or short) log does not mean few hits
+/// occurred, it may mean history recording was never turned on for this
+/// parse. It is also empty under `ShotTracking::Untracked`, same as
+/// `ShotHitLog`: no `ResolvedShotHit` is constructed at all in that mode.
+/// Entries share `ShotHitLog`'s clock semantics: `clock` is the raw
+/// `packet.clock`, non-decreasing but not strictly increasing, since every
+/// hit in one `ShotKills` packet shares a clock.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct HitHistoryLog(pub Vec<ResolvedShotHit>);
+
 /// One observed increment of a self-player ribbon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RibbonEvent {

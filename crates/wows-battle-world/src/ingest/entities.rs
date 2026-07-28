@@ -50,6 +50,8 @@ use crate::resources::KillLog;
 use crate::resources::MetadataPlayers;
 use crate::resources::PendingDropParams;
 use crate::resources::PlayerIndex;
+use crate::resources::PresenceLog;
+use crate::resources::PresenceWindow;
 use crate::resources::WeatherZoneOrder;
 
 /// Handle an EntityCreate packet.
@@ -70,7 +72,7 @@ pub fn handle_entity_create<G: ResourceLoader>(
     };
 
     match entity_type {
-        EntityType::Vehicle => handle_vehicle_create(packet, world, resources, constants, version),
+        EntityType::Vehicle => handle_vehicle_create(clock, packet, world, resources, constants, version),
         EntityType::Building => handle_building_create(clock, packet, world),
         EntityType::SmokeScreen => handle_smoke_create(packet, world),
         EntityType::BattleLogic => handle_battle_logic_create(packet, world, constants, version),
@@ -84,6 +86,7 @@ pub fn handle_entity_create<G: ResourceLoader>(
 }
 
 fn handle_vehicle_create<G: ResourceLoader>(
+    clock: GameClock,
     packet: &EntityCreatePacket<'_>,
     world: &mut World,
     resources: &G,
@@ -115,6 +118,7 @@ fn handle_vehicle_create<G: ResourceLoader>(
             e.insert(PlayerLink(rc));
         }
     }
+    open_presence(world, packet.entity_id, clock);
 }
 
 fn handle_building_create(_clock: GameClock, packet: &EntityCreatePacket<'_>, world: &mut World) {
@@ -393,6 +397,10 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
     for player in &players {
         let entity_id = player.entity_id();
 
+        // Every roster entry is present from the start of this seed packet,
+        // whether or not its Vehicle entity already existed.
+        open_presence(world, entity_id, clock);
+
         // Build Player if not already in the index.
         if !world.resource::<PlayerIndex>().0.contains_key(&entity_id) {
             let meta = metadata.iter().find(|m| m.id() == player.meta_ship_id()).or_else(|| {
@@ -565,8 +573,9 @@ pub fn seed_spawned_players<'a, G: ResourceLoader>(
 /// - SmokeScreen entity: despawn and remove from EntityIndex.
 /// - BuffZone entity: despawn and remove from EntityIndex.
 /// - Vehicle/Building: keep the ECS entity; only remove its Transform3d component
-///   so stale world-position rendering stops. MinimapPlacement is kept.
-pub fn handle_entity_leave(entity_id: EntityId, world: &mut World) {
+///   so stale world-position rendering stops. MinimapPlacement is kept. Any open
+///   PresenceLog window for this entity id is closed at `clock`.
+pub fn handle_entity_leave(entity_id: EntityId, clock: GameClock, world: &mut World) {
     let ecs_entity = world.resource::<EntityIndex>().get(entity_id);
 
     let is_smoke =
@@ -584,10 +593,34 @@ pub fn handle_entity_leave(entity_id: EntityId, world: &mut World) {
     }
 
     // Vehicles and buildings: remove only Transform3d, keeping MinimapPlacement.
+    // Presence is only ever opened for vehicles, so this is a no-op for buildings.
+    close_presence(world, entity_id, clock);
     if let Some(ecs_entity) = world.resource::<EntityIndex>().get(entity_id)
         && let Ok(mut er) = world.get_entity_mut(ecs_entity)
     {
         er.remove::<Transform3d>();
+    }
+}
+
+/// Open a presence window for `id` at `clock`. Idempotent: if `id` already
+/// holds an open window (no EntityLeave has closed it), this does nothing.
+fn open_presence(world: &mut World, id: EntityId, clock: GameClock) {
+    let mut log = world.resource_mut::<PresenceLog>();
+    let windows = log.0.entry(id).or_default();
+    if windows.last().is_some_and(|w| w.left.is_none()) {
+        return;
+    }
+    windows.push(PresenceWindow { entered: clock, left: None });
+}
+
+/// Close `id`'s open presence window at `clock`, if it has one. An id with no
+/// windows, or whose latest window is already closed, is left untouched.
+fn close_presence(world: &mut World, id: EntityId, clock: GameClock) {
+    if let Some(windows) = world.resource_mut::<PresenceLog>().0.get_mut(&id)
+        && let Some(open) = windows.last_mut()
+        && open.left.is_none()
+    {
+        open.left = Some(clock);
     }
 }
 
@@ -678,4 +711,56 @@ fn parse_legacy_control_point(
         both_inside,
         is_enabled,
     })
+}
+
+#[cfg(test)]
+fn test_world() -> World {
+    let mut world = World::new();
+    world.insert_resource(EntityIndex::default());
+    world.insert_resource(PresenceLog::default());
+    world
+}
+
+#[cfg(test)]
+fn handle_entity_leave_at(id: EntityId, clock: GameClock, world: &mut World) {
+    handle_entity_leave(id, clock, world);
+}
+
+#[cfg(test)]
+mod presence_tests {
+    use super::*;
+
+    /// A re-entering vehicle opens a second window. The gap between them is a
+    /// blind spot the analysis must not span.
+    #[test]
+    fn leave_and_re_enter_produce_two_windows() {
+        let mut world = test_world();
+        let id = EntityId::from(9u32);
+
+        open_presence(&mut world, id, GameClock(10.0));
+        handle_entity_leave_at(id, GameClock(50.0), &mut world);
+        open_presence(&mut world, id, GameClock(90.0));
+
+        let log = world.resource::<PresenceLog>();
+        let windows = &log.0[&id];
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].left, Some(GameClock(50.0)));
+        assert_eq!(windows[1].left, None);
+
+        assert!(log.continuously_observed(id, GameClock(20.0), GameClock(40.0)));
+        assert!(!log.continuously_observed(id, GameClock(40.0), GameClock(95.0)));
+        assert!(log.continuously_observed(id, GameClock(95.0), GameClock(120.0)));
+    }
+
+    /// An entity never seen was never observed. Absence of windows must not
+    /// read as "always present".
+    #[test]
+    fn an_unseen_entity_is_never_continuously_observed() {
+        let world = test_world();
+        assert!(!world.resource::<PresenceLog>().continuously_observed(
+            EntityId::from(404u32),
+            GameClock(0.0),
+            GameClock(1.0)
+        ));
+    }
 }
