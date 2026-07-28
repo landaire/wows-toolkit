@@ -68,7 +68,10 @@ ship's tier.
 This is already transcribed in the toolkit:
 `wowsunpack/src/game_params/ttx/weapon_tables.rs::calculate_burn_chance`, which also
 returns an ordered `Vec<AppliedModifier>` describing every step. That provenance list
-is what a per-ship formula breakdown should render.
+is what a per-ship formula breakdown should render. The transcription covers the
+`ARTILLERY` branch only, and returns the pre-clamp value by contract: it has no
+`ROCKET` or `PLANE_BOMBS` branch and does not apply the trailing `max(x, 0)`, which
+is the caller's to apply.
 
 ### 2.1 Constants
 
@@ -147,6 +150,35 @@ Per-projectile in GameParams. Observed ranges:
 So "can this projectile start a fire at all" is `calculate_burn_chance(...) > 0`, not
 an ammo-type test. That is the correct gate and it is version independent.
 
+### 2.4 Legacy formula (0.6.x)
+
+`G:\deob\0.6.13_296659\ModifiersApply.py:10` is a different function with different
+modifier names:
+
+```python
+def getBurnProb(ammoParams, modernization, crewModifiers):
+    p = ammoParams.burnProb
+    if modernization:
+        p += (modernization.burnChanceFactorSmall if isSmallProjectile(ammoParams)
+              else modernization.burnChanceFactorBig) - 1.0
+    if crewModifiers:
+        if ammoParams.typeinfo.species == ARTILLERY:
+            p += (crewModifiers.chanceToSetOnFireBonusSmall if isSmallBullet(ammoParams)
+                  else crewModifiers.chanceToSetOnFireBonusBig)
+        p += crewModifiers.probabilityFireBonus
+    return max(p, 0)
+```
+
+Differences that matter for old replays:
+
+- Upgrade factors were centred on `1.0` and folded in as `value - 1.0`.
+- Crew bonuses used `chanceToSetOnFireBonus{Small,Big}` and `probabilityFireBonus`,
+  none of which exist today.
+- `isSmallBullet` used a hard-coded `0.139` m, distinct from `isSmallProjectile`.
+
+Anything computing an attacker burn chance for a pre-0.7 replay must read the
+modifier names present in that build's GameParams rather than today's names.
+
 ### 2.5 Secondaries take the same fire modifiers as the main battery
 
 Nothing in the client distinguishes secondary fire chance from main-battery fire
@@ -192,35 +224,6 @@ Caveat: this is all client code. The roll itself is server side. The attacker
 half is strong evidence, since it is the same function the port stat card shows.
 The defender half is inference from the node's shape, but that shape is dictated
 by replicated state (`burningFlags` and the node set), not by display code.
-
-### 2.4 Legacy formula (0.6.x)
-
-`G:\deob\0.6.13_296659\ModifiersApply.py:10` is a different function with different
-modifier names:
-
-```python
-def getBurnProb(ammoParams, modernization, crewModifiers):
-    p = ammoParams.burnProb
-    if modernization:
-        p += (modernization.burnChanceFactorSmall if isSmallProjectile(ammoParams)
-              else modernization.burnChanceFactorBig) - 1.0
-    if crewModifiers:
-        if ammoParams.typeinfo.species == ARTILLERY:
-            p += (crewModifiers.chanceToSetOnFireBonusSmall if isSmallBullet(ammoParams)
-                  else crewModifiers.chanceToSetOnFireBonusBig)
-        p += crewModifiers.probabilityFireBonus
-    return max(p, 0)
-```
-
-Differences that matter for old replays:
-
-- Upgrade factors were centred on `1.0` and folded in as `value - 1.0`.
-- Crew bonuses used `chanceToSetOnFireBonus{Small,Big}` and `probabilityFireBonus`,
-  none of which exist today.
-- `isSmallBullet` used a hard-coded `0.139` m, distinct from `isSmallProjectile`.
-
-Anything computing an attacker burn chance for a pre-0.7 replay must read the
-modifier names present in that build's GameParams rather than today's names.
 
 ---
 
@@ -470,8 +473,11 @@ emitter of `fire{i}` for each. The other 39 have one, and 38 of those give
 `fire1` both `HP_FX_Fire_1` and `HP_FX_Fire_2`: one section, two emitters. A
 one-section hull whose model carries a second bare ordinal is therefore normal
 rather than a disagreement, and the resolver accepts it. For any hull with two or
-more sections, a bare ordinal above the section count is a disagreement and an
-error, since the section it would be assigned to is then in question.
+more sections, a bare ordinal in 1..=4 above the section count is a disagreement
+and an error, since the section it would be assigned to is then in question.
+Ordinals of 5 and above are skipped before that check, whatever the hull declares:
+`burningFlags` has four burn bits, so `EP_Fire_5` cannot be a burn node on any
+hull, and the 452 hulls carrying it resolve normally.
 
 Two hypotheses remain open:
 

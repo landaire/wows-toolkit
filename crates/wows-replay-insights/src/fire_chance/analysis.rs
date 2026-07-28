@@ -100,7 +100,15 @@ pub enum HitEligibility {
         expected: Option<BurnChance>,
     },
     SectionAlreadyBurning(BurnNodeIndex),
+    /// The victim was positively read as having learned Fire Prevention Expert,
+    /// so this section could not have lit.
     SectionSuppressedByFirePrevention,
+    /// The hit landed in the suppressible section on a victim whose build could
+    /// not be resolved, so whether the section could light is unknown. Kept
+    /// apart from [`Self::SectionSuppressedByFirePrevention`] because the two
+    /// are different facts: one is a proof, the other is a gap, and old replays
+    /// routinely cannot resolve a victim's skills.
+    SectionSuppressibleVictimBuildUnknown,
     DamageControlActive,
     DamageControlUnknown,
     ObservationGap,
@@ -140,6 +148,7 @@ pub enum HitEligibility {
 pub enum ExclusionReason {
     SectionAlreadyBurning,
     SectionSuppressedByFirePrevention,
+    SectionSuppressibleVictimBuildUnknown,
     DamageControlActive,
     DamageControlUnknown,
     ObservationGap,
@@ -163,6 +172,9 @@ impl HitEligibility {
             HitEligibility::SectionAlreadyBurning(_) => Some(ExclusionReason::SectionAlreadyBurning),
             HitEligibility::SectionSuppressedByFirePrevention => {
                 Some(ExclusionReason::SectionSuppressedByFirePrevention)
+            }
+            HitEligibility::SectionSuppressibleVictimBuildUnknown => {
+                Some(ExclusionReason::SectionSuppressibleVictimBuildUnknown)
             }
             HitEligibility::DamageControlActive => Some(ExclusionReason::DamageControlActive),
             HitEligibility::DamageControlUnknown => Some(ExclusionReason::DamageControlUnknown),
@@ -213,6 +225,9 @@ pub struct PerShipFireChance {
     pub victim_ship_name: String,
     pub eligible_hits: u32,
     pub fires: u32,
+    /// Expected number of fires over this ship's eligible hits, i.e. the sum of
+    /// their per-hit chances, not a rate. [`Self::expected_rate`] is the rate
+    /// the observed one is comparable against.
     pub expected_fires: Option<f32>,
 }
 
@@ -224,12 +239,23 @@ impl PerShipFireChance {
     pub fn rate(&self) -> Option<f32> {
         (self.eligible_hits > 0).then(|| self.fires as f32 / self.eligible_hits as f32)
     }
+
+    /// Per-hit expected fire chance against this ship, the model's counterpart
+    /// to [`Self::rate`]. Same zero-sample rule, and `None` as well whenever
+    /// [`Self::expected_fires`] is unknown.
+    pub fn expected_rate(&self) -> Option<f32> {
+        (self.eligible_hits > 0).then(|| Some(self.expected_fires? / self.eligible_hits as f32)).flatten()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectiveFireChance {
     pub eligible_hits: u32,
     pub fires: u32,
+    /// Expected number of fires over the eligible hits, i.e. the sum of their
+    /// per-hit chances, not a rate. [`Self::expected_rate`] is the rate the
+    /// observed one is comparable against.
+    ///
     /// `None` on builds predating the modern modifier names, where the
     /// attacker formula does not apply. The observed rate is still valid.
     pub expected_fires: Option<f32>,
@@ -312,6 +338,37 @@ impl EffectiveFireChance {
     /// zero, it is unknown.
     pub fn rate(&self) -> Option<f32> {
         (self.eligible_hits > 0).then(|| self.fires as f32 / self.eligible_hits as f32)
+    }
+
+    /// Per-hit expected fire chance, the model's counterpart to [`Self::rate`]
+    /// and the only form of [`Self::expected_fires`] comparable against it.
+    /// Same zero-sample rule as `rate`, and `None` as well whenever
+    /// `expected_fires` is unknown.
+    pub fn expected_rate(&self) -> Option<f32> {
+        (self.eligible_hits > 0).then(|| Some(self.expected_fires? / self.eligible_hits as f32)).flatten()
+    }
+
+    /// Every hit the eligibility model looked at: the trials plus every hit it
+    /// refused. The denominator of the exclusion tally, kept here so a caller
+    /// cannot reconstruct it from a subset of the buckets.
+    pub fn hits_considered(&self) -> u32 {
+        self.eligible_hits + self.exclusions.values().sum::<u32>()
+    }
+
+    /// The attacker-side formula's total as `(raw, clamped)`: the value the
+    /// steps in [`Self::formula`] arrive at, and the value the eligibility
+    /// model actually rolls with.
+    ///
+    /// A raw total can run past 100%, since additive bonuses have no ceiling on
+    /// paper, but `classify` clamps into 0..=1 before gating a hit or computing
+    /// its expectation. Both are returned so a breakdown can show the clamp
+    /// where it bites instead of restating the rule itself. `None` when no
+    /// shell resolved to compute a formula from, which is the same condition as
+    /// [`Self::formula_base`] being `None`.
+    pub fn formula_total(&self) -> Option<(f32, f32)> {
+        let base = self.formula_base?;
+        let raw = self.formula.last().map_or(base, |step| step.result);
+        Some((raw, raw.clamp(0.0, 1.0)))
     }
 
     /// Fraction of attributed fires whose predicted section is the bit the
@@ -411,6 +468,16 @@ pub struct VictimContext {
     pub fate: VictimFate,
     /// This victim's own consumable slots, build modifiers already applied.
     pub consumables: Vec<ConsumableInventory>,
+}
+
+impl VictimContext {
+    /// How many fire sections this hull has. The hull's `burnNodes` list is
+    /// what defines that count, and `node_probability` is that list, so a
+    /// caller resolving geometry asks here rather than restating which field
+    /// carries the count.
+    pub fn hull_section_count(&self) -> usize {
+        self.node_probability.len()
+    }
 }
 
 /// Everything [`analyze`] reads.
@@ -668,10 +735,7 @@ fn contesting_section(
     let contests = match eligibility {
         HitEligibility::NotMainBattery => is_secondary_shell(input, secondary_ammo, shell),
         HitEligibility::HitTypeDoesNotRoll(_) => true,
-        HitEligibility::SectionSuppressedByFirePrevention => input
-            .victims
-            .get(&hit.victim_entity_id)
-            .is_some_and(|victim| victim.fire_prevention == FirePrevention::Unknown),
+        HitEligibility::SectionSuppressibleVictimBuildUnknown => true,
         _ => false,
     };
     contests.then(|| section_of(input, geometry, hit).ok()).flatten()
@@ -817,10 +881,14 @@ fn classify(
 
     // `Unknown` refuses alongside `Learned`: a node-2 hit on a victim whose
     // build we could not read might have been impossible, and admitting it is
-    // the direction that corrupts.
-    let suppressed = matches!(victim.fire_prevention, FirePrevention::Learned | FirePrevention::Unknown);
-    if suppressed && section.get() == FIRE_PREVENTION_SUPPRESSED_NODE {
-        return HitEligibility::SectionSuppressedByFirePrevention;
+    // the direction that corrupts. The two refusals are reported apart because
+    // only the first is a proof.
+    if section.get() == FIRE_PREVENTION_SUPPRESSED_NODE {
+        match victim.fire_prevention {
+            FirePrevention::Learned => return HitEligibility::SectionSuppressedByFirePrevention,
+            FirePrevention::Unknown => return HitEligibility::SectionSuppressibleVictimBuildUnknown,
+            FirePrevention::NotLearned => {}
+        }
     }
 
     if track.burn_mask_before(hit.clock) & section.bit_mask() != 0 {
@@ -1843,6 +1911,7 @@ mod tests {
         let out = analyze(&fixture().with_victim_fire_prevention().hitting_section(2).build()).expect("geometry");
         assert_eq!(out.eligible_hits, 0);
         assert_eq!(out.exclusions[&ExclusionReason::SectionSuppressedByFirePrevention], 1);
+        assert!(!out.exclusions.contains_key(&ExclusionReason::SectionSuppressibleVictimBuildUnknown));
     }
 
     #[test]
@@ -1923,20 +1992,41 @@ mod tests {
         assert_eq!(ricochet.exclusions[&ExclusionReason::HitTypeDoesNotRoll], 1);
     }
 
-    /// Expected fires is attacker chance times the victim's node probability
-    /// times the victim's burnProb: 0.12 * 0.6004 * 0.9.
+    /// One hit's expectation is attacker chance times the victim's node
+    /// probability times the victim's burnProb: 0.12 * 0.6004 * 0.9. Two hits
+    /// on such a victim expect twice that many fires at the same per-hit rate,
+    /// which is what tells a count apart from a rate.
     #[test]
-    fn expected_fires_multiplies_both_halves() {
+    fn expected_fires_multiplies_both_halves_and_sums_over_hits() {
         let out = analyze(
             &fixture()
                 .with_shell_burn_prob(0.12)
                 .with_victim_node_probability(0.6004)
                 .with_victim_burn_prob_modifier(0.9)
+                .hitting_section(0)
+                .also_hitting_section(3)
                 .build(),
         )
         .expect("geometry");
-        let want = 0.12 * 0.6004 * 0.9;
-        assert!((out.expected_fires.expect("expected") - want).abs() < 1e-5);
+        let per_hit = 0.12 * 0.6004 * 0.9;
+        assert_eq!(out.eligible_hits, 2);
+        assert!((out.expected_fires.expect("expected") - 2.0 * per_hit).abs() < 1e-5);
+        assert!((out.expected_rate().expect("rate") - per_hit).abs() < 1e-5);
+        assert!((out.per_ship[0].expected_fires.expect("expected") - 2.0 * per_hit).abs() < 1e-5);
+        assert!((out.per_ship[0].expected_rate().expect("rate") - per_hit).abs() < 1e-5);
+    }
+
+    /// A rate over zero eligible hits is unknown, not zero. `expected_fires` is
+    /// a sum, so an empty candidate list legitimately totals zero fires; the
+    /// rate that total would imply does not exist, and a caller rendering one
+    /// would print a fabricated 0.0%.
+    #[test]
+    fn expected_rate_over_zero_eligible_hits_is_unknown() {
+        let out = analyze(&fixture().with_hit_type(ShellHitType::Ricochet).build()).expect("geometry");
+        assert_eq!(out.eligible_hits, 0);
+        assert_eq!(out.expected_fires, Some(0.0));
+        assert_eq!(out.expected_rate(), None);
+        assert_eq!(out.rate(), None);
     }
 
     /// A ribbon matching no eligible hit is reported, not dropped. Zero is the
@@ -2034,6 +2124,38 @@ mod tests {
         let out = analyze(&fixture().build()).expect("geometry");
         assert!(out.formula.is_empty(), "got {:?}", out.formula);
         assert_eq!(out.formula_base, Some(0.12));
+        assert_eq!(out.formula_total(), Some((0.12, 0.12)));
+    }
+
+    /// The formula total is the last step's running result, and the clamp is
+    /// the one `classify` gates on, so a raw total past 100% reports both.
+    #[test]
+    fn the_formula_total_reads_the_last_step_and_carries_the_clamp() {
+        let mut out = analyze(&fixture().build()).expect("geometry");
+        out.formula = vec![FormulaStep {
+            modifier: "artilleryBurnChanceBonus".to_owned(),
+            source: None,
+            op: FormulaOp::Add,
+            value: 1.1,
+            result: 1.22,
+        }];
+        let (raw, clamped) = out.formula_total().expect("a total");
+        assert!((raw - 1.22).abs() < 1e-6);
+        assert_eq!(clamped, 1.0);
+
+        out.formula_base = None;
+        assert_eq!(out.formula_total(), None);
+    }
+
+    /// Every hit the model looked at, trials and refusals alike.
+    #[test]
+    fn hits_considered_totals_the_trials_and_every_refusal() {
+        let out =
+            analyze(&fixture().hitting_section(0).also_hitting_section_with(3, 20.0, ShellHitType::Ricochet).build())
+                .expect("geometry");
+        assert_eq!(out.eligible_hits, 1);
+        assert_eq!(out.exclusions[&ExclusionReason::HitTypeDoesNotRoll], 1);
+        assert_eq!(out.hits_considered(), 2);
     }
 
     /// A hit the parser never matched to a salvo names no shell, and its
@@ -2144,7 +2266,11 @@ mod tests {
     fn an_unresolved_victim_build_refuses_a_node_two_hit() {
         let out = analyze(&fixture().with_an_unresolved_victim_build().hitting_section(2).build()).expect("geometry");
         assert_eq!(out.eligible_hits, 0);
-        assert_eq!(out.exclusions[&ExclusionReason::SectionSuppressedByFirePrevention], 1);
+        // Its own bucket: the hit was refused for want of proof, and reporting
+        // it under the suppression key would tell the reader the victim had
+        // Fire Prevention Expert when nothing established that.
+        assert_eq!(out.exclusions[&ExclusionReason::SectionSuppressibleVictimBuildUnknown], 1);
+        assert!(!out.exclusions.contains_key(&ExclusionReason::SectionSuppressedByFirePrevention));
 
         // The suppression is node 2 only; other sections are unaffected by an
         // unresolved build.

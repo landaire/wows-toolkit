@@ -94,7 +94,6 @@ use wows_replays::types::AccountId;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::fire_chance::analysis::ExclusionReason;
 use wows_replay_insights::fire_chance::analysis::FormulaOp;
-use wows_replay_insights::fire_chance::analysis::FormulaStep;
 use wows_replay_insights::fire_chance::analysis::PerShipFireChance;
 
 use itertools::Itertools;
@@ -485,7 +484,7 @@ fn resolve_fire_section_geometry(
 ) -> HashMap<String, wowsunpack::models::fire_nodes::FireSectionGeometry> {
     let mut expected_nodes: HashMap<&str, usize> = HashMap::new();
     for victim in victims.values() {
-        expected_nodes.entry(victim.hull_model_path.as_str()).or_insert_with(|| victim.node_probability.len());
+        expected_nodes.entry(victim.hull_model_path.as_str()).or_insert_with(|| victim.hull_section_count());
     }
 
     let mut cache =
@@ -545,9 +544,11 @@ fn resolve_fire_section_geometry(
 
 /// Compute effective fire chance for the recording player of `report`.
 ///
-/// `None` whenever the underlying facts do not resolve (no self vehicle, no
-/// resolvable build, a version predating the modifiers the formula needs) or
-/// there were no eligible hits to measure. Never panics: an unreadable
+/// `None` whenever the underlying facts do not resolve: no self vehicle, no
+/// resolvable build, an unresolved secondary battery, or no victim hull with
+/// fire-section geometry. A result with no eligible hits is still `Some`, and
+/// the render path shows it as an unknown rate rather than a zero one. Never
+/// panics: an unreadable
 /// `assets.bin` degrades to a geometry lookup that always misses, which
 /// `analyze` reports as no result rather than an approximation.
 fn compute_fire_chance(
@@ -1579,12 +1580,31 @@ impl UiReport {
     /// a clickable headline with a formula-and-exclusions hover breakdown, and
     /// a per-target-ship expander. `report.fire_chance` is `None` for every
     /// other row, so callers only reach this once per replay.
-    fn render_fire_chance(&self, ui: &mut egui::Ui, fire_chance: &EffectiveFireChance) {
+    ///
+    /// `hide_stats` replaces the whole block with the NDA placeholder, as the
+    /// sibling sections do: the breakdown carries the ship's raw `burnProb`,
+    /// every modifier its build applies and its per-target rates, which is the
+    /// data the test-ship hide exists to cover.
+    fn render_fire_chance(&self, ui: &mut egui::Ui, fire_chance: &EffectiveFireChance, hide_stats: bool) {
         ui.strong(t!("ui.replay.sections.fire_chance"));
+        if hide_stats {
+            ui.label(t!("ui.replay.nda"));
+            return;
+        }
 
+        // Monospace because the headline's second line is column-aligned under
+        // the first, and `on_hover_ui` because building the breakdown walks
+        // GameParams and the translation tables for every formula step, which a
+        // hover text argument would pay on every frame the row is open.
         let response = ui
-            .add(Label::new(fire_chance_headline_lines(fire_chance).join("\n")).sense(Sense::click()))
-            .on_hover_text(RichText::new(self.fire_chance_hover_text(fire_chance)).monospace());
+            .add(
+                Label::new(RichText::new(fire_chance_headline_lines(fire_chance).join("\n")).monospace())
+                    .sense(Sense::click()),
+            )
+            .on_hover_ui(|ui| {
+                ui.label(RichText::new(self.fire_chance_hover_text(fire_chance)).monospace());
+                ui.label(t!("ui.replay.sections.fire_chance_click_to_copy"));
+            });
 
         if response.clicked() {
             ui.ctx().copy_text(self.fire_chance_copy_text(fire_chance));
@@ -1601,7 +1621,9 @@ impl UiReport {
         if !fire_chance.per_ship.is_empty() {
             egui::CollapsingHeader::new(t!("ui.replay.sections.fire_chance_per_ship")).show(ui, |ui| {
                 for ship in sorted_per_ship(fire_chance) {
-                    ui.label(fire_chance_per_ship_line(ship));
+                    // Monospace: the row is padded into columns, which a
+                    // proportional font cannot line up.
+                    ui.label(RichText::new(fire_chance_per_ship_line(ship)).monospace());
                 }
             });
         }
@@ -1609,9 +1631,7 @@ impl UiReport {
 
     /// Formula-and-exclusions breakdown for the effective-fire-chance hover.
     fn fire_chance_hover_text(&self, fire_chance: &EffectiveFireChance) -> String {
-        let mut lines = fire_chance_formula_lines(fire_chance.formula_base, &fire_chance.formula, &|source| {
-            self.localize_modifier_source(source)
-        });
+        let mut lines = fire_chance_formula_lines(fire_chance, &|source| self.localize_modifier_source(source));
         if !lines.is_empty() {
             lines.push(String::new());
         }
@@ -2227,7 +2247,11 @@ impl UiReport {
                                 if !report.achievements.is_empty() || !report.ribbons.is_empty() || has_damage_events {
                                     ui.separator();
                                 }
-                                self.render_fire_chance(ui, fire_chance);
+                                self.render_fire_chance(
+                                    ui,
+                                    fire_chance,
+                                    report.should_hide_stats() && !self.debug_mode,
+                                );
                             }
                         });
                     }
@@ -5101,9 +5125,13 @@ fn fire_chance_headline_text(fire_chance: &EffectiveFireChance) -> String {
 /// The headline plus the optional "expected" line beneath it, shared verbatim
 /// between the on-screen block and the copy-to-clipboard text so the two
 /// cannot drift apart.
+///
+/// The expected line renders `expected_rate`, the model's per-hit chance, which
+/// is the only form comparable against the observed rate above it;
+/// `expected_fires` is a count of fires.
 fn fire_chance_headline_lines(fire_chance: &EffectiveFireChance) -> Vec<String> {
     let mut lines = vec![fire_chance_headline_text(fire_chance)];
-    if let Some(expected) = fire_chance.expected_fires {
+    if let Some(expected) = fire_chance.expected_rate() {
         lines.push(format!("  {} {:.1}%", t!("ui.replay.sections.fire_chance_expected"), expected * 100.0));
     }
     lines
@@ -5119,13 +5147,14 @@ fn sorted_per_ship(fire_chance: &EffectiveFireChance) -> Vec<&PerShipFireChance>
 
 /// One target-ship row for the per-ship expander. Same zero-sample rule as the
 /// aggregate headline: `PerShipFireChance::rate` is `None` over zero eligible
-/// hits, which is unknown rather than a zero rate.
+/// hits, which is unknown rather than a zero rate. The expected column is
+/// `expected_rate` for the same reason as the headline's.
 fn fire_chance_per_ship_line(ship: &PerShipFireChance) -> String {
     let rate_text = match ship.rate() {
         Some(rate) => format!("{:.1}%  ({} / {})", rate * 100.0, ship.fires, ship.eligible_hits),
         None => t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned(),
     };
-    match ship.expected_fires {
+    match ship.expected_rate() {
         Some(expected) => format!(
             "{}   {rate_text}   {} {:.1}%",
             ship.victim_ship_name,
@@ -5141,16 +5170,16 @@ fn fire_chance_per_ship_line(ship: &PerShipFireChance) -> String {
 /// resulting total. `localize_source` resolves a step's raw source identifier
 /// to a display name (an equipped upgrade, signal or crew skill); passed in
 /// rather than called directly so this function stays free of the metadata
-/// provider and is testable with a stub. Empty when `base` is `None` (no shell
-/// resolved to compute a formula from at all).
+/// provider and is testable with a stub. Empty when no shell resolved to
+/// compute a formula from at all.
 fn fire_chance_formula_lines(
-    base: Option<f32>,
-    formula: &[FormulaStep],
+    fire_chance: &EffectiveFireChance,
     localize_source: &dyn Fn(&str) -> String,
 ) -> Vec<String> {
-    let Some(base) = base else {
+    let (Some(base), Some((raw, clamped))) = (fire_chance.formula_base, fire_chance.formula_total()) else {
         return Vec::new();
     };
+    let formula = &fire_chance.formula;
 
     let names: Vec<String> = formula
         .iter()
@@ -5181,12 +5210,9 @@ fn fire_chance_formula_lines(
         lines.push(format!("  {symbol} {name:<name_width$} {value_text}"));
     }
 
-    // The clamp mirrors `classify`'s own `chance.clamp(0.0, 1.0)`: this raw
-    // product can run past 100% (additive bonuses have no ceiling on paper),
-    // but the eligibility model and `expected_fires` both read the clamped
-    // value, so showing only the raw one would silently disagree with them.
-    let raw = formula.last().map(|step| step.result).unwrap_or(base);
-    let clamped = raw.clamp(0.0, 1.0);
+    // `formula_total` reports the raw product and the value the eligibility
+    // model rolls with. Showing only the raw one would silently disagree with
+    // the rate above wherever the clamp bites.
     if (raw - clamped).abs() > f32::EPSILON {
         lines.push(format!(
             "  = {:.1}%   ({} {:.1}%)",
@@ -5210,7 +5236,7 @@ fn fire_chance_exclusion_lines(fire_chance: &EffectiveFireChance) -> Vec<String>
     excluded.sort_by(|a, b| b.1.cmp(a.1));
     rows.extend(excluded.into_iter().map(|(reason, count)| (*count, exclusion_reason_label(*reason))));
 
-    let total: u32 = fire_chance.eligible_hits + fire_chance.exclusions.values().sum::<u32>();
+    let total = fire_chance.hits_considered();
     let count_width = rows.iter().map(|(count, _)| count.to_string().len()).max().unwrap_or(1);
 
     let mut lines = vec![t!("ui.replay.sections.fire_chance_hits_considered", count = total).into_owned()];
@@ -5224,6 +5250,9 @@ fn exclusion_reason_label(reason: ExclusionReason) -> Cow<'static, str> {
         ExclusionReason::SectionAlreadyBurning => t!("ui.replay.sections.fire_chance_exclusion_already_burning"),
         ExclusionReason::SectionSuppressedByFirePrevention => {
             t!("ui.replay.sections.fire_chance_exclusion_fire_prevention")
+        }
+        ExclusionReason::SectionSuppressibleVictimBuildUnknown => {
+            t!("ui.replay.sections.fire_chance_exclusion_victim_build_unknown")
         }
         ExclusionReason::DamageControlActive => t!("ui.replay.sections.fire_chance_exclusion_damage_control_active"),
         ExclusionReason::DamageControlUnknown => t!("ui.replay.sections.fire_chance_exclusion_damage_control_unknown"),
@@ -5410,6 +5439,7 @@ fn build_replay_chat_content(
 #[cfg(test)]
 mod fire_chance_render_tests {
     use super::*;
+    use wows_replay_insights::fire_chance::analysis::FormulaStep;
 
     fn fixture(eligible_hits: u32, fires: u32, expected_fires: Option<f32>) -> EffectiveFireChance {
         EffectiveFireChance {
@@ -5423,6 +5453,12 @@ mod fire_chance_render_tests {
             formula_base: None,
             formula: Vec::new(),
         }
+    }
+
+    /// A result carrying only a formula, for the breakdown lines. One eligible
+    /// hit so the struct is a shape `analyze` could actually produce.
+    fn formula_fixture(base: Option<f32>, formula: Vec<FormulaStep>) -> EffectiveFireChance {
+        EffectiveFireChance { formula_base: base, formula, ..fixture(1, 0, None) }
     }
 
     fn formula_step(modifier: &str, source: Option<&str>, op: FormulaOp, value: f32, result: f32) -> FormulaStep {
@@ -5447,8 +5483,27 @@ mod fire_chance_render_tests {
 
     #[test]
     fn headline_shows_rate_and_sample_counts() {
-        let fc = fixture(63, 9, Some(0.121));
+        // 63 hits at about 10% each expect roughly 6.3 fires, which is a count.
+        let fc = fixture(63, 9, Some(6.3));
         assert_eq!(fire_chance_headline_text(&fc), "14.3%   (9 / 63)");
+    }
+
+    /// `expected_fires` is a count of fires, not a rate. The line under the
+    /// headline must render the per-hit rate it implies, so the two numbers
+    /// are comparable; rendering the count as a percentage would print 630.0%.
+    #[test]
+    fn headline_expected_line_renders_the_per_hit_rate_not_the_fire_count() {
+        let fc = fixture(63, 9, Some(6.3));
+        assert_eq!(fire_chance_headline_lines(&fc), vec!["14.3%   (9 / 63)".to_owned(), "  expected 10.0%".to_owned()]);
+    }
+
+    /// With no eligible hits `expected_fires` is legitimately `Some(0.0)`: a
+    /// sum over nothing. The rate it would imply does not exist, so no expected
+    /// line is shown, exactly as no observed percentage is.
+    #[test]
+    fn headline_over_zero_eligible_hits_shows_no_expected_line() {
+        let fc = fixture(0, 0, Some(0.0));
+        assert_eq!(fire_chance_headline_lines(&fc), vec!["no eligible hits".to_owned()]);
     }
 
     /// A rate over zero eligible hits is unknown, not zero: this must never
@@ -5482,9 +5537,11 @@ mod fire_chance_render_tests {
         );
     }
 
+    /// Same count-versus-rate rule as the headline: 12 hits expecting 1.656
+    /// fires is a 13.8% per-hit rate.
     #[test]
     fn per_ship_line_includes_expected_when_present() {
-        let s = ship("Zao", 12, 2, Some(0.138));
+        let s = ship("Zao", 12, 2, Some(1.656));
         assert_eq!(fire_chance_per_ship_line(&s), "Zao   16.7%  (2 / 12)   expected 13.8%");
     }
 
@@ -5494,10 +5551,11 @@ mod fire_chance_render_tests {
         assert_eq!(fire_chance_per_ship_line(&s), "Iowa   9.1%  (1 / 11)");
     }
 
-    /// Same zero-sample rule as the aggregate headline, at the per-ship level.
+    /// Same zero-sample rule as the aggregate headline, at the per-ship level,
+    /// including the expected column: a sum over no hits implies no rate.
     #[test]
     fn per_ship_line_over_zero_eligible_hits_has_no_percentage() {
-        let s = ship("Fletcher", 0, 0, None);
+        let s = ship("Fletcher", 0, 0, Some(0.0));
         let line = fire_chance_per_ship_line(&s);
         assert!(!line.contains('%'), "expected no percentage in {line:?}");
         assert_eq!(line, "Fletcher   no eligible hits");
@@ -5515,14 +5573,14 @@ mod fire_chance_render_tests {
     /// to show at all: not even a base line.
     #[test]
     fn formula_lines_are_empty_without_a_base() {
-        assert!(fire_chance_formula_lines(None, &[], &no_localization).is_empty());
+        assert!(fire_chance_formula_lines(&formula_fixture(None, Vec::new()), &no_localization).is_empty());
     }
 
     /// A resolved shell whose modifiers are all identities still shows the
     /// base and a total, even though there are no steps under it.
     #[test]
     fn formula_lines_show_the_base_even_with_no_steps() {
-        let lines = fire_chance_formula_lines(Some(0.12), &[], &no_localization);
+        let lines = fire_chance_formula_lines(&formula_fixture(Some(0.12), Vec::new()), &no_localization);
         assert_eq!(
             lines,
             vec![
@@ -5547,7 +5605,7 @@ mod fire_chance_render_tests {
             "de_id" => "DE".to_owned(),
             other => other.to_owned(),
         };
-        let lines = fire_chance_formula_lines(Some(0.12), &formula, &localize);
+        let lines = fire_chance_formula_lines(&formula_fixture(Some(0.12), formula), &localize);
         assert_eq!(
             lines,
             vec![
@@ -5564,7 +5622,7 @@ mod fire_chance_render_tests {
     #[test]
     fn formula_lines_render_an_unsourced_step_without_parens() {
         let formula = vec![formula_step("burnProbModifier", None, FormulaOp::Multiply, 1.5, 0.18)];
-        let lines = fire_chance_formula_lines(Some(0.12), &formula, &no_localization);
+        let lines = fire_chance_formula_lines(&formula_fixture(Some(0.12), formula), &no_localization);
         assert_eq!(lines[1], "    base burnProb    12.0%");
         assert_eq!(lines[2], "  x burnProbModifier 1.50");
         assert_eq!(lines[3], "  = 18.0%");
@@ -5576,7 +5634,7 @@ mod fire_chance_render_tests {
     #[test]
     fn formula_lines_show_both_raw_and_clamped_when_they_disagree() {
         let formula = vec![formula_step("someBonus", None, FormulaOp::Add, 0.3, 1.2)];
-        let lines = fire_chance_formula_lines(Some(0.9), &formula, &no_localization);
+        let lines = fire_chance_formula_lines(&formula_fixture(Some(0.9), formula), &no_localization);
         let total = lines.last().expect("a total line");
         assert!(total.contains("120.0%"), "got {total:?}");
         assert!(total.contains("100.0%"), "got {total:?}");
@@ -5587,7 +5645,7 @@ mod fire_chance_render_tests {
     #[test]
     fn formula_lines_show_one_value_when_raw_and_clamped_agree() {
         let formula = vec![formula_step("someBonus", None, FormulaOp::Add, 0.01, 0.13)];
-        let lines = fire_chance_formula_lines(Some(0.12), &formula, &no_localization);
+        let lines = fire_chance_formula_lines(&formula_fixture(Some(0.12), formula), &no_localization);
         assert_eq!(lines.last(), Some(&"  = 13.0%".to_owned()));
     }
 
@@ -5602,7 +5660,7 @@ mod fire_chance_render_tests {
         // width is 13, driven by "base burnProb" instead.
         let name = "\u{e9}".repeat(10);
         let formula = vec![formula_step(&name, None, FormulaOp::Multiply, 1.0, 0.12)];
-        let lines = fire_chance_formula_lines(Some(0.12), &formula, &no_localization);
+        let lines = fire_chance_formula_lines(&formula_fixture(Some(0.12), formula), &no_localization);
         assert_eq!(lines[1], "    base burnProb 12.0%");
         assert_eq!(lines[2], format!("  x {name}    1.00"));
     }

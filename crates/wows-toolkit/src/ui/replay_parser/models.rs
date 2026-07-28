@@ -183,8 +183,9 @@ pub struct PlayerReport {
     /// Effective fire chance for the recording player. `None` for every other
     /// player: attribution relies on the self-player SetFire ribbon, which the
     /// server only sends for the recording perspective. Also `None` when the
-    /// analysis could not resolve (missing build data, unreadable assets.bin,
-    /// or a zero-sample result).
+    /// analysis could not resolve at all (missing build data, an unresolved
+    /// secondary battery, no hull with fire-section geometry). A result with no
+    /// eligible hits is still `Some`, rendered as an unknown rate.
     pub fire_chance: Option<wows_replay_insights::fire_chance::analysis::EffectiveFireChance>,
 }
 
@@ -356,10 +357,6 @@ impl PlayerReport {
 
     pub fn crits(&self) -> Option<u64> {
         self.crits
-    }
-
-    pub fn fire_chance(&self) -> Option<&wows_replay_insights::fire_chance::analysis::EffectiveFireChance> {
-        self.fire_chance.as_ref()
     }
 
     pub fn distance_traveled(&self) -> Option<f64> {

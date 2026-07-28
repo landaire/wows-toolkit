@@ -590,8 +590,8 @@ fn attributed_fires_never_exceed_the_battle_results() {
 /// printed below is what it is made of: `NotMainBattery` is our own
 /// secondaries, whose fires raise a ribbon that no main-battery hit can then
 /// claim; `DamageControlUnknown` is a hit that could have started a fire and
-/// could not be proven to; `SectionSuppressedByFirePrevention` is inflated on
-/// this corpus by dumped archives carrying no crew skill tables (see the
+/// could not be proven to; `SectionSuppressibleVictimBuildUnknown` is inflated
+/// on this corpus by dumped archives carrying no crew skill tables (see the
 /// module doc). Gating on the rate would be gating partly on the harness's own
 /// data. Worth revisiting against a full-data corpus.
 ///
