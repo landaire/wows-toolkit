@@ -76,10 +76,10 @@ pub fn dispatch<G: ResourceLoader>(
             match_state::handle_entity_property_match(prop.property, &prop.value, clock, world, constants, version);
         }
         DecodedPacketPayload::BasePlayerCreate(base) => {
-            vehicles::apply_player_create_props(base.entity_id, &base.props, world, version, constants);
+            vehicles::apply_player_create_props(base.entity_id, &base.props, world, version, constants, clock);
         }
         DecodedPacketPayload::CellPlayerCreate(cell) => {
-            vehicles::apply_player_create_props(cell.entity_id, &cell.props, world, version, constants);
+            vehicles::apply_player_create_props(cell.entity_id, &cell.props, world, version, constants, clock);
         }
         DecodedPacketPayload::EntityEnter(_) => {}
         DecodedPacketPayload::EntityLeave(leave) => {

@@ -196,7 +196,16 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
     /// smoke screens and buff zones are despawned on EntityLeave. This helper is
     /// the single site that removes from EntityIndex; callers are responsible for
     /// applying the correct policy.
+    ///
+    /// Any open `PresenceLog` window for `id` is closed at the current `Clock`.
+    /// A despawned entity can no longer be observed, and a window left open
+    /// would keep answering `continuously_observed` with true for every range
+    /// after the despawn. `Clock` rather than a raw `packet.clock` because
+    /// `despawn` is not driven by a packet; the two agree once the match clock
+    /// has advanced past zero.
     pub fn despawn(&mut self, id: EntityId) {
+        let clock = self.world.resource::<Clock>().0;
+        crate::ingest::entities::close_presence(&mut self.world, id, clock);
         if let Some(entity) = self.world.resource_mut::<EntityIndex>().remove(id)
             && self.world.get_entity(entity).is_ok()
         {
@@ -313,5 +322,46 @@ impl<'res, 'replay, G: ResourceLoader> wows_replays::analyzer::Analyzer for Batt
 
     fn finish(&mut self) {
         // Finalization (report assembly, derived state) lands in a later task.
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::resources::PresenceLog;
+    use crate::resources::PresenceWindow;
+    use crate::test_support::StubResources;
+    use crate::test_support::fixture_param;
+    use crate::test_support::minimal_meta;
+    use crate::world::BattleWorld;
+    use wows_replays::types::EntityId;
+    use wows_replays::types::GameClock;
+
+    /// A despawned entity is gone, so its presence window must not keep
+    /// answering `continuously_observed` with true. A false "yes" there lets
+    /// the fire analysis accept a sample for a vehicle that no longer exists.
+    #[test]
+    fn despawn_closes_an_open_presence_window() {
+        let meta = minimal_meta();
+        let resources = StubResources(fixture_param());
+        let mut world = BattleWorld::new(&meta, &resources, None);
+        let id = EntityId::from(31u32);
+
+        let entity = world.spawn_or_get(id);
+        assert!(world.world().get_entity(entity).is_ok());
+        world
+            .world_mut()
+            .resource_mut::<PresenceLog>()
+            .0
+            .entry(id)
+            .or_default()
+            .push(PresenceWindow { entered: GameClock(10.0), left: None });
+        world.world_mut().resource_mut::<crate::resources::Clock>().0 = GameClock(60.0);
+
+        world.despawn(id);
+
+        let log = world.world().resource::<PresenceLog>();
+        assert_eq!(log.0[&id][0].left, Some(GameClock(60.0)));
+        assert!(!log.continuously_observed(id, GameClock(20.0), GameClock(90.0)));
+        assert!(log.continuously_observed(id, GameClock(20.0), GameClock(50.0)));
     }
 }

@@ -310,17 +310,28 @@ impl BurnStateChange {
     }
 }
 
-/// Log of burn-bit transitions observed on any vehicle via `EntityProperty`
-/// updates to `burningFlags`.
+/// Log of burn-bit transitions observed on any vehicle.
 ///
-/// Not a complete history: `BasePlayerCreate`/`CellPlayerCreate` and the
-/// arena-state seed path replace `VehicleState` wholesale rather than diffing
-/// it, so a vehicle re-entering the recording client's AOI after a gap can
-/// arrive with a different burn mask and emit no `BurnStateChange` for
-/// whatever happened while it was unobserved. A consumer reconstructing a
-/// mask at an arbitrary clock from this log alone can be wrong across such a
-/// gap; excluding hits on victims that were not continuously observed is a
-/// separate, later mitigation, not something this log guarantees on its own.
+/// Three ingest paths can move a vehicle's `burningFlags`, and all three are
+/// diffed into this log: `handle_vehicle_property` for `EntityProperty`
+/// updates, `apply_player_create_props` for the `BasePlayerCreate`/
+/// `CellPlayerCreate` fold on the self ship, and `handle_vehicle_create`,
+/// which is the one path that replaces `VehicleState` wholesale. That create
+/// path diffs the incoming mask against whatever the vehicle last held (zero
+/// when it held nothing) and pushes the resulting baseline before opening the
+/// vehicle's presence window. `seed_vehicles_from_arena_state` needs no such
+/// treatment: it skips any entity that already exists, and the ships it does
+/// create get no presence window at all, so nothing certifies a range over
+/// them.
+///
+/// The invariant that buys: **this log is complete over any range
+/// `PresenceLog::continuously_observed` accepts.** What stays unknown across
+/// an unobserved gap is *when* a section was lit, not whether it was burning
+/// at a given clock: a window's baseline pins the mask at the moment the
+/// window opens, and every later change inside the window is logged. The
+/// analysis asks "was this section burning when the shell landed", so a
+/// baseline at window-open is sufficient. A consumer that reconstructs a mask
+/// over a range `continuously_observed` rejects gets no such guarantee.
 ///
 /// Entries are pushed in packet order, so `clock` is non-decreasing, not
 /// strictly increasing: multiple entries (same vehicle or different ones) can
@@ -379,8 +390,7 @@ pub struct PresenceWindow {
 /// without one, the window-open call sees an already-open window and does
 /// nothing (that is what idempotency means), so the log reports
 /// uninterrupted presence straight across a gap it has no way to detect.
-/// This is the same class of incompleteness `BurnStateLog` documents;
-/// `PresenceLog` does not resolve it, it only makes the gaps that were
+/// `PresenceLog` does not resolve that case, it only makes the gaps that were
 /// actually observed (a real `EntityLeave` followed by a later create)
 /// usable by `continuously_observed`. Separately, `DecodedPacketPayload::EntityEnter`
 /// is currently a no-op in `ingest::dispatch`: if the server ever signals a

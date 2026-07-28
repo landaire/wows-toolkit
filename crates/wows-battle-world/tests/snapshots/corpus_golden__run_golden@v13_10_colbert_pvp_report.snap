@@ -3,7 +3,7 @@ source: crates/wows-battle-world/tests/corpus_golden.rs
 expression: report_snapshot(filename)
 ---
 arena_id: ArenaId(2067830915978652)
-version: "Version { major: 13, minor: 10, patch: 0, build: 9129736 }"
+version: "Version { major: 13, minor: 10, patch: 0, build: Some(9129736) }"
 map_name: spaces/44_Path_warrior
 game_mode: domination_3point
 game_type: Known(Random)
@@ -23,6 +23,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179507024)
+    division: A
   - account_id: 1001176005
     name: Dr_Jordan_B_Peterson
     entity_id: 481487
@@ -31,6 +32,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3655317296)
+    division: ~
   - account_id: 1001467709
     name: Cap_Daniel92
     entity_id: 481467
@@ -39,6 +41,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3969824208)
+    division: ~
   - account_id: 1004308714
     name: snapper97
     entity_id: 481465
@@ -47,6 +50,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4284429648)
+    division: A
   - account_id: 1005702852
     name: lazey3y3
     entity_id: 481489
@@ -55,6 +59,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3655219184)
+    division: ~
   - account_id: 1007625052
     name: Gilidarius
     entity_id: 481485
@@ -63,6 +68,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3759585072)
+    division: ~
   - account_id: 1008338698
     name: nawaf_gunner
     entity_id: 481457
@@ -71,6 +77,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(3760141776)
+    division: ~
   - account_id: 1009446889
     name: RealBigTuna
     entity_id: 481477
@@ -79,6 +86,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
+    division: ~
   - account_id: 1015316170
     name: RighteousFury42
     entity_id: 481491
@@ -87,6 +95,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(3445536112)
+    division: ~
   - account_id: 1016824158
     name: Cypher_
     entity_id: 481495
@@ -95,6 +104,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4074649424)
+    division: ~
   - account_id: 1020639850
     name: John_The_Ruthless
     entity_id: 481459
@@ -103,6 +113,7 @@ players:
     relation: Relation(0)
     is_bot: false
     vehicle_id: GameParamId(3760109392)
+    division: ~
   - account_id: 1021582286
     name: Rhino5236
     entity_id: 481473
@@ -111,6 +122,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179539152)
+    division: ~
   - account_id: 1027241780
     name: Alan_James
     entity_id: 481497
@@ -119,6 +131,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4074157872)
+    division: ~
   - account_id: 1027776177
     name: leunam02
     entity_id: 481483
@@ -127,6 +140,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179572528)
+    division: ~
   - account_id: 1028547500
     name: TheWingding
     entity_id: 481481
@@ -135,6 +149,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4284429648)
+    division: ~
   - account_id: 1028670177
     name: Terra_94
     entity_id: 481469
@@ -143,6 +158,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(3759585264)
+    division: B
   - account_id: 1029815480
     name: Red_Steller
     entity_id: 481479
@@ -151,6 +167,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3760142288)
+    division: ~
   - account_id: 1038287524
     name: 6_3L3M3NT
     entity_id: 481471
@@ -159,6 +176,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(3655317296)
+    division: ~
   - account_id: 1039004189
     name: Edgar_Architecture
     entity_id: 481499
@@ -167,6 +185,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4259231440)
+    division: ~
   - account_id: 1039466877
     name: IKnightArtorias
     entity_id: 481461
@@ -175,6 +194,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4074157872)
+    division: ~
   - account_id: 1042538688
     name: ManaBomb
     entity_id: 481501
@@ -183,6 +203,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4074682064)
+    division: A
   - account_id: 1053591281
     name: Kanne00
     entity_id: 481493
@@ -191,6 +212,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4074682064)
+    division: A
   - account_id: 1057437581
     name: EODiezell
     entity_id: 481475
@@ -199,6 +221,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(3739137488)
+    division: B
   - account_id: 1061910011
     name: mick_543
     entity_id: 481463
@@ -207,6 +230,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4277090288)
+    division: ~
 frags:
   - killer_account_id: 1000264088
     killer_name: WH_Knight
@@ -419,3 +443,6 @@ self_damage_stats:
     total: 38564
 active_consumable_avatars: 23
 active_consumable_total: 94
+burn_state_changes: 88
+presence_vehicles: 24
+presence_windows: 86

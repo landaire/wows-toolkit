@@ -13,6 +13,8 @@ pub mod view;
 pub mod world;
 
 mod ingest;
+#[cfg(test)]
+mod test_support;
 
 pub use scan::EntityTrack;
 pub use scan::PositionTimeline;

@@ -206,6 +206,14 @@ struct ReportSnapshot {
     self_damage_stats: Vec<DamageStatEntry>,
     active_consumable_avatars: usize,
     active_consumable_total: usize,
+    /// Burn-bit transitions decoded for this build. A drop to zero on an older
+    /// build is the signature of `burningFlags` failing to decode, which reads
+    /// downstream as "nothing ever burned" rather than as missing data.
+    burn_state_changes: usize,
+    /// Vehicles the recording client actually observed, and the total number of
+    /// AOI windows across them.
+    presence_vehicles: usize,
+    presence_windows: usize,
 }
 
 fn make_world(
@@ -297,6 +305,7 @@ fn report_snapshot(filename: &str) -> Option<ReportSnapshot> {
         .sort_by(|a, b| (a.weapon.clone(), a.category.clone()).cmp(&(b.weapon.clone(), b.category.clone())));
 
     let active_consumable_total: usize = report.active_consumables().values().map(|v| v.len()).sum();
+    let presence_windows: usize = report.presence().0.values().map(|w| w.len()).sum();
 
     Some(ReportSnapshot {
         arena_id: format!("{:?}", report.arena_id()),
@@ -319,6 +328,9 @@ fn report_snapshot(filename: &str) -> Option<ReportSnapshot> {
         self_damage_stats,
         active_consumable_avatars: report.active_consumables().len(),
         active_consumable_total,
+        burn_state_changes: report.burn_state_changes().len(),
+        presence_vehicles: report.presence().0.len(),
+        presence_windows,
     })
 }
 

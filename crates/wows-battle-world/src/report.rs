@@ -198,11 +198,12 @@ impl BattleReport {
         &self.active_consumables
     }
 
-    /// Burn-bit transitions observed on any vehicle. See `BurnStateLog`'s doc
-    /// comment: not a complete history, since a vehicle that re-enters the
-    /// recording client's AOI after a gap can arrive with a changed burn mask
-    /// and emit no transition for whatever happened while unobserved. Bound
-    /// any reconstruction with `presence()`.
+    /// Burn-bit transitions observed on any vehicle, including the baseline
+    /// pushed when a vehicle is created (or re-created on AOI re-entry) while
+    /// already alight. See `BurnStateLog`'s doc comment for the invariant this
+    /// buys: the log is complete over any range `presence()` accepts, so bound
+    /// every reconstruction with `continuously_observed` rather than reading
+    /// the log unguarded.
     pub fn burn_state_changes(&self) -> &[BurnStateChange] {
         &self.burn_state_changes
     }
@@ -229,6 +230,19 @@ impl BattleReport {
     /// unless `IngestOptions::record_hit_history` was set during ingest, and
     /// also empty under `ShotTracking::Untracked`; see `HitHistoryLog`'s doc
     /// comment.
+    ///
+    /// `victim_entity_id` is a heuristic, not a decoded field. It is the ship
+    /// whose last known position is nearest in XZ to the mean target point of
+    /// the salvo the shell was matched to, which is renderer-grade resolution:
+    /// good enough to draw a splash marker, not good enough to key state by.
+    /// When no salvo matched, `salvo` is `None` and `victim_entity_id` falls
+    /// back to the self ship, which is wrong for any hit that was not actually
+    /// on the self ship. Salvos expire 30 seconds after they were fired, so
+    /// that fallback also captures every long-flight shell (battleship fire at
+    /// maximum range) whose salvo aged out before the hit arrived. A consumer
+    /// keying burn state or presence by `victim_entity_id` must filter on
+    /// `salvo.is_some()`; even then the nearest-ship match can pick a
+    /// neighbour in a tight formation.
     pub fn hit_history(&self) -> &[ResolvedShotHit] {
         &self.hit_history
     }
@@ -538,95 +552,20 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
 #[cfg(test)]
 mod tests {
     use bevy_ecs::world::World;
-    use wows_replays::ReplayMeta;
     use wows_replays::analyzer::battle_controller::MetadataPlayer;
     use wows_replays::analyzer::decoder::HitType;
     use wows_replays::analyzer::decoder::PlayerStateData;
     use wows_replays::analyzer::decoder::ShotHit;
-    use wows_replays::types::GameParamId;
     use wows_replays::types::Relation;
     use wows_replays::types::ShotId;
     use wows_replays::types::WorldPos;
-    use wowsunpack::game_params::types::Achievement;
-    use wowsunpack::game_params::types::Param;
-    use wowsunpack::game_params::types::ParamData;
     use wowsunpack::game_types::Ribbon;
-    use wowsunpack::rpc::entitydefs::EntitySpec;
 
     use super::*;
     use crate::resources::PresenceWindow;
-
-    /// Stands in for a real `ResourceLoader`: always resolves to the same
-    /// fixture `Param` regardless of id, since the test never looks up a real
-    /// ship. Mirrors the `NoResources` double in `ingest::entities`'s tests,
-    /// except this one must succeed so `Player::from_arena_player` resolves.
-    struct StubResources(Rc<Param>);
-
-    impl ResourceLoader for StubResources {
-        fn localized_name_from_param(&self, _param: &Param) -> Option<String> {
-            None
-        }
-
-        fn localized_name_from_id(&self, _id: &TranslationKey) -> Option<String> {
-            None
-        }
-
-        fn game_param_by_id(&self, _id: GameParamId) -> Option<Rc<Param>> {
-            Some(self.0.clone())
-        }
-
-        fn entity_specs(&self) -> &[EntitySpec] {
-            &[]
-        }
-    }
-
-    fn fixture_param() -> Rc<Param> {
-        Rc::new(
-            Param::builder()
-                .id(GameParamId::from(1u32))
-                .index("IDX".to_string())
-                .name("Fixture".to_string())
-                .nation("USA".to_string())
-                .data(ParamData::Achievement(
-                    Achievement::builder()
-                        .is_group(false)
-                        .one_per_battle(false)
-                        .ui_type("x".to_string())
-                        .ui_name("x".to_string())
-                        .build(),
-                ))
-                .build(),
-        )
-    }
-
-    fn minimal_meta() -> ReplayMeta {
-        ReplayMeta {
-            matchGroup: None,
-            gameMode: 0,
-            gameType: None,
-            clientVersionFromExe: "0, 15, 5, 12668706".to_string(),
-            scenarioUiCategoryId: None,
-            mapDisplayName: String::new(),
-            mapId: 0,
-            clientVersionFromXml: String::new(),
-            weatherParams: None,
-            duration: 0,
-            gameLogic: None,
-            name: String::new(),
-            scenario: String::new(),
-            playerID: AccountId::from(1u32),
-            vehicles: Vec::new(),
-            playersPerTeam: 1,
-            dateTime: String::new(),
-            mapName: String::new(),
-            playerName: "self".to_string(),
-            scenarioConfigId: 0,
-            teamsCount: 2,
-            logic: None,
-            playerVehicle: String::new(),
-            battleDuration: None,
-        }
-    }
+    use crate::test_support::StubResources;
+    use crate::test_support::fixture_param;
+    use crate::test_support::minimal_meta;
 
     // Minimal PlayerStateData built via its derived Deserialize impl: its
     // fields are private to wows_replays, so this is the only way to

@@ -135,12 +135,17 @@ pub fn handle_set_ammo_for_weapon(
 ///
 /// Mirrors `BattleController::apply_player_create_props`: folds OWN_CLIENT properties
 /// (notably `shipConfig` in some replay versions) into the existing `VehicleState`.
+///
+/// The bundle can move `burning_flags` without any `EntityProperty` arriving,
+/// so the fold is diffed the same way `handle_vehicle_property` diffs a single
+/// update, keeping `BurnStateLog` complete for the self ship.
 pub fn apply_player_create_props(
     entity_id: EntityId,
     props: &std::collections::HashMap<&str, ArgValue<'_>>,
     world: &mut World,
     version: Version,
     constants: &GameConstants,
+    clock: GameClock,
 ) {
     let Some(ecs_entity) = world.resource::<EntityIndex>().get(entity_id) else {
         return;
@@ -149,10 +154,21 @@ pub fn apply_player_create_props(
     if !is_vehicle {
         return;
     }
+    // The entity borrow must be dropped before BurnStateLog can be borrowed, so
+    // the pending change is staged here and pushed afterward.
+    let mut burn_change: Option<BurnStateChange> = None;
     if let Ok(mut er) = world.get_entity_mut(ecs_entity)
         && let Some(mut vs) = er.get_mut::<VehicleState>()
     {
+        let previous = vs.0.burning_flags() & BURN_MASK;
         vs.0.update_from_args(props, version, constants);
+        let current = vs.0.burning_flags() & BURN_MASK;
+        if previous != current {
+            burn_change = Some(BurnStateChange { victim: entity_id, clock, previous, current });
+        }
+    }
+    if let Some(change) = burn_change {
+        world.resource_mut::<BurnStateLog>().0.push(change);
     }
 }
 
@@ -226,6 +242,58 @@ mod burn_state_tests {
             BurnStateChange { victim: EntityId::from(1u32), clock: GameClock(1.0), previous: 0b0000, current: 0b1011 };
         let lit: Vec<u8> = change.newly_lit().map(|n| n.get()).collect();
         assert_eq!(lit, vec![0, 1, 3]);
+    }
+
+    /// `BasePlayerCreate`/`CellPlayerCreate` move `burning_flags` on the self
+    /// ship without going through the `EntityProperty` path, so the fold must
+    /// diff them too. Otherwise the self ship's own burn history starts blank
+    /// while its presence window reports it observed.
+    #[test]
+    fn player_create_props_log_a_burn_transition() {
+        let id = EntityId::from(8u32);
+        let mut world = test_world_with_vehicle(id);
+
+        let mut props: std::collections::HashMap<&str, ArgValue<'_>> = std::collections::HashMap::new();
+        props.insert("burningFlags", ArgValue::Uint16(0b0011));
+        apply_player_create_props(
+            id,
+            &props,
+            &mut world,
+            Version::default(),
+            &GameConstants::defaults(),
+            GameClock(30.0),
+        );
+
+        let log = &world.resource::<BurnStateLog>().0;
+        assert_eq!(log.len(), 1, "{log:?}");
+        assert_eq!(log[0].victim, id);
+        assert_eq!(log[0].clock, GameClock(30.0));
+        assert_eq!(log[0].previous, 0);
+        assert_eq!(log[0].current, 0b0011);
+    }
+
+    /// The fold must not manufacture a transition when the bundle carries no
+    /// burn change: a create bundle repeating the current mask is not an event.
+    #[test]
+    fn player_create_props_without_a_burn_change_log_nothing() {
+        let id = EntityId::from(8u32);
+        let mut world = test_world_with_vehicle(id);
+        set_burning_flags(&mut world, id, 0b0001, GameClock(10.0));
+
+        let mut props: std::collections::HashMap<&str, ArgValue<'_>> = std::collections::HashMap::new();
+        props.insert("burningFlags", ArgValue::Uint16(0b0001));
+        apply_player_create_props(
+            id,
+            &props,
+            &mut world,
+            Version::default(),
+            &GameConstants::defaults(),
+            GameClock(30.0),
+        );
+
+        let log = &world.resource::<BurnStateLog>().0;
+        assert_eq!(log.len(), 1, "{log:?}");
+        assert_eq!(log[0].clock, GameClock(10.0));
     }
 
     /// A fire going out is a transition too: the DCP model reads extinguish

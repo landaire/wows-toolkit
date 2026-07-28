@@ -42,6 +42,9 @@ use crate::components::Vehicle;
 use crate::components::VehicleState;
 use crate::components::WeatherZone;
 use crate::components::WeatherZoneData;
+use crate::resources::BURN_MASK;
+use crate::resources::BurnStateChange;
+use crate::resources::BurnStateLog;
 use crate::resources::CapturePointOrder;
 use crate::resources::EntityIndex;
 use crate::resources::InteractiveZoneIndex;
@@ -106,6 +109,21 @@ fn handle_vehicle_create<G: ResourceLoader>(
     // Snapshot player link before borrowing the entity mutably.
     let player_rc = world.resource::<PlayerIndex>().0.get(&packet.entity_id).cloned();
     let entity = spawn_or_get(world, packet.entity_id);
+
+    // This create replaces VehicleState wholesale, so the burn bits it carries
+    // are diffed here instead of by the EntityProperty path. Without it the
+    // presence window opened below would certify a range whose burn baseline
+    // was never recorded, and a mask reconstructed from BurnStateLog would
+    // report an already-alight section as free. A vehicle with no VehicleState
+    // yet has no observed burning sections, so an absent component is a zero
+    // baseline, matching the default VehicleProps this create would replace.
+    let previous_burn = world
+        .get_entity(entity)
+        .ok()
+        .and_then(|er| er.get::<VehicleState>().map(|vs| vs.0.burning_flags() & BURN_MASK))
+        .unwrap_or(0);
+    let current_burn = props.burning_flags() & BURN_MASK;
+
     if let Ok(mut e) = world.get_entity_mut(entity) {
         e.insert(Vehicle);
         e.insert(VehicleState(props));
@@ -117,6 +135,17 @@ fn handle_vehicle_create<G: ResourceLoader>(
         {
             e.insert(PlayerLink(rc));
         }
+    }
+
+    // Ordered before open_presence so the baseline precedes the window it
+    // makes sound.
+    if previous_burn != current_burn {
+        world.resource_mut::<BurnStateLog>().0.push(BurnStateChange {
+            victim: packet.entity_id,
+            clock,
+            previous: previous_burn,
+            current: current_burn,
+        });
     }
     open_presence(world, packet.entity_id, clock);
 }
@@ -618,7 +647,7 @@ fn open_presence(world: &mut World, id: EntityId, clock: GameClock) {
 
 /// Close `id`'s open presence window at `clock`, if it has one. An id with no
 /// windows, or whose latest window is already closed, is left untouched.
-fn close_presence(world: &mut World, id: EntityId, clock: GameClock) {
+pub(crate) fn close_presence(world: &mut World, id: EntityId, clock: GameClock) {
     if let Some(windows) = world.resource_mut::<PresenceLog>().0.get_mut(&id)
         && let Some(open) = windows.last_mut()
         && open.left.is_none()
@@ -722,6 +751,28 @@ fn test_world() -> World {
     world.insert_resource(EntityIndex::default());
     world.insert_resource(PresenceLog::default());
     world
+}
+
+/// Stands in for a real `ResourceLoader`: the create and seed paths only call
+/// into it for a captain param id, which stays 0 (no lookup) for fixtures with
+/// no `crewModifiersCompactParams`.
+#[cfg(test)]
+struct NoResources;
+
+#[cfg(test)]
+impl ResourceLoader for NoResources {
+    fn localized_name_from_param(&self, _param: &wowsunpack::game_params::types::Param) -> Option<String> {
+        None
+    }
+    fn localized_name_from_id(&self, _id: &wowsunpack::data::TranslationKey) -> Option<String> {
+        None
+    }
+    fn game_param_by_id(&self, _id: GameParamId) -> Option<wowsunpack::Rc<wowsunpack::game_params::types::Param>> {
+        None
+    }
+    fn entity_specs(&self) -> &[wowsunpack::rpc::entitydefs::EntitySpec] {
+        &[]
+    }
 }
 
 #[cfg(test)]
@@ -856,23 +907,135 @@ mod presence_tests {
         assert!(!world.resource::<PresenceLog>().continuously_observed(id, GameClock(10.0), GameClock(10.0)));
         assert!(!world.resource::<PresenceLog>().continuously_observed(id, GameClock(0.0), GameClock(1_000_000.0)));
     }
+}
 
-    /// Stands in for a real `ResourceLoader`: `seed_vehicles_from_arena_state`
-    /// only calls into it for a captain param id, which stays 0 (no lookup)
-    /// for a fixture with no `crewModifiersCompactParams`.
-    struct NoResources;
-    impl ResourceLoader for NoResources {
-        fn localized_name_from_param(&self, _param: &wowsunpack::game_params::types::Param) -> Option<String> {
-            None
+#[cfg(test)]
+mod burn_baseline_tests {
+    use std::collections::HashMap;
+
+    use wows_replays::packet2::Rot3;
+    use wows_replays::packet2::Vec3;
+
+    use super::*;
+
+    fn create_test_world() -> World {
+        let mut world = World::new();
+        world.insert_resource(EntityIndex::default());
+        world.insert_resource(PresenceLog::default());
+        world.insert_resource(BurnStateLog::default());
+        world.insert_resource(PlayerIndex::default());
+        world
+    }
+
+    fn vehicle_create(id: EntityId, burning_flags: u16) -> EntityCreatePacket<'static> {
+        let mut props: HashMap<&'static str, ArgValue<'static>> = HashMap::new();
+        props.insert("burningFlags", ArgValue::Uint16(burning_flags));
+        EntityCreatePacket {
+            entity_id: id,
+            spec_idx: 0,
+            entity_type: "Vehicle",
+            space_id: 0,
+            vehicle_id: GameParamId::default(),
+            position: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+            rotation: Rot3 { roll: 0.0, pitch: 0.0, yaw: 0.0 },
+            state_length: 0,
+            props,
         }
-        fn localized_name_from_id(&self, _id: &wowsunpack::data::TranslationKey) -> Option<String> {
-            None
-        }
-        fn game_param_by_id(&self, _id: GameParamId) -> Option<wowsunpack::Rc<wowsunpack::game_params::types::Param>> {
-            None
-        }
-        fn entity_specs(&self) -> &[wowsunpack::rpc::entitydefs::EntitySpec] {
-            &[]
-        }
+    }
+
+    fn create_vehicle(world: &mut World, id: EntityId, burning_flags: u16, clock: GameClock) {
+        handle_entity_create(
+            clock,
+            &vehicle_create(id, burning_flags),
+            world,
+            &NoResources,
+            &GameConstants::defaults(),
+            Version::default(),
+        );
+    }
+
+    /// Reconstruct a victim's burn mask at `clock` the way the downstream
+    /// analysis does: the `current` of the last transition at or before it,
+    /// with no transitions meaning nothing burning.
+    fn burn_mask_at(log: &[BurnStateChange], victim: EntityId, clock: GameClock) -> u16 {
+        log.iter().rfind(|c| c.victim == victim && c.clock <= clock).map(|c| c.current).unwrap_or(0)
+    }
+
+    /// The create-time burn state is the baseline the presence window is sound
+    /// against. A ship first detected while a teammate's fire is already
+    /// burning must log that fact, or a mask reconstructed at a later clock
+    /// reports the section free and the analysis counts an impossible fire
+    /// trial.
+    #[test]
+    fn first_sighting_of_a_burning_vehicle_logs_a_baseline() {
+        let mut world = create_test_world();
+        let id = EntityId::from(21u32);
+
+        create_vehicle(&mut world, id, 0b0001, GameClock(200.0));
+
+        let log = world.resource::<BurnStateLog>().0.clone();
+        assert_eq!(log.len(), 1, "expected one baseline transition, got {log:?}");
+        assert_eq!(log[0].victim, id);
+        assert_eq!(log[0].clock, GameClock(200.0));
+        assert_eq!(log[0].previous, 0);
+        assert_eq!(log[0].current, 0b0001);
+
+        assert!(world.resource::<PresenceLog>().continuously_observed(id, GameClock(250.0), GameClock(250.0)));
+        assert_eq!(burn_mask_at(&log, id, GameClock(250.0)), 0b0001);
+    }
+
+    /// The baseline must precede the window it makes sound: a consumer that
+    /// walks transitions up to a window's `entered` clock has to see the
+    /// baseline, so the push happens before `open_presence`.
+    #[test]
+    fn the_baseline_is_logged_at_or_before_the_window_opens() {
+        let mut world = create_test_world();
+        let id = EntityId::from(22u32);
+
+        create_vehicle(&mut world, id, 0b0010, GameClock(200.0));
+
+        let entered = world.resource::<PresenceLog>().0[&id][0].entered;
+        let log = world.resource::<BurnStateLog>().0.clone();
+        assert_eq!(log.len(), 1);
+        assert!(log[0].clock <= entered);
+        assert_eq!(burn_mask_at(&log, id, entered), 0b0010);
+    }
+
+    /// A vehicle created with nothing alight has nothing to report; a zero
+    /// baseline against a zero-by-default state is not a transition.
+    #[test]
+    fn creating_an_unburnt_vehicle_logs_nothing() {
+        let mut world = create_test_world();
+        create_vehicle(&mut world, EntityId::from(23u32), 0, GameClock(200.0));
+        assert!(world.resource::<BurnStateLog>().0.is_empty());
+    }
+
+    /// Only burn bits count. A vehicle first seen with a flood running and no
+    /// fire is not burning, so the create must not log.
+    #[test]
+    fn a_create_carrying_only_flood_bits_logs_nothing() {
+        let mut world = create_test_world();
+        create_vehicle(&mut world, EntityId::from(24u32), 0b0001_0000, GameClock(200.0));
+        assert!(world.resource::<BurnStateLog>().0.is_empty());
+        assert_eq!(0b0001_0000 & BURN_MASK, 0);
+    }
+
+    /// AOI re-entry: the second create replaces `VehicleState` wholesale, so
+    /// the burn bits it carries are diffed against the ones the vehicle last
+    /// held rather than against zero.
+    #[test]
+    fn a_second_create_diffs_against_the_previous_state() {
+        let mut world = create_test_world();
+        let id = EntityId::from(25u32);
+
+        create_vehicle(&mut world, id, 0b0001, GameClock(100.0));
+        handle_entity_leave(id, GameClock(150.0), &mut world);
+        create_vehicle(&mut world, id, 0b0101, GameClock(300.0));
+
+        let log = world.resource::<BurnStateLog>().0.clone();
+        assert_eq!(log.len(), 2, "{log:?}");
+        assert_eq!(log[1].previous, 0b0001);
+        assert_eq!(log[1].current, 0b0101);
+        assert_eq!(log[1].clock, GameClock(300.0));
     }
 }
