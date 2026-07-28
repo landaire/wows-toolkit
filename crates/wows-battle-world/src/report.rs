@@ -20,6 +20,7 @@ use wows_replays::analyzer::battle_controller::state::BuildingEntity;
 use wows_replays::analyzer::battle_controller::state::CapturePointState;
 use wows_replays::analyzer::battle_controller::state::CapturedBuff;
 use wows_replays::analyzer::battle_controller::state::LocalWeatherZone;
+use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::analyzer::battle_controller::state::TeamScore;
 use wows_replays::analyzer::decoder::DamageStatEntry;
 use wows_replays::analyzer::decoder::FinishType;
@@ -40,12 +41,18 @@ use crate::components::Captain;
 use crate::components::Division;
 use crate::components::GameId;
 use crate::components::VehicleState;
+use crate::resources::BurnStateChange;
+use crate::resources::BurnStateLog;
 use crate::resources::ChatLog;
 use crate::resources::DamageLedger;
 use crate::resources::EntityIndex;
+use crate::resources::HitHistoryLog;
 use crate::resources::KillLog;
 use crate::resources::MatchState;
 use crate::resources::PlayerIndex;
+use crate::resources::PresenceLog;
+use crate::resources::RibbonEvent;
+use crate::resources::RibbonLog;
 use crate::resources::SelfStats;
 use crate::world::BattleWorld;
 
@@ -77,6 +84,10 @@ pub struct BattleReport {
     battle_start_clock: Option<GameClock>,
     self_damage_stats: Vec<DamageStatEntry>,
     active_consumables: HashMap<EntityId, Vec<ActiveConsumable>>,
+    burn_state_changes: Vec<BurnStateChange>,
+    ribbon_events: Vec<RibbonEvent>,
+    presence: PresenceLog,
+    hit_history: Vec<ResolvedShotHit>,
     max_duration: u32,
     played_duration: Option<f32>,
     extra_duration: Option<f32>,
@@ -185,6 +196,38 @@ impl BattleReport {
     /// All consumable activations observed during the match, keyed by avatar id.
     pub fn active_consumables(&self) -> &HashMap<EntityId, Vec<ActiveConsumable>> {
         &self.active_consumables
+    }
+
+    /// Burn-bit transitions observed on any vehicle. See `BurnStateLog`'s doc
+    /// comment: not a complete history, since a vehicle that re-enters the
+    /// recording client's AOI after a gap can arrive with a changed burn mask
+    /// and emit no transition for whatever happened while unobserved. Bound
+    /// any reconstruction with `presence()`.
+    pub fn burn_state_changes(&self) -> &[BurnStateChange] {
+        &self.burn_state_changes
+    }
+
+    /// Self-player ribbon increments with clocks. Self-player only; see
+    /// `RibbonLog`'s doc comment for the update shapes that produce no event.
+    pub fn ribbon_events(&self) -> &[RibbonEvent] {
+        &self.ribbon_events
+    }
+
+    /// AOI observation windows per vehicle, from `EntityCreate` to
+    /// `EntityLeave`. See `PresenceLog`'s doc comment: an entry is proof of
+    /// observation, but its absence is not proof of the converse in every
+    /// case (an undetected `EntityLeave` or entity-id reuse can extend a
+    /// window silently).
+    pub fn presence(&self) -> &PresenceLog {
+        &self.presence
+    }
+
+    /// Every resolved shell hit for the whole match, in arrival order. Empty
+    /// unless `IngestOptions::record_hit_history` was set during ingest, and
+    /// also empty under `ShotTracking::Untracked`; see `HitHistoryLog`'s doc
+    /// comment.
+    pub fn hit_history(&self) -> &[ResolvedShotHit] {
+        &self.hit_history
     }
 
     /// Maximum match duration from replay metadata (time limit), in seconds.
@@ -366,6 +409,13 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         let buff_zones = self.buff_zones();
         let active_consumables = self.active_consumables();
 
+        // Moved out, not cloned: HitHistoryLog in particular can hold every hit
+        // of the match, and the world is dropped right after this call anyway.
+        let burn_state_changes = std::mem::take(&mut self.world_mut().resource_mut::<BurnStateLog>().0);
+        let ribbon_events = std::mem::take(&mut self.world_mut().resource_mut::<RibbonLog>().0);
+        let presence = std::mem::take(&mut *self.world_mut().resource_mut::<PresenceLog>());
+        let hit_history = std::mem::take(&mut self.world_mut().resource_mut::<HitHistoryLog>().0);
+
         BattleReport {
             arena_id,
             self_player,
@@ -390,6 +440,10 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             battle_start_clock,
             self_damage_stats,
             active_consumables,
+            burn_state_changes,
+            ribbon_events,
+            presence,
+            hit_history,
             max_duration,
             played_duration,
             extra_duration,
@@ -475,5 +529,161 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
                 params_id: bs.params_id,
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy_ecs::world::World;
+    use wows_replays::ReplayMeta;
+    use wows_replays::analyzer::battle_controller::MetadataPlayer;
+    use wows_replays::analyzer::decoder::PlayerStateData;
+    use wows_replays::types::GameParamId;
+    use wows_replays::types::Relation;
+    use wowsunpack::game_params::types::Achievement;
+    use wowsunpack::game_params::types::Param;
+    use wowsunpack::game_params::types::ParamData;
+    use wowsunpack::game_types::Ribbon;
+    use wowsunpack::rpc::entitydefs::EntitySpec;
+
+    use super::*;
+
+    /// Stands in for a real `ResourceLoader`: always resolves to the same
+    /// fixture `Param` regardless of id, since the test never looks up a real
+    /// ship. Mirrors the `NoResources` double in `ingest::entities`'s tests,
+    /// except this one must succeed so `Player::from_arena_player` resolves.
+    struct StubResources(Rc<Param>);
+
+    impl ResourceLoader for StubResources {
+        fn localized_name_from_param(&self, _param: &Param) -> Option<String> {
+            None
+        }
+
+        fn localized_name_from_id(&self, _id: &TranslationKey) -> Option<String> {
+            None
+        }
+
+        fn game_param_by_id(&self, _id: GameParamId) -> Option<Rc<Param>> {
+            Some(self.0.clone())
+        }
+
+        fn entity_specs(&self) -> &[EntitySpec] {
+            &[]
+        }
+    }
+
+    fn fixture_param() -> Rc<Param> {
+        Rc::new(
+            Param::builder()
+                .id(GameParamId::from(1u32))
+                .index("IDX".to_string())
+                .name("Fixture".to_string())
+                .nation("USA".to_string())
+                .data(ParamData::Achievement(
+                    Achievement::builder()
+                        .is_group(false)
+                        .one_per_battle(false)
+                        .ui_type("x".to_string())
+                        .ui_name("x".to_string())
+                        .build(),
+                ))
+                .build(),
+        )
+    }
+
+    fn minimal_meta() -> ReplayMeta {
+        ReplayMeta {
+            matchGroup: None,
+            gameMode: 0,
+            gameType: None,
+            clientVersionFromExe: "0, 15, 5, 12668706".to_string(),
+            scenarioUiCategoryId: None,
+            mapDisplayName: String::new(),
+            mapId: 0,
+            clientVersionFromXml: String::new(),
+            weatherParams: None,
+            duration: 0,
+            gameLogic: None,
+            name: String::new(),
+            scenario: String::new(),
+            playerID: AccountId::from(1u32),
+            vehicles: Vec::new(),
+            playersPerTeam: 1,
+            dateTime: String::new(),
+            mapName: String::new(),
+            playerName: "self".to_string(),
+            scenarioConfigId: 0,
+            teamsCount: 2,
+            logic: None,
+            playerVehicle: String::new(),
+            battleDuration: None,
+        }
+    }
+
+    // Minimal PlayerStateData built via its derived Deserialize impl: its
+    // fields are private to wows_replays, so this is the only way to
+    // construct one from outside that crate. `raw`/`raw_with_names` are
+    // `#[serde(skip_deserializing)]` and default to empty.
+    const SELF_PLAYER_JSON: &str = r#"{
+        "username": "self",
+        "clan": "",
+        "clan_id": 0,
+        "clan_color": 0,
+        "db_id": 1,
+        "realm": null,
+        "meta_ship_id": 1,
+        "entity_id": 3,
+        "team_id": 0,
+        "max_health": 50000,
+        "is_abuser": false,
+        "is_hidden": false,
+        "is_bot": false,
+        "human_properties": null
+    }"#;
+
+    /// Builds a `BattleReport` from a synthetic world: a self player resolved
+    /// through the same `Player::from_arena_player` path production ingest
+    /// uses, plus whatever `seed` pushes directly onto the ECS `World` (e.g.
+    /// log entries). No real vfs/GameParams load; `resources` is a single
+    /// fixture `Param` returned unconditionally.
+    fn report_from_synthetic_world(seed: impl FnOnce(&mut World)) -> BattleReport {
+        let meta = minimal_meta();
+        let param = fixture_param();
+        let resources = StubResources(param.clone());
+        let mut world = BattleWorld::new(&meta, &resources, None);
+
+        let player_state: PlayerStateData =
+            serde_json::from_str(SELF_PLAYER_JSON).expect("fixture matches PlayerStateData's shape");
+        let metadata_player = MetadataPlayer::new(AccountId::from(1u32), "self".to_string(), Relation::new(0), param);
+        let player = Player::from_arena_player(&player_state, &metadata_player, &resources)
+            .expect("stub resources always resolve a vehicle");
+        world.world_mut().resource_mut::<PlayerIndex>().0.insert(player_state.entity_id(), Rc::new(player));
+
+        seed(world.world_mut());
+
+        world.into_report()
+    }
+
+    /// The report is what the analysis sees. A log that reaches finish() but not
+    /// the report is invisible to every consumer.
+    #[test]
+    fn report_carries_the_fire_analysis_logs() {
+        let report = report_from_synthetic_world(|world| {
+            world.resource_mut::<BurnStateLog>().0.push(BurnStateChange {
+                victim: EntityId::from(3u32),
+                clock: GameClock(12.0),
+                previous: 0,
+                current: 1,
+            });
+            world.resource_mut::<RibbonLog>().0.push(RibbonEvent {
+                clock: GameClock(12.0),
+                ribbon: Ribbon::SetFire,
+                count: 1,
+            });
+        });
+
+        assert_eq!(report.burn_state_changes().len(), 1);
+        assert_eq!(report.ribbon_events().len(), 1);
+        assert_eq!(report.burn_state_changes()[0].victim, EntityId::from(3u32));
     }
 }
