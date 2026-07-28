@@ -91,6 +91,12 @@ use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::types::AccountId;
 
+use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
+use wows_replay_insights::fire_chance::analysis::ExclusionReason;
+use wows_replay_insights::fire_chance::analysis::FormulaOp;
+use wows_replay_insights::fire_chance::analysis::FormulaStep;
+use wows_replay_insights::fire_chance::analysis::PerShipFireChance;
+
 use itertools::Itertools;
 use wows_minimap_renderer::renderer::weapon_group_label;
 use wowsunpack::data::ResourceLoader;
@@ -1567,6 +1573,128 @@ impl UiReport {
         });
     }
 
+    /// Render the effective fire chance block for the recording player's row:
+    /// a clickable headline with a formula-and-exclusions hover breakdown, and
+    /// a per-target-ship expander. `report.fire_chance` is `None` for every
+    /// other row, so callers only reach this once per replay.
+    fn render_fire_chance(&self, ui: &mut egui::Ui, fire_chance: &EffectiveFireChance) {
+        ui.strong(t!("ui.replay.sections.fire_chance"));
+
+        let mut headline_lines = vec![fire_chance_headline_text(fire_chance)];
+        if let Some(expected) = fire_chance.expected_fires {
+            headline_lines.push(format!(
+                "  {} {:.1}%",
+                t!("ui.replay.sections.fire_chance_expected"),
+                expected * 100.0
+            ));
+        }
+
+        let response = ui
+            .add(Label::new(headline_lines.join("\n")).sense(Sense::click()))
+            .on_hover_text(RichText::new(self.fire_chance_hover_text(fire_chance)).monospace());
+
+        if response.clicked() {
+            ui.ctx().copy_text(self.fire_chance_copy_text(fire_chance));
+            let _ = self.background_task_sender.as_ref().map(|sender| {
+                sender.send(BackgroundTask {
+                    receiver: None,
+                    kind: BackgroundTaskKind::UpdateTimedMessage(ToastMessage::success(t!(
+                        "ui.replay.sections.fire_chance_copied"
+                    ))),
+                })
+            });
+        }
+
+        if !fire_chance.per_ship.is_empty() {
+            egui::CollapsingHeader::new(t!("ui.replay.sections.fire_chance_per_ship")).show(ui, |ui| {
+                for ship in sorted_per_ship(fire_chance) {
+                    ui.label(fire_chance_per_ship_line(ship));
+                }
+            });
+        }
+    }
+
+    /// Formula-and-exclusions breakdown for the effective-fire-chance hover.
+    fn fire_chance_hover_text(&self, fire_chance: &EffectiveFireChance) -> String {
+        let mut lines = self.fire_chance_formula_lines(&fire_chance.formula);
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.extend(fire_chance_exclusion_lines(fire_chance));
+        lines.join("\n")
+    }
+
+    /// The attacker-side formula steps, in order, with each step's source
+    /// localized where it resolves to a GameParams entry (an equipped upgrade
+    /// or signal). A crew skill's internal name has no Param entry of its own
+    /// and renders as-is. Empty when the attacker's modifiers could not be
+    /// folded for this game version.
+    fn fire_chance_formula_lines(&self, formula: &[FormulaStep]) -> Vec<String> {
+        if formula.is_empty() {
+            return Vec::new();
+        }
+        let names: Vec<String> = formula
+            .iter()
+            .map(|step| match &step.source {
+                Some(source) => format!("{} ({})", step.modifier, self.localize_modifier_source(source)),
+                None => step.modifier.clone(),
+            })
+            .collect();
+        let name_width = names.iter().map(String::len).max().unwrap_or(0);
+
+        let mut lines = vec![t!("ui.replay.sections.fire_chance_formula").into_owned()];
+        for (step, name) in formula.iter().zip(&names) {
+            let (symbol, value_text) = match step.op {
+                FormulaOp::Multiply => ("x", format!("{:.2}", step.value)),
+                FormulaOp::Add => ("+", format!("+{:.1}pp", step.value * 100.0)),
+            };
+            lines.push(format!("  {symbol} {name:<name_width$} {value_text}"));
+        }
+        if let Some(last) = formula.last() {
+            lines.push(format!("  = {:.1}%", last.result * 100.0));
+        }
+        lines
+    }
+
+    /// Best-effort localized name for a formula step's source identifier: an
+    /// equipped upgrade or signal's GameParams name. Crew skill internal names
+    /// carry no Param entry of their own and fall back to the raw identifier.
+    fn localize_modifier_source(&self, source: &str) -> String {
+        let metadata_provider = self.metadata_provider();
+        let name = <GameMetadataProvider as GameParamProvider>::game_param_by_name(&metadata_provider, source)
+            .and_then(|param| {
+                let ctx = wowsunpack::game_params::describe::DescribeContext {
+                    resource_loader: metadata_provider.as_ref(),
+                    version: &self.version,
+                    species: None,
+                    param_name: None,
+                };
+                param.display_name(&ctx)
+            });
+        name.unwrap_or_else(|| source.to_owned())
+    }
+
+    /// The full plain-text breakdown for click-to-copy: headline, formula,
+    /// exclusions and every per-ship row, independent of whether the per-ship
+    /// expander is open.
+    fn fire_chance_copy_text(&self, fire_chance: &EffectiveFireChance) -> String {
+        let mut lines = vec![t!("ui.replay.sections.fire_chance").into_owned(), fire_chance_headline_text(fire_chance)];
+        if let Some(expected) = fire_chance.expected_fires {
+            lines.push(format!("  {} {:.1}%", t!("ui.replay.sections.fire_chance_expected"), expected * 100.0));
+        }
+        lines.push(String::new());
+        lines.push(self.fire_chance_hover_text(fire_chance));
+
+        if !fire_chance.per_ship.is_empty() {
+            lines.push(String::new());
+            lines.push(t!("ui.replay.sections.fire_chance_per_ship").into_owned());
+            lines.extend(
+                sorted_per_ship(fire_chance).into_iter().map(|ship| format!("  {}", fire_chance_per_ship_line(ship))),
+            );
+        }
+        lines.join("\n")
+    }
+
     fn cell_content_ui(&mut self, row_nr: u64, col_nr: usize, ui: &mut egui::Ui) {
         let is_expanded = self.is_row_expanded.get(&row_nr).copied().unwrap_or_default();
         let expandedness = ui.ctx().animate_bool(Id::new(row_nr), is_expanded);
@@ -2114,6 +2242,13 @@ impl UiReport {
                                         ui.label(format!("{}: {crits}", t!("ui.replay.column.crits")));
                                     }
                                 }
+                            }
+
+                            if let Some(fire_chance) = report.fire_chance.as_ref() {
+                                if !report.achievements.is_empty() || !report.ribbons.is_empty() || has_damage_events {
+                                    ui.separator();
+                                }
+                                self.render_fire_chance(ui, fire_chance);
                             }
                         });
                     }
@@ -4974,6 +5109,89 @@ fn breakdown_hover_string<F: Fn(&str) -> u64>(descriptions: &[(&str, &str)], loc
         .join("\n")
 }
 
+/// Percent-and-sample-count headline for the effective-fire-chance block.
+/// `EffectiveFireChance::rate` returns `None` when there are no eligible hits;
+/// zero samples is not a zero rate, so no percentage is rendered for it.
+fn fire_chance_headline_text(fire_chance: &EffectiveFireChance) -> String {
+    match fire_chance.rate() {
+        Some(rate) => format!("{:.1}%   ({} / {})", rate * 100.0, fire_chance.fires, fire_chance.eligible_hits),
+        None => t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned(),
+    }
+}
+
+/// `per_ship`, sorted by eligible hits descending, for both the expander and
+/// the copy-to-clipboard breakdown.
+fn sorted_per_ship(fire_chance: &EffectiveFireChance) -> Vec<&PerShipFireChance> {
+    let mut ships: Vec<&PerShipFireChance> = fire_chance.per_ship.iter().collect();
+    ships.sort_by(|a, b| b.eligible_hits.cmp(&a.eligible_hits));
+    ships
+}
+
+/// One target-ship row for the per-ship expander. Same zero-sample rule as the
+/// aggregate headline.
+fn fire_chance_per_ship_line(ship: &PerShipFireChance) -> String {
+    let rate_text = if ship.eligible_hits > 0 {
+        format!(
+            "{:.1}%  ({} / {})",
+            ship.fires as f32 / ship.eligible_hits as f32 * 100.0,
+            ship.fires,
+            ship.eligible_hits
+        )
+    } else {
+        t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned()
+    };
+    match ship.expected_fires {
+        Some(expected) => format!(
+            "{}   {rate_text}   {} {:.1}%",
+            ship.victim_ship_name,
+            t!("ui.replay.sections.fire_chance_expected"),
+            expected * 100.0
+        ),
+        None => format!("{}   {rate_text}", ship.victim_ship_name),
+    }
+}
+
+/// The exclusion tally as display lines: eligible hits pinned first, then the
+/// rest ordered by count descending with zero-count reasons omitted.
+fn fire_chance_exclusion_lines(fire_chance: &EffectiveFireChance) -> Vec<String> {
+    let mut rows: Vec<(u32, Cow<'static, str>)> =
+        vec![(fire_chance.eligible_hits, t!("ui.replay.sections.fire_chance_eligible"))];
+    let mut excluded: Vec<(&ExclusionReason, &u32)> =
+        fire_chance.exclusions.iter().filter(|(_, count)| **count > 0).collect();
+    excluded.sort_by(|a, b| b.1.cmp(a.1));
+    rows.extend(excluded.into_iter().map(|(reason, count)| (*count, exclusion_reason_label(*reason))));
+
+    let total: u32 = fire_chance.eligible_hits + fire_chance.exclusions.values().sum::<u32>();
+    let count_width = rows.iter().map(|(count, _)| count.to_string().len()).max().unwrap_or(1);
+
+    let mut lines = vec![t!("ui.replay.sections.fire_chance_hits_considered", count = total).into_owned()];
+    lines.extend(rows.into_iter().map(|(count, label)| format!("  {count:>count_width$} {label}")));
+    lines
+}
+
+/// Localized label for one exclusion reason, for the hover breakdown.
+fn exclusion_reason_label(reason: ExclusionReason) -> Cow<'static, str> {
+    match reason {
+        ExclusionReason::SectionAlreadyBurning => t!("ui.replay.sections.fire_chance_exclusion_already_burning"),
+        ExclusionReason::SectionSuppressedByFirePrevention => {
+            t!("ui.replay.sections.fire_chance_exclusion_fire_prevention")
+        }
+        ExclusionReason::DamageControlActive => t!("ui.replay.sections.fire_chance_exclusion_damage_control_active"),
+        ExclusionReason::DamageControlUnknown => t!("ui.replay.sections.fire_chance_exclusion_damage_control_unknown"),
+        ExclusionReason::ObservationGap => t!("ui.replay.sections.fire_chance_exclusion_observation_gap"),
+        ExclusionReason::ConsumableModelUnreliable => {
+            t!("ui.replay.sections.fire_chance_exclusion_consumable_unreliable")
+        }
+        ExclusionReason::VictimDead => t!("ui.replay.sections.fire_chance_exclusion_victim_dead"),
+        ExclusionReason::VictimFateUnknown => t!("ui.replay.sections.fire_chance_exclusion_victim_fate_unknown"),
+        ExclusionReason::ShellCannotBurn => t!("ui.replay.sections.fire_chance_exclusion_shell_cannot_burn"),
+        ExclusionReason::NotMainBattery => t!("ui.replay.sections.fire_chance_exclusion_not_main_battery"),
+        ExclusionReason::HitTypeDoesNotRoll => t!("ui.replay.sections.fire_chance_exclusion_hit_type_does_not_roll"),
+        ExclusionReason::NoSectionGeometry => t!("ui.replay.sections.fire_chance_exclusion_no_geometry"),
+        ExclusionReason::SecondaryFireAmbiguous => t!("ui.replay.sections.fire_chance_exclusion_secondary_ambiguous"),
+    }
+}
+
 /// Presentation view of a normalized per-victim interaction: the numeric fields
 /// are copied verbatim and the text/hover fields are formatted from them, gated
 /// on `> 0` exactly as the original inline extraction did.
@@ -5135,5 +5353,99 @@ fn build_replay_chat_content(
         }
         ui.add(Separator::default());
         ui.end_row();
+    }
+}
+
+#[cfg(test)]
+mod fire_chance_render_tests {
+    use super::*;
+
+    fn fixture(eligible_hits: u32, fires: u32, expected_fires: Option<f32>) -> EffectiveFireChance {
+        EffectiveFireChance {
+            eligible_hits,
+            fires,
+            expected_fires,
+            per_ship: Vec::new(),
+            exclusions: BTreeMap::new(),
+            section_predictions: Vec::new(),
+            unattributed_fires: 0,
+            formula: Vec::new(),
+        }
+    }
+
+    fn ship(name: &str, eligible_hits: u32, fires: u32, expected_fires: Option<f32>) -> PerShipFireChance {
+        PerShipFireChance {
+            victim_ship_index: format!("{name}_INDEX"),
+            victim_ship_name: name.to_owned(),
+            eligible_hits,
+            fires,
+            expected_fires,
+        }
+    }
+
+    #[test]
+    fn headline_shows_rate_and_sample_counts() {
+        let fc = fixture(63, 9, Some(0.121));
+        assert_eq!(fire_chance_headline_text(&fc), "14.3%   (9 / 63)");
+    }
+
+    /// A rate over zero eligible hits is unknown, not zero: this must never
+    /// render as "0.0%".
+    #[test]
+    fn headline_over_zero_eligible_hits_has_no_percentage() {
+        let fc = fixture(0, 0, None);
+        let headline = fire_chance_headline_text(&fc);
+        assert!(!headline.contains('%'), "expected no percentage in {headline:?}");
+        assert_eq!(headline, "no eligible hits");
+    }
+
+    #[test]
+    fn exclusion_lines_pin_eligible_first_then_sort_by_count_descending_and_drop_zeros() {
+        let mut fc = fixture(63, 9, None);
+        fc.exclusions.insert(ExclusionReason::SectionAlreadyBurning, 98);
+        fc.exclusions.insert(ExclusionReason::ObservationGap, 14);
+        fc.exclusions.insert(ExclusionReason::DamageControlUnknown, 31);
+        fc.exclusions.insert(ExclusionReason::VictimDead, 0);
+
+        let lines = fire_chance_exclusion_lines(&fc);
+        assert_eq!(
+            lines,
+            vec![
+                "206 hits considered".to_owned(),
+                "  63 eligible".to_owned(),
+                "  98 section already burning".to_owned(),
+                "  31 damage control state unknown".to_owned(),
+                "  14 observation gap".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn per_ship_line_includes_expected_when_present() {
+        let s = ship("Zao", 12, 2, Some(0.138));
+        assert_eq!(fire_chance_per_ship_line(&s), "Zao   16.7%  (2 / 12)   expected 13.8%");
+    }
+
+    #[test]
+    fn per_ship_line_omits_expected_when_absent() {
+        let s = ship("Iowa", 11, 1, None);
+        assert_eq!(fire_chance_per_ship_line(&s), "Iowa   9.1%  (1 / 11)");
+    }
+
+    /// Same zero-sample rule as the aggregate headline, at the per-ship level.
+    #[test]
+    fn per_ship_line_over_zero_eligible_hits_has_no_percentage() {
+        let s = ship("Fletcher", 0, 0, None);
+        let line = fire_chance_per_ship_line(&s);
+        assert!(!line.contains('%'), "expected no percentage in {line:?}");
+        assert_eq!(line, "Fletcher   no eligible hits");
+    }
+
+    #[test]
+    fn sorted_per_ship_orders_by_eligible_hits_descending() {
+        let mut fc = fixture(23, 3, None);
+        fc.per_ship = vec![ship("Iowa", 11, 1, None), ship("Zao", 12, 2, None)];
+        let names: Vec<&str> = sorted_per_ship(&fc).into_iter().map(|s| s.victim_ship_name.as_str()).collect();
+        assert_eq!(names, vec!["Zao", "Iowa"]);
     }
 }
