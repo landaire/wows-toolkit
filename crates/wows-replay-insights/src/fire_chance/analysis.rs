@@ -42,7 +42,22 @@ use crate::fire_chance::victim::VictimTrack;
 
 /// One server tick (`TICKS_PER_SECOND` = 7, `ma779114d`) plus packet jitter. The
 /// ribbon and the `burningFlags` update are separate packets from the same tick.
+///
+/// This is a ribbon-relative radius: it bounds how far a hit can sit from the
+/// ribbon it caused.
 const ATTRIBUTION_WINDOW: f32 = 0.5;
+
+/// How far apart two of our own hits can be and still both be plausible causes
+/// of one fire.
+///
+/// Twice [`ATTRIBUTION_WINDOW`], because this one is hit-relative rather than
+/// ribbon-relative: two hits can each sit inside a single ribbon's window while
+/// lying a full window apart on opposite sides of it. Using the ribbon radius
+/// here would leave a band where a main-battery hit is close enough to the
+/// ribbon to be credited while a secondary of ours nearer the ribbon still
+/// fails the contest, which inflates the numerator on exactly the secondary
+/// ships the contest exists to protect.
+const CONTEST_WINDOW: f32 = 2.0 * ATTRIBUTION_WINDOW;
 
 /// The `burningFlags` bit Fire Prevention Expert forces off unconditionally
 /// (`setBurningFlags`, `m09838fe6/m0700235d.py:344`), which is what "reduces the
@@ -512,7 +527,7 @@ fn contested_by_a_secondary(candidate: &Candidate<'_>, secondaries: &[SecondaryI
     secondaries.iter().any(|s| {
         s.victim == candidate.victim
             && s.section == candidate.section
-            && clock_distance(s.clock, candidate.hit.clock) <= ATTRIBUTION_WINDOW
+            && clock_distance(s.clock, candidate.hit.clock) <= CONTEST_WINDOW
     })
 }
 
@@ -939,6 +954,10 @@ mod tests {
         hit_type: ShellHitType,
         hit_from_atba: bool,
         secondary_hit_section: Option<u8>,
+        secondary_hit_offset: f32,
+        ribbon_offset: f32,
+        uncomputable_node_probability: Option<u8>,
+        second_main_hit_section: Option<u8>,
         server_lit_section: u8,
         ribbons: bool,
         stray_ribbon: Option<GameClock>,
@@ -965,6 +984,10 @@ mod tests {
             hit_type: ShellHitType::Normal,
             hit_from_atba: false,
             secondary_hit_section: None,
+            secondary_hit_offset: 0.1,
+            ribbon_offset: 0.0,
+            uncomputable_node_probability: None,
+            second_main_hit_section: None,
             server_lit_section: 0,
             ribbons: true,
             stray_ribbon: None,
@@ -1034,6 +1057,30 @@ mod tests {
 
         fn with_secondary_hit_on_section(mut self, section: u8) -> Fixture {
             self.secondary_hit_section = Some(section);
+            self
+        }
+
+        fn with_the_secondary_hit_offset_by(mut self, seconds: f32) -> Fixture {
+            self.secondary_hit_offset = seconds;
+            self
+        }
+
+        fn with_the_ribbon_offset_by(mut self, seconds: f32) -> Fixture {
+            self.ribbon_offset = seconds;
+            self
+        }
+
+        /// A node probability that cannot produce a number, so the hit is a
+        /// valid trial whose expectation is unknown.
+        fn with_an_uncomputable_node_probability(mut self, section: u8) -> Fixture {
+            self.uncomputable_node_probability = Some(section);
+            self
+        }
+
+        /// A second main-battery hit, placed clear of the ribbon window so it
+        /// only adds to the denominator.
+        fn also_hitting_section(mut self, section: u8) -> Fixture {
+            self.second_main_hit_section = Some(section);
             self
         }
 
@@ -1167,7 +1214,16 @@ mod tests {
                 hits.push(hit(
                     victim_id(),
                     atba_shell_id(),
-                    GameClock(HIT_CLOCK.0 + 0.1),
+                    GameClock(HIT_CLOCK.0 + self.secondary_hit_offset),
+                    section,
+                    ShellHitType::Normal,
+                ));
+            }
+            if let Some(section) = self.second_main_hit_section {
+                hits.push(hit(
+                    victim_id(),
+                    main_shell_id(),
+                    GameClock(HIT_CLOCK.0 + 20.0),
                     section,
                     ShellHitType::Normal,
                 ));
@@ -1195,7 +1251,11 @@ mod tests {
 
             let mut ribbons = Vec::new();
             if self.ribbons {
-                ribbons.push(RibbonEvent { clock: HIT_CLOCK, ribbon: Ribbon::SetFire, count: 1 });
+                ribbons.push(RibbonEvent {
+                    clock: GameClock(HIT_CLOCK.0 + self.ribbon_offset),
+                    ribbon: Ribbon::SetFire,
+                    count: 1,
+                });
             }
             if let Some(clock) = self.stray_ribbon {
                 ribbons.push(RibbonEvent { clock, ribbon: Ribbon::SetFire, count: 1 });
@@ -1249,7 +1309,10 @@ mod tests {
                     ship_index: "PZAO".to_owned(),
                     ship_name: "Zao".to_owned(),
                     hull_model_path: HULL_MODEL.to_owned(),
-                    node_probability: vec![self.victim_node_probability; NODES.len()],
+                    node_probability: node_probability(
+                        self.victim_node_probability,
+                        self.uncomputable_node_probability,
+                    ),
                     burn_prob: self.victim_burn_prob,
                     fire_prevention: self.victim_fire_prevention,
                     fate: self.victim_fate,
@@ -1372,6 +1435,16 @@ mod tests {
                 Vec::new(),
             )))
             .build()
+    }
+
+    /// One probability per fire section, optionally with one section made
+    /// uncomputable.
+    fn node_probability(probability: f32, uncomputable: Option<u8>) -> Vec<f32> {
+        let mut nodes = vec![probability; NODES.len()];
+        if let Some(section) = uncomputable {
+            nodes[section as usize] = f32::NAN;
+        }
+        nodes
     }
 
     fn dcp_inventory() -> ConsumableInventory {
@@ -1674,6 +1747,52 @@ mod tests {
         let out = analyze(&fixture().also_hitting_a_hull_we_cannot_place().build()).expect("geometry");
         assert_eq!(out.eligible_hits, 1);
         assert_eq!(out.exclusions[&ExclusionReason::NoSectionGeometry], 1);
+    }
+
+    /// Two of our own hits can each sit inside one ribbon's window while lying
+    /// a full window apart on opposite sides of it, so the contest window is
+    /// twice the attribution window. Main-battery hit at `c`, ribbon at
+    /// `c + 0.5` so the hit is pickable, our own secondary at `c + 0.7` and so
+    /// nearer the ribbon than the hit is: at the narrower window the
+    /// main-battery hit would be credited a fire the secondary may have set.
+    #[test]
+    fn a_secondary_contests_across_the_full_hit_to_hit_window() {
+        let out = analyze(
+            &fixture()
+                .with_the_ribbon_offset_by(0.5)
+                .with_coincident_secondary_hit()
+                .with_the_secondary_hit_offset_by(0.7)
+                .build(),
+        )
+        .expect("geometry");
+        assert_eq!(out.eligible_hits, 0);
+        assert_eq!(out.fires, 0);
+        assert_eq!(out.exclusions[&ExclusionReason::SecondaryFireAmbiguous], 1);
+        assert_eq!(out.unattributed_fires, 1);
+    }
+
+    /// A secondary beyond the contest window does not reach the hit at all.
+    #[test]
+    fn a_secondary_beyond_the_contest_window_does_not_contest() {
+        let out = analyze(&fixture().with_coincident_secondary_hit().with_the_secondary_hit_offset_by(1.5).build())
+            .expect("geometry");
+        assert_eq!(out.eligible_hits, 1);
+        assert_eq!(out.fires, 1);
+    }
+
+    /// One hit whose expectation cannot be computed makes the total unknown,
+    /// not smaller. Summing the rest would report a number that silently omits
+    /// a trial it counted in the denominator, at both levels.
+    #[test]
+    fn one_uncomputable_expectation_makes_the_total_unknown() {
+        let out = analyze(
+            &fixture().hitting_section(0).with_an_uncomputable_node_probability(3).also_hitting_section(3).build(),
+        )
+        .expect("geometry");
+        assert_eq!(out.eligible_hits, 2);
+        assert_eq!(out.expected_fires, None);
+        assert_eq!(out.per_ship.len(), 1);
+        assert_eq!(out.per_ship[0].expected_fires, None);
     }
 
     /// A victim whose build we could not read might have Fire Prevention
