@@ -19,6 +19,7 @@ use wowsunpack::game_params::ttx::weapon_tables::calculate_burn_chance;
 use wowsunpack::game_params::ttx::weapon_tables::is_small_projectile;
 use wowsunpack::game_params::types::CrewSkillType;
 use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::game_types::CollisionType;
 use wowsunpack::game_types::GameParamId;
 use wowsunpack::game_types::Ribbon;
 use wowsunpack::game_types::ShellHitType;
@@ -128,6 +129,11 @@ pub enum HitEligibility {
     /// establishes as rolling, and flattening it would lose which one it was.
     HitTypeDoesNotRoll(Recognized<ShellHitType>),
     NoSectionGeometry,
+    /// The shell's collision type says it struck terrain, water, a wave or
+    /// nothing at all. Such a shell set no ship alight whatever victim the
+    /// nearest-ship heuristic keyed it to, and its `shell_hit` is an ordinary
+    /// `Normal`, so nothing else in the model would refuse it.
+    ImpactNotOnAShip,
     /// The impact lies too far from the victim's burn nodes to have been a hit
     /// on that hull. `victim_entity_id` is a nearest-ship heuristic, so this is
     /// what a hit keyed to a neighbour in a tight formation looks like.
@@ -168,6 +174,7 @@ impl HitEligibility {
             HitEligibility::NotMainBattery => Some(ExclusionReason::NotMainBattery),
             HitEligibility::HitTypeDoesNotRoll(_) => Some(ExclusionReason::HitTypeDoesNotRoll),
             HitEligibility::NoSectionGeometry => Some(ExclusionReason::NoSectionGeometry),
+            HitEligibility::ImpactNotOnAShip => Some(ExclusionReason::ImpactNotOnAShip),
             HitEligibility::ImpactOffTheHull => Some(ExclusionReason::ImpactOffTheHull),
             HitEligibility::VictimPoseUnknown => Some(ExclusionReason::VictimPoseUnknown),
             HitEligibility::AmbiguousWithAnotherHit => Some(ExclusionReason::AmbiguousWithAnotherHit),
@@ -712,6 +719,14 @@ fn contesting_section(
     shell: GameParamId,
     eligibility: &HitEligibility,
 ) -> Option<BurnNodeIndex> {
+    // A shell that struck terrain or water is a proof like the others, and it
+    // reaches here through the secondary arm: `classify` names a secondary
+    // `NotMainBattery` before it ever reads the collision type. Without this a
+    // secondary of ours that hit an island beside the victim would contest a
+    // main-battery trial it could not possibly have contested.
+    if struck_no_ship(&hit.hit.hit_type.collision) {
+        return None;
+    }
     let contests = match eligibility {
         HitEligibility::NotMainBattery => is_secondary_shell(input, secondary_ammo, shell),
         HitEligibility::HitTypeDoesNotRoll(_) => true,
@@ -812,6 +827,15 @@ fn classify(
         return HitEligibility::ShellCannotBurn;
     }
 
+    // Ahead of the hit-type check because it is the more specific fact: a shell
+    // that struck an island carries `SHELL_HIT_TYPE_NORMAL`, so `rolls_for_fire`
+    // admits it and only the geometry gate stands between it and the
+    // denominator. That gate exists to catch a mis-keyed victim, not to decide
+    // what the shell hit, and it lets some of these through onto a hull.
+    if struck_no_ship(&hit.hit.hit_type.collision) {
+        return HitEligibility::ImpactNotOnAShip;
+    }
+
     if !rolls_for_fire(&hit.hit.hit_type.shell_hit) {
         return HitEligibility::HitTypeDoesNotRoll(hit.hit.hit_type.shell_hit.clone());
     }
@@ -887,6 +911,23 @@ fn classify(
         .then(|| chance * victim.node_probability[usize::from(section.get())] * victim.burn_prob)
         .and_then(|product| BurnChance::new(product.clamp(0.0, 1.0)));
     HitEligibility::Eligible { section, expected }
+}
+
+/// Whether the collision type positively says the shell struck something that is
+/// not a ship.
+///
+/// Only a recognized non-ship collision refuses. A collision id this build's
+/// constants table does not name leaves the question open, and reading every
+/// unnamed id as "struck no ship" would refuse every hit in a replay whose build
+/// carries no constants table at all, which is a whole population rather than a
+/// sample here and there. The hits an unknown id lets through are the ones the
+/// geometry gate was already the only guard against, so the direction is no
+/// worse than before for them and strictly better everywhere the id is named.
+fn struck_no_ship(collision: &Recognized<CollisionType>) -> bool {
+    matches!(
+        collision.known(),
+        Some(CollisionType::NoHit | CollisionType::HitWater | CollisionType::HitGround | CollisionType::HitWave)
+    )
 }
 
 /// Hit types that roll for fire. An HE shell detonates on the plate whether or
@@ -1267,6 +1308,7 @@ mod tests {
         uncomputable_node_probability: Option<u8>,
         extra_main_hits: Vec<ExtraHit>,
         hit_off_the_hull: bool,
+        hit_collision: Recognized<wowsunpack::game_types::CollisionType>,
         burn_change_offset: f32,
         server_lit_section: u8,
         second_server_lit_section: Option<u8>,
@@ -1300,6 +1342,7 @@ mod tests {
             uncomputable_node_probability: None,
             extra_main_hits: Vec::new(),
             hit_off_the_hull: false,
+            hit_collision: Recognized::Known(wowsunpack::game_types::CollisionType::HitEntity),
             burn_change_offset: 0.0,
             server_lit_section: 0,
             second_server_lit_section: None,
@@ -1410,6 +1453,20 @@ mod tests {
         /// a hit mis-keyed to a neighbouring ship looks like.
         fn with_the_impact_off_the_hull(mut self) -> Fixture {
             self.hit_off_the_hull = true;
+            self
+        }
+
+        /// The shell struck an island. Its `shell_hit` stays `Normal`, which is
+        /// what the game sends, so only the collision type separates it from a
+        /// hit on the victim.
+        fn with_the_shell_striking_terrain(mut self) -> Fixture {
+            self.hit_collision = Recognized::Known(wowsunpack::game_types::CollisionType::HitGround);
+            self
+        }
+
+        /// A collision id this build's constants table does not name.
+        fn with_an_unnamed_collision_type(mut self) -> Fixture {
+            self.hit_collision = Recognized::Unknown("7".to_owned());
             self
         }
 
@@ -1543,6 +1600,7 @@ mod tests {
                 self.hit_section,
                 self.hit_type,
             )];
+            hits[0].hit.hit_type.collision = self.hit_collision.clone();
             if !self.salvo_matched {
                 hits[0].salvo = None;
             }
@@ -2380,10 +2438,31 @@ mod tests {
         assert_eq!(out.fires, 1);
     }
 
+    /// A shell that struck an island is keyed to a victim like any other, and
+    /// the game reports its `shell_hit` as an ordinary `Normal`. Only the
+    /// collision type says it hit no ship, and a shell that hit no ship set no
+    /// ship alight.
+    #[test]
+    fn a_shell_that_struck_terrain_is_not_a_fire_trial() {
+        let out = analyze(&fixture().with_the_shell_striking_terrain().build()).expect("geometry");
+        assert_eq!(out.eligible_hits, 0);
+        assert_eq!(out.exclusions[&ExclusionReason::ImpactNotOnAShip], 1);
+    }
+
+    /// A collision id the constants table does not name is an unknown, not a
+    /// proof that the shell missed. Refusing it would empty the denominator of
+    /// every replay whose build carries no constants table.
+    #[test]
+    fn an_unnamed_collision_type_still_reaches_the_geometry() {
+        let out = analyze(&fixture().with_an_unnamed_collision_type().build()).expect("geometry");
+        assert_eq!(out.eligible_hits, 1);
+        assert_eq!(out.exclusions.get(&ExclusionReason::ImpactNotOnAShip), None);
+    }
+
     /// `victim_entity_id` is the ship whose last known position was nearest the
-    /// salvo's target point, which in a tight formation can be a neighbour. An
-    /// impact that far from the hull's nodes would otherwise be clamped onto its
-    /// bow or stern and enter the denominator as a trial that can only miss.
+    /// impact, which in a tight formation can be a neighbour. An impact that far
+    /// from the hull's nodes would otherwise be clamped onto its bow or stern
+    /// and enter the denominator as a trial that can only miss.
     #[test]
     fn an_impact_nowhere_near_the_victims_hull_is_excluded() {
         let out = analyze(&fixture().with_the_impact_off_the_hull().build()).expect("geometry");

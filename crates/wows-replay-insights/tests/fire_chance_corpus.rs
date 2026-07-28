@@ -15,8 +15,9 @@
 //! cross-checks the server's two hit accountings against each other.
 //! [`our_impacts_land_on_the_hull_we_keyed_them_to`] then asks how many of
 //! those impacts the body-frame projection actually places on the victim's
-//! hull. It is under 100% and the doc comment says why; the gate there is a
-//! regression bound on a defect, not an endorsement of the rate.
+//! hull. It is under 100% and the doc comment says why, with the two
+//! measurements that establish the cause; the gate there is a regression bound
+//! on a limit of the packet stream, not an endorsement of the rate.
 //!
 //! Ignored: needs a replay corpus and a game install. Run with
 //! `cargo test -p wows-replay-insights --release --features battle-report
@@ -377,11 +378,30 @@ struct HitReconciliation {
     placeable: u32,
     /// Of [`Self::placeable`], those the projection placed on a hull.
     on_hull: u32,
-    /// Body-frame miss distance for each hit the projection placed off the
-    /// hull: how far past the node span it sat longitudinally and how far off
-    /// the hull axis, both in meters. Zero longitudinally means the miss was
-    /// purely off-axis.
-    off_hull_misses: Vec<(f32, f32)>,
+    /// Body-frame offset for each hit the projection placed off the hull: how
+    /// far past the node span it sat longitudinally, how far above the
+    /// waterline, and how far off the centreline, all in meters. Zero
+    /// longitudinally means the miss was purely off-axis.
+    off_hull_misses: Vec<BodyOffset>,
+    /// The same three numbers for every placeable hit, refused or not. Unlike
+    /// [`Self::off_hull_misses`] this is uncensored by the gate, so it is what
+    /// the gate's allowances can be derived from rather than confirmed against.
+    placeable_offsets: Vec<BodyOffset>,
+    /// Firing range in meters for each placeable hit, split by whether the
+    /// projection placed it. The victim is resolved against the ships the client
+    /// holds a live position for, which is the ships inside its area of
+    /// interest, so if the residual off-hull hits are shells landing on ships
+    /// outside it the two distributions separate by range.
+    on_hull_ranges: Vec<f32>,
+    off_hull_ranges: Vec<f32>,
+    /// Placeable hits during whose shell flight some vehicle's presence window
+    /// closed, i.e. some ship left the client's area of interest between the gun
+    /// firing and the shell landing, split by whether the projection placed the
+    /// hit. A vehicle that leaves loses its `Transform3d`, so it stops being a
+    /// candidate for the nearest-ship victim resolution while shells aimed at it
+    /// are still in the air.
+    on_hull_after_a_departure: u32,
+    off_hull_after_a_departure: u32,
     /// Our main-battery shells whose collision type says they struck something
     /// that is not a ship (water, terrain, a wave, or nothing), against how many
     /// of those the projection nevertheless placed on the keyed victim's hull.
@@ -390,6 +410,11 @@ struct HitReconciliation {
     /// island and the fire-chance denominator.
     terrain_hits: u32,
     terrain_on_hull: u32,
+    /// Main-battery hits of ours whose collision id this build's constants
+    /// table does not name. `classify` cannot tell those apart from a hit on a
+    /// ship, so this bounds how much of the corpus the collision gate cannot
+    /// speak for.
+    unnamed_collision: u32,
     /// Refused impacts whose shell hit type rolls for fire, split by whether
     /// they struck a ship at all. A rolling hit type is what it takes to reach
     /// the geometry check, so these bound the `ImpactOffTheHull` exclusion from
@@ -426,6 +451,12 @@ fn damage_stat_main_battery_hits(report: &BattleReport) -> Option<i64> {
 /// Whether a hit's collision type says the shell struck a ship.
 fn struck_a_ship(hit: &ResolvedShotHit) -> bool {
     matches!(hit.hit.hit_type.collision.known(), Some(CollisionType::HitEntity | CollisionType::HitEntityBB))
+}
+
+/// Whether the collision id resolved to a name at all. An unnamed one is not
+/// evidence either way, so it is counted apart from both populations.
+fn collision_is_named(hit: &ResolvedShotHit) -> bool {
+    hit.hit.hit_type.collision.known().is_some()
 }
 
 /// Whether `classify` would carry this hit as far as the geometry check.
@@ -496,6 +527,10 @@ fn reconcile_hits(
                 (geometry, pose, section)
             });
 
+        if !collision_is_named(hit) {
+            reconciliation.unnamed_collision += 1;
+        }
+
         if !struck_a_ship(hit) {
             reconciliation.terrain_hits += 1;
             match placement.map(|(_, _, section)| section) {
@@ -515,13 +550,23 @@ fn reconcile_hits(
 
         let Some((geometry, pose, section)) = placement else { continue };
         reconciliation.placeable += 1;
+        let offset = body_offset(geometry, hit, pose);
+        reconciliation.placeable_offsets.push(offset);
+        let range = firing_range(hit);
+        let departure = a_vehicle_left_during_flight(report, hit);
         match section {
-            Some(_) => reconciliation.on_hull += 1,
+            Some(_) => {
+                reconciliation.on_hull += 1;
+                reconciliation.on_hull_ranges.extend(range);
+                reconciliation.on_hull_after_a_departure += u32::from(departure);
+            }
             None => {
                 if rolls_for_fire(hit) {
                     reconciliation.off_hull_rolling += 1;
                 }
-                reconciliation.off_hull_misses.push(off_hull_miss(geometry, hit, pose));
+                reconciliation.off_hull_misses.push(offset);
+                reconciliation.off_hull_ranges.extend(range);
+                reconciliation.off_hull_after_a_departure += u32::from(departure);
             }
         }
     }
@@ -529,19 +574,108 @@ fn reconcile_hits(
     reconciliation
 }
 
-/// How far off the hull one refused impact sat: past the node span
-/// longitudinally, and off the hull axis, in meters. Both are the excess over
-/// what the projection accepts, so a hit refused only for being off-axis
-/// reports zero longitudinal excess.
-fn off_hull_miss(geometry: &FireSectionGeometry, hit: &ResolvedShotHit, pose: &VictimPose) -> (f32, f32) {
+/// How far this shell flew, in meters: gun to impact, taken off the shot's own
+/// entry in its salvo. `None` for a hit whose salvo did not match or whose salvo
+/// carries no shot with this id.
+fn firing_range(hit: &ResolvedShotHit) -> Option<f32> {
+    let salvo = hit.salvo.as_ref()?;
+    let shot = salvo.shots.iter().find(|shot| shot.shot_id == hit.hit.shot_id)?;
+    let flight = hit.hit.position.0 - shot.origin.0;
+    Some(WorldDistance::from(flight.x.hypot(flight.z)).to_meters().value())
+}
+
+/// Whether any vehicle left the client's area of interest while this shell was
+/// in the air.
+///
+/// A departure closes that vehicle's presence window and strips its
+/// `Transform3d`, which is exactly what takes it out of the candidate set the
+/// victim is resolved against. `false` for a hit whose salvo did not match, so
+/// no flight interval is known.
+fn a_vehicle_left_during_flight(report: &BattleReport, hit: &ResolvedShotHit) -> bool {
+    let Some(fired_at) = hit.fired_at else { return false };
+    report.presence().windows.values().any(|windows| {
+        windows.iter().any(|window| window.left.is_some_and(|left| left >= fired_at && left <= hit.clock))
+    })
+}
+
+/// Where one impact sat in the victim's body frame, in meters.
+#[derive(Clone, Copy, Debug)]
+struct BodyOffset {
+    /// Excess past the burn-node span toward either end, zero inside it.
+    past_span: f32,
+    /// Height above the hull origin. Negative is below the waterline.
+    vertical: f32,
+    /// Distance from the centreline, unsigned: port and starboard are
+    /// symmetric, so the sign carries nothing the gate reads.
+    lateral: f32,
+}
+
+/// The three body-frame numbers the plausibility gate is built out of. Recorded
+/// for every placeable hit, not only the refused ones, so the gate's allowances
+/// can be read off the distribution instead of being confirmed by a population
+/// the gate itself selected.
+fn body_offset(geometry: &FireSectionGeometry, hit: &ResolvedShotHit, pose: &VictimPose) -> BodyOffset {
     let body = world_offset_to_body(hit.hit.position.0 - pose.position.0, pose.yaw, pose.pitch, pose.roll);
     let longitudinal = WorldDistance::from(body.x).to_meters().value();
-    let off_axis = WorldDistance::from(body.y.hypot(body.z)).to_meters().value();
     let nodes = geometry.longitudinal();
     let bow = nodes.iter().map(|node| node.value()).fold(f32::NEG_INFINITY, f32::max);
     let stern = nodes.iter().map(|node| node.value()).fold(f32::INFINITY, f32::min);
-    let past_span = (longitudinal - bow).max(stern - longitudinal).max(0.0);
-    (past_span, off_axis)
+    BodyOffset {
+        past_span: (longitudinal - bow).max(stern - longitudinal).max(0.0),
+        vertical: WorldDistance::from(body.y).to_meters().value(),
+        lateral: WorldDistance::from(body.z).to_meters().value().abs(),
+    }
+}
+
+/// Quantiles of `values` at `HULL_AXIS_QUANTILES`, plus the extremes.
+fn quantiles(values: &mut [f32]) -> String {
+    values.sort_by(f32::total_cmp);
+    if values.is_empty() {
+        return "no samples".to_owned();
+    }
+    let at = |q: f64| {
+        let index = ((values.len() as f64 - 1.0) * q).round() as usize;
+        values[index]
+    };
+    let parts: Vec<String> = HULL_AXIS_QUANTILES.iter().map(|q| format!("p{:.5}={:.1}", q * 100.0, at(*q))).collect();
+    format!("min={:.1} {} max={:.1}", values[0], parts.join(" "), values[values.len() - 1])
+}
+
+const HULL_AXIS_QUANTILES: [f64; 6] = [0.5, 0.9, 0.99, 0.999, 0.9999, 0.99999];
+
+/// The vertical and lateral distributions the plausibility gate's allowances are
+/// read off, over the impacts that sit inside the hull's longitudinal span.
+///
+/// Scoping to the longitudinally plausible ones is what makes the tail
+/// interpretable: a hit keyed to a ship a kilometre away is off in every axis at
+/// once and would otherwise dominate both distributions. Ships are tall and
+/// narrow, so the two axes are printed apart rather than as one radius.
+fn print_axis_distributions(totals: &HitTotals) {
+    let mut vertical: Vec<f32> =
+        totals.placeable_offsets.iter().filter(|o| o.past_span == 0.0).map(|o| o.vertical).collect();
+    let mut lateral: Vec<f32> =
+        totals.placeable_offsets.iter().filter(|o| o.past_span == 0.0).map(|o| o.lateral).collect();
+    println!("impacts inside the node span, {} of {}:", vertical.len(), totals.placeable_offsets.len());
+    println!("  vertical (m above the hull origin): {}", quantiles(&mut vertical));
+    println!("  lateral (m off the centreline): {}", quantiles(&mut lateral));
+
+    let mut placed = totals.on_hull_ranges.clone();
+    let mut refused = totals.off_hull_ranges.clone();
+    println!("firing range in meters, gun to impact:");
+    println!("  placed on a hull ({} shells): {}", placed.len(), quantiles(&mut placed));
+    println!("  refused ({} shells): {}", refused.len(), quantiles(&mut refused));
+
+    let refused_count = totals.placeable - totals.on_hull;
+    println!(
+        "some ship left the client's area of interest during the shell's flight for {} of {} placed hits \
+({:.3}) and {} of {} refused ones ({:.3})",
+        totals.on_hull_after_a_departure,
+        totals.on_hull,
+        f64::from(totals.on_hull_after_a_departure) / f64::from(totals.on_hull.max(1)),
+        totals.off_hull_after_a_departure,
+        refused_count,
+        f64::from(totals.off_hull_after_a_departure) / f64::from(refused_count.max(1)),
+    );
 }
 
 fn measure(
@@ -1019,12 +1153,18 @@ struct HitTotals {
     on_hull: u32,
     terrain_hits: u32,
     terrain_on_hull: u32,
+    unnamed_collision: u32,
     off_hull_rolling: u32,
     terrain_rolling: u32,
     /// Hits the game credited that we never saw, summed per replay so a surplus
     /// in one match cannot cover a shortfall in another.
     shortfall: u32,
-    off_hull_misses: Vec<(f32, f32)>,
+    off_hull_misses: Vec<BodyOffset>,
+    placeable_offsets: Vec<BodyOffset>,
+    on_hull_ranges: Vec<f32>,
+    off_hull_ranges: Vec<f32>,
+    on_hull_after_a_departure: u32,
+    off_hull_after_a_departure: u32,
 }
 
 fn hit_totals(corpus: &Corpus) -> HitTotals {
@@ -1043,10 +1183,16 @@ fn hit_totals(corpus: &Corpus) -> HitTotals {
         totals.on_hull += r.on_hull;
         totals.terrain_hits += r.terrain_hits;
         totals.terrain_on_hull += r.terrain_on_hull;
+        totals.unnamed_collision += r.unnamed_collision;
         totals.off_hull_rolling += r.off_hull_rolling;
         totals.terrain_rolling += r.terrain_rolling;
         totals.shortfall += game_hits(r).saturating_sub(r.ours_on_ship);
         totals.off_hull_misses.extend_from_slice(&r.off_hull_misses);
+        totals.placeable_offsets.extend_from_slice(&r.placeable_offsets);
+        totals.on_hull_ranges.extend_from_slice(&r.on_hull_ranges);
+        totals.off_hull_ranges.extend_from_slice(&r.off_hull_ranges);
+        totals.on_hull_after_a_departure += r.on_hull_after_a_departure;
+        totals.off_hull_after_a_departure += r.off_hull_after_a_departure;
     }
     totals
 }
@@ -1169,26 +1315,45 @@ the 0.0014 measured when this bound was set",
 ///
 /// The projection is what turns an impact into a fire section, so an impact it
 /// refuses is a trial dropped. The expectation is that essentially all of them
-/// land, and they do not: **92.4% over this corpus, 12680 of 13721**.
+/// land, and they do not: **92.6% over this corpus, 12702 of 13721**.
 ///
 /// The residual is not geometric noise, and it is not the coordinate scale
-/// either. The misses are kilometres out: a median of 1424 m past the hull's
-/// node span and a worst of 6265 m, with only 103 of 1041 within 200 m of the
+/// either. The misses are kilometres out: a median of 1447 m past the hull's
+/// node span and a worst of 6265 m, with only 97 of 1019 within 200 m of the
 /// hull. A wrong unit scale would move the placed population as well rather
 /// than leaving this clean split between impacts on the hull and impacts a
-/// ship's length away from any hull.
+/// ship's length away from any hull. The printed body-frame distributions say
+/// the same from the other side: over impacts inside a node span the lateral
+/// offset is 6.3 m at the median and 22.9 m at the 99th percentile, which is
+/// hull beams, and the vertical runs 6 m under the waterline to 35 m over it,
+/// which is drafts and superstructures.
 ///
-/// The cause is upstream, in `handle_shot_kills`. `receiveShotKills` is
-/// delivered to the observing avatar and names no victim, so the victim is
-/// resolved as the ship nearest the salvo's **average aim point**: one victim
-/// for the whole salvo, taken from where the guns were pointed when they fired
-/// rather than from where each shell landed. A salvo fired at a manoeuvring
-/// target seconds of flight away, or one straddling two ships, keys its hits to
-/// a ship the shells did not hit. `ResolvedShotHit` documents that as a
-/// nearest-ship heuristic; this is the measurement of what it costs.
+/// The residual is a limit of what the client was told, not of the projection.
+/// `receiveShotKills` names no victim, so the victim is the nearest ship the
+/// client holds a live position for, and it holds one only for ships inside its
+/// area of interest. A ship that leaves takes its `Transform3d` with it, so a
+/// shell already in the air toward it lands with nothing near it to be keyed to.
+/// Two independent measurements say that is what the refusals are:
+/// - not one refused impact came from a shell fired under 3.2 km, while placed
+///   impacts run down to 58 m. Short flights do not outlast a sighting.
+/// - a ship left the client's area of interest during the shell's flight for
+///   83% of the refused impacts against 38% of the placed ones.
 ///
-/// The gate is 0.90, just under the measured 0.924. It is a regression bound on
-/// a known defect, not a claim that 92.4% is acceptable.
+/// Resolving the victim per hit from its own impact position, rather than once
+/// per salvo from the salvo's average aim point, moved this rate by 0.24 points
+/// (12680 to 12713 of 13721). It is the right model and it removes the
+/// straddling-salvo failure outright, but it was never what this rate was made
+/// of: guns are aimed at the ship they are shooting at, so the aim point was
+/// already a fair proxy for the victim's identity whenever the victim was in the
+/// candidate set at all, and no way of choosing among candidates helps when the
+/// ship that was hit is not one of them.
+///
+/// The gate is 0.915, and the headroom under the measurement is itself
+/// measured: dropping any one replay from the corpus moves the pooled rate only
+/// between 0.9209 and 0.9340, so no single replay carries it and 0.915 sits
+/// under that minimum. A failure is therefore a change in the model rather than
+/// a corpus drawn differently. It is a regression bound on a known data limit,
+/// not a claim that 92.6% is acceptable.
 ///
 /// Two populations are held out, and both are printed, because each is a way
 /// the rate could be flattered:
@@ -1240,9 +1405,9 @@ more had no resolvable hull or pose",
     );
 
     // How far off the refused impacts sat. A projection that was merely
-    // imprecise would miss by tens of meters; these miss by kilometres, which
-    // is a different ship, not a different section.
-    let mut past_span: Vec<f32> = totals.off_hull_misses.iter().map(|(past, _)| *past).collect();
+    // imprecise would miss by tens of meters; a mis-keyed victim misses by
+    // kilometres, which is a different ship, not a different section.
+    let mut past_span: Vec<f32> = totals.off_hull_misses.iter().map(|miss| miss.past_span).collect();
     past_span.sort_by(f32::total_cmp);
     if let (Some(median), Some(worst)) = (past_span.get(past_span.len() / 2), past_span.last()) {
         let near = past_span.iter().filter(|distance| **distance < 200.0).count();
@@ -1252,18 +1417,18 @@ more had no resolvable hull or pose",
             past_span.len()
         );
     }
+    print_axis_distributions(&totals);
 
     // Impacts on water and terrain are in the same history and carry
-    // `SHELL_HIT_TYPE_NORMAL`, which `classify` reads as a hit that rolls for
-    // fire. Nothing in the eligibility model reads the collision type, so the
-    // geometry gate is the only thing keeping a shell that hit an island out of
-    // the fire-chance denominator, and it is not a gate that was built for the
-    // job: 5 of 952 of them land inside a victim's plausibility margin anyway,
-    // and each one is a trial that could never have started a fire.
+    // `SHELL_HIT_TYPE_NORMAL`, so the shell hit type alone reads them as hits
+    // that roll for fire. `classify` reads the collision type and refuses them
+    // outright; what is measured here is the geometry on its own, which is the
+    // second guard and no longer the only one.
     println!(
         "{} main-battery shells of ours struck something other than a ship; the projection placed {} of them \
-on a hull",
-        totals.terrain_hits, totals.terrain_on_hull
+on a hull; {} carried a collision id the build's constants table does not name, which the eligibility model \
+cannot rule either way",
+        totals.terrain_hits, totals.terrain_on_hull, totals.unnamed_collision
     );
     // What the `ImpactOffTheHull` exclusion is made of, in the two kinds it
     // conflates: a shell that hit a ship and was keyed to the wrong one, and a
@@ -1277,19 +1442,45 @@ on a hull",
         totals.off_hull_rolling, totals.terrain_rolling
     );
 
+    // Zero of 952 now, against 5 before the lateral allowance was separated from
+    // the vertical one. The bound is the rule of three: with no event in 952
+    // samples the true rate is under 3/952 at 95% confidence, so that is the
+    // most this measurement can support and anything above it is a real event
+    // rather than a draw.
     let terrain_rate = f64::from(totals.terrain_on_hull) / f64::from(totals.terrain_hits);
     assert!(
-        terrain_rate <= 0.02,
-        "{} of {} impacts that struck no ship were placed on a victim's hull ({terrain_rate:.4}), against the \
-0.0053 measured when this bound was set; each one is an eligible fire trial that could never have started a fire",
+        terrain_rate <= 3.0 / f64::from(totals.terrain_hits),
+        "{} of {} impacts that struck no ship were placed on a victim's hull ({terrain_rate:.4}), against none \
+of 952 measured when this bound was set; each one is a fire trial that could never have started a fire",
         totals.terrain_on_hull,
         totals.terrain_hits
     );
 
+    // How far any one replay carries the pooled rate. The gate has to survive a
+    // corpus drawn slightly differently, so the headroom under it is measured
+    // rather than assumed.
+    let jackknife = leave_one_out_range(corpus);
+    if let Some((low, high)) = jackknife {
+        println!("leave-one-replay-out on-hull rate: {low:.4} to {high:.4}");
+    }
+
     assert!(
-        rate >= 0.90,
-        "the projection placed {rate:.4} of our impacts on the hull they were keyed to, under the 0.924 measured \
-when this bound was set; the victim of a hit is resolved from the salvo's aim point rather than from the impact \
-position, so this rate is a property of that heuristic"
+        rate >= 0.915,
+        "the projection placed {rate:.4} of our impacts on the hull they were keyed to, under the 0.9257 \
+measured when this bound was set; the refusals are shells that landed on a ship the client had no live position \
+for, so this rate is a property of what the client was told rather than of the projection"
     );
+}
+
+/// The lowest and highest pooled on-hull rate over the corpus with one replay
+/// dropped, which is how much of the rate any single replay is carrying.
+fn leave_one_out_range(corpus: &Corpus) -> Option<(f64, f64)> {
+    let total_placeable: u32 = corpus.measurements.iter().map(|m| m.reconciliation.placeable).sum();
+    let total_on_hull: u32 = corpus.measurements.iter().map(|m| m.reconciliation.on_hull).sum();
+    let rates = corpus.measurements.iter().filter_map(|m| {
+        let placeable = total_placeable.checked_sub(m.reconciliation.placeable).filter(|left| *left > 0)?;
+        Some(f64::from(total_on_hull - m.reconciliation.on_hull) / f64::from(placeable))
+    });
+    let (low, high) = rates.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), r| (lo.min(r), hi.max(r)));
+    low.is_finite().then_some((low, high))
 }

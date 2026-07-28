@@ -9,6 +9,22 @@
 //! Everything a caller passes in is world units and everything the geometry
 //! holds is meters, so exactly one conversion belongs in this file, in
 //! [`section_for_hit`].
+//!
+//! Three allowances decide whether an impact was on a hull at all, and they
+//! share one correctness argument. Refusing a hit that really was on this hull
+//! costs a sample without biasing the rate, because the refusal does not depend
+//! on whether a fire started; admitting a hit that was actually on a neighbour
+//! is what corrupts, since the ribbon then finds no burn transition on this
+//! victim and the trial can only ever score a miss. Each allowance is therefore
+//! set where no plausible impact on the hull is refused and no further, and each
+//! is read off the same corpus of real impacts: `tests/fire_chance_corpus.rs`
+//! prints the body-frame distributions the numbers come from.
+//!
+//! A ship is long, tall and narrow, and the three axes carry different
+//! information, so they are gated apart. One radius over all three cannot tell a
+//! mast strike on a battleship from a shell in the water beside a destroyer:
+//! wide enough for the first it admits the second, tight enough for the second
+//! it refuses the first.
 
 use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_params::types::WorldDistance;
@@ -17,23 +33,47 @@ use wowsunpack::game_types::WorldPos;
 use wowsunpack::models::fire_nodes::BurnNodeIndex;
 use wowsunpack::models::fire_nodes::FireSectionGeometry;
 
-/// How far outside a hull's burn-node span an impact can sit and still be a hit
-/// on that hull.
+/// How far past a hull's burn-node span an impact can sit and still be on that
+/// hull.
 ///
 /// The nodes do not reach the hull's ends: on an Iowa-like hull the bow-most
 /// node sits about 38 m inboard of the bow, so requiring an impact to fall
-/// inside the span would refuse every bow and stern hit. The same figure bounds
-/// how far off the longitudinal axis a real impact sits, since a superstructure
-/// or upper-belt hit is tens of meters up or out, not hundreds.
+/// inside the span would refuse every bow and stern hit.
+const HULL_LONGITUDINAL_MARGIN: Meters = Meters::new(75.0);
+
+/// How far above the hull origin an impact can sit.
 ///
-/// The margin is deliberately wide. Refusing a hit that really was on this hull
-/// costs a sample without biasing the rate, because the refusal does not depend
-/// on whether a fire started; admitting a hit that was actually on a neighbour
-/// is what corrupts, since the ribbon then finds no burn transition on this
-/// victim and the trial can only ever score a miss. So the gate is set where no
-/// plausible impact on the hull is refused, and catches the gross mis-keys the
-/// nearest-ship victim heuristic produces rather than trimming the boundary.
-const HULL_PLAUSIBILITY_MARGIN: Meters = Meters::new(75.0);
+/// Ships are tall and the origin is at the waterline, so a legitimate hit is
+/// routinely tens of meters up: a pagoda mast or a carrier's island tops out
+/// near 50 m above the water on the tallest hulls in the game. The corpus's
+/// highest impact inside a hull's node span is 35 m, with the 99th percentile at
+/// 24 m, so this sits above every real impact measured and above the tallest
+/// structure that could carry one.
+const HULL_VERTICAL_ALLOWANCE_ABOVE: Meters = Meters::new(60.0);
+
+/// How far below the hull origin an impact can sit.
+///
+/// Negative because shells strike below the waterline: the deepest draft in the
+/// game is about 11 m, and an underwater hit lands on the hull under it. The
+/// corpus's deepest impact inside a node span is 6 m down, so this is roughly
+/// double the measured depth and still nowhere near the lateral scale.
+const HULL_VERTICAL_ALLOWANCE_BELOW: Meters = Meters::new(-20.0);
+
+/// How far off the hull's centreline an impact can sit.
+///
+/// This is the allowance the old single radius got badly wrong, because ships
+/// are narrow. The widest hull in the game is about 42 m across a Midway-class
+/// flight deck, so 21 m from the centreline covers every beam there is; the rest
+/// is for the victim's pose being the last one the client was told about rather
+/// than its pose at impact, which a ship at 30 knots turns into about 15 m per
+/// second of lag.
+///
+/// The corpus agrees and shows where the populations part: over impacts inside a
+/// hull's node span the lateral offset is 6.3 m at the median and 22.9 m at the
+/// 99th percentile, then jumps to 87 m at the 99.9th and past a kilometre beyond
+/// that. Everything under this bound is a hull; the decade above it is a
+/// different ship.
+const HULL_LATERAL_ALLOWANCE: Meters = Meters::new(35.0);
 
 /// Ry(a): rotates +X toward -Z.
 fn rotate_y(v: Vec3, a: f32) -> Vec3 {
@@ -85,8 +125,9 @@ pub fn world_offset_to_body(offset: Vec3, yaw: f32, pitch: f32, roll: f32) -> Ve
 /// Only the longitudinal component picks the section, not full 3D distance: the
 /// sections partition the hull lengthwise, and the nodes sit at differing
 /// heights, so a full-3D nearest would pull a waterline hit toward a
-/// superstructure node. The off-axis distance is still read, but only to decide
-/// whether the impact is on this hull at all.
+/// superstructure node. Where the impact sits vertically and laterally says
+/// nothing about which section it belongs to and is read only to decide whether
+/// it was on this hull at all.
 ///
 /// `None` when the impact lies too far from the hull's nodes to have been a hit
 /// on it. The victim a hit is keyed to is a nearest-ship heuristic that can pick
@@ -103,23 +144,30 @@ pub fn section_for_hit(
     let offset = impact.0 - victim_position.0;
     let body = world_offset_to_body(offset, victim_yaw, victim_pitch, victim_roll);
     let longitudinal = WorldDistance::from(body.x).to_meters();
-    let off_axis = WorldDistance::from(body.y.hypot(body.z)).to_meters();
-    on_this_hull(geometry, longitudinal, off_axis).then(|| geometry.nearest_node(longitudinal))
+    let vertical = WorldDistance::from(body.y).to_meters();
+    // Unsigned: port and starboard are symmetric, so the sign carries nothing
+    // the gate reads.
+    let lateral = WorldDistance::from(body.z.abs()).to_meters();
+    on_this_hull(geometry, longitudinal, vertical, lateral).then(|| geometry.nearest_node(longitudinal))
 }
 
 /// Whether a body-frame impact is close enough to the hull's burn nodes to have
-/// landed on it, within [`HULL_PLAUSIBILITY_MARGIN`] of the node span at either
-/// end and of the longitudinal axis.
-fn on_this_hull(geometry: &FireSectionGeometry, longitudinal: Meters, off_axis: Meters) -> bool {
+/// landed on it: within [`HULL_LONGITUDINAL_MARGIN`] of the node span at either
+/// end, between [`HULL_VERTICAL_ALLOWANCE_BELOW`] and
+/// [`HULL_VERTICAL_ALLOWANCE_ABOVE`] of the waterline, and within
+/// [`HULL_LATERAL_ALLOWANCE`] of the centreline.
+fn on_this_hull(geometry: &FireSectionGeometry, longitudinal: Meters, vertical: Meters, lateral: Meters) -> bool {
     let nodes = geometry.longitudinal();
     let bow = nodes.iter().copied().reduce(|a, b| if b > a { b } else { a });
     let stern = nodes.iter().copied().reduce(|a, b| if b < a { b } else { a });
     // `FireSectionGeometry` rejects an empty node list, so this is unreachable;
     // it refuses rather than admitting a hull with nothing to place a hit on.
     let (Some(bow), Some(stern)) = (bow, stern) else { return false };
-    longitudinal <= bow + HULL_PLAUSIBILITY_MARGIN
-        && longitudinal >= stern - HULL_PLAUSIBILITY_MARGIN
-        && off_axis <= HULL_PLAUSIBILITY_MARGIN
+    longitudinal <= bow + HULL_LONGITUDINAL_MARGIN
+        && longitudinal >= stern - HULL_LONGITUDINAL_MARGIN
+        && vertical <= HULL_VERTICAL_ALLOWANCE_ABOVE
+        && vertical >= HULL_VERTICAL_ALLOWANCE_BELOW
+        && lateral <= HULL_LATERAL_ALLOWANCE
 }
 
 #[cfg(test)]
@@ -223,6 +271,41 @@ mod tests {
         let geom = iowa_like();
         assert!(section_for_hit(&geom, meters_from_origin(19.0, 25.0, 0.0), origin(), 0.0, 0.0, 0.0).is_some());
         assert_eq!(section_for_hit(&geom, meters_from_origin(19.0, 0.0, 200.0), origin(), 0.0, 0.0, 0.0), None);
+    }
+
+    /// Ships are tall and narrow, so the two off-axis directions are not
+    /// interchangeable. A hit 40 m up a pagoda mast is an ordinary
+    /// superstructure hit; a hit 40 m abeam is open water beside a hull half
+    /// that wide. One radius admits both or refuses both, and this is the case
+    /// that catches a gate that has collapsed back into one.
+    #[test]
+    fn height_is_allowed_where_the_same_distance_abeam_is_not() {
+        let geom = iowa_like();
+        let up = section_for_hit(&geom, meters_from_origin(19.0, 40.0, 0.0), origin(), 0.0, 0.0, 0.0);
+        let out = section_for_hit(&geom, meters_from_origin(19.0, 0.0, 40.0), origin(), 0.0, 0.0, 0.0);
+        assert_eq!(up.expect("a mast hit is on the hull").get(), 1);
+        assert_eq!(out, None, "40 m abeam is past any hull's half beam");
+    }
+
+    /// Shells strike below the waterline, so the vertical allowance reaches
+    /// under the hull origin as well as over it, but not as far: no hull draws
+    /// as deep as its superstructure is tall.
+    #[test]
+    fn an_impact_below_the_waterline_is_still_on_the_hull() {
+        let geom = iowa_like();
+        assert!(section_for_hit(&geom, meters_from_origin(19.0, -12.0, 0.0), origin(), 0.0, 0.0, 0.0).is_some());
+        assert_eq!(section_for_hit(&geom, meters_from_origin(19.0, -50.0, 0.0), origin(), 0.0, 0.0, 0.0), None);
+    }
+
+    /// Port and starboard are the same hull, so the lateral gate reads the
+    /// distance from the centreline rather than a signed offset.
+    #[test]
+    fn the_lateral_gate_is_symmetric_about_the_centreline() {
+        let geom = iowa_like();
+        let port = section_for_hit(&geom, meters_from_origin(19.0, 5.0, 15.0), origin(), 0.0, 0.0, 0.0);
+        let starboard = section_for_hit(&geom, meters_from_origin(19.0, 5.0, -15.0), origin(), 0.0, 0.0, 0.0);
+        assert_eq!(port, starboard);
+        assert!(port.is_some());
     }
 
     /// Roll must not move a hit along the hull: rolling rotates about the

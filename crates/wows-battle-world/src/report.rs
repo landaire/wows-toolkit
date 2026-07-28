@@ -246,17 +246,19 @@ impl BattleReport {
     /// comment.
     ///
     /// `victim_entity_id` is a heuristic, not a decoded field. It is the ship
-    /// whose last known position is nearest in XZ to the mean target point of
-    /// the salvo the shell was matched to, which is renderer-grade resolution:
-    /// good enough to draw a splash marker, not good enough to key state by.
-    /// When no salvo matched, `salvo` is `None` and `victim_entity_id` falls
-    /// back to the self ship, which is wrong for any hit that was not actually
-    /// on the self ship. Salvos expire 30 seconds after they were fired, so
-    /// that fallback also captures every long-flight shell (battleship fire at
-    /// maximum range) whose salvo aged out before the hit arrived. A consumer
-    /// keying burn state or presence by `victim_entity_id` must filter on
-    /// `salvo.is_some()`; even then the nearest-ship match can pick a
-    /// neighbour in a tight formation.
+    /// whose last known position is nearest in XZ to this shell's own impact
+    /// position, which is renderer-grade resolution: good enough to draw a
+    /// splash marker, not good enough to key state by. The victim's position is
+    /// the last one the client was told about rather than its position at
+    /// impact, and a shell landing between two ships in a tight formation can
+    /// sit nearer the one it missed.
+    ///
+    /// `salvo` is `None` for a hit that matched no active salvo, which is every
+    /// torpedo hit and every shell whose salvo aged out of the 30-second active
+    /// list before the hit arrived (battleship fire at maximum range). The
+    /// shell is unidentifiable there, so a consumer that needs to know what
+    /// struck must filter on `salvo.is_some()`; the victim is resolved the same
+    /// way either way.
     pub fn hit_history(&self) -> &[ResolvedShotHit] {
         &self.hit_history
     }

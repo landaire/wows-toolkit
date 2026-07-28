@@ -150,7 +150,7 @@ pub fn handle_shot_kills(
 
         let (salvo, fired_at) = match_active_salvo(world, hit.owner_id, hit.shot_id);
 
-        let victim_entity_id = resolve_victim(world, salvo.as_ref()).unwrap_or(self_ship_id);
+        let victim_entity_id = resolve_victim(world, hit.position).unwrap_or(self_ship_id);
 
         let resolved = ResolvedShotHit {
             clock,
@@ -215,22 +215,28 @@ fn match_active_salvo(
     (None, None)
 }
 
-/// Resolve the victim entity as the ship closest to the salvo's average target.
-/// Returns `None` when no salvo matched or the salvo has no shots, leaving the
-/// caller to fall back to the self ship.
-fn resolve_victim(world: &mut World, salvo: Option<&ArtillerySalvo>) -> Option<EntityId> {
-    let salvo = salvo?;
-    let n = salvo.shots.len() as f32;
-    if n < 1.0 {
-        return None;
-    }
-    let avg_target: WorldPos = salvo.shots.iter().map(|sh| sh.target).sum::<WorldPos>() / n;
-
+/// Resolve the victim entity as the ship whose last known position is closest in
+/// XZ to where this shell landed.
+///
+/// `receiveShotKills` names no victim, so this is a guess either way, but the
+/// impact position is the shell's own and the aim point is not: it is where the
+/// guns were laid when the salvo was fired, seconds of flight earlier, shared by
+/// every shell in the salvo. Resolving from it keyed a whole salvo to one ship,
+/// so a salvo straddling two ships recorded every shell against whichever of
+/// them the average happened to favour. Per-hit resolution from the impact
+/// removes that, and leaves the ordinary nearest-ship failures: the victim's
+/// position is its last known one rather than its position at impact, and a
+/// shell landing between two ships in a tight formation can sit nearer the one
+/// it missed.
+///
+/// `None` when no entity in the world carries a position to compare against,
+/// leaving the caller to fall back to the self ship.
+fn resolve_victim(world: &mut World, impact: WorldPos) -> Option<EntityId> {
     let mut q = world.query::<(&GameId, &Transform3d)>();
     q.iter(world)
         .min_by(|(_, a), (_, b)| {
-            let da = a.pos.distance_xz(&avg_target);
-            let db = b.pos.distance_xz(&avg_target);
+            let da = a.pos.distance_xz(&impact);
+            let db = b.pos.distance_xz(&impact);
             da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|(gid, _)| gid.0)

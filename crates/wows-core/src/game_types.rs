@@ -2925,6 +2925,7 @@ pub enum ExclusionReason {
     NotMainBattery,
     HitTypeDoesNotRoll,
     NoSectionGeometry,
+    ImpactNotOnAShip,
     ImpactOffTheHull,
     VictimPoseUnknown,
     AmbiguousWithAnotherHit,
