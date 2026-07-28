@@ -301,12 +301,29 @@ pub struct ResolvedShotHit {
     pub salvo: Option<ArtillerySalvo>,
     /// The originating salvo fire time. None if unmatched.
     pub fired_at: Option<GameClock>,
-    /// Victim ship world position at the time of impact.
-    pub victim_position: WorldPos,
-    /// Victim ship yaw (radians) at the time of impact.
-    pub victim_yaw: f32,
-    /// Victim ship pitch (radians) at the time of impact.
-    pub victim_pitch: f32,
-    /// Victim ship roll (radians) at the time of impact.
-    pub victim_roll: f32,
+    /// Victim ship pose at the time of impact, or `None` when the victim's
+    /// world transform was not held at that moment (it left the client's AOI,
+    /// or was never resolved to a live entity). Consumers that place the
+    /// impact on the hull must refuse the hit rather than substitute an
+    /// origin: an offset measured from a guessed position lands on a real
+    /// hull section and is indistinguishable from a measured one.
+    pub victim_pose: Option<VictimPose>,
+}
+
+/// A victim ship's world placement at the moment a shell landed on it.
+///
+/// Position and orientation travel together because they are only meaningful
+/// together: the consumer takes `impact - position` and rotates it into the
+/// hull's frame, so a real yaw beside a guessed position is worse than no
+/// pose at all.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct VictimPose {
+    /// World position of the ship's origin.
+    pub position: WorldPos,
+    /// Yaw in radians.
+    pub yaw: f32,
+    /// Pitch in radians.
+    pub pitch: f32,
+    /// Roll in radians.
+    pub roll: f32,
 }

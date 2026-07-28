@@ -43,6 +43,8 @@ use crate::components::VehicleState;
 use crate::components::WeatherZone;
 use crate::components::WeatherZoneData;
 use crate::resources::BURN_MASK;
+use crate::resources::BURNING_FLAGS_PROPERTY;
+use crate::resources::BurnFlagsObserved;
 use crate::resources::BurnStateChange;
 use crate::resources::BurnStateLog;
 use crate::resources::CapturePointOrder;
@@ -123,6 +125,9 @@ fn handle_vehicle_create<G: ResourceLoader>(
         .and_then(|er| er.get::<VehicleState>().map(|vs| vs.0.burning_flags() & BURN_MASK))
         .unwrap_or(0);
     let current_burn = props.burning_flags() & BURN_MASK;
+    if packet.props.contains_key(BURNING_FLAGS_PROPERTY) {
+        world.resource_mut::<BurnFlagsObserved>().0 = true;
+    }
 
     if let Ok(mut e) = world.get_entity_mut(entity) {
         e.insert(Vehicle);
@@ -651,12 +656,7 @@ fn open_presence(world: &mut World, id: EntityId, clock: GameClock) {
 /// Close `id`'s open presence window at `clock`, if it has one. An id with no
 /// windows, or whose latest window is already closed, is left untouched.
 pub(crate) fn close_presence(world: &mut World, id: EntityId, clock: GameClock) {
-    if let Some(windows) = world.resource_mut::<PresenceLog>().windows.get_mut(&id)
-        && let Some(open) = windows.last_mut()
-        && open.left.is_none()
-    {
-        open.left = Some(clock);
-    }
+    world.resource_mut::<PresenceLog>().close_window(id, clock);
 }
 
 fn spawn_or_get(world: &mut World, id: EntityId) -> bevy_ecs::entity::Entity {
@@ -756,6 +756,19 @@ fn test_world() -> World {
     world
 }
 
+/// Feed `id` updates from `from` to `to` at the ~1 Hz cadence an AOI entity
+/// replicates at, which is what keeps a window continuously observed across
+/// the span. A single update at `to` would instead read as a silence and
+/// close the window; see `PresenceLog::note_seen`.
+#[cfg(test)]
+fn note_updates_through(world: &mut World, id: EntityId, from: GameClock, to: GameClock) {
+    let mut clock = from;
+    while clock < to {
+        clock = GameClock((clock.seconds() + 1.0).min(to.seconds()));
+        world.resource_mut::<PresenceLog>().note_seen(id, clock);
+    }
+}
+
 /// Stands in for a real `ResourceLoader`: the create and seed paths only call
 /// into it for a captain param id, which stays 0 (no lookup) for fixtures with
 /// no `crewModifiersCompactParams`.
@@ -799,7 +812,7 @@ mod presence_tests {
         open_presence(&mut world, id, GameClock(90.0));
         // Updates keep arriving after the re-entry, which is what lets the
         // second (still open) window certify anything past its own instant.
-        world.resource_mut::<PresenceLog>().note_seen(id, GameClock(120.0));
+        note_updates_through(&mut world, id, GameClock(90.0), GameClock(120.0));
 
         let log = world.resource::<PresenceLog>();
         let windows = &log.windows[&id];
@@ -822,12 +835,68 @@ mod presence_tests {
         let id = EntityId::from(13u32);
 
         open_presence(&mut world, id, GameClock(10.0));
-        world.resource_mut::<PresenceLog>().note_seen(id, GameClock(60.0));
+        note_updates_through(&mut world, id, GameClock(10.0), GameClock(60.0));
 
         let log = world.resource::<PresenceLog>();
         assert_eq!(log.windows[&id][0].left, None, "no EntityLeave arrived");
         assert!(log.continuously_observed(id, GameClock(20.0), GameClock(60.0)));
         assert!(!log.continuously_observed(id, GameClock(20.0), GameClock(160.0)));
+    }
+
+    /// Updates that stop and later resume leave a blackout in the middle of an
+    /// open window. Nothing was received across it, so no burn transition
+    /// inside it could have been logged, and a range spanning it must not be
+    /// certified. `last_seen` alone cannot see this: it holds only the latest
+    /// update, which the resumed traffic pushes past the whole gap.
+    #[test]
+    fn a_silence_inside_an_open_window_ends_it() {
+        let mut world = test_world();
+        let id = EntityId::from(14u32);
+
+        open_presence(&mut world, id, GameClock(100.0));
+        note_updates_through(&mut world, id, GameClock(100.0), GameClock(150.0));
+        // AOI re-entry with no EntityLeave and no fresh EntityCreate.
+        world.resource_mut::<PresenceLog>().note_seen(id, GameClock(900.0));
+
+        let log = world.resource::<PresenceLog>();
+        assert_eq!(log.windows[&id].len(), 1, "a silence closes the window, it does not open another");
+        assert_eq!(log.windows[&id][0].left, Some(GameClock(150.0)));
+        assert!(!log.continuously_observed(id, GameClock(100.0), GameClock(900.0)));
+        assert!(!log.continuously_observed(id, GameClock(140.0), GameClock(160.0)));
+        assert!(!log.continuously_observed(id, GameClock(900.0), GameClock(905.0)));
+        assert!(log.continuously_observed(id, GameClock(100.0), GameClock(150.0)));
+    }
+
+    /// A gap within the update period is ordinary jitter, not a blackout: the
+    /// worst gap measured on the fixture corpus is under 7s, so a window must
+    /// survive one.
+    #[test]
+    fn an_ordinary_update_gap_keeps_the_window_open() {
+        let mut world = test_world();
+        let id = EntityId::from(15u32);
+
+        open_presence(&mut world, id, GameClock(100.0));
+        world.resource_mut::<PresenceLog>().note_seen(id, GameClock(107.0));
+
+        let log = world.resource::<PresenceLog>();
+        assert_eq!(log.windows[&id][0].left, None);
+        assert!(log.continuously_observed(id, GameClock(100.0), GameClock(107.0)));
+    }
+
+    /// An inverted range satisfies both containment comparisons trivially, so
+    /// it would answer "observed" for a window it has nothing to do with. It
+    /// is rejected in release builds too, not just behind the `debug_assert`.
+    #[test]
+    fn an_inverted_range_is_never_observed() {
+        let mut world = test_world();
+        let id = EntityId::from(16u32);
+
+        open_presence(&mut world, id, GameClock(100.0));
+        handle_entity_leave_at(id, GameClock(200.0), &mut world);
+
+        let log = world.resource::<PresenceLog>();
+        assert!(!log.continuously_observed(id, GameClock(150.0), GameClock(120.0)));
+        assert!(!log.continuously_observed(id, GameClock(900.0), GameClock(0.0)));
     }
 
     /// An entity never seen was never observed. Absence of windows must not
@@ -947,13 +1016,21 @@ mod burn_baseline_tests {
         world.insert_resource(EntityIndex::default());
         world.insert_resource(PresenceLog::default());
         world.insert_resource(BurnStateLog::default());
+        world.insert_resource(BurnFlagsObserved::default());
         world.insert_resource(PlayerIndex::default());
         world
     }
 
     fn vehicle_create(id: EntityId, burning_flags: u16) -> EntityCreatePacket<'static> {
         let mut props: HashMap<&'static str, ArgValue<'static>> = HashMap::new();
-        props.insert("burningFlags", ArgValue::Uint16(burning_flags));
+        props.insert(BURNING_FLAGS_PROPERTY, ArgValue::Uint16(burning_flags));
+        vehicle_create_with_props(id, props)
+    }
+
+    fn vehicle_create_with_props(
+        id: EntityId,
+        props: HashMap<&'static str, ArgValue<'static>>,
+    ) -> EntityCreatePacket<'static> {
         EntityCreatePacket {
             entity_id: id,
             spec_idx: 0,
@@ -998,7 +1075,7 @@ mod burn_baseline_tests {
         create_vehicle(&mut world, id, 0b0001, GameClock(200.0));
         // The vehicle keeps sending state, so its open window still covers the
         // clock this case queries.
-        world.resource_mut::<PresenceLog>().note_seen(id, GameClock(250.0));
+        note_updates_through(&mut world, id, GameClock(200.0), GameClock(250.0));
 
         let log = world.resource::<BurnStateLog>().0.clone();
         assert_eq!(log.len(), 1, "expected one baseline transition, got {log:?}");
@@ -1045,6 +1122,31 @@ mod burn_baseline_tests {
         create_vehicle(&mut world, EntityId::from(24u32), 0b0001_0000, GameClock(200.0));
         assert!(world.resource::<BurnStateLog>().0.is_empty());
         assert_eq!(0b0001_0000 & BURN_MASK, 0);
+    }
+
+    /// A build that never replicates `burningFlags` produces the same empty
+    /// `BurnStateLog` as a match where nothing burned. The observation signal
+    /// is what tells them apart, and it keys off the property being present,
+    /// not off the mask being non-zero.
+    #[test]
+    fn a_create_without_burning_flags_leaves_the_field_unobserved() {
+        let mut world = create_test_world();
+        handle_entity_create(
+            GameClock(100.0),
+            &vehicle_create_with_props(EntityId::from(26u32), HashMap::new()),
+            &mut world,
+            &NoResources,
+            &GameConstants::defaults(),
+            Version::default(),
+        );
+
+        assert!(world.resource::<BurnStateLog>().0.is_empty());
+        assert!(!world.resource::<BurnFlagsObserved>().0);
+
+        create_vehicle(&mut world, EntityId::from(27u32), 0, GameClock(200.0));
+
+        assert!(world.resource::<BurnStateLog>().0.is_empty(), "a zero mask is still not a transition");
+        assert!(world.resource::<BurnFlagsObserved>().0, "a zero mask is still an observation");
     }
 
     /// AOI re-entry: the second create replaces `VehicleState` wholesale, so

@@ -14,6 +14,10 @@ pub struct Degrees(pub f32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SecondsRemaining(pub i64);
 
+/// A duration in seconds, on the same scale as `GameClock`.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Seconds(pub f32);
+
 /// Match outcome once decided; `Option::None` means the match is not yet decided.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatchWinner {

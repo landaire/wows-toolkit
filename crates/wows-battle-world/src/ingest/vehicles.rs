@@ -14,6 +14,8 @@ use crate::components::Aim;
 use crate::components::Vehicle;
 use crate::components::VehicleState;
 use crate::resources::BURN_MASK;
+use crate::resources::BURNING_FLAGS_PROPERTY;
+use crate::resources::BurnFlagsObserved;
 use crate::resources::BurnStateChange;
 use crate::resources::BurnStateLog;
 use crate::resources::EntityIndex;
@@ -39,6 +41,10 @@ pub fn handle_vehicle_property(
     let is_vehicle = world.get_entity(ecs_entity).map(|er| er.contains::<Vehicle>()).unwrap_or(false);
     if !is_vehicle {
         return;
+    }
+
+    if property == BURNING_FLAGS_PROPERTY {
+        world.resource_mut::<BurnFlagsObserved>().0 = true;
     }
 
     // The entity borrow (er/vs) must be dropped before BurnStateLog can be
@@ -154,6 +160,10 @@ pub fn apply_player_create_props(
     if !is_vehicle {
         return;
     }
+    if props.contains_key(BURNING_FLAGS_PROPERTY) {
+        world.resource_mut::<BurnFlagsObserved>().0 = true;
+    }
+
     // The entity borrow must be dropped before BurnStateLog can be borrowed, so
     // the pending change is staged here and pushed afterward.
     let mut burn_change: Option<BurnStateChange> = None;
@@ -184,6 +194,7 @@ mod burn_state_tests {
 
     use super::*;
     use crate::components::GameId;
+    use crate::resources::BurnFlagsObserved;
     use crate::resources::BurnStateLog;
     use crate::resources::EntityIndex;
 
@@ -193,6 +204,7 @@ mod burn_state_tests {
         let mut world = World::new();
         world.insert_resource(EntityIndex::default());
         world.insert_resource(BurnStateLog::default());
+        world.insert_resource(BurnFlagsObserved::default());
         let entity = world.spawn((GameId(id), Vehicle, VehicleState(VehicleProps::default()))).id();
         world.resource_mut::<EntityIndex>().insert(id, entity);
         world
@@ -223,6 +235,33 @@ mod burn_state_tests {
         assert_eq!(log[1].previous, 0b0001);
         assert_eq!(log[1].current, 0b0101);
         assert_eq!(log[1].clock, GameClock(12.0));
+    }
+
+    /// A property update whose mask never leaves zero logs no transition, but
+    /// it does prove the build replicates the field. Without that distinction
+    /// a build that stopped sending `burningFlags` would report "nothing ever
+    /// burned" with the same evidence as a quiet match.
+    #[test]
+    fn a_zero_burning_flags_update_is_still_an_observation() {
+        let id = EntityId::from(9u32);
+        let mut world = test_world_with_vehicle(id);
+        assert!(!world.resource::<BurnFlagsObserved>().0);
+
+        handle_vehicle_property(
+            id,
+            "health",
+            &ArgValue::Float32(1.0),
+            &mut world,
+            Version::default(),
+            &GameConstants::defaults(),
+            GameClock(10.0),
+        );
+        assert!(!world.resource::<BurnFlagsObserved>().0, "an unrelated property proves nothing");
+
+        set_burning_flags(&mut world, id, 0, GameClock(11.0));
+
+        assert!(world.resource::<BurnStateLog>().0.is_empty());
+        assert!(world.resource::<BurnFlagsObserved>().0);
     }
 
     #[test]

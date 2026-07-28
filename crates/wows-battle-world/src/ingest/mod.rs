@@ -94,7 +94,13 @@ pub fn dispatch<G: ResourceLoader>(
             note_seen(world, cell.entity_id, clock);
             vehicles::apply_player_create_props(cell.entity_id, &cell.props, world, version, constants, clock);
         }
-        DecodedPacketPayload::EntityEnter(_) => {}
+        DecodedPacketPayload::EntityEnter(enter) => {
+            // AOI re-entry proves the entity is being received again, but
+            // carries no properties, so it refreshes presence without opening
+            // a window. When it follows a blackout it is the update that
+            // closes the stale window; see `PresenceLog::note_seen`.
+            note_seen(world, enter.entity_id, clock);
+        }
         DecodedPacketPayload::EntityLeave(leave) => {
             entities::handle_entity_leave(leave.entity_id, clock, world);
         }

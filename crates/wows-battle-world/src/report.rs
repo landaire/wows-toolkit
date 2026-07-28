@@ -41,6 +41,7 @@ use crate::components::Captain;
 use crate::components::Division;
 use crate::components::GameId;
 use crate::components::VehicleState;
+use crate::resources::BurnFlagsObserved;
 use crate::resources::BurnStateChange;
 use crate::resources::BurnStateLog;
 use crate::resources::ChatLog;
@@ -85,6 +86,7 @@ pub struct BattleReport {
     self_damage_stats: Vec<DamageStatEntry>,
     active_consumables: HashMap<EntityId, Vec<ActiveConsumable>>,
     burn_state_changes: Vec<BurnStateChange>,
+    burn_state_observed: bool,
     ribbon_events: Vec<RibbonEvent>,
     presence: PresenceLog,
     hit_history: Vec<ResolvedShotHit>,
@@ -207,6 +209,17 @@ impl BattleReport {
     /// the log unguarded.
     pub fn burn_state_changes(&self) -> &[BurnStateChange] {
         &self.burn_state_changes
+    }
+
+    /// Whether the `burningFlags` property was replicated at all during this
+    /// parse, which is what separates "nothing ever burned" from "this build
+    /// never told us". False with a non-empty [`Self::burn_state_changes`] is
+    /// impossible; false with an empty one means every burn-derived count is
+    /// unknown rather than zero, and a consumer must report it as such.
+    ///
+    /// See `BurnFlagsObserved` for how the signal is collected.
+    pub fn burn_state_observed(&self) -> bool {
+        self.burn_state_observed
     }
 
     /// Self-player ribbon increments with clocks. Self-player only; see
@@ -455,6 +468,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         // Moved out, not cloned: HitHistoryLog in particular can hold every hit
         // of the match, and the world is dropped right after this call anyway.
         let burn_state_changes = std::mem::take(&mut self.world_mut().resource_mut::<BurnStateLog>().0);
+        let burn_state_observed = self.world().resource::<BurnFlagsObserved>().0;
         let ribbon_events = std::mem::take(&mut self.world_mut().resource_mut::<RibbonLog>().0);
         let presence = std::mem::take(&mut *self.world_mut().resource_mut::<PresenceLog>());
         let hit_history = std::mem::take(&mut self.world_mut().resource_mut::<HitHistoryLog>().0);
@@ -484,6 +498,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             self_damage_stats,
             active_consumables,
             burn_state_changes,
+            burn_state_observed,
             ribbon_events,
             presence,
             hit_history,
@@ -631,10 +646,7 @@ mod tests {
             victim_entity_id: victim,
             salvo: None,
             fired_at: None,
-            victim_position: WorldPos::new(0.0, 0.0, 0.0),
-            victim_yaw: 0.0,
-            victim_pitch: 0.0,
-            victim_roll: 0.0,
+            victim_pose: None,
         }
     }
 

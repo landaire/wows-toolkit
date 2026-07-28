@@ -21,6 +21,7 @@ use crate::ids::ShotTracking;
 use crate::ids::SourceTeam;
 use crate::resources::ActiveShotOrder;
 use crate::resources::ActiveTorpedoOrder;
+use crate::resources::BurnFlagsObserved;
 use crate::resources::BurnStateLog;
 use crate::resources::CapturePointOrder;
 use crate::resources::CapturedBuffs;
@@ -263,6 +264,7 @@ fn insert_empty_resources(world: &mut World) {
     world.insert_resource(PlayerIndex::default());
     world.insert_resource(ReplayVehicles::default());
     world.insert_resource(BurnStateLog::default());
+    world.insert_resource(BurnFlagsObserved::default());
     world.insert_resource(RibbonLog::default());
     world.insert_resource(PresenceLog::default());
     world.insert_resource(HitHistoryLog::default());

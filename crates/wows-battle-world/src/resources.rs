@@ -32,6 +32,7 @@ use wowsunpack::game_types::Ribbon;
 use wowsunpack::models::fire_nodes::BurnNodeIndex;
 
 use crate::units::MatchWinner;
+use crate::units::Seconds;
 use crate::units::SecondsRemaining;
 
 /// Current replay clock.
@@ -288,6 +289,26 @@ pub enum HydrophoneContactPosition {
 /// 9 wild fire.
 pub const BURN_MASK: u16 = 0x000F;
 
+/// Name of the `Vehicle` property carrying the burn bitmask.
+pub const BURNING_FLAGS_PROPERTY: &str = "burningFlags";
+
+/// Whether any packet in this parse carried the `burningFlags` property.
+///
+/// `BurnStateLog` being empty is ambiguous on its own: either nothing ever
+/// burned, or this build never replicated the field to us. The two are not
+/// equivalent for a consumer that counts fire trials, so the fact that the
+/// field was seen at all is recorded separately from its value. Set by the
+/// three ingest paths that read the property (`handle_vehicle_create`,
+/// `handle_vehicle_property`, `apply_player_create_props`), each of which
+/// checks for the property's presence rather than for a non-zero mask, so a
+/// build that replicates a permanently-zero mask still reads as observed.
+///
+/// The signal is per-parse, not per-vehicle: whether the field is replicated
+/// is a property of the build's `HitLocationManagerOwner` interface, which is
+/// the same for every vehicle in one replay.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct BurnFlagsObserved(pub bool);
+
 /// One change to a vehicle's burn-node bitmask.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BurnStateChange {
@@ -345,8 +366,9 @@ impl BurnStateChange {
 pub struct BurnStateLog(pub Vec<BurnStateChange>);
 
 /// A window during which the recording client received updates for a
-/// vehicle, from the `EntityCreate` that proved it was observed to the
-/// matching `EntityLeave`.
+/// vehicle, opened by the `EntityCreate` that proved it was observed and
+/// closed by an `EntityLeave`, a despawn, or a silence longer than
+/// [`MAX_UPDATE_SILENCE`].
 ///
 /// `left: None` means the window is still open as of the last packet
 /// processed, either because the vehicle is still present or because the
@@ -358,6 +380,18 @@ pub struct PresenceWindow {
     pub entered: GameClock,
     pub left: Option<GameClock>,
 }
+
+/// Longest gap between two consecutive entity updates that still reads as
+/// continuous observation.
+///
+/// AOI entities replicate position at roughly 1 Hz, so a legitimate gap is a
+/// fraction of this. Measured over the 22 replay fixtures (0.8.2 through 15.1,
+/// ~1.5M updates arriving while a window was open) the longest gap is 6.98s
+/// and only three exceed 5s, so this bound splits no window on the corpus
+/// while still catching a vehicle that goes quiet and comes back. Erring low
+/// costs samples; erring high certifies a blackout, so the margin sits on the
+/// low side deliberately.
+pub const MAX_UPDATE_SILENCE: Seconds = Seconds(10.0);
 
 /// Windows during which the recording client observed each vehicle, keyed by
 /// game `EntityId`.
@@ -391,18 +425,25 @@ pub struct PresenceWindow {
 /// on a corpus of 40 real matches, 370 of 2758 windows were still open at the
 /// end of the parse. Left unbounded, an open window answers every query, so a
 /// vehicle that went dark early would read as observed for the rest of the
-/// match. [`Self::last_seen`] is what bounds it: an open window certifies only
-/// as far as the last entity update actually received for that vehicle, which
-/// handles the legitimate case (a ship alive and visible at match end, whose
-/// last update is at match end) and the lost-`EntityLeave` case with the same
-/// rule and no need to tell them apart.
+/// match. Two rules bound it, both driven by [`Self::note_seen`]:
+/// - An open window certifies only as far as the last entity update actually
+///   received for that vehicle ([`Self::last_seen`]), which handles the
+///   legitimate case (a ship alive and visible at match end, whose last update
+///   is at match end) and the lost-`EntityLeave` case with the same rule and
+///   no need to tell them apart.
+/// - Updates that stop and then resume are a blackout in the middle of a
+///   window, which `last_seen` alone cannot see: it holds only the latest
+///   update, so a window opened before the silence and refreshed after it
+///   would span the whole gap. A gap longer than [`MAX_UPDATE_SILENCE`]
+///   therefore closes the open window at the last update before it. Nothing
+///   reopens it, because only `EntityCreate` carries the full property set
+///   that pins a burn baseline; a window opened at a resumed position packet
+///   would certify a mask reconstructed from pre-blackout transitions.
 ///
-/// Separately, `DecodedPacketPayload::EntityEnter` is currently a no-op in
-/// `ingest::dispatch`: if the server ever signals a vehicle's AOI re-entry
-/// with `EntityEnter` rather than a fresh `EntityCreate`, no window reopens
-/// and presence stays closed for the rest of the match. That direction only
-/// loses samples rather than corrupting one, since a closed window can only
-/// make `continuously_observed` too strict, never too lenient.
+/// `DecodedPacketPayload::EntityEnter` feeds `note_seen` for the same reason:
+/// AOI re-entry is evidence of observation, and when it follows a silence it
+/// is the update that trips the rule above. It never opens a window itself,
+/// since it carries no properties to baseline against.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct PresenceLog {
     pub windows: HashMap<EntityId, Vec<PresenceWindow>>,
@@ -418,8 +459,33 @@ impl PresenceLog {
     /// team-shared sighting delivered for ships the recording client is
     /// receiving no entity state for, so counting it would keep an open window
     /// fresh for exactly the vehicle that went dark.
+    ///
+    /// An update arriving more than [`MAX_UPDATE_SILENCE`] after the previous
+    /// one closes any open window at that previous update: the intervening
+    /// silence received nothing, so no burn transition inside it could have
+    /// been logged and no range crossing it may be certified.
     pub fn note_seen(&mut self, entity: EntityId, clock: GameClock) {
-        self.last_seen.entry(entity).and_modify(|seen| *seen = (*seen).max(clock)).or_insert(clock);
+        let Some(previous) = self.last_seen.get(&entity).copied() else {
+            self.last_seen.insert(entity, clock);
+            return;
+        };
+        if clock - previous > MAX_UPDATE_SILENCE.0 {
+            self.close_window(entity, previous);
+        }
+        // Packet clocks are non-decreasing in practice, but a pre-battle packet
+        // can rewind one, and a rewound `last_seen` would shrink an open
+        // window's reach below an update already received.
+        self.last_seen.insert(entity, previous.max(clock));
+    }
+
+    /// Close `entity`'s open window at `clock`, if it has one. An entity with
+    /// no windows, or whose latest window is already closed, is left untouched.
+    pub(crate) fn close_window(&mut self, entity: EntityId, clock: GameClock) {
+        if let Some(open) = self.windows.get_mut(&entity).and_then(|windows| windows.last_mut())
+            && open.left.is_none()
+        {
+            open.left = Some(clock);
+        }
     }
 
     /// The last clock at which any entity update for `entity` was observed.
@@ -436,11 +502,14 @@ impl PresenceLog {
     /// windows was never observed and is never continuously observed, for any
     /// range.
     ///
-    /// Callers must pass `from <= to`; an inverted range is checked only in
-    /// debug builds (`debug_assert!`) because it makes both comparisons
-    /// easier to satisfy, silently turning "not observed" into "observed".
+    /// An inverted range (`from > to`) is a caller bug, and it satisfies both
+    /// containment comparisons more easily than a real one, so left alone it
+    /// would turn "not observed" into "observed". It answers `false`, in every
+    /// build, so the safe answer does not depend on debug assertions.
     pub fn continuously_observed(&self, entity: EntityId, from: GameClock, to: GameClock) -> bool {
-        debug_assert!(from <= to, "continuously_observed requires from <= to, got {from:?}..{to:?}");
+        if from > to {
+            return false;
+        }
         let last_seen = self.last_seen(entity);
         self.windows.get(&entity).is_some_and(|windows| {
             windows.iter().any(|window| {

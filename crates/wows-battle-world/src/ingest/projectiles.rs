@@ -10,6 +10,7 @@
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
+use wows_replays::analyzer::battle_controller::state::VictimPose;
 use wows_replays::analyzer::decoder::ArtillerySalvo;
 use wows_replays::analyzer::decoder::ShotHit;
 use wows_replays::analyzer::decoder::TorpedoData;
@@ -151,18 +152,13 @@ pub fn handle_shot_kills(
 
         let victim_entity_id = resolve_victim(world, salvo.as_ref()).unwrap_or(self_ship_id);
 
-        let (victim_position, victim_yaw, victim_pitch, victim_roll) = victim_pose(world, victim_entity_id);
-
         let resolved = ResolvedShotHit {
             clock,
             hit,
             victim_entity_id,
             salvo,
             fired_at,
-            victim_position,
-            victim_yaw,
-            victim_pitch,
-            victim_roll,
+            victim_pose: victim_pose(world, victim_entity_id),
         };
         if options.record_hit_history {
             world.resource_mut::<HitHistoryLog>().0.push(resolved.clone());
@@ -240,24 +236,25 @@ fn resolve_victim(world: &mut World, salvo: Option<&ArtillerySalvo>) -> Option<E
         .map(|(gid, _)| gid.0)
 }
 
-/// Get victim world position and orientation at impact, mirroring the original's
-/// preference for minimap-derived yaw with a Transform3d fallback.
-fn victim_pose(world: &mut World, victim: EntityId) -> (WorldPos, f32, f32, f32) {
-    let entity = world.resource::<crate::resources::EntityIndex>().get(victim);
-    let Some(entity) = entity else { return (WorldPos::default(), 0.0, 0.0, 0.0) };
-    let Ok(er) = world.get_entity(entity) else { return (WorldPos::default(), 0.0, 0.0, 0.0) };
-
-    let transform = er.get::<Transform3d>();
-    let position = transform.map(|t| t.pos).unwrap_or_default();
-    let (pitch, roll) = transform.map(|t| (t.pitch.0, t.roll.0)).unwrap_or((0.0, 0.0));
+/// Get the victim's world pose at impact, preferring minimap-derived yaw over
+/// the `Transform3d` yaw.
+///
+/// `None` for a victim with no `Transform3d`: `handle_entity_leave` strips it
+/// when a vehicle leaves the client's AOI while keeping `MinimapPlacement`, so
+/// a departed ship still has a live heading and no position at all. Reporting
+/// the pose as absent is the only honest answer there; a zero position reads
+/// as a ship at map centre and puts the impact hundreds of units off the hull.
+fn victim_pose(world: &mut World, victim: EntityId) -> Option<VictimPose> {
+    let entity = world.resource::<crate::resources::EntityIndex>().get(victim)?;
+    let er = world.get_entity(entity).ok()?;
+    let transform = er.get::<Transform3d>()?;
 
     let yaw = er
         .get::<MinimapPlacement>()
         .map(|m| std::f32::consts::FRAC_PI_2 - m.heading.0.to_radians())
-        .or_else(|| transform.map(|t| t.yaw.0))
-        .unwrap_or(0.0);
+        .unwrap_or(transform.yaw.0);
 
-    (position, yaw, pitch, roll)
+    Some(VictimPose { position: transform.pos, yaw, pitch: transform.pitch.0, roll: transform.roll.0 })
 }
 
 /// Drop salvos fired more than 30s before `clock`, mirroring the original's
@@ -285,5 +282,84 @@ fn salvo_fired_at(state: &ProjectileState) -> Option<GameClock> {
     match state {
         ProjectileState::Artillery { fired_at, .. } => Some(*fired_at),
         ProjectileState::Torpedo { .. } => None,
+    }
+}
+
+#[cfg(test)]
+mod victim_pose_tests {
+    use wows_replays::types::NormalizedPos;
+    use wowsunpack::game_types::Vec2;
+
+    use super::*;
+    use crate::components::MinimapPlacement;
+    use crate::components::Transform3d;
+    use crate::ingest::entities::handle_entity_leave;
+    use crate::resources::EntityIndex;
+    use crate::resources::PresenceLog;
+    use crate::units::Degrees;
+    use crate::units::Radians;
+
+    fn world_with_victim(id: EntityId) -> World {
+        let mut world = World::new();
+        world.insert_resource(EntityIndex::default());
+        world.insert_resource(PresenceLog::default());
+        let entity = world
+            .spawn((
+                GameId(id),
+                crate::components::Vehicle,
+                Transform3d {
+                    pos: WorldPos::new(120.0, 0.0, -40.0),
+                    yaw: Radians(0.5),
+                    pitch: Radians(0.1),
+                    roll: Radians(0.2),
+                    last_updated: GameClock(10.0),
+                },
+                MinimapPlacement {
+                    pos: NormalizedPos(Vec2::new(0.5, 0.5)),
+                    heading: Degrees(90.0),
+                    visible: true,
+                    visibility_flags: None,
+                    is_invisible: false,
+                    last_updated: GameClock(10.0),
+                },
+            ))
+            .id();
+        world.resource_mut::<EntityIndex>().insert(id, entity);
+        world
+    }
+
+    /// The live case: position and orientation come off the transform, yaw off
+    /// the minimap heading.
+    #[test]
+    fn a_tracked_victim_has_a_pose() {
+        let id = EntityId::from(5u32);
+        let mut world = world_with_victim(id);
+
+        let pose = victim_pose(&mut world, id).expect("a victim with a transform has a pose");
+        assert_eq!(pose.position, WorldPos::new(120.0, 0.0, -40.0));
+        assert_eq!(pose.pitch, 0.1);
+        assert_eq!(pose.roll, 0.2);
+        assert_eq!(pose.yaw, 0.0, "minimap heading of 90 degrees is a world yaw of 0");
+    }
+
+    /// `handle_entity_leave` strips `Transform3d` and keeps `MinimapPlacement`,
+    /// so a departed victim would otherwise pair a live yaw with an origin
+    /// position, which a section lookup cannot tell apart from a ship sitting
+    /// at map centre.
+    #[test]
+    fn a_departed_victim_has_no_pose() {
+        let id = EntityId::from(5u32);
+        let mut world = world_with_victim(id);
+
+        handle_entity_leave(id, GameClock(20.0), &mut world);
+
+        assert!(victim_pose(&mut world, id).is_none());
+    }
+
+    /// An id that never resolved to an entity has nothing to report either.
+    #[test]
+    fn an_unknown_victim_has_no_pose() {
+        let mut world = world_with_victim(EntityId::from(5u32));
+        assert!(victim_pose(&mut world, EntityId::from(404u32)).is_none());
     }
 }
