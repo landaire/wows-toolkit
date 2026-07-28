@@ -50,17 +50,13 @@ pub const fn advantage_key(level: AdvantageLevel) -> &'static str {
 pub const fn exclusion_reason_key(reason: ExclusionReason) -> &'static str {
     match reason {
         ExclusionReason::SectionAlreadyBurning => "ui.replay.sections.fire_chance_exclusion_already_burning",
-        ExclusionReason::SectionSuppressedByFirePrevention => {
-            "ui.replay.sections.fire_chance_exclusion_fire_prevention"
-        }
-        ExclusionReason::SectionSuppressibleVictimBuildUnknown => {
+        ExclusionReason::MergedSectionVictimBuildUnknown => {
             "ui.replay.sections.fire_chance_exclusion_victim_build_unknown"
         }
         ExclusionReason::DamageControlActive => "ui.replay.sections.fire_chance_exclusion_damage_control_active",
         ExclusionReason::DamageControlUnknown => "ui.replay.sections.fire_chance_exclusion_damage_control_unknown",
         ExclusionReason::ObservationGap => "ui.replay.sections.fire_chance_exclusion_observation_gap",
         ExclusionReason::ConsumableModelUnreliable => "ui.replay.sections.fire_chance_exclusion_consumable_unreliable",
-        ExclusionReason::VictimDead => "ui.replay.sections.fire_chance_exclusion_victim_dead",
         ExclusionReason::VictimFateUnknown => "ui.replay.sections.fire_chance_exclusion_victim_fate_unknown",
         ExclusionReason::ShellCannotBurn => "ui.replay.sections.fire_chance_exclusion_shell_cannot_burn",
         ExclusionReason::NotMainBattery => "ui.replay.sections.fire_chance_exclusion_not_main_battery",

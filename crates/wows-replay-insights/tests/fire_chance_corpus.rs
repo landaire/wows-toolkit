@@ -129,6 +129,12 @@ enum SkipReason {
 struct Measurement {
     name: String,
     build: u32,
+    /// Fire-capable main-battery shells fired, over the salvos the replay lets
+    /// us see, against how many of them landed on a ship.
+    he_shells_fired: u32,
+    shells_on_target: u32,
+    /// Of those, the ones that landed on a ship that was already dead.
+    not_applicable: u32,
     eligible_hits: u32,
     fires: u32,
     /// The model's expected fire count over the same trials, saturating at one
@@ -144,6 +150,9 @@ struct Measurement {
     exclusions: BTreeMap<ExclusionReason, u32>,
     /// Attributed fires per victim ship index.
     fires_by_ship: BTreeMap<String, u64>,
+    /// `(shells on target, eligible, refused, not applicable)` per victim ship
+    /// row, for the same partition check the aggregate gets.
+    per_ship_partition: Vec<(u32, u32, u32, u32)>,
     /// One row per victim ship. The per-ship row is the only level
     /// `EffectiveFireChance` states a rate at, so this is what the corpus
     /// summary reduces when it wants a corpus-wide figure, and what the printed
@@ -780,6 +789,9 @@ fn measure(
     Some(Measurement {
         name,
         build,
+        he_shells_fired: out.he_shells_fired,
+        shells_on_target: out.shells_on_target,
+        not_applicable: out.not_applicable,
         eligible_hits: out.eligible_hits,
         fires: out.fires,
         expected_fires: out.expected_fires,
@@ -792,6 +804,13 @@ fn measure(
             .sum(),
         exclusions: out.exclusions.clone(),
         fires_by_ship,
+        per_ship_partition: out
+            .per_ship
+            .iter()
+            .map(|ship| {
+                (ship.shells_on_target, ship.eligible_hits, ship.exclusions.values().sum(), ship.not_applicable)
+            })
+            .collect(),
         per_ship_trials,
         server_fires_by_ship,
         section_predictions: section_pairs(&out),
@@ -1098,7 +1117,7 @@ fn attributed_fires_never_exceed_the_battle_results() {
 /// printed below is what it is made of: `NotMainBattery` is our own
 /// secondaries, whose fires raise a ribbon that no main-battery hit can then
 /// claim; `DamageControlUnknown` is a hit that could have started a fire and
-/// could not be proven to; `SectionSuppressibleVictimBuildUnknown` is inflated
+/// could not be proven to; `MergedSectionVictimBuildUnknown` is inflated
 /// on this corpus by dumped archives carrying no crew skill tables (see the
 /// module doc). Gating on the rate would be gating partly on the harness's own
 /// data. Worth revisiting against a full-data corpus.
@@ -1118,6 +1137,7 @@ fn ribbon_accounting_reconciles() {
     let corpus = corpus();
     print_corpus_summary(corpus);
     let (mut attributed, mut unattributed, mut observed) = (0u32, 0u32, 0u32);
+    let (mut fired, mut on_target, mut not_applicable) = (0u64, 0u64, 0u64);
     let mut drivers: BTreeMap<ExclusionReason, u32> = BTreeMap::new();
 
     for measurement in &corpus.measurements {
@@ -1141,6 +1161,28 @@ fn ribbon_accounting_reconciles() {
             measurement.set_fire_ribbons
         );
 
+        let refused: u32 = measurement.exclusions.values().sum();
+        assert_eq!(
+            measurement.eligible_hits + refused + measurement.not_applicable,
+            measurement.shells_on_target,
+            "{}: {} eligible + {refused} refused + {} not applicable does not account for the {} shells on target",
+            measurement.name,
+            measurement.eligible_hits,
+            measurement.not_applicable,
+            measurement.shells_on_target
+        );
+        for (index, (on_target, eligible, refused, not_applicable)) in measurement.per_ship_partition.iter().enumerate()
+        {
+            assert_eq!(
+                eligible + refused + not_applicable,
+                *on_target,
+                "{}: per-ship row {index} does not account for its own hits",
+                measurement.name
+            );
+        }
+        fired += u64::from(measurement.he_shells_fired);
+        on_target += u64::from(measurement.shells_on_target);
+        not_applicable += u64::from(measurement.not_applicable);
         attributed += measurement.fires;
         unattributed += measurement.unattributed_fires;
         observed += measurement.set_fire_ribbons;
@@ -1154,6 +1196,11 @@ fn ribbon_accounting_reconciles() {
         "ribbons {observed}: {attributed} attributed, {unattributed} unattributed (rate {:.3})",
         f64::from(unattributed) / f64::from(observed)
     );
+    // Printed rather than gated. The fired count covers only the salvos a hit
+    // led us back to and the on-target count covers every shell of ours that
+    // landed, HE or not, so neither bounds the other; the ratio is a diagnostic
+    // on how much of the shell stream the salvo match recovers.
+    println!("HE shells fired {fired}, shells on target {on_target}, of which {not_applicable} landed on a dead ship");
 
     let mut ranked: Vec<(ExclusionReason, u32)> = drivers.into_iter().collect();
     ranked.sort_by_key(|(reason, count)| (std::cmp::Reverse(*count), *reason));

@@ -1609,12 +1609,18 @@ impl UiReport {
                 if fire_chance.eligible_hits == 0 {
                     plain(ui, RichText::new(t!("ui.replay.sections.fire_chance_no_eligible_hits")).weak());
                 } else {
+                    // The flame is what says the leading figure is fires; the
+                    // clipboard form spells it out in words instead, since an
+                    // icon-font codepoint pasted elsewhere is a blank box.
                     plain(
                         ui,
-                        RichText::new(t!(
-                            "ui.replay.sections.fire_chance_totals",
-                            fires = fire_chance.fires,
-                            hits = fire_chance.eligible_hits
+                        RichText::new(wt_translations::icon_t(
+                            icons::FIRE,
+                            &t!(
+                                "ui.replay.sections.fire_chance_totals",
+                                fires = fire_chance.fires,
+                                hits = fire_chance.eligible_hits
+                            ),
                         ))
                         .strong(),
                     );
@@ -1662,7 +1668,10 @@ impl UiReport {
                             match ship.rate() {
                                 Some(rate) => {
                                     ui.label(format!("{:.1}%", rate * 100.0));
-                                    ui.weak(format!("({} / {})", ship.fires, ship.eligible_hits));
+                                    ui.weak(wt_translations::icon_t(
+                                        icons::FIRE,
+                                        &fire_chance_counts_text(ship.fires, ship.eligible_hits),
+                                    ));
                                 }
                                 None => {
                                     ui.weak(t!("ui.replay.sections.fire_chance_no_eligible_hits"));
@@ -1684,13 +1693,19 @@ impl UiReport {
         }
     }
 
-    /// Formula-and-exclusions breakdown for the effective-fire-chance hover.
+    /// The effective-fire-chance hover: the attacker-side formula, then what
+    /// became of every shell, then the same accounting per target ship.
     fn fire_chance_hover_text(&self, fire_chance: &EffectiveFireChance) -> String {
         let mut lines = fire_chance_formula_lines(fire_chance, &|source| self.localize_modifier_source(source));
         if !lines.is_empty() {
             lines.push(String::new());
         }
-        lines.extend(fire_chance_exclusion_lines(fire_chance));
+        lines.extend(fire_chance_breakdown_lines(fire_chance));
+        let per_ship = fire_chance_per_ship_lines(fire_chance, &|ship| self.localize_ship_name(ship));
+        if !per_ship.is_empty() {
+            lines.push(String::new());
+            lines.extend(per_ship);
+        }
         lines.join("\n")
     }
 
@@ -1743,24 +1758,14 @@ impl UiReport {
         source.to_owned()
     }
 
-    /// The full plain-text breakdown for click-to-copy: headline, formula,
-    /// exclusions and every per-ship row, independent of whether the per-ship
-    /// expander is open.
+    /// The full plain-text breakdown for click-to-copy: the headline, then
+    /// everything the hover shows, independent of whether the per-ship expander
+    /// is open.
     fn fire_chance_copy_text(&self, fire_chance: &EffectiveFireChance) -> String {
         let mut lines = vec![t!("ui.replay.sections.fire_chance").into_owned()];
         lines.extend(fire_chance_headline_lines(fire_chance));
         lines.push(String::new());
         lines.push(self.fire_chance_hover_text(fire_chance));
-
-        if !fire_chance.per_ship.is_empty() {
-            lines.push(String::new());
-            lines.push(t!("ui.replay.sections.fire_chance_per_ship").into_owned());
-            lines.extend(
-                sorted_per_ship(fire_chance)
-                    .into_iter()
-                    .map(|ship| format!("  {}", fire_chance_per_ship_line(ship, &|s| self.localize_ship_name(s)))),
-            );
-        }
         lines.join("\n")
     }
 
@@ -5239,15 +5244,22 @@ fn sorted_per_ship(fire_chance: &EffectiveFireChance) -> Vec<&PerShipFireChance>
     ships
 }
 
-/// One target-ship row in plain text, for the copied breakdown. The on-screen
-/// expander lays these out as a grid. This is the only place a percentage is
-/// stated, because the victim's fire resistance is fixed within the row.
-/// `PerShipFireChance::rate` is `None` over zero eligible hits, which is
-/// unknown rather than a zero rate, and the expected column is the matching
-/// per-hit chance so the two are comparable.
+/// "N fires / M hits", the counts a rate stands on. Both figures carry their
+/// unit, because a bare pair of numbers says nothing about which is which; the
+/// on-screen form puts a flame in front of the first as well.
+fn fire_chance_counts_text(fires: u32, hits: u32) -> String {
+    t!("ui.replay.sections.fire_chance_counts", fires = fires, hits = hits).into_owned()
+}
+
+/// One target-ship row in plain text, the header of that ship's breakdown. The
+/// on-screen expander lays the same figures out as a grid. This is the only
+/// place a percentage is stated, because the victim's fire resistance is fixed
+/// within the row. `PerShipFireChance::rate` is `None` over zero eligible hits,
+/// which is unknown rather than a zero rate, and the expected column is the
+/// matching per-hit chance so the two are comparable.
 fn fire_chance_per_ship_line(ship: &PerShipFireChance, localize_ship: &dyn Fn(&PerShipFireChance) -> String) -> String {
     let rate_text = match ship.rate() {
-        Some(rate) => format!("{:.1}%  ({} / {})", rate * 100.0, ship.fires, ship.eligible_hits),
+        Some(rate) => format!("{:.1}%  {}", rate * 100.0, fire_chance_counts_text(ship.fires, ship.eligible_hits)),
         None => t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned(),
     };
     match ship.expected_rate() {
@@ -5322,21 +5334,72 @@ fn fire_chance_formula_lines(
     lines
 }
 
-/// The exclusion tally as display lines: eligible hits pinned first, then the
-/// rest ordered by count descending with zero-count reasons omitted.
-fn fire_chance_exclusion_lines(fire_chance: &EffectiveFireChance) -> Vec<String> {
-    let mut rows: Vec<(u32, Cow<'static, str>)> =
-        vec![(fire_chance.eligible_hits, t!("ui.replay.sections.fire_chance_eligible"))];
-    let mut excluded: Vec<(&ExclusionReason, &u32)> =
-        fire_chance.exclusions.iter().filter(|(_, count)| **count > 0).collect();
+/// What became of one population of our shells: how many landed, then how they
+/// split. Eligible hits are pinned first, the refusals follow ordered by count
+/// descending with zero-count reasons omitted, and hits that were never in the
+/// population come last, apart from the refusals because they are not one.
+///
+/// `indent` is the leading whitespace the whole block sits under, so the
+/// aggregate and the per-ship blocks share this function and differ only in
+/// depth.
+fn fire_chance_tally_lines(
+    shells_on_target: u32,
+    eligible_hits: u32,
+    exclusions: &BTreeMap<ExclusionReason, u32>,
+    not_applicable: u32,
+    indent: &str,
+) -> Vec<String> {
+    let mut rows: Vec<(u32, Cow<'static, str>)> = vec![(eligible_hits, t!("ui.replay.sections.fire_chance_eligible"))];
+    let mut excluded: Vec<(&ExclusionReason, &u32)> = exclusions.iter().filter(|(_, count)| **count > 0).collect();
     excluded.sort_by(|a, b| b.1.cmp(a.1));
     rows.extend(excluded.into_iter().map(|(reason, count)| (*count, t!(keys::exclusion_reason_key(*reason)))));
+    if not_applicable > 0 {
+        rows.push((not_applicable, t!("ui.replay.sections.fire_chance_not_applicable")));
+    }
 
-    let total = fire_chance.hits_considered();
     let count_width = rows.iter().map(|(count, _)| count.to_string().len()).max().unwrap_or(1);
+    let mut lines =
+        vec![format!("{indent}{}", t!("ui.replay.sections.fire_chance_shells_on_target", hits = shells_on_target))];
+    lines.extend(rows.into_iter().map(|(count, label)| format!("{indent}  {count:>count_width$} {label}")));
+    lines
+}
 
-    let mut lines = vec![t!("ui.replay.sections.fire_chance_hits_considered", count = total).into_owned()];
-    lines.extend(rows.into_iter().map(|(count, label)| format!("  {count:>count_width$} {label}")));
+/// Shells fired, then what became of the ones that landed. Top down, so the
+/// reader sees the whole population before its parts.
+fn fire_chance_breakdown_lines(fire_chance: &EffectiveFireChance) -> Vec<String> {
+    let mut lines =
+        vec![t!("ui.replay.sections.fire_chance_shells_fired", shells = fire_chance.he_shells_fired).into_owned()];
+    lines.extend(fire_chance_tally_lines(
+        fire_chance.shells_on_target,
+        fire_chance.eligible_hits,
+        &fire_chance.exclusions,
+        fire_chance.not_applicable,
+        "  ",
+    ));
+    lines
+}
+
+/// The same accounting per target ship, each row's rate over its own breakdown.
+/// There is no per-ship shells-fired line: a salvo is fired at the water rather
+/// than at a victim, so the analysis states that count only once.
+fn fire_chance_per_ship_lines(
+    fire_chance: &EffectiveFireChance,
+    localize_ship: &dyn Fn(&PerShipFireChance) -> String,
+) -> Vec<String> {
+    if fire_chance.per_ship.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![t!("ui.replay.sections.fire_chance_per_ship").into_owned()];
+    for ship in sorted_per_ship(fire_chance) {
+        lines.push(format!("  {}", fire_chance_per_ship_line(ship, localize_ship)));
+        lines.extend(fire_chance_tally_lines(
+            ship.shells_on_target,
+            ship.eligible_hits,
+            &ship.exclusions,
+            ship.not_applicable,
+            "    ",
+        ));
+    }
     lines
 }
 
@@ -5511,6 +5574,9 @@ mod fire_chance_render_tests {
 
     fn fixture(eligible_hits: u32, fires: u32, expected_fires: Option<f32>) -> EffectiveFireChance {
         EffectiveFireChance {
+            he_shells_fired: 0,
+            shells_on_target: eligible_hits,
+            not_applicable: 0,
             eligible_hits,
             fires,
             expected_fires,
@@ -5543,7 +5609,10 @@ mod fire_chance_render_tests {
         PerShipFireChance {
             victim_ship_index: format!("{name}_INDEX"),
             victim_ship_name: name.to_owned(),
+            shells_on_target: eligible_hits,
             eligible_hits,
+            exclusions: BTreeMap::new(),
+            not_applicable: 0,
             fires,
             expected_fires,
         }
@@ -5592,35 +5661,79 @@ mod fire_chance_render_tests {
         assert_eq!(headline, "no eligible hits");
     }
 
+    /// Shells fired heads the block, the shells that landed come next, and the
+    /// split follows: eligible pinned first, then the refusals by count
+    /// descending with zero-count reasons dropped, then the hits that were
+    /// never in the population.
     #[test]
-    fn exclusion_lines_pin_eligible_first_then_sort_by_count_descending_and_drop_zeros() {
+    fn the_breakdown_reads_fired_then_on_target_then_the_split() {
         let mut fc = fixture(63, 9, None);
+        fc.he_shells_fired = 412;
+        fc.shells_on_target = 210;
+        fc.not_applicable = 4;
         fc.exclusions.insert(ExclusionReason::SectionAlreadyBurning, 98);
         fc.exclusions.insert(ExclusionReason::ObservationGap, 14);
         fc.exclusions.insert(ExclusionReason::DamageControlUnknown, 31);
-        fc.exclusions.insert(ExclusionReason::VictimDead, 0);
+        fc.exclusions.insert(ExclusionReason::NotMainBattery, 0);
 
-        let lines = fire_chance_exclusion_lines(&fc);
         assert_eq!(
-            lines,
+            fire_chance_breakdown_lines(&fc),
             vec![
-                "206 hits considered".to_owned(),
-                "  63 eligible".to_owned(),
-                "  98 section already burning".to_owned(),
-                "  31 damage control state unknown".to_owned(),
-                "  14 observation gap".to_owned(),
+                "412 HE shells fired in salvos we saw land".to_owned(),
+                "  210 hits on target".to_owned(),
+                "    63 eligible".to_owned(),
+                "    98 section already burning".to_owned(),
+                "    31 damage control state unknown".to_owned(),
+                "    14 observation gap".to_owned(),
+                "     4 not applicable, victim already dead".to_owned(),
+            ]
+        );
+    }
+
+    /// A victim that was never hit after it died contributes no row, rather
+    /// than a zero one that reads as a category with nothing in it.
+    #[test]
+    fn the_breakdown_omits_the_not_applicable_row_when_it_is_empty() {
+        let mut fc = fixture(2, 0, None);
+        fc.he_shells_fired = 6;
+        fc.shells_on_target = 2;
+        let lines = fire_chance_breakdown_lines(&fc);
+        assert!(!lines.iter().any(|line| line.contains("not applicable")), "got {lines:?}");
+    }
+
+    /// Each ship's own accounting sits under its row, so the hover answers "why
+    /// did so few hits on this ship count" without a second lookup.
+    #[test]
+    fn the_per_ship_block_carries_each_ships_own_breakdown() {
+        let mut fc = fixture(12, 2, None);
+        let mut zao = ship("Zao", 12, 2, None);
+        zao.shells_on_target = 20;
+        zao.not_applicable = 3;
+        zao.exclusions.insert(ExclusionReason::ObservationGap, 5);
+        fc.per_ship = vec![zao];
+
+        assert_eq!(
+            fire_chance_per_ship_lines(&fc, &|s: &PerShipFireChance| s.victim_ship_name.clone()),
+            vec![
+                "Per Target Ship".to_owned(),
+                "  Zao   16.7%  2 fires / 12 hits".to_owned(),
+                "    20 hits on target".to_owned(),
+                "      12 eligible".to_owned(),
+                "       5 observation gap".to_owned(),
+                "       3 not applicable, victim already dead".to_owned(),
             ]
         );
     }
 
     /// Same count-versus-rate rule as the headline: 12 hits expecting 1.656
-    /// fires is a 13.8% per-hit rate.
+    /// fires is a 13.8% per-hit rate. Both counts carry their unit, because a
+    /// bare pair of numbers does not say which of them is which.
     #[test]
     fn per_ship_line_includes_expected_when_present() {
         let s = ship("Zao", 12, 2, Some(1.656));
         assert_eq!(
             fire_chance_per_ship_line(&s, &|s: &PerShipFireChance| s.victim_ship_name.clone()),
-            "Zao   16.7%  (2 / 12)   expected 13.8%"
+            "Zao   16.7%  2 fires / 12 hits   expected 13.8%"
         );
     }
 
@@ -5629,7 +5742,7 @@ mod fire_chance_render_tests {
         let s = ship("Iowa", 11, 1, None);
         assert_eq!(
             fire_chance_per_ship_line(&s, &|s: &PerShipFireChance| s.victim_ship_name.clone()),
-            "Iowa   9.1%  (1 / 11)"
+            "Iowa   9.1%  1 fires / 11 hits"
         );
     }
 

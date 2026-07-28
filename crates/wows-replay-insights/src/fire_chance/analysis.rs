@@ -1,14 +1,15 @@
 //! Effective fire chance: fires started over hits that could have started one.
 //!
-//! Most HE hits never had a chance: the section was already burning, Damage
-//! Control Party was running, or Fire Prevention Expert had permanently killed
-//! that section. Dividing by every hit buries the signal, so a hit enters the
-//! denominator only when every one of those can be ruled out from the replay.
+//! Most HE hits never had a chance: the section was already burning, or Damage
+//! Control Party was running. Dividing by every hit buries the signal, so a hit
+//! enters the denominator only when every one of those can be ruled out from
+//! the replay.
 //! Every ambiguity resolves toward refusal: admitting a hit that could not have
 //! started a fire silently corrupts the result, while refusing one that could
 //! have merely costs a sample.
 
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 
 use wowsunpack::data::Version;
@@ -72,10 +73,27 @@ const RIBBON_REORDER_TOLERANCE: f32 = 0.15;
 /// ships the contest exists to protect.
 const CONTEST_WINDOW: f32 = 2.0 * ATTRIBUTION_WINDOW;
 
-/// The `burningFlags` bit Fire Prevention Expert forces off unconditionally
-/// (`setBurningFlags`, `m09838fe6/m0700235d.py:344`), which is what "reduces the
-/// maximum number of fires from 4 to 3" means mechanically.
-const FIRE_PREVENTION_SUPPRESSED_NODE: u8 = 2;
+/// The fire section Fire Prevention Expert merges away, and the one it merges
+/// into.
+///
+/// The skill does not make a region of the hull unburnable: it reduces four
+/// fire zones to three by combining two of them, which is what "reduces the
+/// maximum number of fires from 4 to 3" means mechanically. `_createNodes`
+/// (`m09838fe6/m0700235d.py:318`) gives node 1 the `fireResistance` effect
+/// group in place of its own `fire2` when `fireResistanceEnabled` is set, so
+/// node 1 is what renders the combined zone, and `setBurningFlags` (same file,
+/// line 346) holds node 2 permanently unlit, which is why node 2 never appears
+/// in `burningFlags` on such a victim. A shell landing in node 2's region still
+/// rolls for fire; the fire lights node 1.
+const FIRE_PREVENTION_MERGED_NODE: u8 = 2;
+const FIRE_PREVENTION_MERGE_TARGET: u8 = 1;
+
+/// Both nodes are inside `MAX_NODES`, so placing a merged hit cannot fail on
+/// the index. Pinned here rather than handled at the call site, where a
+/// fallback would have to invent a section.
+const _: () = assert!(
+    FIRE_PREVENTION_MERGED_NODE < BurnNodeIndex::MAX_NODES && FIRE_PREVENTION_MERGE_TARGET < BurnNodeIndex::MAX_NODES
+);
 
 /// A probability in 0..=1.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
@@ -103,19 +121,20 @@ pub enum HitEligibility {
         expected: Option<BurnChance>,
     },
     SectionAlreadyBurning(BurnNodeIndex),
-    /// The victim was positively read as having learned Fire Prevention Expert,
-    /// so this section could not have lit.
-    SectionSuppressedByFirePrevention,
-    /// The hit landed in the suppressible section on a victim whose build could
-    /// not be resolved, so whether the section could light is unknown. Kept
-    /// apart from [`Self::SectionSuppressedByFirePrevention`] because the two
-    /// are different facts: one is a proof, the other is a gap, and old replays
-    /// routinely cannot resolve a victim's skills.
-    SectionSuppressibleVictimBuildUnknown,
+    /// The hit landed in [`FIRE_PREVENTION_MERGED_NODE`] on a victim whose
+    /// build could not be resolved, so which section's burn bit the shell rolled
+    /// against is undecidable: node 2's if the victim never learned Fire
+    /// Prevention Expert, node 1's if it did. The already-burning test has no
+    /// section to read, so the hit is refused. Scoped to that one node; a hit
+    /// anywhere else on the same victim is unaffected by the gap.
+    MergedSectionVictimBuildUnknown,
     DamageControlActive,
     DamageControlUnknown,
     ObservationGap,
     ConsumableModelUnreliable,
+    /// The shell landed at or after the moment the victim died. Not a refusal:
+    /// there was no live ship to set alight, so the hit was never a trial the
+    /// eligibility model turned down.
     VictimDead,
     /// The victim's fate could not be resolved, so neither "this hit landed
     /// after it died" nor "this burn transition is a death flare" can be ruled
@@ -148,32 +167,49 @@ pub enum HitEligibility {
     AmbiguousWithAnotherHit,
 }
 
+/// Which of the three buckets a classified hit falls in.
+///
+/// Three rather than two because "refused" and "never in the population" are
+/// different claims. A refusal is a hit that might have started a fire and
+/// could not be proven either way, and its count is the cost of the model's
+/// caution. A hit on a ship that was already dead is neither: there was nothing
+/// left to set alight, so nothing about it was ever in question.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HitDisposition {
+    /// A trial: it enters the denominator.
+    Trial,
+    Excluded(ExclusionReason),
+    NotApplicable,
+}
+
 impl HitEligibility {
-    /// `None` for `Eligible`; the tally key otherwise.
-    pub fn exclusion_reason(&self) -> Option<ExclusionReason> {
+    pub fn disposition(&self) -> HitDisposition {
         match self {
-            HitEligibility::Eligible { .. } => None,
-            HitEligibility::SectionAlreadyBurning(_) => Some(ExclusionReason::SectionAlreadyBurning),
-            HitEligibility::SectionSuppressedByFirePrevention => {
-                Some(ExclusionReason::SectionSuppressedByFirePrevention)
+            HitEligibility::Eligible { .. } => HitDisposition::Trial,
+            HitEligibility::VictimDead => HitDisposition::NotApplicable,
+            HitEligibility::SectionAlreadyBurning(_) => {
+                HitDisposition::Excluded(ExclusionReason::SectionAlreadyBurning)
             }
-            HitEligibility::SectionSuppressibleVictimBuildUnknown => {
-                Some(ExclusionReason::SectionSuppressibleVictimBuildUnknown)
+            HitEligibility::MergedSectionVictimBuildUnknown => {
+                HitDisposition::Excluded(ExclusionReason::MergedSectionVictimBuildUnknown)
             }
-            HitEligibility::DamageControlActive => Some(ExclusionReason::DamageControlActive),
-            HitEligibility::DamageControlUnknown => Some(ExclusionReason::DamageControlUnknown),
-            HitEligibility::ObservationGap => Some(ExclusionReason::ObservationGap),
-            HitEligibility::ConsumableModelUnreliable => Some(ExclusionReason::ConsumableModelUnreliable),
-            HitEligibility::VictimDead => Some(ExclusionReason::VictimDead),
-            HitEligibility::VictimFateUnknown => Some(ExclusionReason::VictimFateUnknown),
-            HitEligibility::ShellCannotBurn => Some(ExclusionReason::ShellCannotBurn),
-            HitEligibility::NotMainBattery => Some(ExclusionReason::NotMainBattery),
-            HitEligibility::HitTypeDoesNotRoll(_) => Some(ExclusionReason::HitTypeDoesNotRoll),
-            HitEligibility::NoSectionGeometry => Some(ExclusionReason::NoSectionGeometry),
-            HitEligibility::ImpactNotOnAShip => Some(ExclusionReason::ImpactNotOnAShip),
-            HitEligibility::ImpactOffTheHull => Some(ExclusionReason::ImpactOffTheHull),
-            HitEligibility::VictimPoseUnknown => Some(ExclusionReason::VictimPoseUnknown),
-            HitEligibility::AmbiguousWithAnotherHit => Some(ExclusionReason::AmbiguousWithAnotherHit),
+            HitEligibility::DamageControlActive => HitDisposition::Excluded(ExclusionReason::DamageControlActive),
+            HitEligibility::DamageControlUnknown => HitDisposition::Excluded(ExclusionReason::DamageControlUnknown),
+            HitEligibility::ObservationGap => HitDisposition::Excluded(ExclusionReason::ObservationGap),
+            HitEligibility::ConsumableModelUnreliable => {
+                HitDisposition::Excluded(ExclusionReason::ConsumableModelUnreliable)
+            }
+            HitEligibility::VictimFateUnknown => HitDisposition::Excluded(ExclusionReason::VictimFateUnknown),
+            HitEligibility::ShellCannotBurn => HitDisposition::Excluded(ExclusionReason::ShellCannotBurn),
+            HitEligibility::NotMainBattery => HitDisposition::Excluded(ExclusionReason::NotMainBattery),
+            HitEligibility::HitTypeDoesNotRoll(_) => HitDisposition::Excluded(ExclusionReason::HitTypeDoesNotRoll),
+            HitEligibility::NoSectionGeometry => HitDisposition::Excluded(ExclusionReason::NoSectionGeometry),
+            HitEligibility::ImpactNotOnAShip => HitDisposition::Excluded(ExclusionReason::ImpactNotOnAShip),
+            HitEligibility::ImpactOffTheHull => HitDisposition::Excluded(ExclusionReason::ImpactOffTheHull),
+            HitEligibility::VictimPoseUnknown => HitDisposition::Excluded(ExclusionReason::VictimPoseUnknown),
+            HitEligibility::AmbiguousWithAnotherHit => {
+                HitDisposition::Excluded(ExclusionReason::AmbiguousWithAnotherHit)
+            }
         }
     }
 }
@@ -208,7 +244,22 @@ pub enum FormulaOp {
 pub struct PerShipFireChance {
     pub victim_ship_index: String,
     pub victim_ship_name: String,
+    /// Every shell of ours the model classified against this ship: the trials,
+    /// the refusals and the hits that were never in the population. Equal to
+    /// `eligible_hits + exclusions.values().sum() + not_applicable`.
+    ///
+    /// There is no per-ship counterpart to
+    /// [`EffectiveFireChance::he_shells_fired`]. A salvo is fired at the water,
+    /// not at a victim, and its shells can land on several ships, so splitting
+    /// a fired count between them would either double-count the salvo or invent
+    /// an assignment the replay does not carry.
+    pub shells_on_target: u32,
     pub eligible_hits: u32,
+    /// Why the refused shells against this ship were refused, the per-ship form
+    /// of [`EffectiveFireChance::exclusions`].
+    pub exclusions: BTreeMap<ExclusionReason, u32>,
+    /// Shells that landed on this ship at or after it died.
+    pub not_applicable: u32,
     pub fires: u32,
     /// Expected number of fires over this ship's eligible hits, not a rate.
     /// Counted the way [`Self::fires`] is, saturating at one fire per section
@@ -257,6 +308,47 @@ impl PerShipFireChance {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectiveFireChance {
+    /// How many fire-capable main-battery shells we fired, summed over the
+    /// salvos the replay lets us see. An undercount of the match's real shell
+    /// count, and it says so in the UI rather than presenting itself as the
+    /// whole.
+    ///
+    /// It cannot be the whole. A salvo reaches this analysis only through the
+    /// hits it produced: `ResolvedShotHit` is the one record the report keeps,
+    /// and it carries the originating `ArtillerySalvo` with that salvo's full
+    /// shot list, which is where this number comes from. `receiveShotKills`
+    /// does not report every shell that hit nothing, so a salvo that landed no
+    /// impact the client was told about leaves no trace at all, as does one
+    /// whose shells outlived the client's 30-second active-shot window.
+    /// Nothing else in the pipeline retains the `receiveArtilleryShots`
+    /// packets, so a complete count would have to be logged during ingest
+    /// rather than reconstructed here.
+    ///
+    /// Counted per salvo rather than per hit, so a salvo is counted once at its
+    /// full width however many of its shells were seen landing, and gated on
+    /// the same "could this shell start a fire" test `classify` applies, so AP
+    /// and SAP are out.
+    pub he_shells_fired: u32,
+    /// Every shell of ours the eligibility model classified: the trials, the
+    /// refusals and the hits that were never in the population. Equal to
+    /// `eligible_hits + exclusions.values().sum() + not_applicable`, and kept
+    /// as a field so a caller cannot reconstruct the total from a subset of the
+    /// buckets.
+    ///
+    /// Every shell, not only the HE ones, which is what makes the partition
+    /// hold: a shell that could not have burned is refused as `ShellCannotBurn`
+    /// or `NotMainBattery` rather than kept out of the total, so the breakdown
+    /// says how many of our hits were not HE instead of quietly dropping them.
+    /// It is therefore not a subset of [`Self::he_shells_fired`], which is
+    /// HE-only.
+    ///
+    /// The sum over [`Self::per_ship`] can be smaller: a hit keyed to a ship
+    /// whose build never resolved has no row to sit in, and lands only here.
+    pub shells_on_target: u32,
+    /// Shells that landed on a ship at or after it died. Reported apart from
+    /// [`Self::exclusions`] because it is not a refusal: there was no live ship
+    /// to set alight, so the eligibility model was never asked anything.
+    pub not_applicable: u32,
     /// Trials summed over every target ship. A count, and deliberately not
     /// half of a rate: dividing it into [`Self::fires`] would pool victims of
     /// different fire resistance into one figure, which
@@ -353,13 +445,6 @@ impl EffectiveFireChance {
     /// because those totals are a sum over this many separate populations.
     pub fn ships_with_trials(&self) -> usize {
         self.per_ship.iter().filter(|ship| ship.eligible_hits > 0).count()
-    }
-
-    /// Every hit the eligibility model looked at: the trials plus every hit it
-    /// refused. The denominator of the exclusion tally, kept here so a caller
-    /// cannot reconstruct it from a subset of the buckets.
-    pub fn hits_considered(&self) -> u32 {
-        self.eligible_hits + self.exclusions.values().sum::<u32>()
     }
 
     /// The attacker-side formula's total as `(raw, clamped)`: the value the
@@ -519,6 +604,19 @@ struct Candidate<'a> {
     section: BurnNodeIndex,
     expected: Option<BurnChance>,
     shell: GameParamId,
+    /// Index of this hit's [`ClassifiedHit`], so losing the contest can move it
+    /// from trial to exclusion in the one place the counts are taken from.
+    record: usize,
+}
+
+/// One of our shells that landed, and where it ended up in the accounting.
+///
+/// The tallies are all taken from this list rather than accumulated as the
+/// classification runs, because the contest guard revises a hit's disposition
+/// after every hit has been classified.
+struct ClassifiedHit {
+    victim: EntityId,
+    disposition: HitDisposition,
 }
 
 /// Where one of our own shells landed that is not a trial itself but cannot be
@@ -604,7 +702,12 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
 
     let mut candidates: Vec<Candidate<'_>> = Vec::new();
     let mut contenders: Vec<ContestingImpact> = Vec::new();
-    let mut exclusions: BTreeMap<ExclusionReason, u32> = BTreeMap::new();
+    let mut classified: Vec<ClassifiedHit> = Vec::new();
+    // Keyed on the salvo and its shell rather than the salvo alone: nothing
+    // establishes that a salvo id is unique across the batteries that raise
+    // them, and a main-battery salvo folded into a secondary one would take
+    // that salvo's width. `BTreeMap` so the sum does not depend on hash seeds.
+    let mut shells_per_salvo: BTreeMap<(u32, u64), u32> = BTreeMap::new();
 
     for hit in input.hits {
         // `salvo` is `Some` only for a hit matched to its originating salvo.
@@ -615,26 +718,27 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
             continue;
         }
 
+        if burnable_main_battery_chance(input, &bundle, tier, salvo.params_id).is_ok() {
+            shells_per_salvo.insert((salvo.salvo_id, salvo.params_id.raw()), salvo.shots.len() as u32);
+        }
+
         let eligibility = classify(input, &geometry, &tracks, &bundle, tier, formula_applies, hit, salvo.params_id);
 
-        if let Some(section) = contesting_section(input, &geometry, secondary_ammo, hit, salvo.params_id, &eligibility)
-        {
+        for section in contesting_sections(input, &geometry, secondary_ammo, hit, salvo.params_id, &eligibility) {
             contenders.push(ContestingImpact { victim: hit.victim_entity_id, section, clock: hit.clock });
         }
 
-        match eligibility {
-            HitEligibility::Eligible { section, expected } => candidates.push(Candidate {
+        let record = classified.len();
+        classified.push(ClassifiedHit { victim: hit.victim_entity_id, disposition: eligibility.disposition() });
+        if let HitEligibility::Eligible { section, expected } = eligibility {
+            candidates.push(Candidate {
                 hit,
                 victim: hit.victim_entity_id,
                 section,
                 expected,
                 shell: salvo.params_id,
-            }),
-            other => {
-                if let Some(reason) = other.exclusion_reason() {
-                    *exclusions.entry(reason).or_insert(0) += 1;
-                }
-            }
+                record,
+            });
         }
     }
 
@@ -647,13 +751,23 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
     // which is what a fire we cannot assign to a weapon is.
     let (counted, contested): (Vec<&Candidate<'_>>, Vec<&Candidate<'_>>) =
         candidates.iter().partition(|c| !contested_by_another_hit(c, &contenders));
-    if !contested.is_empty() {
-        *exclusions.entry(ExclusionReason::AmbiguousWithAnotherHit).or_insert(0) += contested.len() as u32;
+    for candidate in &contested {
+        classified[candidate.record].disposition = HitDisposition::Excluded(ExclusionReason::AmbiguousWithAnotherHit);
+    }
+
+    let mut exclusions: BTreeMap<ExclusionReason, u32> = BTreeMap::new();
+    let mut not_applicable = 0u32;
+    for record in &classified {
+        match record.disposition {
+            HitDisposition::Trial => {}
+            HitDisposition::Excluded(reason) => *exclusions.entry(reason).or_insert(0) += 1,
+            HitDisposition::NotApplicable => not_applicable += 1,
+        }
     }
 
     let attribution = attribute(input, &counted);
 
-    let per_ship = per_ship_breakdown(input, &counted, &attribution.fires_by_victim, formula_applies);
+    let per_ship = per_ship_breakdown(input, &classified, &counted, &attribution.fires_by_victim, formula_applies);
     let expected_fires = formula_applies.then(|| expected_observable_fires(&counted)).flatten();
     // Gated on the same fact as `expected_fires`. Without it the breakdown would
     // be rendered from `ModifierBundle::empty`, showing a player running IFHE,
@@ -663,6 +777,9 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
         if formula_applies { formula_steps(input, &bundle, tier, &counted) } else { (None, Vec::new()) };
 
     Some(EffectiveFireChance {
+        he_shells_fired: shells_per_salvo.values().sum(),
+        shells_on_target: classified.len() as u32,
+        not_applicable,
         eligible_hits: counted.len() as u32,
         fires: attribution.predictions.len() as u32,
         expected_fires,
@@ -713,39 +830,53 @@ fn is_secondary_shell(input: &FireChanceInput<'_>, secondary_ammo: &[String], sh
 /// set be credited to a coincident eligible hit, which adds to the numerator
 /// with no matching trial in the denominator.
 ///
-/// `ShellCannotBurn`, `SectionAlreadyBurning` and a node-2 hit on a victim we
-/// positively read as having learned Fire Prevention Expert are proofs, so they
-/// do not contest.
+/// `ShellCannotBurn` and `SectionAlreadyBurning` are proofs, so they do not
+/// contest.
 ///
-/// The contest is section-scoped, which leaves the Fire Prevention branch with
-/// nothing to reach: a suppressed hit is always in node 2, and node 2 is
-/// suppressed for every hit on that victim, so no candidate can be there to
-/// contest. It is stated anyway because it is part of what "cannot be ruled
-/// out" means, and because the suppression rule is a single `burningFlags` bit
-/// that a future game version could soften.
-fn contesting_section(
+/// A hit refused as [`HitEligibility::MergedSectionVictimBuildUnknown`] returns
+/// two sections rather than one. Which bit it could have lit is precisely what
+/// the unresolved build leaves open: the node the shell landed in if the victim
+/// never learned Fire Prevention Expert, the node that one merges into if it
+/// did. Returning only the first would leave a candidate in the merge target
+/// free to be credited a fire this shell may have set.
+fn contesting_sections(
     input: &FireChanceInput<'_>,
     geometry: &HashMap<EntityId, FireSectionGeometry>,
     secondary_ammo: &[String],
     hit: &ResolvedShotHit,
     shell: GameParamId,
     eligibility: &HitEligibility,
-) -> Option<BurnNodeIndex> {
+) -> Vec<BurnNodeIndex> {
     // A shell that struck terrain or water is a proof like the others, and it
     // reaches here through the secondary arm: `classify` names a secondary
     // `NotMainBattery` before it ever reads the collision type. Without this a
     // secondary of ours that hit an island beside the victim would contest a
     // main-battery trial it could not possibly have contested.
     if struck_no_ship(&hit.hit.hit_type.collision) {
-        return None;
+        return Vec::new();
     }
     let contests = match eligibility {
         HitEligibility::NotMainBattery => is_secondary_shell(input, secondary_ammo, shell),
         HitEligibility::HitTypeDoesNotRoll(_) => true,
-        HitEligibility::SectionSuppressibleVictimBuildUnknown => true,
+        HitEligibility::MergedSectionVictimBuildUnknown => true,
         _ => false,
     };
-    contests.then(|| section_of(input, geometry, hit).ok()).flatten()
+    if !contests {
+        return Vec::new();
+    }
+    let Ok(section) = section_of(input, geometry, hit) else { return Vec::new() };
+    let mut sections = vec![section];
+    if matches!(eligibility, HitEligibility::MergedSectionVictimBuildUnknown) {
+        sections.push(merged_section());
+    }
+    sections
+}
+
+/// The fire section a hit in [`FIRE_PREVENTION_MERGED_NODE`] rolls against on a
+/// victim that learned Fire Prevention Expert. Infallible by the const
+/// assertion beside the constants.
+fn merged_section() -> BurnNodeIndex {
+    BurnNodeIndex::new(FIRE_PREVENTION_MERGE_TARGET).expect("the merge target is inside MAX_NODES")
 }
 
 /// Whether one of our own non-trial hits landed on the same victim and section
@@ -806,6 +937,49 @@ fn expected_observable_fires(candidates: &[&Candidate<'_>]) -> Option<f32> {
     groups.into_values().try_fold(0.0f32, |total, group| Some(total + group?))
 }
 
+/// The clamped chance one of our main-battery shells rolls a fire with, or the
+/// reason it could not have started one wherever it landed.
+///
+/// Split out of [`classify`] because the fired-shell count asks the same
+/// question of a salvo with no hit in hand: what makes a shell an HE shell here
+/// is that its folded burn chance is positive, never an ammo-type string, and
+/// the two counts have to agree on that or the breakdown's denominator and its
+/// headline would describe different populations.
+fn burnable_main_battery_chance(
+    input: &FireChanceInput<'_>,
+    bundle: &ModifierBundle,
+    tier: u32,
+    shell: GameParamId,
+) -> Result<f32, HitEligibility> {
+    let Some(param) = input.params.game_param_by_id(shell) else {
+        return Err(HitEligibility::ShellCannotBurn);
+    };
+    if !input.attacker.main_battery_ammo.iter().any(|name| name == param.name()) {
+        return Err(HitEligibility::NotMainBattery);
+    }
+    let Some(projectile) = param.projectile() else {
+        return Err(HitEligibility::ShellCannotBurn);
+    };
+    // A projectile with no `burnProb` at all carries no fire chance to gate on.
+    let Some(burn_prob) = projectile.burn_prob() else {
+        return Err(HitEligibility::ShellCannotBurn);
+    };
+    let is_small = is_small_projectile(projectile.bullet_diametr(), SMALL_PROJECTILE_MAX_DIAMETER_M);
+    let (pre_clamp, _) = calculate_burn_chance(tier, burn_prob, bundle, is_small);
+    // `calculate_burn_chance` returns the pre-clamp value; ttx's contract is
+    // that the caller applies `max(0)`. The upper bound is the probability's own
+    // definition: additive bonuses can in principle sum past 1, and a chance
+    // above 1 still only means "always".
+    let chance = pre_clamp.clamp(0.0, 1.0);
+    // A non-finite chance survives the clamp, and `NaN <= 0.0` is false, so it
+    // is rejected explicitly: admitting a hit whose chance is unknowable is the
+    // direction that corrupts the result.
+    if !chance.is_finite() || chance <= 0.0 {
+        return Err(HitEligibility::ShellCannotBurn);
+    }
+    Ok(chance)
+}
+
 /// Whether one of our shells could have started a fire where it landed.
 ///
 /// The checks run in a fixed order and the first match wins, so the exclusion
@@ -822,32 +996,10 @@ fn classify(
     hit: &ResolvedShotHit,
     shell: GameParamId,
 ) -> HitEligibility {
-    let Some(param) = input.params.game_param_by_id(shell) else {
-        return HitEligibility::ShellCannotBurn;
+    let chance = match burnable_main_battery_chance(input, bundle, tier, shell) {
+        Ok(chance) => chance,
+        Err(refusal) => return refusal,
     };
-    if !input.attacker.main_battery_ammo.iter().any(|name| name == param.name()) {
-        return HitEligibility::NotMainBattery;
-    }
-    let Some(projectile) = param.projectile() else {
-        return HitEligibility::ShellCannotBurn;
-    };
-    // A projectile with no `burnProb` at all carries no fire chance to gate on.
-    let Some(burn_prob) = projectile.burn_prob() else {
-        return HitEligibility::ShellCannotBurn;
-    };
-    let is_small = is_small_projectile(projectile.bullet_diametr(), SMALL_PROJECTILE_MAX_DIAMETER_M);
-    let (pre_clamp, _) = calculate_burn_chance(tier, burn_prob, bundle, is_small);
-    // `calculate_burn_chance` returns the pre-clamp value; ttx's contract is
-    // that the caller applies `max(0)`. The upper bound is the probability's own
-    // definition: additive bonuses can in principle sum past 1, and a chance
-    // above 1 still only means "always".
-    let chance = pre_clamp.clamp(0.0, 1.0);
-    // A non-finite chance survives the clamp, and `NaN <= 0.0` is false, so it
-    // is rejected explicitly: admitting a hit whose chance is unknowable is the
-    // direction that corrupts the result.
-    if !chance.is_finite() || chance <= 0.0 {
-        return HitEligibility::ShellCannotBurn;
-    }
 
     // Ahead of the hit-type check because it is the more specific fact: a shell
     // that struck an island carries `SHELL_HIT_TYPE_NORMAL`, so `rolls_for_fire`
@@ -906,24 +1058,36 @@ fn classify(
         DamageControlState::Down => {}
     }
 
-    // `Unknown` refuses alongside `Learned`: a node-2 hit on a victim whose
-    // build we could not read might have been impossible, and admitting it is
-    // the direction that corrupts. The two refusals are reported apart because
-    // only the first is a proof.
-    if section.get() == FIRE_PREVENTION_SUPPRESSED_NODE {
+    // Fire Prevention Expert merges the hull's third fire zone into the second,
+    // so a shell landing in the merged node is an ordinary trial that rolls
+    // against the merge target's bit. Applied before the burn-mask read below
+    // and before the expectation is computed, which are the two places the
+    // section index is what the answer depends on.
+    //
+    // With the victim's build unread there is no telling which of the two bits
+    // the shell rolled against, so the burn-mask read has no section and the hit
+    // is refused. Only this node is affected; every other section reads the same
+    // bit either way.
+    let section = if section.get() == FIRE_PREVENTION_MERGED_NODE {
         match victim.fire_prevention {
-            FirePrevention::Learned => return HitEligibility::SectionSuppressedByFirePrevention,
-            FirePrevention::Unknown => return HitEligibility::SectionSuppressibleVictimBuildUnknown,
-            FirePrevention::NotLearned => {}
+            FirePrevention::Learned => merged_section(),
+            FirePrevention::Unknown => return HitEligibility::MergedSectionVictimBuildUnknown,
+            FirePrevention::NotLearned => section,
         }
-    }
+    } else {
+        section
+    };
 
     if track.burn_mask_before(hit.clock) & section.bit_mask() != 0 {
         return HitEligibility::SectionAlreadyBurning(section);
     }
 
     // Node probability is indexed by section; `section_of` has already checked
-    // the section is inside the hull's own `burnNodes` list. The product is
+    // the section is inside the hull's own `burnNodes` list, and the merge
+    // target is below the merged node so it is inside it too. Every hull in the
+    // roster carries one probability across all of its burn nodes, so the merge
+    // does not move this product; it is read at the merged index anyway, since
+    // nothing guarantees that stays true. The product is
     // clamped because a few non-combat and bot hulls carry a node probability
     // of 9.0, which the client's `random() < prob` roll simply reads as always.
     // A non-finite product survives the clamp and `BurnChance::new` rejects it,
@@ -1085,8 +1249,29 @@ fn nearest_risen(change: &BurnStateChange, predicted: BurnNodeIndex) -> BurnNode
     change.newly_lit().min_by_key(|risen| risen.get().abs_diff(predicted.get())).unwrap_or(predicted)
 }
 
+/// One target ship's tally, accumulated over the hits keyed to it.
+struct ShipRow {
+    ship_name: String,
+    shells_on_target: u32,
+    eligible_hits: u32,
+    exclusions: BTreeMap<ExclusionReason, u32>,
+    not_applicable: u32,
+    /// Every vehicle the row folds together, since two of the same ship on the
+    /// enemy team share one row but carry their fires separately.
+    entities: BTreeSet<EntityId>,
+}
+
+/// A row per target ship, over every hit the model classified rather than only
+/// the trials.
+///
+/// A ship hit only by shells the model refused still gets a row, stating no
+/// rate: what the reader needs there is why none of those hits counted, which
+/// is exactly what the row's exclusion tally says. Hits keyed to a ship that
+/// never resolved to a [`VictimContext`] have no row to sit in and appear only
+/// in the aggregate.
 fn per_ship_breakdown(
     input: &FireChanceInput<'_>,
+    classified: &[ClassifiedHit],
     counted: &[&Candidate<'_>],
     fires_by_victim: &HashMap<EntityId, u32>,
     formula_applies: bool,
@@ -1094,28 +1279,48 @@ fn per_ship_breakdown(
     // Grouped by ship index rather than entity so two of the same ship on the
     // enemy team read as one row, which is what a per-target-ship breakdown
     // means. `BTreeMap` because the row order must not depend on hash seeds.
-    let mut groups: BTreeMap<&str, Vec<&Candidate<'_>>> = BTreeMap::new();
-    for candidate in counted {
-        let Some(victim) = input.victims.get(&candidate.victim) else { continue };
-        groups.entry(victim.ship_index.as_str()).or_default().push(candidate);
+    let mut rows: BTreeMap<&str, ShipRow> = BTreeMap::new();
+    for record in classified {
+        let Some(victim) = input.victims.get(&record.victim) else { continue };
+        let row = rows.entry(victim.ship_index.as_str()).or_insert_with(|| ShipRow {
+            ship_name: victim.ship_name.clone(),
+            shells_on_target: 0,
+            eligible_hits: 0,
+            exclusions: BTreeMap::new(),
+            not_applicable: 0,
+            entities: BTreeSet::new(),
+        });
+        row.shells_on_target += 1;
+        row.entities.insert(record.victim);
+        match record.disposition {
+            HitDisposition::Trial => row.eligible_hits += 1,
+            HitDisposition::Excluded(reason) => *row.exclusions.entry(reason).or_insert(0) += 1,
+            HitDisposition::NotApplicable => row.not_applicable += 1,
+        }
     }
 
-    groups
-        .into_values()
-        .filter_map(|group| {
-            let victim = input.victims.get(&group.first()?.victim)?;
-            let mut entities: Vec<EntityId> = group.iter().map(|c| c.victim).collect();
-            entities.sort_unstable();
-            entities.dedup();
-            Some(PerShipFireChance {
-                victim_ship_index: victim.ship_index.clone(),
-                victim_ship_name: victim.ship_name.clone(),
-                eligible_hits: group.len() as u32,
-                fires: entities.iter().filter_map(|e| fires_by_victim.get(e)).sum(),
-                // Same rule as the aggregate: one hit with an uncomputable
-                // expectation makes the row's total unknown, not smaller.
-                expected_fires: formula_applies.then(|| expected_observable_fires(&group)).flatten(),
-            })
+    // The expectation needs the candidates themselves rather than their count,
+    // because it saturates over the ones sharing a section and a tick.
+    let mut trials: BTreeMap<&str, Vec<&Candidate<'_>>> = BTreeMap::new();
+    for candidate in counted {
+        let Some(victim) = input.victims.get(&candidate.victim) else { continue };
+        trials.entry(victim.ship_index.as_str()).or_default().push(candidate);
+    }
+
+    rows.into_iter()
+        .map(|(ship_index, row)| PerShipFireChance {
+            victim_ship_index: ship_index.to_owned(),
+            victim_ship_name: row.ship_name,
+            shells_on_target: row.shells_on_target,
+            eligible_hits: row.eligible_hits,
+            exclusions: row.exclusions,
+            not_applicable: row.not_applicable,
+            fires: row.entities.iter().filter_map(|entity| fires_by_victim.get(entity)).sum(),
+            // Same rule as the aggregate: one hit with an uncomputable
+            // expectation makes the row's total unknown, not smaller.
+            expected_fires: formula_applies
+                .then(|| expected_observable_fires(trials.get(ship_index).map_or(&[], Vec::as_slice)))
+                .flatten(),
         })
         .collect()
 }
@@ -1232,6 +1437,7 @@ mod tests {
     use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
     use wows_replays::analyzer::battle_controller::state::VictimPose;
     use wows_replays::analyzer::decoder::ArtillerySalvo;
+    use wows_replays::analyzer::decoder::ArtilleryShotData;
     use wows_replays::analyzer::decoder::HitType;
     use wows_replays::analyzer::decoder::ShotHit;
     use wows_replays::types::EntityId;
@@ -1324,6 +1530,10 @@ mod tests {
         hit_section: u8,
         hit_type: ShellHitType,
         hit_from_atba: bool,
+        /// How many shells the main-battery salvo fired. Every main-battery hit
+        /// in a scenario belongs to that one salvo, so this is the whole
+        /// fired-shell count and is independent of how many of them landed.
+        main_salvo_shells: usize,
         secondary_hit_section: Option<u8>,
         secondary_hit_offset: f32,
         ribbon_offset: f32,
@@ -1358,6 +1568,7 @@ mod tests {
             hit_section: 0,
             hit_type: ShellHitType::Normal,
             hit_from_atba: false,
+            main_salvo_shells: 1,
             secondary_hit_section: None,
             secondary_hit_offset: 0.1,
             ribbon_offset: 0.0,
@@ -1426,6 +1637,11 @@ mod tests {
 
         fn with_shell_from_atba(mut self) -> Fixture {
             self.hit_from_atba = true;
+            self
+        }
+
+        fn with_the_main_salvo_firing(mut self, shells: usize) -> Fixture {
+            self.main_salvo_shells = shells;
             self
         }
 
@@ -1655,6 +1871,15 @@ mod tests {
             }
             if self.hit_on_a_hull_we_cannot_place {
                 hits.push(hit(other_victim_id(), main_shell_id(), HIT_CLOCK, 0, ShellHitType::Normal));
+            }
+            // Every main-battery hit in a scenario shares salvo 1, so widening
+            // the salvo is a property of the scenario rather than of any one hit.
+            for hit in &mut hits {
+                if let Some(salvo) = hit.salvo.as_mut()
+                    && salvo.params_id == main_shell_id()
+                {
+                    salvo.shots = shot_list(self.main_salvo_shells);
+                }
             }
 
             let mut changes = Vec::new();
@@ -1899,6 +2124,25 @@ mod tests {
         }
     }
 
+    /// A salvo's shot list, `shells` shells wide. Only its length is read here,
+    /// which is what makes the fired-shell count a per-salvo figure rather than
+    /// a per-hit one.
+    fn shot_list(shells: usize) -> Vec<ArtilleryShotData> {
+        (0..shells)
+            .map(|index| ArtilleryShotData {
+                origin: WorldPos::new(0.0, 0.0, 0.0),
+                pitch: 0.0,
+                speed: 800.0,
+                target: WorldPos::new(0.0, 0.0, 0.0),
+                shot_id: ShotId::from(index as u32),
+                gun_barrel_id: index as u16,
+                server_time_left: 0.0,
+                shooter_height: 0.0,
+                hit_distance: 0.0,
+            })
+            .collect()
+    }
+
     /// One hit on `victim`, placed along the hull so it resolves to `section`.
     fn hit(
         victim: EntityId,
@@ -1921,7 +2165,7 @@ mod tests {
                 terminal_ballistics: None,
             },
             victim_entity_id: victim,
-            salvo: Some(ArtillerySalvo { owner_id: attacker_id(), params_id: shell, salvo_id: 1, shots: Vec::new() }),
+            salvo: Some(ArtillerySalvo { owner_id: attacker_id(), params_id: shell, salvo_id: 1, shots: shot_list(1) }),
             fired_at: Some(GameClock(clock.0 - 5.0)),
             victim_pose: Some(VictimPose { position: WorldPos::new(0.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, roll: 0.0 }),
         }
@@ -1963,14 +2207,46 @@ mod tests {
         assert_eq!(out.eligible_hits, 1);
     }
 
-    /// With Fire Prevention Expert the victim's node 2 can never burn, so a
-    /// hit there is excluded rather than counted as a miss.
+    /// Fire Prevention Expert merges the victim's third fire zone into the
+    /// second rather than making it unburnable, so a hit there is an ordinary
+    /// trial whose fire lights the merge target.
     #[test]
-    fn a_hit_on_the_fire_prevention_suppressed_node_is_excluded() {
-        let out = analyze(&fixture().with_victim_fire_prevention().hitting_section(2).build()).expect("geometry");
-        assert_eq!(out.eligible_hits, 0);
-        assert_eq!(out.exclusions[&ExclusionReason::SectionSuppressedByFirePrevention], 1);
-        assert!(!out.exclusions.contains_key(&ExclusionReason::SectionSuppressibleVictimBuildUnknown));
+    fn a_hit_on_the_merged_node_is_a_trial_against_the_zone_it_merges_into() {
+        let out = analyze(&fixture().with_victim_fire_prevention().hitting_section(2).server_lights_section(1).build())
+            .expect("geometry");
+        assert_eq!(out.eligible_hits, 1);
+        assert!(out.exclusions.is_empty(), "got {:?}", out.exclusions);
+        assert_eq!(out.fires, 1);
+        assert_eq!(out.section_predictions.len(), 1);
+        assert_eq!(out.section_predictions[0].predicted.get(), FIRE_PREVENTION_MERGE_TARGET);
+        assert_eq!(out.section_predictions[0].actual.get(), FIRE_PREVENTION_MERGE_TARGET);
+    }
+
+    /// The merged hit reads the burn bit of the zone it merged into, so the
+    /// merge target already burning excludes it while the merged node's own bit
+    /// leaves it alone. That bit is never set on such a victim anyway, so
+    /// reading it would admit every merged hit whatever the ship was doing.
+    #[test]
+    fn a_merged_hit_is_gated_by_the_zone_it_merges_into() {
+        let target_burning =
+            analyze(&fixture().with_victim_fire_prevention().hitting_section(2).with_burn_mask_before(0b0010).build())
+                .expect("geometry");
+        assert_eq!(target_burning.eligible_hits, 0);
+        assert_eq!(target_burning.exclusions[&ExclusionReason::SectionAlreadyBurning], 1);
+
+        let merged_node_burning =
+            analyze(&fixture().with_victim_fire_prevention().hitting_section(2).with_burn_mask_before(0b0100).build())
+                .expect("geometry");
+        assert_eq!(merged_node_burning.eligible_hits, 1);
+    }
+
+    /// The merge is scoped to one node. A hit anywhere else on a Fire
+    /// Prevention victim is unaffected by it.
+    #[test]
+    fn the_merge_leaves_every_other_section_alone() {
+        let out = analyze(&fixture().with_victim_fire_prevention().hitting_section(3).build()).expect("geometry");
+        assert_eq!(out.eligible_hits, 1);
+        assert_eq!(out.section_predictions[0].predicted.get(), 3);
     }
 
     #[test]
@@ -2059,6 +2335,9 @@ mod tests {
             section: BurnNodeIndex::new(section).expect("section in range"),
             expected: expected.map(|chance| BurnChance::new(chance).expect("a probability")),
             shell: main_shell_id(),
+            // These candidates never reach the contest, which is the only thing
+            // that reads the record index back.
+            record: 0,
         }
     }
 
@@ -2188,16 +2467,17 @@ mod tests {
     }
 
     /// `expected_fires` is a sum, so an empty candidate list legitimately
-    /// totals zero fires. No ship rows out of it, so no rate is stated at all:
-    /// the rate that total would imply does not exist, and a caller rendering
-    /// one would print a fabricated 0.0%.
+    /// totals zero fires. No rate is stated anywhere over it: the rate that
+    /// total would imply does not exist, and a caller rendering one would print
+    /// a fabricated 0.0%.
     #[test]
     fn zero_eligible_hits_state_no_rate_anywhere() {
         let out = analyze(&fixture().with_hit_type(ShellHitType::Ricochet).build()).expect("geometry");
         assert_eq!(out.eligible_hits, 0);
         assert_eq!(out.expected_fires, Some(0.0));
-        assert!(out.per_ship.is_empty());
         assert_eq!(out.ships_with_trials(), 0);
+        assert_eq!(out.per_ship[0].rate(), None);
+        assert_eq!(out.per_ship[0].expected_rate(), None);
     }
 
     /// A ribbon matching no eligible hit is reported, not dropped. Zero is the
@@ -2262,13 +2542,18 @@ mod tests {
         assert_eq!(out.independent_section_agreement(), None);
     }
 
-    /// A ship with no eligible hits against it produces no row, so nothing
-    /// reports a rate over zero samples.
+    /// A ship hit only by shells the model refused still gets a row, because
+    /// why none of them counted is what the reader needs there. The row states
+    /// no rate, so nothing reports one over zero samples.
     #[test]
-    fn no_eligible_hits_yields_no_ship_rows() {
+    fn a_ship_with_only_refused_hits_gets_a_row_that_states_no_rate() {
         let out = analyze(&fixture().with_dcp_unknown().build()).expect("geometry");
         assert_eq!(out.eligible_hits, 0);
-        assert!(out.per_ship.is_empty());
+        assert_eq!(out.per_ship.len(), 1);
+        assert_eq!(out.per_ship[0].shells_on_target, 1);
+        assert_eq!(out.per_ship[0].exclusions[&ExclusionReason::DamageControlUnknown], 1);
+        assert_eq!(out.per_ship[0].rate(), None);
+        assert_eq!(out.ships_with_trials(), 0);
     }
 
     /// Without geometry there is no eligibility model, so there is no result.
@@ -2322,13 +2607,76 @@ mod tests {
 
     /// Every hit the model looked at, trials and refusals alike.
     #[test]
-    fn hits_considered_totals_the_trials_and_every_refusal() {
+    fn shells_on_target_total_the_trials_and_every_refusal() {
         let out =
             analyze(&fixture().hitting_section(0).also_hitting_section_with(3, 20.0, ShellHitType::Ricochet).build())
                 .expect("geometry");
         assert_eq!(out.eligible_hits, 1);
         assert_eq!(out.exclusions[&ExclusionReason::HitTypeDoesNotRoll], 1);
-        assert_eq!(out.hits_considered(), 2);
+        assert_eq!(out.shells_on_target, 2);
+    }
+
+    /// The three buckets partition the shells that landed, at both levels. A
+    /// hit that fell out of the accounting entirely would show up here as a
+    /// shortfall rather than as a quietly better rate.
+    #[test]
+    fn the_buckets_partition_the_shells_on_target() {
+        let out = analyze(
+            &fixture()
+                .with_the_victim_dead_at(GameClock(90.0))
+                .also_hitting_section(3)
+                .also_hitting_a_hull_we_cannot_place()
+                .build(),
+        )
+        .expect("geometry");
+
+        assert_eq!(out.shells_on_target, 3);
+        assert_eq!(out.not_applicable, 2, "both hits on the dead victim");
+        assert_eq!(out.exclusions[&ExclusionReason::NoSectionGeometry], 1);
+        assert_eq!(out.eligible_hits + out.exclusions.values().sum::<u32>() + out.not_applicable, out.shells_on_target);
+
+        for ship in &out.per_ship {
+            assert_eq!(
+                ship.eligible_hits + ship.exclusions.values().sum::<u32>() + ship.not_applicable,
+                ship.shells_on_target,
+                "{} does not account for its own hits",
+                ship.victim_ship_name
+            );
+        }
+        assert_eq!(out.per_ship.iter().map(|ship| ship.shells_on_target).sum::<u32>(), out.shells_on_target);
+    }
+
+    /// A shell landing on a ship that was already dead is not a refusal: there
+    /// was nothing left to set alight, so the eligibility model was never asked
+    /// anything and the hit sits outside the exclusion tally entirely.
+    #[test]
+    fn a_hit_on_a_dead_victim_is_not_applicable_rather_than_excluded() {
+        let out = analyze(&fixture().with_the_victim_dead_at(GameClock(90.0)).build()).expect("geometry");
+        assert_eq!(out.not_applicable, 1);
+        assert!(out.exclusions.is_empty(), "got {:?}", out.exclusions);
+        assert_eq!(out.per_ship[0].not_applicable, 1);
+    }
+
+    /// A salvo is counted once at its full width however many of its shells were
+    /// seen landing, so the fired count is not the hit count by another name.
+    /// Both hits here belong to one six-shell salvo.
+    #[test]
+    fn shells_fired_counts_the_salvo_not_the_hits() {
+        let out = analyze(&fixture().with_the_main_salvo_firing(6).hitting_section(0).also_hitting_section(3).build())
+            .expect("geometry");
+        assert_eq!(out.he_shells_fired, 6);
+        assert_eq!(out.shells_on_target, 2);
+    }
+
+    /// The fired count is gated on the same "could this shell start a fire"
+    /// test the trials are, so an AP salvo contributes nothing to it.
+    #[test]
+    fn shells_fired_ignores_a_shell_that_cannot_burn() {
+        let out =
+            analyze(&fixture().with_shell_burn_prob(-0.5).with_the_main_salvo_firing(6).build()).expect("geometry");
+        assert_eq!(out.he_shells_fired, 0);
+        assert_eq!(out.shells_on_target, 1);
+        assert_eq!(out.exclusions[&ExclusionReason::ShellCannotBurn], 1);
     }
 
     /// A hit the parser never matched to a salvo names no shell, and its
@@ -2353,10 +2701,10 @@ mod tests {
     /// The server lights extra burn nodes on death for visual effect, so a hit
     /// at or after the victim died proves nothing.
     #[test]
-    fn a_hit_at_or_after_the_victims_death_is_excluded() {
+    fn a_hit_at_or_after_the_victims_death_is_not_a_trial() {
         let out = analyze(&fixture().with_the_victim_dead_at(GameClock(90.0)).build()).expect("geometry");
         assert_eq!(out.eligible_hits, 0);
-        assert_eq!(out.exclusions[&ExclusionReason::VictimDead], 1);
+        assert_eq!(out.not_applicable, 1);
     }
 
     /// Outside the recording client's AOI nothing about the victim is known,
@@ -2433,23 +2781,40 @@ mod tests {
     }
 
     /// A victim whose build we could not read might have Fire Prevention
-    /// Expert, so a node-2 hit on it might have been impossible. Unknown
-    /// refuses alongside Learned; only a build we actually read admits.
+    /// Expert, so a hit in the merged node might have rolled against either
+    /// bit and the already-burning test has no section to read.
     #[test]
-    fn an_unresolved_victim_build_refuses_a_node_two_hit() {
+    fn an_unresolved_victim_build_refuses_a_merged_node_hit() {
         let out = analyze(&fixture().with_an_unresolved_victim_build().hitting_section(2).build()).expect("geometry");
         assert_eq!(out.eligible_hits, 0);
-        // Its own bucket: the hit was refused for want of proof, and reporting
-        // it under the suppression key would tell the reader the victim had
-        // Fire Prevention Expert when nothing established that.
-        assert_eq!(out.exclusions[&ExclusionReason::SectionSuppressibleVictimBuildUnknown], 1);
-        assert!(!out.exclusions.contains_key(&ExclusionReason::SectionSuppressedByFirePrevention));
+        assert_eq!(out.exclusions[&ExclusionReason::MergedSectionVictimBuildUnknown], 1);
 
-        // The suppression is node 2 only; other sections are unaffected by an
+        // The merge is node 2 only; other sections are unaffected by an
         // unresolved build.
         let elsewhere =
             analyze(&fixture().with_an_unresolved_victim_build().hitting_section(0).build()).expect("geometry");
         assert_eq!(elsewhere.eligible_hits, 1);
+    }
+
+    /// A merged-node hit on a victim whose build we could not read may have lit
+    /// either bit, so it contests a coincident trial in the merge target as well
+    /// as one in the node it landed in. Crediting that trial with the ribbon
+    /// would add a fire to the numerator that this shell may have set.
+    #[test]
+    fn an_unresolved_merged_node_hit_contests_both_bits() {
+        let out = analyze(
+            &fixture()
+                .with_an_unresolved_victim_build()
+                .hitting_section(1)
+                .also_hitting_section_at(2, 0.0)
+                .server_lights_section(1)
+                .build(),
+        )
+        .expect("geometry");
+        assert_eq!(out.eligible_hits, 0);
+        assert_eq!(out.exclusions[&ExclusionReason::MergedSectionVictimBuildUnknown], 1);
+        assert_eq!(out.exclusions[&ExclusionReason::AmbiguousWithAnotherHit], 1);
+        assert_eq!(out.unattributed_fires, 1);
     }
 
     /// An unresolved fate leaves both "this hit landed after it died" and "this

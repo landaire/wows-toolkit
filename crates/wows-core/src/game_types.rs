@@ -2910,16 +2910,18 @@ impl fmt::Display for DamageStatCategory {
 /// Payload-free counterpart of `HitEligibility`, used as the exclusion-tally
 /// key. Separate from `HitEligibility` because the tally counts reasons, not
 /// instances, and `BurnNodeIndex`/`ShellHitType` payloads would fragment it.
+///
+/// Only refusals appear here. A hit the model was never asked to judge, such as
+/// one landing on a ship that was already dead, is outside the population
+/// rather than excluded from it and is counted apart from this tally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ExclusionReason {
     SectionAlreadyBurning,
-    SectionSuppressedByFirePrevention,
-    SectionSuppressibleVictimBuildUnknown,
+    MergedSectionVictimBuildUnknown,
     DamageControlActive,
     DamageControlUnknown,
     ObservationGap,
     ConsumableModelUnreliable,
-    VictimDead,
     VictimFateUnknown,
     ShellCannotBurn,
     NotMainBattery,
