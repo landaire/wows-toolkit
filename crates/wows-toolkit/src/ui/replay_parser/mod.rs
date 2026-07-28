@@ -1592,21 +1592,37 @@ impl UiReport {
             return;
         }
 
-        // Monospace because the headline's second line is column-aligned under
-        // the first, and `on_hover_ui` because building the breakdown walks
-        // GameParams and the translation tables for every formula step, which a
-        // hover text argument would pay on every frame the row is open.
-        let response = ui
-            .add(
-                Label::new(RichText::new(fire_chance_headline_lines(fire_chance).join("\n")).monospace())
-                    .sense(Sense::click()),
-            )
+        // Laid out rather than space-padded: the figures carry their own
+        // emphasis and the per-ship table gets real columns, so neither depends
+        // on a fixed-width font to line up. The hover keeps monospace because a
+        // formula block genuinely is a fixed-width listing.
+        let headline = ui
+            .horizontal(|ui| {
+                match fire_chance.rate() {
+                    Some(rate) => {
+                        ui.label(RichText::new(format!("{:.1}%", rate * 100.0)).strong());
+                        ui.weak(format!("({} / {})", fire_chance.fires, fire_chance.eligible_hits));
+                    }
+                    None => {
+                        ui.weak(t!("ui.replay.sections.fire_chance_no_eligible_hits"));
+                    }
+                }
+                if let Some(expected) = fire_chance.expected_rate() {
+                    ui.weak(format!(
+                        "{} {:.1}%",
+                        t!("ui.replay.sections.fire_chance_expected"),
+                        expected * 100.0
+                    ));
+                }
+            })
+            .response
+            .interact(Sense::click())
             .on_hover_ui(|ui| {
                 ui.label(RichText::new(self.fire_chance_hover_text(fire_chance)).monospace());
                 ui.label(t!("ui.replay.sections.fire_chance_click_to_copy"));
             });
 
-        if response.clicked() {
+        if headline.clicked() {
             ui.ctx().copy_text(self.fire_chance_copy_text(fire_chance));
             let _ = self.background_task_sender.as_ref().map(|sender| {
                 sender.send(BackgroundTask {
@@ -1620,11 +1636,34 @@ impl UiReport {
 
         if !fire_chance.per_ship.is_empty() {
             egui::CollapsingHeader::new(t!("ui.replay.sections.fire_chance_per_ship")).show(ui, |ui| {
-                for ship in sorted_per_ship(fire_chance) {
-                    // Monospace: the row is padded into columns, which a
-                    // proportional font cannot line up.
-                    ui.label(RichText::new(fire_chance_per_ship_line(ship)).monospace());
-                }
+                egui::Grid::new(ui.id().with("fire_chance_per_ship"))
+                    .num_columns(4)
+                    .spacing([12.0, 2.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for ship in sorted_per_ship(fire_chance) {
+                            ui.label(self.localize_ship_name(ship));
+                            match ship.rate() {
+                                Some(rate) => {
+                                    ui.label(format!("{:.1}%", rate * 100.0));
+                                    ui.weak(format!("({} / {})", ship.fires, ship.eligible_hits));
+                                }
+                                None => {
+                                    ui.weak(t!("ui.replay.sections.fire_chance_no_eligible_hits"));
+                                    ui.label("");
+                                }
+                            }
+                            match ship.expected_rate() {
+                                Some(expected) => ui.weak(format!(
+                                    "{} {:.1}%",
+                                    t!("ui.replay.sections.fire_chance_expected"),
+                                    expected * 100.0
+                                )),
+                                None => ui.label(""),
+                            };
+                            ui.end_row();
+                        }
+                    });
             });
         }
     }
@@ -1642,6 +1681,26 @@ impl UiReport {
     /// Best-effort localized name for a formula step's source identifier.
     /// Tries an equipped upgrade or signal's GameParams entry first, then a
     /// crew skill's translation keys (a skill carries no `Param` of its own,
+    /// A victim ship's display name, translated from its GameParams index.
+    ///
+    /// The insights crate carries no translations, so it reports the raw index
+    /// (`PWSB010_Thor`). Falls back to the name it recorded when the index does
+    /// not resolve against this replay's build.
+    fn localize_ship_name(&self, ship: &PerShipFireChance) -> String {
+        let metadata_provider = self.metadata_provider();
+        <GameMetadataProvider as GameParamProvider>::game_param_by_name(&metadata_provider, &ship.victim_ship_index)
+            .and_then(|param| {
+                let ctx = wowsunpack::game_params::describe::DescribeContext {
+                    resource_loader: metadata_provider.as_ref(),
+                    version: &self.version,
+                    species: None,
+                    param_name: None,
+                };
+                param.display_name(&ctx)
+            })
+            .unwrap_or_else(|| ship.victim_ship_name.clone())
+    }
+
     /// so it cannot be found the first way); falls back to the raw identifier
     /// when neither resolves.
     fn localize_modifier_source(&self, source: &str) -> String {
@@ -1688,7 +1747,9 @@ impl UiReport {
             lines.push(String::new());
             lines.push(t!("ui.replay.sections.fire_chance_per_ship").into_owned());
             lines.extend(
-                sorted_per_ship(fire_chance).into_iter().map(|ship| format!("  {}", fire_chance_per_ship_line(ship))),
+                sorted_per_ship(fire_chance)
+                    .into_iter()
+                    .map(|ship| format!("  {}", fire_chance_per_ship_line(ship, &|s| self.localize_ship_name(s)))),
             );
         }
         lines.join("\n")
@@ -5123,8 +5184,8 @@ fn fire_chance_headline_text(fire_chance: &EffectiveFireChance) -> String {
 }
 
 /// The headline plus the optional "expected" line beneath it, shared verbatim
-/// between the on-screen block and the copy-to-clipboard text so the two
-/// cannot drift apart.
+/// for the copy-to-clipboard and hover text. The on-screen block lays the same
+/// figures out with egui widgets instead, so this is the plain-text form.
 ///
 /// The expected line renders `expected_rate`, the model's per-hit chance, which
 /// is the only form comparable against the observed rate above it;
@@ -5145,11 +5206,12 @@ fn sorted_per_ship(fire_chance: &EffectiveFireChance) -> Vec<&PerShipFireChance>
     ships
 }
 
-/// One target-ship row for the per-ship expander. Same zero-sample rule as the
-/// aggregate headline: `PerShipFireChance::rate` is `None` over zero eligible
+/// One target-ship row in plain text, for the copied breakdown. The on-screen
+/// expander lays these out as a grid. Same zero-sample rule as the aggregate
+/// headline: `PerShipFireChance::rate` is `None` over zero eligible
 /// hits, which is unknown rather than a zero rate. The expected column is
 /// `expected_rate` for the same reason as the headline's.
-fn fire_chance_per_ship_line(ship: &PerShipFireChance) -> String {
+fn fire_chance_per_ship_line(ship: &PerShipFireChance, localize_ship: &dyn Fn(&PerShipFireChance) -> String) -> String {
     let rate_text = match ship.rate() {
         Some(rate) => format!("{:.1}%  ({} / {})", rate * 100.0, ship.fires, ship.eligible_hits),
         None => t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned(),
@@ -5157,11 +5219,11 @@ fn fire_chance_per_ship_line(ship: &PerShipFireChance) -> String {
     match ship.expected_rate() {
         Some(expected) => format!(
             "{}   {rate_text}   {} {:.1}%",
-            ship.victim_ship_name,
+            localize_ship(ship),
             t!("ui.replay.sections.fire_chance_expected"),
             expected * 100.0
         ),
-        None => format!("{}   {rate_text}", ship.victim_ship_name),
+        None => format!("{}   {rate_text}", localize_ship(ship)),
     }
 }
 
@@ -5543,13 +5605,13 @@ mod fire_chance_render_tests {
     #[test]
     fn per_ship_line_includes_expected_when_present() {
         let s = ship("Zao", 12, 2, Some(1.656));
-        assert_eq!(fire_chance_per_ship_line(&s), "Zao   16.7%  (2 / 12)   expected 13.8%");
+        assert_eq!(fire_chance_per_ship_line(&s, &|s: &PerShipFireChance| s.victim_ship_name.clone()), "Zao   16.7%  (2 / 12)   expected 13.8%");
     }
 
     #[test]
     fn per_ship_line_omits_expected_when_absent() {
         let s = ship("Iowa", 11, 1, None);
-        assert_eq!(fire_chance_per_ship_line(&s), "Iowa   9.1%  (1 / 11)");
+        assert_eq!(fire_chance_per_ship_line(&s, &|s: &PerShipFireChance| s.victim_ship_name.clone()), "Iowa   9.1%  (1 / 11)");
     }
 
     /// Same zero-sample rule as the aggregate headline, at the per-ship level,
@@ -5557,7 +5619,7 @@ mod fire_chance_render_tests {
     #[test]
     fn per_ship_line_over_zero_eligible_hits_has_no_percentage() {
         let s = ship("Fletcher", 0, 0, Some(0.0));
-        let line = fire_chance_per_ship_line(&s);
+        let line = fire_chance_per_ship_line(&s, &|s: &PerShipFireChance| s.victim_ship_name.clone());
         assert!(!line.contains('%'), "expected no percentage in {line:?}");
         assert_eq!(line, "Fletcher   no eligible hits");
     }
