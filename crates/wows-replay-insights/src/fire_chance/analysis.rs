@@ -594,14 +594,8 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
                 VictimFate::DiedAt(clock) => Some(clock),
                 VictimFate::Survived | VictimFate::Unknown => None,
             };
-            let track = VictimTrack::build(
-                *entity,
-                input.burn_state_changes,
-                activations,
-                &victim.consumables,
-                input.presence,
-                died_at,
-            );
+            let track =
+                VictimTrack::build(*entity, input.burn_state_changes, activations, &victim.consumables, died_at);
             (*entity, track)
         })
         .collect();
@@ -882,7 +876,7 @@ fn classify(
     if track.cooldown_unreliable() {
         return HitEligibility::ConsumableModelUnreliable;
     }
-    match track.damage_control_at(hit.clock) {
+    match track.damage_control_at(input.presence, hit.clock) {
         DamageControlState::Running => return HitEligibility::DamageControlActive,
         DamageControlState::Unknown => return HitEligibility::DamageControlUnknown,
         DamageControlState::Down => {}

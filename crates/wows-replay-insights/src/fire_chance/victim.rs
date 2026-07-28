@@ -4,9 +4,9 @@
 //! sections were already burning immediately before a hit's clock, and was
 //! Damage Control Party running then. Both are read from logs that are only
 //! complete over a range the caller has separately confirmed was
-//! continuously observed (`PresenceLog::continuously_observed`); this module
-//! does not check that itself, except for the one presence-derived rule
-//! inside `damage_control_at` documented below.
+//! continuously observed (`PresenceLog::continuously_observed`);
+//! `burn_mask_before` does not check that itself, while `damage_control_at`
+//! takes the log and checks the one lead-in range its own inference needs.
 
 use wows_battle_world::resources::BurnStateChange;
 use wows_battle_world::resources::PresenceLog;
@@ -26,6 +26,9 @@ const COOLDOWN_TOLERANCE_SECS: f32 = 1.0;
 /// reconstructed from the whole-match logs and narrowed to one ship.
 #[derive(Debug)]
 pub struct VictimTrack {
+    /// The ship this track was narrowed to. Kept so `damage_control_at` can
+    /// ask the presence log about this victim at query time.
+    victim: EntityId,
     /// Burn-node bitmask changes for this victim, sorted ascending by clock.
     changes: Vec<BurnStateChange>,
     /// Observed Damage Control Party activations, sorted ascending by
@@ -38,20 +41,11 @@ pub struct VictimTrack {
     /// reload model.
     dcp_reload_secs: Option<f32>,
     /// Work time for the same slot, again with build modifiers applied. Rule 4
-    /// needs it to know how long after a victim came into view an unseen
-    /// earlier activation could still be covering the query clock. `None` when
+    /// needs it to size the lead-in before the query clock over which an
+    /// unobserved activation could still be covering that clock. `None` when
     /// no Damage Control Party slot resolved, which leaves that lead-in
     /// unbounded and so blocks rule 4 entirely.
     dcp_work_time_secs: Option<f32>,
-    /// Earliest clock this victim was observed from, set only when that
-    /// observation is a single presence window still open (`left: None`):
-    /// the one case where "unbroken since" holds for any future query clock
-    /// without also needing the full window list at query time. Any gap, any
-    /// second window, or a window that has since closed all clear this to
-    /// `None`, which is conservative (queries inside a closed early window
-    /// report `Unknown` instead of the `Down` they could technically prove)
-    /// but never turns a real gap into a false `Down`.
-    first_seen: Option<GameClock>,
     cooldown_unreliable: bool,
     /// True when any activation observed for this victim (of any
     /// consumable, not just the ones filtered into `dcp`) could not be
@@ -84,7 +78,6 @@ impl VictimTrack {
         changes: &[BurnStateChange],
         activations: &[ActiveConsumable],
         inventory: &[ConsumableInventory],
-        presence: &PresenceLog,
         died_at: Option<GameClock>,
     ) -> VictimTrack {
         let mut changes: Vec<BurnStateChange> = changes
@@ -109,17 +102,12 @@ impl VictimTrack {
             dcp.windows(2).any(|pair| (pair[1].activated_at - pair[0].activated_at) < reload - COOLDOWN_TOLERANCE_SECS)
         });
 
-        let first_seen = presence.windows.get(&victim).and_then(|windows| match windows.as_slice() {
-            [only] if only.left.is_none() => Some(only.entered),
-            _ => None,
-        });
-
         VictimTrack {
+            victim,
             changes,
             dcp,
             dcp_reload_secs,
             dcp_work_time_secs,
-            first_seen,
             cooldown_unreliable,
             unrecognized_activation,
         }
@@ -137,7 +125,7 @@ impl VictimTrack {
         idx.checked_sub(1).map(|i| self.changes[i].current).unwrap_or(0)
     }
 
-    pub fn damage_control_at(&self, clock: GameClock) -> DamageControlState {
+    pub fn damage_control_at(&self, presence: &PresenceLog, clock: GameClock) -> DamageControlState {
         let running = self.dcp.iter().any(|a| clock >= a.activated_at && clock <= a.activated_at + a.duration);
         if running {
             return DamageControlState::Running;
@@ -164,21 +152,22 @@ impl VictimTrack {
         }
 
         // Activations are broadcast for any entity in the recording client's
-        // AOI, not just the self ship. So a victim continuously observed from
-        // its first presence window through `clock`, with no activation
-        // covering `clock` and none whose cooldown could still be running,
-        // provably never used Damage Control Party in that span: an
-        // activation would have produced an entry in `dcp`.
+        // AOI, not just the self ship. An activation still covering `clock`
+        // must have started within `work_time` of it, so a victim observed
+        // without a break across the whole of `[clock - work_time, clock]`
+        // provably has none running: one that started in there would have
+        // produced an entry in `dcp`, and the check above found none covering
+        // `clock`.
         //
-        // That argument only covers activations inside the observed span. One
-        // fired a moment before the ship came into view is invisible here and
-        // still covers the first `work_time` seconds of the span, which is the
-        // ordinary case of a ship popping Damage Control Party on a fire and
-        // being spotted seconds later. Nothing bounds that lead-in without a
-        // work time, so a ship with no resolvable Damage Control Party slot
-        // stays unknown rather than being read as one that cannot use it.
+        // The lead-in is what makes this a range query rather than a point
+        // one. A ship that popped Damage Control Party a moment before coming
+        // into view is invisible here and still covered for `work_time`, which
+        // is the ordinary case of a ship burning, dousing, and being spotted
+        // seconds later. Nothing bounds that lead-in without a work time, so a
+        // ship with no resolvable Damage Control Party slot stays unknown
+        // rather than being read as one that cannot use it.
         if let Some(work_time) = self.dcp_work_time_secs
-            && self.first_seen.is_some_and(|seen| clock >= seen + work_time)
+            && presence.continuously_observed(self.victim, clock - work_time, clock)
         {
             return DamageControlState::Down;
         }
@@ -214,7 +203,7 @@ mod tests {
             .iter()
             .map(|&(clock, previous, current)| BurnStateChange { victim, clock, previous, current })
             .collect();
-        VictimTrack::build(victim, &changes, &[], &[], &PresenceLog::default(), died_at)
+        VictimTrack::build(victim, &changes, &[], &[], died_at)
     }
 
     /// A single Damage Control Party inventory slot with the given reload.
@@ -234,7 +223,7 @@ mod tests {
         }
     }
 
-    fn track_with_dcp(activations: &[(GameClock, f32)], reload_time: f32, presence: PresenceLog) -> VictimTrack {
+    fn track_with_dcp(activations: &[(GameClock, f32)], reload_time: f32) -> VictimTrack {
         let victim = victim_id();
         let activations: Vec<ActiveConsumable> = activations
             .iter()
@@ -246,7 +235,7 @@ mod tests {
             })
             .collect();
         let inventory = vec![dcp_inventory(reload_time)];
-        VictimTrack::build(victim, &[], &activations, &inventory, &presence, None)
+        VictimTrack::build(victim, &[], &activations, &inventory, None)
     }
 
     /// Observed from `entered`, with entity updates still arriving as late as
@@ -275,6 +264,15 @@ mod tests {
             ],
         );
         log.note_seen(victim_id(), last_seen);
+        log
+    }
+
+    /// Observed over one window that has since closed, the shape a despawn or
+    /// a long update silence leaves behind.
+    fn observed_then_left(entered: GameClock, left: GameClock) -> PresenceLog {
+        let mut log = PresenceLog::default();
+        log.windows.insert(victim_id(), vec![PresenceWindow { entered, left: Some(left) }]);
+        log.note_seen(victim_id(), left);
         log
     }
 
@@ -326,23 +324,61 @@ mod tests {
     /// provably down, because the ship cannot reactivate inside reload_time.
     #[test]
     fn dcp_is_running_then_provably_down_through_the_cooldown() {
-        let track = track_with_dcp(&[(GameClock(100.0), 15.0)], 80.0, observed(GameClock(0.0), GameClock(300.0)));
-        assert_eq!(track.damage_control_at(GameClock(105.0)), DamageControlState::Running);
-        assert_eq!(track.damage_control_at(GameClock(120.0)), DamageControlState::Down);
-        assert_eq!(track.damage_control_at(GameClock(175.0)), DamageControlState::Down);
+        let presence = observed(GameClock(0.0), GameClock(300.0));
+        let track = track_with_dcp(&[(GameClock(100.0), 15.0)], 80.0);
+        assert_eq!(track.damage_control_at(&presence, GameClock(105.0)), DamageControlState::Running);
+        assert_eq!(track.damage_control_at(&presence, GameClock(120.0)), DamageControlState::Down);
+        assert_eq!(track.damage_control_at(&presence, GameClock(175.0)), DamageControlState::Down);
     }
 
     /// Past the cooldown, a continuously observed ship is still known: we
     /// would have seen any activation. Continuity is what makes this safe.
     #[test]
     fn dcp_past_cooldown_is_down_while_observed_and_unknown_across_a_gap() {
-        let observed = observed(GameClock(0.0), GameClock(300.0));
-        let track = track_with_dcp(&[(GameClock(100.0), 15.0)], 80.0, observed);
-        assert_eq!(track.damage_control_at(GameClock(300.0)), DamageControlState::Down);
+        let track = track_with_dcp(&[(GameClock(100.0), 15.0)], 80.0);
+        let presence = observed(GameClock(0.0), GameClock(300.0));
+        assert_eq!(track.damage_control_at(&presence, GameClock(300.0)), DamageControlState::Down);
 
+        // The blind spot sits inside the work-time lead-in ending at the
+        // query, so an activation fired in it could still be running.
+        let gapped = observed_with_gap(GameClock(0.0), GameClock(297.0), GameClock(299.0), GameClock(300.0));
+        assert_eq!(track.damage_control_at(&gapped, GameClock(300.0)), DamageControlState::Unknown);
+    }
+
+    /// The lead-in is a range query, so only a break inside it matters. A gap
+    /// that closed well before the lead-in started leaves the conclusion
+    /// intact: nothing that happened in it can still be running at the query.
+    #[test]
+    fn a_gap_that_ended_before_the_lead_in_still_proves_down() {
+        let track = track_with_dcp(&[], 80.0);
         let gapped = observed_with_gap(GameClock(0.0), GameClock(200.0), GameClock(280.0), GameClock(300.0));
-        let track = track_with_dcp(&[(GameClock(100.0), 15.0)], 80.0, gapped);
-        assert_eq!(track.damage_control_at(GameClock(300.0)), DamageControlState::Unknown);
+        assert_eq!(track.damage_control_at(&gapped, GameClock(300.0)), DamageControlState::Down);
+    }
+
+    /// A window that has since closed still certifies the span it covered.
+    /// Windows close routinely, on despawn and on a long update silence, so a
+    /// rule that only accepted a single still-open window refused nearly every
+    /// real victim.
+    #[test]
+    fn a_closed_window_covering_the_lead_in_proves_down() {
+        let track = track_with_dcp(&[], 80.0);
+        let presence = observed_then_left(GameClock(0.0), GameClock(280.0));
+        assert_eq!(track.damage_control_at(&presence, GameClock(200.0)), DamageControlState::Down);
+
+        // Same for the earlier of several windows: the query does not have to
+        // land in the latest one.
+        let gapped = observed_with_gap(GameClock(0.0), GameClock(100.0), GameClock(150.0), GameClock(300.0));
+        assert_eq!(track.damage_control_at(&gapped, GameClock(90.0)), DamageControlState::Down);
+        assert_eq!(track.damage_control_at(&gapped, GameClock(250.0)), DamageControlState::Down);
+    }
+
+    /// An open window reaches only as far as the last update received, so a
+    /// query past that has not been observed at all.
+    #[test]
+    fn a_query_past_the_last_update_is_unknown() {
+        let track = track_with_dcp(&[], 80.0);
+        let presence = observed(GameClock(0.0), GameClock(300.0));
+        assert_eq!(track.damage_control_at(&presence, GameClock(400.0)), DamageControlState::Unknown);
     }
 
     /// Two activations closer than reload_time mean the ship refunds charges
@@ -350,14 +386,11 @@ mod tests {
     /// everything outside an observed work window becomes Unknown.
     #[test]
     fn a_refund_ship_is_detected_and_stops_cooldown_inference() {
-        let track = track_with_dcp(
-            &[(GameClock(100.0), 15.0), (GameClock(130.0), 15.0)],
-            80.0,
-            observed(GameClock(0.0), GameClock(300.0)),
-        );
+        let presence = observed(GameClock(0.0), GameClock(300.0));
+        let track = track_with_dcp(&[(GameClock(100.0), 15.0), (GameClock(130.0), 15.0)], 80.0);
         assert!(track.cooldown_unreliable());
-        assert_eq!(track.damage_control_at(GameClock(135.0)), DamageControlState::Running);
-        assert_eq!(track.damage_control_at(GameClock(300.0)), DamageControlState::Unknown);
+        assert_eq!(track.damage_control_at(&presence, GameClock(135.0)), DamageControlState::Running);
+        assert_eq!(track.damage_control_at(&presence, GameClock(300.0)), DamageControlState::Unknown);
     }
 
     /// A gap just under reload_time, within the jitter tolerance, must NOT
@@ -366,11 +399,7 @@ mod tests {
     /// reasonable tolerance would catch it.
     #[test]
     fn a_near_reload_gap_within_jitter_tolerance_stays_reliable() {
-        let track = track_with_dcp(
-            &[(GameClock(100.0), 15.0), (GameClock(179.5), 15.0)],
-            80.0,
-            observed(GameClock(0.0), GameClock(300.0)),
-        );
+        let track = track_with_dcp(&[(GameClock(100.0), 15.0), (GameClock(179.5), 15.0)], 80.0);
         assert!(!track.cooldown_unreliable());
     }
 
@@ -400,8 +429,9 @@ mod tests {
     /// the start, has definitely not used it.
     #[test]
     fn never_activated_and_always_observed_is_down() {
-        let track = track_with_dcp(&[], 80.0, observed(GameClock(0.0), GameClock(300.0)));
-        assert_eq!(track.damage_control_at(GameClock(200.0)), DamageControlState::Down);
+        let track = track_with_dcp(&[], 80.0);
+        let presence = observed(GameClock(0.0), GameClock(300.0));
+        assert_eq!(track.damage_control_at(&presence, GameClock(200.0)), DamageControlState::Down);
     }
 
     /// Continuity proves nothing without a work time to bound how long an
@@ -412,8 +442,9 @@ mod tests {
     #[test]
     fn no_dcp_slot_leaves_the_state_unknown() {
         let victim = victim_id();
-        let track = VictimTrack::build(victim, &[], &[], &[], &observed(GameClock(0.0), GameClock(300.0)), None);
-        assert_eq!(track.damage_control_at(GameClock(200.0)), DamageControlState::Unknown);
+        let presence = observed(GameClock(0.0), GameClock(300.0));
+        let track = VictimTrack::build(victim, &[], &[], &[], None);
+        assert_eq!(track.damage_control_at(&presence, GameClock(200.0)), DamageControlState::Unknown);
     }
 
     /// A ship that popped Damage Control Party just before entering AOI is
@@ -422,10 +453,11 @@ mod tests {
     /// unknown; past it, continuity proves Down.
     #[test]
     fn the_work_time_lead_in_after_entering_aoi_is_unknown() {
-        let track = track_with_dcp(&[], 80.0, observed(GameClock(100.0), GameClock(300.0)));
-        assert_eq!(track.damage_control_at(GameClock(102.0)), DamageControlState::Unknown);
-        assert_eq!(track.damage_control_at(GameClock(104.9)), DamageControlState::Unknown);
-        assert_eq!(track.damage_control_at(GameClock(105.0)), DamageControlState::Down);
+        let track = track_with_dcp(&[], 80.0);
+        let presence = observed(GameClock(100.0), GameClock(300.0));
+        assert_eq!(track.damage_control_at(&presence, GameClock(102.0)), DamageControlState::Unknown);
+        assert_eq!(track.damage_control_at(&presence, GameClock(104.9)), DamageControlState::Unknown);
+        assert_eq!(track.damage_control_at(&presence, GameClock(105.0)), DamageControlState::Down);
     }
 
     /// An activation the decoder could not name (thin or shifted per-version
@@ -444,14 +476,8 @@ mod tests {
             usage_params: None,
         }];
         let inventory = vec![dcp_inventory(80.0)];
-        let track = VictimTrack::build(
-            victim,
-            &[],
-            &activations,
-            &inventory,
-            &observed(GameClock(0.0), GameClock(300.0)),
-            None,
-        );
-        assert_eq!(track.damage_control_at(GameClock(200.0)), DamageControlState::Unknown);
+        let presence = observed(GameClock(0.0), GameClock(300.0));
+        let track = VictimTrack::build(victim, &[], &activations, &inventory, None);
+        assert_eq!(track.damage_control_at(&presence, GameClock(200.0)), DamageControlState::Unknown);
     }
 }
