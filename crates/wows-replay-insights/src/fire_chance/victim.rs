@@ -101,6 +101,10 @@ impl VictimTrack {
     /// its own hits ineligible.
     pub fn burn_mask_before(&self, clock: GameClock) -> u16 {
         let idx = self.changes.partition_point(|c| c.clock < clock);
+        // No prior change is 0, not a missing-data sentinel: BurnStateLog logs
+        // a baseline transition from 0 on first sighting, so within a range
+        // the caller has confirmed continuously observed, "no change yet"
+        // and "unburned" are the same fact.
         idx.checked_sub(1).map(|i| self.changes[i].current).unwrap_or(0)
     }
 
