@@ -2,9 +2,12 @@
 //!
 //! Wraps an rkyv-serialized `Vec<Param>` payload with a small header so the
 //! reader can detect and reject caches written by an older parser. Bump
-//! [`FORMAT_VERSION`] whenever the parsing logic in this crate changes in a
-//! way that affects the cached payload but doesn't change the rkyv schema
-//! (e.g. fixing a parser bug that was silently dropping fields).
+//! [`FORMAT_VERSION`] whenever the cached payload changes shape or content:
+//! both parser-logic changes that leave the rkyv schema alone (e.g. fixing a
+//! bug that silently dropped fields) and changes to the cached types
+//! themselves. Schema changes usually also make rkyv validation fail, but
+//! that rejection is incidental, so the header check is what the reader is
+//! meant to rely on.
 
 use std::fs;
 use std::io;
@@ -14,11 +17,11 @@ use crate::game_params::types::Param;
 
 const MAGIC: [u8; 4] = *b"WUGP";
 
-/// Bump on parser-logic changes that would invalidate previously-written
-/// caches. New writes always carry the latest version; reads that see an
-/// older or unknown version return `None`, prompting the caller to
-/// re-parse from the source VFS.
-pub const FORMAT_VERSION: u32 = 14;
+/// Bump on any change that invalidates previously-written caches, whether it
+/// comes from the parser or from the cached types. New writes always carry
+/// the latest version; reads that see an older or unknown version return
+/// `None`, prompting the caller to re-parse from the source VFS.
+pub const FORMAT_VERSION: u32 = 15;
 
 const HEADER_LEN: usize = MAGIC.len() + std::mem::size_of::<u32>();
 
@@ -80,7 +83,7 @@ mod tests {
     use super::FORMAT_VERSION;
 
     #[test]
-    fn format_version_is_14() {
-        assert_eq!(FORMAT_VERSION, 14);
+    fn format_version_is_15() {
+        assert_eq!(FORMAT_VERSION, 15);
     }
 }
