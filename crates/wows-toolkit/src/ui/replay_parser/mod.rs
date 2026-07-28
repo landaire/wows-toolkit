@@ -1609,11 +1609,7 @@ impl UiReport {
                     }
                 }
                 if let Some(expected) = fire_chance.expected_rate() {
-                    ui.weak(format!(
-                        "{} {:.1}%",
-                        t!("ui.replay.sections.fire_chance_expected"),
-                        expected * 100.0
-                    ));
+                    ui.weak(format!("{} {:.1}%", t!("ui.replay.sections.fire_chance_expected"), expected * 100.0));
                 }
             })
             .response
@@ -5570,13 +5566,19 @@ mod fire_chance_render_tests {
     #[test]
     fn per_ship_line_includes_expected_when_present() {
         let s = ship("Zao", 12, 2, Some(1.656));
-        assert_eq!(fire_chance_per_ship_line(&s, &|s: &PerShipFireChance| s.victim_ship_name.clone()), "Zao   16.7%  (2 / 12)   expected 13.8%");
+        assert_eq!(
+            fire_chance_per_ship_line(&s, &|s: &PerShipFireChance| s.victim_ship_name.clone()),
+            "Zao   16.7%  (2 / 12)   expected 13.8%"
+        );
     }
 
     #[test]
     fn per_ship_line_omits_expected_when_absent() {
         let s = ship("Iowa", 11, 1, None);
-        assert_eq!(fire_chance_per_ship_line(&s, &|s: &PerShipFireChance| s.victim_ship_name.clone()), "Iowa   9.1%  (1 / 11)");
+        assert_eq!(
+            fire_chance_per_ship_line(&s, &|s: &PerShipFireChance| s.victim_ship_name.clone()),
+            "Iowa   9.1%  (1 / 11)"
+        );
     }
 
     /// Same zero-sample rule as the aggregate headline, at the per-ship level,
