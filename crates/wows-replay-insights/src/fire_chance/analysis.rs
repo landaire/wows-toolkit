@@ -210,9 +210,11 @@ pub struct PerShipFireChance {
     pub victim_ship_name: String,
     pub eligible_hits: u32,
     pub fires: u32,
-    /// Expected number of fires over this ship's eligible hits, i.e. the sum of
-    /// their per-hit chances, not a rate. [`Self::expected_rate`] is the rate
-    /// the observed one is comparable against.
+    /// Expected number of fires over this ship's eligible hits, not a rate.
+    /// Counted the way [`Self::fires`] is, saturating at one fire per section
+    /// per server tick, so the two are the same quantity; see
+    /// `expected_observable_fires`. [`Self::expected_rate`] is the rate the
+    /// observed one is comparable against.
     pub expected_fires: Option<f32>,
 }
 
@@ -241,9 +243,13 @@ impl PerShipFireChance {
         (self.eligible_hits > 0).then(|| self.fires as f32 / self.eligible_hits as f32)
     }
 
-    /// Per-hit expected fire chance against this ship, the model's counterpart
-    /// to [`Self::rate`]. Same zero-sample rule, and `None` as well whenever
-    /// [`Self::expected_fires`] is unknown.
+    /// Expected fires per eligible hit against this ship, the model's
+    /// counterpart to [`Self::rate`]. Same zero-sample rule, and `None` as well
+    /// whenever [`Self::expected_fires`] is unknown.
+    ///
+    /// Its numerator saturates exactly as the observed one does, so the two
+    /// rates describe the same event and their ratio is the model's error
+    /// rather than an artifact of how densely the shells landed.
     pub fn expected_rate(&self) -> Option<f32> {
         (self.eligible_hits > 0).then(|| Some(self.expected_fires? / self.eligible_hits as f32)).flatten()
     }
@@ -259,9 +265,10 @@ pub struct EffectiveFireChance {
     /// Attributed fires summed over every target ship, the counterpart count to
     /// [`Self::eligible_hits`].
     pub fires: u32,
-    /// Expected number of fires over the eligible hits, i.e. the sum of their
-    /// per-hit chances, not a rate. Comparable against [`Self::fires`], which is
-    /// also a count.
+    /// Expected number of fires over the eligible hits, not a rate. Comparable
+    /// against [`Self::fires`] because it is the same quantity: both saturate
+    /// at one fire per section per server tick, which is all a replay can show.
+    /// See `expected_observable_fires`.
     ///
     /// `None` on builds predating the modern modifier names, where the
     /// attacker formula does not apply. The observed counts are still valid.
@@ -647,7 +654,7 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
     let attribution = attribute(input, &counted);
 
     let per_ship = per_ship_breakdown(input, &counted, &attribution.fires_by_victim, formula_applies);
-    let expected_fires = formula_applies.then(|| sum_expected(&counted)).flatten();
+    let expected_fires = formula_applies.then(|| expected_observable_fires(&counted)).flatten();
     // Gated on the same fact as `expected_fires`. Without it the breakdown would
     // be rendered from `ModifierBundle::empty`, showing a player running IFHE,
     // Demolition Expert and Victor Lima the stock table's fire chance labelled
@@ -751,12 +758,52 @@ fn contested_by_another_hit(candidate: &Candidate<'_>, contenders: &[ContestingI
     })
 }
 
-/// Total expected fires over `candidates`.
+/// The key a set of shells has to share before they contest one section's one
+/// fire: one victim, one fire section, one server tick.
 ///
-/// `None` when any one hit's expectation could not be computed: summing the
-/// rest would silently treat the unknown as zero and understate the total.
-fn sum_expected(candidates: &[&Candidate<'_>]) -> Option<f32> {
-    candidates.iter().try_fold(0.0f32, |total, candidate| Some(total + candidate.expected?.get()))
+/// The tick is keyed on the clock's exact bits because every hit in one
+/// `ShotKills` packet carries that packet's clock unchanged, so two hits from
+/// the same tick are bit-identical and two from different ticks are not.
+type FireGroup = (EntityId, u8, u32);
+
+fn fire_group(candidate: &Candidate<'_>) -> FireGroup {
+    (candidate.victim, candidate.section.get(), candidate.hit.clock.seconds().to_bits())
+}
+
+/// Expected number of *observable* fires over `candidates`, saturating at one
+/// per section per tick.
+///
+/// That saturation is what makes this comparable against the observed count.
+/// The game rolls for fire per shell and independently, but a section can only
+/// be burning once, so several shells reaching one section in one server tick
+/// produce at most one fire between them however many of them rolled one. The
+/// observed side counts fires, which means it counts that one; a prediction of
+/// how many rolls succeeded would be a quantity the replay can never show.
+///
+/// Candidates are therefore grouped by victim, section and tick, and a group
+/// expects one minus the product of `1 - p` over its members, which is the
+/// chance at least one of its shells rolled a fire. The per-hit chances are
+/// multiplied out rather than assumed equal, since a group can mix shells. A
+/// group of one reduces to that hit's own chance, so where hits share no
+/// section and tick this is exactly the sum of the per-hit chances.
+///
+/// `None` when any one hit's expectation could not be computed: that leaves its
+/// group unknown and the total with it, where folding the rest in would
+/// silently treat the unknown as zero and understate both.
+fn expected_observable_fires(candidates: &[&Candidate<'_>]) -> Option<f32> {
+    // `BTreeMap` so the summation order does not depend on hash seeds. The
+    // running value is the chance the group has produced a fire so far, grown
+    // one shell at a time; a group of one leaves it at that shell's chance
+    // untouched by any arithmetic.
+    let mut groups: BTreeMap<FireGroup, Option<f32>> = BTreeMap::new();
+    for candidate in candidates {
+        let group = groups.entry(fire_group(candidate)).or_insert(Some(0.0));
+        *group = group.zip(candidate.expected).map(|(lit, chance)| {
+            let chance = chance.get();
+            lit + chance - lit * chance
+        });
+    }
+    groups.into_values().try_fold(0.0f32, |total, group| Some(total + group?))
 }
 
 /// Whether one of our shells could have started a fire where it landed.
@@ -1067,7 +1114,7 @@ fn per_ship_breakdown(
                 fires: entities.iter().filter_map(|e| fires_by_victim.get(e)).sum(),
                 // Same rule as the aggregate: one hit with an uncomputable
                 // expectation makes the row's total unknown, not smaller.
-                expected_fires: formula_applies.then(|| sum_expected(&group)).flatten(),
+                expected_fires: formula_applies.then(|| expected_observable_fires(&group)).flatten(),
             })
         })
         .collect()
@@ -2004,10 +2051,123 @@ mod tests {
         assert_eq!(ricochet.exclusions[&ExclusionReason::HitTypeDoesNotRoll], 1);
     }
 
+    /// One candidate, section and clock to itself, with a stated expectation.
+    fn candidate_with(hit: &ResolvedShotHit, section: u8, expected: Option<f32>) -> Candidate<'_> {
+        Candidate {
+            hit,
+            victim: hit.victim_entity_id,
+            section: BurnNodeIndex::new(section).expect("section in range"),
+            expected: expected.map(|chance| BurnChance::new(chance).expect("a probability")),
+            shell: main_shell_id(),
+        }
+    }
+
+    /// A group of one saturates at nothing, so the group's expectation is that
+    /// hit's own chance, to the bit.
+    #[test]
+    fn a_group_of_one_expects_exactly_that_hits_chance() {
+        let hits = [hit(victim_id(), main_shell_id(), HIT_CLOCK, 0, ShellHitType::Normal)];
+        let candidates = [candidate_with(&hits[0], 0, Some(0.37))];
+        let borrowed: Vec<&Candidate<'_>> = candidates.iter().collect();
+        assert_eq!(expected_observable_fires(&borrowed), Some(0.37));
+    }
+
+    /// Several shells on one section in one tick can only ever produce one
+    /// visible fire between them, so the group expects the chance that at least
+    /// one of them rolled, one minus the product of `1 - p` over the group,
+    /// which is strictly under their sum. The
+    /// chances are deliberately unequal, because the group is a product rather
+    /// than anything that assumes they match.
+    #[test]
+    fn a_group_expects_one_saturating_fire_over_differing_chances() {
+        let hits = [
+            hit(victim_id(), main_shell_id(), HIT_CLOCK, 0, ShellHitType::Normal),
+            hit(victim_id(), main_shell_id(), HIT_CLOCK, 0, ShellHitType::Normal),
+        ];
+        let candidates = [candidate_with(&hits[0], 0, Some(0.1)), candidate_with(&hits[1], 0, Some(0.2))];
+        let borrowed: Vec<&Candidate<'_>> = candidates.iter().collect();
+        let total = expected_observable_fires(&borrowed).expect("both chances known");
+        assert!((total - (1.0 - 0.9 * 0.8)).abs() < 1e-6, "got {total}");
+        assert!(total < 0.1 + 0.2, "got {total}, which is the naive sum or more");
+    }
+
+    /// Only shells sharing a victim, a section and a tick saturate against one
+    /// another. A different section, a different tick and a different victim
+    /// are each their own group, and separate groups add in full.
+    #[test]
+    fn separate_groups_add_their_expectations() {
+        let later = GameClock(HIT_CLOCK.0 + 20.0);
+        let hits = [
+            hit(victim_id(), main_shell_id(), HIT_CLOCK, 0, ShellHitType::Normal),
+            hit(victim_id(), main_shell_id(), HIT_CLOCK, 0, ShellHitType::Normal),
+            hit(victim_id(), main_shell_id(), HIT_CLOCK, 1, ShellHitType::Normal),
+            hit(victim_id(), main_shell_id(), later, 0, ShellHitType::Normal),
+            hit(other_victim_id(), main_shell_id(), HIT_CLOCK, 0, ShellHitType::Normal),
+        ];
+        let candidates = [
+            candidate_with(&hits[0], 0, Some(0.1)),
+            candidate_with(&hits[1], 0, Some(0.2)),
+            candidate_with(&hits[2], 1, Some(0.3)),
+            candidate_with(&hits[3], 0, Some(0.4)),
+            candidate_with(&hits[4], 0, Some(0.5)),
+        ];
+        let borrowed: Vec<&Candidate<'_>> = candidates.iter().collect();
+        let total = expected_observable_fires(&borrowed).expect("every chance known");
+        let shared_section = 1.0 - 0.9 * 0.8;
+        assert!((total - (shared_section + 0.3 + 0.4 + 0.5)).abs() < 1e-6, "got {total}");
+    }
+
+    /// An unknown chance leaves its whole group unknown, and one unknown group
+    /// leaves the total unknown. Folding the known members in would report a
+    /// number that silently treats the unknown as zero.
+    #[test]
+    fn an_unknown_chance_makes_its_group_and_the_total_unknown() {
+        let hits = [
+            hit(victim_id(), main_shell_id(), HIT_CLOCK, 0, ShellHitType::Normal),
+            hit(victim_id(), main_shell_id(), HIT_CLOCK, 0, ShellHitType::Normal),
+            hit(victim_id(), main_shell_id(), HIT_CLOCK, 1, ShellHitType::Normal),
+        ];
+        let candidates = [
+            candidate_with(&hits[0], 0, Some(0.1)),
+            candidate_with(&hits[1], 0, None),
+            candidate_with(&hits[2], 1, Some(0.2)),
+        ];
+        let borrowed: Vec<&Candidate<'_>> = candidates.iter().collect();
+        assert_eq!(expected_observable_fires(&borrowed), None);
+    }
+
+    /// Two shells of ours reaching one section in one tick expect one fire
+    /// between them, not two rolls, because one fire is all the replay can ever
+    /// show. The observed side counts the same quantity, which is what makes
+    /// the two comparable.
+    #[test]
+    fn same_tick_hits_on_one_section_expect_a_single_saturating_fire() {
+        let out = analyze(
+            &fixture()
+                .with_shell_burn_prob(0.12)
+                .with_victim_node_probability(0.6004)
+                .with_victim_burn_prob_modifier(0.9)
+                .hitting_section(0)
+                .also_hitting_section_at(0, 0.0)
+                .build(),
+        )
+        .expect("geometry");
+        let per_hit = 0.12 * 0.6004 * 0.9;
+        let saturating = 1.0 - (1.0 - per_hit) * (1.0 - per_hit);
+        assert_eq!(out.eligible_hits, 2);
+        let total = out.expected_fires.expect("expected");
+        assert!((total - saturating).abs() < 1e-6, "got {total}");
+        assert!(total < 2.0 * per_hit, "got {total}, which is the naive sum or more");
+        let ship = out.per_ship[0].expected_fires.expect("expected");
+        assert!((ship - saturating).abs() < 1e-6, "got {ship}");
+        assert!((out.per_ship[0].expected_rate().expect("rate") - saturating / 2.0).abs() < 1e-6);
+    }
+
     /// One hit's expectation is attacker chance times the victim's node
     /// probability times the victim's burnProb: 0.12 * 0.6004 * 0.9. Two hits
-    /// on such a victim expect twice that many fires at the same per-hit rate,
-    /// which is what tells a count apart from a rate.
+    /// landing on different sections are two groups, so they expect twice that
+    /// many fires at the same per-hit rate, which is what tells a count apart
+    /// from a rate.
     #[test]
     fn expected_fires_multiplies_both_halves_and_sums_over_hits() {
         let out = analyze(

@@ -131,6 +131,11 @@ struct Measurement {
     build: u32,
     eligible_hits: u32,
     fires: u32,
+    /// The model's expected fire count over the same trials, saturating at one
+    /// fire per section per tick exactly as `fires` does. `None` when the
+    /// attacker's modifiers could not be folded for this build, which is a
+    /// replay the observed/expected comparison simply has no expected side for.
+    expected_fires: Option<f32>,
     unattributed_fires: u32,
     /// Every `SetFire` ribbon increment the replay carried, counted straight
     /// off the ribbon log rather than from anything `analyze` returned. This is
@@ -139,11 +144,11 @@ struct Measurement {
     exclusions: BTreeMap<ExclusionReason, u32>,
     /// Attributed fires per victim ship index.
     fires_by_ship: BTreeMap<String, u64>,
-    /// `(ship index, eligible hits, fires)` per victim ship. The per-ship row
-    /// is the only level `EffectiveFireChance` states a rate at, so this is
-    /// what the corpus summary reduces when it wants a corpus-wide figure, and
-    /// what the printed distribution of sample sizes is taken over.
-    per_ship_trials: Vec<(String, u32, u32)>,
+    /// One row per victim ship. The per-ship row is the only level
+    /// `EffectiveFireChance` states a rate at, so this is what the corpus
+    /// summary reduces when it wants a corpus-wide figure, and what the printed
+    /// distribution of sample sizes is taken over.
+    per_ship_trials: Vec<ShipTrials>,
     /// Server-recorded fires per victim ship index, from the post-battle
     /// results. `None` when the replay carries no results blob or the build's
     /// constants table is missing, so the external check simply has nothing to
@@ -165,6 +170,14 @@ struct Measurement {
     total_windows: u32,
     /// What the game said we hit, against what our hit pipeline accounted for.
     reconciliation: HitReconciliation,
+}
+
+/// One victim ship's trials in one replay, observed against predicted.
+struct ShipTrials {
+    ship: String,
+    eligible_hits: u32,
+    fires: u32,
+    expected_fires: Option<f32>,
 }
 
 struct Corpus {
@@ -751,8 +764,16 @@ fn measure(
 
     let fires_by_ship =
         out.per_ship.iter().map(|ship| (ship.victim_ship_index.clone(), u64::from(ship.fires))).collect();
-    let per_ship_trials =
-        out.per_ship.iter().map(|ship| (ship.victim_ship_index.clone(), ship.eligible_hits, ship.fires)).collect();
+    let per_ship_trials = out
+        .per_ship
+        .iter()
+        .map(|ship| ShipTrials {
+            ship: ship.victim_ship_index.clone(),
+            eligible_hits: ship.eligible_hits,
+            fires: ship.fires,
+            expected_fires: ship.expected_fires,
+        })
+        .collect();
     let server_fires_by_ship =
         data.constants_json.as_ref().and_then(|constants| server_fires_by_ship(&report, constants));
 
@@ -761,6 +782,7 @@ fn measure(
         build,
         eligible_hits: out.eligible_hits,
         fires: out.fires,
+        expected_fires: out.expected_fires,
         unattributed_fires: out.unattributed_fires,
         set_fire_ribbons: report
             .ribbon_events()
@@ -954,12 +976,12 @@ fn print_rate_summary(corpus: &Corpus) {
     for measurement in &corpus.measurements {
         hits += u64::from(measurement.eligible_hits);
         fires += u64::from(measurement.fires);
-        for (_, eligible, ship_fires) in &measurement.per_ship_trials {
-            if *eligible == 0 {
+        for ship in &measurement.per_ship_trials {
+            if ship.eligible_hits == 0 {
                 continue;
             }
-            ship_rates.push(*ship_fires as f32 / *eligible as f32);
-            ship_hits.push(*eligible as f32);
+            ship_rates.push(ship.fires as f32 / ship.eligible_hits as f32);
+            ship_hits.push(ship.eligible_hits as f32);
         }
     }
     println!("eligible hits {hits}, attributed fires {fires}");
@@ -976,7 +998,61 @@ fn print_rate_summary(corpus: &Corpus) {
             quantiles(&mut ship_hits)
         );
     }
+    print_expected_summary(corpus);
 }
+
+/// Observed fires against the model's expectation, pooled and per target ship.
+///
+/// Both sides count the same event, a fire the replay could show, so their
+/// ratio is the model's error. It is pooled only over the replays and ships
+/// whose expectation is known: a replay whose modifiers would not fold has no
+/// expected side, and taking its observed fires into the ratio anyway would
+/// inflate the numerator against an expectation that never covered them.
+fn print_expected_summary(corpus: &Corpus) {
+    let (mut hits, mut fires, mut expected) = (0u64, 0u64, 0f64);
+    let mut without_expectation = 0u32;
+    for measurement in &corpus.measurements {
+        let Some(replay_expected) = measurement.expected_fires else {
+            without_expectation += 1;
+            continue;
+        };
+        hits += u64::from(measurement.eligible_hits);
+        fires += u64::from(measurement.fires);
+        expected += f64::from(replay_expected);
+    }
+    println!(
+        "expected fires {expected:.2} against {fires} observed over {hits} eligible hits \
+         ({without_expectation} replays carried no expectation)"
+    );
+    if expected > 0.0 {
+        println!("  pooled observed/expected {:.4}", fires as f64 / expected);
+    }
+
+    let mut per_ship: BTreeMap<&str, (u64, u64, f64)> = BTreeMap::new();
+    for measurement in &corpus.measurements {
+        for ship in &measurement.per_ship_trials {
+            let Some(ship_expected) = ship.expected_fires else { continue };
+            let entry = per_ship.entry(ship.ship.as_str()).or_insert((0, 0, 0.0));
+            entry.0 += u64::from(ship.eligible_hits);
+            entry.1 += u64::from(ship.fires);
+            entry.2 += f64::from(ship_expected);
+        }
+    }
+    let mut rows: Vec<(&str, u64, u64, f64)> =
+        per_ship.into_iter().map(|(ship, (hits, fires, expected))| (ship, hits, fires, expected)).collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    println!("per target ship, at least {PER_SHIP_REPORTING_FLOOR} eligible hits (hits, observed, expected, ratio):");
+    for (ship, hits, fires, expected) in rows.iter().filter(|row| row.1 >= PER_SHIP_REPORTING_FLOOR) {
+        let ratio = if *expected > 0.0 { format!("{:.3}", *fires as f64 / expected) } else { "n/a".to_owned() };
+        println!("  {ship}: {hits}, {fires}, {expected:.2}, {ratio}");
+    }
+}
+
+/// How many eligible hits a target ship needs before its own observed/expected
+/// ratio is printed. A row of two hits carries a ratio of 0 or of several
+/// hundred percent and nothing in between, so printing every row would bury the
+/// ones that say something.
+const PER_SHIP_REPORTING_FLOOR: u64 = 30;
 
 /// Attributed fires can never exceed what the server recorded for the same
 /// attacker/victim pair. This is the one external check on attribution: the
