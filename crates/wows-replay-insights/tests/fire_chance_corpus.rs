@@ -71,6 +71,7 @@ use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::fire_chance::analysis::ExclusionReason;
 use wows_replay_insights::fire_chance::analysis::FireChanceInput;
 use wows_replay_insights::fire_chance::analysis::NarrowingReason;
+use wows_replay_insights::fire_chance::analysis::UnattributedFireReason;
 use wows_replay_insights::fire_chance::analysis::analyze;
 use wows_replay_insights::fire_chance::geometry::section_for_hit;
 use wows_replay_insights::fire_chance::geometry::world_offset_to_body;
@@ -180,6 +181,12 @@ struct Measurement {
     /// replay the observed/expected comparison simply has no expected side for.
     expected_fires: Option<f32>,
     unattributed_fires: u32,
+    /// Why each of those could not be tied to a shell of ours. Sums to
+    /// `unattributed_fires`.
+    unattributed_reasons: BTreeMap<UnattributedFireReason, u32>,
+    /// The ribbon total `analyze` counted for itself, which the independent
+    /// count below has to agree with.
+    analysis_ribbons: u32,
     /// Every `SetFire` ribbon increment the replay carried, counted straight
     /// off the ribbon log rather than from anything `analyze` returned. This is
     /// the independent total the two buckets have to add back up to.
@@ -951,6 +958,8 @@ fn measure(
         fires: out.fires,
         expected_fires: out.expected_fires,
         unattributed_fires: out.unattributed_fires,
+        unattributed_reasons: out.unattributed_reasons.clone(),
+        analysis_ribbons: out.set_fire_ribbons,
         set_fire_ribbons: report
             .ribbon_events()
             .iter()
@@ -1187,6 +1196,12 @@ fn print_widest_breakdown(corpus: &Corpus) {
         println!("    {count} {reason:?}");
     }
     println!("    {} not applicable", widest.not_applicable);
+    println!("  {} SetFire ribbons", widest.set_fire_ribbons);
+    println!("    {} credited to a shell", widest.fires);
+    println!("    {} not credited", widest.unattributed_fires);
+    for (reason, count) in &widest.unattributed_reasons {
+        println!("      {count} {reason:?}");
+    }
     println!(
         "  per-ship rows carry {} hits, {} struck no ship, {} have no row",
         widest.per_ship_hits,
@@ -1376,7 +1391,23 @@ fn ribbon_accounting_reconciles() {
     let mut silent_builds: BTreeMap<u32, Vec<&str>> = BTreeMap::new();
     let mut builds_seen: BTreeMap<u32, u32> = BTreeMap::new();
 
+    let mut unattributed_reasons: BTreeMap<UnattributedFireReason, u32> = BTreeMap::new();
     for measurement in &corpus.measurements {
+        // The analysis counts the ribbons it stepped over; this is the same
+        // count taken off the ribbon log without it. A disagreement means the
+        // attribution loop is not seeing every ribbon the replay carries.
+        assert_eq!(
+            measurement.analysis_ribbons, measurement.set_fire_ribbons,
+            "{}: the analysis counted {} SetFire ribbons, the ribbon log carries {}",
+            measurement.name, measurement.analysis_ribbons, measurement.set_fire_ribbons
+        );
+        assert_eq!(
+            measurement.unattributed_reasons.values().sum::<u32>(),
+            measurement.unattributed_fires,
+            "{}: the reasons do not account for the {} unattributed fires",
+            measurement.name,
+            measurement.unattributed_fires
+        );
         assert_eq!(
             measurement.fires + measurement.unattributed_fires,
             measurement.set_fire_ribbons,
@@ -1482,6 +1513,9 @@ fn ribbon_accounting_reconciles() {
         for (reason, count) in &measurement.exclusions {
             *drivers.entry(*reason).or_insert(0) += count;
         }
+        for (reason, count) in &measurement.unattributed_reasons {
+            *unattributed_reasons.entry(*reason).or_insert(0) += count;
+        }
     }
 
     assert!(observed > 0, "corpus produced no SetFire ribbons at all");
@@ -1489,6 +1523,20 @@ fn ribbon_accounting_reconciles() {
         "ribbons {observed}: {attributed} attributed, {unattributed} unattributed (rate {:.3})",
         f64::from(unattributed) / f64::from(observed)
     );
+    // Every reason but one says the replay is missing something. A large
+    // `EveryNearbyHitExcluded` share says the eligibility model refused hits
+    // that did start fires, which is a fault in the model rather than in the
+    // data, so it is printed as its own share of the ribbons.
+    let mut reasons: Vec<(UnattributedFireReason, u32)> = unattributed_reasons.into_iter().collect();
+    reasons.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    println!("unattributed fires by reason:");
+    for (reason, count) in &reasons {
+        println!(
+            "  {reason:?}: {count} ({:.3} of unattributed, {:.3} of ribbons)",
+            f64::from(*count) / f64::from(unattributed.max(1)),
+            f64::from(*count) / f64::from(observed)
+        );
+    }
     // The fired count comes off the salvo log and covers every salvo, landed or
     // not; the on-target count covers every shell of ours that landed, HE or
     // not. `he_on_target` is the HE-only subset, so its ratio to `fired` is the

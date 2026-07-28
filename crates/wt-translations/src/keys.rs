@@ -4,7 +4,7 @@ use wows_core::game_types::AdvantageLevel;
 use wows_core::game_types::BattleResult;
 use wows_core::game_types::ExclusionReason;
 use wows_core::game_types::FinishType;
-use wows_core::game_types::NarrowingReason;
+use wows_core::game_types::UnattributedFireReason;
 
 // -- Battle result keys --
 
@@ -67,18 +67,25 @@ pub const fn exclusion_reason_key(reason: ExclusionReason) -> &'static str {
     }
 }
 
-/// The narrowing-step labels, which carry their count inline (`%{count}`)
-/// because they read as a parenthetical clause beside the line they explain
-/// rather than as a row in a tally. `singular` picks the form for a count of
-/// one; the translation layer has no plural machinery, so each form is its own
-/// key the way the target-ship count's is.
-pub const fn narrowing_reason_key(reason: NarrowingReason, singular: bool) -> &'static str {
-    match (reason, singular) {
-        (NarrowingReason::ShellCannotBurn, false) => "ui.replay.sections.fire_chance_narrowed_cannot_burn",
-        (NarrowingReason::ShellCannotBurn, true) => "ui.replay.sections.fire_chance_narrowed_cannot_burn_one",
-        (NarrowingReason::NotMainBattery, false) => "ui.replay.sections.fire_chance_narrowed_not_main_battery",
-        (NarrowingReason::NotMainBattery, true) => "ui.replay.sections.fire_chance_narrowed_not_main_battery_one",
-        (NarrowingReason::ImpactNotOnAShip, false) => "ui.replay.sections.fire_chance_narrowed_terrain",
-        (NarrowingReason::ImpactNotOnAShip, true) => "ui.replay.sections.fire_chance_narrowed_terrain_one",
+/// Why a fire the game credited us with could not be tied to one of our shells.
+/// Bare rows in a tally, so the count sits in its own column and the string is
+/// the reason alone.
+pub const fn unattributed_fire_reason_key(reason: UnattributedFireReason) -> &'static str {
+    match reason {
+        UnattributedFireReason::BurnStateNotObserved => "ui.replay.sections.fire_chance_unattributed_no_burn_state",
+        UnattributedFireReason::AlreadyCreditedToAnEarlierFire => {
+            "ui.replay.sections.fire_chance_unattributed_already_credited"
+        }
+        UnattributedFireReason::ContestedByOurSecondary => {
+            "ui.replay.sections.fire_chance_unattributed_secondary_contest"
+        }
+        UnattributedFireReason::ContestedByAnotherHitOfOurs => {
+            "ui.replay.sections.fire_chance_unattributed_hit_contest"
+        }
+        UnattributedFireReason::EveryNearbyHitExcluded => "ui.replay.sections.fire_chance_unattributed_all_excluded",
+        UnattributedFireReason::NoNearbyHitCouldStartAFire => {
+            "ui.replay.sections.fire_chance_unattributed_none_could_burn"
+        }
+        UnattributedFireReason::NoHitInWindow => "ui.replay.sections.fire_chance_unattributed_no_hit",
     }
 }

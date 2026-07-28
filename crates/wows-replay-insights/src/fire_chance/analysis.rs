@@ -46,6 +46,7 @@ use crate::fire_chance::victim::VictimTrack;
 
 pub use wows_core::game_types::ExclusionReason;
 pub use wows_core::game_types::NarrowingReason;
+pub use wows_core::game_types::UnattributedFireReason;
 
 /// One server tick (`TICKS_PER_SECOND` = 7, `ma779114d`) plus packet jitter. The
 /// ribbon and the `burningFlags` update are separate packets from the same tick.
@@ -425,6 +426,17 @@ pub struct EffectiveFireChance {
     /// can carry it. Stored as pairs so a corpus test can build a confusion
     /// matrix.
     pub section_predictions: Vec<SectionPrediction>,
+    /// Every `SetFire` ribbon the recording player earned, counted off the
+    /// ribbon log. The total [`Self::fires`] and [`Self::unattributed_fires`]
+    /// partition: `fires + unattributed_fires == set_fire_ribbons`, which is
+    /// what makes the fire count in the breakdown checkable against the count
+    /// the game showed the player.
+    ///
+    /// There is no per-ship counterpart. A `SetFire` ribbon names no victim, so
+    /// a ribbon that matched no hit of ours cannot be filed under a ship
+    /// without inventing the assignment; the whole-battle level is the only one
+    /// this arithmetic closes at.
+    pub set_fire_ribbons: u32,
     /// Fires we could not assign to a specific hit: a SetFire ribbon that
     /// matched no eligible hit inside the attribution window.
     ///
@@ -438,6 +450,14 @@ pub struct EffectiveFireChance {
     /// unattributed count far larger than `fires` on a ship with no secondaries
     /// means something upstream is wrong.
     pub unattributed_fires: u32,
+    /// Which of those causes each unattributed ribbon fell to. Sums to
+    /// [`Self::unattributed_fires`].
+    ///
+    /// [`UnattributedFireReason::EveryNearbyHitExcluded`] is the entry worth
+    /// watching: every other reason says the replay is missing something, that
+    /// one says the eligibility model refused a hit at a moment the server lit a
+    /// fire, which is evidence against the model itself.
+    pub unattributed_reasons: BTreeMap<UnattributedFireReason, u32>,
     /// The shell's raw `burnProb` before any modifier step in [`Self::formula`]
     /// is applied, for the hover breakdown's base line. `None` when no shell
     /// resolved to compute it from (no eligible hit, or the projectile carries
@@ -687,7 +707,27 @@ struct Candidate<'a> {
 /// after every hit has been classified.
 struct ClassifiedHit {
     victim: EntityId,
+    clock: GameClock,
     disposition: HitDisposition,
+    /// What took this hit out of the running when the contest guard dropped it.
+    /// `None` for every other disposition. Kept because
+    /// [`ExclusionReason::AmbiguousWithAnotherHit`] names the outcome and not
+    /// the contender, and a ribbon left unattributed by a secondary of ours is a
+    /// different finding from one left unattributed by a ricochet.
+    contest: Option<ContestKind>,
+}
+
+/// What kind of shell of ours took a candidate out of the running.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ContestKind {
+    /// One of our own secondaries. It sets fires and the ribbon does not name
+    /// the weapon, so a fire in that section is not separable from the main
+    /// battery's.
+    Secondary,
+    /// A hit of ours whose fire roll could not be ruled out: a hit type nothing
+    /// establishes as rolling, or a hit on the merged fire node of a victim
+    /// whose build never resolved.
+    UncertainHitOfOurs,
 }
 
 /// Where one of our own shells landed that is not a trial itself but cannot be
@@ -696,6 +736,7 @@ struct ContestingImpact {
     victim: EntityId,
     section: BurnNodeIndex,
     clock: GameClock,
+    kind: ContestKind,
 }
 
 /// Why a hit could not be placed in one of the victim's fire sections.
@@ -787,12 +828,18 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
 
         let eligibility = classify(input, &geometry, &tracks, &bundle, tier, formula_applies, hit, salvo.params_id);
 
-        for section in contesting_sections(input, &geometry, secondary_ammo, hit, salvo.params_id, &eligibility) {
-            contenders.push(ContestingImpact { victim: hit.victim_entity_id, section, clock: hit.clock });
+        let contest = contesting_sections(input, &geometry, secondary_ammo, hit, salvo.params_id, &eligibility);
+        for (section, kind) in contest {
+            contenders.push(ContestingImpact { victim: hit.victim_entity_id, section, clock: hit.clock, kind });
         }
 
         let record = classified.len();
-        classified.push(ClassifiedHit { victim: hit.victim_entity_id, disposition: eligibility.disposition() });
+        classified.push(ClassifiedHit {
+            victim: hit.victim_entity_id,
+            clock: hit.clock,
+            disposition: eligibility.disposition(),
+            contest: None,
+        });
         if let HitEligibility::Eligible { section, expected } = eligibility {
             candidates.push(Candidate {
                 hit,
@@ -812,10 +859,16 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
     // proportion to secondary throughput, on exactly the ships the guard exists
     // to protect. A ribbon left with no candidate falls to `unattributed_fires`,
     // which is what a fire we cannot assign to a weapon is.
-    let (counted, contested): (Vec<&Candidate<'_>>, Vec<&Candidate<'_>>) =
-        candidates.iter().partition(|c| !contested_by_another_hit(c, &contenders));
-    for candidate in &contested {
-        classified[candidate.record].disposition = HitDisposition::Excluded(ExclusionReason::AmbiguousWithAnotherHit);
+    let mut counted: Vec<&Candidate<'_>> = Vec::new();
+    for candidate in &candidates {
+        match contested_by_another_hit(candidate, &contenders) {
+            Some(kind) => {
+                let record = &mut classified[candidate.record];
+                record.disposition = HitDisposition::Excluded(ExclusionReason::AmbiguousWithAnotherHit);
+                record.contest = Some(kind);
+            }
+            None => counted.push(candidate),
+        }
     }
 
     let mut exclusions: BTreeMap<ExclusionReason, u32> = BTreeMap::new();
@@ -848,7 +901,7 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
         }
     }
 
-    let attribution = attribute(input, &counted);
+    let attribution = attribute(input, &counted, &classified);
 
     let per_ship = per_ship_breakdown(input, &classified, &counted, &attribution.fires_by_victim, formula_applies);
     let expected_fires = formula_applies.then(|| expected_observable_fires(&counted)).flatten();
@@ -872,7 +925,9 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
         per_ship,
         exclusions,
         section_predictions: attribution.predictions,
-        unattributed_fires: attribution.unattributed,
+        set_fire_ribbons: attribution.ribbons,
+        unattributed_fires: attribution.unattributed.values().sum(),
+        unattributed_reasons: attribution.unattributed,
         formula_base,
         formula,
     })
@@ -968,20 +1023,20 @@ fn contesting_sections(
     hit: &ResolvedShotHit,
     shell: GameParamId,
     eligibility: &HitEligibility,
-) -> Vec<BurnNodeIndex> {
-    let contests = match eligibility {
-        HitEligibility::NotMainBattery => is_secondary_shell(input, secondary_ammo, shell),
-        HitEligibility::HitTypeDoesNotRoll(_) => true,
-        HitEligibility::MergedSectionVictimBuildUnknown => true,
-        _ => false,
+) -> Vec<(BurnNodeIndex, ContestKind)> {
+    let kind = match eligibility {
+        HitEligibility::NotMainBattery => {
+            is_secondary_shell(input, secondary_ammo, shell).then_some(ContestKind::Secondary)
+        }
+        HitEligibility::HitTypeDoesNotRoll(_) => Some(ContestKind::UncertainHitOfOurs),
+        HitEligibility::MergedSectionVictimBuildUnknown => Some(ContestKind::UncertainHitOfOurs),
+        _ => None,
     };
-    if !contests {
-        return Vec::new();
-    }
+    let Some(kind) = kind else { return Vec::new() };
     let Ok(section) = section_of(input, geometry, hit) else { return Vec::new() };
-    let mut sections = vec![section];
+    let mut sections = vec![(section, kind)];
     if matches!(eligibility, HitEligibility::MergedSectionVictimBuildUnknown) {
-        sections.push(merged_section());
+        sections.push((merged_section(), kind));
     }
     sections
 }
@@ -993,14 +1048,26 @@ fn merged_section() -> BurnNodeIndex {
     BurnNodeIndex::new(FIRE_PREVENTION_MERGE_TARGET).expect("the merge target is inside MAX_NODES")
 }
 
-/// Whether one of our own non-trial hits landed on the same victim and section
-/// close enough that a fire there could have been either shell's.
-fn contested_by_another_hit(candidate: &Candidate<'_>, contenders: &[ContestingImpact]) -> bool {
-    contenders.iter().any(|other| {
-        other.victim == candidate.victim
-            && other.section == candidate.section
-            && clock_distance(other.clock, candidate.hit.clock) <= CONTEST_WINDOW
-    })
+/// What one of our own non-trial hits was, when one landed on the same victim
+/// and section close enough that a fire there could have been either shell's.
+///
+/// A secondary wins over any other contender when both are present, because it
+/// is the one the guard exists for: it says the fire may have been our own
+/// secondary's, which is a stronger statement than "some hit of ours might also
+/// have rolled".
+fn contested_by_another_hit(candidate: &Candidate<'_>, contenders: &[ContestingImpact]) -> Option<ContestKind> {
+    contenders
+        .iter()
+        .filter(|other| {
+            other.victim == candidate.victim
+                && other.section == candidate.section
+                && clock_distance(other.clock, candidate.hit.clock) <= CONTEST_WINDOW
+        })
+        .map(|other| other.kind)
+        .max_by_key(|kind| match kind {
+            ContestKind::Secondary => 1,
+            ContestKind::UncertainHitOfOurs => 0,
+        })
 }
 
 /// The key a set of shells has to share before they contest one section's one
@@ -1244,7 +1311,10 @@ fn rolls_for_fire(shell_hit: &Recognized<ShellHitType>) -> bool {
 
 struct Attribution {
     predictions: Vec<SectionPrediction>,
-    unattributed: u32,
+    /// Every `SetFire` ribbon increment the loop stepped over, so the two
+    /// buckets partition a total taken from the same iteration that fills them.
+    ribbons: u32,
+    unattributed: BTreeMap<UnattributedFireReason, u32>,
     fires_by_victim: HashMap<EntityId, u32>,
 }
 
@@ -1255,7 +1325,12 @@ struct Attribution {
 /// a secondary could equally have caused were already removed from `candidates`
 /// before this runs, so a ribbon they would have matched falls to
 /// `unattributed` here.
-fn attribute(input: &FireChanceInput<'_>, candidates: &[&Candidate<'_>]) -> Attribution {
+///
+/// `classified` is every shell of ours that landed, which is what an
+/// unattributed ribbon is explained against: the candidates alone cannot say
+/// whether nothing of ours was nearby or whether what was nearby had already
+/// been refused.
+fn attribute(input: &FireChanceInput<'_>, candidates: &[&Candidate<'_>], classified: &[ClassifiedHit]) -> Attribution {
     let mut consumed = vec![false; candidates.len()];
     // Indices into `input.burn_state_changes` already claimed by an earlier
     // ribbon. One transition is one fire starting, so two ribbons reading the
@@ -1264,10 +1339,12 @@ fn attribute(input: &FireChanceInput<'_>, candidates: &[&Candidate<'_>]) -> Attr
     let mut claimed_changes: Vec<bool> = vec![false; input.burn_state_changes.len()];
     let mut predictions = Vec::new();
     let mut fires_by_victim: HashMap<EntityId, u32> = HashMap::new();
-    let mut unattributed = 0u32;
+    let mut unattributed: BTreeMap<UnattributedFireReason, u32> = BTreeMap::new();
+    let mut ribbons = 0u32;
 
     for ribbon in input.ribbons.iter().filter(|r| r.ribbon == Ribbon::SetFire) {
         for _ in 0..ribbon.count {
+            ribbons += 1;
             let pick = candidates
                 .iter()
                 .enumerate()
@@ -1279,7 +1356,8 @@ fn attribute(input: &FireChanceInput<'_>, candidates: &[&Candidate<'_>]) -> Attr
                 });
 
             let Some((index, candidate, change_index)) = pick else {
-                unattributed += 1;
+                let reason = unattributed_reason(input, candidates, classified, &consumed, ribbon.clock);
+                *unattributed.entry(reason).or_insert(0) += 1;
                 continue;
             };
 
@@ -1300,7 +1378,73 @@ fn attribute(input: &FireChanceInput<'_>, candidates: &[&Candidate<'_>]) -> Attr
         }
     }
 
-    Attribution { predictions, unattributed, fires_by_victim }
+    Attribution { predictions, ribbons, unattributed, fires_by_victim }
+}
+
+/// Why no hit of ours could be credited with the fire this ribbon reports.
+///
+/// Runs the same window the attribution loop just failed in, over the candidates
+/// first and then over every other shell of ours that landed. The order is
+/// specificity: an eligible hit sitting beside the ribbon says more about why the
+/// match failed than an AP shell that also landed there, and a contest says more
+/// than a refusal because the contest is a candidate the guard removed on
+/// purpose.
+fn unattributed_reason(
+    input: &FireChanceInput<'_>,
+    candidates: &[&Candidate<'_>],
+    classified: &[ClassifiedHit],
+    consumed: &[bool],
+    ribbon: GameClock,
+) -> UnattributedFireReason {
+    let in_window: Vec<(usize, &&Candidate<'_>)> =
+        candidates.iter().enumerate().filter(|(_, c)| hit_could_have_caused(c.hit.clock, ribbon)).collect();
+    if !in_window.is_empty() {
+        let free: Vec<&&Candidate<'_>> =
+            in_window.into_iter().filter(|(index, _)| !consumed[*index]).map(|(_, c)| c).collect();
+        if free.is_empty() {
+            return UnattributedFireReason::AlreadyCreditedToAnEarlierFire;
+        }
+        // The loop's own `lit_change` call already failed with the real claim
+        // list. Repeating it with nothing claimed separates "there was no
+        // transition to match" from "an earlier ribbon took the transition this
+        // one needed", which are different findings sharing one symptom.
+        let unclaimed = vec![false; input.burn_state_changes.len()];
+        if free.iter().any(|candidate| lit_change(input, candidate, ribbon, &unclaimed).is_some()) {
+            return UnattributedFireReason::AlreadyCreditedToAnEarlierFire;
+        }
+        return UnattributedFireReason::BurnStateNotObserved;
+    }
+
+    let mut secondary_contest = false;
+    let mut other_contest = false;
+    let mut excluded = false;
+    let mut could_not_burn = false;
+    for record in classified.iter().filter(|record| hit_could_have_caused(record.clock, ribbon)) {
+        match record.disposition {
+            // Every trial in the window was already handled above, since the
+            // candidates are exactly the records carrying this disposition.
+            HitDisposition::Trial => {}
+            HitDisposition::Excluded(ExclusionReason::AmbiguousWithAnotherHit) => match record.contest {
+                Some(ContestKind::Secondary) => secondary_contest = true,
+                Some(ContestKind::UncertainHitOfOurs) | None => other_contest = true,
+            },
+            HitDisposition::Excluded(_) => excluded = true,
+            HitDisposition::Narrowed(_) | HitDisposition::NotApplicable => could_not_burn = true,
+        }
+    }
+    if secondary_contest {
+        return UnattributedFireReason::ContestedByOurSecondary;
+    }
+    if other_contest {
+        return UnattributedFireReason::ContestedByAnotherHitOfOurs;
+    }
+    if excluded {
+        return UnattributedFireReason::EveryNearbyHitExcluded;
+    }
+    if could_not_burn {
+        return UnattributedFireReason::NoNearbyHitCouldStartAFire;
+    }
+    UnattributedFireReason::NoHitInWindow
 }
 
 fn clock_distance(a: GameClock, b: GameClock) -> f32 {
@@ -3377,5 +3521,127 @@ mod tests {
         assert_eq!(out.fires, 1);
         assert_eq!(out.unattributed_fires, 1);
         assert_eq!(out.section_predictions.len(), 1);
+    }
+
+    /// The only reason key an unattributed ribbon carries, for the tests below.
+    fn only_reason(out: &EffectiveFireChance) -> UnattributedFireReason {
+        assert_eq!(out.unattributed_reasons.len(), 1, "expected one reason, got {:?}", out.unattributed_reasons);
+        *out.unattributed_reasons.keys().next().expect("one reason")
+    }
+
+    /// The two buckets partition the ribbon count, which is what lets the
+    /// breakdown state the figure the game showed the player and account for
+    /// every one of them. Checked over a spread of outcomes rather than one, so
+    /// a path that loses a ribbon in any of them shows up here.
+    #[test]
+    fn every_set_fire_ribbon_is_either_credited_or_explained() {
+        let cases: Vec<EffectiveFireChance> = vec![
+            analyze(&fixture().build()).expect("geometry"),
+            analyze(&fixture().without_ribbons().build()).expect("geometry"),
+            analyze(&fixture().with_stray_ribbon_at(GameClock(999.0)).build()).expect("geometry"),
+            analyze(&fixture().with_coincident_secondary_hit().build()).expect("geometry"),
+            analyze(&fixture().with_burn_mask_before(0b0001).build()).expect("geometry"),
+            analyze(&fixture().with_shell_burn_prob(-0.5).build()).expect("geometry"),
+            analyze(
+                &fixture()
+                    .hitting_section(0)
+                    .also_hitting_section_at(3, 0.0)
+                    .server_lights_section(0)
+                    .with_stray_ribbon_at(HIT_CLOCK)
+                    .build(),
+            )
+            .expect("geometry"),
+        ];
+        for out in &cases {
+            assert_eq!(
+                out.fires + out.unattributed_fires,
+                out.set_fire_ribbons,
+                "{} credited + {} unattributed does not account for {} ribbons",
+                out.fires,
+                out.unattributed_fires,
+                out.set_fire_ribbons
+            );
+            assert_eq!(out.unattributed_reasons.values().sum::<u32>(), out.unattributed_fires);
+        }
+    }
+
+    /// A ribbon with nothing of ours anywhere near it. Someone else set that
+    /// fire, or a weapon of ours the model does not track did.
+    #[test]
+    fn a_ribbon_with_no_hit_of_ours_nearby_says_so() {
+        let out = analyze(&fixture().with_stray_ribbon_at(GameClock(999.0)).build()).expect("geometry");
+        assert_eq!(only_reason(&out), UnattributedFireReason::NoHitInWindow);
+    }
+
+    /// The secondary contest is a candidate the guard removed on purpose, and
+    /// it names the secondary rather than the generic ambiguity so a ship whose
+    /// secondaries do the burning reads as that rather than as a defect.
+    #[test]
+    fn a_ribbon_our_secondary_contested_says_so() {
+        let out = analyze(&fixture().with_coincident_secondary_hit().build()).expect("geometry");
+        assert_eq!(only_reason(&out), UnattributedFireReason::ContestedByOurSecondary);
+    }
+
+    /// A ricochet of ours in the same section is not a secondary, so it reports
+    /// as the other contest: nothing establishes it rolled, and nothing
+    /// establishes it did not.
+    #[test]
+    fn a_ribbon_another_hit_of_ours_contested_says_so() {
+        let out =
+            analyze(&fixture().hitting_section(0).also_hitting_section_with(0, 0.0, ShellHitType::Ricochet).build())
+                .expect("geometry");
+        assert_eq!(only_reason(&out), UnattributedFireReason::ContestedByAnotherHitOfOurs);
+    }
+
+    /// The diagnostically important one: the model refused the only hit beside
+    /// the ribbon, so it believed a fire was impossible at a moment the server
+    /// lit one.
+    #[test]
+    fn a_ribbon_whose_only_nearby_hit_was_excluded_says_so() {
+        let out = analyze(&fixture().with_burn_mask_before(0b0001).build()).expect("geometry");
+        assert_eq!(out.exclusions[&ExclusionReason::SectionAlreadyBurning], 1);
+        assert_eq!(only_reason(&out), UnattributedFireReason::EveryNearbyHitExcluded);
+    }
+
+    /// An AP shell beside the ribbon is not a refusal: it could not have set
+    /// the fire at all, so it is reported apart from the exclusions.
+    #[test]
+    fn a_ribbon_whose_only_nearby_hit_could_not_burn_says_so() {
+        let out = analyze(&fixture().with_shell_burn_prob(-0.5).build()).expect("geometry");
+        assert_eq!(only_reason(&out), UnattributedFireReason::NoNearbyHitCouldStartAFire);
+    }
+
+    /// An eligible hit sat beside the ribbon with no usable transition on its
+    /// victim: here the only one is a death flare, which attribution refuses
+    /// for the same reason the burn mask does.
+    #[test]
+    fn a_ribbon_with_a_candidate_but_no_transition_says_so() {
+        let out = analyze(
+            &fixture()
+                .with_the_victim_dead_at(GameClock(HIT_CLOCK.0 + 0.2))
+                .with_the_burn_change_offset_by(0.3)
+                .with_the_ribbon_offset_by(0.3)
+                .build(),
+        )
+        .expect("geometry");
+        assert_eq!(out.eligible_hits, 1);
+        assert_eq!(only_reason(&out), UnattributedFireReason::BurnStateNotObserved);
+    }
+
+    /// Two ribbons, one transition: the second finds its candidate free but the
+    /// transition already spent, which is an earlier fire having taken what it
+    /// needed rather than the transition never existing.
+    #[test]
+    fn a_ribbon_whose_evidence_an_earlier_fire_took_says_so() {
+        let out = analyze(
+            &fixture()
+                .hitting_section(0)
+                .also_hitting_section_at(3, 0.0)
+                .server_lights_section(0)
+                .with_stray_ribbon_at(HIT_CLOCK)
+                .build(),
+        )
+        .expect("geometry");
+        assert_eq!(only_reason(&out), UnattributedFireReason::AlreadyCreditedToAnEarlierFire);
     }
 }

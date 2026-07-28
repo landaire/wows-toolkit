@@ -2932,13 +2932,59 @@ pub enum ExclusionReason {
     AmbiguousWithAnotherHit,
 }
 
+/// Why a `SetFire` ribbon of ours could not be credited to one of our shells.
+///
+/// The ribbon says a fire was ours and carries neither a victim nor a weapon,
+/// so every reason here is stated in terms of what our own shells were doing in
+/// the attribution window around it. The most specific reason wins: a ribbon
+/// with an eligible hit beside it is described by what happened to that hit, not
+/// by the AP shell that also landed nearby.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum UnattributedFireReason {
+    /// An eligible hit of ours sat in the window with no burn transition on its
+    /// victim to match the ribbon against, so nothing ties the two together.
+    /// The ordinary cause is a victim outside the recording client's AOI, whose
+    /// `burningFlags` we never see change.
+    BurnStateNotObserved,
+    /// Every eligible hit in the window, or every burn transition they could
+    /// have matched, was already spent on an earlier ribbon. Two fires close
+    /// together with one candidate between them land here.
+    AlreadyCreditedToAnEarlierFire,
+    /// The only hits of ours in the window were dropped because one of our own
+    /// secondaries landed in the same section at the same time, so the fire
+    /// cannot be told from a secondary's.
+    ContestedByOurSecondary,
+    /// The only hits of ours in the window were dropped because another hit of
+    /// ours whose fire roll could not be ruled out landed in the same section:
+    /// a ricochet, an overpenetration, a hit type this build cannot name, or a
+    /// hit on the merged fire node of a victim whose build never resolved.
+    ContestedByAnotherHitOfOurs,
+    /// Every hit of ours in the window was refused by the eligibility model.
+    /// This is the one reason that says the model may be wrong rather than that
+    /// data is missing: it believed a fire was impossible at a moment the server
+    /// lit one.
+    EveryNearbyHitExcluded,
+    /// Hits of ours landed in the window but none of them could have started a
+    /// fire: AP or SAP shells, our own secondaries, shells that struck terrain
+    /// or water, and shells that landed on a ship that was already dead. Those
+    /// last two groups are merged with the shell-type filter because they share
+    /// the only property this bucket asserts, that no fire could have come from
+    /// them.
+    NoNearbyHitCouldStartAFire,
+    /// No shell of ours landed at all in the window. The fire was set by another
+    /// player, or by a weapon of ours the model does not track.
+    NoHitInWindow,
+}
+
 /// Why one of our hits was never a main-battery HE hit on a ship, and so was
 /// never a question the eligibility model could answer.
 ///
 /// Apart from [`ExclusionReason`] because these are filters on the shell and on
 /// what it struck, not outcomes the model reached. Every HE shell that lands on
 /// a ship can start a fire; listing "this was an AP shell" beside "the section
-/// was already burning" reads as though some HE shells could not.
+/// was already burning" reads as though some of them could not, which is why
+/// this partition is an accounting aid the corpus checks rather than something
+/// the breakdown renders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NarrowingReason {
     /// AP, SAP, or a main-battery shell whose folded burn chance is not

@@ -95,8 +95,8 @@ use wows_replays::types::AccountId;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::fire_chance::analysis::ExclusionReason;
 use wows_replay_insights::fire_chance::analysis::FormulaOp;
-use wows_replay_insights::fire_chance::analysis::NarrowingReason;
 use wows_replay_insights::fire_chance::analysis::PerShipFireChance;
+use wows_replay_insights::fire_chance::analysis::UnattributedFireReason;
 
 use itertools::Itertools;
 use wows_minimap_renderer::renderer::weapon_group_label;
@@ -579,8 +579,10 @@ fn compute_fire_chance(
     if let Some(result) = &result {
         tracing::debug!(
             eligible_hits = result.eligible_hits,
+            set_fire_ribbons = result.set_fire_ribbons,
             fires = result.fires,
             unattributed_fires = result.unattributed_fires,
+            unattributed_reasons = ?result.unattributed_reasons,
             "computed effective fire chance"
         );
     }
@@ -1579,9 +1581,14 @@ impl UiReport {
     }
 
     /// Render the effective fire chance block for the recording player's row:
-    /// a clickable headline with a formula-and-exclusions hover breakdown, and
-    /// a per-target-ship expander. `report.fire_chance` is `None` for every
-    /// other row, so callers only reach this once per replay.
+    /// a clickable headline, a breakdown expander, and a per-target-ship
+    /// expander. `report.fire_chance` is `None` for every other row, so callers
+    /// only reach this once per replay.
+    ///
+    /// Both expanders start collapsed. This block is one row of a table of
+    /// players, so it has to stay a couple of lines tall until the reader asks
+    /// for more; the hover carries only the copy hint, since the breakdown it
+    /// used to hold is longer than a tooltip can usefully be.
     ///
     /// `hide_stats` replaces the whole block with the NDA placeholder, as the
     /// sibling sections do: the breakdown carries the ship's raw `burnProb`,
@@ -1595,9 +1602,9 @@ impl UiReport {
         }
 
         // Laid out rather than space-padded: the figures carry their own
-        // emphasis and the per-ship table gets real columns, so neither depends
-        // on a fixed-width font to line up. The hover keeps monospace because a
-        // formula block genuinely is a fixed-width listing.
+        // emphasis and every listing under them gets real columns, so none of
+        // it depends on a fixed-width font to line up. The formula keeps
+        // monospace because it genuinely is a fixed-width listing.
         let headline = ui
             .horizontal(|ui| {
                 // Labels are selectable by default, which makes each one consume
@@ -1636,10 +1643,7 @@ impl UiReport {
             })
             .response
             .interact(Sense::click())
-            .on_hover_ui(|ui| {
-                ui.label(RichText::new(self.fire_chance_hover_text(fire_chance)).monospace());
-                ui.label(t!("ui.replay.sections.fire_chance_click_to_copy"));
-            });
+            .on_hover_text(t!("ui.replay.sections.fire_chance_click_to_copy"));
 
         if headline.clicked() {
             ui.ctx().copy_text(self.fire_chance_copy_text(fire_chance));
@@ -1652,6 +1656,20 @@ impl UiReport {
                 })
             });
         }
+
+        egui::CollapsingHeader::new(t!("ui.replay.sections.fire_chance_breakdown")).show(ui, |ui| {
+            let formula = fire_chance_formula_lines(fire_chance, &|source| self.localize_modifier_source(source));
+            if !formula.is_empty() {
+                ui.label(RichText::new(formula.join("\n")).monospace());
+                ui.add_space(4.0);
+            }
+            fire_chance_rows_ui(ui, "fire_chance_tally", &fire_chance_battle_tally_rows(fire_chance));
+            let ribbons = fire_chance_ribbon_rows(fire_chance);
+            if !ribbons.is_empty() {
+                ui.add_space(4.0);
+                fire_chance_rows_ui(ui, "fire_chance_ribbons", &ribbons);
+            }
+        });
 
         if !fire_chance.per_ship.is_empty() {
             egui::CollapsingHeader::new(t!("ui.replay.sections.fire_chance_per_ship")).show(ui, |ui| {
@@ -1699,9 +1717,14 @@ impl UiReport {
         }
     }
 
-    /// The effective-fire-chance hover: the attacker-side formula, then what
-    /// became of every shell, then the same accounting per target ship.
-    fn fire_chance_hover_text(&self, fire_chance: &EffectiveFireChance) -> String {
+    /// The whole effective-fire-chance breakdown as text: the attacker-side
+    /// formula, then what became of our HE shells and of the fire ribbons, then
+    /// the same accounting per target ship.
+    ///
+    /// Built independently of which expanders are open, because this is what
+    /// clicking the headline copies and a reader pasting it elsewhere expects
+    /// the whole document.
+    fn fire_chance_breakdown_text(&self, fire_chance: &EffectiveFireChance) -> String {
         let mut lines = fire_chance_formula_lines(fire_chance, &|source| self.localize_modifier_source(source));
         if !lines.is_empty() {
             lines.push(String::new());
@@ -1765,13 +1788,12 @@ impl UiReport {
     }
 
     /// The full plain-text breakdown for click-to-copy: the headline, then
-    /// everything the hover shows, independent of whether the per-ship expander
-    /// is open.
+    /// everything either expander can show, whether or not it is open.
     fn fire_chance_copy_text(&self, fire_chance: &EffectiveFireChance) -> String {
         let mut lines = vec![t!("ui.replay.sections.fire_chance").into_owned()];
         lines.extend(fire_chance_headline_lines(fire_chance));
         lines.push(String::new());
-        lines.push(self.fire_chance_hover_text(fire_chance));
+        lines.push(self.fire_chance_breakdown_text(fire_chance));
         lines.join("\n")
     }
 
@@ -5290,28 +5312,6 @@ fn fire_chance_count_label(count: u32, plural: &'static str, singular: &'static 
     t!(if count == 1 { singular } else { plural })
 }
 
-/// The narrowing step's parenthetical: why the hits above it are more than the
-/// main-battery HE hits on a ship below it, one clause per nonzero reason,
-/// largest first. `None` when nothing was narrowed out, so the line carries no
-/// empty brackets.
-///
-/// The counts sit inside the clauses rather than in the left column because
-/// these are not rows of a tally: they are the arithmetic of one subtraction,
-/// and hiding them would leave the reader to derive them.
-fn fire_chance_narrowing_text(narrowed: &BTreeMap<NarrowingReason, u32>) -> Option<String> {
-    let mut clauses: Vec<(&NarrowingReason, &u32)> = narrowed.iter().filter(|(_, count)| **count > 0).collect();
-    if clauses.is_empty() {
-        return None;
-    }
-    clauses.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
-    let text = clauses
-        .into_iter()
-        .map(|(reason, count)| t!(keys::narrowing_reason_key(*reason, *count == 1), count = count).into_owned())
-        .collect::<Vec<String>>()
-        .join(", ");
-    Some(format!("({text})"))
-}
-
 /// One target-ship row in plain text, the header of that ship's breakdown. The
 /// on-screen expander lays the same figures out as a grid. This is the only
 /// place a percentage is stated, because the victim's fire resistance is fixed
@@ -5396,12 +5396,17 @@ fn fire_chance_formula_lines(
 }
 
 /// One population's counts as the breakdown reads them, taken from either the
-/// whole battle or one target ship's row. Both carry the same six figures, so
-/// the two levels render through one function.
+/// whole battle or one target ship's row. Both carry the same figures, so the
+/// two levels render through one function.
+///
+/// HE-only and ship-only throughout. Our AP and SAP hits, our secondaries and
+/// the shells that struck terrain are none of them members of the population
+/// this chain describes, so they appear nowhere in it; the analysis still counts
+/// them, and its corpus checks still reconcile against them, but a listing whose
+/// first line is a count of HE shells cannot state how many shells could not
+/// burn without contradicting itself.
 struct FireChanceTally<'a> {
-    hits: u32,
     he_hits_on_a_ship: u32,
-    narrowed: &'a BTreeMap<NarrowingReason, u32>,
     eligible_hits: u32,
     exclusions: &'a BTreeMap<ExclusionReason, u32>,
     not_applicable: u32,
@@ -5410,9 +5415,7 @@ struct FireChanceTally<'a> {
 impl<'a> From<&'a EffectiveFireChance> for FireChanceTally<'a> {
     fn from(fire_chance: &'a EffectiveFireChance) -> FireChanceTally<'a> {
         FireChanceTally {
-            hits: fire_chance.hits,
             he_hits_on_a_ship: fire_chance.he_hits_on_a_ship,
-            narrowed: &fire_chance.narrowed,
             eligible_hits: fire_chance.eligible_hits,
             exclusions: &fire_chance.exclusions,
             not_applicable: fire_chance.not_applicable,
@@ -5423,9 +5426,7 @@ impl<'a> From<&'a EffectiveFireChance> for FireChanceTally<'a> {
 impl<'a> From<&'a PerShipFireChance> for FireChanceTally<'a> {
     fn from(ship: &'a PerShipFireChance) -> FireChanceTally<'a> {
         FireChanceTally {
-            hits: ship.hits,
             he_hits_on_a_ship: ship.he_hits_on_a_ship,
-            narrowed: &ship.narrowed,
             eligible_hits: ship.eligible_hits,
             exclusions: &ship.exclusions,
             not_applicable: ship.not_applicable,
@@ -5433,49 +5434,60 @@ impl<'a> From<&'a PerShipFireChance> for FireChanceTally<'a> {
     }
 }
 
-/// One population of our shells, narrowed and then split.
-///
-/// Two steps, and they are different in kind. The first says how many of the
-/// hits were main-battery HE hits on a ship at all, with the shells that could
-/// not burn and the ones that struck terrain or water named on the line itself.
-/// The second is the eligibility model's own answer over what is left: eligible
-/// pinned first, then the refusals by count descending with zero-count reasons
-/// omitted, then the hits that were never in the population, apart from the
-/// refusals because they are not one.
-///
-/// Keeping the shell-type and terrain filters out of the second list is the
-/// point of the split. Every HE shell that lands on a ship can start a fire;
-/// listing "shell cannot start fires" beside "section already burning" reads as
-/// though some of them could not.
+/// One row of a count-and-label listing, at the depth it sits under the row
+/// above it. The on-screen breakdown lays these out as a grid and the
+/// clipboard form renders them as text, so both read the same rows and cannot
+/// drift apart.
+#[derive(Clone, Debug, PartialEq)]
+struct TallyRow {
+    depth: usize,
+    count: u32,
+    label: Cow<'static, str>,
+}
+
+impl TallyRow {
+    fn new(depth: usize, count: u32, label: Cow<'static, str>) -> TallyRow {
+        TallyRow { depth, count, label }
+    }
+}
+
+/// Rows as plain text, counts right-aligned within their own depth so a nested
+/// listing lines up independently of the wider figures above it.
 ///
 /// `indent` is the leading whitespace the whole block sits under, so the
 /// aggregate and the per-ship blocks share this function and differ only in
 /// depth.
-fn fire_chance_tally_lines(
-    tally: &FireChanceTally<'_>,
-    indent: &str,
-    heads: &[(u32, Cow<'static, str>)],
-) -> Vec<String> {
-    let mut rows: Vec<(u32, Cow<'static, str>)> =
-        vec![(tally.eligible_hits, t!("ui.replay.sections.fire_chance_eligible"))];
-    let mut excluded: Vec<(&ExclusionReason, &u32)> =
-        tally.exclusions.iter().filter(|(_, count)| **count > 0).collect();
-    excluded.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
-    rows.extend(excluded.into_iter().map(|(reason, count)| (*count, t!(keys::exclusion_reason_key(*reason)))));
-    if tally.not_applicable > 0 {
-        rows.push((tally.not_applicable, t!("ui.replay.sections.fire_chance_not_applicable")));
+fn fire_chance_rows_to_lines(rows: &[TallyRow], indent: &str) -> Vec<String> {
+    let mut widths: BTreeMap<usize, usize> = BTreeMap::new();
+    for row in rows {
+        let digits = row.count.to_string().len();
+        let width = widths.entry(row.depth).or_insert(digits);
+        *width = (*width).max(digits);
     }
+    rows.iter()
+        .map(|row| {
+            let width = widths.get(&row.depth).copied().unwrap_or(1);
+            let nesting = "  ".repeat(row.depth);
+            format!("{indent}{nesting}{:>width$} {}", row.count, row.label)
+        })
+        .collect()
+}
 
-    let mut head_rows: Vec<(u32, Cow<'static, str>)> = heads.to_vec();
-    head_rows.push((
-        tally.hits,
-        fire_chance_count_label(
-            tally.hits,
-            "ui.replay.sections.fire_chance_hits",
-            "ui.replay.sections.fire_chance_hits_one",
-        ),
-    ));
-    head_rows.push((
+/// One population of our shells: how many HE hits landed on a ship, then the
+/// eligibility model's own answer over them.
+///
+/// Eligible is pinned first, then the refusals by count descending with
+/// zero-count reasons omitted, then the hits that were never the model's
+/// question because the ship was already dead, apart from the refusals because
+/// they are not one. The rows under the HE line sum to it exactly.
+///
+/// `heads` are the rows that sit above it at the same depth, which is where the
+/// whole-battle block states its fired count. A per-ship block passes none: a
+/// salvo is fired at the water rather than at a victim.
+fn fire_chance_tally_rows(tally: &FireChanceTally<'_>, heads: &[TallyRow]) -> Vec<TallyRow> {
+    let mut rows: Vec<TallyRow> = heads.to_vec();
+    rows.push(TallyRow::new(
+        0,
         tally.he_hits_on_a_ship,
         fire_chance_count_label(
             tally.he_hits_on_a_ship,
@@ -5483,29 +5495,47 @@ fn fire_chance_tally_lines(
             "ui.replay.sections.fire_chance_he_hits_one",
         ),
     ));
+    rows.push(TallyRow::new(1, tally.eligible_hits, t!("ui.replay.sections.fire_chance_eligible")));
 
-    let head_width = head_rows.iter().map(|(count, _)| count.to_string().len()).max().unwrap_or(1);
-    let narrowing = fire_chance_narrowing_text(tally.narrowed);
-    let last = head_rows.len() - 1;
-    let mut lines: Vec<String> = head_rows
-        .into_iter()
-        .enumerate()
-        .map(|(index, (count, label))| match narrowing.as_deref().filter(|_| index == last) {
-            Some(clause) => format!("{indent}{count:>head_width$} {label}   {clause}"),
-            None => format!("{indent}{count:>head_width$} {label}"),
-        })
-        .collect();
-
-    let count_width = rows.iter().map(|(count, _)| count.to_string().len()).max().unwrap_or(1);
-    lines.extend(rows.into_iter().map(|(count, label)| format!("{indent}  {count:>count_width$} {label}")));
-    lines
+    let mut excluded: Vec<(&ExclusionReason, &u32)> =
+        tally.exclusions.iter().filter(|(_, count)| **count > 0).collect();
+    excluded.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    rows.extend(
+        excluded.into_iter().map(|(reason, count)| TallyRow::new(1, *count, t!(keys::exclusion_reason_key(*reason)))),
+    );
+    if tally.not_applicable > 0 {
+        rows.push(TallyRow::new(1, tally.not_applicable, t!("ui.replay.sections.fire_chance_not_applicable")));
+    }
+    rows
 }
 
-/// Shells fired, then the hits they produced, then what those narrow to and how
-/// the rest split. Top down, so the reader sees the whole population before its
-/// parts.
-fn fire_chance_breakdown_lines(fire_chance: &EffectiveFireChance) -> Vec<String> {
-    let fired = (
+/// A count-and-label listing on screen: counts right-aligned in their own
+/// column, labels indented by depth. A grid rather than padded text, so the
+/// columns line up in the proportional font the rest of the row uses.
+fn fire_chance_rows_ui(ui: &mut egui::Ui, id: &str, rows: &[TallyRow]) {
+    egui::Grid::new(ui.id().with(id)).num_columns(2).spacing([8.0, 2.0]).show(ui, |ui| {
+        for row in rows {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(row.count.to_string());
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(row.depth as f32 * 12.0);
+                if row.depth == 0 {
+                    ui.label(row.label.as_ref());
+                } else {
+                    ui.weak(row.label.as_ref());
+                }
+            });
+            ui.end_row();
+        }
+    });
+}
+
+/// The whole battle's tally: HE shells fired, then the HE hits on a ship they
+/// produced, then how those split.
+fn fire_chance_battle_tally_rows(fire_chance: &EffectiveFireChance) -> Vec<TallyRow> {
+    let fired = TallyRow::new(
+        0,
         fire_chance.he_shells_fired,
         fire_chance_count_label(
             fire_chance.he_shells_fired,
@@ -5513,16 +5543,74 @@ fn fire_chance_breakdown_lines(fire_chance: &EffectiveFireChance) -> Vec<String>
             "ui.replay.sections.fire_chance_shells_fired_one",
         ),
     );
-    fire_chance_tally_lines(&fire_chance.into(), "", std::slice::from_ref(&fired))
+    fire_chance_tally_rows(&fire_chance.into(), std::slice::from_ref(&fired))
+}
+
+/// The `SetFire` ribbon accounting: every fire the game credited us with, split
+/// into the ones a shell of ours could be named for and the ones that could not,
+/// with a reason under each of the latter.
+///
+/// This is the block that answers "the game gave me six fires and this says
+/// four". The two figures under the ribbon count sum to it by construction, so
+/// the arithmetic is visible rather than asserted.
+///
+/// Whole-battle only. A `SetFire` ribbon names no victim, so an uncredited one
+/// belongs to no target ship without inventing the assignment, and the
+/// per-target-ship rows would have to state a total they cannot account for.
+fn fire_chance_ribbon_rows(fire_chance: &EffectiveFireChance) -> Vec<TallyRow> {
+    if fire_chance.set_fire_ribbons == 0 {
+        return Vec::new();
+    }
+    let mut rows = vec![
+        TallyRow::new(
+            0,
+            fire_chance.set_fire_ribbons,
+            fire_chance_count_label(
+                fire_chance.set_fire_ribbons,
+                "ui.replay.sections.fire_chance_ribbons",
+                "ui.replay.sections.fire_chance_ribbons_one",
+            ),
+        ),
+        TallyRow::new(1, fire_chance.fires, t!("ui.replay.sections.fire_chance_ribbons_credited")),
+    ];
+    if fire_chance.unattributed_fires == 0 {
+        return rows;
+    }
+    rows.push(TallyRow::new(
+        1,
+        fire_chance.unattributed_fires,
+        t!("ui.replay.sections.fire_chance_ribbons_uncredited"),
+    ));
+    let mut reasons: Vec<(&UnattributedFireReason, &u32)> =
+        fire_chance.unattributed_reasons.iter().filter(|(_, count)| **count > 0).collect();
+    reasons.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    rows.extend(
+        reasons
+            .into_iter()
+            .map(|(reason, count)| TallyRow::new(2, *count, t!(keys::unattributed_fire_reason_key(*reason)))),
+    );
+    rows
+}
+
+/// Shells fired, the hits they produced, how those split, and then what became
+/// of the fire ribbons themselves. Top down, so the reader sees the whole
+/// population before its parts.
+fn fire_chance_breakdown_lines(fire_chance: &EffectiveFireChance) -> Vec<String> {
+    let mut lines = fire_chance_rows_to_lines(&fire_chance_battle_tally_rows(fire_chance), "");
+    let ribbons = fire_chance_ribbon_rows(fire_chance);
+    if !ribbons.is_empty() {
+        lines.push(String::new());
+        lines.extend(fire_chance_rows_to_lines(&ribbons, ""));
+    }
+    lines
 }
 
 /// The same accounting per target ship, each row's rate over its own breakdown,
 /// closed by the hits no target ship's row could carry.
 ///
 /// There is no per-ship shells-fired line: a salvo is fired at the water rather
-/// than at a victim, so the analysis states that count only once. Nor is there a
-/// per-ship terrain count: a shell that struck the water hit no ship, so it
-/// belongs to the whole battle's narrowing step and to no row here.
+/// than at a victim, so the analysis states that count only once. Nor is there
+/// a per-ship ribbon block: a `SetFire` ribbon names no victim.
 fn fire_chance_per_ship_lines(
     fire_chance: &EffectiveFireChance,
     localize_ship: &dyn Fn(&PerShipFireChance) -> String,
@@ -5533,7 +5621,7 @@ fn fire_chance_per_ship_lines(
     let mut lines = vec![t!("ui.replay.sections.fire_chance_per_ship").into_owned()];
     for ship in sorted_per_ship(fire_chance) {
         lines.push(format!("  {}", fire_chance_per_ship_line(ship, localize_ship)));
-        lines.extend(fire_chance_tally_lines(&ship.into(), "    ", &[]));
+        lines.extend(fire_chance_rows_to_lines(&fire_chance_tally_rows(&ship.into(), &[]), "    "));
     }
     // Without this the rows silently fail to add up to the aggregate: a hit keyed
     // to the recording player's own ship, or to a player whose hull never
@@ -5544,10 +5632,16 @@ fn fire_chance_per_ship_lines(
     lines
 }
 
-/// "N hits not attributable to a target ship", or `None` when every hit landed
-/// on a ship the breakdown has a row for.
+/// "N HE hits not attributable to a target ship", or `None` when every HE hit
+/// on a ship landed on one the breakdown has a row for.
+///
+/// Derived here rather than read off the analysis, because the analysis reports
+/// the remainder over every hit of ours and this listing is HE-only: a hit keyed
+/// to our own ship or to a player whose hull never resolved is counted in the
+/// aggregate HE line and carried by no row, and this is exactly that difference.
 fn fire_chance_no_target_ship_line(fire_chance: &EffectiveFireChance) -> Option<String> {
-    let hits = fire_chance.hits_without_a_target_ship;
+    let in_rows: u32 = fire_chance.per_ship.iter().map(|ship| ship.he_hits_on_a_ship).sum();
+    let hits = fire_chance.he_hits_on_a_ship.saturating_sub(in_rows);
     if hits == 0 {
         return None;
     }
@@ -5727,6 +5821,9 @@ fn build_replay_chat_content(
 mod fire_chance_render_tests {
     use super::*;
     use wows_replay_insights::fire_chance::analysis::FormulaStep;
+    // Only the tests name this: the analysis still counts our AP hits and our
+    // splashes, and these check that none of it reaches the breakdown.
+    use wows_replay_insights::fire_chance::analysis::NarrowingReason;
 
     fn fixture(eligible_hits: u32, fires: u32, expected_fires: Option<f32>) -> EffectiveFireChance {
         EffectiveFireChance {
@@ -5742,7 +5839,9 @@ mod fire_chance_render_tests {
             per_ship: Vec::new(),
             exclusions: BTreeMap::new(),
             section_predictions: Vec::new(),
+            set_fire_ribbons: fires,
             unattributed_fires: 0,
+            unattributed_reasons: BTreeMap::new(),
             formula_base: None,
             formula: Vec::new(),
         }
@@ -5788,7 +5887,7 @@ mod fire_chance_render_tests {
         fc.per_ship = vec![ship("Zao", 40, 6, None), ship("Iowa", 23, 3, None)];
         let headline = fire_chance_headline_text(&fc);
         assert!(!headline.contains('%'), "expected no percentage in {headline:?}");
-        assert_eq!(headline, "9 fires / 63 eligible hits   across 2 target ships");
+        assert_eq!(headline, "9 fires / 63 hits that could have started one   across 2 target ships");
     }
 
     /// `expected_fires` is a count of fires, and the observed figure beside it
@@ -5799,7 +5898,10 @@ mod fire_chance_render_tests {
         fc.per_ship = vec![ship("Zao", 63, 9, None)];
         assert_eq!(
             fire_chance_headline_lines(&fc),
-            vec!["9 fires / 63 eligible hits   across 1 target ship".to_owned(), "  expected 6.3 fires".to_owned()]
+            vec![
+                "9 fires / 63 hits that could have started one   across 1 target ship".to_owned(),
+                "  expected 6.3 fires".to_owned()
+            ]
         );
     }
 
@@ -5809,7 +5911,7 @@ mod fire_chance_render_tests {
     #[test]
     fn headline_over_zero_eligible_hits_shows_no_expected_line() {
         let fc = fixture(0, 0, Some(0.0));
-        assert_eq!(fire_chance_headline_lines(&fc), vec!["no eligible hits".to_owned()]);
+        assert_eq!(fire_chance_headline_lines(&fc), vec!["no hits that could have started a fire".to_owned()]);
     }
 
     /// Zero eligible hits is unknown, not zero: this must never render as a
@@ -5819,17 +5921,16 @@ mod fire_chance_render_tests {
         let fc = fixture(0, 0, None);
         let headline = fire_chance_headline_text(&fc);
         assert!(!headline.contains('%'), "expected no percentage in {headline:?}");
-        assert_eq!(headline, "no eligible hits");
+        assert_eq!(headline, "no hits that could have started a fire");
     }
 
-    /// The whole shape in one place: shells fired, the hits they produced, the
-    /// narrowing down to the main-battery HE hits on a ship with both
-    /// subtractions named on the line, and only then the eligibility split.
-    /// Eligible is pinned first, the refusals follow by count descending with
-    /// zero-count reasons dropped, and the hits that were never in the
+    /// The whole shape in one place: HE shells fired, the HE hits on a ship
+    /// they produced, and then the eligibility split. The hits that could have
+    /// started a fire are pinned first, the refusals follow by count descending
+    /// with zero-count reasons dropped, and the hits that were never in the
     /// population come last.
     #[test]
-    fn the_breakdown_reads_fired_then_hits_then_he_hits_then_the_split() {
+    fn the_breakdown_reads_fired_then_he_hits_then_the_split() {
         let mut fc = fixture(43, 4, None);
         fc.he_shells_fired = 171;
         fc.hits = 130;
@@ -5842,12 +5943,11 @@ mod fire_chance_render_tests {
         fc.exclusions.insert(ExclusionReason::ImpactUnplaceableOnVictim, 2);
 
         assert_eq!(
-            fire_chance_breakdown_lines(&fc),
-            vec![
+            fire_chance_breakdown_lines(&fc)[..7],
+            [
                 "171 HE shells fired".to_owned(),
-                "130 hits".to_owned(),
-                " 69 HE hits on a ship   (39 shells could not burn, 22 struck terrain or water)".to_owned(),
-                "  43 eligible".to_owned(),
+                " 69 HE hits on a ship".to_owned(),
+                "  43 could have started a fire".to_owned(),
                 "  15 section already burning".to_owned(),
                 "   8 Damage Control Party active".to_owned(),
                 "   2 could not place the impact on the ship we matched it to".to_owned(),
@@ -5856,12 +5956,12 @@ mod fire_chance_render_tests {
         );
     }
 
-    /// The eligibility list is the eligibility model's own answers and nothing
-    /// else. Every HE shell that lands on a ship can start a fire, so a shell
-    /// type or a splash in the water has no business in a list the reader is
-    /// meant to read as "these could have burned and did not".
+    /// The chain is HE-only and ship-only from top to bottom. An AP hit was
+    /// never an HE shell and a splash in the water hit no ship, so neither has
+    /// any business in a listing whose first line counts HE shells fired and
+    /// whose last lines read as "these could have burned and did not".
     #[test]
-    fn the_shell_and_terrain_filters_never_appear_in_the_eligibility_list() {
+    fn the_shell_and_terrain_filters_never_appear_in_the_breakdown() {
         let mut fc = fixture(43, 4, None);
         fc.hits = 130;
         fc.he_hits_on_a_ship = 69;
@@ -5870,9 +5970,9 @@ mod fire_chance_render_tests {
         fc.exclusions.insert(ExclusionReason::SectionAlreadyBurning, 26);
 
         let lines = fire_chance_breakdown_lines(&fc);
-        let listing = &lines[3..];
-        assert!(!listing.iter().any(|line| line.contains("could not burn")), "got {listing:?}");
-        assert!(!listing.iter().any(|line| line.contains("terrain")), "got {listing:?}");
+        assert!(!lines.iter().any(|line| line.contains("could not burn")), "got {lines:?}");
+        assert!(!lines.iter().any(|line| line.contains("terrain")), "got {lines:?}");
+        assert!(!lines.iter().any(|line| line.contains("130")), "got {lines:?}");
     }
 
     /// A victim that was never hit after it died contributes no row, rather
@@ -5886,15 +5986,15 @@ mod fire_chance_render_tests {
         assert!(!lines.iter().any(|line| line.contains("not applicable")), "got {lines:?}");
     }
 
-    /// Nothing narrowed out means the two head lines carry the same figure and
-    /// the line states no empty brackets.
+    /// The head of the chain is the fired count and the HE hits on a ship, in
+    /// that order and with nothing between them.
     #[test]
-    fn the_narrowing_clause_is_absent_when_nothing_was_narrowed_out() {
+    fn the_breakdown_head_is_fired_then_he_hits_on_a_ship() {
         let mut fc = fixture(2, 0, None);
         fc.he_shells_fired = 6;
         fc.hits = 2;
         let lines = fire_chance_breakdown_lines(&fc);
-        assert_eq!(lines[2], "2 HE hits on a ship");
+        assert_eq!(lines[..2], ["6 HE shells fired".to_owned(), "2 HE hits on a ship".to_owned()]);
     }
 
     /// Each ship's own accounting sits under its row in the same shape, so the
@@ -5916,10 +6016,9 @@ mod fire_chance_render_tests {
             fire_chance_per_ship_lines(&fc, &|s: &PerShipFireChance| s.victim_ship_name.clone()),
             vec![
                 "Per Target Ship".to_owned(),
-                "  Zao   16.7%  2 fires / 12 eligible hits".to_owned(),
-                "    20 hits".to_owned(),
-                "    17 HE hits on a ship   (3 shells could not burn)".to_owned(),
-                "      12 eligible".to_owned(),
+                "  Zao   16.7%  2 fires / 12 hits that could have started one".to_owned(),
+                "    17 HE hits on a ship".to_owned(),
+                "      12 could have started a fire".to_owned(),
                 "       2 observation gap".to_owned(),
                 "       3 victim already dead, not applicable".to_owned(),
             ]
@@ -5942,11 +6041,10 @@ mod fire_chance_render_tests {
     #[test]
     fn the_per_ship_block_states_the_hits_no_row_carries() {
         let mut fc = fixture(12, 2, None);
-        fc.hits = 130;
-        fc.hits_without_a_target_ship = 33;
+        fc.he_hits_on_a_ship = 45;
         fc.per_ship = vec![ship("Zao", 12, 2, None)];
         let lines = fire_chance_per_ship_lines(&fc, &|s: &PerShipFireChance| s.victim_ship_name.clone());
-        assert_eq!(lines.last().map(String::as_str), Some("  33 hits not attributable to a target ship"));
+        assert_eq!(lines.last().map(String::as_str), Some("  33 HE hits not attributable to a target ship"));
     }
 
     /// Same count-versus-rate rule as the headline: 12 hits expecting 1.656
@@ -5957,7 +6055,7 @@ mod fire_chance_render_tests {
         let s = ship("Zao", 12, 2, Some(1.656));
         assert_eq!(
             fire_chance_per_ship_line(&s, &|s: &PerShipFireChance| s.victim_ship_name.clone()),
-            "Zao   16.7%  2 fires / 12 eligible hits   expected 13.8%"
+            "Zao   16.7%  2 fires / 12 hits that could have started one   expected 13.8%"
         );
     }
 
@@ -5966,15 +6064,15 @@ mod fire_chance_render_tests {
         let s = ship("Iowa", 11, 1, None);
         assert_eq!(
             fire_chance_per_ship_line(&s, &|s: &PerShipFireChance| s.victim_ship_name.clone()),
-            "Iowa   9.1%  1 fire / 11 eligible hits"
+            "Iowa   9.1%  1 fire / 11 hits that could have started one"
         );
     }
 
     /// One fire is one fire, not "1 fires", and one hit is one hit.
     #[test]
     fn counts_of_one_are_singular() {
-        assert_eq!(fire_chance_counts_text(1, 1), "1 fire / 1 eligible hit");
-        assert_eq!(fire_chance_counts_text(0, 2), "0 fires / 2 eligible hits");
+        assert_eq!(fire_chance_counts_text(1, 1), "1 fire / 1 hit that could have started one");
+        assert_eq!(fire_chance_counts_text(0, 2), "0 fires / 2 hits that could have started one");
     }
 
     /// The same shape over a real match's counts, taken from
@@ -5997,12 +6095,11 @@ mod fire_chance_render_tests {
         fc.exclusions.insert(ExclusionReason::ImpactUnplaceableOnVictim, 23);
 
         assert_eq!(
-            fire_chance_breakdown_lines(&fc),
-            vec![
+            fire_chance_breakdown_lines(&fc)[..9],
+            [
                 "2312 HE shells fired".to_owned(),
-                "1276 hits".to_owned(),
-                "1132 HE hits on a ship   (97 were not main battery hits, 47 struck terrain or water)".to_owned(),
-                "  202 eligible".to_owned(),
+                "1132 HE hits on a ship".to_owned(),
+                "  202 could have started a fire".to_owned(),
                 "  320 section already burning".to_owned(),
                 "  257 victim build unknown, fire zones may be merged".to_owned(),
                 "  171 ambiguous with another hit of ours".to_owned(),
@@ -6011,8 +6108,67 @@ mod fire_chance_render_tests {
                 "  100 victim already dead, not applicable".to_owned(),
             ]
         );
-        assert_eq!(fc.he_hits_on_a_ship + fc.narrowed_total(), fc.hits);
         assert_eq!(fc.eligible_hits + fc.exclusions.values().sum::<u32>() + fc.not_applicable, fc.he_hits_on_a_ship);
+    }
+
+    /// The block that answers "the game gave me six fires and this says four".
+    /// The ribbon count is the game's own figure, the two lines under it are
+    /// what became of them, and the reasons under those say why each uncredited
+    /// one could not be tied to a shell.
+    #[test]
+    fn the_ribbon_block_accounts_for_every_fire_the_game_gave_us() {
+        let mut fc = fixture(43, 4, None);
+        fc.set_fire_ribbons = 6;
+        fc.unattributed_fires = 2;
+        fc.unattributed_reasons.insert(UnattributedFireReason::NoHitInWindow, 1);
+        fc.unattributed_reasons.insert(UnattributedFireReason::EveryNearbyHitExcluded, 1);
+
+        let lines = fire_chance_breakdown_lines(&fc);
+        let ribbons = &lines[lines.len() - 5..];
+        assert_eq!(
+            ribbons,
+            [
+                "6 SetFire ribbons".to_owned(),
+                "  4 credited to a shell".to_owned(),
+                "  2 not credited".to_owned(),
+                "    1 every nearby hit of ours was already excluded".to_owned(),
+                "    1 no hit of ours landed in the window".to_owned(),
+            ]
+        );
+    }
+
+    /// The arithmetic the block exists to make visible: credited plus
+    /// uncredited is the ribbon count, and the reasons account for the
+    /// uncredited ones exactly.
+    #[test]
+    fn the_ribbon_block_adds_up() {
+        let mut fc = fixture(43, 4, None);
+        fc.set_fire_ribbons = 6;
+        fc.unattributed_fires = 2;
+        fc.unattributed_reasons.insert(UnattributedFireReason::BurnStateNotObserved, 2);
+        let rows = fire_chance_ribbon_rows(&fc);
+        assert_eq!(rows[0].count, fc.fires + fc.unattributed_fires);
+        assert_eq!(rows.iter().filter(|row| row.depth == 1).map(|row| row.count).sum::<u32>(), rows[0].count);
+        assert_eq!(rows.iter().filter(|row| row.depth == 2).map(|row| row.count).sum::<u32>(), fc.unattributed_fires);
+    }
+
+    /// Every ribbon credited leaves nothing to explain, so the block stops at
+    /// the two lines that state as much rather than showing an empty heading.
+    #[test]
+    fn the_ribbon_block_omits_the_reasons_when_every_fire_was_credited() {
+        let mut fc = fixture(43, 4, None);
+        fc.set_fire_ribbons = 4;
+        let lines = fire_chance_breakdown_lines(&fc);
+        assert_eq!(&lines[lines.len() - 2..], ["4 SetFire ribbons".to_owned(), "  4 credited to a shell".to_owned()]);
+    }
+
+    /// A player who started no fires at all has no ribbon accounting to show,
+    /// and a block of zeroes would read as a category with nothing in it.
+    #[test]
+    fn the_ribbon_block_is_absent_without_ribbons() {
+        let fc = fixture(43, 0, None);
+        assert!(fire_chance_ribbon_rows(&fc).is_empty());
+        assert!(!fire_chance_breakdown_lines(&fc).iter().any(|line| line.contains("SetFire")));
     }
 
     /// The key match is exhaustive, so a stale arm is a compile error, but a key
@@ -6034,26 +6190,33 @@ mod fire_chance_render_tests {
             ExclusionReason::VictimPoseUnknown,
             ExclusionReason::AmbiguousWithAnotherHit,
         ];
-        const NARROWINGS: [NarrowingReason; 3] =
-            [NarrowingReason::ShellCannotBurn, NarrowingReason::NotMainBattery, NarrowingReason::ImpactNotOnAShip];
-        const LABELS: [&str; 10] = [
+        const UNATTRIBUTED: [UnattributedFireReason; 7] = [
+            UnattributedFireReason::BurnStateNotObserved,
+            UnattributedFireReason::AlreadyCreditedToAnEarlierFire,
+            UnattributedFireReason::ContestedByOurSecondary,
+            UnattributedFireReason::ContestedByAnotherHitOfOurs,
+            UnattributedFireReason::EveryNearbyHitExcluded,
+            UnattributedFireReason::NoNearbyHitCouldStartAFire,
+            UnattributedFireReason::NoHitInWindow,
+        ];
+        const LABELS: [&str; 13] = [
+            "ui.replay.sections.fire_chance_breakdown",
             "ui.replay.sections.fire_chance_shells_fired",
             "ui.replay.sections.fire_chance_shells_fired_one",
-            "ui.replay.sections.fire_chance_hits",
-            "ui.replay.sections.fire_chance_hits_one",
             "ui.replay.sections.fire_chance_he_hits",
             "ui.replay.sections.fire_chance_he_hits_one",
             "ui.replay.sections.fire_chance_no_target_ship",
             "ui.replay.sections.fire_chance_no_target_ship_one",
             "ui.replay.sections.fire_chance_eligible",
             "ui.replay.sections.fire_chance_not_applicable",
+            "ui.replay.sections.fire_chance_ribbons",
+            "ui.replay.sections.fire_chance_ribbons_one",
+            "ui.replay.sections.fire_chance_ribbons_credited",
+            "ui.replay.sections.fire_chance_ribbons_uncredited",
         ];
 
         let mut keys: Vec<&'static str> = EXCLUSIONS.iter().map(|r| keys::exclusion_reason_key(*r)).collect();
-        for reason in NARROWINGS {
-            keys.push(keys::narrowing_reason_key(reason, false));
-            keys.push(keys::narrowing_reason_key(reason, true));
-        }
+        keys.extend(UNATTRIBUTED.iter().map(|r| keys::unattributed_fire_reason_key(*r)));
         keys.extend(LABELS);
         for key in keys {
             assert_ne!(t!(key), key, "{key} resolves to nothing");
@@ -6067,7 +6230,7 @@ mod fire_chance_render_tests {
         let s = ship("Fletcher", 0, 0, Some(0.0));
         let line = fire_chance_per_ship_line(&s, &|s: &PerShipFireChance| s.victim_ship_name.clone());
         assert!(!line.contains('%'), "expected no percentage in {line:?}");
-        assert_eq!(line, "Fletcher   no eligible hits");
+        assert_eq!(line, "Fletcher   no hits that could have started a fire");
     }
 
     #[test]
