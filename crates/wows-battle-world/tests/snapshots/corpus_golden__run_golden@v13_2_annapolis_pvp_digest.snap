@@ -107,7 +107,7 @@ minimap:
     y: 0.521
     heading: 161.719
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 1250308
     x: -0.111

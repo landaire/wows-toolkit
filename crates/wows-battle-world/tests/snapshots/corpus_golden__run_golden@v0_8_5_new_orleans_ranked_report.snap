@@ -2,4 +2,230 @@
 source: crates/wows-battle-world/tests/corpus_golden.rs
 expression: report_snapshot(filename)
 ---
-~
+arena_id: ArenaId(3699080802102665)
+version: "Version { major: 0, minor: 8, patch: 5, build: Some(1631917) }"
+map_name: spaces/r01_military_navigation
+game_mode: Ranked_Epicenter
+game_type: "Unknown(\"\")"
+match_group: ranked
+self_player: 91142449
+battle_result: "{\"type\":\"Win\",\"team_id\":1}"
+finish_type: Known(ScoreExcess)
+max_duration: 1200
+played_duration: 450.856
+extra_duration: ~
+players:
+  - account_id: 70630
+    name: BoxTona
+    entity_id: 861270
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4182717904)
+    division: C
+  - account_id: 1148813
+    name: tcar128
+    entity_id: 861272
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4182652624)
+    division: B
+  - account_id: 5637891
+    name: Vladodes
+    entity_id: 861264
+    team_id: 0
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4284430032)
+    division: A
+  - account_id: 8833372
+    name: 1serb
+    entity_id: 861280
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4288559088)
+    division: C
+  - account_id: 11142644
+    name: Loader88
+    entity_id: 861262
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4182718288)
+    division: A
+  - account_id: 23962431
+    name: ___777____boec
+    entity_id: 861284
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3752802256)
+    division: B
+  - account_id: 35193216
+    name: wolna20
+    entity_id: 861268
+    team_id: 0
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4182652112)
+    division: D
+  - account_id: 39498588
+    name: KiLLoGraM2015
+    entity_id: 861274
+    team_id: 0
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4182718256)
+    division: D
+  - account_id: 58043569
+    name: Blakseamen
+    entity_id: 861278
+    team_id: 0
+    meta_ship_id: 1
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4182652880)
+    division: B
+  - account_id: 91093937
+    name: bobi7777777
+    entity_id: 861276
+    team_id: 0
+    meta_ship_id: 1
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4182685136)
+    division: D
+  - account_id: 91142449
+    name: JleJluk_u_6oJluk
+    entity_id: 861266
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(4182685680)
+    division: A
+  - account_id: 102880689
+    name: GVpro2503_1
+    entity_id: 861282
+    team_id: 0
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4182717904)
+    division: C
+frags:
+  - killer_account_id: 70630
+    killer_name: BoxTona
+    victims:
+      - 861270@Known(Flooding)
+  - killer_account_id: 8833372
+    killer_name: 1serb
+    victims:
+      - 861280@Known(DiveBomber)
+  - killer_account_id: 11142644
+    killer_name: Loader88
+    victims:
+      - 861262@Known(Flooding)
+  - killer_account_id: 23962431
+    killer_name: ___777____boec
+    victims:
+      - 861284@Known(Secondaries)
+  - killer_account_id: 91142449
+    killer_name: JleJluk_u_6oJluk
+    victims:
+      - 861266@Known(Torpedo)
+  - killer_account_id: 102880689
+    killer_name: GVpro2503_1
+    victims:
+      - 861282@Known(Secondaries)
+chat:
+  - clock: 438.307
+    sender_name: KiLLoGraM2015
+    channel: Global
+    message: Боже хватит мне слать в команду Затупков!!!
+    entity_id: 861265
+    sender_relation: Some(Relation(2))
+    player: "39498588:KiLLoGraM2015"
+capture_points:
+  - index: 0
+    position:
+      - 0
+      - 0
+      - 0
+    radius: 115
+    control_point_type: Some(Known(EpicenterCp))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 55
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - 0
+      - 0
+      - 0
+    radius: 195
+    control_point_type: Some(Known(EpicenterCp))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 496.818
+    has_invaders: false
+    both_inside: false
+    is_enabled: true
+  - index: 2
+    position:
+      - 0
+      - 0
+      - 0
+    radius: 275
+    control_point_type: Some(Known(EpicenterCp))
+    team_id: 1
+    invader_team: 0
+    progress:
+      - 0
+      - 12.667
+    has_invaders: true
+    both_inside: true
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 180
+  - team_index: 1
+    score: 1000
+self_damage_stats:
+  - weapon: Known(Burn)
+    category: Known(Enemy)
+    count: 14
+    total: 2035.198
+  - weapon: Known(MainAp)
+    category: Known(Agro)
+    count: 26
+    total: 138600
+  - weapon: Known(MainAp)
+    category: Known(Spot)
+    count: 2
+    total: 1900
+  - weapon: Known(MainHe)
+    category: Known(Enemy)
+    count: 45
+    total: 27702.27
+active_consumable_avatars: 7
+active_consumable_total: 19
+burn_state_changes: 28
+presence_vehicles: 12
+presence_windows: 21

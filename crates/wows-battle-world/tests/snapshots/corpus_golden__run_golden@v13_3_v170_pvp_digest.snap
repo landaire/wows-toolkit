@@ -135,7 +135,7 @@ minimap:
     y: 0.766
     heading: -68.906
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 952011
     x: 0.486
@@ -268,7 +268,7 @@ minimap:
     y: 0.803
     heading: -118.125
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
 vehicles:
   - id: 952001

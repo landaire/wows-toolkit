@@ -3,7 +3,7 @@ source: crates/wows-battle-world/tests/corpus_golden.rs
 expression: report_snapshot(filename)
 ---
 arena_id: ArenaId(5180982086409349)
-version: "Version { major: 12, minor: 6, patch: 0, build: 7266701 }"
+version: "Version { major: 12, minor: 6, patch: 0, build: Some(7266701) }"
 map_name: spaces/s06_Atoll
 game_mode: PCVO009_OP_02_02_s06_Atoll
 game_type: Known(Pve)
@@ -23,6 +23,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4076779504)
+    division: ~
   - account_id: -4270029679
     name: IDS_OP_02_02_EN45
     entity_id: 1219458
@@ -31,6 +32,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(3762206704)
+    division: ~
   - account_id: -3979484341
     name: IDS_OP_02_02_DDG_02
     entity_id: 1219336
@@ -39,6 +41,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4264441840)
+    division: ~
   - account_id: -3915805405
     name: IDS_OP_02_02_INTRMDT_2
     entity_id: 1219319
@@ -47,6 +50,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4248745968)
+    division: ~
   - account_id: -3625101193
     name: IDS_OP_02_02_EN_RBA_2
     entity_id: 1219412
@@ -55,6 +59,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4289607664)
+    division: ~
   - account_id: -3226123448
     name: IDS_OP_02_02_EN35
     entity_id: 1219409
@@ -63,6 +68,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4076779504)
+    division: ~
   - account_id: -3113448432
     name: IDS_OP_02_02_BOT_01_1
     entity_id: 1206314
@@ -71,6 +77,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4280170480)
+    division: ~
   - account_id: -2840921354
     name: IDS_OP_02_02_EN44
     entity_id: 1219457
@@ -79,6 +86,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(3761190896)
+    division: ~
   - account_id: -2835062099
     name: IDS_OP_02_02_BOT_ALLY
     entity_id: 1206321
@@ -87,6 +95,7 @@ players:
     relation: Relation(1)
     is_bot: true
     vehicle_id: GameParamId(4287542992)
+    division: ~
   - account_id: -2539814340
     name: IDS_OP_02_02_BOT_03_3
     entity_id: 1219252
@@ -95,6 +104,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4288591856)
+    division: ~
   - account_id: -2308959489
     name: IDS_OP_02_02_BOT_CRR_1
     entity_id: 1206320
@@ -103,6 +113,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(3448747280)
+    division: ~
   - account_id: -2254972601
     name: IDS_OP_02_02_DDG_01
     entity_id: 1219335
@@ -111,6 +122,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4289607664)
+    division: ~
   - account_id: -2238397599
     name: IDS_OP_02_02_EN34
     entity_id: 1219408
@@ -119,6 +131,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4282333168)
+    division: ~
   - account_id: -2167446974
     name: IDS_OP_02_02_BOT_03_4
     entity_id: 1219219
@@ -127,6 +140,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4078876656)
+    division: ~
   - account_id: -2114866493
     name: IDS_OP_02_02_EN41
     entity_id: 1219459
@@ -135,6 +149,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4289607664)
+    division: ~
   - account_id: -1593419487
     name: IDS_OP_02_02_EN25
     entity_id: 1219332
@@ -143,6 +158,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4289640432)
+    division: ~
   - account_id: -1368453493
     name: IDS_OP_02_02_BOT_01_9
     entity_id: 1206319
@@ -151,6 +167,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4290721776)
+    division: ~
   - account_id: -1251500459
     name: IDS_OP_02_02_BOT_01_5
     entity_id: 1206316
@@ -159,6 +176,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(3763255280)
+    division: ~
   - account_id: -1190017392
     name: IDS_OP_02_02_EN33
     entity_id: 1219407
@@ -167,6 +185,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4289640432)
+    division: ~
   - account_id: -1043186179
     name: IDS_OP_02_02_EN24
     entity_id: 1219331
@@ -175,6 +194,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4183734256)
+    division: ~
   - account_id: -932777551
     name: IDS_OP_02_02_BOT_01_14
     entity_id: 1219337
@@ -183,6 +203,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4078876656)
+    division: ~
   - account_id: -705892326
     name: IDS_OP_02_02_BOT_03_1
     entity_id: 1219218
@@ -191,6 +212,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4289640432)
+    division: ~
   - account_id: -635308303
     name: IDS_OP_02_02_EN23
     entity_id: 1219330
@@ -199,6 +221,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4289640432)
+    division: ~
   - account_id: -509544973
     name: IDS_OP_02_02_BOT_01_8
     entity_id: 1206318
@@ -207,6 +230,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4288624624)
+    division: ~
   - account_id: -470428147
     name: IDS_OP_02_02_EN42
     entity_id: 1219460
@@ -215,6 +239,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4286461936)
+    division: ~
   - account_id: -252488766
     name: IDS_OP_02_02_EN_RBA_1
     entity_id: 1219411
@@ -223,6 +248,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4288559088)
+    division: ~
   - account_id: -252247031
     name: IDS_OP_02_02_BOT_01_7
     entity_id: 1206317
@@ -231,6 +257,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4259264496)
+    division: ~
   - account_id: -246634527
     name: IDS_OP_02_02_INTRMDT_3
     entity_id: 1219320
@@ -239,6 +266,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4269717488)
+    division: ~
   - account_id: -204049776
     name: IDS_OP_02_02_BOT_01_2
     entity_id: 1206315
@@ -247,6 +275,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4288559088)
+    division: ~
   - account_id: -87792667
     name: IDS_OP_02_02_EN_RBA_3
     entity_id: 1219413
@@ -255,6 +284,7 @@ players:
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4280170480)
+    division: ~
   - account_id: 500521120
     name: kut750
     entity_id: 1206311
@@ -263,6 +293,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4077860816)
+    division: ~
   - account_id: 500559591
     name: stevandac
     entity_id: 1206307
@@ -271,6 +302,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4078876368)
+    division: ~
   - account_id: 502238597
     name: coeur69lion
     entity_id: 1206309
@@ -279,6 +311,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4284430032)
+    division: ~
   - account_id: 512563593
     name: HarryPotterSniper
     entity_id: 1206313
@@ -287,6 +320,7 @@ players:
     relation: Relation(0)
     is_bot: false
     vehicle_id: GameParamId(3543054032)
+    division: ~
   - account_id: 547445435
     name: adarkandstormyknight
     entity_id: 1206305
@@ -295,6 +329,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4181636912)
+    division: ~
   - account_id: 603410272
     name: paulakis90
     entity_id: 1206301
@@ -303,6 +338,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4076779472)
+    division: ~
   - account_id: 676455223
     name: "8468484"
     entity_id: 1206303
@@ -311,6 +347,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4076812080)
+    division: ~
 frags:
   - killer_account_id: -4270029679
     killer_name: IDS_OP_02_02_EN45
@@ -465,3 +502,6 @@ self_damage_stats:
     total: 27587.25
 active_consumable_avatars: 36
 active_consumable_total: 92
+burn_state_changes: 121
+presence_vehicles: 37
+presence_windows: 96

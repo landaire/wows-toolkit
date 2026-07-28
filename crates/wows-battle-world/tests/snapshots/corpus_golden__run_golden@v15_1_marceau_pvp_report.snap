@@ -3,7 +3,7 @@ source: crates/wows-battle-world/tests/corpus_golden.rs
 expression: report_snapshot(filename)
 ---
 arena_id: ArenaId(5214882342341106)
-version: "Version { major: 15, minor: 1, patch: 0, build: 11965230 }"
+version: "Version { major: 15, minor: 1, patch: 0, build: Some(11965230) }"
 map_name: spaces/22_tierra_del_fuego
 game_mode: domination_3point
 game_type: Known(Random)
@@ -23,6 +23,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4284397360)
+    division: ~
   - account_id: 500983845
     name: krisken
     entity_id: 1214199
@@ -31,6 +32,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4284429648)
+    division: ~
   - account_id: 501983621
     name: hugoka
     entity_id: 1214205
@@ -39,6 +41,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179539408)
+    division: ~
   - account_id: 502198039
     name: penguinslayer
     entity_id: 1214215
@@ -47,6 +50,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179572688)
+    division: ~
   - account_id: 503082190
     name: kiniu5
     entity_id: 1214213
@@ -55,6 +59,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3760076496)
+    division: ~
   - account_id: 512472337
     name: TwistedJoker
     entity_id: 1214217
@@ -63,6 +68,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179572720)
+    division: ~
   - account_id: 512994654
     name: it_FUBAR
     entity_id: 1214189
@@ -71,6 +77,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4074714928)
+    division: ~
   - account_id: 527024650
     name: hotek1
     entity_id: 1214193
@@ -79,6 +86,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4259231440)
+    division: ~
   - account_id: 529046938
     name: 1Stein1
     entity_id: 1214221
@@ -87,6 +95,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(3655218960)
+    division: ~
   - account_id: 531914142
     name: Sliwkoland
     entity_id: 1214207
@@ -95,6 +104,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(3539908400)
+    division: ~
   - account_id: 538045448
     name: Zodiac164
     entity_id: 1214231
@@ -103,6 +113,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4179539152)
+    division: ~
   - account_id: 549388476
     name: Kero29
     entity_id: 1214211
@@ -111,6 +122,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(3445536720)
+    division: ~
   - account_id: 558775322
     name: mnouckk
     entity_id: 1214219
@@ -119,6 +131,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3549869904)
+    division: ~
   - account_id: 559184240
     name: the_seven_Chandrian
     entity_id: 1214227
@@ -127,6 +140,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3539941072)
+    division: A
   - account_id: 559688745
     name: Heidenpower
     entity_id: 1214191
@@ -135,6 +149,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3759585264)
+    division: A
   - account_id: 564936097
     name: Wolster_1
     entity_id: 1214203
@@ -143,6 +158,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179506480)
+    division: ~
   - account_id: 565593699
     name: BonnieBlue_prpr
     entity_id: 1214225
@@ -151,6 +167,7 @@ players:
     relation: Relation(0)
     is_bot: false
     vehicle_id: GameParamId(4074649424)
+    division: ~
   - account_id: 567916609
     name: Changer24
     entity_id: 1214223
@@ -159,6 +176,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4273977328)
+    division: ~
   - account_id: 568856703
     name: Damianwar
     entity_id: 1214187
@@ -167,6 +185,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4074158064)
+    division: ~
   - account_id: 588344757
     name: MOMO123_47
     entity_id: 1214197
@@ -175,6 +194,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(3550394352)
+    division: ~
   - account_id: 596221760
     name: individum65
     entity_id: 1214201
@@ -183,6 +203,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4284429648)
+    division: ~
   - account_id: 598249206
     name: tomatenyeti
     entity_id: 1214195
@@ -191,6 +212,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4074747856)
+    division: ~
   - account_id: 684420539
     name: Nathanieldark21
     entity_id: 1214229
@@ -199,6 +221,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4179539408)
+    division: ~
   - account_id: 689785201
     name: narjaghan18
     entity_id: 1214233
@@ -207,6 +230,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(3549870064)
+    division: ~
 frags:
   - killer_account_id: 500425962
     killer_name: ranma1985
@@ -620,3 +644,6 @@ self_damage_stats:
     total: 11370.393
 active_consumable_avatars: 24
 active_consumable_total: 123
+burn_state_changes: 104
+presence_vehicles: 24
+presence_windows: 98

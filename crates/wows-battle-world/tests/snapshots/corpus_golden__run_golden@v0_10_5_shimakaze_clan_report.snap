@@ -3,7 +3,7 @@ source: crates/wows-battle-world/tests/corpus_golden.rs
 expression: report_snapshot(filename)
 ---
 arena_id: ArenaId(3016614854264728)
-version: "Version { major: 0, minor: 10, patch: 5, build: 4046169 }"
+version: "Version { major: 0, minor: 10, patch: 5, build: Some(4046169) }"
 map_name: spaces/18_NE_ice_islands
 game_mode: CvC_Domination
 game_type: Known(Clan)
@@ -23,6 +23,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
+    division: A
   - account_id: 1002114231
     name: DamienLarkspur
     entity_id: 795218
@@ -31,6 +32,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
+    division: A
   - account_id: 1005391474
     name: Dadecoy11
     entity_id: 795220
@@ -39,6 +41,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4074649392)
+    division: A
   - account_id: 1011962247
     name: TheJohnny_Tank
     entity_id: 795204
@@ -47,6 +50,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(3338548944)
+    division: A
   - account_id: 1012033981
     name: BigDaddy061
     entity_id: 795210
@@ -55,6 +59,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
+    division: A
   - account_id: 1013032818
     name: infmaze
     entity_id: 795216
@@ -63,6 +68,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3338548944)
+    division: A
   - account_id: 1015481238
     name: Crummy_One
     entity_id: 795224
@@ -71,6 +77,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
+    division: A
   - account_id: 1019244409
     name: Nimzaj
     entity_id: 795212
@@ -79,6 +86,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
+    division: A
   - account_id: 1030144936
     name: CPT_Benson
     entity_id: 795230
@@ -87,6 +95,7 @@ players:
     relation: Relation(0)
     is_bot: false
     vehicle_id: GameParamId(3338548944)
+    division: A
   - account_id: 1032071847
     name: Papercannon
     entity_id: 795208
@@ -95,6 +104,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
+    division: A
   - account_id: 1034854963
     name: Knightow
     entity_id: 795206
@@ -103,6 +113,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3338548944)
+    division: A
   - account_id: 1036245237
     name: k35_
     entity_id: 795226
@@ -111,6 +122,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
+    division: A
   - account_id: 1038206403
     name: _Miscreant_
     entity_id: 795228
@@ -119,6 +131,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
+    division: A
   - account_id: 1039874276
     name: hupking
     entity_id: 795214
@@ -127,6 +140,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3338548944)
+    division: A
 frags:
   - killer_account_id: 1002114231
     killer_name: DamienLarkspur
@@ -364,3 +378,6 @@ self_damage_stats:
     total: 71301
 active_consumable_avatars: 14
 active_consumable_total: 36
+burn_state_changes: 26
+presence_vehicles: 14
+presence_windows: 29

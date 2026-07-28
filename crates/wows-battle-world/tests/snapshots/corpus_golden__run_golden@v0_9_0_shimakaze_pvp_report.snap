@@ -2,4 +2,493 @@
 source: crates/wows-battle-world/tests/corpus_golden.rs
 expression: report_snapshot(filename)
 ---
-~
+arena_id: ArenaId(2865779852805350)
+version: "Version { major: 0, minor: 9, patch: 0, build: Some(2171354) }"
+map_name: spaces/45_Zigzag
+game_mode: Domination
+game_type: "Unknown(\"\")"
+match_group: ""
+self_player: 2004046233
+battle_result: "{\"type\":\"Win\",\"team_id\":0}"
+finish_type: Known(ScoreExcess)
+max_duration: 1200
+played_duration: 1083.087
+extra_duration: ~
+players:
+  - account_id: 2000648987
+    name: jegan
+    entity_id: 667290
+    team_id: 0
+    meta_ship_id: 537038333
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3760142288)
+    division: ~
+  - account_id: 2002278728
+    name: f23390178
+    entity_id: 667270
+    team_id: 0
+    meta_ship_id: 536985150
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4179539696)
+    division: ~
+  - account_id: 2002619211
+    name: Lasagna7
+    entity_id: 667262
+    team_id: 0
+    meta_ship_id: 671153078
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3655251408)
+    division: ~
+  - account_id: 2004046233
+    name: Puggsley
+    entity_id: 667250
+    team_id: 0
+    meta_ship_id: 671198363
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+    division: ~
+  - account_id: 2006203278
+    name: styri
+    entity_id: 667272
+    team_id: 1
+    meta_ship_id: 536956785
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4282267344)
+    division: ~
+  - account_id: 2007638001
+    name: seasofjoytoy
+    entity_id: 667284
+    team_id: 0
+    meta_ship_id: 536965875
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4179572176)
+    division: ~
+  - account_id: 2008577084
+    name: battleshipmaster
+    entity_id: 667256
+    team_id: 0
+    meta_ship_id: 671141159
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4179605488)
+    division: ~
+  - account_id: 2010399770
+    name: lBAEKl
+    entity_id: 667266
+    team_id: 1
+    meta_ship_id: 671368761
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179572176)
+    division: ~
+  - account_id: 2011771217
+    name: Tejo_Adi_Prabowo
+    entity_id: 667248
+    team_id: 1
+    meta_ship_id: 671155345
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4276041424)
+    division: ~
+  - account_id: 2011836085
+    name: law84897
+    entity_id: 667268
+    team_id: 1
+    meta_ship_id: 671334714
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179506992)
+    division: ~
+  - account_id: 2012153456
+    name: Curtain_Flowers
+    entity_id: 667254
+    team_id: 0
+    meta_ship_id: 671337507
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4179539920)
+    division: ~
+  - account_id: 2013109722
+    name: martz57
+    entity_id: 667276
+    team_id: 0
+    meta_ship_id: 671263323
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4281219056)
+    division: ~
+  - account_id: 2013409431
+    name: coupe0513
+    entity_id: 667278
+    team_id: 1
+    meta_ship_id: 671105005
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(3655251408)
+    division: ~
+  - account_id: 2016026059
+    name: aina_suzuki723
+    entity_id: 667264
+    team_id: 1
+    meta_ship_id: 536894008
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179539760)
+    division: ~
+  - account_id: 2018516961
+    name: MrRingNAW
+    entity_id: 667286
+    team_id: 0
+    meta_ship_id: 537083124
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4259231440)
+    division: ~
+  - account_id: 2019106181
+    name: RIGHTCC
+    entity_id: 667282
+    team_id: 1
+    meta_ship_id: 537177329
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179572528)
+    division: ~
+  - account_id: 2022022386
+    name: sugumou
+    entity_id: 667280
+    team_id: 1
+    meta_ship_id: 536945006
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179539696)
+    division: ~
+  - account_id: 2022394811
+    name: soraka_1986
+    entity_id: 667274
+    team_id: 1
+    meta_ship_id: 671289416
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4273911792)
+    division: ~
+  - account_id: 2022750571
+    name: bosinmy
+    entity_id: 667244
+    team_id: 1
+    meta_ship_id: 671316748
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179539792)
+    division: ~
+  - account_id: 2023115002
+    name: JEEOO
+    entity_id: 667246
+    team_id: 1
+    meta_ship_id: 671166991
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179605200)
+    division: ~
+  - account_id: 2023829015
+    name: Chocolate_QIN
+    entity_id: 667258
+    team_id: 0
+    meta_ship_id: 671145515
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4179572176)
+    division: ~
+  - account_id: 2024979087
+    name: "2192117835"
+    entity_id: 667260
+    team_id: 0
+    meta_ship_id: 536994989
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4276041424)
+    division: ~
+  - account_id: 3000223654
+    name: kimuchides
+    entity_id: 667288
+    team_id: 1
+    meta_ship_id: 671340763
+    relation: Relation(2)
+    is_bot: false
+    vehicle_id: GameParamId(4179572176)
+    division: ~
+  - account_id: 3001580924
+    name: smith2335
+    entity_id: 667252
+    team_id: 0
+    meta_ship_id: 671338273
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4179539696)
+    division: ~
+frags:
+  - killer_account_id: 2002619211
+    killer_name: Lasagna7
+    victims:
+      - 667262@Known(Torpedo)
+  - killer_account_id: 2004046233
+    killer_name: Puggsley
+    victims:
+      - 667250@Known(Artillery)
+      - 667250@Known(DiveBomber)
+      - 667250@Known(DiveBomber)
+  - killer_account_id: 2006203278
+    killer_name: styri
+    victims:
+      - 667272@Known(DiveBomber)
+  - killer_account_id: 2008577084
+    killer_name: battleshipmaster
+    victims:
+      - 667256@Known(Ramming)
+      - 667256@Known(Terrain)
+  - killer_account_id: 2013109722
+    killer_name: martz57
+    victims:
+      - 667276@Known(DiveBomber)
+  - killer_account_id: 2013409431
+    killer_name: coupe0513
+    victims:
+      - 667278@Known(Ramming)
+  - killer_account_id: 2016026059
+    killer_name: aina_suzuki723
+    victims:
+      - 667264@Known(Torpedo)
+  - killer_account_id: 2022022386
+    killer_name: sugumou
+    victims:
+      - 667280@Known(Detonation)
+  - killer_account_id: 2023115002
+    killer_name: JEEOO
+    victims:
+      - 667246@Known(AerialTorpedo)
+      - 667246@Known(AerialTorpedo)
+  - killer_account_id: 3000223654
+    killer_name: kimuchides
+    victims:
+      - 667288@Known(Secondaries)
+chat:
+  - clock: 201.52
+    sender_name: Puggsley
+    channel: Team
+    message: wtf r u doing aussie??
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 228.777
+    sender_name: f23390178
+    channel: Team
+    message: 亨利削了?
+    entity_id: 667249
+    sender_relation: Some(Relation(1))
+    player: "2002278728:f23390178"
+  - clock: 330.922
+    sender_name: f23390178
+    channel: Global
+    message: gk he??
+    entity_id: 667249
+    sender_relation: Some(Relation(1))
+    player: "2002278728:f23390178"
+  - clock: 371.227
+    sender_name: Puggsley
+    channel: Team
+    message: ffs gearing wtf r u doing
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 384.498
+    sender_name: martz57
+    channel: Team
+    message: having some fun
+    entity_id: 667249
+    sender_relation: Some(Relation(1))
+    player: "2013109722:martz57"
+  - clock: 401.784
+    sender_name: Puggsley
+    channel: Team
+    message: being a d1ck more like
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 537.054
+    sender_name: Puggsley
+    channel: Team
+    message: we need caps ffs
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 623.498
+    sender_name: Puggsley
+    channel: Team
+    message: i go cap a
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 633.783
+    sender_name: Puggsley
+    channel: Team
+    message: protect cap
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 696.78
+    sender_name: Puggsley
+    channel: Team
+    message: PLEASE PROTECT B
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 706.21
+    sender_name: Puggsley
+    channel: Team
+    message: PLLEASE STOP b CAP
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 726.502
+    sender_name: Lasagna7
+    channel: Team
+    message: need spoter
+    entity_id: 667249
+    sender_relation: Some(Relation(1))
+    player: "2002619211:Lasagna7"
+  - clock: 758.206
+    sender_name: Puggsley
+    channel: Team
+    message: LOOK AT MAP
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 776.079
+    sender_name: Puggsley
+    channel: Team
+    message: FFSD WHY THE FUUCK YOU NOT STAY NEAR B
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 911.214
+    sender_name: Puggsley
+    channel: Team
+    message: KILL LOW HEALTH
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 968.363
+    sender_name: f23390178
+    channel: Global
+    message: 打了15萬有啥用
+    entity_id: 667249
+    sender_relation: Some(Relation(1))
+    player: "2002278728:f23390178"
+  - clock: 979.383
+    sender_name: f23390178
+    channel: Global
+    message: 一堆BB不上
+    entity_id: 667249
+    sender_relation: Some(Relation(1))
+    player: "2002278728:f23390178"
+  - clock: 992.21
+    sender_name: "2192117835"
+    channel: Team
+    message: 哎无语
+    entity_id: 667249
+    sender_relation: Some(Relation(1))
+    player: "2024979087:2192117835"
+capture_points:
+  - index: 0
+    position:
+      - -399.999
+      - 0
+      - -0
+    radius: 120
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: 1
+    progress:
+      - 0.367
+      - 38
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 1
+    position:
+      - 0
+      - 0
+      - -0.001
+    radius: 120
+    control_point_type: Some(Known(Control))
+    team_id: 0
+    invader_team: 1
+    progress:
+      - 0.65
+      - 21
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+  - index: 2
+    position:
+      - 399.999
+      - 0
+      - -0.001
+    radius: 120
+    control_point_type: Some(Known(Control))
+    team_id: 1
+    invader_team: -1
+    progress:
+      - 0
+      - 60
+    has_invaders: true
+    both_inside: false
+    is_enabled: true
+team_scores:
+  - team_index: 0
+    score: 1000
+  - team_index: 1
+    score: 765
+self_damage_stats:
+  - weapon: Known(Burn)
+    category: Known(Spot)
+    count: 3
+    total: 3
+  - weapon: Known(Flood)
+    category: Known(Enemy)
+    count: 5
+    total: 2900.27
+  - weapon: Known(MainAp)
+    category: Known(Spot)
+    count: 21
+    total: 58409.68
+  - weapon: Known(MainCs)
+    category: Known(Spot)
+    count: 35
+    total: 43621.57
+  - weapon: Known(MainHe)
+    category: Known(Spot)
+    count: 25
+    total: 9981
+  - weapon: Known(RocketHe)
+    category: Known(Agro)
+    count: 18
+    total: 62100
+  - weapon: Known(Torpedo)
+    category: Known(Agro)
+    count: 4
+    total: 57600
+  - weapon: Known(Torpedo)
+    category: Known(Enemy)
+    count: 8
+    total: 130105.76
+active_consumable_avatars: 22
+active_consumable_total: 87
+burn_state_changes: 50
+presence_vehicles: 24
+presence_windows: 136

@@ -3,7 +3,7 @@ source: crates/wows-battle-world/tests/corpus_golden.rs
 expression: report_snapshot(filename)
 ---
 arena_id: ArenaId(8202431402102518)
-version: "Version { major: 0, minor: 11, patch: 0, build: 5045210 }"
+version: "Version { major: 0, minor: 11, patch: 0, build: Some(5045210) }"
 map_name: spaces/15_NE_north
 game_mode: Ranked_Domination
 game_type: Known(Ranked)
@@ -23,6 +23,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4179572176)
+    division: ~
   - account_id: 501523287
     name: Korolko
     entity_id: 1961005
@@ -31,6 +32,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3760076496)
+    division: ~
   - account_id: 505781024
     name: milgra
     entity_id: 1961011
@@ -39,6 +41,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4179539920)
+    division: ~
   - account_id: 514551619
     name: rafall777
     entity_id: 1960997
@@ -47,6 +50,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179572176)
+    division: ~
   - account_id: 529432798
     name: limivorous
     entity_id: 1960989
@@ -55,6 +59,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4074649296)
+    division: ~
   - account_id: 534300997
     name: Gurgel100
     entity_id: 1960991
@@ -63,6 +68,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4277090288)
+    division: ~
   - account_id: 538780490
     name: silvio16
     entity_id: 1961003
@@ -71,6 +77,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4074714928)
+    division: ~
   - account_id: 550031975
     name: wetCgoe
     entity_id: 1960999
@@ -79,6 +86,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4273911792)
+    division: ~
   - account_id: 559670817
     name: yusufbaskent2009
     entity_id: 1961001
@@ -87,6 +95,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
+    division: ~
   - account_id: 564371113
     name: Mastervdemon
     entity_id: 1960995
@@ -95,6 +104,7 @@ players:
     relation: Relation(0)
     is_bot: false
     vehicle_id: GameParamId(4179572528)
+    division: ~
   - account_id: 565596600
     name: Amiral_PUJOL
     entity_id: 1960987
@@ -103,6 +113,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4074682352)
+    division: ~
   - account_id: 571715981
     name: Tasos_Mauromixalis
     entity_id: 1961013
@@ -111,6 +122,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179539760)
+    division: ~
   - account_id: 571898565
     name: Mikey2111
     entity_id: 1961007
@@ -119,6 +131,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3760142320)
+    division: ~
   - account_id: 575910458
     name: Tigris31_2020
     entity_id: 1960993
@@ -127,6 +140,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
+    division: ~
 frags:
   - killer_account_id: 559670817
     killer_name: yusufbaskent2009
@@ -317,3 +331,6 @@ self_damage_stats:
     total: 6006
 active_consumable_avatars: 13
 active_consumable_total: 50
+burn_state_changes: 39
+presence_vehicles: 14
+presence_windows: 36

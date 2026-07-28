@@ -65,168 +65,168 @@ minimap:
     y: 0.393
     heading: -170.156
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69295
     x: 0.691
     y: 0.619
     heading: -95.625
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69297
     x: 0.889
     y: 0.324
     heading: 77.344
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69299
     x: 0.76
     y: 0.756
     heading: 113.906
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69301
     x: 0.494
     y: 0.496
     heading: -53.438
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69303
     x: 0.609
     y: 0.467
     heading: -119.531
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69305
     x: 0.568
     y: 0.539
     heading: -133.594
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69307
     x: 0.816
     y: 0.625
     heading: -46.406
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69309
     x: 0.656
     y: 0.357
     heading: -132.188
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69311
     x: 0.551
     y: 0.504
     heading: 85.781
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69313
     x: 0.654
     y: 0.615
     heading: 171.563
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69315
     x: 0.955
     y: 0.754
     heading: 171.563
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69317
     x: 0.242
     y: 0.619
     heading: -29.531
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69319
     x: 1.025
     y: 0.447
     heading: -168.75
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69321
     x: 0.891
     y: 0.629
     heading: 127.969
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69323
     x: 0.779
     y: 0.635
     heading: 130.781
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69325
     x: 0.709
     y: 0.617
     heading: 70.313
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69327
     x: 0.266
     y: 0.631
     heading: 91.406
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69329
     x: 1.008
     y: 0.578
     heading: -63.281
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69331
     x: 0.367
     y: 0.322
     heading: 32.344
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69333
     x: 0.734
     y: 0.475
     heading: -108.281
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69335
     x: 0.299
     y: 0.5
     heading: 77.344
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69337
     x: 0.561
     y: 0.369
     heading: 136.406
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
   - id: 69339
     x: 0.191
     y: 0.549
     heading: 42.188
     visible: true
-    visibility_flags: 0
+    visibility_flags: ~
     is_invisible: false
 vehicles:
   - id: 69293
@@ -234,7 +234,7 @@ vehicles:
     max_health: 18400
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 69292
     selected_weapon: Known(Artillery)
@@ -244,7 +244,7 @@ vehicles:
     max_health: 59300
     is_alive: true
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 69294
     selected_weapon: Known(Artillery)
@@ -254,7 +254,7 @@ vehicles:
     max_health: 47900
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 69296
     selected_weapon: Known(Planes)
@@ -264,7 +264,7 @@ vehicles:
     max_health: 51400
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 69298
     selected_weapon: Known(Planes)
@@ -274,7 +274,7 @@ vehicles:
     max_health: 0
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 69300
     selected_weapon: Known(Artillery)
@@ -284,7 +284,7 @@ vehicles:
     max_health: 30800
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 69302
     selected_weapon: Known(Artillery)
@@ -294,7 +294,7 @@ vehicles:
     max_health: 17600
     is_alive: true
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 69304
     selected_weapon: Known(Artillery)
@@ -304,7 +304,7 @@ vehicles:
     max_health: 32140
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 69306
     selected_weapon: Known(Artillery)
@@ -314,7 +314,7 @@ vehicles:
     max_health: 47800
     is_alive: true
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 69308
     selected_weapon: Known(Artillery)
@@ -324,7 +324,7 @@ vehicles:
     max_health: 14100
     is_alive: false
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 69310
     selected_weapon: Known(Artillery)
@@ -334,7 +334,7 @@ vehicles:
     max_health: 69000
     is_alive: true
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 69312
     selected_weapon: Known(Artillery)
@@ -344,7 +344,7 @@ vehicles:
     max_health: 49000
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 69314
     selected_weapon: Known(Artillery)
@@ -354,7 +354,7 @@ vehicles:
     max_health: 33659
     is_alive: false
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 69316
     selected_weapon: Known(Artillery)
@@ -364,7 +364,7 @@ vehicles:
     max_health: 65666
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 69318
     selected_weapon: Known(Artillery)
@@ -374,7 +374,7 @@ vehicles:
     max_health: 49000
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 69320
     selected_weapon: Known(Artillery)
@@ -384,7 +384,7 @@ vehicles:
     max_health: 21414.018
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 69322
     selected_weapon: Known(Artillery)
@@ -394,7 +394,7 @@ vehicles:
     max_health: 0
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 69324
     selected_weapon: Known(Artillery)
@@ -404,7 +404,7 @@ vehicles:
     max_health: 78300
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 69326
     selected_weapon: Known(Artillery)
@@ -414,7 +414,7 @@ vehicles:
     max_health: 505.408
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 69328
     selected_weapon: Known(Artillery)
@@ -424,7 +424,7 @@ vehicles:
     max_health: 49000
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 69330
     selected_weapon: Known(Artillery)
@@ -434,7 +434,7 @@ vehicles:
     max_health: 0
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 69332
     selected_weapon: Known(Torpedoes)
@@ -444,7 +444,7 @@ vehicles:
     max_health: 42400
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 69334
     selected_weapon: Known(Artillery)
@@ -454,7 +454,7 @@ vehicles:
     max_health: 14303.887
     is_alive: false
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 69336
     selected_weapon: Known(Artillery)
@@ -464,7 +464,7 @@ vehicles:
     max_health: 56300
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 69338
     selected_weapon: Known(Artillery)

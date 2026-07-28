@@ -2,4 +2,635 @@
 source: crates/wows-battle-world/tests/corpus_golden.rs
 expression: report_snapshot(filename)
 ---
-~
+arena_id: ArenaId(1254028951631881)
+version: "Version { major: 0, minor: 9, patch: 0, build: Some(2171354) }"
+map_name: spaces/s07_Advance
+game_mode: OP_02_03_s07_Advance
+game_type: "Unknown(\"\")"
+match_group: ""
+self_player: 1028639932
+battle_result: "{\"type\":\"Win\",\"team_id\":0}"
+finish_type: Known(PveMainTaskSucceeded)
+max_duration: 1200
+played_duration: 955.127
+extra_duration: ~
+players:
+  - account_id: -36
+    name: IDS_OP_02_03_AT_ATTAKA_US_41
+    entity_id: 306150
+    team_id: 1
+    meta_ship_id: -36
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4286527472)
+    division: ~
+  - account_id: -35
+    name: IDS_OP_02_03_AT_ATTAKA_UR_44
+    entity_id: 306148
+    team_id: 1
+    meta_ship_id: -35
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4182685136)
+    division: ~
+  - account_id: -34
+    name: IDS_OP_02_03_AT_ATTAKA_US_40_ATLANTA
+    entity_id: 306146
+    team_id: 1
+    meta_ship_id: -34
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4288591856)
+    division: ~
+  - account_id: -33
+    name: IDS_OP_02_03_AT_ATTAKA_FR_23
+    entity_id: 306066
+    team_id: 1
+    meta_ship_id: -33
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4183766992)
+    division: ~
+  - account_id: -32
+    name: IDS_OP_02_03_AT_ATTAKA_US_43
+    entity_id: 306064
+    team_id: 1
+    meta_ship_id: -32
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(3763255280)
+    division: ~
+  - account_id: -31
+    name: IDS_OP_02_03_AT_ATTAKA_US_51
+    entity_id: 306062
+    team_id: 1
+    meta_ship_id: -31
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(3764271056)
+    division: ~
+  - account_id: -30
+    name: IDS_OP_02_03_AT_ATTAKA_US_A3
+    entity_id: 306060
+    team_id: 1
+    meta_ship_id: -30
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4288624624)
+    division: ~
+  - account_id: -29
+    name: IDS_OP_02_03_AT_ATTAKA_US_48
+    entity_id: 306058
+    team_id: 1
+    meta_ship_id: -29
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4184815440)
+    division: ~
+  - account_id: -28
+    name: IDS_OP_02_03_AT_ATTAKA_UR_42
+    entity_id: 306056
+    team_id: 1
+    meta_ship_id: -28
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4289640432)
+    division: ~
+  - account_id: -27
+    name: IDS_OP_02_03_AT_ATTAKA_US_47
+    entity_id: 306054
+    team_id: 1
+    meta_ship_id: -27
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4289607664)
+    division: ~
+  - account_id: -26
+    name: IDS_OP_02_03_AT_ATTAKA_US_PORT
+    entity_id: 301893
+    team_id: 1
+    meta_ship_id: -26
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(3761190896)
+    division: ~
+  - account_id: -25
+    name: IDS_OP_02_03_AT_ATTAKA_FR_21
+    entity_id: 301891
+    team_id: 1
+    meta_ship_id: -25
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4184782800)
+    division: ~
+  - account_id: -24
+    name: IDS_OP_02_03_AT_ATTAKA_UR_21
+    entity_id: 301889
+    team_id: 1
+    meta_ship_id: -24
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4184782672)
+    division: ~
+  - account_id: -23
+    name: IDS_OP_02_03_AT_ATTAKA_US_21
+    entity_id: 301887
+    team_id: 1
+    meta_ship_id: -23
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4078876656)
+    division: ~
+  - account_id: -22
+    name: IDS_OP_02_03_AT_SHIP_DEFENDER_3
+    entity_id: 301848
+    team_id: 1
+    meta_ship_id: -22
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4280170480)
+    division: ~
+  - account_id: -21
+    name: IDS_OP_02_03_AT_ATTAKA_GB_33
+    entity_id: 301846
+    team_id: 1
+    meta_ship_id: -21
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4184815568)
+    division: ~
+  - account_id: -20
+    name: IDS_OP_02_03_AT_SHIP_DEFENDER_1
+    entity_id: 301844
+    team_id: 1
+    meta_ship_id: -20
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4184782800)
+    division: ~
+  - account_id: -19
+    name: IDS_OP_02_03_AT_TRANSPORT_E_3
+    entity_id: 301784
+    team_id: 1
+    meta_ship_id: -19
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4266931472)
+    division: ~
+  - account_id: -18
+    name: IDS_OP_02_03_AT_COMMUNICATION
+    entity_id: 301782
+    team_id: 1
+    meta_ship_id: -18
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4288952304)
+    division: ~
+  - account_id: -17
+    name: IDS_OP_02_03_AT_TRANSPORT_E_4
+    entity_id: 301780
+    team_id: 1
+    meta_ship_id: -17
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4247008528)
+    division: ~
+  - account_id: -16
+    name: IDS_OP_02_03_AT_TRANSPORT_E_2
+    entity_id: 301778
+    team_id: 1
+    meta_ship_id: -16
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4248057104)
+    division: ~
+  - account_id: -15
+    name: IDS_OP_02_03_AT_TRANSPORT_E_1
+    entity_id: 301776
+    team_id: 1
+    meta_ship_id: -15
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4248057104)
+    division: ~
+  - account_id: -14
+    name: IDS_OP_02_03_AT_SHIP_DEFENDER_4
+    entity_id: 301774
+    team_id: 1
+    meta_ship_id: -14
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4078876656)
+    division: ~
+  - account_id: -13
+    name: IDS_OP_02_03_AT_ATTAKA_US_14
+    entity_id: 301772
+    team_id: 1
+    meta_ship_id: -13
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4290721776)
+    division: ~
+  - account_id: -12
+    name: IDS_OP_02_03_AT_ATTAKA_FR_11
+    entity_id: 301770
+    team_id: 1
+    meta_ship_id: -12
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4185831248)
+    division: ~
+  - account_id: -11
+    name: IDS_OP_02_03_AT_ATTAKA_US_11
+    entity_id: 301768
+    team_id: 1
+    meta_ship_id: -11
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4274927600)
+    division: ~
+  - account_id: -10
+    name: IDS_OP_02_03_AT_ATTAKA_US_A1
+    entity_id: 301746
+    team_id: 1
+    meta_ship_id: -10
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4181702640)
+    division: ~
+  - account_id: -9
+    name: IDS_OP_02_03_AT_ATTAKA_US_51
+    entity_id: 301748
+    team_id: 1
+    meta_ship_id: -9
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4280170480)
+    division: ~
+  - account_id: -8
+    name: IDS_OP_02_03_AT_ATTAKA_US_23
+    entity_id: 301750
+    team_id: 1
+    meta_ship_id: -8
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4269717488)
+    division: ~
+  - account_id: -7
+    name: IDS_OP_02_03_AT_ATTAKA_GB_32
+    entity_id: 301752
+    team_id: 1
+    meta_ship_id: -7
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4280170480)
+    division: ~
+  - account_id: -6
+    name: IDS_OP_02_03_AT_TRANSPORT_E_5
+    entity_id: 301754
+    team_id: 1
+    meta_ship_id: -6
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(3767416784)
+    division: ~
+  - account_id: -5
+    name: IDS_OP_02_03_AT_TRANSPORT_A_2
+    entity_id: 301738
+    team_id: 0
+    meta_ship_id: -5
+    relation: Relation(1)
+    is_bot: true
+    vehicle_id: GameParamId(4291049456)
+    division: ~
+  - account_id: -4
+    name: IDS_OP_02_03_AT_TRANSPORT_A_4
+    entity_id: 301758
+    team_id: 0
+    meta_ship_id: -4
+    relation: Relation(1)
+    is_bot: true
+    vehicle_id: GameParamId(4291049456)
+    division: ~
+  - account_id: -3
+    name: IDS_OP_02_03_AT_TRANSPORT_A_R
+    entity_id: 301760
+    team_id: 0
+    meta_ship_id: -3
+    relation: Relation(1)
+    is_bot: true
+    vehicle_id: GameParamId(4293146608)
+    division: ~
+  - account_id: -2
+    name: IDS_OP_02_03_AT_TRANSPORT_A_1
+    entity_id: 301762
+    team_id: 0
+    meta_ship_id: -2
+    relation: Relation(1)
+    is_bot: true
+    vehicle_id: GameParamId(4291049456)
+    division: ~
+  - account_id: -1
+    name: IDS_OP_02_03_AT_TRANSPORT_A_3
+    entity_id: 301744
+    team_id: 0
+    meta_ship_id: -1
+    relation: Relation(1)
+    is_bot: true
+    vehicle_id: GameParamId(4291049456)
+    division: ~
+  - account_id: 1013308377
+    name: PtooieBoat
+    entity_id: 301736
+    team_id: 0
+    meta_ship_id: 268835586
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4182718416)
+    division: A
+  - account_id: 1028639932
+    name: AttentionOnDeck
+    entity_id: 301756
+    team_id: 0
+    meta_ship_id: 403049819
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(4288591856)
+    division: A
+  - account_id: 1031445644
+    name: Wardroom
+    entity_id: 301740
+    team_id: 0
+    meta_ship_id: 402753543
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4182717904)
+    division: A
+  - account_id: 1032465056
+    name: Cerberus760
+    entity_id: 301742
+    team_id: 0
+    meta_ship_id: 269033679
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4182718256)
+    division: A
+frags:
+  - killer_account_id: -35
+    killer_name: IDS_OP_02_03_AT_ATTAKA_UR_44
+    victims:
+      - 306148@Known(Torpedo)
+  - killer_account_id: -31
+    killer_name: IDS_OP_02_03_AT_ATTAKA_US_51
+    victims:
+      - 306062@Known(Torpedo)
+  - killer_account_id: 1013308377
+    killer_name: PtooieBoat
+    victims:
+      - 301736@Known(Fire)
+      - 301736@Known(Secondaries)
+      - 301736@Known(Secondaries)
+      - 301736@Known(Secondaries)
+      - 301736@Known(Secondaries)
+      - 301736@Known(Secondaries)
+      - 301736@Known(Secondaries)
+  - killer_account_id: 1028639932
+    killer_name: AttentionOnDeck
+    victims:
+      - 301756@Known(DiveBomber)
+      - 301756@Known(Ramming)
+      - 301756@Known(Ramming)
+      - 301756@Known(Torpedo)
+      - 301756@Known(Torpedo)
+      - 301756@Known(Torpedo)
+      - 301756@Known(Torpedo)
+      - 301756@Known(Torpedo)
+      - 301756@Known(Torpedo)
+      - 301756@Known(Torpedo)
+      - 301756@Known(Torpedo)
+      - 301756@Known(Torpedo)
+      - 301756@Known(Torpedo)
+  - killer_account_id: 1031445644
+    killer_name: Wardroom
+    victims:
+      - 301740@Known(Secondaries)
+      - 301740@Known(Secondaries)
+      - 301740@Known(Secondaries)
+  - killer_account_id: 1032465056
+    killer_name: Cerberus760
+    victims:
+      - 301742@Known(Artillery)
+      - 301742@Known(DiveBomber)
+      - 301742@Known(DiveBomber)
+      - 301742@Known(Flooding)
+      - 301742@Known(Flooding)
+      - 301742@Known(Flooding)
+      - 301742@Known(Secondaries)
+      - 301742@Known(Secondaries)
+chat:
+  - clock: 11.382
+    sender_name: Wardroom
+    channel: Team
+    message: Yeeee- hawww
+    entity_id: 301755
+    sender_relation: Some(Relation(1))
+    player: "1031445644:Wardroom"
+  - clock: 15.536
+    sender_name: Cerberus760
+    channel: Team
+    message: ill torp WY
+    entity_id: 301755
+    sender_relation: Some(Relation(1))
+    player: "1032465056:Cerberus760"
+  - clock: 38.566
+    sender_name: PtooieBoat
+    channel: Team
+    message: "but you are right about KGV in a way,   too bad WG raised her citadel."
+    entity_id: 301755
+    sender_relation: Some(Relation(1))
+    player: "1013308377:PtooieBoat"
+  - clock: 54.122
+    sender_name: AttentionOnDeck
+    channel: Division
+    message: cant reach with radart this time
+    entity_id: 301755
+    sender_relation: Some(Relation(0))
+    player: "1028639932:AttentionOnDeck"
+  - clock: 235.403
+    sender_name: PtooieBoat
+    channel: Division
+    message: get some heals cerb
+    entity_id: 301755
+    sender_relation: Some(Relation(1))
+    player: "1013308377:PtooieBoat"
+  - clock: 442.397
+    sender_name: Unknown
+    channel: Division
+    message: IDS_OP_02_03_CHAT_005_SECOND_TASK_04_SUCCESS
+    entity_id: 301755
+    sender_relation: None
+    player: ~
+  - clock: 475.667
+    sender_name: PtooieBoat
+    channel: Division
+    message: phoenix down
+    entity_id: 301755
+    sender_relation: Some(Relation(1))
+    player: "1013308377:PtooieBoat"
+  - clock: 476.232
+    sender_name: Cerberus760
+    channel: Team
+    message: you got CV KG?
+    entity_id: 301755
+    sender_relation: Some(Relation(1))
+    player: "1032465056:Cerberus760"
+  - clock: 490.005
+    sender_name: PtooieBoat
+    channel: Division
+    message: wasnt planning but ill go
+    entity_id: 301755
+    sender_relation: Some(Relation(1))
+    player: "1013308377:PtooieBoat"
+  - clock: 515.817
+    sender_name: Cerberus760
+    channel: Team
+    message: "ok, my health too low"
+    entity_id: 301755
+    sender_relation: Some(Relation(1))
+    player: "1032465056:Cerberus760"
+  - clock: 574.22
+    sender_name: Cerberus760
+    channel: Team
+    message: nice
+    entity_id: 301755
+    sender_relation: Some(Relation(1))
+    player: "1032465056:Cerberus760"
+  - clock: 647.22
+    sender_name: Unknown
+    channel: Division
+    message: IDS_OP_02_03_020_MESSAGE
+    entity_id: 301755
+    sender_relation: None
+    player: ~
+  - clock: 653.102
+    sender_name: Unknown
+    channel: Division
+    message: IDS_OP_02_03_012_TARANSPORTS_IN_PORT
+    entity_id: 301755
+    sender_relation: None
+    player: ~
+  - clock: 711.368
+    sender_name: PtooieBoat
+    channel: Division
+    message: "im shooting new york first,  cause its bigger threat to you guys and convoy"
+    entity_id: 301755
+    sender_relation: Some(Relation(1))
+    player: "1013308377:PtooieBoat"
+  - clock: 713.236
+    sender_name: Cerberus760
+    channel: Team
+    message: oops
+    entity_id: 301755
+    sender_relation: Some(Relation(1))
+    player: "1032465056:Cerberus760"
+  - clock: 759.218
+    sender_name: Unknown
+    channel: Division
+    message: IDS_OP_02_03_005_MAIN_MESSAGE_3
+    entity_id: 301755
+    sender_relation: None
+    player: ~
+  - clock: 827.647
+    sender_name: Cerberus760
+    channel: Team
+    message: crappy run again
+    entity_id: 301755
+    sender_relation: Some(Relation(1))
+    player: "1032465056:Cerberus760"
+  - clock: 833.219
+    sender_name: Cerberus760
+    channel: Team
+    message: by me
+    entity_id: 301755
+    sender_relation: Some(Relation(1))
+    player: "1032465056:Cerberus760"
+  - clock: 837.22
+    sender_name: Unknown
+    channel: Division
+    message: IDS_OP_02_03_014_REMONT_1_ARRIVED
+    entity_id: 301755
+    sender_relation: None
+    player: ~
+  - clock: 923.214
+    sender_name: Unknown
+    channel: Division
+    message: IDS_OP_02_03_014_REMONT_1_END_ARRIVED
+    entity_id: 301755
+    sender_relation: None
+    player: ~
+  - clock: 972.103
+    sender_name: Cerberus760
+    channel: Team
+    message: gg
+    entity_id: 301755
+    sender_relation: Some(Relation(1))
+    player: "1032465056:Cerberus760"
+  - clock: 976.482
+    sender_name: AttentionOnDeck
+    channel: Division
+    message: u got robbed on that last one
+    entity_id: 301755
+    sender_relation: Some(Relation(0))
+    player: "1028639932:AttentionOnDeck"
+capture_points: []
+team_scores: []
+self_damage_stats:
+  - weapon: Known(AtbaHe)
+    category: Known(Agro)
+    count: 1
+    total: 1800
+  - weapon: Known(AtbaHe)
+    category: Known(Spot)
+    count: 10
+    total: 4801.25
+  - weapon: Known(Burn)
+    category: Known(Enemy)
+    count: 98
+    total: 16465.719
+  - weapon: Known(Burn)
+    category: Known(Spot)
+    count: 1
+    total: 1
+  - weapon: Known(MainAp)
+    category: Known(Agro)
+    count: 17
+    total: 174400
+  - weapon: Known(MainAp)
+    category: Known(Enemy)
+    count: 76
+    total: 26212.5
+  - weapon: Known(MainAp)
+    category: Known(Spot)
+    count: 8
+    total: 16176
+  - weapon: Known(MainHe)
+    category: Known(Agro)
+    count: 173
+    total: 349500
+  - weapon: Known(MainHe)
+    category: Known(Enemy)
+    count: 921
+    total: 294792.13
+  - weapon: Known(Torpedo)
+    category: Known(Agro)
+    count: 6
+    total: 72398
+  - weapon: Known(Torpedo)
+    category: Known(Enemy)
+    count: 1
+    total: 10000
+active_consumable_avatars: 6
+active_consumable_total: 34
+burn_state_changes: 80
+presence_vehicles: 40
+presence_windows: 51

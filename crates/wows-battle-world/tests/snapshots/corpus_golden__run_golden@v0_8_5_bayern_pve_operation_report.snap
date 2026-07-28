@@ -2,4 +2,459 @@
 source: crates/wows-battle-world/tests/corpus_golden.rs
 expression: report_snapshot(filename)
 ---
-~
+arena_id: ArenaId(1741898564374894)
+version: "Version { major: 0, minor: 8, patch: 5, build: Some(1631917) }"
+map_name: spaces/s01_NavalBase
+game_mode: Attack_On_Base_Normal
+game_type: "Unknown(\"\")"
+match_group: pve
+self_player: 558023589
+battle_result: "{\"type\":\"Win\",\"team_id\":0}"
+finish_type: Known(PveMainTaskSucceeded)
+max_duration: 1200
+played_duration: 1181.85
+extra_duration: ~
+players:
+  - account_id: -29
+    name: IDS_OP_01_02_MOB_REINFORCEMENT_5_3
+    entity_id: 430365
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4183766832)
+    division: ~
+  - account_id: -28
+    name: IDS_OP_01_02_MOB_REINFORCEMENT_5_2
+    entity_id: 430363
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4183734064)
+    division: ~
+  - account_id: -27
+    name: IDS_OP_01_02_MOB_REINFORCEMENT_5_1
+    entity_id: 430361
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4183701296)
+    division: ~
+  - account_id: -26
+    name: IDS_OP_01_02_MOB_REINFORCEMENT_4_3
+    entity_id: 430311
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4184815408)
+    division: ~
+  - account_id: -25
+    name: IDS_OP_01_02_MOB_REINFORCEMENT_4_2
+    entity_id: 430309
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4184782640)
+    division: ~
+  - account_id: -24
+    name: IDS_OP_01_02_MOB_REINFORCEMENT_4_1
+    entity_id: 430307
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4184749872)
+    division: ~
+  - account_id: -23
+    name: IDS_OP_01_02_MOB_REINFORCEMENT_3_3
+    entity_id: 430219
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4185798448)
+    division: ~
+  - account_id: -22
+    name: IDS_OP_01_02_MOB_REINFORCEMENT_3_2
+    entity_id: 430217
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4185863984)
+    division: ~
+  - account_id: -21
+    name: IDS_OP_01_02_MOB_REINFORCEMENT_3_1
+    entity_id: 430215
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4185831216)
+    division: ~
+  - account_id: -20
+    name: IDS_OP_01_02_MOB_AIR_CARRIER_2_SUPPORT_1
+    entity_id: 430203
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4279154384)
+    division: ~
+  - account_id: -19
+    name: IDS_OP_01_02_MOB_AIR_CARRIER_2
+    entity_id: 430201
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4286527184)
+    division: ~
+  - account_id: -18
+    name: IDS_OP_01_02_MOB_REINFORCEMENT_2_2
+    entity_id: 430173
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4186879792)
+    division: ~
+  - account_id: -17
+    name: IDS_OP_01_02_MOB_REINFORCEMENT_2_1
+    entity_id: 430171
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4185863984)
+    division: ~
+  - account_id: -16
+    name: IDS_OP_01_02_MOB_REINFORCEMENT_1_2
+    entity_id: 430102
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4187895600)
+    division: ~
+  - account_id: -15
+    name: IDS_OP_01_02_MOB_REINFORCEMENT_1_1
+    entity_id: 430100
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4186879792)
+    division: ~
+  - account_id: -14
+    name: IDS_OP_01_02_MOB_AIR_CARRIER_1_SUPPORT_2
+    entity_id: 430098
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4269684432)
+    division: ~
+  - account_id: -13
+    name: IDS_OP_01_02_MOB_AIR_CARRIER_1
+    entity_id: 430096
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4293867216)
+    division: ~
+  - account_id: -12
+    name: IDS_OP_01_02_MOB_JENKINS
+    entity_id: 423896
+    team_id: 0
+    meta_ship_id: 0
+    relation: Relation(1)
+    is_bot: true
+    vehicle_id: GameParamId(4289607664)
+    division: ~
+  - account_id: -11
+    name: IDS_OP_01_02_MOB_VESSEL_05
+    entity_id: 423864
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4293146608)
+    division: ~
+  - account_id: -10
+    name: IDS_OP_01_02_MOB_VESSEL_04
+    entity_id: 423846
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4293146608)
+    division: ~
+  - account_id: -9
+    name: IDS_OP_01_02_MOB_VESSEL_03
+    entity_id: 423838
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4293146608)
+    division: ~
+  - account_id: -8
+    name: IDS_OP_01_02_MOB_VESSEL_02
+    entity_id: 423850
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4293146608)
+    division: ~
+  - account_id: -7
+    name: IDS_OP_01_02_MOB_VESSEL_01
+    entity_id: 423852
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4293146608)
+    division: ~
+  - account_id: -6
+    name: IDS_OP_01_02_MOB_WARSHIP_06
+    entity_id: 423854
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4185831216)
+    division: ~
+  - account_id: -5
+    name: IDS_OP_01_02_MOB_WARSHIP_05
+    entity_id: 423856
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(3767482160)
+    division: ~
+  - account_id: -4
+    name: IDS_OP_01_02_MOB_WARSHIP_04
+    entity_id: 423858
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4186847024)
+    division: ~
+  - account_id: -3
+    name: IDS_OP_01_02_MOB_WARSHIP_03
+    entity_id: 423840
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4186879792)
+    division: ~
+  - account_id: -2
+    name: IDS_OP_01_02_MOB_WARSHIP_02
+    entity_id: 423844
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4186912560)
+    division: ~
+  - account_id: -1
+    name: IDS_OP_01_02_MOB_WARSHIP_01
+    entity_id: 423862
+    team_id: 1
+    meta_ship_id: 0
+    relation: Relation(2)
+    is_bot: true
+    vehicle_id: GameParamId(4184815408)
+    division: ~
+  - account_id: 517084912
+    name: pisaura
+    entity_id: 423860
+    team_id: 0
+    meta_ship_id: 0
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3764336464)
+    division: A
+  - account_id: 527723605
+    name: hynulo
+    entity_id: 423836
+    team_id: 0
+    meta_ship_id: 1
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4287542992)
+    division: B
+  - account_id: 541055339
+    name: Captain_Blunthead
+    entity_id: 423832
+    team_id: 0
+    meta_ship_id: 0
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4183799760)
+    division: A
+  - account_id: 550052891
+    name: BatHunt
+    entity_id: 423830
+    team_id: 0
+    meta_ship_id: 1
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4078876656)
+    division: A
+  - account_id: 555695536
+    name: zaciatocnikjap
+    entity_id: 423842
+    team_id: 0
+    meta_ship_id: 0
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(3764336432)
+    division: C
+  - account_id: 558023589
+    name: ColonelRandyShugard
+    entity_id: 423834
+    team_id: 0
+    meta_ship_id: 0
+    relation: Relation(0)
+    is_bot: false
+    vehicle_id: GameParamId(4183766832)
+    division: A
+  - account_id: 563030789
+    name: Badeschlapfenwarmduscher
+    entity_id: 423848
+    team_id: 0
+    meta_ship_id: 0
+    relation: Relation(1)
+    is_bot: false
+    vehicle_id: GameParamId(4183734224)
+    division: A
+frags:
+  - killer_account_id: -28
+    killer_name: IDS_OP_01_02_MOB_REINFORCEMENT_5_2
+    victims:
+      - 430363@Known(Ramming)
+  - killer_account_id: -23
+    killer_name: IDS_OP_01_02_MOB_REINFORCEMENT_3_3
+    victims:
+      - 430219@Known(Ramming)
+  - killer_account_id: -20
+    killer_name: IDS_OP_01_02_MOB_AIR_CARRIER_2_SUPPORT_1
+    victims:
+      - 430203@Known(Secondaries)
+  - killer_account_id: -14
+    killer_name: IDS_OP_01_02_MOB_AIR_CARRIER_1_SUPPORT_2
+    victims:
+      - 430098@Known(Torpedo)
+  - killer_account_id: -12
+    killer_name: IDS_OP_01_02_MOB_JENKINS
+    victims:
+      - 423896@Known(Torpedo)
+  - killer_account_id: 517084912
+    killer_name: pisaura
+    victims:
+      - 423860@Known(Artillery)
+      - 423860@Known(Ramming)
+      - 423860@Known(Secondaries)
+      - 423860@Known(Torpedo)
+  - killer_account_id: 527723605
+    killer_name: hynulo
+    victims:
+      - 423836@Known(Ramming)
+      - 423836@Known(Secondaries)
+      - 423836@Known(Secondaries)
+  - killer_account_id: 541055339
+    killer_name: Captain_Blunthead
+    victims:
+      - 423832@Known(DiveBomber)
+      - 423832@Known(Ramming)
+      - 423832@Known(Terrain)
+  - killer_account_id: 550052891
+    killer_name: BatHunt
+    victims:
+      - 423830@Known(Ramming)
+      - 423830@Known(Torpedo)
+      - 423830@Known(Torpedo)
+      - 423830@Known(Torpedo)
+  - killer_account_id: 555695536
+    killer_name: zaciatocnikjap
+    victims:
+      - 423842@Known(Artillery)
+      - 423842@Known(Flooding)
+      - 423842@Known(Secondaries)
+  - killer_account_id: 563030789
+    killer_name: Badeschlapfenwarmduscher
+    victims:
+      - 423848@Known(DiveBomber)
+      - 423848@Known(Secondaries)
+      - 423848@Known(Secondaries)
+      - 423848@Known(Secondaries)
+      - 423848@Known(Secondaries)
+      - 423848@Known(Secondaries)
+chat:
+  - clock: 58.24
+    sender_name: IDS_OP_01_02_MOB_JENKINS
+    channel: Division
+    message: IDS_OP_01_02_LEEROYY
+    entity_id: 423833
+    sender_relation: Some(Relation(1))
+    player: "-12:IDS_OP_01_02_MOB_JENKINS"
+  - clock: 734.389
+    sender_name: IDS_OP_01_02_MOB_JENKINS
+    channel: Division
+    message: IDS_OP_01_02_LEEROY_START_ESCAPE
+    entity_id: 423833
+    sender_relation: Some(Relation(1))
+    player: "-12:IDS_OP_01_02_MOB_JENKINS"
+  - clock: 764.954
+    sender_name: IDS_OP_01_02_MOB_JENKINS
+    channel: Division
+    message: IDS_OP_01_02_LEEROY_OHH_SHIT
+    entity_id: 423833
+    sender_relation: Some(Relation(1))
+    player: "-12:IDS_OP_01_02_MOB_JENKINS"
+  - clock: 780.135
+    sender_name: IDS_OP_01_02_MOB_JENKINS
+    channel: Division
+    message: IDS_OP_01_02_LEEROY_DIED
+    entity_id: 423833
+    sender_relation: Some(Relation(1))
+    player: "-12:IDS_OP_01_02_MOB_JENKINS"
+capture_points: []
+team_scores: []
+self_damage_stats:
+  - weapon: Known(AtbaHe)
+    category: Known(Enemy)
+    count: 25
+    total: 2502.135
+  - weapon: Known(MainAp)
+    category: Known(Agro)
+    count: 128
+    total: 730200
+  - weapon: Known(MainAp)
+    category: Known(Enemy)
+    count: 55
+    total: 77702.98
+  - weapon: Known(MainAp)
+    category: Known(Spot)
+    count: 8
+    total: 6021
+  - weapon: Known(MainHe)
+    category: Known(Agro)
+    count: 80
+    total: 129300
+active_consumable_avatars: 7
+active_consumable_total: 27
+burn_state_changes: 95
+presence_vehicles: 34
+presence_windows: 49

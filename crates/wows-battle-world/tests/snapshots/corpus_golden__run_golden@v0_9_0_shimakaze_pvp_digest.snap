@@ -73,248 +73,416 @@ positions:
     yaw: -0.187
     pitch: 0
     roll: -0.043
-minimap: []
+minimap:
+  - id: 667244
+    x: 0.168
+    y: 0.445
+    heading: 116.719
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667246
+    x: 0.486
+    y: 0.016
+    heading: 14.063
+    visible: false
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667248
+    x: 0.648
+    y: 0.535
+    heading: 12.656
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667250
+    x: 0.484
+    y: 0.721
+    heading: 87.188
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667252
+    x: 0.807
+    y: 0.756
+    heading: 139.219
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667254
+    x: 0.479
+    y: 0.494
+    heading: -157.5
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667256
+    x: 0.865
+    y: 1.133
+    heading: 53.438
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667258
+    x: 0.875
+    y: 0.393
+    heading: -52.031
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667260
+    x: 0.875
+    y: 0.883
+    heading: 158.906
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667262
+    x: 0.27
+    y: 0.779
+    heading: -49.219
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667264
+    x: 0.496
+    y: 0.414
+    heading: 144.844
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667266
+    x: 0.396
+    y: 0.293
+    heading: -109.688
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667268
+    x: 0.855
+    y: 0.494
+    heading: 30.938
+    visible: false
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667270
+    x: 0.428
+    y: 0.971
+    heading: -92.813
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667272
+    x: 0.512
+    y: 0.42
+    heading: -77.344
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667274
+    x: -0.053
+    y: 0.473
+    heading: -137.813
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667276
+    x: 0.15
+    y: 0.557
+    heading: 87.188
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667278
+    x: 0.996
+    y: 0.541
+    heading: 174.375
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667280
+    x: 0.852
+    y: 0.723
+    heading: -87.188
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667282
+    x: 0.611
+    y: 0.623
+    heading: 80.156
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667284
+    x: 0.537
+    y: 0.904
+    heading: 161.719
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667286
+    x: 0.186
+    y: 0.854
+    heading: -71.719
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667288
+    x: 0.389
+    y: 0.545
+    heading: -178.594
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
+  - id: 667290
+    x: 1.039
+    y: 0.668
+    heading: 168.75
+    visible: true
+    visibility_flags: ~
+    is_invisible: false
 vehicles:
   - id: 667244
     health: 6516.531
     max_health: 6516.531
     is_alive: true
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 667243
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4179539792)
   - id: 667246
     health: 66600
     max_health: 66600
     is_alive: true
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 667245
     selected_weapon: Known(Planes)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4179605200)
   - id: 667248
     health: 52296.97
     max_health: 52296.97
     is_alive: true
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 667247
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4276041424)
   - id: 667250
     health: 16846
     max_health: 21400
     is_alive: true
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 667249
     selected_weapon: Known(Torpedoes)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4282267344)
   - id: 667252
     health: 0
     max_health: 0
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 667251
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4179539696)
   - id: 667254
     health: 0
     max_health: 43300
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 667253
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4179539920)
   - id: 667256
     health: 71100
     max_health: 71100
     is_alive: true
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 667255
     selected_weapon: Known(Planes)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4179605488)
   - id: 667258
     health: 0
     max_health: 108300
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 667257
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4179572176)
   - id: 667260
     health: 0
     max_health: 0
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 667259
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4276041424)
   - id: 667262
     health: 5063.745
     max_health: 28901
     is_alive: true
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 667261
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(3655251408)
   - id: 667264
     health: 0
     max_health: 0
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 667263
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4179539760)
   - id: 667266
     health: 0
     max_health: 63942.04
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 667265
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4179572176)
   - id: 667268
     health: 7746
     max_health: 7746
     is_alive: true
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 667267
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4179506992)
   - id: 667270
     health: 30464.85
     max_health: 51800
     is_alive: true
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 667269
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4179539696)
   - id: 667272
     health: 0
     max_health: 7854.259
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 667271
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4282267344)
   - id: 667274
     health: 0
     max_health: 0
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 667273
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4273911792)
   - id: 667276
     health: 0
     max_health: 4449
     is_alive: false
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 667275
     selected_weapon: Known(Torpedoes)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4281219056)
   - id: 667278
     health: 0
     max_health: 0
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 667277
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(3655251408)
   - id: 667280
     health: 24837.293
     max_health: 31302.152
     is_alive: true
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 667279
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4179539696)
   - id: 667282
     health: 0
     max_health: 19137.783
     is_alive: false
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 667281
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4179572528)
   - id: 667284
     health: 28449.988
     max_health: 108300
     is_alive: true
     is_invisible: false
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 667283
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4179572176)
   - id: 667286
     health: 0
     max_health: 0
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 667285
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4259231440)
   - id: 667288
     health: 0
     max_health: 60591.887
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 1
     owner: 667287
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(4179572176)
   - id: 667290
     health: 0
     max_health: 0
     is_alive: false
     is_invisible: true
-    visibility_flags: 0
+    visibility_flags: ~
     team_id: 0
     owner: 667289
     selected_weapon: Known(Artillery)
-    ship_params_id: GameParamId(0)
+    ship_params_id: GameParamId(3760142288)
 entity_kinds:
   - id: 276435
     kind: SmokeScreen
@@ -367,394 +535,189 @@ entity_kinds:
   - id: 667290
     kind: Vehicle
 kills:
-  - clock: 555.075
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1146411418\")"
-  - clock: 555.38
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 555.662
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 555.933
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 556.225
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 556.509
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 556.78
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 557.071
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 557.204
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 557.513
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 557.781
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 558.077
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 558.204
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 558.499
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 558.643
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 558.932
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 559.222
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 559.369
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 559.515
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1103731098\")"
-  - clock: 559.648
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 559.796
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1108816691\")"
-  - clock: 559.931
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1103731098\")"
-  - clock: 560.067
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 560.202
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1108816691\")"
-  - clock: 560.373
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1103731098\")"
-  - clock: 560.499
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 560.646
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1108816691\")"
-  - clock: 560.926
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1108816691\")"
-  - clock: 561.058
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1108816691\")"
-  - clock: 561.381
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1108816691\")"
-  - clock: 561.502
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1108816691\")"
-  - clock: 561.773
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1108816691\")"
-  - clock: 561.924
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1108816691\")"
-  - clock: 563.929
-    killer: 35
-    victim: 667246
-    cause: "Unknown(\"1108816691\")"
-  - clock: 564.194
-    killer: 35
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 564.637
-    killer: 35
-    victim: 667246
-    cause: "Unknown(\"1108816691\")"
-  - clock: 565.054
-    killer: 35
-    victim: 667246
-    cause: "Unknown(\"1103731098\")"
-  - clock: 565.199
-    killer: 35
-    victim: 667246
-    cause: "Unknown(\"1103731098\")"
-  - clock: 565.372
-    killer: 35
-    victim: 667246
-    cause: "Unknown(\"1103731098\")"
-  - clock: 565.509
-    killer: 35
-    victim: 667246
-    cause: "Unknown(\"1103731098\")"
-  - clock: 565.644
-    killer: 35
-    victim: 667246
-    cause: "Unknown(\"1103731098\")"
-  - clock: 565.783
-    killer: 35
-    victim: 667246
-    cause: "Unknown(\"1103731098\")"
-  - clock: 565.931
-    killer: 35
-    victim: 667246
-    cause: "Unknown(\"1103731098\")"
-  - clock: 566.079
-    killer: 35
-    victim: 667246
-    cause: "Unknown(\"1103731098\")"
-  - clock: 566.922
-    killer: 35
-    victim: 667246
-    cause: "Unknown(\"1103731098\")"
-  - clock: 567.633
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 568.005
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 568.218
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 578.496
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 578.79
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 579.062
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1093664768\")"
-  - clock: 579.368
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 579.648
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 579.94
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 580.232
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 580.5
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 580.797
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 581.063
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 581.387
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 581.646
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 581.926
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 582.223
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 582.489
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 582.771
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 583.049
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 583.372
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 583.627
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 583.92
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 584.213
-    killer: 1
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 591.395
-    killer: 36
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 591.668
-    killer: 36
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 591.935
-    killer: 36
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 592.224
-    killer: 36
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 592.51
-    killer: 36
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 592.777
-    killer: 36
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 593.073
-    killer: 36
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 593.382
-    killer: 36
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1105.372
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1105.645
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1105.94
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1106.235
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1106.54
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1106.795
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1107.062
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1107.372
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1107.638
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1107.94
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1108.221
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1108.512
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1108.788
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1109.082
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1109.387
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1109.664
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
-  - clock: 1109.956
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
+  - clock: 294.521
+    killer: 667288
+    victim: 667286
+    cause: Known(Secondaries)
+  - clock: 294.664
+    killer: 667276
+    victim: 667274
+    cause: Known(DiveBomber)
+  - clock: 489.493
+    killer: 667256
+    victim: 667288
+    cause: Known(Terrain)
+  - clock: 517.94
+    killer: 667272
+    victim: 667276
+    cause: Known(DiveBomber)
+  - clock: 671.061
+    killer: 667246
+    victim: 667258
+    cause: Known(AerialTorpedo)
+  - clock: 795.788
+    killer: 667262
+    victim: 667272
+    cause: Known(Torpedo)
+  - clock: 829.081
+    killer: 667280
+    victim: 667290
+    cause: Known(Detonation)
+  - clock: 876.221
+    killer: 667246
+    victim: 667252
+    cause: Known(AerialTorpedo)
+  - clock: 891.643
+    killer: 667264
+    victim: 667254
+    cause: Known(Torpedo)
+  - clock: 958.921
+    killer: 667278
+    victim: 667260
+    cause: Known(Ramming)
+  - clock: 959.508
+    killer: 667250
+    victim: 667266
+    cause: Known(Artillery)
+  - clock: 968.363
+    killer: 667256
+    victim: 667278
+    cause: Known(Ramming)
+  - clock: 1011.226
+    killer: 667250
+    victim: 667264
+    cause: Known(DiveBomber)
   - clock: 1110.222
-    killer: 3
-    victim: 667246
-    cause: "Unknown(\"1095342490\")"
+    killer: 667250
+    victim: 667282
+    cause: Known(DiveBomber)
 chat:
-  - clock: 0
-    sender_name: Unknown
-    channel: "Unknown(\"\")"
-    message: ""
+  - clock: 201.52
+    sender_name: Puggsley
+    channel: Team
+    message: wtf r u doing aussie??
     entity_id: 667249
-    sender_relation: None
-    player: ~
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 228.777
+    sender_name: f23390178
+    channel: Team
+    message: 亨利削了?
+    entity_id: 667249
+    sender_relation: Some(Relation(1))
+    player: "2002278728:f23390178"
+  - clock: 330.922
+    sender_name: f23390178
+    channel: Global
+    message: gk he??
+    entity_id: 667249
+    sender_relation: Some(Relation(1))
+    player: "2002278728:f23390178"
+  - clock: 371.227
+    sender_name: Puggsley
+    channel: Team
+    message: ffs gearing wtf r u doing
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 384.498
+    sender_name: martz57
+    channel: Team
+    message: having some fun
+    entity_id: 667249
+    sender_relation: Some(Relation(1))
+    player: "2013109722:martz57"
+  - clock: 401.784
+    sender_name: Puggsley
+    channel: Team
+    message: being a d1ck more like
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 537.054
+    sender_name: Puggsley
+    channel: Team
+    message: we need caps ffs
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 623.498
+    sender_name: Puggsley
+    channel: Team
+    message: i go cap a
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 633.783
+    sender_name: Puggsley
+    channel: Team
+    message: protect cap
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 696.78
+    sender_name: Puggsley
+    channel: Team
+    message: PLEASE PROTECT B
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 706.21
+    sender_name: Puggsley
+    channel: Team
+    message: PLLEASE STOP b CAP
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 726.502
+    sender_name: Lasagna7
+    channel: Team
+    message: need spoter
+    entity_id: 667249
+    sender_relation: Some(Relation(1))
+    player: "2002619211:Lasagna7"
+  - clock: 758.206
+    sender_name: Puggsley
+    channel: Team
+    message: LOOK AT MAP
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 776.079
+    sender_name: Puggsley
+    channel: Team
+    message: FFSD WHY THE FUUCK YOU NOT STAY NEAR B
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 911.214
+    sender_name: Puggsley
+    channel: Team
+    message: KILL LOW HEALTH
+    entity_id: 667249
+    sender_relation: Some(Relation(0))
+    player: "2004046233:Puggsley"
+  - clock: 968.363
+    sender_name: f23390178
+    channel: Global
+    message: 打了15萬有啥用
+    entity_id: 667249
+    sender_relation: Some(Relation(1))
+    player: "2002278728:f23390178"
+  - clock: 979.383
+    sender_name: f23390178
+    channel: Global
+    message: 一堆BB不上
+    entity_id: 667249
+    sender_relation: Some(Relation(1))
+    player: "2002278728:f23390178"
+  - clock: 992.21
+    sender_name: "2192117835"
+    channel: Team
+    message: 哎无语
+    entity_id: 667249
+    sender_relation: Some(Relation(1))
+    player: "2024979087:2192117835"
 capture_points:
   - index: 0
     position:
@@ -873,262 +836,41 @@ consumables:
   - id: 667290
     active: 6
     inventory_slots: 0
-planes: []
+planes:
+  - plane_id: PlaneId(12885569134)
+    owner_id: 667249
+    team_id: 1
+    params_id: GameParamId(4074667728)
+  - plane_id: PlaneId(163209424504)
+    owner_id: 667249
+    team_id: 0
+    params_id: GameParamId(4074733552)
+  - plane_id: PlaneId(171799359096)
+    owner_id: 667249
+    team_id: 0
+    params_id: GameParamId(3969744880)
+  - plane_id: PlaneId(17180536440)
+    owner_id: 667249
+    team_id: 0
+    params_id: GameParamId(3864887280)
+  - plane_id: PlaneId(4295634552)
+    owner_id: 667249
+    team_id: 0
+    params_id: GameParamId(3969744880)
+  - plane_id: PlaneId(897648832120)
+    owner_id: 667249
+    team_id: 0
+    params_id: GameParamId(3864887280)
 wards:
-  - plane_id: PlaneId(733644743956594384)
-    owner_id: 2364593729
+  - plane_id: PlaneId(897648832120)
+    owner_id: 667256
     position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(19295048000.0)
-  - plane_id: PlaneId(733644743956725456)
-    owner_id: 3504418625
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(54986304.0)
-  - plane_id: PlaneId(733644748251561680)
-    owner_id: 884863041
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(1.4499069e-30)
-  - plane_id: PlaneId(733644748251692752)
-    owner_id: 2710631745
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(-7.384006e36)
-  - plane_id: PlaneId(733644752546528976)
-    owner_id: 1848484417
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(3.1143274e-14)
-  - plane_id: PlaneId(733644752546594512)
-    owner_id: 127059778
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(1.19086424e27)
-  - plane_id: PlaneId(733644756841496272)
-    owner_id: 2787251777
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(8.0102475e-18)
-  - plane_id: PlaneId(733644756841561808)
-    owner_id: 2523780673
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(-0.0026971537)
-  - plane_id: PlaneId(733644765431496400)
-    owner_id: 1612634177
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(7.025233e-35)
-  - plane_id: PlaneId(733644769516682960)
-    owner_id: 649204033
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(NaN)
-  - plane_id: PlaneId(733644778316332752)
-    owner_id: 142082369
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(2.595517e-39)
-  - plane_id: PlaneId(733644791201300176)
-    owner_id: 431352129
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(4.156677e-39)
-  - plane_id: PlaneId(733644791201365712)
-    owner_id: 424080961
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(1.493385e-39)
-  - plane_id: PlaneId(733646943192284880)
-    owner_id: 2343147329
-    position:
-      - 0
-      - -0
-      - 0
-    radius: BigWorldDistance(2.418e-41)
-  - plane_id: PlaneId(733651341238796016)
-    owner_id: 3395982657
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(7.0173e-41)
-  - plane_id: PlaneId(733655738968014832)
-    owner_id: 3060230722
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(-0.00041058275)
-  - plane_id: PlaneId(733655739072937968)
-    owner_id: 3124913729
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(-65218820000000.0)
-  - plane_id: PlaneId(733655747557949424)
-    owner_id: 2431273537
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(1.9750562e-34)
-  - plane_id: PlaneId(733655747662872560)
-    owner_id: 680926785
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(-2.8845604e-29)
-  - plane_id: PlaneId(733655747662938096)
-    owner_id: 750042946
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(2.4933717e20)
-  - plane_id: PlaneId(733655751748059120)
-    owner_id: 1083272257
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(2.4339e-41)
-  - plane_id: PlaneId(733655756147884016)
-    owner_id: 3571543362
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(1.1210042e-33)
-  - plane_id: PlaneId(733655760442851312)
-    owner_id: 3755373122
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(-7.2370487e-37)
-  - plane_id: PlaneId(733655760547774448)
-    owner_id: 313134402
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(1.6252614e-36)
-  - plane_id: PlaneId(733655760547839984)
-    owner_id: 525827650
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(-1.7611896e-24)
-  - plane_id: PlaneId(733655764632961008)
-    owner_id: 4264247106
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(-6.27203e-33)
-  - plane_id: PlaneId(733655769137709040)
-    owner_id: 2411667266
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(1.3448389e-14)
-  - plane_id: PlaneId(733655773327753200)
-    owner_id: 968276289
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(9.384036e-31)
-  - plane_id: PlaneId(733655773432741872)
-    owner_id: 711737921
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(-1.117214e32)
-  - plane_id: PlaneId(733655786317578224)
-    owner_id: 3807052609
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(NaN)
-  - plane_id: PlaneId(733660150222388944)
-    owner_id: 3628285759
-    position:
-      - 0
-      - -0
-      - 0
-    radius: BigWorldDistance(NaN)
-  - plane_id: PlaneId(733664535384620848)
-    owner_id: 4021750849
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(2.425e-41)
-  - plane_id: PlaneId(733671132448095984)
-    owner_id: 2554633535
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(-0.00020243235)
-  - plane_id: PlaneId(733682127564373744)
-    owner_id: 317642049
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(2.4348e-41)
-  - plane_id: PlaneId(733684325643910960)
-    owner_id: 3406908993
-    position:
-      - 0
-      - 0
-      - 0
-    radius: BigWorldDistance(2.4158e-41)
-  - plane_id: PlaneId(733688724634140368)
-    owner_id: 2701182527
-    position:
-      - 0
-      - -6586514500000000000
-      - 0
-    radius: BigWorldDistance(-1.1679815e-6)
-active_shots: 0
-active_torpedoes: 0
+      - 416.656
+      - 0
+      - 462.281
+    radius: BigWorldDistance(116.667)
+active_shots: 72
+active_torpedoes: 9
 battle_stage: Some(Waiting)
 time_left: 116
 winning_team: 0

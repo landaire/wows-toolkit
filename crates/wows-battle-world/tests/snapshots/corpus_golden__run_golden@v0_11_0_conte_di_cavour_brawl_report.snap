@@ -3,7 +3,7 @@ source: crates/wows-battle-world/tests/corpus_golden.rs
 expression: report_snapshot(filename)
 ---
 arena_id: ArenaId(1482907821473142)
-version: "Version { major: 0, minor: 11, patch: 0, build: 5045210 }"
+version: "Version { major: 0, minor: 11, patch: 0, build: Some(5045210) }"
 map_name: spaces/22_tierra_del_fuego
 game_mode: Domination_Special
 game_type: Known(Brawl)
@@ -23,6 +23,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4079957808)
+    division: A
   - account_id: 1002900728
     name: 12PKMAIN
     entity_id: 345269
@@ -31,6 +32,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4267587280)
+    division: A
   - account_id: 1003888875
     name: Grampa_
     entity_id: 345273
@@ -39,6 +41,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(3765384944)
+    division: A
   - account_id: 1005424237
     name: AlteBrown_22
     entity_id: 345279
@@ -47,6 +50,7 @@ players:
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3765319120)
+    division: A
   - account_id: 1017966530
     name: 12PK_HogMan
     entity_id: 345277
@@ -55,6 +59,7 @@ players:
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4184782640)
+    division: A
   - account_id: 1031189841
     name: Ps2_ros
     entity_id: 345275
@@ -63,6 +68,7 @@ players:
     relation: Relation(0)
     is_bot: false
     vehicle_id: GameParamId(4184815344)
+    division: A
 frags:
   - killer_account_id: 1002088734
     killer_name: Obi_want
@@ -146,3 +152,6 @@ self_damage_stats:
     total: 72000
 active_consumable_avatars: 6
 active_consumable_total: 23
+burn_state_changes: 28
+presence_vehicles: 6
+presence_windows: 19
