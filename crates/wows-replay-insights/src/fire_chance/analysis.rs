@@ -927,8 +927,20 @@ mod tests {
 
     const HULL_MODEL: &str = "content/gameplay/usa/ship/cruiser/ACR001/ACR001.model";
 
-    /// Four nodes bow to stern, an Iowa-like hull.
+    /// Four nodes bow to stern, an Iowa-like hull, in meters: the space
+    /// `FireSectionGeometry` holds.
     const NODES: [f32; 4] = [93.0, 19.0, -35.0, -99.0];
+
+    /// A hit landing squarely on one section's node, as a world position.
+    ///
+    /// `NODES` is in meters and a `WorldPos` is in world units, so the
+    /// conversion is what puts the impact on the section it names. Placing the
+    /// raw meters here instead would push every hit fifteen times too far out
+    /// and clamp the whole fixture onto the bow and stern nodes.
+    fn impact_on_section(section: u8) -> WorldPos {
+        let offset = wowsunpack::game_params::types::Meters::from(NODES[section as usize]).to_world().value();
+        WorldPos::new(offset, 0.0, 0.0)
+    }
 
     const HIT_CLOCK: GameClock = GameClock(100.0);
 
@@ -1276,8 +1288,13 @@ mod tests {
                 vec![PresenceWindow { entered: GameClock(0.0), left: None }]
             };
             let mut presence = PresenceLog::default();
-            presence.0.insert(victim_id(), windows);
-            presence.0.insert(other_victim_id(), vec![PresenceWindow { entered: GameClock(0.0), left: None }]);
+            presence.windows.insert(victim_id(), windows);
+            presence.windows.insert(other_victim_id(), vec![PresenceWindow { entered: GameClock(0.0), left: None }]);
+            // Both windows are open, and an open window reaches only as far as
+            // the last update received, so the fixture states when that was:
+            // well past every clock any case here queries.
+            presence.note_seen(victim_id(), GameClock(1000.0));
+            presence.note_seen(other_victim_id(), GameClock(1000.0));
 
             let mut activations: HashMap<EntityId, Vec<ActiveConsumable>> = HashMap::new();
             let mut consumables = Vec::new();
@@ -1481,7 +1498,7 @@ mod tests {
                     raw: 0,
                 },
                 shot_id: ShotId::from(1u32),
-                position: WorldPos::new(NODES[section as usize], 0.0, 0.0),
+                position: impact_on_section(section),
                 terminal_ballistics: None,
             },
             victim_entity_id: victim,

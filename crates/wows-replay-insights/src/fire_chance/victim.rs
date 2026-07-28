@@ -104,7 +104,7 @@ impl VictimTrack {
             dcp.windows(2).any(|pair| (pair[1].activated_at - pair[0].activated_at) < reload - COOLDOWN_TOLERANCE_SECS)
         });
 
-        let first_seen = presence.0.get(&victim).and_then(|windows| match windows.as_slice() {
+        let first_seen = presence.windows.get(&victim).and_then(|windows| match windows.as_slice() {
             [only] if only.left.is_none() => Some(only.entered),
             _ => None,
         });
@@ -226,21 +226,32 @@ mod tests {
         VictimTrack::build(victim, &[], &activations, &inventory, &presence, None)
     }
 
-    fn observed_from(entered: GameClock) -> PresenceLog {
+    /// Observed from `entered`, with entity updates still arriving as late as
+    /// `last_seen`. An open window certifies only as far as the last update
+    /// received, so a fixture has to name that clock rather than implying the
+    /// vehicle was observed forever.
+    fn observed(entered: GameClock, last_seen: GameClock) -> PresenceLog {
         let mut log = PresenceLog::default();
-        log.0.insert(victim_id(), vec![PresenceWindow { entered, left: None }]);
+        log.windows.insert(victim_id(), vec![PresenceWindow { entered, left: None }]);
+        log.note_seen(victim_id(), last_seen);
         log
     }
 
-    fn observed_with_gap(entered1: GameClock, left1: GameClock, entered2: GameClock) -> PresenceLog {
+    fn observed_with_gap(
+        entered1: GameClock,
+        left1: GameClock,
+        entered2: GameClock,
+        last_seen: GameClock,
+    ) -> PresenceLog {
         let mut log = PresenceLog::default();
-        log.0.insert(
+        log.windows.insert(
             victim_id(),
             vec![
                 PresenceWindow { entered: entered1, left: Some(left1) },
                 PresenceWindow { entered: entered2, left: None },
             ],
         );
+        log.note_seen(victim_id(), last_seen);
         log
     }
 
@@ -292,7 +303,7 @@ mod tests {
     /// provably down, because the ship cannot reactivate inside reload_time.
     #[test]
     fn dcp_is_running_then_provably_down_through_the_cooldown() {
-        let track = track_with_dcp(&[(GameClock(100.0), 15.0)], 80.0, observed_from(GameClock(0.0)));
+        let track = track_with_dcp(&[(GameClock(100.0), 15.0)], 80.0, observed(GameClock(0.0), GameClock(300.0)));
         assert_eq!(track.damage_control_at(GameClock(105.0)), DamageControlState::Running);
         assert_eq!(track.damage_control_at(GameClock(120.0)), DamageControlState::Down);
         assert_eq!(track.damage_control_at(GameClock(175.0)), DamageControlState::Down);
@@ -302,11 +313,11 @@ mod tests {
     /// would have seen any activation. Continuity is what makes this safe.
     #[test]
     fn dcp_past_cooldown_is_down_while_observed_and_unknown_across_a_gap() {
-        let observed = observed_from(GameClock(0.0));
+        let observed = observed(GameClock(0.0), GameClock(300.0));
         let track = track_with_dcp(&[(GameClock(100.0), 15.0)], 80.0, observed);
         assert_eq!(track.damage_control_at(GameClock(300.0)), DamageControlState::Down);
 
-        let gapped = observed_with_gap(GameClock(0.0), GameClock(200.0), GameClock(280.0));
+        let gapped = observed_with_gap(GameClock(0.0), GameClock(200.0), GameClock(280.0), GameClock(300.0));
         let track = track_with_dcp(&[(GameClock(100.0), 15.0)], 80.0, gapped);
         assert_eq!(track.damage_control_at(GameClock(300.0)), DamageControlState::Unknown);
     }
@@ -316,8 +327,11 @@ mod tests {
     /// everything outside an observed work window becomes Unknown.
     #[test]
     fn a_refund_ship_is_detected_and_stops_cooldown_inference() {
-        let track =
-            track_with_dcp(&[(GameClock(100.0), 15.0), (GameClock(130.0), 15.0)], 80.0, observed_from(GameClock(0.0)));
+        let track = track_with_dcp(
+            &[(GameClock(100.0), 15.0), (GameClock(130.0), 15.0)],
+            80.0,
+            observed(GameClock(0.0), GameClock(300.0)),
+        );
         assert!(track.cooldown_unreliable());
         assert_eq!(track.damage_control_at(GameClock(135.0)), DamageControlState::Running);
         assert_eq!(track.damage_control_at(GameClock(300.0)), DamageControlState::Unknown);
@@ -329,8 +343,11 @@ mod tests {
     /// reasonable tolerance would catch it.
     #[test]
     fn a_near_reload_gap_within_jitter_tolerance_stays_reliable() {
-        let track =
-            track_with_dcp(&[(GameClock(100.0), 15.0), (GameClock(179.5), 15.0)], 80.0, observed_from(GameClock(0.0)));
+        let track = track_with_dcp(
+            &[(GameClock(100.0), 15.0), (GameClock(179.5), 15.0)],
+            80.0,
+            observed(GameClock(0.0), GameClock(300.0)),
+        );
         assert!(!track.cooldown_unreliable());
     }
 
@@ -360,7 +377,7 @@ mod tests {
     /// the start, has definitely not used it.
     #[test]
     fn never_activated_and_always_observed_is_down() {
-        let track = track_with_dcp(&[], 80.0, observed_from(GameClock(0.0)));
+        let track = track_with_dcp(&[], 80.0, observed(GameClock(0.0), GameClock(300.0)));
         assert_eq!(track.damage_control_at(GameClock(200.0)), DamageControlState::Down);
     }
 
@@ -370,7 +387,7 @@ mod tests {
     #[test]
     fn no_dcp_slot_still_resolves_down_from_continuity() {
         let victim = victim_id();
-        let track = VictimTrack::build(victim, &[], &[], &[], &observed_from(GameClock(0.0)), None);
+        let track = VictimTrack::build(victim, &[], &[], &[], &observed(GameClock(0.0), GameClock(300.0)), None);
         assert_eq!(track.damage_control_at(GameClock(200.0)), DamageControlState::Down);
     }
 
@@ -390,7 +407,14 @@ mod tests {
             usage_params: None,
         }];
         let inventory = vec![dcp_inventory(80.0)];
-        let track = VictimTrack::build(victim, &[], &activations, &inventory, &observed_from(GameClock(0.0)), None);
+        let track = VictimTrack::build(
+            victim,
+            &[],
+            &activations,
+            &inventory,
+            &observed(GameClock(0.0), GameClock(300.0)),
+            None,
+        );
         assert_eq!(track.damage_control_at(GameClock(200.0)), DamageControlState::Unknown);
     }
 }

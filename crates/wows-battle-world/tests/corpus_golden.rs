@@ -305,7 +305,7 @@ fn report_snapshot(filename: &str) -> Option<ReportSnapshot> {
         .sort_by(|a, b| (a.weapon.clone(), a.category.clone()).cmp(&(b.weapon.clone(), b.category.clone())));
 
     let active_consumable_total: usize = report.active_consumables().values().map(|v| v.len()).sum();
-    let presence_windows: usize = report.presence().0.values().map(|w| w.len()).sum();
+    let presence_windows: usize = report.presence().windows.values().map(|w| w.len()).sum();
 
     Some(ReportSnapshot {
         arena_id: format!("{:?}", report.arena_id()),
@@ -329,7 +329,7 @@ fn report_snapshot(filename: &str) -> Option<ReportSnapshot> {
         active_consumable_avatars: report.active_consumables().len(),
         active_consumable_total,
         burn_state_changes: report.burn_state_changes().len(),
-        presence_vehicles: report.presence().0.len(),
+        presence_vehicles: report.presence().windows.len(),
         presence_windows,
     })
 }

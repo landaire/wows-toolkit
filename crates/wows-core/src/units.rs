@@ -1,16 +1,21 @@
 //! Distance newtypes and their unit conversions.
 //!
-//! The game mixes several distance units: real meters, BigWorld engine units
-//! (1 BW unit = 30 m), ship-model units (1 unit = 15 m, used by hull geometry),
-//! plus kilometers and millimeters. These newtypes keep units honest at the type
+//! The game mixes several distance units: real meters, GameParams BigWorld units
+//! (1 unit = 30 m), replay world units (1 unit = 15 m, what packet positions and
+//! radii are in), ship-model units (1 unit = 15 m, used by hull geometry), plus
+//! kilometers and millimeters. These newtypes keep units honest at the type
 //! level; cross-unit arithmetic and comparison convert to a common unit.
+//!
+//! [`BigWorldDistance`] and [`WorldDistance`] are two different spaces that a
+//! name alone will not keep apart, and they differ by exactly 2. Read each
+//! type's doc before reaching for either.
 
 use std::fmt;
 use std::ops::Add;
 use std::ops::Mul;
 use std::ops::Sub;
 
-/// Conversion factor: 1 BigWorld unit = 30 meters.
+/// Conversion factor: 1 GameParams BigWorld unit = 30 meters.
 const BW_TO_METERS: f32 = 30.0;
 
 /// Conversion factor: 1 ship-model unit = 15 meters. The engine's own name for
@@ -18,17 +23,70 @@ const BW_TO_METERS: f32 = 30.0;
 /// not what it does; the client multiplies by it to leave ship space for meters.
 const SHIP_TO_METERS: f32 = 15.0;
 
+/// Conversion factor: 1 replay world unit = 15 meters.
+///
+/// Defined in terms of [`SHIP_TO_METERS`] rather than repeating the literal,
+/// because the two spaces measure the same: see [`WorldDistance`] for the
+/// evidence. If evidence ever separates them, give this its own number.
+const WORLD_TO_METERS: f32 = SHIP_TO_METERS;
+
 /// Distance in meters.
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct Meters(f32);
 
-/// Distance in BigWorld coordinate units (1 BW unit = 30 meters).
+/// Distance in the coordinate units **GameParams** uses (1 unit = 30 meters):
+/// consumable `distShip`/`distTorpedo`, projectile `maxDist`, and the other
+/// range fields read off the ship dict.
+///
+/// The 30 is exact against the port. Hydroacoustic Search's `C_4_7` variant
+/// carries `distShip = 133.3333`, and its in-game ship-detection range is
+/// 4.0 km; Black's radar carries `distShip = 250.0` against a published 7.5 km.
+///
+/// **This is not the space replay packets are in.** Positions, hit points and
+/// zone radii off the wire are [`WorldDistance`], which measures 15 m per unit,
+/// so reading a packet value as a `BigWorldDistance` doubles it. The two are
+/// separated by measurement, not by naming: see [`WorldDistance`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct BigWorldDistance(f32);
+
+/// Distance in the coordinate units a **replay packet stream** is in (1 unit =
+/// 15 meters): entity positions, shell impact points, and any offset between
+/// two of them.
+///
+/// The 15 is measured, three ways, on the 15.1.0 corpus:
+///
+/// - **Hull length.** Shell impacts on a ship, rotated into its body frame,
+///   reach 8 to 10 units from the hull origin on ships whose bow fire node sits
+///   104 to 128 m out. At 15 m/unit that is 120 to 152 m, just past the bow
+///   node and inside a ~135 m half-length. At 30 it would be 240 to 300 m, i.e.
+///   half-kilometre ships.
+/// - **Hull beam.** The same impacts reach 1.1 to 1.6 units abeam, which at
+///   15 m/unit is a 34 to 49 m beam for ships whose real beams are 26 to 38 m.
+///   Generous by the few meters an impact point sits proud of the plate;
+///   at 30 it would put every beam past 68 m.
+/// - **Gun range.** The longest shot in a replay, as `|target - origin|` from
+///   the salvo packet, runs 247 to 808 units. At 15 m/unit those are 3.7 to
+///   12.1 km, every one inside the firing ship's GameParams `maxDist`. At 30,
+///   ten of the twenty-six replays measured put shots beyond their own ship's
+///   maximum range.
+///
+/// A fourth, functional measurement agrees: sweeping the scale used to place
+/// shell impacts into hull fire sections, and scoring each against the section
+/// the server actually lit, gives a single-peaked curve topping out at 15 to 16.
+///
+/// So this space and [`ShipModelDistance`] measure the same, which is why
+/// [`WORLD_TO_METERS`] is defined as [`SHIP_TO_METERS`]. They are still separate
+/// types because they are separate spaces: a world position is not a
+/// ship-model coordinate, and only one of the two is anchored by the waterline
+/// and dispersion evidence on `ShipModelDistance`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct WorldDistance(f32);
 
 /// Distance in ship-model coordinate units (1 unit = 15 meters). Hull geometry
 /// uses this space: `.visual` node matrices, the `.skel_ext` nodes hung off them,
@@ -102,6 +160,12 @@ impl From<f32> for ShipModelDistance {
     }
 }
 
+impl From<f32> for WorldDistance {
+    fn from(v: f32) -> Self {
+        Self(v)
+    }
+}
+
 impl From<f32> for Km {
     fn from(v: f32) -> Self {
         Self(v)
@@ -159,6 +223,11 @@ impl Meters {
     pub fn to_mm(self) -> Millimeters {
         Millimeters(self.0 * 1000.0)
     }
+    /// Convert to replay world units (1 unit = 15 meters). Use this for
+    /// distances that will be compared against packet positions.
+    pub fn to_world(self) -> WorldDistance {
+        WorldDistance(self.0 / WORLD_TO_METERS)
+    }
 }
 
 impl BigWorldDistance {
@@ -182,6 +251,23 @@ impl ShipModelDistance {
     }
     pub fn to_bigworld(self) -> BigWorldDistance {
         self.to_meters().to_bigworld()
+    }
+}
+
+impl WorldDistance {
+    /// Const constructor for use in static/const contexts.
+    pub const fn new(v: f32) -> Self {
+        Self(v)
+    }
+
+    pub fn value(self) -> f32 {
+        self.0
+    }
+    pub fn to_meters(self) -> Meters {
+        Meters(self.0 * WORLD_TO_METERS)
+    }
+    pub fn to_km(self) -> Km {
+        self.to_meters().to_km()
     }
 }
 
@@ -494,5 +580,33 @@ mod tests {
     fn ship_model_units_are_fifteen_meters() {
         assert_eq!(ShipModelDistance::from(6.489).to_meters().value(), 97.335);
         assert_eq!(Meters::from(97.335).to_ship_model().value(), 6.489);
+    }
+
+    /// A shell impact 8 world units from a battleship's hull origin is 120 m
+    /// out, which is a bow hit. At the GameParams BigWorld scale it would be
+    /// 240 m out, which is not on the ship.
+    #[test]
+    fn replay_world_units_are_fifteen_meters() {
+        assert_eq!(WorldDistance::from(8.0).to_meters().value(), 120.0);
+        assert_eq!(Meters::from(120.0).to_world().value(), 8.0);
+    }
+
+    /// The two spaces differ by exactly 2, which is small enough that a value in
+    /// the wrong one still looks plausible. Pinned so neither can drift into the
+    /// other unnoticed.
+    #[test]
+    fn game_params_and_replay_spaces_are_not_the_same() {
+        let one = 1.0f32;
+        assert_eq!(BigWorldDistance::from(one).to_meters().value(), 30.0);
+        assert_eq!(WorldDistance::from(one).to_meters().value(), 15.0);
+    }
+
+    /// Hydroacoustic Search `C_4_7` carries `distShip = 133.3333` and detects
+    /// ships at 4.0 km in game; Black's radar carries 250.0 against 7.5 km.
+    /// These are what anchor the GameParams scale.
+    #[test]
+    fn game_params_distances_match_the_published_consumable_ranges() {
+        assert!((BigWorldDistance::from(133.3333).to_km().value() - 4.0).abs() < 0.001);
+        assert_eq!(BigWorldDistance::from(250.0).to_km().value(), 7.5);
     }
 }

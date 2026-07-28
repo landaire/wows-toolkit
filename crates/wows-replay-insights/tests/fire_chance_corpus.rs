@@ -26,6 +26,13 @@
 //! silently measures half the corpus reports a rate for a population it does
 //! not describe.
 //!
+//! The dumped archives are also thin in one way that shows up in the printed
+//! diagnostics: most crews in them carry no `Skills` table at all (67 of 632
+//! for build 11965230, against 604 of 651 in a live install), so a victim's
+//! learned skill ids cannot be named and `FirePrevention` resolves `Unknown`
+//! for far more victims here than it would against a full install. That is a
+//! property of the harness's data source, not of the eligibility model.
+//!
 //! The geometry is a known cross-build approximation. The dumps carry no
 //! `assets.bin`, so fire-node positions come from the installed build whatever
 //! the replay's build is. A hull whose `.model` path no longer exists in the
@@ -312,7 +319,7 @@ fn measure(
     };
 
     let (mut open_windows, mut total_windows) = (0u32, 0u32);
-    for windows in report.presence().0.values() {
+    for windows in report.presence().windows.values() {
         for window in windows {
             total_windows += 1;
             if window.left.is_none() {

@@ -659,12 +659,9 @@ mod tests {
                 ribbon: Ribbon::SetFire,
                 count: 1,
             });
-            world
-                .resource_mut::<PresenceLog>()
-                .0
-                .entry(victim)
-                .or_default()
-                .push(PresenceWindow { entered: GameClock(0.0), left: None });
+            let mut presence = world.resource_mut::<PresenceLog>();
+            presence.windows.entry(victim).or_default().push(PresenceWindow { entered: GameClock(0.0), left: None });
+            presence.note_seen(victim, GameClock(20.0));
             world.resource_mut::<HitHistoryLog>().0.push(fixture_shot_hit());
         });
 

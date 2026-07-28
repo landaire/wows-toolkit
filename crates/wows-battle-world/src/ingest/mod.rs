@@ -21,6 +21,14 @@ use wowsunpack::data::Version;
 use wowsunpack::game_types::WorldPos;
 
 use crate::ids::IngestOptions;
+use crate::resources::PresenceLog;
+
+/// Record that entity state for `entity` arrived at `clock`, which is what
+/// bounds a still-open presence window. See `PresenceLog::note_seen` for why
+/// minimap updates are not among the arms that call this.
+fn note_seen(world: &mut World, entity: wows_replays::types::EntityId, clock: GameClock) {
+    world.resource_mut::<PresenceLog>().note_seen(entity, clock);
+}
 
 /// Dispatch one decoded packet into the ECS world.
 ///
@@ -50,9 +58,11 @@ pub fn dispatch<G: ResourceLoader>(
             combat::handle_ribbon(ribbon, world, clock);
         }
         DecodedPacketPayload::Position(pos) => {
+            note_seen(world, pos.pid, clock);
             positions::handle_position(&pos, world, clock);
         }
         DecodedPacketPayload::PlayerOrientation(orient) => {
+            note_seen(world, orient.pid, clock);
             positions::handle_player_orientation(&orient, world, clock);
         }
         DecodedPacketPayload::DamageStat(ref entries) => {
@@ -63,6 +73,7 @@ pub fn dispatch<G: ResourceLoader>(
         }
         DecodedPacketPayload::EntityMethod(_) => {}
         DecodedPacketPayload::EntityProperty(prop) => {
+            note_seen(world, prop.entity_id, clock);
             vehicles::handle_vehicle_property(
                 prop.entity_id,
                 prop.property,
@@ -76,9 +87,11 @@ pub fn dispatch<G: ResourceLoader>(
             match_state::handle_entity_property_match(prop.property, &prop.value, clock, world, constants, version);
         }
         DecodedPacketPayload::BasePlayerCreate(base) => {
+            note_seen(world, base.entity_id, clock);
             vehicles::apply_player_create_props(base.entity_id, &base.props, world, version, constants, clock);
         }
         DecodedPacketPayload::CellPlayerCreate(cell) => {
+            note_seen(world, cell.entity_id, clock);
             vehicles::apply_player_create_props(cell.entity_id, &cell.props, world, version, constants, clock);
         }
         DecodedPacketPayload::EntityEnter(_) => {}

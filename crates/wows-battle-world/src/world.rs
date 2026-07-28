@@ -374,7 +374,7 @@ mod tests {
         world
             .world_mut()
             .resource_mut::<PresenceLog>()
-            .0
+            .windows
             .entry(id)
             .or_default()
             .push(PresenceWindow { entered: GameClock(10.0), left: None });
@@ -383,7 +383,7 @@ mod tests {
         world.despawn(id);
 
         let log = world.world().resource::<PresenceLog>();
-        assert_eq!(log.0[&id][0].left, Some(GameClock(60.0)));
+        assert_eq!(log.windows[&id][0].left, Some(GameClock(60.0)));
         assert!(!log.continuously_observed(id, GameClock(20.0), GameClock(90.0)));
         assert!(log.continuously_observed(id, GameClock(20.0), GameClock(50.0)));
     }

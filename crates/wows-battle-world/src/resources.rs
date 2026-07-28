@@ -351,6 +351,8 @@ pub struct BurnStateLog(pub Vec<BurnStateChange>);
 /// `left: None` means the window is still open as of the last packet
 /// processed, either because the vehicle is still present or because the
 /// match ended (or the parse stopped) before an `EntityLeave` arrived for it.
+/// An open window does not certify observation forever: it reaches only as far
+/// as [`PresenceLog::last_seen`] for that vehicle.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PresenceWindow {
     pub entered: GameClock,
@@ -385,40 +387,73 @@ pub struct PresenceWindow {
 ///
 /// Coverage boundary: a gap between two windows for one vehicle is a real,
 /// provable blind spot, since an `EntityLeave` was actually observed for it.
-/// The converse is not guaranteed. If an `EntityLeave` for a vehicle is
-/// silently dropped, or the vehicle's underlying game entity id is reused
-/// without one, the window-open call sees an already-open window and does
-/// nothing (that is what idempotency means), so the log reports
-/// uninterrupted presence straight across a gap it has no way to detect.
-/// `PresenceLog` does not resolve that case, it only makes the gaps that were
-/// actually observed (a real `EntityLeave` followed by a later create)
-/// usable by `continuously_observed`. Separately, `DecodedPacketPayload::EntityEnter`
-/// is currently a no-op in `ingest::dispatch`: if the server ever signals a
-/// vehicle's AOI re-entry with `EntityEnter` rather than a fresh
-/// `EntityCreate`, no window reopens and presence stays closed for the rest
-/// of the match. That direction only loses samples rather than corrupting
-/// one, since a closed window can only make `continuously_observed` too
-/// strict, never too lenient.
+/// An `EntityLeave` that never arrives is the harder case, and it is common:
+/// on a corpus of 40 real matches, 370 of 2758 windows were still open at the
+/// end of the parse. Left unbounded, an open window answers every query, so a
+/// vehicle that went dark early would read as observed for the rest of the
+/// match. [`Self::last_seen`] is what bounds it: an open window certifies only
+/// as far as the last entity update actually received for that vehicle, which
+/// handles the legitimate case (a ship alive and visible at match end, whose
+/// last update is at match end) and the lost-`EntityLeave` case with the same
+/// rule and no need to tell them apart.
+///
+/// Separately, `DecodedPacketPayload::EntityEnter` is currently a no-op in
+/// `ingest::dispatch`: if the server ever signals a vehicle's AOI re-entry
+/// with `EntityEnter` rather than a fresh `EntityCreate`, no window reopens
+/// and presence stays closed for the rest of the match. That direction only
+/// loses samples rather than corrupting one, since a closed window can only
+/// make `continuously_observed` too strict, never too lenient.
 #[derive(Resource, Debug, Clone, Default)]
-pub struct PresenceLog(pub HashMap<EntityId, Vec<PresenceWindow>>);
+pub struct PresenceLog {
+    pub windows: HashMap<EntityId, Vec<PresenceWindow>>,
+    last_seen: HashMap<EntityId, GameClock>,
+}
 
 impl PresenceLog {
+    /// Record that an entity update for `entity` arrived at `clock`.
+    ///
+    /// Fed from the packet arms that carry per-entity state the analysis reads
+    /// (entity properties, player-create folds, positions and orientations),
+    /// deliberately **not** from minimap updates: a minimap position is a
+    /// team-shared sighting delivered for ships the recording client is
+    /// receiving no entity state for, so counting it would keep an open window
+    /// fresh for exactly the vehicle that went dark.
+    pub fn note_seen(&mut self, entity: EntityId, clock: GameClock) {
+        self.last_seen.entry(entity).and_modify(|seen| *seen = (*seen).max(clock)).or_insert(clock);
+    }
+
+    /// The last clock at which any entity update for `entity` was observed.
+    /// `None` for a vehicle nothing was ever received for.
+    pub fn last_seen(&self, entity: EntityId) -> Option<GameClock> {
+        self.last_seen.get(&entity).copied()
+    }
+
     /// True when `[from, to]` lies inside a single unbroken window: some
-    /// window's `entered` is at or before `from`, and that same window's
-    /// `left` is either still open (`None`) or at or after `to`. Both
-    /// comparisons are inclusive: a window opens at its `entered` clock and
-    /// closes at its `left` clock, so a query touching either boundary is
-    /// still fully inside it. An entity with no recorded windows was never
-    /// observed and is never continuously observed, for any range.
+    /// window's `entered` is at or before `from`, and that same window reaches
+    /// at least as far as `to`. Both comparisons are inclusive: a window opens
+    /// at its `entered` clock and closes at its end clock, so a query touching
+    /// either boundary is still fully inside it. An entity with no recorded
+    /// windows was never observed and is never continuously observed, for any
+    /// range.
     ///
     /// Callers must pass `from <= to`; an inverted range is checked only in
     /// debug builds (`debug_assert!`) because it makes both comparisons
     /// easier to satisfy, silently turning "not observed" into "observed".
     pub fn continuously_observed(&self, entity: EntityId, from: GameClock, to: GameClock) -> bool {
         debug_assert!(from <= to, "continuously_observed requires from <= to, got {from:?}..{to:?}");
-        self.0
-            .get(&entity)
-            .is_some_and(|windows| windows.iter().any(|w| w.entered <= from && w.left.is_none_or(|left| left >= to)))
+        let last_seen = self.last_seen(entity);
+        self.windows.get(&entity).is_some_and(|windows| {
+            windows.iter().any(|window| {
+                // A closed window ends where it was closed. An open one ends at
+                // the last update received, and a vehicle with no updates at
+                // all certifies nothing rather than everything.
+                let end = match window.left {
+                    Some(left) => Some(left),
+                    None => last_seen,
+                };
+                window.entered <= from && end.is_some_and(|end| end >= to)
+            })
+        })
     }
 }
 

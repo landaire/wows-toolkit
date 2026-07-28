@@ -638,7 +638,10 @@ pub fn handle_entity_leave(entity_id: EntityId, clock: GameClock, world: &mut Wo
 /// holds an open window (no EntityLeave has closed it), this does nothing.
 fn open_presence(world: &mut World, id: EntityId, clock: GameClock) {
     let mut log = world.resource_mut::<PresenceLog>();
-    let windows = log.0.entry(id).or_default();
+    // The create is itself a sighting, so a vehicle that never gets another
+    // update still certifies the instant it was seen rather than nothing.
+    log.note_seen(id, clock);
+    let windows = log.windows.entry(id).or_default();
     if windows.last().is_some_and(|w| w.left.is_none()) {
         return;
     }
@@ -648,7 +651,7 @@ fn open_presence(world: &mut World, id: EntityId, clock: GameClock) {
 /// Close `id`'s open presence window at `clock`, if it has one. An id with no
 /// windows, or whose latest window is already closed, is left untouched.
 pub(crate) fn close_presence(world: &mut World, id: EntityId, clock: GameClock) {
-    if let Some(windows) = world.resource_mut::<PresenceLog>().0.get_mut(&id)
+    if let Some(windows) = world.resource_mut::<PresenceLog>().windows.get_mut(&id)
         && let Some(open) = windows.last_mut()
         && open.left.is_none()
     {
@@ -794,9 +797,12 @@ mod presence_tests {
         open_presence(&mut world, id, GameClock(10.0));
         handle_entity_leave_at(id, GameClock(50.0), &mut world);
         open_presence(&mut world, id, GameClock(90.0));
+        // Updates keep arriving after the re-entry, which is what lets the
+        // second (still open) window certify anything past its own instant.
+        world.resource_mut::<PresenceLog>().note_seen(id, GameClock(120.0));
 
         let log = world.resource::<PresenceLog>();
-        let windows = &log.0[&id];
+        let windows = &log.windows[&id];
         assert_eq!(windows.len(), 2);
         assert_eq!(windows[0].left, Some(GameClock(50.0)));
         assert_eq!(windows[1].left, None);
@@ -804,6 +810,24 @@ mod presence_tests {
         assert!(log.continuously_observed(id, GameClock(20.0), GameClock(40.0)));
         assert!(!log.continuously_observed(id, GameClock(40.0), GameClock(95.0)));
         assert!(log.continuously_observed(id, GameClock(95.0), GameClock(120.0)));
+    }
+
+    /// A vehicle whose updates stop is not observed afterwards, even though no
+    /// `EntityLeave` ever closed its window. On real replays 13% of windows are
+    /// still open at end of parse, so without this an entity that went dark
+    /// early would answer every later query with a false "observed".
+    #[test]
+    fn a_vehicle_that_goes_dark_stops_being_observed() {
+        let mut world = test_world();
+        let id = EntityId::from(13u32);
+
+        open_presence(&mut world, id, GameClock(10.0));
+        world.resource_mut::<PresenceLog>().note_seen(id, GameClock(60.0));
+
+        let log = world.resource::<PresenceLog>();
+        assert_eq!(log.windows[&id][0].left, None, "no EntityLeave arrived");
+        assert!(log.continuously_observed(id, GameClock(20.0), GameClock(60.0)));
+        assert!(!log.continuously_observed(id, GameClock(20.0), GameClock(160.0)));
     }
 
     /// An entity never seen was never observed. Absence of windows must not
@@ -828,7 +852,7 @@ mod presence_tests {
         open_presence(&mut world, id, GameClock(5.0));
         open_presence(&mut world, id, GameClock(6.0));
 
-        let windows = &world.resource::<PresenceLog>().0[&id];
+        let windows = &world.resource::<PresenceLog>().windows[&id];
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].entered, GameClock(5.0));
         assert_eq!(windows[0].left, None);
@@ -903,7 +927,7 @@ mod presence_tests {
         // The seed path still pre-creates the ECS entity (for HP tracking
         // etc.); the assertion that matters is that no presence window opened.
         assert!(world.resource::<EntityIndex>().get(id).is_some());
-        assert!(world.resource::<PresenceLog>().0.get(&id).is_none_or(|w| w.is_empty()));
+        assert!(world.resource::<PresenceLog>().windows.get(&id).is_none_or(|w| w.is_empty()));
         assert!(!world.resource::<PresenceLog>().continuously_observed(id, GameClock(10.0), GameClock(10.0)));
         assert!(!world.resource::<PresenceLog>().continuously_observed(id, GameClock(0.0), GameClock(1_000_000.0)));
     }
@@ -972,6 +996,9 @@ mod burn_baseline_tests {
         let id = EntityId::from(21u32);
 
         create_vehicle(&mut world, id, 0b0001, GameClock(200.0));
+        // The vehicle keeps sending state, so its open window still covers the
+        // clock this case queries.
+        world.resource_mut::<PresenceLog>().note_seen(id, GameClock(250.0));
 
         let log = world.resource::<BurnStateLog>().0.clone();
         assert_eq!(log.len(), 1, "expected one baseline transition, got {log:?}");
@@ -994,7 +1021,7 @@ mod burn_baseline_tests {
 
         create_vehicle(&mut world, id, 0b0010, GameClock(200.0));
 
-        let entered = world.resource::<PresenceLog>().0[&id][0].entered;
+        let entered = world.resource::<PresenceLog>().windows[&id][0].entered;
         let log = world.resource::<BurnStateLog>().0.clone();
         assert_eq!(log.len(), 1);
         assert!(log[0].clock <= entered);

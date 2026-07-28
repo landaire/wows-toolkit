@@ -41,6 +41,9 @@ pub use wows_core::units::Millimeters;
 /// Distance newtypes. Defined in `wows-core`; re-exported so existing
 /// `wowsunpack::game_params::types::{Meters, ...}` paths keep working.
 pub use wows_core::units::ShipModelDistance;
+/// Distance newtypes. Defined in `wows-core`; re-exported so existing
+/// `wowsunpack::game_params::types::{Meters, ...}` paths keep working.
+pub use wows_core::units::WorldDistance;
 
 /// Per-material armor thickness map.
 ///
