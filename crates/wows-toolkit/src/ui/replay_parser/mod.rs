@@ -1599,17 +1599,35 @@ impl UiReport {
         // formula block genuinely is a fixed-width listing.
         let headline = ui
             .horizontal(|ui| {
+                // Labels are selectable by default, which makes each one consume
+                // the pointer and leaves the row's own response reachable only
+                // through the gaps between them. The hover and click belong to
+                // the row as a whole, so the parts must not sense input.
+                let plain = |ui: &mut egui::Ui, text: RichText| {
+                    ui.add(Label::new(text).selectable(false));
+                };
                 match fire_chance.rate() {
                     Some(rate) => {
-                        ui.label(RichText::new(format!("{:.1}%", rate * 100.0)).strong());
-                        ui.weak(format!("({} / {})", fire_chance.fires, fire_chance.eligible_hits));
+                        plain(ui, RichText::new(format!("{:.1}%", rate * 100.0)).strong());
+                        plain(
+                            ui,
+                            RichText::new(format!("({} / {})", fire_chance.fires, fire_chance.eligible_hits)).weak(),
+                        );
                     }
                     None => {
-                        ui.weak(t!("ui.replay.sections.fire_chance_no_eligible_hits"));
+                        plain(ui, RichText::new(t!("ui.replay.sections.fire_chance_no_eligible_hits")).weak());
                     }
                 }
                 if let Some(expected) = fire_chance.expected_rate() {
-                    ui.weak(format!("{} {:.1}%", t!("ui.replay.sections.fire_chance_expected"), expected * 100.0));
+                    plain(
+                        ui,
+                        RichText::new(format!(
+                            "{} {:.1}%",
+                            t!("ui.replay.sections.fire_chance_expected"),
+                            expected * 100.0
+                        ))
+                        .weak(),
+                    );
                 }
             })
             .response
