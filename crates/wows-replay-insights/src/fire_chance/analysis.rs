@@ -146,10 +146,6 @@ pub enum HitEligibility {
     /// be assigned to this hit rather than to that one. See
     /// [`contesting_section`] for what qualifies.
     AmbiguousWithAnotherHit,
-    /// Several of our own eligible hits landed on this victim's section in one
-    /// server tick. At most one of them could have lit it and which one is not
-    /// recoverable, so the whole group is dropped.
-    SameTickSectionAmbiguous,
 }
 
 impl HitEligibility {
@@ -178,7 +174,6 @@ impl HitEligibility {
             HitEligibility::ImpactOffTheHull => Some(ExclusionReason::ImpactOffTheHull),
             HitEligibility::VictimPoseUnknown => Some(ExclusionReason::VictimPoseUnknown),
             HitEligibility::AmbiguousWithAnotherHit => Some(ExclusionReason::AmbiguousWithAnotherHit),
-            HitEligibility::SameTickSectionAmbiguous => Some(ExclusionReason::SameTickSectionAmbiguous),
         }
     }
 }
@@ -222,10 +217,26 @@ pub struct PerShipFireChance {
 }
 
 impl PerShipFireChance {
-    /// `None` when there are no eligible hits against this ship: a rate over
-    /// zero samples is not zero, it is unknown. Same rule as
-    /// [`EffectiveFireChance::rate`], kept here so both rate definitions stay
-    /// on this side rather than being reimplemented per caller.
+    /// Fires started per eligible hit against this ship. `None` when there are
+    /// no eligible hits against it: a rate over zero samples is not zero, it is
+    /// unknown.
+    ///
+    /// This is the only level a rate is reported at, because fire resistance is
+    /// a property of the victim: each ship carries its own `burnProb`
+    /// coefficient and its own per-node probabilities, so a figure pooled over
+    /// several victims describes the enemy composition as much as the shooter.
+    ///
+    /// It reads low against the true per-shell chance, and how low depends on
+    /// the shooter. The game rolls for fire per shell, independently, so every
+    /// shell that lands on an unburning section is a genuine trial and the
+    /// denominator counts them all. The numerator cannot keep up: a section can
+    /// only burn once, so when several shells reach one section in the same
+    /// server tick and more than one of them rolls a fire, exactly one fire is
+    /// ever observed. The shortfall grows with how many shells land on a single
+    /// section at a time, so a ship landing dense salvos on one section is
+    /// undercounted further than one whose hits spread across the hull. Read
+    /// this as a lower bound on the per-shell chance rather than an unbiased
+    /// estimate of it.
     pub fn rate(&self) -> Option<f32> {
         (self.eligible_hits > 0).then(|| self.fires as f32 / self.eligible_hits as f32)
     }
@@ -240,14 +251,20 @@ impl PerShipFireChance {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectiveFireChance {
+    /// Trials summed over every target ship. A count, and deliberately not
+    /// half of a rate: dividing it into [`Self::fires`] would pool victims of
+    /// different fire resistance into one figure, which
+    /// [`PerShipFireChance::rate`] is the level that avoids.
     pub eligible_hits: u32,
+    /// Attributed fires summed over every target ship, the counterpart count to
+    /// [`Self::eligible_hits`].
     pub fires: u32,
     /// Expected number of fires over the eligible hits, i.e. the sum of their
-    /// per-hit chances, not a rate. [`Self::expected_rate`] is the rate the
-    /// observed one is comparable against.
+    /// per-hit chances, not a rate. Comparable against [`Self::fires`], which is
+    /// also a count.
     ///
     /// `None` on builds predating the modern modifier names, where the
-    /// attacker formula does not apply. The observed rate is still valid.
+    /// attacker formula does not apply. The observed counts are still valid.
     pub expected_fires: Option<f32>,
     pub per_ship: Vec<PerShipFireChance>,
     pub exclusions: BTreeMap<ExclusionReason, u32>,
@@ -265,8 +282,8 @@ pub struct EffectiveFireChance {
     /// secondaries with no main-battery candidate nearby, fires on a victim
     /// outside the recording client's AOI, fires whose causing hit was excluded
     /// by any of the eligibility rules, and fires whose only candidates were
-    /// dropped as ambiguous, either with another hit of ours or with each other
-    /// inside one server tick. What the number is for is proportion: an
+    /// dropped as ambiguous with another hit of ours. What the number is for is
+    /// proportion: an
     /// unattributed count far larger than `fires` on a ship with no secondaries
     /// means something upstream is wrong.
     pub unattributed_fires: u32,
@@ -324,18 +341,11 @@ impl SectionPrediction {
 }
 
 impl EffectiveFireChance {
-    /// `None` when there are no eligible hits: a rate over zero samples is not
-    /// zero, it is unknown.
-    pub fn rate(&self) -> Option<f32> {
-        (self.eligible_hits > 0).then(|| self.fires as f32 / self.eligible_hits as f32)
-    }
-
-    /// Per-hit expected fire chance, the model's counterpart to [`Self::rate`]
-    /// and the only form of [`Self::expected_fires`] comparable against it.
-    /// Same zero-sample rule as `rate`, and `None` as well whenever
-    /// `expected_fires` is unknown.
-    pub fn expected_rate(&self) -> Option<f32> {
-        (self.eligible_hits > 0).then(|| Some(self.expected_fires? / self.eligible_hits as f32)).flatten()
+    /// How many target ships carry at least one eligible hit, i.e. how many
+    /// [`Self::per_ship`] rows can state a rate. Reported alongside the totals
+    /// because those totals are a sum over this many separate populations.
+    pub fn ships_with_trials(&self) -> usize {
+        self.per_ship.iter().filter(|ship| ship.eligible_hits > 0).count()
     }
 
     /// Every hit the eligibility model looked at: the trials plus every hit it
@@ -634,11 +644,6 @@ pub fn analyze(input: &FireChanceInput<'_>) -> Option<EffectiveFireChance> {
         *exclusions.entry(ExclusionReason::AmbiguousWithAnotherHit).or_insert(0) += contested.len() as u32;
     }
 
-    let (counted, same_tick) = drop_same_tick_section_groups(counted);
-    if same_tick > 0 {
-        *exclusions.entry(ExclusionReason::SameTickSectionAmbiguous).or_insert(0) += same_tick;
-    }
-
     let attribution = attribute(input, &counted);
 
     let per_ship = per_ship_breakdown(input, &counted, &attribution.fires_by_victim, formula_applies);
@@ -744,36 +749,6 @@ fn contested_by_another_hit(candidate: &Candidate<'_>, contenders: &[ContestingI
             && other.section == candidate.section
             && clock_distance(other.clock, candidate.hit.clock) <= CONTEST_WINDOW
     })
-}
-
-/// Drop every group of eligible hits that shares a victim, a section and a
-/// clock, returning what is left and how many were dropped.
-///
-/// Every hit in one `ShotKills` packet carries that packet's clock, so k shells
-/// of one salvo landing in one victim's section arrive as k entries at the same
-/// clock. They all read the same pre-tick burn mask and all k pass the
-/// already-burning gate, but at most one of them lit the section: once it was
-/// alight the rest provably had no chance, and which one it was is not
-/// recoverable from the logs.
-///
-/// Neither of the two ways to keep such a group is unbiased. Keeping all k
-/// scores at most one fire over k trials, so the group estimates
-/// `(1-(1-p)^k)/k`, well under `p`. Collapsing the group to one trial estimates
-/// `1-(1-p)^k`, well over it. And the deflation is outcome-conditioned in the
-/// worst way: the extra denominator entries only ever appear where a fire did
-/// start. So the group goes whole, decided on the hits alone.
-fn drop_same_tick_section_groups<'a, 'b>(counted: Vec<&'a Candidate<'b>>) -> (Vec<&'a Candidate<'b>>, u32) {
-    let mut group_size: HashMap<(EntityId, BurnNodeIndex, GameClock), u32> = HashMap::new();
-    for candidate in &counted {
-        *group_size.entry((candidate.victim, candidate.section, candidate.hit.clock)).or_insert(0) += 1;
-    }
-    let before = counted.len();
-    let kept: Vec<&'a Candidate<'b>> = counted
-        .into_iter()
-        .filter(|c| group_size.get(&(c.victim, c.section, c.hit.clock)).copied().unwrap_or(0) == 1)
-        .collect();
-    let dropped = (before - kept.len()) as u32;
-    (kept, dropped)
 }
 
 /// Total expected fires over `candidates`.
@@ -1912,7 +1887,7 @@ mod tests {
         let out = analyze(&fixture().build()).expect("geometry present");
         assert_eq!(out.eligible_hits, 1);
         assert_eq!(out.fires, 1);
-        assert_eq!(out.rate(), Some(1.0));
+        assert_eq!(out.per_ship[0].rate(), Some(1.0));
         assert_eq!(out.unattributed_fires, 0);
     }
 
@@ -1922,7 +1897,7 @@ mod tests {
         let out = analyze(&fixture().without_ribbons().build()).expect("geometry");
         assert_eq!(out.eligible_hits, 1);
         assert_eq!(out.fires, 0);
-        assert_eq!(out.rate(), Some(0.0));
+        assert_eq!(out.per_ship[0].rate(), Some(0.0));
     }
 
     /// A hit on a section that is already burning had no chance.
@@ -2048,22 +2023,21 @@ mod tests {
         let per_hit = 0.12 * 0.6004 * 0.9;
         assert_eq!(out.eligible_hits, 2);
         assert!((out.expected_fires.expect("expected") - 2.0 * per_hit).abs() < 1e-5);
-        assert!((out.expected_rate().expect("rate") - per_hit).abs() < 1e-5);
         assert!((out.per_ship[0].expected_fires.expect("expected") - 2.0 * per_hit).abs() < 1e-5);
         assert!((out.per_ship[0].expected_rate().expect("rate") - per_hit).abs() < 1e-5);
     }
 
-    /// A rate over zero eligible hits is unknown, not zero. `expected_fires` is
-    /// a sum, so an empty candidate list legitimately totals zero fires; the
-    /// rate that total would imply does not exist, and a caller rendering one
-    /// would print a fabricated 0.0%.
+    /// `expected_fires` is a sum, so an empty candidate list legitimately
+    /// totals zero fires. No ship rows out of it, so no rate is stated at all:
+    /// the rate that total would imply does not exist, and a caller rendering
+    /// one would print a fabricated 0.0%.
     #[test]
-    fn expected_rate_over_zero_eligible_hits_is_unknown() {
+    fn zero_eligible_hits_state_no_rate_anywhere() {
         let out = analyze(&fixture().with_hit_type(ShellHitType::Ricochet).build()).expect("geometry");
         assert_eq!(out.eligible_hits, 0);
         assert_eq!(out.expected_fires, Some(0.0));
-        assert_eq!(out.expected_rate(), None);
-        assert_eq!(out.rate(), None);
+        assert!(out.per_ship.is_empty());
+        assert_eq!(out.ships_with_trials(), 0);
     }
 
     /// A ribbon matching no eligible hit is reported, not dropped. Zero is the
@@ -2128,11 +2102,13 @@ mod tests {
         assert_eq!(out.independent_section_agreement(), None);
     }
 
-    /// A rate over zero samples is unknown, not zero.
+    /// A ship with no eligible hits against it produces no row, so nothing
+    /// reports a rate over zero samples.
     #[test]
-    fn no_eligible_hits_yields_no_rate() {
+    fn no_eligible_hits_yields_no_ship_rows() {
         let out = analyze(&fixture().with_dcp_unknown().build()).expect("geometry");
-        assert_eq!(out.rate(), None);
+        assert_eq!(out.eligible_hits, 0);
+        assert!(out.per_ship.is_empty());
     }
 
     /// Without geometry there is no eligibility model, so there is no result.
@@ -2350,7 +2326,7 @@ mod tests {
         let out = analyze(&fixture().with_a_modifier_this_version_cannot_classify().build()).expect("geometry");
         assert_eq!(out.eligible_hits, 1);
         assert_eq!(out.fires, 1);
-        assert_eq!(out.rate(), Some(1.0));
+        assert_eq!(out.per_ship[0].rate(), Some(1.0));
         assert_eq!(out.expected_fires, None);
         assert_eq!(out.per_ship[0].expected_fires, None);
     }
@@ -2367,29 +2343,25 @@ mod tests {
 
     /// Every hit in one `ShotKills` packet carries that packet's clock, so a
     /// salvo putting several shells into one section arrives as several hits at
-    /// one clock, all reading the same pre-tick burn mask. At most one of them
-    /// lit the section and which one is not recoverable, so the group is
-    /// dropped from both counts. Keeping it would score one fire over k trials
-    /// and only ever inflate the denominator where a fire actually started.
+    /// one clock, all reading the same pre-tick burn mask. The game rolls per
+    /// shell, so each of them rolled and each is a trial. Only one fire can
+    /// ever be seen, which is what makes the rate a lower bound.
     #[test]
-    fn several_hits_on_one_section_in_one_tick_are_dropped_whole() {
+    fn several_hits_on_one_section_in_one_tick_are_all_trials() {
         let out = analyze(&fixture().hitting_section(0).also_hitting_section_at(0, 0.0).build()).expect("geometry");
-        assert_eq!(out.eligible_hits, 0);
-        assert_eq!(out.fires, 0);
-        assert_eq!(out.exclusions[&ExclusionReason::SameTickSectionAmbiguous], 2);
-        // The fire was ours and did happen; with both candidates gone there is
-        // nothing left to assign it to.
-        assert_eq!(out.unattributed_fires, 1);
+        assert_eq!(out.eligible_hits, 2);
+        assert_eq!(out.fires, 1);
+        assert_eq!(out.unattributed_fires, 0);
     }
 
-    /// The same group with no fire is dropped identically. The decision is on
-    /// the hits alone, so it cannot depend on the outcome.
+    /// The same group with no fire counts identically. Whether a hit is a trial
+    /// is decided on the hits alone, so it cannot depend on the outcome.
     #[test]
-    fn a_same_tick_section_group_is_dropped_even_when_no_fire_started() {
+    fn a_same_tick_section_group_counts_in_full_when_no_fire_started() {
         let out = analyze(&fixture().hitting_section(0).also_hitting_section_at(0, 0.0).without_ribbons().build())
             .expect("geometry");
-        assert_eq!(out.eligible_hits, 0);
-        assert_eq!(out.exclusions[&ExclusionReason::SameTickSectionAmbiguous], 2);
+        assert_eq!(out.eligible_hits, 2);
+        assert_eq!(out.fires, 0);
         assert_eq!(out.unattributed_fires, 0);
     }
 
@@ -2399,7 +2371,6 @@ mod tests {
     fn two_hits_in_one_tick_on_different_sections_both_count() {
         let out = analyze(&fixture().hitting_section(0).also_hitting_section_at(3, 0.0).build()).expect("geometry");
         assert_eq!(out.eligible_hits, 2);
-        assert!(!out.exclusions.contains_key(&ExclusionReason::SameTickSectionAmbiguous));
     }
 
     /// Two hits on one section in different ticks are two separate trials: the
@@ -2408,7 +2379,6 @@ mod tests {
     fn two_hits_on_one_section_in_different_ticks_both_count() {
         let out = analyze(&fixture().hitting_section(3).also_hitting_section_at(3, 20.0).build()).expect("geometry");
         assert_eq!(out.eligible_hits, 2);
-        assert!(!out.exclusions.contains_key(&ExclusionReason::SameTickSectionAmbiguous));
     }
 
     /// A ricochet is not proof that a shell could not have rolled for fire, only

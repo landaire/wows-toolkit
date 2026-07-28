@@ -2929,7 +2929,6 @@ pub enum ExclusionReason {
     ImpactOffTheHull,
     VictimPoseUnknown,
     AmbiguousWithAnotherHit,
-    SameTickSectionAmbiguous,
 }
 
 #[cfg(test)]

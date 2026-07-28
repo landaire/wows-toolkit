@@ -70,6 +70,5 @@ pub const fn exclusion_reason_key(reason: ExclusionReason) -> &'static str {
         ExclusionReason::ImpactOffTheHull => "ui.replay.sections.fire_chance_exclusion_impact_off_the_hull",
         ExclusionReason::VictimPoseUnknown => "ui.replay.sections.fire_chance_exclusion_victim_pose_unknown",
         ExclusionReason::AmbiguousWithAnotherHit => "ui.replay.sections.fire_chance_exclusion_ambiguous_hit",
-        ExclusionReason::SameTickSectionAmbiguous => "ui.replay.sections.fire_chance_exclusion_same_tick_section",
     }
 }

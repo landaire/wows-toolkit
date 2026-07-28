@@ -187,10 +187,6 @@ mod tests {
             keys::exclusion_reason_key(ExclusionReason::DamageControlActive),
             "ui.replay.sections.fire_chance_exclusion_damage_control_active"
         );
-        assert_eq!(
-            keys::exclusion_reason_key(ExclusionReason::SameTickSectionAmbiguous),
-            "ui.replay.sections.fire_chance_exclusion_same_tick_section"
-        );
     }
 
     #[test]

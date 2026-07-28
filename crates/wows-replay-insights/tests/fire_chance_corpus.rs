@@ -139,6 +139,11 @@ struct Measurement {
     exclusions: BTreeMap<ExclusionReason, u32>,
     /// Attributed fires per victim ship index.
     fires_by_ship: BTreeMap<String, u64>,
+    /// `(ship index, eligible hits, fires)` per victim ship. The per-ship row
+    /// is the only level `EffectiveFireChance` states a rate at, so this is
+    /// what the corpus summary reduces when it wants a corpus-wide figure, and
+    /// what the printed distribution of sample sizes is taken over.
+    per_ship_trials: Vec<(String, u32, u32)>,
     /// Server-recorded fires per victim ship index, from the post-battle
     /// results. `None` when the replay carries no results blob or the build's
     /// constants table is missing, so the external check simply has nothing to
@@ -746,6 +751,8 @@ fn measure(
 
     let fires_by_ship =
         out.per_ship.iter().map(|ship| (ship.victim_ship_index.clone(), u64::from(ship.fires))).collect();
+    let per_ship_trials =
+        out.per_ship.iter().map(|ship| (ship.victim_ship_index.clone(), ship.eligible_hits, ship.fires)).collect();
     let server_fires_by_ship =
         data.constants_json.as_ref().and_then(|constants| server_fires_by_ship(&report, constants));
 
@@ -763,6 +770,7 @@ fn measure(
             .sum(),
         exclusions: out.exclusions.clone(),
         fires_by_ship,
+        per_ship_trials,
         server_fires_by_ship,
         section_predictions: section_pairs(&out),
         diagnostics: resolution.diagnostics(),
@@ -923,6 +931,50 @@ fn print_corpus_summary_once(corpus: &Corpus) {
     println!("per build (replays, eligible hits, attributed fires):");
     for (build, (replays, hits, fires)) in &per_build {
         println!("  {build}: {replays}, {hits}, {fires}");
+    }
+
+    print_rate_summary(corpus);
+}
+
+/// The corpus totals, plus the two ways of reducing them to one number.
+///
+/// Neither reduction is a product statistic and the app reports neither: fire
+/// resistance is the victim's, so a figure spanning several victims has to pick
+/// a weighting and no weighting is the right one. The pooled ratio weights
+/// every eligible hit equally, so the most heavily hit targets carry it; the
+/// unweighted mean of the per-ship rates weights every target ship equally, so
+/// a ship hit once carries as much as one hit eighty times. Both are printed
+/// here as harness diagnostics against the distribution of sample sizes, which
+/// is what shows how far apart the two definitions sit and how thin the rows
+/// underneath them are.
+fn print_rate_summary(corpus: &Corpus) {
+    let (mut hits, mut fires) = (0u64, 0u64);
+    let mut ship_rates: Vec<f32> = Vec::new();
+    let mut ship_hits: Vec<f32> = Vec::new();
+    for measurement in &corpus.measurements {
+        hits += u64::from(measurement.eligible_hits);
+        fires += u64::from(measurement.fires);
+        for (_, eligible, ship_fires) in &measurement.per_ship_trials {
+            if *eligible == 0 {
+                continue;
+            }
+            ship_rates.push(*ship_fires as f32 / *eligible as f32);
+            ship_hits.push(*eligible as f32);
+        }
+    }
+    println!("eligible hits {hits}, attributed fires {fires}");
+    if hits > 0 {
+        println!("  pooled ratio {:.4} (ignores per-ship fire resistance)", fires as f64 / hits as f64);
+    }
+    if !ship_rates.is_empty() {
+        let mean = f64::from(ship_rates.iter().sum::<f32>()) / ship_rates.len() as f64;
+        println!("  unweighted mean of per-ship rates {mean:.4} over {} target ships", ship_rates.len());
+        let singles = ship_hits.iter().filter(|h| **h == 1.0).count();
+        let under_five = ship_hits.iter().filter(|h| **h < 5.0).count();
+        println!(
+            "  eligible hits per target ship: {} ({singles} rows of exactly 1, {under_five} under 5)",
+            quantiles(&mut ship_hits)
+        );
     }
 }
 

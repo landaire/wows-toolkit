@@ -1606,28 +1606,29 @@ impl UiReport {
                 let plain = |ui: &mut egui::Ui, text: RichText| {
                     ui.add(Label::new(text).selectable(false));
                 };
-                match fire_chance.rate() {
-                    Some(rate) => {
-                        plain(ui, RichText::new(format!("{:.1}%", rate * 100.0)).strong());
-                        plain(
-                            ui,
-                            RichText::new(format!("({} / {})", fire_chance.fires, fire_chance.eligible_hits)).weak(),
-                        );
-                    }
-                    None => {
-                        plain(ui, RichText::new(t!("ui.replay.sections.fire_chance_no_eligible_hits")).weak());
-                    }
-                }
-                if let Some(expected) = fire_chance.expected_rate() {
+                if fire_chance.eligible_hits == 0 {
+                    plain(ui, RichText::new(t!("ui.replay.sections.fire_chance_no_eligible_hits")).weak());
+                } else {
                     plain(
                         ui,
-                        RichText::new(format!(
-                            "{} {:.1}%",
-                            t!("ui.replay.sections.fire_chance_expected"),
-                            expected * 100.0
+                        RichText::new(t!(
+                            "ui.replay.sections.fire_chance_totals",
+                            fires = fire_chance.fires,
+                            hits = fire_chance.eligible_hits
                         ))
-                        .weak(),
+                        .strong(),
                     );
+                    plain(ui, RichText::new(fire_chance_ships_text(fire_chance)).weak());
+                    if let Some(expected) = fire_chance.expected_fires {
+                        plain(
+                            ui,
+                            RichText::new(t!(
+                                "ui.replay.sections.fire_chance_expected_fires",
+                                fires = format!("{expected:.1}")
+                            ))
+                            .weak(),
+                        );
+                    }
                 }
             })
             .response
@@ -5181,27 +5182,51 @@ fn breakdown_hover_string<F: Fn(&str) -> u64>(descriptions: &[(&str, &str)], loc
         .join("\n")
 }
 
-/// Percent-and-sample-count headline for the effective-fire-chance block.
-/// `EffectiveFireChance::rate` returns `None` when there are no eligible hits;
-/// zero samples is not a zero rate, so no percentage is rendered for it.
+/// Sample-count headline for the effective-fire-chance block: fires and
+/// eligible hits summed over every target ship, and how many ships those
+/// totals cover.
+///
+/// Counts, not a rate. Fire resistance is a property of the victim, so a rate
+/// only means something inside one target ship's row, where the victim's
+/// `burnProb` coefficient and node probabilities are fixed. Reducing several
+/// ships to one percentage would need a weighting between a ship hit twice and
+/// one hit eighty times, and no weighting is the right one. Zero eligible hits
+/// says so in words rather than showing a total nothing stands behind.
 fn fire_chance_headline_text(fire_chance: &EffectiveFireChance) -> String {
-    match fire_chance.rate() {
-        Some(rate) => format!("{:.1}%   ({} / {})", rate * 100.0, fire_chance.fires, fire_chance.eligible_hits),
-        None => t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned(),
+    if fire_chance.eligible_hits == 0 {
+        return t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned();
     }
+    format!(
+        "{}   {}",
+        t!("ui.replay.sections.fire_chance_totals", fires = fire_chance.fires, hits = fire_chance.eligible_hits),
+        fire_chance_ships_text(fire_chance),
+    )
+}
+
+/// "across N target ships", with its own singular form. The translation layer
+/// carries no plural machinery, so a count of one takes a separate key the way
+/// the session-stats labels do.
+fn fire_chance_ships_text(fire_chance: &EffectiveFireChance) -> Cow<'static, str> {
+    let ships = fire_chance.ships_with_trials();
+    if ships == 1 {
+        return t!("ui.replay.sections.fire_chance_ships_one");
+    }
+    t!("ui.replay.sections.fire_chance_ships", ships = ships)
 }
 
 /// The headline plus the optional "expected" line beneath it, shared verbatim
 /// for the copy-to-clipboard and hover text. The on-screen block lays the same
 /// figures out with egui widgets instead, so this is the plain-text form.
 ///
-/// The expected line renders `expected_rate`, the model's per-hit chance, which
-/// is the only form comparable against the observed rate above it;
-/// `expected_fires` is a count of fires.
+/// The expected line renders `expected_fires`, a count of fires, which is what
+/// the observed fire count above it is comparable against.
 fn fire_chance_headline_lines(fire_chance: &EffectiveFireChance) -> Vec<String> {
     let mut lines = vec![fire_chance_headline_text(fire_chance)];
-    if let Some(expected) = fire_chance.expected_rate() {
-        lines.push(format!("  {} {:.1}%", t!("ui.replay.sections.fire_chance_expected"), expected * 100.0));
+    if fire_chance.eligible_hits > 0
+        && let Some(expected) = fire_chance.expected_fires
+    {
+        let text = t!("ui.replay.sections.fire_chance_expected_fires", fires = format!("{expected:.1}"));
+        lines.push(format!("  {text}"));
     }
     lines
 }
@@ -5215,10 +5240,11 @@ fn sorted_per_ship(fire_chance: &EffectiveFireChance) -> Vec<&PerShipFireChance>
 }
 
 /// One target-ship row in plain text, for the copied breakdown. The on-screen
-/// expander lays these out as a grid. Same zero-sample rule as the aggregate
-/// headline: `PerShipFireChance::rate` is `None` over zero eligible
-/// hits, which is unknown rather than a zero rate. The expected column is
-/// `expected_rate` for the same reason as the headline's.
+/// expander lays these out as a grid. This is the only place a percentage is
+/// stated, because the victim's fire resistance is fixed within the row.
+/// `PerShipFireChance::rate` is `None` over zero eligible hits, which is
+/// unknown rather than a zero rate, and the expected column is the matching
+/// per-hit chance so the two are comparable.
 fn fire_chance_per_ship_line(ship: &PerShipFireChance, localize_ship: &dyn Fn(&PerShipFireChance) -> String) -> String {
     let rate_text = match ship.rate() {
         Some(rate) => format!("{:.1}%  ({} / {})", rate * 100.0, ship.fires, ship.eligible_hits),
@@ -5523,35 +5549,43 @@ mod fire_chance_render_tests {
         }
     }
 
+    /// The headline is counts and the ship count they cover. A percentage
+    /// there would need a weighting across victims of different fire
+    /// resistance, which is why the rate lives on the per-ship rows instead.
     #[test]
-    fn headline_shows_rate_and_sample_counts() {
-        // 63 hits at about 10% each expect roughly 6.3 fires, which is a count.
-        let fc = fixture(63, 9, Some(6.3));
-        assert_eq!(fire_chance_headline_text(&fc), "14.3%   (9 / 63)");
+    fn headline_shows_counts_and_the_ships_they_cover() {
+        let mut fc = fixture(63, 9, Some(6.3));
+        fc.per_ship = vec![ship("Zao", 40, 6, None), ship("Iowa", 23, 3, None)];
+        let headline = fire_chance_headline_text(&fc);
+        assert!(!headline.contains('%'), "expected no percentage in {headline:?}");
+        assert_eq!(headline, "9 fires / 63 eligible hits   across 2 target ships");
     }
 
-    /// `expected_fires` is a count of fires, not a rate. The line under the
-    /// headline must render the per-hit rate it implies, so the two numbers
-    /// are comparable; rendering the count as a percentage would print 630.0%.
+    /// `expected_fires` is a count of fires, and the observed figure beside it
+    /// is now a count too, so the line renders the count as it stands.
     #[test]
-    fn headline_expected_line_renders_the_per_hit_rate_not_the_fire_count() {
-        let fc = fixture(63, 9, Some(6.3));
-        assert_eq!(fire_chance_headline_lines(&fc), vec!["14.3%   (9 / 63)".to_owned(), "  expected 10.0%".to_owned()]);
+    fn headline_expected_line_renders_the_fire_count() {
+        let mut fc = fixture(63, 9, Some(6.3));
+        fc.per_ship = vec![ship("Zao", 63, 9, None)];
+        assert_eq!(
+            fire_chance_headline_lines(&fc),
+            vec!["9 fires / 63 eligible hits   across 1 target ship".to_owned(), "  expected 6.3 fires".to_owned()]
+        );
     }
 
     /// With no eligible hits `expected_fires` is legitimately `Some(0.0)`: a
-    /// sum over nothing. The rate it would imply does not exist, so no expected
-    /// line is shown, exactly as no observed percentage is.
+    /// sum over nothing. Nothing stands behind it, so no expected line is
+    /// shown, exactly as no observed total is.
     #[test]
     fn headline_over_zero_eligible_hits_shows_no_expected_line() {
         let fc = fixture(0, 0, Some(0.0));
         assert_eq!(fire_chance_headline_lines(&fc), vec!["no eligible hits".to_owned()]);
     }
 
-    /// A rate over zero eligible hits is unknown, not zero: this must never
-    /// render as "0.0%".
+    /// Zero eligible hits is unknown, not zero: this must never render as a
+    /// total or a rate.
     #[test]
-    fn headline_over_zero_eligible_hits_has_no_percentage() {
+    fn headline_over_zero_eligible_hits_shows_no_totals() {
         let fc = fixture(0, 0, None);
         let headline = fire_chance_headline_text(&fc);
         assert!(!headline.contains('%'), "expected no percentage in {headline:?}");
@@ -5599,8 +5633,8 @@ mod fire_chance_render_tests {
         );
     }
 
-    /// Same zero-sample rule as the aggregate headline, at the per-ship level,
-    /// including the expected column: a sum over no hits implies no rate.
+    /// A row over no hits states no rate, including in the expected column: a
+    /// sum over no hits implies no rate.
     #[test]
     fn per_ship_line_over_zero_eligible_hits_has_no_percentage() {
         let s = ship("Fletcher", 0, 0, Some(0.0));
