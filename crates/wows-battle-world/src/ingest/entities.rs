@@ -397,9 +397,12 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
     for player in &players {
         let entity_id = player.entity_id();
 
-        // Every roster entry is present from the start of this seed packet,
-        // whether or not its Vehicle entity already existed.
-        open_presence(world, entity_id, clock);
+        // Deliberately no presence window opened here: OnArenaStateReceived lists
+        // every match participant, including ships the recording client's AOI
+        // never detects and for which no EntityCreate ever arrives (see
+        // gather_replay_facts's doc comment in merged.rs). Opening a window on
+        // the seed would report such a ship as observed for the whole match,
+        // which is exactly backwards. Presence is proven only by EntityCreate.
 
         // Build Player if not already in the index.
         if !world.resource::<PlayerIndex>().0.contains_key(&entity_id) {
@@ -762,5 +765,114 @@ mod presence_tests {
             GameClock(0.0),
             GameClock(1.0)
         ));
+    }
+
+    /// Two opens with no leave in between must not stack a second window;
+    /// this is the early return `open_presence` promises in its doc comment.
+    #[test]
+    fn opening_an_already_open_window_is_a_no_op() {
+        let mut world = test_world();
+        let id = EntityId::from(11u32);
+
+        open_presence(&mut world, id, GameClock(5.0));
+        open_presence(&mut world, id, GameClock(6.0));
+
+        let windows = &world.resource::<PresenceLog>().0[&id];
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].entered, GameClock(5.0));
+        assert_eq!(windows[0].left, None);
+    }
+
+    /// `continuously_observed`'s boundary comparisons are inclusive on both
+    /// ends: a query touching `entered` or `left` exactly is still inside the
+    /// window, and a query entirely before the first window is not.
+    #[test]
+    fn continuously_observed_boundaries_are_inclusive() {
+        let mut world = test_world();
+        let id = EntityId::from(12u32);
+
+        open_presence(&mut world, id, GameClock(10.0));
+        handle_entity_leave_at(id, GameClock(50.0), &mut world);
+
+        let log = world.resource::<PresenceLog>();
+        assert!(log.continuously_observed(id, GameClock(10.0), GameClock(20.0)));
+        assert!(log.continuously_observed(id, GameClock(20.0), GameClock(50.0)));
+        assert!(!log.continuously_observed(id, GameClock(0.0), GameClock(5.0)));
+    }
+
+    /// Regression test for the false premise that arena-state seeding proves
+    /// observation. `seed_vehicles_from_arena_state` pre-creates a Vehicle
+    /// entity (with max HP etc.) for every roster entry so the ship is
+    /// queryable, including ones the recording client's AOI never detects and
+    /// for which no EntityCreate ever arrives (see `gather_replay_facts`'s doc
+    /// comment in `wows_replays::analyzer::battle_controller::merged`). That
+    /// pre-create must not open a presence window: a ship seeded but never
+    /// created has no window at all, not an always-open one.
+    #[test]
+    fn arena_state_seed_alone_does_not_prove_observation() {
+        let mut world = World::new();
+        world.insert_resource(EntityIndex::default());
+        world.insert_resource(PresenceLog::default());
+        world.insert_resource(PlayerIndex::default());
+        world.insert_resource(MetadataPlayers::default());
+
+        // Minimal PlayerStateData built via its derived Deserialize impl:
+        // its fields are private to wows_replays, so this is the only way to
+        // construct one from outside that crate. `raw`/`raw_with_names` are
+        // `#[serde(skip_deserializing)]` and default to empty.
+        let json = r#"{
+            "username": "bot9",
+            "clan": "",
+            "clan_id": 0,
+            "clan_color": 0,
+            "db_id": 0,
+            "realm": null,
+            "meta_ship_id": 500,
+            "entity_id": 9,
+            "team_id": 1,
+            "max_health": 50000,
+            "is_abuser": false,
+            "is_hidden": false,
+            "is_bot": true,
+            "human_properties": null
+        }"#;
+        let player: PlayerStateData = serde_json::from_str(json).expect("fixture matches PlayerStateData's shape");
+        let id = EntityId::from(9u32);
+        assert_eq!(player.entity_id(), id);
+
+        seed_vehicles_from_arena_state(
+            std::iter::once(&player),
+            GameClock(10.0),
+            &mut world,
+            &NoResources,
+            &GameConstants::defaults(),
+            Version::default(),
+        );
+
+        // The seed path still pre-creates the ECS entity (for HP tracking
+        // etc.); the assertion that matters is that no presence window opened.
+        assert!(world.resource::<EntityIndex>().get(id).is_some());
+        assert!(world.resource::<PresenceLog>().0.get(&id).is_none_or(|w| w.is_empty()));
+        assert!(!world.resource::<PresenceLog>().continuously_observed(id, GameClock(10.0), GameClock(10.0)));
+        assert!(!world.resource::<PresenceLog>().continuously_observed(id, GameClock(0.0), GameClock(1_000_000.0)));
+    }
+
+    /// Stands in for a real `ResourceLoader`: `seed_vehicles_from_arena_state`
+    /// only calls into it for a captain param id, which stays 0 (no lookup)
+    /// for a fixture with no `crewModifiersCompactParams`.
+    struct NoResources;
+    impl ResourceLoader for NoResources {
+        fn localized_name_from_param(&self, _param: &wowsunpack::game_params::types::Param) -> Option<String> {
+            None
+        }
+        fn localized_name_from_id(&self, _id: &wowsunpack::data::TranslationKey) -> Option<String> {
+            None
+        }
+        fn game_param_by_id(&self, _id: GameParamId) -> Option<wowsunpack::Rc<wowsunpack::game_params::types::Param>> {
+            None
+        }
+        fn entity_specs(&self) -> &[wowsunpack::rpc::entitydefs::EntitySpec] {
+            &[]
+        }
     }
 }

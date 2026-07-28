@@ -334,8 +334,8 @@ impl BurnStateChange {
 pub struct BurnStateLog(pub Vec<BurnStateChange>);
 
 /// A window during which the recording client received updates for a
-/// vehicle, from `EntityCreate`/arena-state seeding to the matching
-/// `EntityLeave`.
+/// vehicle, from the `EntityCreate` that proved it was observed to the
+/// matching `EntityLeave`.
 ///
 /// `left: None` means the window is still open as of the last packet
 /// processed, either because the vehicle is still present or because the
@@ -349,21 +349,28 @@ pub struct PresenceWindow {
 /// Windows during which the recording client observed each vehicle, keyed by
 /// game `EntityId`.
 ///
-/// A window opens in `handle_vehicle_create` or
-/// `seed_vehicles_from_arena_state` and closes in `handle_entity_leave`;
-/// opening is idempotent, so a vehicle that already holds an open window
-/// gets no second one. Only entities that receive the `Vehicle` marker ever
-/// get an entry: smoke screens, buff zones, capture points, and buildings
-/// never appear in this map, so `continuously_observed` is always false for
-/// them.
+/// A window opens in `handle_vehicle_create` (the `EntityCreate` handler for
+/// `EntityType::Vehicle`) and closes in `handle_entity_leave`; opening is
+/// idempotent, so a vehicle that already holds an open window gets no second
+/// one. Carrying the `Vehicle` marker component is necessary but not
+/// sufficient for an entry here: smoke screens, buff zones, capture points,
+/// and buildings never get the marker and so never appear in this map, but
+/// `seed_vehicles_from_arena_state` also attaches `Vehicle` to ships it only
+/// pre-creates from the match roster, and that path deliberately never opens
+/// a window (see below). So an entry, when one exists, is proof of
+/// observation: it exists only where the client's own `EntityCreate` for
+/// that vehicle was actually seen. `OnArenaStateReceived` lists every match
+/// participant, including ships the client's AOI never detects at all;
+/// opening a window there would mark a never-observed ship as present for
+/// the whole match, which is exactly backwards. A vehicle with no windows
+/// was never observed, not merely untracked.
 ///
 /// Entries within one vehicle's `Vec` are pushed in the order the client
 /// observed them, so `entered` is non-decreasing across the `Vec`, not
-/// strictly increasing: bots and players seeded together from one
-/// `OnArenaStateReceived` packet all open windows at the same clock. As with
-/// `BurnStateLog`, `clock` in both `entered` and `left` is the raw
-/// `packet.clock` seen by `ingest::dispatch`, not the `Clock` resource,
-/// which can disagree with it on pre-battle packets.
+/// strictly increasing: two `EntityCreate` packets for different vehicles can
+/// land on the same clock. As with `BurnStateLog`, `clock` in both `entered`
+/// and `left` is the raw `packet.clock` seen by `ingest::dispatch`, not the
+/// `Clock` resource, which can disagree with it on pre-battle packets.
 ///
 /// Coverage boundary: a gap between two windows for one vehicle is a real,
 /// provable blind spot, since an `EntityLeave` was actually observed for it.
@@ -375,22 +382,33 @@ pub struct PresenceWindow {
 /// This is the same class of incompleteness `BurnStateLog` documents;
 /// `PresenceLog` does not resolve it, it only makes the gaps that were
 /// actually observed (a real `EntityLeave` followed by a later create)
-/// usable by `continuously_observed`.
+/// usable by `continuously_observed`. Separately, `DecodedPacketPayload::EntityEnter`
+/// is currently a no-op in `ingest::dispatch`: if the server ever signals a
+/// vehicle's AOI re-entry with `EntityEnter` rather than a fresh
+/// `EntityCreate`, no window reopens and presence stays closed for the rest
+/// of the match. That direction only loses samples rather than corrupting
+/// one, since a closed window can only make `continuously_observed` too
+/// strict, never too lenient.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct PresenceLog(pub HashMap<EntityId, Vec<PresenceWindow>>);
 
 impl PresenceLog {
     /// True when `[from, to]` lies inside a single unbroken window: some
     /// window's `entered` is at or before `from`, and that same window's
-    /// `left` is either still open (`None`) or at or after `to`. An entity
-    /// with no recorded windows was never observed and is never
-    /// continuously observed, for any range.
+    /// `left` is either still open (`None`) or at or after `to`. Both
+    /// comparisons are inclusive: a window opens at its `entered` clock and
+    /// closes at its `left` clock, so a query touching either boundary is
+    /// still fully inside it. An entity with no recorded windows was never
+    /// observed and is never continuously observed, for any range.
+    ///
+    /// Callers must pass `from <= to`; an inverted range is checked only in
+    /// debug builds (`debug_assert!`) because it makes both comparisons
+    /// easier to satisfy, silently turning "not observed" into "observed".
     pub fn continuously_observed(&self, entity: EntityId, from: GameClock, to: GameClock) -> bool {
-        self.0.get(&entity).is_some_and(|windows| {
-            windows.iter().any(|w| {
-                w.entered.seconds() <= from.seconds() && w.left.is_none_or(|left| left.seconds() >= to.seconds())
-            })
-        })
+        debug_assert!(from <= to, "continuously_observed requires from <= to, got {from:?}..{to:?}");
+        self.0
+            .get(&entity)
+            .is_some_and(|windows| windows.iter().any(|w| w.entered <= from && w.left.is_none_or(|left| left >= to)))
     }
 }
 
