@@ -2928,7 +2928,7 @@ pub enum ExclusionReason {
     HitTypeDoesNotRoll,
     NoSectionGeometry,
     ImpactNotOnAShip,
-    ImpactOffTheHull,
+    ImpactUnplaceableOnVictim,
     VictimPoseUnknown,
     AmbiguousWithAnotherHit,
 }

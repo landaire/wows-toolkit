@@ -63,7 +63,7 @@ pub const fn exclusion_reason_key(reason: ExclusionReason) -> &'static str {
         ExclusionReason::HitTypeDoesNotRoll => "ui.replay.sections.fire_chance_exclusion_hit_type_does_not_roll",
         ExclusionReason::NoSectionGeometry => "ui.replay.sections.fire_chance_exclusion_no_geometry",
         ExclusionReason::ImpactNotOnAShip => "ui.replay.sections.fire_chance_exclusion_impact_not_on_a_ship",
-        ExclusionReason::ImpactOffTheHull => "ui.replay.sections.fire_chance_exclusion_impact_off_the_hull",
+        ExclusionReason::ImpactUnplaceableOnVictim => "ui.replay.sections.fire_chance_exclusion_impact_unplaceable",
         ExclusionReason::VictimPoseUnknown => "ui.replay.sections.fire_chance_exclusion_victim_pose_unknown",
         ExclusionReason::AmbiguousWithAnotherHit => "ui.replay.sections.fire_chance_exclusion_ambiguous_hit",
     }

@@ -479,7 +479,7 @@ struct HitReconciliation {
     unnamed_collision: u32,
     /// Refused impacts whose shell hit type rolls for fire, split by whether
     /// they struck a ship at all. A rolling hit type is what it takes to reach
-    /// the geometry check, so these bound the `ImpactOffTheHull` exclusion from
+    /// the geometry check, so these bound the `ImpactUnplaceableOnVictim` exclusion from
     /// above and say what it is made of: one is a shell that hit a ship and was
     /// keyed to the wrong victim, the other is a shell that hit no ship. They
     /// only bound it, because `classify` also refuses a shell whose burn chance
@@ -535,7 +535,7 @@ fn rolls_for_fire(hit: &ResolvedShotHit) -> bool {
 ///
 /// Deliberately independent of `EffectiveFireChance::exclusions`: that tally
 /// stops at the first reason a hit failed, so a ricochet is never asked whether
-/// it lands on a hull and `ImpactOffTheHull` under-counts what the projection
+/// it lands on a hull and `ImpactUnplaceableOnVictim` under-counts what the projection
 /// really does. The projection is geometry and does not care what the shell did
 /// on arrival, so it is measured over every main-battery hit that struck a ship.
 fn reconcile_hits(
@@ -1775,7 +1775,7 @@ on a hull; {} carried a collision id the build's constants table does not name, 
 cannot rule either way",
         totals.terrain_hits, totals.terrain_on_hull, totals.unnamed_collision
     );
-    // What the `ImpactOffTheHull` exclusion is made of, in the two kinds it
+    // What the `ImpactUnplaceableOnVictim` exclusion is made of, in the two kinds it
     // conflates: a shell that hit a ship and was keyed to the wrong one, and a
     // shell that hit no ship at all and should never have been a trial. Both
     // counts are a superset of the tally, since `classify` refuses a shell whose

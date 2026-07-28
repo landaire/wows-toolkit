@@ -155,10 +155,14 @@ pub enum HitEligibility {
     /// nearest-ship heuristic keyed it to, and its `shell_hit` is an ordinary
     /// `Normal`, so nothing else in the model would refuse it.
     ImpactNotOnAShip,
-    /// The impact lies too far from the victim's burn nodes to have been a hit
-    /// on that hull. `victim_entity_id` is a nearest-ship heuristic, so this is
-    /// what a hit keyed to a neighbour in a tight formation looks like.
-    ImpactOffTheHull,
+    /// The impact could not be placed on the hull of the ship it was matched
+    /// to. Any hit anywhere on a ship can start a fire, superstructure and
+    /// masts included, and the allowances are set wide enough to admit those.
+    /// What this catches is a hit matched to the wrong ship: `victim_entity_id`
+    /// is a nearest-ship heuristic and picks a neighbour in a tight formation.
+    /// Without the right victim the burn state and section are unknowable, so
+    /// the hit is refused rather than guessed at.
+    ImpactUnplaceableOnVictim,
     /// The victim's position and orientation were not known at the moment of
     /// the hit, so where on the hull the shell landed cannot be established.
     VictimPoseUnknown,
@@ -207,7 +211,9 @@ impl HitEligibility {
             HitEligibility::HitTypeDoesNotRoll(_) => HitDisposition::Excluded(ExclusionReason::HitTypeDoesNotRoll),
             HitEligibility::NoSectionGeometry => HitDisposition::Excluded(ExclusionReason::NoSectionGeometry),
             HitEligibility::ImpactNotOnAShip => HitDisposition::Excluded(ExclusionReason::ImpactNotOnAShip),
-            HitEligibility::ImpactOffTheHull => HitDisposition::Excluded(ExclusionReason::ImpactOffTheHull),
+            HitEligibility::ImpactUnplaceableOnVictim => {
+                HitDisposition::Excluded(ExclusionReason::ImpactUnplaceableOnVictim)
+            }
             HitEligibility::VictimPoseUnknown => HitDisposition::Excluded(ExclusionReason::VictimPoseUnknown),
             HitEligibility::AmbiguousWithAnotherHit => {
                 HitDisposition::Excluded(ExclusionReason::AmbiguousWithAnotherHit)
@@ -1050,7 +1056,7 @@ fn classify(
     let section = match section_of(input, geometry, hit) {
         Ok(section) => section,
         Err(SectionGap::NoGeometry) => return HitEligibility::NoSectionGeometry,
-        Err(SectionGap::OffTheHull) => return HitEligibility::ImpactOffTheHull,
+        Err(SectionGap::OffTheHull) => return HitEligibility::ImpactUnplaceableOnVictim,
         Err(SectionGap::NoVictimPose) => return HitEligibility::VictimPoseUnknown,
     };
     let Some(victim) = input.victims.get(&hit.victim_entity_id) else {
@@ -3090,7 +3096,7 @@ mod tests {
     fn an_impact_nowhere_near_the_victims_hull_is_excluded() {
         let out = analyze(&fixture().with_the_impact_off_the_hull().build()).expect("geometry");
         assert_eq!(out.eligible_hits, 0);
-        assert_eq!(out.exclusions[&ExclusionReason::ImpactOffTheHull], 1);
+        assert_eq!(out.exclusions[&ExclusionReason::ImpactUnplaceableOnVictim], 1);
     }
 
     /// The causing hit precedes its ribbon. A hit after it is packet ordering

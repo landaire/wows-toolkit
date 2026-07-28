@@ -406,7 +406,7 @@ fire_chance_exclusion_not_main_battery = "not a main battery hit"
 fire_chance_exclusion_hit_type_does_not_roll = "hit type does not roll for fire"
 fire_chance_exclusion_no_geometry = "no fire section geometry"
 fire_chance_exclusion_impact_not_on_a_ship = "shell struck terrain or water"
-fire_chance_exclusion_impact_off_the_hull = "impact not on the victim's hull"
+fire_chance_exclusion_impact_unplaceable = "could not place the impact on the ship we matched it to"
 fire_chance_exclusion_victim_pose_unknown = "victim's position not known at impact"
 fire_chance_exclusion_ambiguous_hit = "ambiguous with another hit of ours"
 
