@@ -15,3 +15,5 @@ pub mod build;
 
 #[cfg(feature = "build")]
 pub use build::ResolvedBuild;
+
+pub mod fire_chance;
