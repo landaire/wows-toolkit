@@ -3,4 +3,6 @@
 #[cfg(feature = "build")]
 pub mod analysis;
 pub mod geometry;
+#[cfg(feature = "build")]
+pub mod resolve;
 pub mod victim;

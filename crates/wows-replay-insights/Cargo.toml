@@ -13,6 +13,7 @@ wowsunpack = { workspace = true, default-features = false, features = ["parsing"
 wows_replays = { workspace = true, default-features = false, features = ["parsing"] }
 wows-battle-world = { workspace = true, default-features = false }
 tracing = { workspace = true }
+thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 jiff = { workspace = true, features = ["serde"], optional = true }
@@ -22,7 +23,9 @@ data-encoding = { workspace = true, optional = true }
 [dev-dependencies]
 wows-data-mgr = { workspace = true }
 wows_replays = { workspace = true, features = ["vfs", "arc"] }
-wowsunpack = { workspace = true, features = ["arc", "vfs-mmap"] }
+# `models` carries assets.bin parsing and `fire_nodes::resolve_fire_sections`,
+# which the fire-chance corpus test needs to place a hull's fire sections.
+wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "models"] }
 serde_json = { workspace = true }
 
 [features]

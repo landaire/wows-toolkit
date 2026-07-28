@@ -114,6 +114,18 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         self.options.source_team = SourceTeam(team);
     }
 
+    /// Accumulate every resolved hit in `HitHistoryLog` for the whole parse.
+    ///
+    /// Off by default because renderers only need the current frame's hits and
+    /// should not pay the memory. Any consumer that reads
+    /// `BattleReport::hit_history` must turn it on before feeding packets: the
+    /// log is otherwise empty, which reads as "no hits" rather than "not
+    /// recorded". `ShotTracking::Untracked` suppresses it regardless, since no
+    /// `ResolvedShotHit` is constructed at all in that mode.
+    pub fn set_record_hit_history(&mut self, record: bool) {
+        self.options.record_hit_history = record;
+    }
+
     /// Replace the consumable inventory for one entity.
     ///
     /// If `inventory` is empty, any existing `Consumables` component is removed.
@@ -327,14 +339,25 @@ impl<'res, 'replay, G: ResourceLoader> wows_replays::analyzer::Analyzer for Batt
 
 #[cfg(test)]
 mod tests {
+    use wows_replays::Rc;
+    use wows_replays::analyzer::decoder::HitType;
+    use wows_replays::analyzer::decoder::Recognized;
+    use wows_replays::analyzer::decoder::ShotHit;
+    use wows_replays::types::AvatarId;
+    use wows_replays::types::EntityId;
+    use wows_replays::types::GameClock;
+    use wows_replays::types::ShotId;
+    use wows_replays::types::WorldPos;
+
+    use crate::resources::HitHistoryLog;
+    use crate::resources::PlayerIndex;
     use crate::resources::PresenceLog;
     use crate::resources::PresenceWindow;
     use crate::test_support::StubResources;
     use crate::test_support::fixture_param;
     use crate::test_support::minimal_meta;
+    use crate::test_support::self_player;
     use crate::world::BattleWorld;
-    use wows_replays::types::EntityId;
-    use wows_replays::types::GameClock;
 
     /// A despawned entity is gone, so its presence window must not keep
     /// answering `continuously_observed` with true. A false "yes" there lets
@@ -363,5 +386,49 @@ mod tests {
         assert_eq!(log.0[&id][0].left, Some(GameClock(60.0)));
         assert!(!log.continuously_observed(id, GameClock(20.0), GameClock(90.0)));
         assert!(log.continuously_observed(id, GameClock(20.0), GameClock(50.0)));
+    }
+
+    fn a_hit() -> ShotHit {
+        ShotHit {
+            owner_id: EntityId::from(3u32),
+            hit_type: HitType {
+                collision: Recognized::Unknown("0".to_string()),
+                shell_hit: Recognized::Unknown("0".to_string()),
+                raw: 0,
+            },
+            shot_id: ShotId::from(1u32),
+            position: WorldPos::new(0.0, 0.0, 0.0),
+            terminal_ballistics: None,
+        }
+    }
+
+    /// The hit history is what every fire-chance measurement divides by, and it
+    /// is off by default, so an unset flag reads as "no hits" rather than "not
+    /// recorded". Drives the setter through the ingest handler that consults
+    /// it, so a setter wired to the wrong field fails here.
+    #[test]
+    fn recording_the_hit_history_is_off_until_it_is_set() {
+        for (record, expected) in [(false, 0usize), (true, 1usize)] {
+            let meta = minimal_meta();
+            let resources = StubResources(fixture_param());
+            let mut world = BattleWorld::new(&meta, &resources, None);
+            let (entity_id, player) = self_player(&resources);
+            world.world_mut().resource_mut::<PlayerIndex>().0.insert(entity_id, Rc::new(player));
+
+            world.set_record_hit_history(record);
+            // Copied because `handle_shot_kills` takes the ECS world mutably;
+            // `IngestOptions` is `Copy`, so this is the same value dispatch
+            // would hand it.
+            let options = world.options;
+            crate::ingest::projectiles::handle_shot_kills(
+                AvatarId::from(1u32),
+                vec![a_hit()],
+                GameClock(10.0),
+                world.world_mut(),
+                &options,
+            );
+
+            assert_eq!(world.world().resource::<HitHistoryLog>().0.len(), expected, "record_hit_history = {record}");
+        }
     }
 }

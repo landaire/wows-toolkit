@@ -11150,6 +11150,7 @@ dependencies = [
  "jiff",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tracing",
  "wows-battle-world",
  "wows-data-mgr",

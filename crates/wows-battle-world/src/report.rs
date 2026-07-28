@@ -88,6 +88,7 @@ pub struct BattleReport {
     ribbon_events: Vec<RibbonEvent>,
     presence: PresenceLog,
     hit_history: Vec<ResolvedShotHit>,
+    deaths: HashMap<EntityId, GameClock>,
     max_duration: u32,
     played_duration: Option<f32>,
     extra_duration: Option<f32>,
@@ -247,6 +248,26 @@ impl BattleReport {
         &self.hit_history
     }
 
+    /// When each vehicle died, keyed by victim entity id, from `KillLog`.
+    ///
+    /// The clock is the `ShipDestroyed` packet's own clock, not a duration
+    /// reconstructed from `DeathInfo::time_lived`, so it is directly comparable
+    /// to every other clock in this report.
+    ///
+    /// **Absence is not proof of survival.** The log only holds deaths this
+    /// replay actually observed, so a match whose recording stopped early (the
+    /// player left, or the packet stream is truncated) is missing every death
+    /// after that point. A consumer that reads absence as "survived" must first
+    /// establish that the recording ran to the end of the match;
+    /// [`Self::battle_result`] being `Some` is that evidence, since it is only
+    /// set once the match was observed to finish.
+    ///
+    /// Only the first death per victim is kept, in packet order, so a scenario
+    /// with respawns reports when the vehicle first died.
+    pub fn deaths_by_victim(&self) -> &HashMap<EntityId, GameClock> {
+        &self.deaths
+    }
+
     /// Maximum match duration from replay metadata (time limit), in seconds.
     pub fn max_duration(&self) -> u32 {
         self.max_duration
@@ -314,9 +335,14 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         // HashMap iteration (only differs when a victim id appears in multiple
         // ShipDestroyed events, e.g. operation respawns).
         let mut death_by_victim: HashMap<EntityId, DeathInfo> = HashMap::new();
+        // The clock beside it, kept because `DeathInfo` carries only a duration
+        // measured from the battle start constant, which is not comparable to
+        // the packet clocks every other log in this report is keyed by.
+        let mut death_clock_by_victim: HashMap<EntityId, GameClock> = HashMap::new();
         for kill in &self.world().resource::<KillLog>().0 {
             frags_by_killer.entry(kill.killer).or_default().push(DeathInfo::from(kill));
             death_by_victim.entry(kill.victim).or_insert_with(|| DeathInfo::from(kill));
+            death_clock_by_victim.entry(kill.victim).or_insert(kill.clock);
         }
 
         let parsed_battle_results = self
@@ -461,6 +487,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             ribbon_events,
             presence,
             hit_history,
+            deaths: death_clock_by_victim,
             max_duration,
             played_duration,
             extra_duration,
@@ -552,11 +579,9 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
 #[cfg(test)]
 mod tests {
     use bevy_ecs::world::World;
-    use wows_replays::analyzer::battle_controller::MetadataPlayer;
+    use wows_replays::analyzer::battle_controller::state::KillRecord;
     use wows_replays::analyzer::decoder::HitType;
-    use wows_replays::analyzer::decoder::PlayerStateData;
     use wows_replays::analyzer::decoder::ShotHit;
-    use wows_replays::types::Relation;
     use wows_replays::types::ShotId;
     use wows_replays::types::WorldPos;
     use wowsunpack::game_types::Ribbon;
@@ -566,27 +591,7 @@ mod tests {
     use crate::test_support::StubResources;
     use crate::test_support::fixture_param;
     use crate::test_support::minimal_meta;
-
-    // Minimal PlayerStateData built via its derived Deserialize impl: its
-    // fields are private to wows_replays, so this is the only way to
-    // construct one from outside that crate. `raw`/`raw_with_names` are
-    // `#[serde(skip_deserializing)]` and default to empty.
-    const SELF_PLAYER_JSON: &str = r#"{
-        "username": "self",
-        "clan": "",
-        "clan_id": 0,
-        "clan_color": 0,
-        "db_id": 1,
-        "realm": null,
-        "meta_ship_id": 1,
-        "entity_id": 3,
-        "team_id": 0,
-        "max_health": 50000,
-        "is_abuser": false,
-        "is_hidden": false,
-        "is_bot": false,
-        "human_properties": null
-    }"#;
+    use crate::test_support::self_player;
 
     /// Builds a `BattleReport` from a synthetic world: a self player resolved
     /// through the same `Player::from_arena_player` path production ingest
@@ -595,16 +600,11 @@ mod tests {
     /// fixture `Param` returned unconditionally.
     fn report_from_synthetic_world(seed: impl FnOnce(&mut World)) -> BattleReport {
         let meta = minimal_meta();
-        let param = fixture_param();
-        let resources = StubResources(param.clone());
+        let resources = StubResources(fixture_param());
         let mut world = BattleWorld::new(&meta, &resources, None);
 
-        let player_state: PlayerStateData =
-            serde_json::from_str(SELF_PLAYER_JSON).expect("fixture matches PlayerStateData's shape");
-        let metadata_player = MetadataPlayer::new(AccountId::from(1u32), "self".to_string(), Relation::new(0), param);
-        let player = Player::from_arena_player(&player_state, &metadata_player, &resources)
-            .expect("stub resources always resolve a vehicle");
-        world.world_mut().resource_mut::<PlayerIndex>().0.insert(player_state.entity_id(), Rc::new(player));
+        let (entity_id, player) = self_player(&resources);
+        world.world_mut().resource_mut::<PlayerIndex>().0.insert(entity_id, Rc::new(player));
 
         seed(world.world_mut());
 
@@ -674,5 +674,33 @@ mod tests {
         assert!(report.presence().continuously_observed(victim, GameClock(0.0), GameClock(20.0)));
         assert_eq!(report.hit_history().len(), 1);
         assert_eq!(report.hit_history()[0].victim_entity_id, victim);
+    }
+
+    /// The fire analysis excludes hits landing at or after a victim's death, so
+    /// it needs the death clock on the same scale as every other log. Only the
+    /// first record per victim counts, so a scenario respawn cannot move the
+    /// clock later and re-admit post-death hits.
+    #[test]
+    fn deaths_are_reported_by_victim_at_the_first_kill_clock() {
+        let victim = EntityId::from(9u32);
+        let killer = EntityId::from(3u32);
+        let report = report_from_synthetic_world(|world| {
+            let log = &mut world.resource_mut::<KillLog>().0;
+            log.push(KillRecord {
+                clock: GameClock(120.0),
+                killer,
+                victim,
+                cause: Recognized::Unknown("0".to_string()),
+            });
+            log.push(KillRecord {
+                clock: GameClock(300.0),
+                killer,
+                victim,
+                cause: Recognized::Unknown("0".to_string()),
+            });
+        });
+
+        assert_eq!(report.deaths_by_victim().get(&victim), Some(&GameClock(120.0)));
+        assert_eq!(report.deaths_by_victim().get(&EntityId::from(11u32)), None);
     }
 }

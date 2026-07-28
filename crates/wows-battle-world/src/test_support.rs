@@ -3,8 +3,13 @@
 
 use wows_replays::Rc;
 use wows_replays::ReplayMeta;
+use wows_replays::analyzer::battle_controller::MetadataPlayer;
+use wows_replays::analyzer::battle_controller::Player;
+use wows_replays::analyzer::decoder::PlayerStateData;
 use wows_replays::types::AccountId;
+use wows_replays::types::EntityId;
 use wows_replays::types::GameParamId;
+use wows_replays::types::Relation;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
 use wowsunpack::game_params::types::Achievement;
@@ -52,6 +57,39 @@ pub(crate) fn fixture_param() -> Rc<Param> {
             ))
             .build(),
     )
+}
+
+// Minimal PlayerStateData built via its derived Deserialize impl: its fields are
+// private to wows_replays, so this is the only way to construct one from
+// outside that crate. `raw`/`raw_with_names` are `#[serde(skip_deserializing)]`
+// and default to empty.
+const SELF_PLAYER_JSON: &str = r#"{
+    "username": "self",
+    "clan": "",
+    "clan_id": 0,
+    "clan_color": 0,
+    "db_id": 1,
+    "realm": null,
+    "meta_ship_id": 1,
+    "entity_id": 3,
+    "team_id": 0,
+    "max_health": 50000,
+    "is_abuser": false,
+    "is_hidden": false,
+    "is_bot": false,
+    "human_properties": null
+}"#;
+
+/// The recording player, resolved through the same `Player::from_arena_player`
+/// path production ingest uses, alongside their vehicle entity id.
+pub(crate) fn self_player(resources: &StubResources) -> (EntityId, Player) {
+    let state: PlayerStateData =
+        serde_json::from_str(SELF_PLAYER_JSON).expect("fixture matches PlayerStateData's shape");
+    let metadata =
+        MetadataPlayer::new(AccountId::from(1u32), "self".to_string(), Relation::new(0), Rc::clone(&resources.0));
+    let player =
+        Player::from_arena_player(&state, &metadata, resources).expect("stub resources always resolve a vehicle");
+    (state.entity_id(), player)
 }
 
 pub(crate) fn minimal_meta() -> ReplayMeta {

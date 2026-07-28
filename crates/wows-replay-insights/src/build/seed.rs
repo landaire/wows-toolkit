@@ -22,6 +22,13 @@ pub fn build_inventory_for_player<P: GameParamProvider>(
     let Some(build) = ResolvedBuild::from_player(player, gp, version) else {
         return Vec::new();
     };
+    inventory_from_build(&build)
+}
+
+/// One inventory slot per resolved consumable slot, with the dynamic state
+/// (charges used, active window) zeroed: a build says what the ship carries,
+/// not what it has spent.
+pub fn inventory_from_build(build: &ResolvedBuild) -> Vec<ConsumableInventory> {
     build
         .slots
         .iter()
@@ -127,23 +134,7 @@ pub fn build_inventory_from_facts<P: GameParamProvider>(
     ) else {
         return Vec::new();
     };
-    build
-        .slots
-        .iter()
-        .map(|slot| ConsumableInventory {
-            slot_index: slot.slot_index,
-            consumable_type_raw: slot.consumable_type_raw.clone(),
-            consumable: slot.consumable_type.clone(),
-            icon_key: slot.icon_key.clone(),
-            total_charges: slot.total_charges,
-            charges_used: 0,
-            work_time: slot.work_time.as_secs_f32(),
-            reload_time: slot.reload_time.as_secs_f32(),
-            regen_hp_speed: slot.regen_hp_speed,
-            regen_hp_speed_units: slot.regen_hp_speed_units,
-            active_until: None,
-        })
-        .collect()
+    inventory_from_build(&build)
 }
 
 /// Helper kept for callers that want species-specific facts lookups (e.g.
