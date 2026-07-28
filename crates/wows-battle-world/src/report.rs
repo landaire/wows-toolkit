@@ -208,7 +208,10 @@ impl BattleReport {
     }
 
     /// Self-player ribbon increments with clocks. Self-player only; see
-    /// `RibbonLog`'s doc comment for the update shapes that produce no event.
+    /// `RibbonLog`'s doc comment for the two documented gaps: some update
+    /// shapes produce no event at all, and a falling total silently rebases
+    /// a slot's baseline downward, so a later rise measured from that lower
+    /// baseline can under-report the true increment.
     pub fn ribbon_events(&self) -> &[RibbonEvent] {
         &self.ribbon_events
     }
@@ -537,9 +540,13 @@ mod tests {
     use bevy_ecs::world::World;
     use wows_replays::ReplayMeta;
     use wows_replays::analyzer::battle_controller::MetadataPlayer;
+    use wows_replays::analyzer::decoder::HitType;
     use wows_replays::analyzer::decoder::PlayerStateData;
+    use wows_replays::analyzer::decoder::ShotHit;
     use wows_replays::types::GameParamId;
     use wows_replays::types::Relation;
+    use wows_replays::types::ShotId;
+    use wows_replays::types::WorldPos;
     use wowsunpack::game_params::types::Achievement;
     use wowsunpack::game_params::types::Param;
     use wowsunpack::game_params::types::ParamData;
@@ -547,6 +554,7 @@ mod tests {
     use wowsunpack::rpc::entitydefs::EntitySpec;
 
     use super::*;
+    use crate::resources::PresenceWindow;
 
     /// Stands in for a real `ResourceLoader`: always resolves to the same
     /// fixture `Param` regardless of id, since the test never looks up a real
@@ -664,13 +672,45 @@ mod tests {
         world.into_report()
     }
 
+    /// A fixture `ResolvedShotHit` with all optional/unmatched fields left
+    /// empty; only `clock` and the two entity ids are asserted on.
+    fn fixture_shot_hit() -> ResolvedShotHit {
+        let victim = EntityId::from(3u32);
+        ResolvedShotHit {
+            clock: GameClock(12.0),
+            hit: ShotHit {
+                owner_id: victim,
+                hit_type: HitType {
+                    collision: Recognized::Unknown("0".to_string()),
+                    shell_hit: Recognized::Unknown("0".to_string()),
+                    raw: 0,
+                },
+                shot_id: ShotId::from(1u32),
+                position: WorldPos::new(0.0, 0.0, 0.0),
+                terminal_ballistics: None,
+            },
+            victim_entity_id: victim,
+            salvo: None,
+            fired_at: None,
+            victim_position: WorldPos::new(0.0, 0.0, 0.0),
+            victim_yaw: 0.0,
+            victim_pitch: 0.0,
+            victim_roll: 0.0,
+        }
+    }
+
     /// The report is what the analysis sees. A log that reaches finish() but not
-    /// the report is invisible to every consumer.
+    /// the report is invisible to every consumer. Covers all four logs this
+    /// task carries: burn state and ribbons via their `Vec` resources,
+    /// presence via its window map, and hit history via its own log, so a
+    /// regression dropping any one `mem::take` line or struct-literal field
+    /// fails a test rather than passing silently.
     #[test]
     fn report_carries_the_fire_analysis_logs() {
+        let victim = EntityId::from(3u32);
         let report = report_from_synthetic_world(|world| {
             world.resource_mut::<BurnStateLog>().0.push(BurnStateChange {
-                victim: EntityId::from(3u32),
+                victim,
                 clock: GameClock(12.0),
                 previous: 0,
                 current: 1,
@@ -680,10 +720,20 @@ mod tests {
                 ribbon: Ribbon::SetFire,
                 count: 1,
             });
+            world
+                .resource_mut::<PresenceLog>()
+                .0
+                .entry(victim)
+                .or_default()
+                .push(PresenceWindow { entered: GameClock(0.0), left: None });
+            world.resource_mut::<HitHistoryLog>().0.push(fixture_shot_hit());
         });
 
         assert_eq!(report.burn_state_changes().len(), 1);
         assert_eq!(report.ribbon_events().len(), 1);
-        assert_eq!(report.burn_state_changes()[0].victim, EntityId::from(3u32));
+        assert_eq!(report.burn_state_changes()[0].victim, victim);
+        assert!(report.presence().continuously_observed(victim, GameClock(0.0), GameClock(20.0)));
+        assert_eq!(report.hit_history().len(), 1);
+        assert_eq!(report.hit_history()[0].victim_entity_id, victim);
     }
 }
