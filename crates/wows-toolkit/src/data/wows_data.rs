@@ -69,6 +69,13 @@ impl WoWsDataMap {
         self.game_data_cache_dir = dir;
     }
 
+    /// Custom game data cache directory as configured in settings. Empty means
+    /// the default app data location; resolve it with
+    /// [`crate::task::replays::game_data_dump_base_with_override`].
+    pub fn game_data_cache_dir(&self) -> &str {
+        &self.game_data_cache_dir
+    }
+
     pub fn set_network_job_tx(&mut self, tx: mpsc::Sender<NetworkJob>) {
         self.network_job_tx = Some(tx);
     }

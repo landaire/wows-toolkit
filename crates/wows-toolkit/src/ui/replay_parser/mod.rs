@@ -438,6 +438,144 @@ fn resolve_battle_results(results: serde_json::Value, constants: &serde_json::Va
     wows_replay_insights::battle_report::resolve_battle_results(results, constants)
 }
 
+/// Why fire-section geometry could not be read from the game install.
+#[derive(Debug, thiserror::Error)]
+enum FireSectionSourceError {
+    #[error("could not resolve assets.bin's path in the game vfs: {0}")]
+    Path(String),
+    #[error("could not open assets.bin: {0}")]
+    Open(String),
+    #[error("could not read assets.bin: {0}")]
+    Read(#[from] std::io::Error),
+}
+
+/// Read `content/assets.bin` from the resolved build's game data.
+fn open_assets_bin(wows_data: &crate::data::wows_data::WorldOfWarshipsData) -> Result<Vec<u8>, FireSectionSourceError> {
+    let assets_path =
+        wows_data.vfs.join("content/assets.bin").map_err(|e| FireSectionSourceError::Path(e.to_string()))?;
+    let mut file = assets_path.open_file().map_err(|e| FireSectionSourceError::Open(e.to_string()))?;
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut bytes)?;
+    Ok(bytes)
+}
+
+/// Resolve fire-section geometry for every hull among `victims`, backed by a
+/// per-build on-disk cache so `assets.bin` is parsed once per hull per game
+/// build rather than once per replay.
+///
+/// A hull that fails to resolve, or an unreadable/unparseable `assets.bin`,
+/// simply has no entry in the returned map: `analyze` treats a missing
+/// geometry as `NoSectionGeometry` for that victim rather than the whole
+/// statistic failing. `cache_dir` being `None` (the cache location could not
+/// be resolved) is the same story: resolution still runs, it just is not
+/// persisted.
+fn resolve_fire_section_geometry(
+    wows_data: &crate::data::wows_data::WorldOfWarshipsData,
+    cache_dir: Option<&std::path::Path>,
+    build_number: u32,
+    victims: &HashMap<wows_replays::types::EntityId, wows_replay_insights::fire_chance::analysis::VictimContext>,
+) -> HashMap<String, wowsunpack::models::fire_nodes::FireSectionGeometry> {
+    let mut expected_nodes: HashMap<&str, usize> = HashMap::new();
+    for victim in victims.values() {
+        expected_nodes.entry(victim.hull_model_path.as_str()).or_insert_with(|| victim.node_probability.len());
+    }
+
+    let mut cache =
+        cache_dir.map(|dir| wowsunpack::models::fire_nodes_cache::FireSectionCache::load(dir, build_number));
+    let mut resolved = HashMap::new();
+    let mut misses = Vec::new();
+    for (&path, &nodes) in &expected_nodes {
+        match cache.as_ref().and_then(|cache| cache.get(path, nodes)) {
+            Some(geom) => {
+                resolved.insert(path.to_string(), geom);
+            }
+            None => misses.push((path, nodes)),
+        }
+    }
+
+    if misses.is_empty() {
+        return resolved;
+    }
+
+    match open_assets_bin(wows_data) {
+        Ok(bytes) => match wowsunpack::models::assets_bin::parse_assets_bin(&bytes) {
+            Ok(db) => {
+                let self_id_index = db.build_self_id_index();
+                for (path, nodes) in misses {
+                    match wowsunpack::models::fire_nodes::resolve_fire_sections(&db, &self_id_index, path, nodes) {
+                        Ok(geom) => {
+                            if let Some(cache) = cache.as_mut()
+                                && let Err(error) = cache.insert(path, nodes, &geom)
+                            {
+                                tracing::warn!(
+                                    hull = path,
+                                    %error,
+                                    "freshly resolved fire-section geometry disagreed with the cache"
+                                );
+                            }
+                            resolved.insert(path.to_string(), geom);
+                        }
+                        Err(error) => {
+                            tracing::debug!(hull = path, %error, "fire-section geometry unresolved");
+                        }
+                    }
+                }
+            }
+            Err(error) => tracing::warn!(%error, "could not parse assets.bin for fire-section geometry"),
+        },
+        Err(error) => tracing::debug!(%error, "assets.bin unavailable for fire-section geometry"),
+    }
+
+    if let (Some(cache), Some(dir)) = (&cache, cache_dir)
+        && let Err(error) = cache.save(dir)
+    {
+        tracing::warn!(%error, "could not save fire-section cache");
+    }
+
+    resolved
+}
+
+/// Compute effective fire chance for the recording player of `report`.
+///
+/// `None` whenever the underlying facts do not resolve (no self vehicle, no
+/// resolvable build, a version predating the modifiers the formula needs) or
+/// there were no eligible hits to measure. Never panics: an unreadable
+/// `assets.bin` degrades to a geometry lookup that always misses, which
+/// `analyze` reports as no result rather than an approximation.
+fn compute_fire_chance(
+    report: &BattleReport,
+    params: &GameMetadataProvider,
+    wows_data: &crate::data::wows_data::WorldOfWarshipsData,
+    deps: &crate::data::wows_data::ReplayDependencies,
+) -> Option<wows_replay_insights::fire_chance::analysis::EffectiveFireChance> {
+    let resolved = match wows_replay_insights::fire_chance::resolve::resolve_fire_chance_input(report, params) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            tracing::debug!(%error, "fire chance input did not resolve");
+            return None;
+        }
+    };
+
+    let build_number = wows_data.build_number;
+    let cache_dir = crate::task::replays::game_data_dump_base_with_override(deps.wows_data_map.game_data_cache_dir())
+        .map(|base| base.join("fire_sections").join(build_number.to_string()));
+
+    let geometry_map = resolve_fire_section_geometry(wows_data, cache_dir.as_deref(), build_number, resolved.victims());
+    let geometry = |path: &str| geometry_map.get(path).cloned();
+
+    let input = resolved.input(report, params, &geometry);
+    let result = wows_replay_insights::fire_chance::analysis::analyze(&input);
+    if let Some(result) = &result {
+        tracing::debug!(
+            eligible_hits = result.eligible_hits,
+            fires = result.fires,
+            unattributed_fires = result.unattributed_fires,
+            "computed effective fire chance"
+        );
+    }
+    result
+}
+
 #[allow(non_camel_case_types)]
 pub struct UiReport {
     match_timestamp: Timestamp,
@@ -495,6 +633,11 @@ impl UiReport {
         let players = report.players().to_vec();
 
         let self_player = players.iter().find(|player| player.relation().is_self()).cloned();
+
+        // Computed once for the recording player and attached only to that
+        // player's report below: `analyze` already refuses any other attacker,
+        // so per-player computation would be wasted work.
+        let self_fire_chance = compute_fire_chance(report, metadata_provider, &wows_data_inner, deps);
 
         let resolved_results: Option<serde_json::Value> = report
             .battle_results()
@@ -847,6 +990,7 @@ impl UiReport {
                     heal_count: np.heal_count,
                     personal_rating: None,
                     has_vehicle_entity: vehicle.is_some(),
+                    fire_chance: np.is_self.then(|| self_fire_chance.clone()).flatten(),
                 }
             })
             .collect();
@@ -2660,6 +2804,10 @@ impl Replay {
             // Single-replay fast path — no merger involved.
             let mut world =
                 BattleWorld::new(&self.replay_file.meta, self.resource_loader.as_ref(), self.game_constants.as_deref());
+            // Fire-chance analysis divides by the whole-match hit history, which is
+            // otherwise not recorded to save memory for renderers that only need
+            // the current frame's hits.
+            world.set_record_hit_history(true);
             let mut p =
                 wows_replays::packet2::Parser::with_version(self.resource_loader.entity_specs(), replay_version);
             let mut remaining = self.replay_file.packet_data.as_slice();
@@ -2691,6 +2839,9 @@ impl Replay {
             &self.alt_replays,
         )
         .map_err(|e| rootcause::report!("{e}"))?;
+        // See the single-replay path above: fire-chance analysis needs the
+        // whole-match hit history, which is off by default.
+        session.world_mut().set_record_hit_history(true);
         while session.step().map_err(|e| rootcause::report!("{e}"))?.is_some() {}
         session.finish();
         Ok(session.into_world().into_report())

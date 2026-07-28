@@ -180,6 +180,12 @@ pub struct PlayerReport {
     pub heal_count: Option<u32>,
     pub personal_rating: Option<crate::util::personal_rating::PersonalRatingResult>,
     pub has_vehicle_entity: bool,
+    /// Effective fire chance for the recording player. `None` for every other
+    /// player: attribution relies on the self-player SetFire ribbon, which the
+    /// server only sends for the recording perspective. Also `None` when the
+    /// analysis could not resolve (missing build data, unreadable assets.bin,
+    /// or a zero-sample result).
+    pub fire_chance: Option<wows_replay_insights::fire_chance::analysis::EffectiveFireChance>,
 }
 
 #[allow(dead_code)]
@@ -201,6 +207,7 @@ impl PlayerReport {
         self.floods = Some(0);
         self.citadels = Some(0);
         self.crits = Some(0);
+        self.fire_chance = None;
     }
 
     pub fn player(&self) -> &Player {
@@ -349,6 +356,10 @@ impl PlayerReport {
 
     pub fn crits(&self) -> Option<u64> {
         self.crits
+    }
+
+    pub fn fire_chance(&self) -> Option<&wows_replay_insights::fire_chance::analysis::EffectiveFireChance> {
+        self.fire_chance.as_ref()
     }
 
     pub fn distance_traveled(&self) -> Option<f64> {
