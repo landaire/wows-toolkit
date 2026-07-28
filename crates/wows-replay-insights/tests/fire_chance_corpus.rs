@@ -55,6 +55,7 @@ use wows_battle_world::report::BattleReport;
 use wows_replay_insights::battle_report::resolve_battle_results;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::fire_chance::analysis::ExclusionReason;
+use wows_replay_insights::fire_chance::analysis::SectionEvidence;
 use wows_replay_insights::fire_chance::analysis::analyze;
 use wows_replay_insights::fire_chance::resolve::ResolutionDiagnostics;
 use wows_replay_insights::fire_chance::resolve::resolve_fire_chance_input;
@@ -123,8 +124,11 @@ struct Measurement {
     /// constants table is missing, so the external check simply has nothing to
     /// compare against.
     server_fires_by_ship: Option<BTreeMap<String, u64>>,
-    /// `(predicted, actual)` per attributed fire.
-    section_predictions: Vec<(u8, u8)>,
+    /// `(predicted, actual, independent)` per attributed fire. `independent` is
+    /// false when the matched transition lit several sections at once, in which
+    /// case `actual` was chosen as the risen bit nearest the prediction and the
+    /// pair cannot be scored as evidence for the positional model.
+    section_predictions: Vec<(u8, u8, bool)>,
     diagnostics: ResolutionDiagnostics,
     /// Presence windows still open at the end of the parse, against the total.
     /// A window left open is `PresenceLog`'s one remaining route to a false
@@ -139,6 +143,8 @@ struct Corpus {
     skips: BTreeMap<SkipReason, u32>,
     skip_details: Vec<String>,
     replays_seen: u32,
+    /// Measured replays whose packet stream stopped parsing before the end.
+    truncated_parses: u32,
     /// Hull model paths that resolved to geometry, against those that did not.
     hulls_placed: u32,
     hulls_unplaced: u32,
@@ -228,7 +234,20 @@ fn replay_paths(dir: &Path) -> Vec<PathBuf> {
     paths
 }
 
-fn build_report(replay: &ReplayFile, provider: &GameMetadataProvider, constants: &GameConstants) -> BattleReport {
+/// A report, plus whether the packet stream ran out before the end.
+///
+/// A replay whose packets stop parsing part-way is still measured rather than
+/// skipped, because a truncated stream is not a wrong one: it just ends early.
+/// The direction is safe (with no `BattleEnd` every victim's fate is `Unknown`
+/// and every hit against them is refused, so the replay contributes near-zero
+/// samples rather than corrupt ones) but it is exactly the kind of silent
+/// population change the skip tally exists to surface, so it is counted too.
+struct ParsedReport {
+    report: BattleReport,
+    truncated: bool,
+}
+
+fn build_report(replay: &ReplayFile, provider: &GameMetadataProvider, constants: &GameConstants) -> ParsedReport {
     let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
     let mut world = BattleWorld::new(&replay.meta, provider, Some(constants));
     // Without this the hit history is empty and every rate is zero-sample.
@@ -236,14 +255,18 @@ fn build_report(replay: &ReplayFile, provider: &GameMetadataProvider, constants:
 
     let mut parser = wows_replays::packet2::Parser::with_version(provider.entity_specs(), version);
     let mut remaining = replay.packet_data.as_slice();
+    let mut truncated = false;
     while !remaining.is_empty() {
         match parser.parse_packet(&mut remaining) {
             Ok(packet) => world.process(&packet),
-            Err(_) => break,
+            Err(_) => {
+                truncated = true;
+                break;
+            }
         }
     }
     world.finish();
-    world.into_report()
+    ParsedReport { report: world.into_report(), truncated }
 }
 
 /// Server-recorded fires the recording player started, per victim ship index.
@@ -267,6 +290,9 @@ fn server_fires_by_ship(report: &BattleReport, constants: &serde_json::Value) ->
     let mut fires: BTreeMap<String, u64> = BTreeMap::new();
     for (victim_db_id, victim) in &interactions {
         let Some(ship) = ship_by_db_id.get(victim_db_id) else { continue };
+        // A victim the recording player interacted with but never set alight
+        // carries no `fires` key at all, which is a real zero rather than a
+        // missing measurement.
         let count = victim.get("fires").and_then(|v| v.as_u64()).unwrap_or(0);
         *fires.entry(ship.clone()).or_insert(0) += count;
     }
@@ -281,16 +307,21 @@ fn measure(
     geometry: &Geometry,
     corpus: &mut Corpus,
 ) -> Option<Measurement> {
-    let report =
+    let parsed =
         match std::panic::catch_unwind(AssertUnwindSafe(|| build_report(replay, &data.provider, &data.game_constants)))
         {
-            Ok(report) => report,
+            Ok(parsed) => parsed,
             Err(_) => {
                 *corpus.skips.entry(SkipReason::ReportUnbuildable).or_insert(0) += 1;
                 corpus.skip_details.push(format!("{name}: building the report panicked"));
                 return None;
             }
         };
+    let ParsedReport { report, truncated } = parsed;
+    if truncated {
+        corpus.truncated_parses += 1;
+        corpus.skip_details.push(format!("{name}: packet stream stopped parsing early, measured anyway"));
+    }
 
     let resolution = match resolve_fire_chance_input(&report, &data.provider) {
         Ok(resolution) => resolution,
@@ -360,8 +391,11 @@ fn measure(
     })
 }
 
-fn section_pairs(out: &EffectiveFireChance) -> Vec<(u8, u8)> {
-    out.section_predictions.iter().map(|pair| (pair.predicted.get(), pair.actual.get())).collect()
+fn section_pairs(out: &EffectiveFireChance) -> Vec<(u8, u8, bool)> {
+    out.section_predictions
+        .iter()
+        .map(|pair| (pair.predicted.get(), pair.actual.get(), pair.evidence == SectionEvidence::OneSectionRose))
+        .collect()
 }
 
 fn build_corpus() -> Corpus {
@@ -370,6 +404,7 @@ fn build_corpus() -> Corpus {
         skips: BTreeMap::new(),
         skip_details: Vec::new(),
         replays_seen: 0,
+        truncated_parses: 0,
         hulls_placed: 0,
         hulls_unplaced: 0,
     };
@@ -421,9 +456,15 @@ fn build_corpus() -> Corpus {
     corpus
 }
 
-/// Printed once by whichever test runs first, so a failure in any of the three
-/// carries the population it was measured over.
+/// Printed once per process, by whichever test reaches it first, so a failure
+/// in any of the three carries the population it was measured over even when
+/// that test is run on its own.
 fn print_corpus_summary(corpus: &Corpus) {
+    static PRINTED: std::sync::Once = std::sync::Once::new();
+    PRINTED.call_once(|| print_corpus_summary_once(corpus));
+}
+
+fn print_corpus_summary_once(corpus: &Corpus) {
     println!("corpus: {} replays seen, {} measured", corpus.replays_seen, corpus.measurements.len());
     for (reason, count) in &corpus.skips {
         println!("  skipped {count} for {reason:?}");
@@ -431,6 +472,11 @@ fn print_corpus_summary(corpus: &Corpus) {
     for detail in &corpus.skip_details {
         println!("    {detail}");
     }
+    println!(
+        "measured replays whose packet stream stopped early: {} of {}",
+        corpus.truncated_parses,
+        corpus.measurements.len()
+    );
     println!("hull geometry: {} placed, {} unplaced", corpus.hulls_placed, corpus.hulls_unplaced);
 
     let mut diagnostics = ResolutionDiagnostics::default();
@@ -501,6 +547,9 @@ fn attributed_fires_never_exceed_the_battle_results() {
             continue;
         };
         for (ship, ours) in &measurement.fires_by_ship {
+            // A ship absent from the server's interactions is a ship the
+            // recording player set no fires on, so the bound to check our
+            // attribution against is zero, not "unknown".
             let recorded = server.get(ship).copied().unwrap_or(0);
             compared += 1;
             assert!(
@@ -529,13 +578,20 @@ fn attributed_fires_never_exceed_the_battle_results() {
 /// module doc). Gating on the rate would be gating partly on the harness's own
 /// data. Worth revisiting against a full-data corpus.
 ///
-/// What is asserted is the accounting, which a real defect does break: a
-/// candidate dropped without being tallied, a ribbon consumed twice, or a
-/// `count > 1` ribbon credited once would all show up here.
+/// What is asserted is the accounting. `attribute` walks the same ribbon slice
+/// emitting one outcome per ribbon-count unit, so the equality holds by loop
+/// construction for most ways it could go wrong: a dropped candidate only moves
+/// a fire from attributed to unattributed and leaves the sum alone, and a
+/// double-consumed ribbon is not expressible, since what gets consumed is a
+/// candidate. Two things it does catch, both of which have bitten this kind of
+/// code before: a `count > 1` ribbon credited once instead of `count` times,
+/// and any future divergence between the ribbon set `analyze` reads and the set
+/// the report carries.
 #[test]
 #[ignore = "requires replays and a game install"]
 fn ribbon_accounting_reconciles() {
     let corpus = corpus();
+    print_corpus_summary(corpus);
     let (mut attributed, mut unattributed, mut observed) = (0u32, 0u32, 0u32);
     let mut drivers: BTreeMap<ExclusionReason, u32> = BTreeMap::new();
 
@@ -583,44 +639,88 @@ fn ribbon_accounting_reconciles() {
 }
 
 /// The load-bearing measurement. If nearest-node is what the server does, the
-/// section we predict is the one that lights. Chance for a four-section ship is
-/// 0.25, so anything near that means the model is wrong rather than merely
-/// imprecise.
+/// section we predict is the one that lights.
+///
+/// The gate is on the **single-section** rate. When one transition lights
+/// several sections at once, `analyze` reports the risen bit nearest the
+/// prediction as the actual one, so predicted and actual are not independent
+/// there and scoring those pairs biases the rate upward. A battleship salvo
+/// setting two fires inside one server tick is ordinary, so that share is not
+/// negligible and is printed rather than assumed away. The all-pairs rate is
+/// printed beside it: the gap between the two is the size of the bias.
+///
+/// Chance is not 0.25 either. Sections are not lit uniformly, so the number to
+/// beat is what a predictor reproducing the observed marginal distribution
+/// would score, which is printed too.
 #[test]
 #[ignore = "requires replays and a game install"]
 fn predicted_sections_agree_with_the_server() {
     let corpus = corpus();
+    print_corpus_summary(corpus);
     let (mut agreed, mut compared) = (0u32, 0u32);
-    // confusion[predicted][actual], so a constant offset shows as a shifted
-    // diagonal and a non-positional rule as a flat block.
+    let (mut agreed_independent, mut independent) = (0u32, 0u32);
+    // confusion[predicted][actual] over the independent pairs only, so a
+    // constant offset shows as a shifted diagonal and a non-positional rule as
+    // a flat block, without the nearest-of-several pairs pulling it diagonal.
     let mut confusion = [[0u32; BurnNodeIndex::MAX_NODES as usize]; BurnNodeIndex::MAX_NODES as usize];
+    let mut actual_marginal = [0u32; BurnNodeIndex::MAX_NODES as usize];
 
     for measurement in &corpus.measurements {
         if measurement.section_predictions.is_empty() {
             continue;
         }
         let replay_agreed =
-            measurement.section_predictions.iter().filter(|(predicted, actual)| predicted == actual).count();
+            measurement.section_predictions.iter().filter(|(predicted, actual, _)| predicted == actual).count();
         println!(
             "{}: section agreement {:.3} over {} fires",
             measurement.name,
             replay_agreed as f64 / measurement.section_predictions.len() as f64,
             measurement.section_predictions.len()
         );
-        for (predicted, actual) in &measurement.section_predictions {
-            confusion[usize::from(*predicted)][usize::from(*actual)] += 1;
+        for (predicted, actual, is_independent) in &measurement.section_predictions {
             compared += 1;
             if predicted == actual {
                 agreed += 1;
+            }
+            if !is_independent {
+                continue;
+            }
+            independent += 1;
+            confusion[usize::from(*predicted)][usize::from(*actual)] += 1;
+            actual_marginal[usize::from(*actual)] += 1;
+            if predicted == actual {
+                agreed_independent += 1;
             }
         }
     }
 
     assert!(compared > 50, "only {compared} attributed fires; corpus is too small to conclude");
-    let rate = f64::from(agreed) / f64::from(compared);
-    println!("overall section agreement {rate:.3} over {compared} fires");
+    println!("all pairs: agreement {:.3} over {compared} fires", f64::from(agreed) / f64::from(compared));
+    println!(
+        "of those, {independent} lit exactly one section and {} lit several; only the first kind is \
+independent evidence, since the second picks the actual section nearest the prediction",
+        compared - independent
+    );
+
+    assert!(
+        independent > 50,
+        "only {independent} fires lit exactly one section; not enough independent evidence to conclude"
+    );
+    let rate = f64::from(agreed_independent) / f64::from(independent);
+    // A predictor that knew the marginal distribution and nothing about
+    // position would score this. It is the bar the positional model has to
+    // clear, and it is well above the 0.25 a uniform four-section guess implies.
+    let marginal_chance: f64 = actual_marginal
+        .iter()
+        .map(|count| {
+            let share = f64::from(*count) / f64::from(independent);
+            share * share
+        })
+        .sum();
+    println!("single-section agreement {rate:.3} over {independent} fires (marginal chance {marginal_chance:.3})");
     for (predicted, row) in confusion.iter().enumerate() {
         println!("  predicted {predicted}: {row:?}");
     }
+
     assert!(rate > 0.6, "section agreement {rate:.3} is near chance; the positional model is wrong");
 }

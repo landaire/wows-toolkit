@@ -44,10 +44,25 @@ pub struct Meters(f32);
 /// carries `distShip = 133.3333`, and its in-game ship-detection range is
 /// 4.0 km; Black's radar carries `distShip = 250.0` against a published 7.5 km.
 ///
-/// **This is not the space replay packets are in.** Positions, hit points and
-/// zone radii off the wire are [`WorldDistance`], which measures 15 m per unit,
-/// so reading a packet value as a `BigWorldDistance` doubles it. The two are
-/// separated by measurement, not by naming: see [`WorldDistance`].
+/// **Replay packet positions are not in this space.** Entity positions and hit
+/// points off the wire measure 15 m per unit ([`WorldDistance`]). The two are
+/// separated by measurement, not by naming.
+///
+/// **Unreconciled:** four live call sites type packet-borne *radii* as this, or
+/// convert them at 30, and nothing here establishes which is right. Either they
+/// are 2x out, which would mean the minimap has been drawing meters-derived
+/// rings at half size, or `WorldDistance`'s 15 is. The hull half-beam
+/// measurement behind `WorldDistance` is the tighter of the two and needs no
+/// GameParams value, so the call sites are the likelier suspects, but nobody
+/// has checked whether a zone radius travels in the same units as a position:
+///
+/// - `wows-battle-world/src/ingest/entities.rs` (smoke radius from `EntityCreate`)
+/// - `wows-replays/src/analyzer/decoder/decode.rs` (`WardAdded` radius)
+/// - `wows-toolkit/src/replay/minimap_view/tactics.rs` (`space_size * 30.0`)
+/// - `minimap-renderer/src/renderer.rs` (`m / 30.0 / space_size`)
+///
+/// Until someone measures a drawn radius against a known in-game one, treat a
+/// packet radius as unresolved rather than assuming either constant.
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]

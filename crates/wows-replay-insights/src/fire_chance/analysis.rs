@@ -222,11 +222,28 @@ pub struct EffectiveFireChance {
     pub formula: Vec<FormulaStep>,
 }
 
+/// How `actual` was determined for one attributed fire.
+///
+/// This is what says whether the pair is usable as evidence. A rate computed
+/// over pairs where several sections rose at once is biased toward agreement,
+/// because `actual` was chosen with the prediction in hand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SectionEvidence {
+    /// Exactly one section rose in the matched transition, so `actual` is that
+    /// section and nothing about it depends on what was predicted.
+    OneSectionRose,
+    /// Several sections rose in the same transition and `actual` is whichever
+    /// of them sits nearest the prediction. Predicted and actual are not
+    /// independent here.
+    NearestOfSeveral,
+}
+
 /// One attributed fire's predicted section against the one the server lit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SectionPrediction {
     pub predicted: BurnNodeIndex,
     pub actual: BurnNodeIndex,
+    pub evidence: SectionEvidence,
 }
 
 impl EffectiveFireChance {
@@ -238,6 +255,12 @@ impl EffectiveFireChance {
 
     /// Fraction of attributed fires whose predicted section is the bit the
     /// server lit. `None` when no fires were attributed.
+    ///
+    /// Taken over every pair, including the ones whose `actual` was chosen as
+    /// the risen bit nearest the prediction. Those are not independent of the
+    /// prediction, so a caller measuring how well the positional model works
+    /// should read [`SectionPrediction::evidence`] and compute the rate over
+    /// [`SectionEvidence::OneSectionRose`] alone.
     pub fn section_agreement(&self) -> Option<f32> {
         if self.section_predictions.is_empty() {
             return None;
@@ -699,6 +722,11 @@ fn attribute(input: &FireChanceInput<'_>, candidates: &[&Candidate<'_>]) -> Attr
             predictions.push(SectionPrediction {
                 predicted: candidate.section,
                 actual: nearest_risen(change, candidate.section),
+                evidence: if change.newly_lit().count() == 1 {
+                    SectionEvidence::OneSectionRose
+                } else {
+                    SectionEvidence::NearestOfSeveral
+                },
             });
         }
     }
@@ -733,7 +761,8 @@ fn lit_change<'a>(
 
 /// The bit that rose nearest the prediction. A single change can light several
 /// sections; the pair is recorded either way so a corpus confusion matrix stays
-/// complete.
+/// complete, and [`SectionEvidence`] marks which case it was so a consumer can
+/// tell the independent pairs from the rest.
 fn nearest_risen(change: &BurnStateChange, predicted: BurnNodeIndex) -> BurnNodeIndex {
     // `lit_change` only returns changes with at least one risen bit, so the
     // fallback is unreachable; it reads the prediction back rather than
@@ -971,6 +1000,7 @@ mod tests {
         uncomputable_node_probability: Option<u8>,
         second_main_hit_section: Option<u8>,
         server_lit_section: u8,
+        second_server_lit_section: Option<u8>,
         ribbons: bool,
         stray_ribbon: Option<GameClock>,
         burn_mask_before: u16,
@@ -1001,6 +1031,7 @@ mod tests {
             uncomputable_node_probability: None,
             second_main_hit_section: None,
             server_lit_section: 0,
+            second_server_lit_section: None,
             ribbons: true,
             stray_ribbon: None,
             burn_mask_before: 0,
@@ -1098,6 +1129,13 @@ mod tests {
 
         fn server_lights_section(mut self, section: u8) -> Fixture {
             self.server_lit_section = section;
+            self
+        }
+
+        /// A battleship salvo can land several shells inside one server tick,
+        /// so a single transition lighting more than one section is ordinary.
+        fn server_also_lights_section(mut self, section: u8) -> Fixture {
+            self.second_server_lit_section = Some(section);
             self
         }
 
@@ -1253,7 +1291,10 @@ mod tests {
                     current: self.burn_mask_before,
                 });
             }
-            let lit = 1u16 << self.server_lit_section;
+            let mut lit = 1u16 << self.server_lit_section;
+            if let Some(second) = self.second_server_lit_section {
+                lit |= 1u16 << second;
+            }
             changes.push(BurnStateChange {
                 victim: victim_id(),
                 clock: HIT_CLOCK,
@@ -1669,6 +1710,36 @@ mod tests {
         let disagree = analyze(&fixture().server_lights_section(3).hitting_section(0).build()).expect("geometry");
         assert_eq!(disagree.section_agreement(), Some(0.0));
         assert_eq!(disagree.section_predictions[0].actual.get(), 3);
+        assert_eq!(disagree.section_predictions[0].evidence, SectionEvidence::OneSectionRose);
+    }
+
+    /// When several sections rise at once, `actual` is chosen as the risen bit
+    /// nearest the prediction, so the pair agrees more often than an
+    /// independent one would. The pair is still recorded, and marked, because
+    /// a consumer measuring the positional model has to be able to drop it:
+    /// scoring these alongside the independent pairs inflates the rate.
+    #[test]
+    fn a_transition_lighting_several_sections_is_marked_as_dependent_evidence() {
+        let out = analyze(&fixture().hitting_section(1).server_lights_section(1).server_also_lights_section(3).build())
+            .expect("geometry");
+
+        assert_eq!(out.section_predictions.len(), 1);
+        assert_eq!(out.section_predictions[0].predicted.get(), 1);
+        assert_eq!(out.section_predictions[0].actual.get(), 1, "the risen bit nearest the prediction");
+        assert_eq!(out.section_predictions[0].evidence, SectionEvidence::NearestOfSeveral);
+    }
+
+    /// The nearest risen bit is not always the predicted one, so a multi-bit
+    /// transition can still disagree. This is what bounds how far the bias goes.
+    #[test]
+    fn several_risen_sections_can_still_miss_the_prediction() {
+        let out = analyze(&fixture().hitting_section(0).server_lights_section(2).server_also_lights_section(3).build())
+            .expect("geometry");
+
+        assert_eq!(out.section_predictions[0].predicted.get(), 0);
+        assert_eq!(out.section_predictions[0].actual.get(), 2);
+        assert_eq!(out.section_predictions[0].evidence, SectionEvidence::NearestOfSeveral);
+        assert_eq!(out.section_agreement(), Some(0.0));
     }
 
     /// With no attributed fires there is nothing to agree about.
