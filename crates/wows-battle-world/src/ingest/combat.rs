@@ -94,6 +94,10 @@ pub fn handle_ribbon_property_update(update: &PropertyUpdatePacket<'_>, world: &
         }
 
         for (ribbon, total) in &rebuilt {
+            // A ribbon absent from `before` was never above zero: the rebuild loop
+            // above only inserts entries with `count > 0`, so "missing" and "zero"
+            // are the same state and 0 is the correct previous total, not a stand-in
+            // for unknown data.
             let previous = before.get(ribbon).copied().unwrap_or(0);
             if *total > previous {
                 events.push(RibbonEvent { clock, ribbon: *ribbon, count: total - previous });
@@ -101,6 +105,12 @@ pub fn handle_ribbon_property_update(update: &PropertyUpdatePacket<'_>, world: &
         }
         stats.ribbons = rebuilt;
     }
+
+    // `rebuilt` is a HashMap, so iteration order above is unstable (even across
+    // calls in the same process, since RandomState reseeds per map). Sort so a
+    // packet that raises more than one ribbon at once produces a reproducible
+    // RibbonLog; see RibbonLog's doc comment for the ordering this establishes.
+    events.sort_by_key(|e| e.ribbon);
 
     if !events.is_empty() {
         world.resource_mut::<RibbonLog>().0.extend(events);
@@ -220,6 +230,15 @@ mod ribbon_property_tests {
         assert_eq!(ribbons.get(&Ribbon::Penetration), Some(&5));
         assert_eq!(ribbons.get(&Ribbon::SetFire), Some(&1));
         assert_eq!(ribbons.len(), 2);
+
+        // The first SetRange raised two ribbons at once (clock 1.0); their order
+        // here must be reproducible run to run, not an artifact of HashMap
+        // iteration, hence the fixed expectation on Ribbon's declaration order.
+        let log = &world.resource::<RibbonLog>().0;
+        assert_eq!(log.len(), 3);
+        assert_eq!((log[0].ribbon, log[0].count, log[0].clock.0), (Ribbon::SetFire, 1, 1.0));
+        assert_eq!((log[1].ribbon, log[1].count, log[1].clock.0), (Ribbon::Penetration, 1, 1.0));
+        assert_eq!((log[2].ribbon, log[2].count, log[2].clock.0), (Ribbon::Penetration, 4, 2.0));
     }
 
     #[test]

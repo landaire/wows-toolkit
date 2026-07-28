@@ -356,11 +356,26 @@ pub struct RibbonEvent {
 /// strictly increasing, the same as [`BurnStateLog`]: several events can
 /// share a clock value, and a time-keyed lookup must tolerate duplicates
 /// rather than assume a unique match. `clock` is the raw `packet.clock` seen
-/// by `ingest::dispatch`, not the `Clock` resource.
+/// by `ingest::dispatch`, not the `Clock` resource. When one modern update
+/// raises more than one ribbon's total at once, the events it produces share
+/// that clock and are ordered by `Ribbon`'s declaration order (its derived
+/// `Ord`), not by any real-world sub-tick ordering, since the update carries
+/// no such information; this keeps the log reproducible rather than
+/// dependent on `HashMap` iteration order.
 ///
-/// Only self-player ribbons are covered: `onRibbon` and
-/// `privateVehicleState` are both scoped to the recording player's own
-/// avatar, so there is no path to observe another player's ribbons and
-/// nothing to log for them.
+/// Only self-player ribbons are covered: `onRibbon` and `privateVehicleState`
+/// are both scoped to the recording player's own avatar, so there is no path
+/// to observe another player's ribbons. Within that scope, two paths can
+/// still earn a ribbon without producing a log entry:
+/// - `handle_ribbon_property_update` matches only `SetRange`, `SetElement`,
+///   and array-index `SetKey { key: "count" }`; any other update shape to the
+///   `ribbons` array is ignored, so a total that moves through an unmatched
+///   shape produces neither a `RibbonEvent` nor a `SelfStats.ribbons` update.
+/// - A slot's total can only fall by being overwritten (`SetRange`/
+///   `SetElement`) with a lower count or a different `ribbonId`, never by an
+///   explicit decrement message. A fall is not logged and rebases that
+///   ribbon's baseline downward, so a later rise from the new, lower baseline
+///   under-reports the true increment if the two changes belong to different
+///   ribbons that shared a slot.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct RibbonLog(pub Vec<RibbonEvent>);
