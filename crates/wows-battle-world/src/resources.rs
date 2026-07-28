@@ -310,6 +310,25 @@ impl BurnStateChange {
     }
 }
 
-/// Ordered log of every burn-bit transition observed on any vehicle.
+/// Log of burn-bit transitions observed on any vehicle via `EntityProperty`
+/// updates to `burningFlags`.
+///
+/// Not a complete history: `BasePlayerCreate`/`CellPlayerCreate` and the
+/// arena-state seed path replace `VehicleState` wholesale rather than diffing
+/// it, so a vehicle re-entering the recording client's AOI after a gap can
+/// arrive with a different burn mask and emit no `BurnStateChange` for
+/// whatever happened while it was unobserved. A consumer reconstructing a
+/// mask at an arbitrary clock from this log alone can be wrong across such a
+/// gap; excluding hits on victims that were not continuously observed is a
+/// separate, later mitigation, not something this log guarantees on its own.
+///
+/// Entries are pushed in packet order, so `clock` is non-decreasing, not
+/// strictly increasing: multiple entries (same vehicle or different ones) can
+/// share a clock value, since several packets can land on one tick. A
+/// time-keyed lookup over this log must tolerate duplicate clocks rather than
+/// assume a unique match. `clock` is the raw `packet.clock` seen by
+/// `ingest::dispatch`, not the `Clock` resource: `Clock` additionally refuses
+/// to rewind to zero once it has advanced past zero (see `world.rs`'s
+/// `Analyzer::process`), so the two can disagree on pre-battle packets.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct BurnStateLog(pub Vec<BurnStateChange>);

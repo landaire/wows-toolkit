@@ -201,8 +201,12 @@ mod burn_state_tests {
         let log = &world.resource::<BurnStateLog>().0;
         assert_eq!(log.len(), 2, "the flood-only change must not log: {log:?}");
         assert_eq!(log[0].current, 0b0001);
+        // Pins the recorded clock to the value passed to handle_vehicle_property,
+        // not the Clock resource (which this test never touches).
+        assert_eq!(log[0].clock, GameClock(10.0));
         assert_eq!(log[1].previous, 0b0001);
         assert_eq!(log[1].current, 0b0101);
+        assert_eq!(log[1].clock, GameClock(12.0));
     }
 
     #[test]
@@ -211,6 +215,17 @@ mod burn_state_tests {
             BurnStateChange { victim: EntityId::from(1u32), clock: GameClock(1.0), previous: 0b0001, current: 0b0101 };
         let lit: Vec<u8> = change.newly_lit().map(|n| n.get()).collect();
         assert_eq!(lit, vec![2]);
+    }
+
+    /// Several bits can rise in one change (e.g. a burst hit igniting more than
+    /// one section). Asserts both the full set and the yielded order, which a
+    /// consumer may rely on.
+    #[test]
+    fn newly_lit_reports_every_rising_bit_in_order() {
+        let change =
+            BurnStateChange { victim: EntityId::from(1u32), clock: GameClock(1.0), previous: 0b0000, current: 0b1011 };
+        let lit: Vec<u8> = change.newly_lit().map(|n| n.get()).collect();
+        assert_eq!(lit, vec![0, 1, 3]);
     }
 
     /// A fire going out is a transition too: the DCP model reads extinguish
