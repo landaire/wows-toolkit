@@ -332,3 +332,35 @@ impl BurnStateChange {
 /// `Analyzer::process`), so the two can disagree on pre-battle packets.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct BurnStateLog(pub Vec<BurnStateChange>);
+
+/// One observed increment of a self-player ribbon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RibbonEvent {
+    pub clock: GameClock,
+    pub ribbon: Ribbon,
+    /// How many were earned at this clock. Legacy `onRibbon` calls always
+    /// contribute 1; modern replays deliver absolute running totals per
+    /// ribbon, so this is the delta against the previous total.
+    pub count: usize,
+}
+
+/// Every self-player ribbon increment observed, in the order it was earned.
+///
+/// Fed by two intake paths with different shapes: legacy `onRibbon` pushes
+/// one event per call with `count: 1`; modern `privateVehicleState.ribbons`
+/// nested updates carry absolute running totals, so an event there is the
+/// delta against the previous total for that ribbon, and an unchanged total
+/// (the server re-sending an array slot) logs nothing.
+///
+/// Entries are pushed in packet order, so `clock` is non-decreasing, not
+/// strictly increasing, the same as [`BurnStateLog`]: several events can
+/// share a clock value, and a time-keyed lookup must tolerate duplicates
+/// rather than assume a unique match. `clock` is the raw `packet.clock` seen
+/// by `ingest::dispatch`, not the `Clock` resource.
+///
+/// Only self-player ribbons are covered: `onRibbon` and
+/// `privateVehicleState` are both scoped to the recording player's own
+/// avatar, so there is no path to observe another player's ribbons and
+/// nothing to log for them.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct RibbonLog(pub Vec<RibbonEvent>);

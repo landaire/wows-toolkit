@@ -38,6 +38,7 @@ use crate::resources::PendingDropParams;
 use crate::resources::PlaneIndex;
 use crate::resources::PlayerIndex;
 use crate::resources::ReplayVehicles;
+use crate::resources::RibbonLog;
 use crate::resources::ScoringRules;
 use crate::resources::SelfStats;
 use crate::resources::ShotHitLog;
@@ -239,6 +240,7 @@ fn insert_empty_resources(world: &mut World) {
     world.insert_resource(PlayerIndex::default());
     world.insert_resource(ReplayVehicles::default());
     world.insert_resource(BurnStateLog::default());
+    world.insert_resource(RibbonLog::default());
 }
 
 /// Build MetadataPlayers from the replay vehicles list.
