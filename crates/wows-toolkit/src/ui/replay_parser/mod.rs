@@ -1605,8 +1605,11 @@ impl UiReport {
         // emphasis and every listing under them gets real columns, so none of
         // it depends on a fixed-width font to line up. The formula keeps
         // monospace because it genuinely is a fixed-width listing.
+        // Vertical: the counts on one line and the context beneath, so the
+        // block stays narrow. The name column clips rather than wraps, so a
+        // single wide line loses its tail.
         let headline = ui
-            .horizontal(|ui| {
+            .vertical(|ui| {
                 // Labels are selectable by default, which makes each one consume
                 // the pointer and leaves the row's own response reachable only
                 // through the gaps between them. The hover and click belong to
@@ -1628,17 +1631,19 @@ impl UiReport {
                         ))
                         .strong(),
                     );
-                    plain(ui, RichText::new(fire_chance_ships_text(fire_chance)).weak());
-                    if let Some(expected) = fire_chance.expected_fires {
-                        plain(
-                            ui,
-                            RichText::new(t!(
-                                "ui.replay.sections.fire_chance_expected_fires",
-                                fires = format!("{expected:.1}")
-                            ))
-                            .weak(),
-                        );
-                    }
+                    ui.horizontal(|ui| {
+                        plain(ui, RichText::new(fire_chance_ships_text(fire_chance)).weak());
+                        if let Some(expected) = fire_chance.expected_fires {
+                            plain(
+                                ui,
+                                RichText::new(t!(
+                                    "ui.replay.sections.fire_chance_expected_fires",
+                                    fires = format!("{expected:.1}")
+                                ))
+                                .weak(),
+                            );
+                        }
+                    });
                 }
             })
             .response
@@ -1673,42 +1678,45 @@ impl UiReport {
 
         if !fire_chance.per_ship.is_empty() {
             egui::CollapsingHeader::new(t!("ui.replay.sections.fire_chance_per_ship")).show(ui, |ui| {
+                // Two rows per ship: the name and its rate on one, the counts
+                // indented beneath. One line carrying all four would set the
+                // width of the name column, which clips rather than wraps.
                 egui::Grid::new(ui.id().with("fire_chance_per_ship"))
-                    .num_columns(4)
+                    .num_columns(2)
                     .spacing([12.0, 2.0])
                     .striped(true)
                     .show(ui, |ui| {
                         for ship in sorted_per_ship(fire_chance) {
                             ui.label(self.localize_ship_name(ship));
                             match ship.rate() {
-                                Some(rate) => {
-                                    ui.label(format!("{:.1}%", rate * 100.0));
+                                Some(rate) => ui.label(format!("{:.1}%", rate * 100.0)),
+                                None => ui.weak(t!("ui.replay.sections.fire_chance_no_eligible_hits")),
+                            };
+                            ui.end_row();
+
+                            if ship.rate().is_some() {
+                                ui.label("");
+                                ui.horizontal(|ui| {
                                     ui.weak(wt_translations::icon_t(
                                         icons::FIRE,
                                         &fire_chance_counts_text(ship.fires, ship.eligible_hits),
                                     ));
-                                }
-                                None => {
-                                    ui.weak(t!("ui.replay.sections.fire_chance_no_eligible_hits"));
-                                    ui.label("");
-                                }
+                                    if let Some(expected) = ship.expected_rate() {
+                                        ui.weak(format!(
+                                            "{} {:.1}%",
+                                            t!("ui.replay.sections.fire_chance_expected"),
+                                            expected * 100.0
+                                        ));
+                                    }
+                                });
+                                ui.end_row();
                             }
-                            match ship.expected_rate() {
-                                Some(expected) => ui.weak(format!(
-                                    "{} {:.1}%",
-                                    t!("ui.replay.sections.fire_chance_expected"),
-                                    expected * 100.0
-                                )),
-                                None => ui.label(""),
-                            };
-                            ui.end_row();
                         }
                         // The rows do not otherwise add up to the totals above
                         // them, because a hit keyed to our own ship or to a
                         // player whose hull never resolved has no row to sit in.
                         if let Some(line) = fire_chance_no_target_ship_line(fire_chance) {
                             ui.weak(line);
-                            ui.label("");
                             ui.label("");
                             ui.end_row();
                         }
