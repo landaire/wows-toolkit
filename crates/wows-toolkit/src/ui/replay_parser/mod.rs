@@ -4835,11 +4835,44 @@ impl ToolkitTabViewer<'_> {
                         let icon = if expanded { icons::CARET_LEFT } else { icons::CARET_RIGHT };
                         let tooltip =
                             if expanded { t!("ui.replay.collapse_listing") } else { t!("ui.replay.expand_listing") };
-                        if ui.add(egui::Button::new(icon).frame(false)).on_hover_text(tooltip).clicked() {
-                            expanded = !expanded;
+
+                        // The listing panel's resize divider is registered on its own
+                        // right edge, i.e. exactly where this rail begins (the listing
+                        // is declared first). Cede that strip to the divider so a
+                        // full-rail click can't swallow the resize / drag-to-collapse
+                        // gesture.
+                        let mut rect = ui.max_rect();
+                        rect.min.x += ui.style().interaction.resize_grab_radius_side;
+
+                        let response = ui.interact(rect, ui.id().with("listing_rail_toggle"), egui::Sense::click());
+                        if response.hovered() {
+                            ui.painter().rect_filled(
+                                rect,
+                                ui.visuals().widgets.hovered.corner_radius,
+                                ui.visuals().widgets.hovered.weak_bg_fill,
+                            );
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
+
+                        let fg_color = if response.hovered() {
+                            ui.visuals().widgets.hovered.fg_stroke.color
+                        } else {
+                            ui.visuals().widgets.inactive.fg_stroke.color
+                        };
+                        ui.painter().text(
+                            egui::pos2(rect.center().x, rect.top() + 14.0),
+                            egui::Align2::CENTER_CENTER,
+                            icon,
+                            egui::TextStyle::Button.resolve(ui.style()),
+                            fg_color,
+                        );
+
                         if !expanded {
-                            paint_vertical_caption(ui, ui.max_rect(), 28.0, &t!("ui.replay.listing_caption"));
+                            paint_vertical_caption(ui, rect, 28.0, &t!("ui.replay.listing_caption"));
+                        }
+
+                        if response.on_hover_text(tooltip).clicked() {
+                            expanded = !expanded;
                         }
                     });
 
