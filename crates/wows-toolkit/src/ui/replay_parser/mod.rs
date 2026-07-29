@@ -134,9 +134,10 @@ use crate::util::separate_number;
 
 const CHAT_VIEW_WIDTH: f32 = 500.0;
 
-/// Minimum width the replay listing is allowed to occupy. Below this the tree
-/// cannot lay out a row, and egui_ltreeview panics on the degenerate clip rect
-/// that `show_collapsible` produces mid-animation.
+/// Minimum width the replay listing is allowed to occupy, and the clip-rect
+/// width below which the tree is skipped for a frame. Below this the tree
+/// cannot lay out a row, and egui_ltreeview panics on the degenerate
+/// (possibly inverted) clip rect that `show_collapsible` produces mid-animation.
 const REPLAY_LISTING_MIN_WIDTH: f32 = 100.0;
 
 /// A single replay viewer tab inside the Replay Inspector dock area.
@@ -4812,10 +4813,13 @@ impl ToolkitTabViewer<'_> {
                     }))
                     .show_collapsible(ui, &mut expanded, |ui| {
                         // egui_ltreeview 0.8.0 draw_indent_hint clamps against an
-                        // un-normalized clip rect; below the panel's own minimum width
-                        // (only reachable mid-collapse-animation) that rect inverts and
-                        // the clamp panics. Skip drawing the tree until we're past it.
-                        if ui.available_width() < REPLAY_LISTING_MIN_WIDTH {
+                        // un-normalized clip rect. `show_collapsible` slides the panel
+                        // off-screen rather than shrinking it, so the clip rect - not
+                        // the panel width - is what collapses and inverts mid-animation;
+                        // an inverted rect makes the clamp panic. Skip drawing the tree
+                        // until we're past it.
+                        let clip_width = ui.clip_rect().width();
+                        if clip_width < REPLAY_LISTING_MIN_WIDTH {
                             return;
                         }
                         egui::ScrollArea::both().id_salt("replay_listing_scroll_area").show(ui, |ui| {
