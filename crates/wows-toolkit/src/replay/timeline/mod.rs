@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
+use thiserror::Error;
 use wows_battle_world::scan::WorldScanCollector;
 use wows_battle_world::scan::scan_replay_world;
 use wows_battle_world::view::BattleView;
@@ -142,11 +144,40 @@ pub(crate) fn format_timeline_event(event: &TimelineEvent) -> String {
 /// Parse the entire replay and extract significant game events for the timeline.
 /// Returns `(events, battle_start)` where `battle_start` is the absolute game clock
 /// Result from the combined timeline + shot extraction pass.
+#[derive(Debug)]
 pub(crate) struct TimelineExtractionResult {
     pub(crate) events: Vec<TimelineEvent>,
     pub(crate) battle_start: GameClock,
     pub(crate) battle_end: Option<GameClock>,
     pub(crate) viewer_team: Option<TeamId>,
+}
+
+/// Failure reconstructing a replay from its raw bytes on the extraction thread.
+#[derive(Debug, Error)]
+pub(crate) enum TimelineExtractionError {
+    #[error("failed to reconstruct the replay: {source}")]
+    Reconstruction {
+        #[source]
+        source: wows_replays::ParseError,
+    },
+}
+
+/// Lazy background-extraction state for the inspector's Match Timeline window.
+#[derive(Debug)]
+pub(crate) enum TimelineState {
+    NotRequested,
+    Extracting,
+    Ready(Arc<TimelineExtractionResult>),
+    Failed(TimelineExtractionError),
+}
+
+impl TimelineState {
+    /// True only when no extraction has been requested yet. Guards against
+    /// starting a second multi-second parse while one is already running, or
+    /// re-parsing something already cached.
+    pub(crate) fn should_start(&self) -> bool {
+        matches!(self, TimelineState::NotRequested)
+    }
 }
 
 struct TimelineEventsCollector<'a> {
@@ -1011,5 +1042,33 @@ mod merge_tests {
     fn primary_viewer_team_is_preserved() {
         let merged = merge_timelines(result(vec![], 0), vec![result(vec![], 1)]);
         assert_eq!(merged.viewer_team, Some(TeamId::new(0)));
+    }
+}
+
+#[cfg(test)]
+mod state_tests {
+    use super::*;
+
+    fn ready_state() -> TimelineState {
+        TimelineState::Ready(Arc::new(TimelineExtractionResult {
+            events: Vec::new(),
+            battle_start: GameClock(0.0),
+            battle_end: None,
+            viewer_team: None,
+        }))
+    }
+
+    fn failed_state() -> TimelineState {
+        TimelineState::Failed(TimelineExtractionError::Reconstruction {
+            source: wows_replays::ParseError::IncompleteReplay,
+        })
+    }
+
+    #[test]
+    fn should_start_only_when_not_requested() {
+        assert!(TimelineState::NotRequested.should_start());
+        assert!(!TimelineState::Extracting.should_start());
+        assert!(!ready_state().should_start());
+        assert!(!failed_state().should_start());
     }
 }

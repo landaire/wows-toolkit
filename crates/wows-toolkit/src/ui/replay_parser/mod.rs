@@ -44,6 +44,14 @@ use crate::data::settings::ReplaySettings;
 use crate::data::wows_data::GameAsset;
 use crate::data::wows_data::SharedWoWsData;
 use crate::icons;
+use crate::replay::timeline::TimelineExtractionError;
+use crate::replay::timeline::TimelineState;
+use crate::replay::timeline::extract_timeline_events;
+use crate::replay::timeline::format_timeline_event;
+use crate::replay::timeline::merge_timelines;
+use crate::replay::timeline::ui::TimelineFilter;
+use crate::replay::timeline::ui::timeline_filter_bar;
+use crate::replay::timeline::ui::timeline_list;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayExportFormat;
@@ -2937,6 +2945,9 @@ pub struct Replay {
 
     /// Original file path this replay was loaded from, if available.
     pub source_path: Option<PathBuf>,
+
+    /// Lazy background-extraction state for the Match Timeline window.
+    pub(crate) timeline: TimelineState,
 }
 
 /// The colour a player's clan tag should render with. `None` if the player
@@ -2972,6 +2983,7 @@ impl Replay {
             ui_report: None,
             game_constants: None,
             source_path: None,
+            timeline: TimelineState::NotRequested,
         }
     }
 
@@ -3316,6 +3328,9 @@ impl ToolkitTabViewer<'_> {
                     ui.label(RichText::new(t!("ui.replay.section_match").as_ref()).strong());
 
                     if ui.button(wt_translations::icon_t(icons::LIST_BULLETS, &t!("ui.replay.timeline"))).clicked() {
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(egui::Id::new("show_timeline"), true);
+                        });
                         ui.close_kind(UiKind::Menu);
                     }
 
@@ -4841,6 +4856,7 @@ impl ToolkitTabViewer<'_> {
         });
 
         self.show_game_chat_window(ui.ctx());
+        self.show_timeline_window(ui.ctx());
         self.pick_up_replay_controls_request(ui.ctx());
         self.show_replay_controls_window(ui.ctx());
     }
@@ -4955,6 +4971,167 @@ impl ToolkitTabViewer<'_> {
         // Write back the open state (user may have closed the window via X)
         ctx.data_mut(|d| {
             d.insert_temp(egui::Id::new("show_game_chat"), open);
+        });
+    }
+
+    /// Starts a background timeline scan if none is running or cached yet.
+    /// Everything the scan needs is cloned out of the write guard before the
+    /// guard is dropped - the scan takes seconds and must never hold the lock
+    /// the UI reads every frame.
+    fn start_timeline_extraction_if_needed(&self, replay_arc: &Arc<RwLock<Replay>>) {
+        let mut guard = replay_arc.write();
+        if !guard.timeline.should_start() {
+            return;
+        }
+        let raw_meta = guard.replay_file.raw_meta.clone().into_bytes();
+        let packet_data = guard.replay_file.packet_data.clone();
+        let alt_bytes: Vec<(Vec<u8>, Vec<u8>)> =
+            guard.alt_replays.iter().map(|r| (r.raw_meta.clone().into_bytes(), r.packet_data.clone())).collect();
+        let resource_loader = guard.resource_loader.clone();
+        let game_constants = guard.game_constants.clone();
+        guard.timeline = TimelineState::Extracting;
+        drop(guard);
+
+        let weak = Arc::downgrade(replay_arc);
+        crate::util::thread::spawn_logged("timeline-extraction", move || {
+            let primary = match ReplayFile::from_decrypted_parts(raw_meta, packet_data) {
+                Ok(replay) => replay,
+                Err(source) => {
+                    if let Some(arc) = weak.upgrade() {
+                        arc.write().timeline =
+                            TimelineState::Failed(TimelineExtractionError::Reconstruction { source });
+                    }
+                    return;
+                }
+            };
+
+            let primary_result = extract_timeline_events(&primary, &resource_loader, game_constants.as_deref());
+
+            // An alt that fails to reconstruct is skipped: the primary's events are
+            // still worth showing, and only a primary failure is fatal to the window.
+            let alt_results: Vec<_> = alt_bytes
+                .into_iter()
+                .filter_map(|(alt_raw_meta, alt_packet_data)| {
+                    match ReplayFile::from_decrypted_parts(alt_raw_meta, alt_packet_data) {
+                        Ok(alt) => Some(extract_timeline_events(&alt, &resource_loader, game_constants.as_deref())),
+                        Err(e) => {
+                            tracing::warn!("timeline extraction: skipping alt replay that failed to reconstruct: {e}");
+                            None
+                        }
+                    }
+                })
+                .collect();
+
+            let merged = merge_timelines(primary_result, alt_results);
+
+            if let Some(arc) = weak.upgrade() {
+                arc.write().timeline = TimelineState::Ready(Arc::new(merged));
+            }
+        });
+    }
+
+    fn show_timeline_window(&self, ctx: &egui::Context) {
+        let mut open: bool = ctx.data(|d| d.get_temp(egui::Id::new("show_timeline"))).unwrap_or(false);
+        if !open {
+            return;
+        }
+
+        let Some(replay_arc) = self.tab_state.focused_replay() else {
+            return;
+        };
+
+        self.start_timeline_extraction_if_needed(&replay_arc);
+
+        let filter_id = egui::Id::new("timeline_window_filter");
+        let mut filter = ctx.data_mut(|d| d.get_temp_mut_or_default::<TimelineFilter>(filter_id).clone());
+        let mut retry_requested = false;
+
+        {
+            let replay = replay_arc.read();
+            egui::Window::new(wt_translations::icon_t(icons::LIST_BULLETS, &t!("ui.replay.timeline")))
+                .open(&mut open)
+                .default_width(CHAT_VIEW_WIDTH)
+                .default_height(400.0)
+                .resizable(true)
+                .show(ctx, |ui| match &replay.timeline {
+                    TimelineState::NotRequested | TimelineState::Extracting => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(t!("ui.replay.timeline_parsing"));
+                        });
+                    }
+                    TimelineState::Failed(err) => {
+                        ui.label(
+                            RichText::new(t!("ui.replay.timeline_failed", error = err.to_string()).as_ref())
+                                .color(Color32::LIGHT_RED),
+                        );
+                        if ui.button(t!("ui.replay.timeline_retry")).clicked() {
+                            retry_requested = true;
+                        }
+                    }
+                    TimelineState::Ready(result) => {
+                        let visible_count = result.events.iter().filter(|e| filter.matches(e)).count();
+
+                        ui.horizontal(|ui| {
+                            timeline_filter_bar(ui, &mut filter);
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui
+                                    .add_enabled(visible_count > 0, egui::Button::new(t!("ui.replay.save_to_file")))
+                                    .on_hover_text(t!("ui.replay.timeline_export_tooltip"))
+                                    .clicked()
+                                    && let Some(path) = rfd::FileDialog::new()
+                                        .set_file_name(format!(
+                                            "{} - Match Timeline.txt",
+                                            replay.map_name(&replay.resource_loader)
+                                        ))
+                                        .save_file()
+                                    && let Ok(mut file) = std::fs::File::create(path)
+                                {
+                                    for event in result.events.iter().filter(|e| filter.matches(e)) {
+                                        let _ = writeln!(file, "{}", format_timeline_event(event));
+                                    }
+                                }
+                                if ui
+                                    .add_enabled(visible_count > 0, egui::Button::new(t!("ui.buttons.copy")))
+                                    .on_hover_text(t!("ui.replay.timeline_export_tooltip"))
+                                    .clicked()
+                                {
+                                    let text = result
+                                        .events
+                                        .iter()
+                                        .filter(|e| filter.matches(e))
+                                        .map(format_timeline_event)
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    ui.ctx().copy_text(text);
+                                    self.tab_state.toasts.lock().success(t!("ui.replay.timeline_copied"));
+                                }
+                            });
+                        });
+                        ui.separator();
+
+                        if !result.events.is_empty() && visible_count == 0 {
+                            ui.label(t!("ui.replay.timeline_no_matches"));
+                        } else {
+                            egui::ScrollArea::vertical().id_salt("timeline_window_scroll").show(ui, |ui| {
+                                let egui_ctx = ui.ctx().clone();
+                                timeline_list(ui, &result.events, &filter, result.viewer_team, |event| {
+                                    egui_ctx.copy_text(format_timeline_event(event));
+                                    self.tab_state.toasts.lock().success(t!("ui.replay.timeline_event_copied"));
+                                });
+                            });
+                        }
+                    }
+                });
+        }
+
+        if retry_requested {
+            replay_arc.write().timeline = TimelineState::NotRequested;
+        }
+
+        ctx.data_mut(|d| {
+            d.insert_temp(filter_id, filter);
+            d.insert_temp(egui::Id::new("show_timeline"), open);
         });
     }
 
