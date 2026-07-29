@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use egui::Color32;
 
@@ -24,6 +25,7 @@ use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use crate::replay::minimap_view::ENEMY_COLOR;
 use crate::replay::minimap_view::FRIENDLY_COLOR;
 
+#[derive(Clone, Debug)]
 pub(crate) enum TimelineEventKind {
     HealthLost {
         ship_name: String,
@@ -69,6 +71,7 @@ pub(crate) enum TimelineEventKind {
     },
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct TimelineEvent {
     pub(crate) clock: ElapsedClock,
     pub(crate) kind: TimelineEventKind,
@@ -619,22 +622,10 @@ pub(crate) fn extract_timeline_and_shots(
         );
     }
 
-    let battle_start = timeline_col.battle_start;
-    let battle_end = timeline_col.battle_end;
-    for event in &mut timeline_col.events {
-        let abs = GameClock(event.clock.seconds());
-        event.clock = abs.to_elapsed(battle_start);
-    }
-    timeline_col.events.sort_by(|a, b| a.clock.cmp(&b.clock));
+    let health_histories = std::mem::take(&mut timeline_col.health_histories);
+    let timeline_result = finish_timeline_collector(timeline_col);
 
-    let timeline_result = TimelineExtractionResult {
-        events: timeline_col.events,
-        battle_start,
-        battle_end,
-        viewer_team: timeline_col.viewer_team,
-    };
-
-    for (eid, hh) in &timeline_col.health_histories {
+    for (eid, hh) in &health_histories {
         shot_col
             .timelines
             .entry(*eid)
@@ -653,6 +644,100 @@ pub(crate) fn extract_timeline_and_shots(
     );
 
     (timeline_result, shot_col.timelines)
+}
+
+fn finish_timeline_collector(mut col: TimelineEventsCollector<'_>) -> TimelineExtractionResult {
+    let battle_start = col.battle_start;
+    for event in &mut col.events {
+        let abs = GameClock(event.clock.seconds());
+        event.clock = abs.to_elapsed(battle_start);
+    }
+    col.events.sort_by(|a, b| a.clock.cmp(&b.clock));
+    TimelineExtractionResult {
+        events: col.events,
+        battle_start,
+        battle_end: col.battle_end,
+        viewer_team: col.viewer_team,
+    }
+}
+
+/// Scan `replay_file` for timeline events only, skipping the per-ship shot
+/// collection that the renderer needs but the inspector does not.
+pub(crate) fn extract_timeline_events(
+    replay_file: &ReplayFile,
+    game_metadata: &GameMetadataProvider,
+    game_constants: Option<&GameConstants>,
+) -> TimelineExtractionResult {
+    let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+    let mut timeline_col = TimelineEventsCollector::new(game_metadata);
+
+    {
+        let cols: &mut [&mut dyn WorldScanCollector] = &mut [&mut timeline_col];
+        scan_replay_world(
+            &replay_file.meta,
+            game_metadata,
+            game_constants.unwrap_or(&*wows_replays::game_constants::DEFAULT_GAME_CONSTANTS),
+            replay_version,
+            replay_file,
+            cols,
+        );
+    }
+
+    finish_timeline_collector(timeline_col)
+}
+
+/// Identity used to recognise the same real-world event seen by two clients.
+/// Clocks are bucketed to whole seconds because two recordings of one battle
+/// time the same moment slightly differently.
+fn dedup_key(event: &TimelineEvent) -> (u8, String, i64) {
+    let bucket = event.clock.seconds().round() as i64;
+    match &event.kind {
+        TimelineEventKind::HealthLost { ship_name, player_name, .. } => {
+            (0, format!("{ship_name}/{player_name}"), bucket)
+        }
+        TimelineEventKind::Death { ship_name, player_name, .. } => (1, format!("{ship_name}/{player_name}"), bucket),
+        TimelineEventKind::CapContested { cap_label, .. } => (2, cap_label.clone(), bucket),
+        TimelineEventKind::CapFlipped { cap_label, .. } => (3, cap_label.clone(), bucket),
+        TimelineEventKind::CapBeingCaptured { cap_label, .. } => (4, cap_label.clone(), bucket),
+        TimelineEventKind::RadarUsed { ship_name, player_name, .. } => {
+            (5, format!("{ship_name}/{player_name}"), bucket)
+        }
+        TimelineEventKind::AdvantageChanged { label, .. } => (6, label.clone(), bucket),
+        TimelineEventKind::Disconnected { ship_name, player_name, .. } => {
+            (7, format!("{ship_name}/{player_name}"), bucket)
+        }
+    }
+}
+
+/// Union the primary scan with alternate-perspective scans of the same battle.
+///
+/// The primary is inserted first and wins every collision, so its strings and
+/// ordering stay authoritative. Alternate `AdvantageChanged` events are dropped
+/// outright: the advantage calculation swaps team indices so index 0 is the
+/// scanning client's team, and its label is baked from that perspective, so
+/// keeping both streams would emit contradictory events at one timestamp.
+pub(crate) fn merge_timelines(
+    primary: TimelineExtractionResult,
+    alts: Vec<TimelineExtractionResult>,
+) -> TimelineExtractionResult {
+    let TimelineExtractionResult { mut events, battle_start, battle_end, viewer_team } = primary;
+
+    let mut seen: HashSet<(u8, String, i64)> = events.iter().map(dedup_key).collect();
+
+    for alt in alts {
+        for event in alt.events {
+            if matches!(event.kind, TimelineEventKind::AdvantageChanged { .. }) {
+                continue;
+            }
+            if seen.insert(dedup_key(&event)) {
+                events.push(event);
+            }
+        }
+    }
+
+    events.sort_by(|a, b| a.clock.cmp(&b.clock));
+
+    TimelineExtractionResult { events, battle_start, battle_end, viewer_team }
 }
 
 #[cfg(test)]
@@ -847,5 +932,101 @@ mod extraction_snapshots {
         };
 
         insta::assert_yaml_snapshot!(snapshot);
+    }
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+
+    fn death(secs: f32, ship: &str, team: i64) -> TimelineEvent {
+        TimelineEvent {
+            clock: ElapsedClock(secs),
+            kind: TimelineEventKind::Death {
+                ship_name: ship.to_owned(),
+                player_name: "p".to_owned(),
+                team: TeamId::new(team),
+                killer_ship: String::new(),
+                killer_player: String::new(),
+            },
+        }
+    }
+
+    fn advantage(secs: f32, label: &str) -> TimelineEvent {
+        TimelineEvent {
+            clock: ElapsedClock(secs),
+            kind: TimelineEventKind::AdvantageChanged { label: label.to_owned(), is_friendly: true },
+        }
+    }
+
+    fn result(events: Vec<TimelineEvent>, viewer_team: i64) -> TimelineExtractionResult {
+        TimelineExtractionResult {
+            events,
+            battle_start: GameClock(0.0),
+            battle_end: None,
+            viewer_team: Some(TeamId::new(viewer_team)),
+        }
+    }
+
+    #[test]
+    fn identical_events_from_both_perspectives_collapse_to_one() {
+        let merged = merge_timelines(
+            result(vec![death(100.0, "Yamato", 1)], 0),
+            vec![result(vec![death(100.0, "Yamato", 1)], 1)],
+        );
+        assert_eq!(merged.events.len(), 1);
+    }
+
+    #[test]
+    fn near_simultaneous_duplicates_collapse_but_distinct_ones_do_not() {
+        // Two clients time the same kill slightly differently; 0.4s apart is
+        // the same event, 2.0s apart is not.
+        let merged = merge_timelines(
+            result(vec![death(100.0, "Yamato", 1)], 0),
+            vec![result(vec![death(100.4, "Yamato", 1), death(102.0, "Yamato", 1)], 1)],
+        );
+        assert_eq!(merged.events.len(), 2);
+    }
+
+    #[test]
+    fn events_only_the_alt_saw_are_kept() {
+        let merged = merge_timelines(
+            result(vec![death(100.0, "Yamato", 1)], 0),
+            vec![result(vec![death(150.0, "Gearing", 0)], 1)],
+        );
+        assert_eq!(merged.events.len(), 2);
+    }
+
+    #[test]
+    fn alt_advantage_events_are_dropped() {
+        // Advantage is computed relative to the scanning client, so the alt's
+        // stream would contradict the primary's at the same timestamps.
+        let merged = merge_timelines(
+            result(vec![advantage(100.0, "Major advantage gained")], 0),
+            vec![result(vec![advantage(100.0, "Dropped to Major advantage")], 1)],
+        );
+        assert_eq!(merged.events.len(), 1);
+        match &merged.events[0].kind {
+            TimelineEventKind::AdvantageChanged { label, .. } => {
+                assert_eq!(label, "Major advantage gained");
+            }
+            other => panic!("expected AdvantageChanged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn output_is_sorted_by_clock() {
+        let merged = merge_timelines(
+            result(vec![death(300.0, "A", 0)], 0),
+            vec![result(vec![death(100.0, "B", 1), death(200.0, "C", 1)], 1)],
+        );
+        let clocks: Vec<f32> = merged.events.iter().map(|e| e.clock.seconds()).collect();
+        assert_eq!(clocks, vec![100.0, 200.0, 300.0]);
+    }
+
+    #[test]
+    fn primary_viewer_team_is_preserved() {
+        let merged = merge_timelines(result(vec![], 0), vec![result(vec![], 1)]);
+        assert_eq!(merged.viewer_team, Some(TeamId::new(0)));
     }
 }
