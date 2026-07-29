@@ -4727,8 +4727,8 @@ impl ToolkitTabViewer<'_> {
                         })
                         .fold(0.0f32, f32::max);
 
-                    // Add padding for tree indentation, margins, scrollbar
-                    default_width = (max_width + 60.0).max(200.0);
+                    // Allowance for tree indentation, the right margin, and the scrollbar.
+                    default_width = (max_width + 52.0).max(200.0);
 
                     self.tab_state.replay_listing_auto_sized = true;
 
@@ -4741,6 +4741,14 @@ impl ToolkitTabViewer<'_> {
                 egui::Panel::left("replay_listing_panel")
                     .default_size(default_width)
                     .size_range(100.0..=f32::INFINITY)
+                    // Left margin is zero so labels sit flush; the right margin keeps them
+                    // clear of the resize divider.
+                    .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin {
+                        left: 0,
+                        right: 8,
+                        top: 2,
+                        bottom: 2,
+                    }))
                     .show(ui, |ui| {
                         egui::ScrollArea::both().id_salt("replay_listing_scroll_area").show(ui, |ui| {
                             self.build_file_listing(ui);
