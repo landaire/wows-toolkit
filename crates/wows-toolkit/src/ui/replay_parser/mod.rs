@@ -134,6 +134,11 @@ use crate::util::separate_number;
 
 const CHAT_VIEW_WIDTH: f32 = 500.0;
 
+/// Minimum width the replay listing is allowed to occupy. Below this the tree
+/// cannot lay out a row, and egui_ltreeview panics on the degenerate clip rect
+/// that `show_collapsible` produces mid-animation.
+const REPLAY_LISTING_MIN_WIDTH: f32 = 100.0;
+
 /// A single replay viewer tab inside the Replay Inspector dock area.
 #[derive(Clone)]
 pub struct ReplayTab {
@@ -4796,7 +4801,7 @@ impl ToolkitTabViewer<'_> {
 
                 egui::Panel::left("replay_listing_panel")
                     .default_size(default_width)
-                    .size_range(100.0..=f32::INFINITY)
+                    .size_range(REPLAY_LISTING_MIN_WIDTH..=f32::INFINITY)
                     // Left margin is zero so labels sit flush; the right margin keeps them
                     // clear of the resize divider.
                     .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin {
@@ -4806,6 +4811,13 @@ impl ToolkitTabViewer<'_> {
                         bottom: 2,
                     }))
                     .show_collapsible(ui, &mut expanded, |ui| {
+                        // egui_ltreeview 0.8.0 draw_indent_hint clamps against an
+                        // un-normalized clip rect; below the panel's own minimum width
+                        // (only reachable mid-collapse-animation) that rect inverts and
+                        // the clamp panics. Skip drawing the tree until we're past it.
+                        if ui.available_width() < REPLAY_LISTING_MIN_WIDTH {
+                            return;
+                        }
                         egui::ScrollArea::both().id_salt("replay_listing_scroll_area").show(ui, |ui| {
                             self.build_file_listing(ui);
                         });
@@ -4829,8 +4841,9 @@ impl ToolkitTabViewer<'_> {
 
                 // `show_collapsible` may have flipped `expanded` itself via a resize drag or a
                 // double-click on the edge, so persist on any change, not just a caret click.
-                if expanded == collapsed_before {
-                    self.tab_state.persisted.write().settings.replay.listing_collapsed = !expanded;
+                let collapsed_now = !expanded;
+                if collapsed_now != collapsed_before {
+                    self.tab_state.persisted.write().settings.replay.listing_collapsed = collapsed_now;
                 }
             }
 
