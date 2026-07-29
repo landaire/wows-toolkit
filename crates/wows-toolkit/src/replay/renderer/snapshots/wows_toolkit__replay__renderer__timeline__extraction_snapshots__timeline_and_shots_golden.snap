@@ -120,47 +120,49 @@ events:
     kind: HealthLost(/_Bignuts_ pct=1000 new_hp=0)
 shot_counts:
   - entity_id: 968041
-    shell_count: 24
+    shell_count: 39
   - entity_id: 968043
     shell_count: 9
+  - entity_id: 968045
+    shell_count: 8
   - entity_id: 968047
-    shell_count: 42
+    shell_count: 70
   - entity_id: 968049
-    shell_count: 57
+    shell_count: 64
   - entity_id: 968051
-    shell_count: 47
+    shell_count: 54
   - entity_id: 968053
-    shell_count: 62
+    shell_count: 83
   - entity_id: 968055
-    shell_count: 37
+    shell_count: 38
   - entity_id: 968057
-    shell_count: 59
+    shell_count: 67
   - entity_id: 968059
     shell_count: 24
   - entity_id: 968061
-    shell_count: 20
+    shell_count: 32
   - entity_id: 968067
-    shell_count: 42
+    shell_count: 83
   - entity_id: 968069
-    shell_count: 51
+    shell_count: 53
   - entity_id: 968070
-    shell_count: 11
+    shell_count: 9
   - entity_id: 968071
-    shell_count: 367
+    shell_count: 136
   - entity_id: 968073
-    shell_count: 113
+    shell_count: 118
   - entity_id: 968075
-    shell_count: 2
+    shell_count: 3
   - entity_id: 968079
-    shell_count: 10
+    shell_count: 15
   - entity_id: 968081
-    shell_count: 81
+    shell_count: 143
   - entity_id: 968083
     shell_count: 44
   - entity_id: 968085
-    shell_count: 19
+    shell_count: 22
   - entity_id: 968087
-    shell_count: 45
+    shell_count: 52
 health_histories:
   - entity_id: 968041
     sample_count: 28
@@ -308,13 +310,13 @@ health_histories:
     min_health: 22500
 shot_timelines:
   - entity_id: 968041
-    hit_count: 24
+    hit_count: 39
     first_hit_clock_s: 195.213
     last_hit_clock_s: 463.532
     hit_type_counts:
       SHELL_HIT_TYPE_MAJORHIT: 1
       SHELL_HIT_TYPE_NOPENETRATION: 6
-      SHELL_HIT_TYPE_NORMAL: 11
+      SHELL_HIT_TYPE_NORMAL: 26
       SHELL_HIT_TYPE_OVERPENETRATION: 4
       SHELL_HIT_TYPE_RICOCHET: 2
   - entity_id: 968043
@@ -326,63 +328,64 @@ shot_timelines:
       SHELL_HIT_TYPE_NORMAL: 2
       SHELL_HIT_TYPE_RICOCHET: 2
   - entity_id: 968045
-    hit_count: 0
-    first_hit_clock_s: ~
-    last_hit_clock_s: ~
-    hit_type_counts: {}
+    hit_count: 8
+    first_hit_clock_s: 459.808
+    last_hit_clock_s: 518.093
+    hit_type_counts:
+      SHELL_HIT_TYPE_NORMAL: 8
   - entity_id: 968047
-    hit_count: 42
+    hit_count: 70
     first_hit_clock_s: 231.207
     last_hit_clock_s: 324.237
     hit_type_counts:
       SHELL_HIT_TYPE_NOPENETRATION: 34
-      SHELL_HIT_TYPE_NORMAL: 7
+      SHELL_HIT_TYPE_NORMAL: 35
       SHELL_HIT_TYPE_OVERPENETRATION: 1
   - entity_id: 968049
-    hit_count: 57
+    hit_count: 64
     first_hit_clock_s: 242.512
     last_hit_clock_s: 697.508
     hit_type_counts:
       SHELL_HIT_TYPE_NOPENETRATION: 9
-      SHELL_HIT_TYPE_NORMAL: 14
+      SHELL_HIT_TYPE_NORMAL: 21
       SHELL_HIT_TYPE_OVERPENETRATION: 8
       SHELL_HIT_TYPE_RICOCHET: 26
   - entity_id: 968051
-    hit_count: 47
+    hit_count: 54
     first_hit_clock_s: 387.367
-    last_hit_clock_s: 750.7
+    last_hit_clock_s: 750.79
     hit_type_counts:
-      SHELL_HIT_TYPE_NOPENETRATION: 33
-      SHELL_HIT_TYPE_NORMAL: 7
+      SHELL_HIT_TYPE_NOPENETRATION: 34
+      SHELL_HIT_TYPE_NORMAL: 13
       SHELL_HIT_TYPE_OVERPENETRATION: 5
       SHELL_HIT_TYPE_RICOCHET: 2
   - entity_id: 968053
-    hit_count: 62
+    hit_count: 83
     first_hit_clock_s: 230.398
-    last_hit_clock_s: 656.264
+    last_hit_clock_s: 676.24
     hit_type_counts:
       SHELL_HIT_TYPE_MAJORHIT: 1
       SHELL_HIT_TYPE_NOPENETRATION: 22
-      SHELL_HIT_TYPE_NORMAL: 28
+      SHELL_HIT_TYPE_NORMAL: 49
       SHELL_HIT_TYPE_OVERPENETRATION: 8
       SHELL_HIT_TYPE_RICOCHET: 3
   - entity_id: 968055
-    hit_count: 37
-    first_hit_clock_s: 226.075
+    hit_count: 38
+    first_hit_clock_s: 208.506
     last_hit_clock_s: 341.506
     hit_type_counts:
       SHELL_HIT_TYPE_NOPENETRATION: 16
-      SHELL_HIT_TYPE_NORMAL: 5
+      SHELL_HIT_TYPE_NORMAL: 6
       SHELL_HIT_TYPE_OVERPENETRATION: 14
       SHELL_HIT_TYPE_RICOCHET: 2
   - entity_id: 968057
-    hit_count: 59
+    hit_count: 67
     first_hit_clock_s: 153.921
-    last_hit_clock_s: 440.699
+    last_hit_clock_s: 525.945
     hit_type_counts:
       SHELL_HIT_TYPE_MAJORHIT: 3
-      SHELL_HIT_TYPE_NOPENETRATION: 50
-      SHELL_HIT_TYPE_NORMAL: 2
+      SHELL_HIT_TYPE_NOPENETRATION: 52
+      SHELL_HIT_TYPE_NORMAL: 8
       SHELL_HIT_TYPE_OVERPENETRATION: 4
   - entity_id: 968059
     hit_count: 24
@@ -394,13 +397,13 @@ shot_timelines:
       SHELL_HIT_TYPE_OVERPENETRATION: 5
       SHELL_HIT_TYPE_RICOCHET: 7
   - entity_id: 968061
-    hit_count: 20
+    hit_count: 32
     first_hit_clock_s: 176.929
     last_hit_clock_s: 549.934
     hit_type_counts:
       SHELL_HIT_TYPE_MAJORHIT: 1
-      SHELL_HIT_TYPE_NOPENETRATION: 12
-      SHELL_HIT_TYPE_NORMAL: 4
+      SHELL_HIT_TYPE_NOPENETRATION: 15
+      SHELL_HIT_TYPE_NORMAL: 13
       SHELL_HIT_TYPE_OVERPENETRATION: 1
       SHELL_HIT_TYPE_RICOCHET: 2
   - entity_id: 968063
@@ -414,75 +417,75 @@ shot_timelines:
     last_hit_clock_s: ~
     hit_type_counts: {}
   - entity_id: 968067
-    hit_count: 42
+    hit_count: 83
     first_hit_clock_s: 160.211
-    last_hit_clock_s: 761.67
+    last_hit_clock_s: 761.928
     hit_type_counts:
-      SHELL_HIT_TYPE_NOPENETRATION: 14
-      SHELL_HIT_TYPE_NORMAL: 15
+      SHELL_HIT_TYPE_NOPENETRATION: 16
+      SHELL_HIT_TYPE_NORMAL: 54
       SHELL_HIT_TYPE_OVERPENETRATION: 7
       SHELL_HIT_TYPE_RICOCHET: 6
   - entity_id: 968069
-    hit_count: 51
+    hit_count: 53
     first_hit_clock_s: 490.968
     last_hit_clock_s: 535.823
     hit_type_counts:
       SHELL_HIT_TYPE_NOPENETRATION: 36
-      SHELL_HIT_TYPE_NORMAL: 14
+      SHELL_HIT_TYPE_NORMAL: 16
       SHELL_HIT_TYPE_OVERPENETRATION: 1
   - entity_id: 968070
-    hit_count: 11
-    first_hit_clock_s: 282.383
+    hit_count: 9
+    first_hit_clock_s: 535.658
     last_hit_clock_s: 760.94
     hit_type_counts:
-      SHELL_HIT_TYPE_OVERPENETRATION: 2
-      SHELL_HIT_TYPE_RICOCHET: 9
+      SHELL_HIT_TYPE_NORMAL: 6
+      SHELL_HIT_TYPE_RICOCHET: 3
   - entity_id: 968071
-    hit_count: 367
-    first_hit_clock_s: 161.677
-    last_hit_clock_s: 761.928
+    hit_count: 136
+    first_hit_clock_s: 197.08
+    last_hit_clock_s: 760.815
     hit_type_counts:
-      SHELL_HIT_TYPE_MAJORHIT: 7
-      SHELL_HIT_TYPE_NOPENETRATION: 20
-      SHELL_HIT_TYPE_NORMAL: 301
-      SHELL_HIT_TYPE_OVERPENETRATION: 17
-      SHELL_HIT_TYPE_RICOCHET: 22
+      SHELL_HIT_TYPE_NOPENETRATION: 10
+      SHELL_HIT_TYPE_NORMAL: 79
+      SHELL_HIT_TYPE_OVERPENETRATION: 19
+      SHELL_HIT_TYPE_RICOCHET: 28
   - entity_id: 968073
-    hit_count: 113
+    hit_count: 118
     first_hit_clock_s: 328.109
-    last_hit_clock_s: 753.382
+    last_hit_clock_s: 756.948
     hit_type_counts:
-      SHELL_HIT_TYPE_NOPENETRATION: 79
-      SHELL_HIT_TYPE_NORMAL: 21
+      SHELL_HIT_TYPE_NOPENETRATION: 81
+      SHELL_HIT_TYPE_NORMAL: 24
       SHELL_HIT_TYPE_OVERPENETRATION: 10
       SHELL_HIT_TYPE_RICOCHET: 3
   - entity_id: 968075
-    hit_count: 2
+    hit_count: 3
     first_hit_clock_s: 704.361
-    last_hit_clock_s: 704.361
+    last_hit_clock_s: 724.363
     hit_type_counts:
-      SHELL_HIT_TYPE_NORMAL: 2
+      SHELL_HIT_TYPE_NORMAL: 3
   - entity_id: 968077
     hit_count: 0
     first_hit_clock_s: ~
     last_hit_clock_s: ~
     hit_type_counts: {}
   - entity_id: 968079
-    hit_count: 10
+    hit_count: 15
     first_hit_clock_s: 155.933
     last_hit_clock_s: 370.202
     hit_type_counts:
       SHELL_HIT_TYPE_NOPENETRATION: 1
-      SHELL_HIT_TYPE_NORMAL: 2
+      SHELL_HIT_TYPE_NORMAL: 7
       SHELL_HIT_TYPE_OVERPENETRATION: 3
       SHELL_HIT_TYPE_RICOCHET: 4
   - entity_id: 968081
-    hit_count: 81
-    first_hit_clock_s: 349.666
-    last_hit_clock_s: 674.25
+    hit_count: 143
+    first_hit_clock_s: 182.217
+    last_hit_clock_s: 721.265
     hit_type_counts:
+      SHELL_HIT_TYPE_MAJORHIT: 7
       SHELL_HIT_TYPE_NOPENETRATION: 66
-      SHELL_HIT_TYPE_NORMAL: 11
+      SHELL_HIT_TYPE_NORMAL: 66
       SHELL_HIT_TYPE_OVERPENETRATION: 2
       SHELL_HIT_TYPE_RICOCHET: 2
   - entity_id: 968083
@@ -495,20 +498,20 @@ shot_timelines:
       SHELL_HIT_TYPE_OVERPENETRATION: 5
       SHELL_HIT_TYPE_RICOCHET: 5
   - entity_id: 968085
-    hit_count: 19
-    first_hit_clock_s: 667.109
+    hit_count: 22
+    first_hit_clock_s: 222.784
     last_hit_clock_s: 754.677
     hit_type_counts:
       SHELL_HIT_TYPE_NOPENETRATION: 6
-      SHELL_HIT_TYPE_NORMAL: 2
+      SHELL_HIT_TYPE_NORMAL: 5
       SHELL_HIT_TYPE_OVERPENETRATION: 2
       SHELL_HIT_TYPE_RICOCHET: 9
   - entity_id: 968087
-    hit_count: 45
-    first_hit_clock_s: 363.087
-    last_hit_clock_s: 461.369
+    hit_count: 52
+    first_hit_clock_s: 316.499
+    last_hit_clock_s: 535.658
     hit_type_counts:
       SHELL_HIT_TYPE_MAJORHIT: 1
       SHELL_HIT_TYPE_NOPENETRATION: 36
-      SHELL_HIT_TYPE_NORMAL: 6
+      SHELL_HIT_TYPE_NORMAL: 13
       SHELL_HIT_TYPE_OVERPENETRATION: 2
