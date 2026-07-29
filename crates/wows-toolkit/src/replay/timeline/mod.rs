@@ -17,10 +17,11 @@ use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::recognized::Recognized;
 
-use super::ENEMY_COLOR;
-use super::FRIENDLY_COLOR;
 use wows_replays::analyzer::battle_controller::state::ControlPointType;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
+
+use crate::replay::minimap_view::ENEMY_COLOR;
+use crate::replay::minimap_view::FRIENDLY_COLOR;
 
 pub(crate) enum TimelineEventKind {
     HealthLost {
@@ -139,10 +140,10 @@ pub(crate) fn format_timeline_event(event: &TimelineEvent) -> String {
 /// Parse the entire replay and extract significant game events for the timeline.
 /// Returns `(events, battle_start)` where `battle_start` is the absolute game clock
 /// Result from the combined timeline + shot extraction pass.
-pub(super) struct TimelineExtractionResult {
-    pub(super) events: Vec<TimelineEvent>,
-    pub(super) battle_start: GameClock,
-    pub(super) battle_end: Option<GameClock>,
+pub(crate) struct TimelineExtractionResult {
+    pub(crate) events: Vec<TimelineEvent>,
+    pub(crate) battle_start: GameClock,
+    pub(crate) battle_end: Option<GameClock>,
 }
 
 struct TimelineEventsCollector<'a> {
@@ -582,7 +583,7 @@ impl WorldScanCollector for ShotTimelineCollector {
     }
 }
 
-pub(super) fn extract_timeline_and_shots(
+pub(crate) fn extract_timeline_and_shots(
     replay_file: &ReplayFile,
     game_metadata: &GameMetadataProvider,
     game_constants: Option<&GameConstants>,

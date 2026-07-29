@@ -58,8 +58,6 @@ const SNAPSHOTS_PER_SECOND: f32 = 1.5;
 const PLAYBACK_SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
 use crate::replay::minimap_view::Annotation;
 use crate::replay::minimap_view::AnnotationState;
-use crate::replay::minimap_view::ENEMY_COLOR;
-use crate::replay::minimap_view::FRIENDLY_COLOR;
 use crate::replay::minimap_view::MapTransform;
 use crate::replay::minimap_view::OverlayState;
 use crate::replay::minimap_view::PaintTool;
@@ -71,6 +69,12 @@ use crate::replay::minimap_view::send_annotation_clear;
 use crate::replay::minimap_view::send_annotation_full_sync;
 use crate::replay::minimap_view::send_annotation_remove;
 use crate::replay::minimap_view::send_annotation_update;
+pub use crate::replay::timeline::PreExtractedHit;
+pub use crate::replay::timeline::ShipShotTimeline;
+use crate::replay::timeline::TimelineEvent;
+use crate::replay::timeline::TimelineEventKind;
+use crate::replay::timeline::event_color;
+use crate::replay::timeline::format_timeline_event;
 /// Extracted score bar state used for positioning the advantage label.
 struct ScoreBarInfo {
     team0_score: i32,
@@ -1215,14 +1219,6 @@ pub fn launch_client_renderer(
 
 mod playback;
 use playback::playback_thread;
-
-mod timeline;
-pub use timeline::PreExtractedHit;
-pub use timeline::ShipShotTimeline;
-pub(crate) use timeline::TimelineEvent;
-pub(crate) use timeline::TimelineEventKind;
-pub(crate) use timeline::event_color;
-pub(crate) use timeline::format_timeline_event;
 
 mod video_export;
 pub use video_export::BatchEncodeOptions;

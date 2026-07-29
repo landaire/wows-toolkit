@@ -34,8 +34,8 @@ use super::ReplayPlayerInfo;
 use super::ReplayRendererAssets;
 use super::SNAPSHOTS_PER_SECOND;
 use super::SharedRendererState;
-use super::timeline::ShipShotTimeline;
-use super::timeline::extract_timeline_and_shots;
+use crate::replay::timeline::ShipShotTimeline;
+use crate::replay::timeline::extract_timeline_and_shots;
 use crate::util::controls::parse_commands_scheme;
 
 #[allow(clippy::too_many_arguments)]
