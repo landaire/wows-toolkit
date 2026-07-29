@@ -5128,13 +5128,16 @@ impl ToolkitTabViewer<'_> {
                         if !result.events.is_empty() && visible_count == 0 {
                             ui.label(t!("ui.replay.timeline_no_matches"));
                         } else {
-                            egui::ScrollArea::vertical().id_salt("timeline_window_scroll").show(ui, |ui| {
-                                let egui_ctx = ui.ctx().clone();
-                                timeline_list(ui, &result.events, &filter, result.viewer_team, |event| {
-                                    egui_ctx.copy_text(format_timeline_event(event));
-                                    self.tab_state.toasts.lock().success(t!("ui.replay.timeline_event_copied"));
+                            egui::ScrollArea::vertical()
+                                .id_salt("timeline_window_scroll")
+                                .auto_shrink([false; 2])
+                                .show(ui, |ui| {
+                                    let egui_ctx = ui.ctx().clone();
+                                    timeline_list(ui, &result.events, &filter, result.viewer_team, |event| {
+                                        egui_ctx.copy_text(format_timeline_event(event));
+                                        self.tab_state.toasts.lock().success(t!("ui.replay.timeline_event_copied"));
+                                    });
                                 });
-                            });
                         }
                     }
                 });
