@@ -3205,6 +3205,12 @@ impl ToolkitTabViewer<'_> {
         let action_label_width = action_label_layout.rect.width() + 4.0;
         columns[ReplayColumn::Actions as usize] = egui_table::Column::new(action_label_width).resizable(false);
 
+        // The name column carries every expanded section: achievements, ribbons,
+        // damage events and the fire-chance breakdown. Those are wider than a
+        // name, and a cell clips rather than wraps, so the shared 500 px ceiling
+        // truncates them once expanded.
+        columns[ReplayColumn::Name as usize] = egui_table::Column::new(260.0).range(10.0..=1400.0).resizable(true);
+
         let table = egui_table::Table::new()
             .id_salt("replay_player_list")
             .num_rows(ui_report.player_reports.len() as u64)
