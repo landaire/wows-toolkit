@@ -76,6 +76,9 @@ pub struct ReplaySettings {
     pub auto_export_format: ReplayExportFormat,
     #[serde(default)]
     pub grouping: ReplayGrouping,
+    /// Whether the replay listing panel is collapsed to its rail.
+    #[serde(default)]
+    pub listing_collapsed: bool,
 }
 
 impl Default for ReplaySettings {
@@ -91,10 +94,25 @@ impl Default for ReplaySettings {
             auto_export_path: String::new(),
             auto_export_format: ReplayExportFormat::default(),
             grouping: ReplayGrouping::default(),
+            listing_collapsed: false,
         }
     }
 }
 
 pub const fn default_bool<const V: bool>() -> bool {
     V
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn listing_collapsed_defaults_to_false_and_survives_missing_field() {
+        // Settings files written before this field existed must still load.
+        let legacy = r#"{"show_entity_id":false,"show_observed_damage":false}"#;
+        let parsed: ReplaySettings = serde_json::from_str(legacy).expect("legacy settings should parse");
+        assert!(!parsed.listing_collapsed);
+        assert!(!ReplaySettings::default().listing_collapsed);
+    }
 }

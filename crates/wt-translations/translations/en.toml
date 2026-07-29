@@ -263,6 +263,9 @@ monitored_channel = "Monitored Channel (Default to Self)"
 # -- Replay Inspector --
 
 [ui.replay]
+collapse_listing = "Collapse Replay Listing"
+expand_listing = "Expand Replay Listing"
+listing_caption = "Replays"
 spectator = "Spectator"
 loading = "Loading..."
 no_selection = "Click a replay to view, or double-click to open in a new tab"

@@ -163,6 +163,23 @@ fn colorize_label(
     }
 }
 
+/// Paints `text` rotated a quarter turn counter-clockwise, reading bottom-to-top,
+/// horizontally centred in `rect` and starting `top_offset` below its top edge.
+fn paint_vertical_caption(ui: &egui::Ui, rect: egui::Rect, top_offset: f32, text: &str) {
+    let galley = ui.painter().layout_no_wrap(
+        text.to_owned(),
+        egui::TextStyle::Body.resolve(ui.style()),
+        ui.visuals().weak_text_color(),
+    );
+    // With a -90deg angle the galley grows downward from its anchor, so the
+    // anchor is the top of the run and the text width becomes its height.
+    let pos = egui::pos2(rect.center().x + galley.size().y / 2.0, rect.top() + top_offset);
+    ui.painter().add(
+        egui::epaint::TextShape::new(pos, galley, ui.visuals().weak_text_color())
+            .with_angle(-std::f32::consts::FRAC_PI_2),
+    );
+}
+
 /// Calculate a win/loss rate summary string like " - 5W/3L (63%)".
 fn win_rate_label(replays: &[ReplayEntry]) -> String {
     let (wins, losses) = replays.iter().fold((0u32, 0u32), |(w, l), (_, replay)| match replay.read().battle_result() {
@@ -4694,14 +4711,36 @@ impl ToolkitTabViewer<'_> {
 
             {
                 let panel_id = egui::Id::new("replay_listing_panel");
+                let collapsed_before = self.tab_state.persisted.read().settings.replay.listing_collapsed;
+                // `show_collapsible` tracks the expanded state, and flips it itself when the
+                // user drags or double-clicks the resize edge.
+                let mut expanded = !collapsed_before;
+
+                egui::Panel::left("replay_listing_rail")
+                    .exact_size(20.0)
+                    .resizable(false)
+                    .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::same(0)))
+                    .show(ui, |ui| {
+                        let icon = if expanded { icons::CARET_LEFT } else { icons::CARET_RIGHT };
+                        let tooltip =
+                            if expanded { t!("ui.replay.collapse_listing") } else { t!("ui.replay.expand_listing") };
+                        if ui.add(egui::Button::new(icon).frame(false)).on_hover_text(tooltip).clicked() {
+                            expanded = !expanded;
+                        }
+                        if !expanded {
+                            paint_vertical_caption(ui, ui.max_rect(), 28.0, &t!("ui.replay.listing_caption"));
+                        }
+                    });
 
                 // Auto-size the panel to the widest label when files are first populated.
-                // Uses a flag on TabState (not egui temp data) to survive GC.
+                // Uses a flag on TabState (not egui temp data) to survive GC. Deferred while
+                // collapsed, so re-expanding does not clobber a width the user chose.
                 let has_files = self.tab_state.replay_files.as_ref().is_some_and(|f| !f.is_empty());
 
                 let mut default_width = 250.0f32;
 
                 if has_files
+                    && expanded
                     && !self.tab_state.replay_listing_auto_sized
                     && let Some(metadata_provider) = self.metadata_provider()
                 {
@@ -4749,11 +4788,17 @@ impl ToolkitTabViewer<'_> {
                         top: 2,
                         bottom: 2,
                     }))
-                    .show(ui, |ui| {
+                    .show_collapsible(ui, &mut expanded, |ui| {
                         egui::ScrollArea::both().id_salt("replay_listing_scroll_area").show(ui, |ui| {
                             self.build_file_listing(ui);
                         });
                     });
+
+                // `show_collapsible` may have flipped `expanded` itself via a resize drag or a
+                // double-click on the edge, so persist on any change, not just a caret click.
+                if expanded == collapsed_before {
+                    self.tab_state.persisted.write().settings.replay.listing_collapsed = !expanded;
+                }
             }
 
             egui::CentralPanel::default().show(ui, |ui| {
