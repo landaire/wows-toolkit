@@ -122,7 +122,7 @@ pub struct RealtimeArmorViewer {
     command_tx: Option<std::sync::mpsc::Sender<crate::replay::renderer::PlaybackCommand>>,
 
     /// Pre-computed shot timeline for this target ship (entire replay).
-    shot_timeline: Option<Arc<crate::replay::renderer::ShipShotTimeline>>,
+    shot_timeline: Option<Arc<crate::replay::timeline::ShipShotTimeline>>,
 
     /// Whether the pre-computed timeline has been ingested into salvo_groups.
     timeline_ingested: bool,
@@ -1132,7 +1132,7 @@ impl RealtimeArmorViewer {
             needs_sim.iter().map(|&i| self.salvo_groups[group_idx].shells[i].shot_id).collect();
 
         // Find matching PreExtractedHits from the timeline
-        let mut hit_map: HashMap<ShotId, &crate::replay::renderer::PreExtractedHit> = HashMap::new();
+        let mut hit_map: HashMap<ShotId, &crate::replay::timeline::PreExtractedHit> = HashMap::new();
         for pre_hit in &timeline.hits {
             if shot_ids_to_sim.contains(&pre_hit.hit.hit.shot_id) {
                 hit_map.insert(pre_hit.hit.hit.shot_id, pre_hit);

@@ -59,7 +59,6 @@ const SNAPSHOTS_PER_SECOND: f32 = 1.5;
 const PLAYBACK_SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
 use crate::replay::minimap_view::Annotation;
 use crate::replay::minimap_view::AnnotationState;
-use crate::replay::minimap_view::ENEMY_COLOR;
 use crate::replay::minimap_view::MapTransform;
 use crate::replay::minimap_view::OverlayState;
 use crate::replay::minimap_view::PaintTool;
@@ -71,13 +70,12 @@ use crate::replay::minimap_view::send_annotation_clear;
 use crate::replay::minimap_view::send_annotation_full_sync;
 use crate::replay::minimap_view::send_annotation_remove;
 use crate::replay::minimap_view::send_annotation_update;
-pub use crate::replay::timeline::PreExtractedHit;
-pub use crate::replay::timeline::ShipShotTimeline;
+use crate::replay::timeline::ShipShotTimeline;
 use crate::replay::timeline::TimelineEvent;
-use crate::replay::timeline::TimelineEventKind;
-use crate::replay::timeline::advantage_color;
-use crate::replay::timeline::event_color;
 use crate::replay::timeline::format_timeline_event;
+use crate::replay::timeline::ui::TimelineFilter;
+use crate::replay::timeline::ui::timeline_filter_bar;
+use crate::replay::timeline::ui::timeline_list;
 /// Extracted score bar state used for positioning the advantage label.
 struct ScoreBarInfo {
     team0_score: i32,
@@ -3211,7 +3209,7 @@ impl ReplayRendererViewer {
                                                 .fill(ui.style().visuals.window_fill.gamma_multiply(0.5)),
                                         )
                                         .show(|ui| {
-                                            ui.set_width(280.0);
+                                            ui.set_width(340.0);
                                             ui.horizontal(|ui| {
                                                 ui.label(egui::RichText::new(t!("ui.renderer.settings.event_timeline").as_ref()).strong());
                                                 ui.with_layout(
@@ -3232,122 +3230,39 @@ impl ReplayRendererViewer {
                                             });
                                             ui.separator();
 
+                                            let mut filter = ui.ctx().data_mut(|d| {
+                                                d.get_temp_mut_or_default::<TimelineFilter>(
+                                                    egui::Id::new("renderer_timeline_filter"),
+                                                )
+                                                .clone()
+                                            });
+                                            timeline_filter_bar(ui, &mut filter);
+                                            ui.ctx().data_mut(|d| {
+                                                d.insert_temp(egui::Id::new("renderer_timeline_filter"), filter.clone());
+                                            });
+                                            ui.separator();
+
                                             let state = shared_state.lock();
-                                            let viewer_team = state.viewer_team;
-                                            if let Some(events) = &state.timeline_events {
-                                                if events.is_empty() {
-                                                    ui.label("No significant events detected.");
-                                                } else {
+                                            match &state.timeline_events {
+                                                Some(events) => {
+                                                    let viewer_team = state.viewer_team;
+                                                    let mut seek_to = None;
                                                     egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                                                         ui.set_width(ui.available_width());
-                                                        for event in events {
-                                                            let mins = event.clock.seconds() as u32 / 60;
-                                                            let secs = event.clock.seconds() as u32 % 60;
-                                                            let timestamp = format!("{:02}:{:02}", mins, secs);
-
-                                                            let row = ui.horizontal(|ui| {
-                                                                let mut clicked = ui.small_button(&timestamp).clicked();
-
-                                                                let (color, text, hover) = match &event.kind {
-                                                                    TimelineEventKind::HealthLost {
-                                                                        ship_name, player_name, team,
-                                                                        percent_lost, old_hp, new_hp, max_hp,
-                                                                    } => {
-                                                                        let pct = (percent_lost * 100.0) as u32;
-                                                                        (
-                                                                            event_color(*team, viewer_team),
-                                                                            format!("{} -{}% HP", ship_name, pct),
-                                                                            format!("{} ({})\n{:.0}/{:.0} -> {:.0}/{:.0} HP",
-                                                                                ship_name, player_name, old_hp, max_hp, new_hp, max_hp),
-                                                                        )
-                                                                    }
-                                                                    TimelineEventKind::Death {
-                                                                        ship_name, player_name, team,
-                                                                        killer_ship, killer_player,
-                                                                    } => {
-                                                                        let hover = if killer_ship.is_empty() {
-                                                                            format!("{} ({})", ship_name, player_name)
-                                                                        } else {
-                                                                            format!("{} ({})\nKilled by {} ({})",
-                                                                                ship_name, player_name, killer_ship, killer_player)
-                                                                        };
-                                                                        (
-                                                                            event_color(*team, viewer_team),
-                                                                            format!("{} destroyed", ship_name),
-                                                                            hover,
-                                                                        )
-                                                                    }
-                                                                    TimelineEventKind::CapContested {
-                                                                        cap_label, owner_team,
-                                                                    } => (
-                                                                        owner_team
-                                                                            .map(|team| event_color(team, viewer_team))
-                                                                            .unwrap_or(ENEMY_COLOR),
-                                                                        format!("{} contested", cap_label),
-                                                                        String::new(),
-                                                                    ),
-                                                                    TimelineEventKind::CapFlipped {
-                                                                        cap_label, capturer_team,
-                                                                    } => (
-                                                                        event_color(*capturer_team, viewer_team),
-                                                                        format!("{} captured", cap_label),
-                                                                        String::new(),
-                                                                    ),
-                                                                    TimelineEventKind::CapBeingCaptured {
-                                                                        cap_label, capturer_team,
-                                                                    } => (
-                                                                        event_color(*capturer_team, viewer_team),
-                                                                        format!("{} being captured", cap_label),
-                                                                        String::new(),
-                                                                    ),
-                                                                    TimelineEventKind::RadarUsed {
-                                                                        ship_name, player_name, team,
-                                                                    } => (
-                                                                        event_color(*team, viewer_team),
-                                                                        format!("{} used radar", ship_name),
-                                                                        format!("{} ({})", ship_name, player_name),
-                                                                    ),
-                                                                    TimelineEventKind::AdvantageChanged {
-                                                                        label, is_friendly,
-                                                                    } => (advantage_color(*is_friendly), label.clone(), String::new()),
-                                                                    TimelineEventKind::Disconnected {
-                                                                        ship_name, player_name, team,
-                                                                    } => (
-                                                                        event_color(*team, viewer_team),
-                                                                        format!("{} disconnected", ship_name),
-                                                                        format!("{} ({})", ship_name, player_name),
-                                                                    ),
-                                                                };
-
-                                                                let label_resp = ui.add(
-                                                                    egui::Label::new(
-                                                                        egui::RichText::new(text).color(color),
-                                                                    )
-                                                                    .selectable(false)
-                                                                    .sense(egui::Sense::click()),
-                                                                );
-                                                                if !hover.is_empty() {
-                                                                    label_resp.clone().on_hover_text(&hover);
-                                                                }
-                                                                if label_resp.hovered() {
-                                                                    ui.ctx().set_cursor_icon(
-                                                                        egui::CursorIcon::PointingHand,
-                                                                    );
-                                                                }
-                                                                clicked |= label_resp.clicked();
-                                                                clicked
-                                                            });
-                                                            if row.inner {
-                                                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                                                let _ =
-                                                                    command_tx.send(PlaybackCommand::Seek(event.clock.to_absolute(battle_start)));
-                                                            }
-                                                        }
+                                                        timeline_list(ui, events, &filter, viewer_team, |event| {
+                                                            seek_to = Some(event.clock.to_absolute(battle_start));
+                                                        });
                                                     });
+                                                    drop(state);
+                                                    if let Some(clock) = seek_to {
+                                                        shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                                                        let _ = command_tx.send(PlaybackCommand::Seek(clock));
+                                                    }
                                                 }
-                                            } else {
-                                                ui.spinner();
-                                                ui.label("Parsing events...");
+                                                None => {
+                                                    ui.spinner();
+                                                    ui.label(t!("ui.replay.timeline_parsing"));
+                                                }
                                             }
                                         });
 

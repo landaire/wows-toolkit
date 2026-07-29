@@ -20,6 +20,7 @@ pub use wt_collab_egui::types::AnnotationShipConfig;
 pub use wt_collab_egui::types::AnnotationState;
 pub use wt_collab_egui::types::ENEMY_COLOR;
 pub use wt_collab_egui::types::FRIENDLY_COLOR;
+pub use wt_collab_egui::types::NEUTRAL_COLOR;
 pub use wt_collab_egui::types::PaintTool;
 /// Overlay controls visibility state. Persists across frames.
 pub struct OverlayState {

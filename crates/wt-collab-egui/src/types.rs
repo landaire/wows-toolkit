@@ -19,6 +19,10 @@ use wt_collab_protocol::types as wire;
 pub const SHIP_SPECIES: [&str; 5] = ["Destroyer", "Cruiser", "Battleship", "AirCarrier", "Submarine"];
 pub const FRIENDLY_COLOR: Color32 = Color32::from_rgb(76, 232, 170);
 pub const ENEMY_COLOR: Color32 = Color32::from_rgb(254, 77, 42);
+/// Mid-tone grey for a genuinely neutral state (e.g. a cap contested by both
+/// teams with no owner). Distinct from both team colors and legible against
+/// both light and dark panel fills.
+pub const NEUTRAL_COLOR: Color32 = Color32::from_rgb(158, 158, 158);
 
 // ─── Capture Point View ─────────────────────────────────────────────────────
 

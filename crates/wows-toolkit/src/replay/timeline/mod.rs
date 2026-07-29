@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use egui::Color32;
-
 use wows_battle_world::scan::WorldScanCollector;
 use wows_battle_world::scan::scan_replay_world;
 use wows_battle_world::view::BattleView;
@@ -22,10 +20,9 @@ use wowsunpack::recognized::Recognized;
 use wows_replays::analyzer::battle_controller::state::ControlPointType;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 
-use crate::replay::minimap_view::ENEMY_COLOR;
-use crate::replay::minimap_view::FRIENDLY_COLOR;
+pub(crate) mod ui;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) enum TimelineEventKind {
     HealthLost {
         ship_name: String,
@@ -71,7 +68,7 @@ pub(crate) enum TimelineEventKind {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct TimelineEvent {
     pub(crate) clock: ElapsedClock,
     pub(crate) kind: TimelineEventKind,
@@ -97,20 +94,6 @@ pub struct ShipShotTimeline {
     /// Health over time, keyed by GameClock. BTreeMap allows efficient
     /// lookup of health at any game clock via range queries.
     pub health_history: std::collections::BTreeMap<GameClock, HealthSnapshot>,
-}
-
-pub(crate) fn event_color(team: TeamId, viewer_team: Option<TeamId>) -> Color32 {
-    // Without a known viewer team every ship reads as an opponent, which is the
-    // safer default: it never claims an enemy is an ally.
-    match viewer_team {
-        Some(viewer) if viewer == team => FRIENDLY_COLOR,
-        _ => ENEMY_COLOR,
-    }
-}
-
-/// Advantage events are viewer-relative and carry no absolute team.
-pub(crate) fn advantage_color(is_friendly: bool) -> Color32 {
-    if is_friendly { FRIENDLY_COLOR } else { ENEMY_COLOR }
 }
 
 /// Capture points use a negative team id to mean "no team holds this".
