@@ -1,93 +1,93 @@
 ---
-source: crates/wows-toolkit/src/replay/renderer/timeline.rs
+source: crates/wows-toolkit/src/replay/timeline/mod.rs
 expression: snapshot
 ---
 battle_start_s: 27.938
 events:
   - clock_s: 95.609
-    kind: CapBeingCaptured(A)
+    kind: CapBeingCaptured(A team=1)
   - clock_s: 126.744
-    kind: CapBeingCaptured(C)
+    kind: CapBeingCaptured(C team=1)
   - clock_s: 127.071
-    kind: HealthLost(/sonacles pct=416 new_hp=32277)
+    kind: HealthLost(/sonacles team=1 pct=416 new_hp=32277)
   - clock_s: 133.083
-    kind: HealthLost(/Waffelbrueder pct=358 new_hp=42932)
+    kind: HealthLost(/Waffelbrueder team=0 pct=358 new_hp=42932)
   - clock_s: 157.274
-    kind: HealthLost(/sonacles pct=301 new_hp=14926)
+    kind: HealthLost(/sonacles team=1 pct=301 new_hp=14926)
   - clock_s: 164.853
-    kind: CapFlipped(A)
+    kind: CapFlipped(A team=1)
   - clock_s: 166.241
     kind: AdvantageChanged(Moderate advantage gained friendly=true)
   - clock_s: 185.728
-    kind: CapFlipped(C)
+    kind: CapFlipped(C team=1)
   - clock_s: 187.481
     kind: AdvantageChanged(Strong advantage gained friendly=true)
   - clock_s: 191.136
-    kind: CapContested(C)
+    kind: CapContested(C team=1)
   - clock_s: 193.567
     kind: AdvantageChanged(Dropped to Moderate advantage friendly=true)
   - clock_s: 196.563
-    kind: CapContested(A)
+    kind: CapContested(A team=1)
   - clock_s: 196.632
     kind: AdvantageChanged(Moderate advantage lost friendly=false)
   - clock_s: 205.703
     kind: AdvantageChanged(Moderate advantage gained friendly=true)
   - clock_s: 205.733
-    kind: CapBeingCaptured(B)
+    kind: CapBeingCaptured(B team=1)
   - clock_s: 211.938
-    kind: HealthLost(/Amok_Squirrel pct=404 new_hp=6003)
+    kind: HealthLost(/Amok_Squirrel team=1 pct=404 new_hp=6003)
   - clock_s: 264.763
-    kind: CapFlipped(B)
+    kind: CapFlipped(B team=1)
   - clock_s: 266.413
     kind: AdvantageChanged(Strong advantage gained friendly=true)
   - clock_s: 284.181
-    kind: CapFlipped(C)
+    kind: CapFlipped(C team=0)
   - clock_s: 284.693
     kind: AdvantageChanged(Dropped to Moderate advantage friendly=true)
   - clock_s: 295.993
-    kind: Death(/Amok_Squirrel)
+    kind: Death(/Amok_Squirrel team=1)
   - clock_s: 402.785
-    kind: HealthLost(/HAIY_KFC pct=658 new_hp=12379)
+    kind: HealthLost(/HAIY_KFC team=1 pct=658 new_hp=12379)
   - clock_s: 405.803
-    kind: HealthLost(/HAIY_KFC pct=259 new_hp=637)
+    kind: HealthLost(/HAIY_KFC team=1 pct=259 new_hp=637)
   - clock_s: 411.867
-    kind: HealthLost(/Killer211070 pct=420 new_hp=18474)
+    kind: HealthLost(/Killer211070 team=0 pct=420 new_hp=18474)
   - clock_s: 428.858
-    kind: Death(/andi9039)
+    kind: Death(/andi9039 team=0)
   - clock_s: 429.569
-    kind: CapBeingCaptured(B)
+    kind: CapBeingCaptured(B team=0)
   - clock_s: 430.04
-    kind: HealthLost(/andi9039 pct=1000 new_hp=0)
+    kind: HealthLost(/andi9039 team=0 pct=1000 new_hp=0)
   - clock_s: 432.859
-    kind: Death(/Killer211070)
+    kind: Death(/Killer211070 team=0)
   - clock_s: 436.124
     kind: AdvantageChanged(Strong advantage gained friendly=true)
   - clock_s: 436.124
-    kind: HealthLost(/Killer211070 pct=456 new_hp=0)
+    kind: HealthLost(/Killer211070 team=0 pct=456 new_hp=0)
   - clock_s: 475.869
-    kind: Death(/sonacles)
+    kind: Death(/sonacles team=1)
   - clock_s: 476.991
-    kind: CapContested(B)
+    kind: CapContested(B team=1)
   - clock_s: 478.466
     kind: AdvantageChanged(Dropped to Weak advantage friendly=true)
   - clock_s: 478.466
-    kind: HealthLost(/sonacles pct=326 new_hp=0)
+    kind: HealthLost(/sonacles team=1 pct=326 new_hp=0)
   - clock_s: 494.152
-    kind: Death(/Olrac69)
+    kind: Death(/Olrac69 team=0)
   - clock_s: 496.703
     kind: AdvantageChanged(Moderate advantage gained friendly=true)
   - clock_s: 496.703
-    kind: HealthLost(/Olrac69 pct=818 new_hp=0)
+    kind: HealthLost(/Olrac69 team=0 pct=818 new_hp=0)
   - clock_s: 502.737
-    kind: HealthLost(/xNeckro pct=263 new_hp=5376)
+    kind: HealthLost(/xNeckro team=0 pct=263 new_hp=5376)
   - clock_s: 505.77
-    kind: HealthLost(/xNeckro pct=320 new_hp=551)
+    kind: HealthLost(/xNeckro team=0 pct=320 new_hp=551)
   - clock_s: 506.322
-    kind: Death(/xNeckro)
+    kind: Death(/xNeckro team=0)
   - clock_s: 508.801
     kind: AdvantageChanged(Strong advantage gained friendly=true)
   - clock_s: 522.136
-    kind: Death(/HAIY_KFC)
+    kind: Death(/HAIY_KFC team=1)
   - clock_s: 524.595
     kind: AdvantageChanged(Dropped to Moderate advantage friendly=true)
   - clock_s: 533.651
@@ -97,27 +97,27 @@ events:
   - clock_s: 539.677
     kind: AdvantageChanged(Strong advantage gained friendly=true)
   - clock_s: 542.689
-    kind: HealthLost(/GrayGhos_CV6Enterprise pct=798 new_hp=6698)
+    kind: HealthLost(/GrayGhos_CV6Enterprise team=1 pct=798 new_hp=6698)
   - clock_s: 579.017
-    kind: HealthLost(/Ell1eEu_l2E pct=284 new_hp=46865)
+    kind: HealthLost(/Ell1eEu_l2E team=1 pct=284 new_hp=46865)
   - clock_s: 594.227
-    kind: HealthLost(/Rezzo_31 pct=514 new_hp=7275)
+    kind: HealthLost(/Rezzo_31 team=0 pct=514 new_hp=7275)
   - clock_s: 621.344
-    kind: Death(/Rezzo_31)
+    kind: Death(/Rezzo_31 team=0)
   - clock_s: 659.743
-    kind: Death(/dinamis66)
+    kind: Death(/dinamis66 team=0)
   - clock_s: 660.93
-    kind: HealthLost(/dinamis66 pct=889 new_hp=0)
+    kind: HealthLost(/dinamis66 team=0 pct=889 new_hp=0)
   - clock_s: 721.483
-    kind: HealthLost(/Waffelbrueder pct=344 new_hp=6386)
+    kind: HealthLost(/Waffelbrueder team=0 pct=344 new_hp=6386)
   - clock_s: 722.762
-    kind: Death(/Lutjens_G)
+    kind: Death(/Lutjens_G team=0)
   - clock_s: 724.536
-    kind: HealthLost(/Lutjens_G pct=501 new_hp=0)
+    kind: HealthLost(/Lutjens_G team=0 pct=501 new_hp=0)
   - clock_s: 726.15
-    kind: Death(/_Bignuts_)
+    kind: Death(/_Bignuts_ team=0)
   - clock_s: 727.551
-    kind: HealthLost(/_Bignuts_ pct=1000 new_hp=0)
+    kind: HealthLost(/_Bignuts_ team=0 pct=1000 new_hp=0)
 shot_counts:
   - entity_id: 968041
     shell_count: 39

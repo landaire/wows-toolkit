@@ -37,6 +37,7 @@ use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::data::Version;
+use wowsunpack::game_types::TeamId;
 use wowsunpack::vfs::VfsPath;
 
 use egui_taffy::AsTuiBuilder as _;
@@ -58,6 +59,7 @@ const SNAPSHOTS_PER_SECOND: f32 = 1.5;
 const PLAYBACK_SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
 use crate::replay::minimap_view::Annotation;
 use crate::replay::minimap_view::AnnotationState;
+use crate::replay::minimap_view::ENEMY_COLOR;
 use crate::replay::minimap_view::MapTransform;
 use crate::replay::minimap_view::OverlayState;
 use crate::replay::minimap_view::PaintTool;
@@ -73,6 +75,7 @@ pub use crate::replay::timeline::PreExtractedHit;
 pub use crate::replay::timeline::ShipShotTimeline;
 use crate::replay::timeline::TimelineEvent;
 use crate::replay::timeline::TimelineEventKind;
+use crate::replay::timeline::advantage_color;
 use crate::replay::timeline::event_color;
 use crate::replay::timeline::format_timeline_event;
 /// Extracted score bar state used for positioning the advantage label.
@@ -733,6 +736,8 @@ pub struct SharedRendererState {
     /// Absolute game clock at which the battle started (after pre-battle countdown).
     /// Used to convert between absolute clock (used by seeking) and elapsed time (used by timeline).
     pub battle_start: GameClock,
+    /// The replay owner's team, used to resolve absolute `TeamId`s on timeline events to friend/foe.
+    pub viewer_team: Option<TeamId>,
     /// Absolute game clock at which the battle ended (from the BattleEnd packet).
     /// None when the replay ends before the result is decided.
     pub battle_end: Option<GameClock>,
@@ -950,6 +955,7 @@ pub fn launch_replay_renderer(
         viewport_ctx: None,
         timeline_events: None,
         battle_start: GameClock(0.0),
+        viewer_team: None,
         battle_end: None,
         actual_game_duration: None,
         self_player_name: None,
@@ -1151,6 +1157,7 @@ pub fn launch_client_renderer(
         viewport_ctx: None,
         timeline_events: None,
         battle_start: GameClock(0.0),
+        viewer_team: None,
         battle_end: None,
         actual_game_duration: None,
         self_player_name: None,
@@ -3226,6 +3233,7 @@ impl ReplayRendererViewer {
                                             ui.separator();
 
                                             let state = shared_state.lock();
+                                            let viewer_team = state.viewer_team;
                                             if let Some(events) = &state.timeline_events {
                                                 if events.is_empty() {
                                                     ui.label("No significant events detected.");
@@ -3242,19 +3250,19 @@ impl ReplayRendererViewer {
 
                                                                 let (color, text, hover) = match &event.kind {
                                                                     TimelineEventKind::HealthLost {
-                                                                        ship_name, player_name, is_friendly,
+                                                                        ship_name, player_name, team,
                                                                         percent_lost, old_hp, new_hp, max_hp,
                                                                     } => {
                                                                         let pct = (percent_lost * 100.0) as u32;
                                                                         (
-                                                                            event_color(*is_friendly),
+                                                                            event_color(*team, viewer_team),
                                                                             format!("{} -{}% HP", ship_name, pct),
                                                                             format!("{} ({})\n{:.0}/{:.0} -> {:.0}/{:.0} HP",
                                                                                 ship_name, player_name, old_hp, max_hp, new_hp, max_hp),
                                                                         )
                                                                     }
                                                                     TimelineEventKind::Death {
-                                                                        ship_name, player_name, is_friendly,
+                                                                        ship_name, player_name, team,
                                                                         killer_ship, killer_player,
                                                                     } => {
                                                                         let hover = if killer_ship.is_empty() {
@@ -3264,46 +3272,48 @@ impl ReplayRendererViewer {
                                                                                 ship_name, player_name, killer_ship, killer_player)
                                                                         };
                                                                         (
-                                                                            event_color(*is_friendly),
+                                                                            event_color(*team, viewer_team),
                                                                             format!("{} destroyed", ship_name),
                                                                             hover,
                                                                         )
                                                                     }
                                                                     TimelineEventKind::CapContested {
-                                                                        cap_label, owner_is_friendly,
+                                                                        cap_label, owner_team,
                                                                     } => (
-                                                                        event_color(*owner_is_friendly),
+                                                                        owner_team
+                                                                            .map(|team| event_color(team, viewer_team))
+                                                                            .unwrap_or(ENEMY_COLOR),
                                                                         format!("{} contested", cap_label),
                                                                         String::new(),
                                                                     ),
                                                                     TimelineEventKind::CapFlipped {
-                                                                        cap_label, capturer_is_friendly,
+                                                                        cap_label, capturer_team,
                                                                     } => (
-                                                                        event_color(*capturer_is_friendly),
+                                                                        event_color(*capturer_team, viewer_team),
                                                                         format!("{} captured", cap_label),
                                                                         String::new(),
                                                                     ),
                                                                     TimelineEventKind::CapBeingCaptured {
-                                                                        cap_label, capturer_is_friendly,
+                                                                        cap_label, capturer_team,
                                                                     } => (
-                                                                        event_color(*capturer_is_friendly),
+                                                                        event_color(*capturer_team, viewer_team),
                                                                         format!("{} being captured", cap_label),
                                                                         String::new(),
                                                                     ),
                                                                     TimelineEventKind::RadarUsed {
-                                                                        ship_name, player_name, is_friendly,
+                                                                        ship_name, player_name, team,
                                                                     } => (
-                                                                        event_color(*is_friendly),
+                                                                        event_color(*team, viewer_team),
                                                                         format!("{} used radar", ship_name),
                                                                         format!("{} ({})", ship_name, player_name),
                                                                     ),
                                                                     TimelineEventKind::AdvantageChanged {
                                                                         label, is_friendly,
-                                                                    } => (event_color(*is_friendly), label.clone(), String::new()),
+                                                                    } => (advantage_color(*is_friendly), label.clone(), String::new()),
                                                                     TimelineEventKind::Disconnected {
-                                                                        ship_name, player_name, is_friendly,
+                                                                        ship_name, player_name, team,
                                                                     } => (
-                                                                        event_color(*is_friendly),
+                                                                        event_color(*team, viewer_team),
                                                                         format!("{} disconnected", ship_name),
                                                                         format!("{} ({})", ship_name, player_name),
                                                                     ),

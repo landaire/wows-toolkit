@@ -15,6 +15,7 @@ use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_types::TeamId;
 use wowsunpack::recognized::Recognized;
 
 use wows_replays::analyzer::battle_controller::state::ControlPointType;
@@ -27,7 +28,7 @@ pub(crate) enum TimelineEventKind {
     HealthLost {
         ship_name: String,
         player_name: String,
-        is_friendly: bool,
+        team: TeamId,
         percent_lost: f32,
         old_hp: f32,
         new_hp: f32,
@@ -36,26 +37,26 @@ pub(crate) enum TimelineEventKind {
     Death {
         ship_name: String,
         player_name: String,
-        is_friendly: bool,
+        team: TeamId,
         killer_ship: String,
         killer_player: String,
     },
     CapContested {
         cap_label: String,
-        owner_is_friendly: bool,
+        owner_team: Option<TeamId>,
     },
     CapFlipped {
         cap_label: String,
-        capturer_is_friendly: bool,
+        capturer_team: TeamId,
     },
     CapBeingCaptured {
         cap_label: String,
-        capturer_is_friendly: bool,
+        capturer_team: TeamId,
     },
     RadarUsed {
         ship_name: String,
         player_name: String,
-        is_friendly: bool,
+        team: TeamId,
     },
     AdvantageChanged {
         label: String,
@@ -64,7 +65,7 @@ pub(crate) enum TimelineEventKind {
     Disconnected {
         ship_name: String,
         player_name: String,
-        is_friendly: bool,
+        team: TeamId,
     },
 }
 
@@ -95,8 +96,23 @@ pub struct ShipShotTimeline {
     pub health_history: std::collections::BTreeMap<GameClock, HealthSnapshot>,
 }
 
-pub(crate) fn event_color(is_friendly: bool) -> Color32 {
+pub(crate) fn event_color(team: TeamId, viewer_team: Option<TeamId>) -> Color32 {
+    // Without a known viewer team every ship reads as an opponent, which is the
+    // safer default: it never claims an enemy is an ally.
+    match viewer_team {
+        Some(viewer) if viewer == team => FRIENDLY_COLOR,
+        _ => ENEMY_COLOR,
+    }
+}
+
+/// Advantage events are viewer-relative and carry no absolute team.
+pub(crate) fn advantage_color(is_friendly: bool) -> Color32 {
     if is_friendly { FRIENDLY_COLOR } else { ENEMY_COLOR }
+}
+
+/// Capture points use a negative team id to mean "no team holds this".
+fn cap_team(raw: i64) -> Option<TeamId> {
+    (raw >= 0).then(|| TeamId::new(raw))
 }
 
 pub(crate) fn format_timeline_event(event: &TimelineEvent) -> String {
@@ -144,6 +160,7 @@ pub(crate) struct TimelineExtractionResult {
     pub(crate) events: Vec<TimelineEvent>,
     pub(crate) battle_start: GameClock,
     pub(crate) battle_end: Option<GameClock>,
+    pub(crate) viewer_team: Option<TeamId>,
 }
 
 struct TimelineEventsCollector<'a> {
@@ -151,16 +168,16 @@ struct TimelineEventsCollector<'a> {
     events: Vec<TimelineEvent>,
     ship_names: HashMap<EntityId, String>,
     player_names: HashMap<EntityId, String>,
-    is_friendly: HashMap<EntityId, bool>,
-    viewer_team_id: Option<i64>,
+    teams: HashMap<EntityId, TeamId>,
+    viewer_team: Option<TeamId>,
     players_populated: bool,
     health_windows: HashMap<EntityId, (GameClock, f32)>,
     health_histories: HashMap<EntityId, std::collections::BTreeMap<GameClock, HealthSnapshot>>,
     last_health: HashMap<EntityId, f32>,
     last_kill_count: usize,
     cap_prev_contested: HashMap<usize, bool>,
-    cap_prev_team: HashMap<usize, i64>,
-    cap_prev_invader_team: HashMap<usize, i64>,
+    cap_prev_team: HashMap<usize, Option<TeamId>>,
+    cap_prev_invader_team: HashMap<usize, Option<TeamId>>,
     radar_counts: HashMap<EntityId, usize>,
     prev_advantage: wows_minimap_renderer::advantage::TeamAdvantage,
     advantage_check_clock: GameClock,
@@ -175,8 +192,8 @@ impl<'a> TimelineEventsCollector<'a> {
             events: Vec::new(),
             ship_names: HashMap::new(),
             player_names: HashMap::new(),
-            is_friendly: HashMap::new(),
-            viewer_team_id: None,
+            teams: HashMap::new(),
+            viewer_team: None,
             players_populated: false,
             health_windows: HashMap::new(),
             health_histories: HashMap::new(),
@@ -206,12 +223,11 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
                         self.ship_names.insert(*entity_id, ship_name);
                         self.player_names.insert(*entity_id, player.initial_state().username().to_string());
 
-                        let relation = player.relation();
-                        let friendly = relation.is_self() || relation.is_ally();
-                        self.is_friendly.insert(*entity_id, friendly);
+                        let team = TeamId::new(player.initial_state().team_id());
+                        self.teams.insert(*entity_id, team);
 
-                        if relation.is_self() {
-                            self.viewer_team_id = Some(player.initial_state().team_id());
+                        if player.relation().is_self() {
+                            self.viewer_team = Some(team);
                         }
                     }
                     self.players_populated = true;
@@ -231,16 +247,17 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
                 if let Some((window_start, health_at_start)) = self.health_windows.get_mut(&entity_id) {
                     if clock - *window_start >= 3.0 {
                         let loss = (*health_at_start - current_health) / max_health;
-                        if loss > 0.25 {
+                        if loss > 0.25
+                            && let Some(team) = self.teams.get(&entity_id).copied()
+                        {
                             let sname = self.ship_names.get(&entity_id).cloned().unwrap_or_default();
                             let pname = self.player_names.get(&entity_id).cloned().unwrap_or_default();
-                            let friendly = self.is_friendly.get(&entity_id).copied().unwrap_or(false);
                             self.events.push(TimelineEvent {
                                 clock: ElapsedClock(clock.seconds()),
                                 kind: TimelineEventKind::HealthLost {
                                     ship_name: sname,
                                     player_name: pname,
-                                    is_friendly: friendly,
+                                    team,
                                     percent_lost: loss,
                                     old_hp: *health_at_start,
                                     new_hp: current_health,
@@ -259,9 +276,11 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
             let kills = view.kills();
             if kills.len() > self.last_kill_count {
                 for kill in &kills[self.last_kill_count..] {
+                    let Some(team) = self.teams.get(&kill.victim).copied() else {
+                        continue;
+                    };
                     let victim_ship = self.ship_names.get(&kill.victim).cloned().unwrap_or_default();
                     let victim_player = self.player_names.get(&kill.victim).cloned().unwrap_or_default();
-                    let friendly = self.is_friendly.get(&kill.victim).copied().unwrap_or(false);
                     let killer_ship = self.ship_names.get(&kill.killer).cloned().unwrap_or_default();
                     let killer_player = self.player_names.get(&kill.killer).cloned().unwrap_or_default();
                     self.events.push(TimelineEvent {
@@ -269,7 +288,7 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
                         kind: TimelineEventKind::Death {
                             ship_name: victim_ship,
                             player_name: victim_player,
-                            is_friendly: friendly,
+                            team,
                             killer_ship,
                             killer_player,
                         },
@@ -278,7 +297,6 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
                 self.last_kill_count = kills.len();
             }
 
-            let viewer_team = self.viewer_team_id.unwrap_or(0);
             for cap in view.capture_points() {
                 let cap_idx = cap.index;
 
@@ -302,54 +320,49 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
                         clock: ElapsedClock(clock.seconds()),
                         kind: TimelineEventKind::CapContested {
                             cap_label: cap_label.clone(),
-                            owner_is_friendly: cap.team_id == viewer_team,
+                            owner_team: cap_team(cap.team_id),
                         },
                     });
                 }
                 self.cap_prev_contested.insert(cap_idx, cap.both_inside);
 
-                let prev_invader = self.cap_prev_invader_team.get(&cap_idx).copied().unwrap_or(-1);
-                if cap.invader_team >= 0 && prev_invader < 0 && !cap.both_inside {
-                    self.events.push(TimelineEvent {
-                        clock: ElapsedClock(clock.seconds()),
-                        kind: TimelineEventKind::CapBeingCaptured {
-                            cap_label: cap_label.clone(),
-                            capturer_is_friendly: cap.invader_team == viewer_team,
-                        },
-                    });
-                }
-                self.cap_prev_invader_team.insert(cap_idx, cap.invader_team);
-
-                if let Some(&prev_team) = self.cap_prev_team.get(&cap_idx)
-                    && cap.team_id != prev_team
-                    && cap.team_id >= 0
+                let prev_invader = self.cap_prev_invader_team.get(&cap_idx).copied().flatten();
+                if let Some(capturer_team) = cap_team(cap.invader_team)
+                    && prev_invader.is_none()
+                    && !cap.both_inside
                 {
                     self.events.push(TimelineEvent {
                         clock: ElapsedClock(clock.seconds()),
-                        kind: TimelineEventKind::CapFlipped {
-                            cap_label,
-                            capturer_is_friendly: cap.team_id == viewer_team,
-                        },
+                        kind: TimelineEventKind::CapBeingCaptured { cap_label: cap_label.clone(), capturer_team },
                     });
                 }
-                self.cap_prev_team.insert(cap_idx, cap.team_id);
+                self.cap_prev_invader_team.insert(cap_idx, cap_team(cap.invader_team));
+
+                let current_team = cap_team(cap.team_id);
+                if let Some(&prev_team) = self.cap_prev_team.get(&cap_idx)
+                    && current_team != prev_team
+                    && let Some(capturer_team) = current_team
+                {
+                    self.events.push(TimelineEvent {
+                        clock: ElapsedClock(clock.seconds()),
+                        kind: TimelineEventKind::CapFlipped { cap_label, capturer_team },
+                    });
+                }
+                self.cap_prev_team.insert(cap_idx, current_team);
             }
 
             for (entity_id, consumables) in view.active_consumables() {
                 let radar_count =
                     consumables.iter().filter(|c| c.consumable == Recognized::Known(Consumable::Radar)).count();
                 let prev_count = self.radar_counts.get(&entity_id).copied().unwrap_or(0);
-                if radar_count > prev_count {
+                if radar_count > prev_count
+                    && let Some(team) = self.teams.get(&entity_id).copied()
+                {
                     let sname = self.ship_names.get(&entity_id).cloned().unwrap_or_default();
                     let pname = self.player_names.get(&entity_id).cloned().unwrap_or_default();
-                    let friendly = self.is_friendly.get(&entity_id).copied().unwrap_or(false);
                     self.events.push(TimelineEvent {
                         clock: ElapsedClock(clock.seconds()),
-                        kind: TimelineEventKind::RadarUsed {
-                            ship_name: sname,
-                            player_name: pname,
-                            is_friendly: friendly,
-                        },
+                        kind: TimelineEventKind::RadarUsed { ship_name: sname, player_name: pname, team },
                     });
                 }
                 self.radar_counts.insert(entity_id, radar_count);
@@ -363,8 +376,12 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
 
                 self.advantage_check_clock = clock;
 
-                let viewer_team = self.viewer_team_id.unwrap_or(0);
-                let swap = viewer_team == 1;
+                // Advantage is computed relative to the viewer's team, so there is nothing
+                // meaningful to report until that team is known.
+                let Some(viewer_team) = self.viewer_team else {
+                    return;
+                };
+                let swap = viewer_team.raw() == 1;
 
                 let players = view.player_entities();
                 let all_vehicle_props = view.vehicle_props_all();
@@ -536,17 +553,15 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
         use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
         for (entity_id, player) in view.player_entities() {
             for info in player.connection_change_info().iter() {
-                if info.event_kind() == ConnectionChangeKind::Disconnected && !info.had_death_event() {
+                if info.event_kind() == ConnectionChangeKind::Disconnected
+                    && !info.had_death_event()
+                    && let Some(team) = self.teams.get(entity_id).copied()
+                {
                     let sname = self.ship_names.get(entity_id).cloned().unwrap_or_default();
                     let pname = self.player_names.get(entity_id).cloned().unwrap_or_default();
-                    let friendly = self.is_friendly.get(entity_id).copied().unwrap_or(false);
                     self.events.push(TimelineEvent {
                         clock: ElapsedClock(info.at_game_duration().as_secs_f32()),
-                        kind: TimelineEventKind::Disconnected {
-                            ship_name: sname,
-                            player_name: pname,
-                            is_friendly: friendly,
-                        },
+                        kind: TimelineEventKind::Disconnected { ship_name: sname, player_name: pname, team },
                     });
                 }
             }
@@ -612,7 +627,12 @@ pub(crate) fn extract_timeline_and_shots(
     }
     timeline_col.events.sort_by(|a, b| a.clock.cmp(&b.clock));
 
-    let timeline_result = TimelineExtractionResult { events: timeline_col.events, battle_start, battle_end };
+    let timeline_result = TimelineExtractionResult {
+        events: timeline_col.events,
+        battle_start,
+        battle_end,
+        viewer_team: timeline_col.viewer_team,
+    };
 
     for (eid, hh) in &timeline_col.health_histories {
         shot_col
@@ -710,29 +730,42 @@ mod extraction_snapshots {
         (v * 1000.0).round() / 1000.0
     }
 
+    fn team_label(team: Option<TeamId>) -> String {
+        match team {
+            Some(t) => t.to_string(),
+            None => "none".to_string(),
+        }
+    }
+
     fn event_kind_label(kind: &TimelineEventKind) -> String {
         match kind {
-            TimelineEventKind::HealthLost { ship_name, player_name, percent_lost, new_hp, .. } => {
+            TimelineEventKind::HealthLost { ship_name, player_name, team, percent_lost, new_hp, .. } => {
                 format!(
-                    "HealthLost({ship_name}/{player_name} pct={} new_hp={})",
+                    "HealthLost({ship_name}/{player_name} team={team} pct={} new_hp={})",
                     (percent_lost * 1000.0).round() as i64,
                     new_hp.round() as i64,
                 )
             }
-            TimelineEventKind::Death { ship_name, player_name, .. } => {
-                format!("Death({ship_name}/{player_name})")
+            TimelineEventKind::Death { ship_name, player_name, team, .. } => {
+                format!("Death({ship_name}/{player_name} team={team})")
             }
-            TimelineEventKind::CapContested { cap_label, .. } => format!("CapContested({cap_label})"),
-            TimelineEventKind::CapFlipped { cap_label, .. } => format!("CapFlipped({cap_label})"),
-            TimelineEventKind::CapBeingCaptured { cap_label, .. } => format!("CapBeingCaptured({cap_label})"),
-            TimelineEventKind::RadarUsed { ship_name, player_name, .. } => {
-                format!("RadarUsed({ship_name}/{player_name})")
+            TimelineEventKind::CapContested { cap_label, owner_team } => {
+                format!("CapContested({cap_label} team={})", team_label(*owner_team))
+            }
+            TimelineEventKind::CapFlipped { cap_label, capturer_team } => {
+                format!("CapFlipped({cap_label} team={capturer_team})")
+            }
+            TimelineEventKind::CapBeingCaptured { cap_label, capturer_team } => {
+                format!("CapBeingCaptured({cap_label} team={capturer_team})")
+            }
+            TimelineEventKind::RadarUsed { ship_name, player_name, team } => {
+                format!("RadarUsed({ship_name}/{player_name} team={team})")
             }
             TimelineEventKind::AdvantageChanged { label, is_friendly } => {
                 format!("AdvantageChanged({label} friendly={is_friendly})")
             }
-            TimelineEventKind::Disconnected { ship_name, player_name, .. } => {
-                format!("Disconnected({ship_name}/{player_name})")
+            TimelineEventKind::Disconnected { ship_name, player_name, team } => {
+                format!("Disconnected({ship_name}/{player_name} team={team})")
             }
         }
     }
