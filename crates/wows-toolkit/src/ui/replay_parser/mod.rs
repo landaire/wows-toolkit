@@ -3192,6 +3192,16 @@ fn copy_files_to_clipboard(paths: &[std::path::PathBuf]) {
     }
 }
 
+/// Label for the alt-perspective action, with a merge count when replays are
+/// already merged in.
+fn alt_perspective_label(replay_file: &Replay) -> String {
+    let mut label = wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.replay.load_alt_perspective"));
+    if !replay_file.alt_replays.is_empty() {
+        label.push_str(&format!(" ({})", replay_file.alt_replays.len()));
+    }
+    label
+}
+
 impl ToolkitTabViewer<'_> {
     fn metadata_provider(&self) -> Option<Arc<GameMetadataProvider>> {
         self.tab_state.world_of_warships_data.as_ref().and_then(|wows_data| wows_data.read().game_metadata.clone())
@@ -3302,10 +3312,68 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
 
-                ui.menu_button(t!("ui.replay.export"), |ui| {
-                    ui.label(RichText::new(t!("ui.replay.chat").as_ref()).strong());
+                ui.menu_button(t!("ui.replay.actions"), |ui| {
+                    ui.label(RichText::new(t!("ui.replay.section_match").as_ref()).strong());
+
+                    if ui.button(wt_translations::icon_t(icons::LIST_BULLETS, &t!("ui.replay.timeline"))).clicked() {
+                        ui.close_kind(UiKind::Menu);
+                    }
+
+                    if !self.tab_state.persisted.read().settings.game.wows_dir.is_empty()
+                        && replay_file.source_path.is_some()
+                    {
+                        if ui
+                            .button(wt_translations::icon_t(
+                                icons::GAME_CONTROLLER,
+                                &t!("ui.replay.context.open_in_game"),
+                            ))
+                            .clicked()
+                        {
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(
+                                    egui::Id::new("pending_confirmation_request"),
+                                    Some(crate::tab_state::ConfirmableAction::OpenInGame {
+                                        replay_path: replay_file.source_path.clone().unwrap(),
+                                    }),
+                                );
+                            });
+                            ui.close_kind(UiKind::Menu);
+                        }
+                        if ui
+                            .button(wt_translations::icon_t(
+                                icons::KEYBOARD,
+                                &t!("ui.replay.context.show_replay_controls"),
+                            ))
+                            .clicked()
+                        {
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
+                            });
+                            ui.close_kind(UiKind::Menu);
+                        }
+                    }
+
                     if ui
-                        .small_button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.replay.save_to_file")))
+                        .button(alt_perspective_label(replay_file))
+                        .on_hover_text(t!("ui.replay.load_alt_perspective_tooltip"))
+                        .clicked()
+                    {
+                        self.load_alt_perspective_action(ui, replay_file, replay_weak);
+                        ui.close_kind(UiKind::Menu);
+                    }
+
+                    if let Some(self_report) = self_report
+                        && self_report.is_test_ship()
+                        && ui.checkbox(&mut hide_my_stats, t!("ui.replay.hide_my_stats")).changed()
+                    {
+                        hide_my_stats_changed = true;
+                    }
+
+                    ui.separator();
+                    ui.label(RichText::new(t!("ui.replay.section_export").as_ref()).strong());
+
+                    if ui
+                        .button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.replay.export_chat_save")))
                         .clicked()
                     {
                         if let Some(path) = rfd::FileDialog::new()
@@ -3347,7 +3415,7 @@ impl ToolkitTabViewer<'_> {
                         }
                         ui.close_kind(UiKind::Menu);
                     }
-                    if ui.small_button(wt_translations::icon_t(icons::COPY, &t!("ui.buttons.copy"))).clicked() {
+                    if ui.button(wt_translations::icon_t(icons::COPY, &t!("ui.replay.export_chat_copy"))).clicked() {
                         let mut buf = BufWriter::new(Vec::new());
                         for message in report.game_chat() {
                             let GameMessage {
@@ -3381,13 +3449,11 @@ impl ToolkitTabViewer<'_> {
                         ui.close_kind(UiKind::Menu);
                     }
 
-                    ui.separator();
-                    ui.label(RichText::new(t!("ui.replay.export_results").as_ref()).strong());
-                    let format = if ui.button(t!("ui.settings.replay.format_json")).clicked() {
+                    let format = if ui.button(t!("ui.replay.export_results_json")).clicked() {
                         Some(ReplayExportFormat::Json)
-                    } else if ui.button(t!("ui.settings.replay.format_cbor")).clicked() {
+                    } else if ui.button(t!("ui.replay.export_results_cbor")).clicked() {
                         Some(ReplayExportFormat::Cbor)
-                    } else if ui.button(t!("ui.settings.replay.format_csv")).clicked() {
+                    } else if ui.button(t!("ui.replay.export_results_csv")).clicked() {
                         Some(ReplayExportFormat::Csv)
                     } else {
                         None
@@ -3426,49 +3492,33 @@ impl ToolkitTabViewer<'_> {
                             error!("Failed to write results to file: {}", e);
                         }
                     }
-                });
 
-                {
-                    let has_chat = !report.game_chat().is_empty();
-                    let show_chat: bool =
-                        ui.ctx().data(|d| d.get_temp(egui::Id::new("show_game_chat"))).unwrap_or(false);
-                    let response = ui.add_enabled(
-                        has_chat,
-                        egui::Button::new(wt_translations::icon_t(icons::CHAT_TEXT, &t!("ui.replay.chat")))
-                            .selected(show_chat),
-                    );
-                    if !has_chat {
-                        response.on_disabled_hover_text(t!("ui.replay.no_chat"));
-                    } else if response.clicked() {
-                        ui.ctx().data_mut(|d| {
-                            d.insert_temp(egui::Id::new("show_game_chat"), !show_chat);
-                        });
-                    }
-                }
+                    if self.tab_state.persisted.read().settings.app.debug_mode {
+                        ui.separator();
+                        ui.label(RichText::new(t!("ui.replay.section_debug").as_ref()).strong());
 
-                if self.tab_state.persisted.read().settings.app.debug_mode
-                    && ui.button(t!("ui.replay.debug.raw_metadata")).clicked()
-                {
-                    let parsed_meta: serde_json::Value = serde_json::from_str(&replay_file.replay_file.raw_meta)
-                        .expect("failed to parse replay metadata");
-                    let pretty_meta =
-                        serde_json::to_string_pretty(&parsed_meta).expect("failed to serialize replay metadata");
-                    let viewer = plaintext_viewer::PlaintextFileViewer {
-                        title: Arc::new("metadata.json".to_owned()),
-                        file_info: Arc::new(Mutex::new(FileType::PlainTextFile {
-                            ext: ".json".to_owned(),
-                            contents: pretty_meta,
-                        })),
-                        open: Arc::new(AtomicBool::new(true)),
-                    };
-                    self.tab_state.file_viewer.lock().push(viewer);
-                }
-                if self.tab_state.persisted.read().settings.app.debug_mode {
-                    let has_results = report.battle_results().is_some();
-                    ui.add_enabled_ui(has_results, |ui| {
-                        ui.menu_button(t!("ui.replay.debug.view_results"), |ui| {
+                        if ui.button(t!("ui.replay.debug.raw_metadata")).clicked() {
+                            let parsed_meta: serde_json::Value =
+                                serde_json::from_str(&replay_file.replay_file.raw_meta)
+                                    .expect("failed to parse replay metadata");
+                            let pretty_meta = serde_json::to_string_pretty(&parsed_meta)
+                                .expect("failed to serialize replay metadata");
+                            let viewer = plaintext_viewer::PlaintextFileViewer {
+                                title: Arc::new("metadata.json".to_owned()),
+                                file_info: Arc::new(Mutex::new(FileType::PlainTextFile {
+                                    ext: ".json".to_owned(),
+                                    contents: pretty_meta,
+                                })),
+                                open: Arc::new(AtomicBool::new(true)),
+                            };
+                            self.tab_state.file_viewer.lock().push(viewer);
+                            ui.close_kind(UiKind::Menu);
+                        }
+
+                        let has_results = report.battle_results().is_some();
+                        ui.add_enabled_ui(has_results, |ui| {
                             if ui
-                                .button(t!("ui.replay.debug.raw_json"))
+                                .button(t!("ui.replay.debug.results_raw_json"))
                                 .on_hover_text(t!("ui.replay.debug.raw_json_tooltip"))
                                 .clicked()
                             {
@@ -3490,7 +3540,7 @@ impl ToolkitTabViewer<'_> {
                                 ui.close_kind(UiKind::Menu);
                             }
                             if ui
-                                .button(t!("ui.replay.debug.mapped_json"))
+                                .button(t!("ui.replay.debug.results_mapped_json"))
                                 .on_hover_text(t!("ui.replay.debug.mapped_json_tooltip"))
                                 .clicked()
                             {
@@ -3512,37 +3562,26 @@ impl ToolkitTabViewer<'_> {
                                 ui.close_kind(UiKind::Menu);
                             }
                         });
-                    });
-                }
+                    }
+                });
 
-                if !self.tab_state.persisted.read().settings.game.wows_dir.is_empty()
-                    && replay_file.source_path.is_some()
                 {
-                    let alt_held = ui.input(|i| i.modifiers.alt);
-                    let label = if alt_held {
-                        wt_translations::icon_t(icons::KEYBOARD, &t!("ui.replay.context.show_replay_controls"))
-                    } else {
-                        wt_translations::icon_t(icons::GAME_CONTROLLER, &t!("ui.replay.context.open_in_game"))
-                    };
-                    if ui.button(label).clicked() {
-                        if alt_held {
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
-                            });
-                        } else {
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(
-                                    egui::Id::new("pending_confirmation_request"),
-                                    Some(crate::tab_state::ConfirmableAction::OpenInGame {
-                                        replay_path: replay_file.source_path.clone().unwrap(),
-                                    }),
-                                );
-                            });
-                        }
+                    let has_chat = !report.game_chat().is_empty();
+                    let show_chat: bool =
+                        ui.ctx().data(|d| d.get_temp(egui::Id::new("show_game_chat"))).unwrap_or(false);
+                    let response = ui.add_enabled(
+                        has_chat,
+                        egui::Button::new(wt_translations::icon_t(icons::CHAT_TEXT, &t!("ui.replay.chat")))
+                            .selected(show_chat),
+                    );
+                    if !has_chat {
+                        response.on_disabled_hover_text(t!("ui.replay.no_chat"));
+                    } else if response.clicked() {
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new("show_game_chat"), !show_chat);
+                        });
                     }
                 }
-
-                self.render_load_alt_perspective_button(ui, &*replay_file, replay_weak);
 
                 if self.tab_state.wows_data_map.is_some()
                     && ui.button(wt_translations::icon_t(icons::PLAY, &t!("ui.replay.render"))).clicked()
@@ -3599,13 +3638,6 @@ impl ToolkitTabViewer<'_> {
                         is_debug_mode,
                     );
                     self.tab_state.replay_renderers.lock().push(viewer);
-                }
-
-                if let Some(self_report) = self_report
-                    && self_report.is_test_ship()
-                    && ui.checkbox(&mut hide_my_stats, t!("ui.replay.hide_my_stats")).changed()
-                {
-                    hide_my_stats_changed = true;
                 }
             });
 
@@ -3942,29 +3974,13 @@ impl ToolkitTabViewer<'_> {
         self.handle_replay_open_actions(ui, &mut replay_to_open, &mut replay_to_open_new);
     }
 
-    /// Render the "Load Other Team Perspective" button inside a specific
-    /// replay's action row. On click, opens a file picker for another
-    /// `.wowsreplay` recording of the same match and validates it. If
-    /// valid, the freshly-loaded `ReplayFile` plus a Weak pointer to the
-    /// current Replay are stashed in egui's transient store for
-    /// [`handle_replay_open_actions`] to pick up — that handler takes the
-    /// write lock, appends to `alt_replays`, and dispatches the re-parse.
-    fn render_load_alt_perspective_button(
-        &self,
-        ui: &mut egui::Ui,
-        replay_file: &Replay,
-        replay_weak: &Weak<RwLock<Replay>>,
-    ) {
-        let merge_count = replay_file.alt_replays.len();
-        let mut label = wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.replay.load_alt_perspective"));
-        if merge_count > 0 {
-            label.push_str(&format!(" ({})", merge_count));
-        }
-
-        if !ui.button(label).on_hover_text(t!("ui.replay.load_alt_perspective_tooltip")).clicked() {
-            return;
-        }
-
+    /// Opens a file picker for another `.wowsreplay` recording of the same
+    /// match and validates it. If valid, the freshly-loaded `ReplayFile`
+    /// plus a Weak pointer to the current Replay are stashed in egui's
+    /// transient store for [`handle_replay_open_actions`] to pick up -
+    /// that handler takes the write lock, appends to `alt_replays`, and
+    /// dispatches the re-parse.
+    fn load_alt_perspective_action(&self, ui: &mut egui::Ui, replay_file: &Replay, replay_weak: &Weak<RwLock<Replay>>) {
         let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() else {
             return;
         };
@@ -4035,7 +4051,7 @@ impl ToolkitTabViewer<'_> {
             *replay_to_open_new = Some(replay);
         }
 
-        // `render_load_alt_perspective_button` stashes a (Weak, ReplayFile)
+        // `load_alt_perspective_action` stashes a (Weak, ReplayFile)
         // here after validating a candidate. The write guard inside
         // `build_replay_view` is gone by the time we get here, so we can
         // safely take a fresh write lock to push the alt and then kick off
