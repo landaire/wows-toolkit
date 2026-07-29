@@ -1623,16 +1623,17 @@ impl UiReport {
                     // The flame is what says the leading figure is fires; the
                     // clipboard form spells it out in words instead, since an
                     // icon-font codepoint pasted elsewhere is a blank box.
-                    plain(
-                        ui,
-                        RichText::new(wt_translations::icon_t(
-                            icons::FIRE,
-                            &fire_chance_counts_text(fire_chance.fires, fire_chance.eligible_hits),
-                        ))
-                        .strong(),
-                    );
+                    // Observed and expected sit together: comparing them is the
+                    // point of the statistic, so they must not be split apart.
                     ui.horizontal(|ui| {
-                        plain(ui, RichText::new(fire_chance_ships_text(fire_chance)).weak());
+                        plain(
+                            ui,
+                            RichText::new(wt_translations::icon_t(
+                                icons::FIRE,
+                                &fire_chance_counts_text(fire_chance.fires, fire_chance.eligible_hits),
+                            ))
+                            .strong(),
+                        );
                         if let Some(expected) = fire_chance.expected_fires {
                             plain(
                                 ui,
@@ -1644,6 +1645,7 @@ impl UiReport {
                             );
                         }
                     });
+                    plain(ui, RichText::new(fire_chance_ships_text(fire_chance)).weak());
                 }
             })
             .response
@@ -1682,7 +1684,7 @@ impl UiReport {
                 // indented beneath. One line carrying all four would set the
                 // width of the name column, which clips rather than wraps.
                 egui::Grid::new(ui.id().with("fire_chance_per_ship"))
-                    .num_columns(2)
+                    .num_columns(3)
                     .spacing([12.0, 2.0])
                     .striped(true)
                     .show(ui, |ui| {
@@ -1692,23 +1694,23 @@ impl UiReport {
                                 Some(rate) => ui.label(format!("{:.1}%", rate * 100.0)),
                                 None => ui.weak(t!("ui.replay.sections.fire_chance_no_eligible_hits")),
                             };
+                            match ship.expected_rate() {
+                                Some(expected) => ui.weak(format!(
+                                    "{} {:.1}%",
+                                    t!("ui.replay.sections.fire_chance_expected"),
+                                    expected * 100.0
+                                )),
+                                None => ui.label(""),
+                            };
                             ui.end_row();
 
                             if ship.rate().is_some() {
                                 ui.label("");
-                                ui.horizontal(|ui| {
-                                    ui.weak(wt_translations::icon_t(
-                                        icons::FIRE,
-                                        &fire_chance_counts_text(ship.fires, ship.eligible_hits),
-                                    ));
-                                    if let Some(expected) = ship.expected_rate() {
-                                        ui.weak(format!(
-                                            "{} {:.1}%",
-                                            t!("ui.replay.sections.fire_chance_expected"),
-                                            expected * 100.0
-                                        ));
-                                    }
-                                });
+                                ui.weak(wt_translations::icon_t(
+                                    icons::FIRE,
+                                    &fire_chance_counts_text(ship.fires, ship.eligible_hits),
+                                ));
+                                ui.label("");
                                 ui.end_row();
                             }
                         }
@@ -1717,6 +1719,7 @@ impl UiReport {
                         // player whose hull never resolved has no row to sit in.
                         if let Some(line) = fire_chance_no_target_ship_line(fire_chance) {
                             ui.weak(line);
+                            ui.label("");
                             ui.label("");
                             ui.end_row();
                         }
