@@ -3210,25 +3210,6 @@ impl ReplayRendererViewer {
                                         )
                                         .show(|ui| {
                                             ui.set_width(340.0);
-                                            ui.horizontal(|ui| {
-                                                ui.label(egui::RichText::new(t!("ui.renderer.settings.event_timeline").as_ref()).strong());
-                                                ui.with_layout(
-                                                    egui::Layout::right_to_left(egui::Align::Center),
-                                                    |ui| {
-                                                        let state = shared_state.lock();
-                                                        if let Some(events) = &state.timeline_events
-                                                            && ui.small_button(t!("ui.buttons.copy")).clicked() {
-                                                                let text: String = events
-                                                                    .iter()
-                                                                    .map(format_timeline_event)
-                                                                    .collect::<Vec<_>>()
-                                                                    .join("\n");
-                                                                ui.ctx().copy_text(text);
-                                                            }
-                                                    },
-                                                );
-                                            });
-                                            ui.separator();
 
                                             let mut filter = ui.ctx().data_mut(|d| {
                                                 d.get_temp_mut_or_default::<TimelineFilter>(
@@ -3236,6 +3217,34 @@ impl ReplayRendererViewer {
                                                 )
                                                 .clone()
                                             });
+
+                                            ui.horizontal(|ui| {
+                                                ui.label(egui::RichText::new(t!("ui.renderer.settings.event_timeline").as_ref()).strong());
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(egui::Align::Center),
+                                                    |ui| {
+                                                        let state = shared_state.lock();
+                                                        if let Some(events) = &state.timeline_events {
+                                                            let visible_count = events.iter().filter(|e| filter.matches(e)).count();
+                                                            if ui
+                                                                .add_enabled(visible_count > 0, egui::Button::new(t!("ui.buttons.copy")).small())
+                                                                .on_hover_text(t!("ui.replay.timeline_export_tooltip"))
+                                                                .clicked()
+                                                            {
+                                                                let text: String = events
+                                                                    .iter()
+                                                                    .filter(|e| filter.matches(e))
+                                                                    .map(format_timeline_event)
+                                                                    .collect::<Vec<_>>()
+                                                                    .join("\n");
+                                                                ui.ctx().copy_text(text);
+                                                            }
+                                                        }
+                                                    },
+                                                );
+                                            });
+                                            ui.separator();
+
                                             timeline_filter_bar(ui, &mut filter);
                                             ui.ctx().data_mut(|d| {
                                                 d.insert_temp(egui::Id::new("renderer_timeline_filter"), filter.clone());
@@ -3245,18 +3254,23 @@ impl ReplayRendererViewer {
                                             let state = shared_state.lock();
                                             match &state.timeline_events {
                                                 Some(events) => {
-                                                    let viewer_team = state.viewer_team;
-                                                    let mut seek_to = None;
-                                                    egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
-                                                        ui.set_width(ui.available_width());
-                                                        timeline_list(ui, events, &filter, viewer_team, |event| {
-                                                            seek_to = Some(event.clock.to_absolute(battle_start));
+                                                    let visible_count = events.iter().filter(|e| filter.matches(e)).count();
+                                                    if !events.is_empty() && visible_count == 0 {
+                                                        ui.label(t!("ui.replay.timeline_no_matches"));
+                                                    } else {
+                                                        let viewer_team = state.viewer_team;
+                                                        let mut seek_to = None;
+                                                        egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                                                            ui.set_width(ui.available_width());
+                                                            timeline_list(ui, events, &filter, viewer_team, |event| {
+                                                                seek_to = Some(event.clock.to_absolute(battle_start));
+                                                            });
                                                         });
-                                                    });
-                                                    drop(state);
-                                                    if let Some(clock) = seek_to {
-                                                        shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                                        let _ = command_tx.send(PlaybackCommand::Seek(clock));
+                                                        drop(state);
+                                                        if let Some(clock) = seek_to {
+                                                            shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                                                            let _ = command_tx.send(PlaybackCommand::Seek(clock));
+                                                        }
                                                     }
                                                 }
                                                 None => {

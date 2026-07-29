@@ -9,7 +9,7 @@ use crate::replay::minimap_view::NEUTRAL_COLOR;
 use crate::replay::timeline::TimelineEvent;
 use crate::replay::timeline::TimelineEventKind;
 
-pub(crate) fn event_color(team: TeamId, viewer_team: Option<TeamId>) -> Color32 {
+fn event_color(team: TeamId, viewer_team: Option<TeamId>) -> Color32 {
     // Without a known viewer team every ship reads as an opponent, which is the
     // safer default: it never claims an enemy is an ally.
     match viewer_team {
@@ -19,14 +19,14 @@ pub(crate) fn event_color(team: TeamId, viewer_team: Option<TeamId>) -> Color32 
 }
 
 /// Advantage events are viewer-relative and carry no absolute team.
-pub(crate) fn advantage_color(is_friendly: bool) -> Color32 {
+fn advantage_color(is_friendly: bool) -> Color32 {
     if is_friendly { FRIENDLY_COLOR } else { ENEMY_COLOR }
 }
 
-pub(crate) const KIND_COUNT: usize = 8;
+const KIND_COUNT: usize = 8;
 
 /// Stable index per event kind, used to key the filter's checkbox array.
-pub(crate) fn kind_index(kind: &TimelineEventKind) -> usize {
+fn kind_index(kind: &TimelineEventKind) -> usize {
     match kind {
         TimelineEventKind::HealthLost { .. } => 0,
         TimelineEventKind::Death { .. } => 1,
@@ -114,15 +114,15 @@ fn row_content(kind: &TimelineEventKind, viewer_team: Option<TeamId>) -> (Color3
             };
             (event_color(*team, viewer_team), format!("{} destroyed", ship_name), hover)
         }
-        TimelineEventKind::CapContested { cap_label, owner_team } => (
+        TimelineEventKind::CapContested { cap_label, owner_team, .. } => (
             owner_team.map(|team| event_color(team, viewer_team)).unwrap_or(NEUTRAL_COLOR),
             format!("{} contested", cap_label),
             String::new(),
         ),
-        TimelineEventKind::CapFlipped { cap_label, capturer_team } => {
+        TimelineEventKind::CapFlipped { cap_label, capturer_team, .. } => {
             (event_color(*capturer_team, viewer_team), format!("{} captured", cap_label), String::new())
         }
-        TimelineEventKind::CapBeingCaptured { cap_label, capturer_team } => {
+        TimelineEventKind::CapBeingCaptured { cap_label, capturer_team, .. } => {
             (event_color(*capturer_team, viewer_team), format!("{} being captured", cap_label), String::new())
         }
         TimelineEventKind::RadarUsed { ship_name, player_name, team } => (
@@ -250,11 +250,51 @@ mod tests {
     #[test]
     fn kind_indices_are_distinct_across_all_eight_kinds() {
         // A collision would make one checkbox silently toggle two kinds.
-        let mut seen = [false; 8];
-        for idx in [kind_index(&death("x", "y").kind), kind_index(&radar("x").kind)] {
+        let kinds = [
+            TimelineEventKind::HealthLost {
+                ship_name: "Yamato".to_owned(),
+                player_name: "a".to_owned(),
+                team: TeamId::new(0),
+                percent_lost: 0.1,
+                old_hp: 100.0,
+                new_hp: 90.0,
+                max_hp: 100.0,
+            },
+            TimelineEventKind::Death {
+                ship_name: "Yamato".to_owned(),
+                player_name: "a".to_owned(),
+                team: TeamId::new(0),
+                killer_ship: String::new(),
+                killer_player: String::new(),
+            },
+            TimelineEventKind::CapContested { cap_label: "A".to_owned(), cap_index: 0, owner_team: None },
+            TimelineEventKind::CapFlipped { cap_label: "A".to_owned(), cap_index: 0, capturer_team: TeamId::new(0) },
+            TimelineEventKind::CapBeingCaptured {
+                cap_label: "A".to_owned(),
+                cap_index: 0,
+                capturer_team: TeamId::new(0),
+            },
+            TimelineEventKind::RadarUsed {
+                ship_name: "Gearing".to_owned(),
+                player_name: "a".to_owned(),
+                team: TeamId::new(0),
+            },
+            TimelineEventKind::AdvantageChanged { label: "adv".to_owned(), is_friendly: true },
+            TimelineEventKind::Disconnected {
+                ship_name: "Yamato".to_owned(),
+                player_name: "a".to_owned(),
+                team: TeamId::new(0),
+            },
+        ];
+
+        let mut seen = [false; KIND_COUNT];
+        for kind in &kinds {
+            let idx = kind_index(kind);
+            assert!(idx < KIND_COUNT, "index {idx} out of range");
             assert!(!seen[idx], "duplicate kind index {idx}");
             seen[idx] = true;
         }
+        assert!(seen.iter().all(|&s| s), "not all eight kind indices were covered");
     }
 
     #[test]
@@ -284,7 +324,11 @@ mod tests {
         let filter = TimelineFilter { search: "a".to_owned(), ..Default::default() };
         let event = TimelineEvent {
             clock: ElapsedClock(5.0),
-            kind: TimelineEventKind::CapFlipped { cap_label: "A".to_owned(), capturer_team: TeamId::new(0) },
+            kind: TimelineEventKind::CapFlipped {
+                cap_label: "A".to_owned(),
+                cap_index: 0,
+                capturer_team: TeamId::new(0),
+            },
         };
         assert!(filter.matches(&event));
     }

@@ -44,14 +44,17 @@ pub(crate) enum TimelineEventKind {
     },
     CapContested {
         cap_label: String,
+        cap_index: usize,
         owner_team: Option<TeamId>,
     },
     CapFlipped {
         cap_label: String,
+        cap_index: usize,
         capturer_team: TeamId,
     },
     CapBeingCaptured {
         cap_label: String,
+        cap_index: usize,
         capturer_team: TeamId,
     },
     RadarUsed {
@@ -337,6 +340,7 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
                         clock: ElapsedClock(clock.seconds()),
                         kind: TimelineEventKind::CapContested {
                             cap_label: cap_label.clone(),
+                            cap_index: cap_idx,
                             owner_team: cap_team(cap.team_id),
                         },
                     });
@@ -350,7 +354,11 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
                 {
                     self.events.push(TimelineEvent {
                         clock: ElapsedClock(clock.seconds()),
-                        kind: TimelineEventKind::CapBeingCaptured { cap_label: cap_label.clone(), capturer_team },
+                        kind: TimelineEventKind::CapBeingCaptured {
+                            cap_label: cap_label.clone(),
+                            cap_index: cap_idx,
+                            capturer_team,
+                        },
                     });
                 }
                 self.cap_prev_invader_team.insert(cap_idx, cap_team(cap.invader_team));
@@ -362,7 +370,7 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
                 {
                     self.events.push(TimelineEvent {
                         clock: ElapsedClock(clock.seconds()),
-                        kind: TimelineEventKind::CapFlipped { cap_label, capturer_team },
+                        kind: TimelineEventKind::CapFlipped { cap_label, cap_index: cap_idx, capturer_team },
                     });
                 }
                 self.cap_prev_team.insert(cap_idx, current_team);
@@ -710,9 +718,9 @@ fn dedup_key(event: &TimelineEvent) -> (u8, String, i64) {
             (0, format!("{ship_name}/{player_name}"), bucket)
         }
         TimelineEventKind::Death { ship_name, player_name, .. } => (1, format!("{ship_name}/{player_name}"), bucket),
-        TimelineEventKind::CapContested { cap_label, .. } => (2, cap_label.clone(), bucket),
-        TimelineEventKind::CapFlipped { cap_label, .. } => (3, cap_label.clone(), bucket),
-        TimelineEventKind::CapBeingCaptured { cap_label, .. } => (4, cap_label.clone(), bucket),
+        TimelineEventKind::CapContested { cap_index, .. } => (2, cap_index.to_string(), bucket),
+        TimelineEventKind::CapFlipped { cap_index, .. } => (3, cap_index.to_string(), bucket),
+        TimelineEventKind::CapBeingCaptured { cap_index, .. } => (4, cap_index.to_string(), bucket),
         TimelineEventKind::RadarUsed { ship_name, player_name, .. } => {
             (5, format!("{ship_name}/{player_name}"), bucket)
         }
@@ -848,13 +856,13 @@ mod extraction_snapshots {
             TimelineEventKind::Death { ship_name, player_name, team, .. } => {
                 format!("Death({ship_name}/{player_name} team={team})")
             }
-            TimelineEventKind::CapContested { cap_label, owner_team } => {
+            TimelineEventKind::CapContested { cap_label, owner_team, .. } => {
                 format!("CapContested({cap_label} team={})", team_label(*owner_team))
             }
-            TimelineEventKind::CapFlipped { cap_label, capturer_team } => {
+            TimelineEventKind::CapFlipped { cap_label, capturer_team, .. } => {
                 format!("CapFlipped({cap_label} team={capturer_team})")
             }
-            TimelineEventKind::CapBeingCaptured { cap_label, capturer_team } => {
+            TimelineEventKind::CapBeingCaptured { cap_label, capturer_team, .. } => {
                 format!("CapBeingCaptured({cap_label} team={capturer_team})")
             }
             TimelineEventKind::RadarUsed { ship_name, player_name, team } => {

@@ -4086,6 +4086,8 @@ impl ToolkitTabViewer<'_> {
             let mut guard = arc.write();
             guard.alt_replays.push(alt);
             let count = guard.alt_replays.len();
+            // The cached timeline is primary-only; force a re-extract/merge on next open.
+            guard.timeline = TimelineState::NotRequested;
             drop(guard);
             tracing::info!(player = %player, alt_count = count, "pushed alt-perspective; triggering re-parse");
             if let Some(deps) = self.tab_state.replay_dependencies() {
@@ -4747,22 +4749,6 @@ impl ToolkitTabViewer<'_> {
                 // user drags or double-clicks the resize edge.
                 let mut expanded = !collapsed_before;
 
-                egui::Panel::left("replay_listing_rail")
-                    .exact_size(20.0)
-                    .resizable(false)
-                    .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::same(0)))
-                    .show(ui, |ui| {
-                        let icon = if expanded { icons::CARET_LEFT } else { icons::CARET_RIGHT };
-                        let tooltip =
-                            if expanded { t!("ui.replay.collapse_listing") } else { t!("ui.replay.expand_listing") };
-                        if ui.add(egui::Button::new(icon).frame(false)).on_hover_text(tooltip).clicked() {
-                            expanded = !expanded;
-                        }
-                        if !expanded {
-                            paint_vertical_caption(ui, ui.max_rect(), 28.0, &t!("ui.replay.listing_caption"));
-                        }
-                    });
-
                 // Auto-size the panel to the widest label when files are first populated.
                 // Uses a flag on TabState (not egui temp data) to survive GC. Deferred while
                 // collapsed, so re-expanding does not clobber a width the user chose.
@@ -4823,6 +4809,22 @@ impl ToolkitTabViewer<'_> {
                         egui::ScrollArea::both().id_salt("replay_listing_scroll_area").show(ui, |ui| {
                             self.build_file_listing(ui);
                         });
+                    });
+
+                egui::Panel::left("replay_listing_rail")
+                    .exact_size(20.0)
+                    .resizable(false)
+                    .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::same(0)))
+                    .show(ui, |ui| {
+                        let icon = if expanded { icons::CARET_LEFT } else { icons::CARET_RIGHT };
+                        let tooltip =
+                            if expanded { t!("ui.replay.collapse_listing") } else { t!("ui.replay.expand_listing") };
+                        if ui.add(egui::Button::new(icon).frame(false)).on_hover_text(tooltip).clicked() {
+                            expanded = !expanded;
+                        }
+                        if !expanded {
+                            paint_vertical_caption(ui, ui.max_rect(), 28.0, &t!("ui.replay.listing_caption"));
+                        }
                     });
 
                 // `show_collapsible` may have flipped `expanded` itself via a resize drag or a
