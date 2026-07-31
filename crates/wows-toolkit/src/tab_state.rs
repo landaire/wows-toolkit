@@ -501,6 +501,9 @@ pub struct TabState {
     /// Whether the replay listing panel has been auto-sized to fit content.
     /// Reset when game state is cleared so the panel re-auto-sizes on next load.
     pub replay_listing_auto_sized: bool,
+    /// Whether large grouped listings have had their default collapse applied.
+    /// Reset when game state is cleared so the collapse re-applies on next load.
+    pub replay_listing_collapse_defaulted: bool,
     pub twitch_update_sender: Option<tokio::sync::mpsc::Sender<crate::twitch::TwitchUpdate>>,
     pub twitch_state: Arc<RwLock<TwitchState>>,
     pub markdown_cache: egui_commonmark::CommonMarkCache,
@@ -643,6 +646,7 @@ impl Default for TabState {
             replay_dock_state: egui_dock::DockState::new(vec![]),
             next_replay_tab_id: 0,
             replay_listing_auto_sized: false,
+            replay_listing_collapse_defaulted: false,
             twitch_update_sender: Default::default(),
             twitch_state: Default::default(),
             markdown_cache: Default::default(),
@@ -957,6 +961,7 @@ impl TabState {
         self.replay_row_summaries_generation = None;
         self.replay_rows_need_reindex_scan = false;
         self.replay_listing_auto_sized = false;
+        self.replay_listing_collapse_defaulted = false;
         self.browser_state = Default::default();
         {
             let mut p = self.persisted.write();
