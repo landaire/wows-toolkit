@@ -1235,4 +1235,43 @@ mod tests {
             "an unknown active_workspace_id must fall back to live_workspace"
         );
     }
+
+    /// `workspaces` is `pub`, so nothing stops a `LIVE` key from ending up in
+    /// it. All four accessors must still resolve to the `live_workspace`
+    /// field, not the map entry -- a map-first implementation would return
+    /// the decoy here instead.
+    #[test]
+    fn a_live_entry_in_the_map_is_ignored_by_every_accessor() {
+        let mut state = TabState::default();
+        state.live_workspace.root = Some(PathBuf::from("live"));
+        state.workspaces.insert(WorkspaceId::LIVE, ReplayWorkspace::new(Some(PathBuf::from("decoy"))));
+        let live_addr = &state.live_workspace as *const ReplayWorkspace as usize;
+
+        assert_eq!(
+            state.workspace(WorkspaceId::LIVE).expect("LIVE always resolves") as *const ReplayWorkspace as usize,
+            live_addr,
+            "workspace(LIVE) must ignore a LIVE entry in the map"
+        );
+        assert_eq!(
+            state.active_workspace() as *const ReplayWorkspace as usize,
+            live_addr,
+            "active_workspace() must ignore a LIVE entry in the map"
+        );
+        assert_eq!(
+            state.workspace_mut(WorkspaceId::LIVE).expect("LIVE always resolves") as *mut ReplayWorkspace as usize,
+            live_addr,
+            "workspace_mut(LIVE) must ignore a LIVE entry in the map"
+        );
+        assert_eq!(
+            state.active_workspace_mut() as *mut ReplayWorkspace as usize,
+            live_addr,
+            "active_workspace_mut() must ignore a LIVE entry in the map"
+        );
+
+        assert_eq!(
+            state.workspaces.get(&WorkspaceId::LIVE).and_then(|w| w.root.clone()),
+            Some(PathBuf::from("decoy")),
+            "the decoy map entry itself must be untouched"
+        );
+    }
 }

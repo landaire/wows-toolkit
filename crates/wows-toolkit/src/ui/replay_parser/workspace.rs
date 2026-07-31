@@ -213,10 +213,54 @@ mod tests {
         assert_ne!(date, ship, "a ship named like a date label must not share tree state");
     }
 
+    /// A minimal but real `ReplayTab`: an empty-params `GameMetadataProvider`
+    /// (no VFS needed) backing a `Replay` built from a hand-built `ReplayMeta`
+    /// round-tripped through `ReplayFile::from_decrypted_parts`, the same
+    /// entry point the app uses for a loaded replay's raw JSON.
+    fn test_replay_tab(id: u64) -> ReplayTab {
+        let meta = wows_replays::ReplayMeta {
+            matchGroup: None,
+            gameMode: 0,
+            gameType: None,
+            clientVersionFromExe: "0,0,0,0".to_string(),
+            scenarioUiCategoryId: None,
+            mapDisplayName: String::new(),
+            mapId: 0,
+            clientVersionFromXml: String::new(),
+            weatherParams: None,
+            duration: 0,
+            gameLogic: None,
+            name: String::new(),
+            scenario: String::new(),
+            playerID: wows_replays::types::AccountId(0),
+            vehicles: Vec::new(),
+            playersPerTeam: 0,
+            dateTime: String::new(),
+            mapName: String::new(),
+            playerName: String::new(),
+            scenarioConfigId: 0,
+            teamsCount: 0,
+            logic: None,
+            playerVehicle: String::new(),
+            battleDuration: None,
+        };
+        let meta_json = serde_json::to_vec(&meta).expect("ReplayMeta serializes");
+        let replay_file = wows_replays::ReplayFile::from_decrypted_parts(meta_json, Vec::new())
+            .expect("a ReplayMeta we just serialized parses back");
+        let resource_loader = Arc::new(
+            wowsunpack::game_params::provider::GameMetadataProvider::from_params_no_specs(Vec::new())
+                .expect("an empty param list is always valid"),
+        );
+        let replay = Arc::new(RwLock::new(Replay::new(replay_file, resource_loader)));
+        ReplayTab { replay, id }
+    }
+
     #[test]
     fn reset_clears_the_listing_but_keeps_the_root_and_an_in_flight_load() {
         let mut ws = ReplayWorkspace::new(Some(PathBuf::from("replays")));
         ws.replay_files = Some(HashMap::new());
+        ws.replay_dock_state.push_to_focused_leaf(test_replay_tab(0));
+        assert!(ws.replay_dock_state.iter_all_tabs().next().is_some(), "the tab was actually added before reset");
         ws.replay_row_summaries.insert(
             PathBuf::from("a.wowsreplay"),
             RowSummary {
