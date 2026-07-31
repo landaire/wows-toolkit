@@ -103,7 +103,7 @@ async fn several_sources_may_have_a_null_root_path() {
 }
 
 #[tokio::test]
-async fn live_source_id_is_deterministic_when_rows_exist() {
+async fn ensure_default_source_id_round_trips_through_live_source_id() {
     let pool = mem_pool().await;
     let now = Timestamp::from_second(1_700_000_000).unwrap();
     let created = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
@@ -123,4 +123,76 @@ async fn records_survive_the_migration_of_a_single_live_source() {
 
     let paths = query::record_paths_in_source(&pool, src).await.unwrap();
     assert!(paths.contains("a.wowsreplay"));
+}
+
+#[tokio::test]
+async fn migration_dedupes_two_live_sources_repointing_non_colliding_records() {
+    // mem_pool() already applied migration 008, so its indexes are in place.
+    // Drop them to rebuild the pre-008 shape the migration is meant to repair,
+    // then recreate the duplicate-live-source condition a racing first launch
+    // could leave behind.
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    sqlx::query("DROP INDEX idx_source_single_live").execute(&pool).await.unwrap();
+    sqlx::query("DROP INDEX idx_source_root_path").execute(&pool).await.unwrap();
+
+    let survivor = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+    let doomed_row: (i64,) = sqlx::query_as(
+        "INSERT INTO index_source (name, kind, root_path, added_at) VALUES (?1, ?2, ?3, ?4) RETURNING source_id",
+    )
+    .bind("Live replays (dup)")
+    .bind(SourceKind::Live.as_db_str())
+    .bind("D:/other/replays")
+    .bind(now.as_second())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let doomed = SourceId(doomed_row.0);
+    assert!(doomed.0 > survivor.0, "the doomed source must have the higher id for this scenario to be meaningful");
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_match(&pool, &sample_match(200)).await.unwrap();
+    query::upsert_match(&pool, &sample_match(300)).await.unwrap();
+
+    // Already on the survivor; the migration must leave it alone.
+    query::upsert_record(&pool, &sample_record(100, survivor, "a.wowsreplay")).await.unwrap();
+    // Only on the doomed source; the migration must repoint it onto the survivor.
+    query::upsert_record(&pool, &sample_record(200, doomed, "b.wowsreplay")).await.unwrap();
+    // Both sources independently indexed the same physical file (the two-writer
+    // race the migration is repairing): same arena and path, one row per source.
+    // The doomed copy must be dropped rather than repointed, because repointing
+    // it would collide with the survivor's own row at (source_id, replay_path).
+    query::upsert_record(&pool, &sample_record(300, survivor, "shared.wowsreplay")).await.unwrap();
+    query::upsert_record(&pool, &sample_record(300, doomed, "shared.wowsreplay")).await.unwrap();
+
+    // Run the real migration body, not a paraphrase, so this test cannot drift
+    // from what actually ships.
+    const DEDUPE_SQL: &str = include_str!("../migrations/008_source_uniqueness.sql");
+    sqlx::raw_sql(DEDUPE_SQL).execute(&pool).await.unwrap();
+
+    let live_sources: Vec<(i64,)> = sqlx::query_as("SELECT source_id FROM index_source WHERE kind = ?1")
+        .bind(SourceKind::Live.as_db_str())
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(live_sources, vec![(survivor.0,)], "exactly one live source must remain, at the lowest id");
+
+    let paths = query::record_paths_in_source(&pool, survivor).await.unwrap();
+    assert!(paths.contains("a.wowsreplay"), "the survivor's own record must be untouched");
+    assert!(paths.contains("b.wowsreplay"), "the non-colliding doomed record must be repointed onto the survivor");
+    assert!(paths.contains("shared.wowsreplay"), "the survivor's copy of the colliding record must remain");
+
+    let shared_rows: Vec<(i64, i64)> =
+        sqlx::query_as("SELECT source_id, arena_id FROM replay_record WHERE replay_path = 'shared.wowsreplay'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        shared_rows,
+        vec![(survivor.0, 300)],
+        "the doomed source's colliding copy must be dropped, not repointed"
+    );
+
+    let total: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM replay_record").fetch_one(&pool).await.unwrap();
+    assert_eq!(total.0, 3, "one duplicate record must be dropped; the other three must remain");
 }
