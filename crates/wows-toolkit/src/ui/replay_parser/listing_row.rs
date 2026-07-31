@@ -387,6 +387,129 @@ mod tests {
         assert_eq!(stats.outcome, MatchOutcome::Unknown);
         let line = stats_line(&identity(), &stats, ReplayGrouping::Date, Some("en-US"));
         assert!(line.contains("114,230"), "stats that do exist still render: {line:?}");
+
+        let visuals = egui::Visuals::dark();
+        let job = row_layout_job("Yamato - Ocean", &line, &stats, false, &visuals, test_font());
+        assert_eq!(identity_color(&job), visuals.text_color(), "an Unknown outcome must draw in the plain text colour");
+        assert!(!job.text.contains(crate::icons::TROPHY), "no result means no outcome glyph: {:?}", job.text);
+    }
+
+    fn test_font() -> egui::FontId {
+        // Deliberately not a style default, so a section that drops the passed
+        // `font_id` is visible in the assertions rather than coincidentally equal.
+        egui::FontId::proportional(17.5)
+    }
+
+    fn row_stats(outcome: MatchOutcome, in_division: bool) -> RowStats {
+        RowStats { outcome, damage: Some(1000), kills: Some(1), survived: Some(true), in_division, known: true }
+    }
+
+    /// Line 1's tint. `LayoutJob::append` coalesces adjacent runs that share a
+    /// `TextFormat`, so section indices past the first are not stable; only
+    /// section 0 is guaranteed to be the head of the identity text.
+    fn identity_color(job: &egui::text::LayoutJob) -> egui::Color32 {
+        job.sections[0].format.color
+    }
+
+    fn has_section_colored(job: &egui::text::LayoutJob, color: egui::Color32) -> bool {
+        job.sections.iter().any(|s| s.format.color == color)
+    }
+
+    #[test]
+    fn a_win_tints_line_one_with_the_win_colour() {
+        let visuals = egui::Visuals::dark();
+        let sem = crate::ui::theme::semantic::semantic(&visuals);
+        let job = row_layout_job(
+            "Yamato - Ocean",
+            "1,000  14:23:05",
+            &row_stats(MatchOutcome::Win, false),
+            false,
+            &visuals,
+            test_font(),
+        );
+        assert_eq!(identity_color(&job), sem.win);
+        assert!(job.text.starts_with("Yamato - Ocean"));
+    }
+
+    #[test]
+    fn a_loss_tints_line_one_with_the_loss_colour() {
+        let visuals = egui::Visuals::dark();
+        let sem = crate::ui::theme::semantic::semantic(&visuals);
+        let job = row_layout_job(
+            "Yamato - Ocean",
+            "1,000  14:23:05",
+            &row_stats(MatchOutcome::Loss, false),
+            false,
+            &visuals,
+            test_font(),
+        );
+        assert_eq!(identity_color(&job), sem.loss);
+        assert_ne!(sem.loss, sem.win, "the two outcomes must not resolve to the same colour");
+    }
+
+    #[test]
+    fn selection_overrides_the_outcome_tint() {
+        let visuals = egui::Visuals::dark();
+        let sem = crate::ui::theme::semantic::semantic(&visuals);
+        let stats = row_stats(MatchOutcome::Loss, false);
+        let job = row_layout_job("Yamato - Ocean", "1,000  14:23:05", &stats, true, &visuals, test_font());
+        assert_eq!(identity_color(&job), sem.text_strong, "a selected row reads against the selection fill");
+        assert!(
+            !has_section_colored(&job, sem.loss),
+            "the outcome tint must be gone everywhere it applied, trophy glyph included"
+        );
+    }
+
+    #[test]
+    fn the_outcome_glyph_appears_only_for_a_decided_match() {
+        let visuals = egui::Visuals::dark();
+        for outcome in [MatchOutcome::Win, MatchOutcome::Loss, MatchOutcome::Draw] {
+            let job = row_layout_job("id", "stats", &row_stats(outcome, false), false, &visuals, test_font());
+            assert!(job.text.contains(crate::icons::TROPHY), "{outcome:?} should carry the outcome glyph");
+        }
+        let job = row_layout_job("id", "stats", &row_stats(MatchOutcome::Unknown, false), false, &visuals, test_font());
+        assert!(!job.text.contains(crate::icons::TROPHY));
+    }
+
+    #[test]
+    fn the_division_glyph_appears_only_when_in_a_division() {
+        let visuals = egui::Visuals::dark();
+        let sem = crate::ui::theme::semantic::semantic(&visuals);
+        let solo = row_layout_job("id", "stats", &row_stats(MatchOutcome::Win, false), false, &visuals, test_font());
+        assert!(!solo.text.contains(crate::icons::USERS_THREE));
+        assert!(!has_section_colored(&solo, sem.division));
+
+        let div = row_layout_job("id", "stats", &row_stats(MatchOutcome::Win, true), false, &visuals, test_font());
+        assert!(div.text.contains(crate::icons::USERS_THREE));
+        assert!(has_section_colored(&div, sem.division), "the division glyph keeps its own colour, not the outcome's");
+        assert_ne!(sem.division, sem.win, "otherwise the colour assertion above proves nothing");
+    }
+
+    #[test]
+    fn the_stats_line_is_de_emphasised() {
+        let visuals = egui::Visuals::dark();
+        let sem = crate::ui::theme::semantic::semantic(&visuals);
+        let job = row_layout_job("id", "stats", &row_stats(MatchOutcome::Win, true), false, &visuals, test_font());
+        let last = job.sections.last().unwrap();
+        assert_eq!(last.format.color, sem.text_dim);
+        assert!(job.text.ends_with("\nstats"), "line 2 is the last section: {:?}", job.text);
+        assert_ne!(sem.text_dim, sem.win, "line 2 must not inherit line 1's tint");
+    }
+
+    #[test]
+    fn every_section_carries_the_passed_font_id() {
+        let visuals = egui::Visuals::dark();
+        let font = test_font();
+        // Both glyphs present and selection on, so every branch that appends a
+        // section is exercised in one job.
+        let job = row_layout_job("id", "stats", &row_stats(MatchOutcome::Win, true), true, &visuals, font.clone());
+        assert!(job.sections.len() >= 4, "expected at least identity, division, newline and stats runs");
+        for (i, section) in job.sections.iter().enumerate() {
+            assert_eq!(
+                section.format.font_id, font,
+                "section {i} dropped the caller's font and fell back to a default"
+            );
+        }
     }
 
     #[test]
@@ -441,13 +564,25 @@ mod tests {
     }
 
     #[test]
-    fn file_mtime_secs_reads_a_real_file_and_returns_none_for_a_missing_one() {
-        let dir = std::env::temp_dir().join("wt_listing_row_mtime_test");
+    fn file_mtime_secs_returns_whole_unix_seconds() {
+        // The exact value matters, not just that one is produced. `replay_index`
+        // records the mtime as whole seconds since the Unix epoch, and
+        // `row_freshness` compares the two for equality: a milliseconds or
+        // otherwise-shifted implementation here would mark every indexed replay
+        // Stale forever and re-parse the whole library on every launch.
+        let dir = std::env::temp_dir().join(format!("wt_listing_row_mtime_test_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("a.wowsreplay");
-        std::fs::write(&path, b"x").unwrap();
-        assert!(file_mtime_secs(&path).is_some());
+
+        let file = std::fs::File::create(&path).unwrap();
+        // Half a second past the mark, so a rounding implementation is caught too.
+        let known = std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_700_000_000_500);
+        file.set_modified(known).unwrap();
+        drop(file);
+
+        assert_eq!(file_mtime_secs(&path), Some(1_700_000_000));
         assert_eq!(file_mtime_secs(&dir.join("absent.wowsreplay")), None);
+
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
     }

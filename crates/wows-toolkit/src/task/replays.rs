@@ -817,6 +817,10 @@ fn parse_replay_data_in_background(
                             );
                         }
 
+                        // TODO: this might export data multiple times. The gate is only
+                        // `results_available`, not whether this replay has been parsed
+                        // before, so any path that re-parses an already-exported replay
+                        // rewrites its export file.
                         if results_available && data.data_export_settings.should_auto_export {
                             let export_path =
                                 data.data_export_settings.export_path.join(replay.better_file_name(&metadata_provider));
@@ -1057,13 +1061,13 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                         debug!("Skipping blacklisted replay at {}", path_str);
                     } else {
                         debug!("Attempting to parse replay at {}", path_str);
-                        // `indexed` is forced false: this loop has no live view of which
-                        // paths are already indexed, so reconcile_one's indexed-and-sent
-                        // skip never applies and every message still gets parsed, matching
-                        // prior behavior. Mark sent only when the parse fully completed and
-                        // the upload succeeded; transient conditions are left for a later
-                        // attempt. A hard failure or panic is caught by reconcile_one and
-                        // blacklisted instead of unwinding through the receive loop.
+                        // `indexed` is forced false so reconcile_one's indexed-and-sent skip
+                        // cannot apply: a message on this channel is a request to parse this
+                        // file now, not a candidate for the startup ledger's skip. Mark sent
+                        // only when the parse fully completed and the upload succeeded;
+                        // transient conditions are left for a later attempt. A hard failure or
+                        // panic is caught by reconcile_one and blacklisted instead of unwinding
+                        // through the receive loop.
                         let outcome = crate::data::replay_reconcile::reconcile_one(
                             &path,
                             false,
@@ -1405,21 +1409,22 @@ fn run_reconcile_index(
 /// Load the replay-listing row summaries for the live source.
 ///
 /// Resolving the source and running the query both happen on this thread; the
-/// UI never blocks on the pool. `generation` is echoed back so the completion
-/// handler can tell whether a newer write landed while the query was running.
+/// UI never blocks on the pool. This is a read-only path: when the indexing
+/// thread has not created the live source yet there is nothing to summarise, so
+/// it yields an empty map rather than inserting a source row of its own.
 pub fn start_load_row_summaries(
     pool: sqlx::SqlitePool,
     tokio_runtime: Arc<tokio::runtime::Runtime>,
-    replays_dir: PathBuf,
     generation: u64,
 ) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
 
     crate::util::thread::spawn_logged("load-row-summaries", move || {
         let result = tokio_runtime.block_on(async {
-            let source =
-                crate::db::index::query::ensure_default_source(&pool, &replays_dir, jiff::Timestamp::now()).await?;
-            crate::db::index::query::row_summaries_for_source(&pool, source).await
+            match crate::db::index::query::live_source_id(&pool).await? {
+                Some(source) => crate::db::index::query::row_summaries_for_source(&pool, source).await,
+                None => Ok(HashMap::new()),
+            }
         });
 
         let completion = match result {

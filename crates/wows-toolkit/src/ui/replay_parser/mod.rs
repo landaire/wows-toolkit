@@ -3019,18 +3019,6 @@ impl Replay {
         self.battle_report.as_ref()
     }
 
-    pub fn label(&self, metadata_provider: &GameMetadataProvider) -> String {
-        [
-            self.vehicle_name(metadata_provider).as_str(),
-            self.map_name(metadata_provider).as_str(),
-            self.scenario(metadata_provider).as_str(),
-            self.game_mode(metadata_provider).as_str(),
-            self.game_time(),
-        ]
-        .iter()
-        .join("\n")
-    }
-
     pub fn better_file_name(&self, metadata_provider: &GameMetadataProvider) -> String {
         [
             self.vehicle_name(metadata_provider).as_str(),
@@ -3752,8 +3740,9 @@ impl ToolkitTabViewer<'_> {
             let row_summaries = &self.tab_state.replay_row_summaries;
             let font_id = egui::TextStyle::Body.resolve(ui.style());
 
-            // Two lines of body text plus the spacing egui inserts between widgets.
-            let row_height = ui.text_style_height(&egui::TextStyle::Body) * 2.0 + ui.spacing().item_spacing.y;
+            // `show_rows` takes the height without spacing and adds `item_spacing.y` itself,
+            // so this is just the two-line galley.
+            let row_height = ui.text_style_height(&egui::TextStyle::Body) * 2.0;
 
             egui::ScrollArea::both().id_salt("replay_listing_scroll_area").show_rows(
                 ui,
@@ -3888,7 +3877,7 @@ impl ToolkitTabViewer<'_> {
             let fallback_maps = tree_maps.clone();
             let visuals = ui.visuals().clone();
             let font_id = egui::TextStyle::Body.resolve(ui.style());
-            let row_summaries = self.tab_state.replay_row_summaries.clone();
+            let row_summaries = &self.tab_state.replay_row_summaries;
             let locale = self.tab_state.persisted.read().settings.app.locale.clone();
 
             if !self.tab_state.replay_listing_collapse_defaulted && files_len > LARGE_LISTING_THRESHOLD {
@@ -4790,7 +4779,9 @@ impl ToolkitTabViewer<'_> {
 
                 // Auto-size the panel to the widest label when files are first populated.
                 // Uses a flag on TabState (not egui temp data) to survive GC. Deferred while
-                // collapsed, so re-expanding does not clobber a width the user chose.
+                // collapsed, so re-expanding does not clobber a width the user chose, and
+                // deferred until a summary load has completed, since measuring before the
+                // stats line exists would latch a width fitted to "not indexed".
                 let has_files = self.tab_state.replay_files.as_ref().is_some_and(|f| !f.is_empty());
 
                 let mut default_width = 250.0f32;
@@ -4798,6 +4789,7 @@ impl ToolkitTabViewer<'_> {
                 if has_files
                     && expanded
                     && !self.tab_state.replay_listing_auto_sized
+                    && self.tab_state.replay_row_summaries_loaded
                     && let Some(metadata_provider) = self.metadata_provider()
                 {
                     let grouping = self.tab_state.persisted.read().settings.replay.grouping;
@@ -4954,9 +4946,9 @@ impl ToolkitTabViewer<'_> {
     }
 
     /// Reload the listing's index-sourced row data when the index has been
-    /// written since the cached map was built. `index_generation` is bumped
-    /// after every index write, so this is a cheap per-frame comparison rather
-    /// than a query.
+    /// written since the last load attempt. `index_generation` is bumped after
+    /// every index write, so this is a cheap per-frame comparison rather than a
+    /// query.
     fn refresh_row_summaries(&mut self) {
         let generation = crate::data::replay_index::index_generation();
         if !listing_row::should_reload_summaries(
@@ -4966,27 +4958,40 @@ impl ToolkitTabViewer<'_> {
         ) {
             return;
         }
+        // A configured replays dir is what makes a live index source possible at all,
+        // so it gates the load even though the query itself does not need the path.
         let deps = match (
             self.tab_state.db_pool.as_ref(),
             self.tab_state.tokio_runtime.as_ref(),
             self.tab_state.replays_dir.as_ref(),
         ) {
-            (Some(pool), Some(rt), Some(dir)) => Some((pool.clone(), Arc::clone(rt), dir.clone())),
+            (Some(pool), Some(rt), Some(_)) => Some((pool.clone(), Arc::clone(rt))),
             _ => None,
         };
-        let Some((pool, rt, dir)) = deps else {
+        let Some((pool, rt)) = deps else {
             return;
         };
+        // Stamped here rather than on completion so a query that keeps failing does not
+        // re-dispatch on every frame. The next attempt waits for the index to move again.
         self.tab_state.replay_row_summaries_loading = true;
+        self.tab_state.replay_row_summaries_generation = Some(generation);
         crate::update_background_task!(
             self.tab_state.background_tasks,
-            Some(crate::task::start_load_row_summaries(pool, rt, dir, generation))
+            Some(crate::task::start_load_row_summaries(pool, rt, generation))
         );
     }
 
-    /// Hand every listed replay whose index row is absent or out of date to the
-    /// background parser. `ModifiedReplay` re-parses and re-indexes without
-    /// re-uploading, which is exactly the semantics wanted here.
+    /// Hand every listed replay whose index row is out of date to the background
+    /// parser. `ModifiedReplay` re-parses and re-indexes without re-uploading,
+    /// which is exactly the semantics wanted here.
+    ///
+    /// Only `Stale` is queued. Detecting mtime drift is what this scan uniquely
+    /// knows how to do; a replay with no index row at all belongs to the parser
+    /// thread's startup walk, which already carries `record_paths_in_source` as
+    /// its ledger. Queueing `Missing` here would re-parse everything that walk
+    /// just handled, re-run auto-export over the whole library, and re-parse on
+    /// every launch forever for old-version replays that can never index because
+    /// their build data is not downloaded.
     fn queue_stale_rows_for_reindex(&mut self) {
         let Some(sender) = self.tab_state.background_parser_tx.as_ref() else {
             return;
@@ -5001,7 +5006,7 @@ impl ToolkitTabViewer<'_> {
             }
             let summary = self.tab_state.replay_row_summaries.get(path);
             let freshness = listing_row::row_freshness(summary, listing_row::file_mtime_secs(path));
-            if matches!(freshness, listing_row::RowFreshness::Fresh) {
+            if !matches!(freshness, listing_row::RowFreshness::Stale) {
                 continue;
             }
             if sender.send(crate::task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path.clone())).is_ok() {

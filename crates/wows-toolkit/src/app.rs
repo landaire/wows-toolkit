@@ -1306,9 +1306,9 @@ impl WowsToolkitApp {
                         self.tab_state.toasts.lock().info(t!("ui.messages.replays_already_indexed", total = total));
                     }
                 }
-                BackgroundTaskCompletion::RowSummariesLoaded { summaries, generation } => {
+                BackgroundTaskCompletion::RowSummariesLoaded { summaries, .. } => {
                     self.tab_state.replay_row_summaries = summaries;
-                    self.tab_state.replay_row_summaries_generation = Some(generation);
+                    self.tab_state.replay_row_summaries_loaded = true;
                     self.tab_state.replay_rows_need_reindex_scan = true;
                 }
                 #[cfg(feature = "mod_manager")]

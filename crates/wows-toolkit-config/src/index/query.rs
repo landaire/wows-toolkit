@@ -38,7 +38,20 @@ use super::rows::SourceId;
 use super::rows::SourceKind;
 use super::rows::VehicleRelation;
 
-/// Return the id of the single `Live` source, creating it if absent.
+/// The live source's id, or `None` when the indexer has not created it yet.
+/// Readers must not create the row; that is the indexing path's job. A reader
+/// that inserted would race the indexing thread's non-atomic check-then-insert
+/// and could leave two `Live` rows behind.
+pub async fn live_source_id(pool: &SqlitePool) -> Result<Option<SourceId>, IndexError> {
+    let existing: Option<(i64,)> = sqlx::query_as("SELECT source_id FROM index_source WHERE kind = ?1 LIMIT 1")
+        .bind(SourceKind::Live.as_db_str())
+        .fetch_optional(pool)
+        .await?;
+    Ok(existing.map(|(id,)| SourceId(id)))
+}
+
+/// Return the id of the single `Live` source, creating it if absent. Only the
+/// indexing path may call this; readers use [`live_source_id`].
 pub async fn ensure_default_source(
     pool: &SqlitePool,
     root_path: &Path,
@@ -272,7 +285,9 @@ fn row_to_row_summary(row: &sqlx::sqlite::SqliteRow) -> Result<(PathBuf, RowSumm
         // An unrecognised stored string means the row predates a variant we
         // know; `Unknown` renders untinted, which is the honest fallback.
         outcome: MatchOutcome::from_db_str(&outcome_str).unwrap_or(MatchOutcome::Unknown),
-        self_damage: self_damage.map(|d| d as u64),
+        // A negative stored damage is nonsense; reading it as absent beats
+        // wrapping it into ~1.8e19 on the row.
+        self_damage: self_damage.and_then(|d| u64::try_from(d).ok()),
         self_kills: row.try_get("self_kills")?,
         self_survived: row.try_get::<Option<bool>, _>("self_survived")?,
         self_pr: row.try_get("self_pr")?,

@@ -484,12 +484,18 @@ pub struct TabState {
     /// Reloaded whenever `index_generation()` moves past
     /// `replay_row_summaries_generation`.
     pub replay_row_summaries: HashMap<PathBuf, crate::db::index::rows::RowSummary>,
-    /// The `index_generation()` value `replay_row_summaries` was built from.
-    /// `None` before the first load completes.
+    /// The `index_generation()` value of the most recent load *attempt*, stamped
+    /// when the task is dispatched rather than when it lands. A load that errors
+    /// therefore waits for the index to move again instead of re-dispatching on
+    /// every frame. `None` before the first attempt.
     pub replay_row_summaries_generation: Option<u64>,
     /// True while a summary load is in flight, so a slow query cannot spawn a
     /// second task on the next frame.
     pub replay_row_summaries_loading: bool,
+    /// True once a load has landed successfully. The listing's panel auto-size
+    /// waits on this: measuring before any summary exists would fit the panel to
+    /// the "not indexed" placeholder and latch that width for the session.
+    pub replay_row_summaries_loaded: bool,
     /// Set when a summary load lands, consumed by the listing to run one
     /// freshness scan over the listed files.
     pub replay_rows_need_reindex_scan: bool,
@@ -642,6 +648,7 @@ impl Default for TabState {
             replay_row_summaries: HashMap::new(),
             replay_row_summaries_generation: None,
             replay_row_summaries_loading: false,
+            replay_row_summaries_loaded: false,
             replay_rows_need_reindex_scan: false,
             replay_rows_reindex_requested: std::collections::HashSet::new(),
             file_receiver: None,
@@ -964,6 +971,7 @@ impl TabState {
         self.replay_files = None;
         self.replay_row_summaries.clear();
         self.replay_row_summaries_generation = None;
+        self.replay_row_summaries_loaded = false;
         self.replay_rows_need_reindex_scan = false;
         self.replay_rows_reindex_requested.clear();
         self.replay_listing_auto_sized = false;

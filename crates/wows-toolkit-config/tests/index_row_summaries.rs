@@ -98,6 +98,23 @@ fn sample_vehicle(arena: i64, account: i64, division: Option<i64>, relation: Veh
 }
 
 #[tokio::test]
+async fn live_source_id_is_none_until_the_indexer_creates_the_source() {
+    let pool = mem_pool().await;
+    assert_eq!(query::live_source_id(&pool).await.unwrap(), None, "a reader must not create the live source itself");
+
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let created = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+    assert_eq!(query::live_source_id(&pool).await.unwrap(), Some(created));
+}
+
+#[tokio::test]
+async fn live_source_id_ignores_sources_that_are_not_live() {
+    let pool = mem_pool().await;
+    make_source(&pool, "Imported", SourceKind::ImportedDir, "D:/dump").await;
+    assert_eq!(query::live_source_id(&pool).await.unwrap(), None, "only a Live source answers this lookup");
+}
+
+#[tokio::test]
 async fn row_summaries_resolve_division_through_the_account_join() {
     let pool = mem_pool().await;
     let now = Timestamp::from_second(1_700_000_000).unwrap();
@@ -175,6 +192,27 @@ async fn row_summaries_have_no_division_without_a_roster_row() {
     let summaries = query::row_summaries_for_source(&pool, src).await.unwrap();
     let row = summaries.get(&PathBuf::from("a.wowsreplay")).expect("summary for the recorded path");
     assert_eq!(row.division_id, None, "a missing roster must yield None, not a default of 0");
+}
+
+#[tokio::test]
+async fn a_negative_stored_damage_reads_as_absent() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "a.wowsreplay", Some(7))).await.unwrap();
+    // The typed API cannot write a negative, so go around it: the column is
+    // plain INTEGER and nothing stops an older or corrupted row from holding one.
+    sqlx::query("UPDATE replay_record SET self_damage = -1 WHERE replay_path = ?1")
+        .bind("a.wowsreplay")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let summaries = query::row_summaries_for_source(&pool, src).await.unwrap();
+    let row = summaries.get(&PathBuf::from("a.wowsreplay")).unwrap();
+    assert_eq!(row.self_damage, None, "a negative must read as absent, not wrap to ~1.8e19 on the row");
 }
 
 #[tokio::test]
