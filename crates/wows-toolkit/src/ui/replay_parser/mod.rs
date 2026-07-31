@@ -3953,9 +3953,13 @@ impl ToolkitTabViewer<'_> {
                                 &visuals,
                                 font_id.clone(),
                             );
+                            let hover = listing_row::hover_text(&identity, &stats, locale.as_deref());
                             let node = egui_ltreeview::NodeBuilder::leaf(id)
                                 .height(leaf_node_height)
-                                .label(label_text)
+                                .label_ui(move |ui| {
+                                    ui.add(Label::new(label_text.clone()).selectable(false))
+                                        .on_hover_text(hover.clone());
+                                })
                                 .context_menu(move |ui| {
                                     show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir);
                                 });
