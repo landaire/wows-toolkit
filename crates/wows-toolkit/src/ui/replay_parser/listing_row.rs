@@ -28,6 +28,32 @@ impl RowIdentity {
     }
 }
 
+/// Drops a trailing `:SS` from a `HH:MM:SS`-shaped string, leaving anything
+/// else untouched. `Replay::game_time()` is the raw `dateTime` field from
+/// replay metadata, whose exact shape is not guaranteed across game versions,
+/// so this only acts once two-digit groups are confirmed on both sides of the
+/// last two colons (a plain `HH:MM` has only one colon, so its `MM` is never
+/// mistaken for seconds). No fixed-width slicing, so a shorter or
+/// differently-shaped string is returned unchanged rather than panicking.
+fn strip_seconds(time: &str) -> &str {
+    let two_digits = |s: &str| s.len() == 2 && s.bytes().all(|b| b.is_ascii_digit());
+
+    let Some(last_colon) = time.rfind(':') else { return time };
+    let seconds = &time[last_colon + 1..];
+    if !two_digits(seconds) {
+        return time;
+    }
+
+    let rest = &time[..last_colon];
+    let Some(prev_colon) = rest.rfind(':') else { return time };
+    let minutes = &rest[prev_colon + 1..];
+    if !two_digits(minutes) {
+        return time;
+    }
+
+    rest
+}
+
 /// Stats read off a fully parsed replay held in memory.
 pub(crate) struct ParsedStats {
     pub outcome: MatchOutcome,
@@ -93,25 +119,27 @@ pub(crate) fn identity_line(identity: &RowIdentity, grouping: ReplayGrouping) ->
 }
 
 /// The timestamp half of line 2: just the time when the group header already
-/// states the date, the full `dd.mm.yyyy HH:MM:SS` otherwise.
+/// states the date, the full `dd.mm.yyyy HH:MM` otherwise. Seconds are
+/// dropped in both cases so the value cannot be misread as a match duration.
 fn timestamp_for(identity: &RowIdentity, grouping: ReplayGrouping) -> String {
     match grouping {
-        ReplayGrouping::Date => identity.time_part().to_string(),
-        ReplayGrouping::Ship | ReplayGrouping::None => identity.date_time.clone(),
+        ReplayGrouping::Date => strip_seconds(identity.time_part()).to_string(),
+        ReplayGrouping::Ship | ReplayGrouping::None => strip_seconds(&identity.date_time).to_string(),
     }
 }
 
 /// Line 2 as drawn: icons instead of words, so adjacent stats never read as
 /// one phrase (a word-based "0 kills sunk" was misread as "2 sunk"). Survival
-/// is conveyed by the absence of the skull; nothing is drawn for it when the
-/// player survived or when survival is unknown.
+/// is not shown here at all; it costs no row width in the hover tooltip
+/// instead. The timestamp carries a clock glyph and drops its seconds so it
+/// cannot be misread as a match duration.
 pub(crate) fn stats_line(
     identity: &RowIdentity,
     stats: &RowStats,
     grouping: ReplayGrouping,
     locale: Option<&str>,
 ) -> String {
-    let when = timestamp_for(identity, grouping);
+    let when = format!("{} {}", crate::icons::CLOCK, timestamp_for(identity, grouping));
 
     if !stats.known {
         return format!("{}  {}", t!("ui.replay.row_not_indexed"), when);
@@ -123,9 +151,6 @@ pub(crate) fn stats_line(
     }
     if let Some(kills) = stats.kills {
         parts.push(format!("{} {}", crate::icons::SWORD, kills));
-    }
-    if stats.survived == Some(false) {
-        parts.push(crate::icons::SKULL.to_string());
     }
     parts.push(when);
     parts.join("  ")
@@ -347,6 +372,17 @@ mod tests {
     }
 
     #[test]
+    fn strip_seconds_drops_only_a_genuine_hh_mm_ss_tail() {
+        assert_eq!(strip_seconds("25.07.2026 16:35:06"), "25.07.2026 16:35");
+        // Already seconds-less: the lone colon pair must not be mistaken for
+        // minutes:seconds and truncated further.
+        assert_eq!(strip_seconds("16:35"), "16:35");
+        assert_eq!(strip_seconds(""), "");
+        // No space and no colons at all: nothing for the helper to find.
+        assert_eq!(strip_seconds("not_a_timestamp"), "not_a_timestamp");
+    }
+
+    #[test]
     fn identity_line_drops_the_field_its_group_already_states() {
         let id = identity();
         assert_eq!(identity_line(&id, ReplayGrouping::None), "Yamato - Ocean");
@@ -363,10 +399,15 @@ mod tests {
         assert!(line.contains("114,230"), "expected separated damage in {line:?}");
         assert!(line.contains(crate::icons::CROSSHAIR_SIMPLE), "expected the damage glyph in {line:?}");
         assert!(line.contains(&format!("{} 3", crate::icons::SWORD)), "expected the kill glyph and count in {line:?}");
-        // Date grouping heads the group with the date, so the row shows the time only.
-        assert!(line.contains("14:23:05"), "expected the time in {line:?}");
+        // Date grouping heads the group with the date, so the row shows the time
+        // only, clock-prefixed and with the seconds dropped.
+        assert!(
+            line.contains(&format!("{} 14:23", crate::icons::CLOCK)),
+            "expected the clock-prefixed time in {line:?}"
+        );
+        assert!(!line.contains("14:23:05"), "seconds must be dropped from the drawn row: {line:?}");
         assert!(!line.contains("28.07.2026"), "date is already in the group header: {line:?}");
-        assert!(!line.contains(crate::icons::SKULL), "the player survived, so no skull should render: {line:?}");
+        assert!(!line.contains(crate::icons::SKULL), "the skull glyph was removed from the drawn row: {line:?}");
     }
 
     #[test]
@@ -387,10 +428,31 @@ mod tests {
     }
 
     #[test]
-    fn stats_line_shows_the_full_timestamp_when_ungrouped() {
+    fn hover_text_shows_sunk_in_words_when_the_player_died() {
+        let died = RowSummary { self_survived: Some(false), ..summary() };
+        let stats = resolve_row_stats(None, Some(&died));
+        let hover = hover_text(&identity(), &stats, Some("en-US"));
+        assert!(hover.contains("Domination"), "scenario must survive in the tooltip: {hover:?}");
+        assert!(hover.contains("Randoms"), "game mode must survive in the tooltip: {hover:?}");
+        assert!(
+            hover.contains(t!("ui.replay.row_sunk").as_ref()),
+            "death must read as a word in the tooltip: {hover:?}"
+        );
+        assert!(
+            !hover.contains(t!("ui.replay.row_survived").as_ref()),
+            "the survived and sunk words must not both appear: {hover:?}"
+        );
+    }
+
+    #[test]
+    fn stats_line_shows_the_full_timestamp_without_seconds_when_ungrouped() {
         let stats = resolve_row_stats(None, Some(&summary()));
         let line = stats_line(&identity(), &stats, ReplayGrouping::None, Some("en-US"));
-        assert!(line.contains("28.07.2026 14:23:05"), "expected the full timestamp in {line:?}");
+        assert!(
+            line.contains(&format!("{} 28.07.2026 14:23", crate::icons::CLOCK)),
+            "expected the clock-prefixed full timestamp with no seconds in {line:?}"
+        );
+        assert!(!line.contains("14:23:05"), "seconds must be dropped from the drawn row: {line:?}");
     }
 
     #[test]
@@ -402,31 +464,18 @@ mod tests {
     }
 
     #[test]
-    fn stats_line_shows_the_skull_only_when_the_player_died() {
-        let partial = RowSummary { self_damage: None, self_kills: None, self_survived: Some(false), ..summary() };
-        let stats = resolve_row_stats(None, Some(&partial));
-        let line = stats_line(&identity(), &stats, ReplayGrouping::Date, Some("en-US"));
-        // Exact equality, not a substring check: the timestamp itself contains
-        // digits, so "does not render a zero" cannot be tested by searching.
-        assert_eq!(line, format!("{}  14:23:05", crate::icons::SKULL));
-    }
-
-    #[test]
-    fn stats_line_renders_nothing_extra_when_the_player_survived() {
-        // Survival is conveyed by the skull's absence: a survived row must not
-        // draw any stand-in glyph or word in its place.
-        let partial = RowSummary { self_damage: None, self_kills: None, self_survived: Some(true), ..summary() };
-        let stats = resolve_row_stats(None, Some(&partial));
-        let line = stats_line(&identity(), &stats, ReplayGrouping::Date, Some("en-US"));
-        assert_eq!(line, "14:23:05");
-    }
-
-    #[test]
-    fn stats_line_renders_nothing_extra_when_survival_is_unknown() {
-        let partial = RowSummary { self_damage: None, self_kills: None, self_survived: None, ..summary() };
-        let stats = resolve_row_stats(None, Some(&partial));
-        let line = stats_line(&identity(), &stats, ReplayGrouping::Date, Some("en-US"));
-        assert_eq!(line, "14:23:05");
+    fn stats_line_never_shows_the_skull_regardless_of_survival() {
+        // The skull was removed from the drawn row entirely; survival now only
+        // shows up in the hover tooltip. Exact equality, not a substring check,
+        // since the row is nothing but the clock-prefixed time once damage and
+        // kills are absent.
+        for survived in [Some(false), Some(true), None] {
+            let partial = RowSummary { self_damage: None, self_kills: None, self_survived: survived, ..summary() };
+            let stats = resolve_row_stats(None, Some(&partial));
+            let line = stats_line(&identity(), &stats, ReplayGrouping::Date, Some("en-US"));
+            assert_eq!(line, format!("{} 14:23", crate::icons::CLOCK), "survived={survived:?}");
+            assert!(!line.contains(crate::icons::SKULL), "survived={survived:?}: {line:?}");
+        }
     }
 
     #[test]
@@ -535,6 +584,22 @@ mod tests {
         for outcome in [MatchOutcome::Win, MatchOutcome::Loss, MatchOutcome::Draw, MatchOutcome::Unknown] {
             let job = row_layout_job("id", "stats", &row_stats(outcome, false), false, &visuals, test_font());
             assert!(!job.text.contains(crate::icons::TROPHY), "{outcome:?} must not carry an outcome glyph");
+        }
+    }
+
+    #[test]
+    fn no_skull_glyph_is_ever_emitted_in_the_drawn_row() {
+        // The skull used to render when the player died; it is gone from the
+        // drawn row entirely, for every survival state, both from the raw
+        // stats line and from the assembled layout job's text.
+        let visuals = egui::Visuals::dark();
+        for survived in [Some(false), Some(true), None] {
+            let stats = RowStats { survived, ..row_stats(MatchOutcome::Win, false) };
+            let line = stats_line(&identity(), &stats, ReplayGrouping::Date, Some("en-US"));
+            assert!(!line.contains(crate::icons::SKULL), "survived={survived:?}: {line:?}");
+
+            let job = row_layout_job("Yamato - Ocean", &line, &stats, false, &visuals, test_font());
+            assert!(!job.text.contains(crate::icons::SKULL), "survived={survived:?}: {:?}", job.text);
         }
     }
 
