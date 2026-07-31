@@ -273,6 +273,10 @@ pub enum IndexError {
     Sqlx(#[from] sqlx::Error),
     #[error("unknown source: {0:?}")]
     UnknownSource(SourceId),
+    /// `ensure_source` could not resolve a row for `root_path` after inserting
+    /// and, for `Live`, falling back to the kind-level lookup. This means the
+    /// row was removed by something else between the insert and the reads;
+    /// the app has no code path that does that.
     #[error("failed to create or resolve index source for {root_path:?}")]
-    SourceCreationFailed { root_path: std::path::PathBuf },
+    SourceCreationFailed { root_path: PathBuf },
 }

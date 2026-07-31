@@ -56,7 +56,11 @@ pub async fn live_source_id(pool: &SqlitePool) -> Result<Option<SourceId>, Index
 /// `INSERT ... ON CONFLICT DO NOTHING` followed by a re-select, so two threads
 /// racing on a fresh database both end up with the same id rather than one
 /// failing. The unique indexes from migration 008 are what make the conflict
-/// arm reachable.
+/// arm reachable. The `ON CONFLICT` is unqualified, so it also absorbs a
+/// conflict on `idx_source_single_live` (at most one `Live` source), not only
+/// one on `root_path`; for a `Live` insert that lost to that index instead,
+/// the row exists at a different `root_path`, so the `root_path` re-select
+/// below finds nothing and the `Live`-specific fallback below that resolves it.
 ///
 /// The re-select matches on `root_path` alone, not `(root_path, kind)`, so if
 /// a source already owns `root_path` under a different `kind`, this returns
@@ -91,8 +95,12 @@ pub async fn ensure_source(
 
     match row {
         Some((id,)) => Ok(SourceId(id)),
-        // The row is absent only if another connection deleted it between the
-        // insert and the select, which the app never does concurrently.
+        // Absent here means the insert's conflict was not on root_path. The
+        // only other unique index the insert can hit is idx_source_single_live,
+        // which only a Live insert can violate, so only Live gets a fallback.
+        None if kind == SourceKind::Live => {
+            live_source_id(pool).await?.ok_or(IndexError::SourceCreationFailed { root_path: root_path.to_path_buf() })
+        }
         None => Err(IndexError::SourceCreationFailed { root_path: root_path.to_path_buf() }),
     }
 }

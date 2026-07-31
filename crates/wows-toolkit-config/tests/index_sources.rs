@@ -493,3 +493,22 @@ async fn ensure_default_source_adopts_an_existing_source_for_the_same_root() {
     );
     assert_eq!(row_count_for_root(&pool, "C:/wows/replays").await, 1, "only one row may exist for the root");
 }
+
+#[tokio::test]
+async fn ensure_source_resolves_an_existing_live_source_at_a_different_root() {
+    // The unqualified ON CONFLICT DO NOTHING also absorbs a conflict on the
+    // single-live-source index, not just the root_path index. When a second
+    // Live insert loses to that index, the row it should resolve to lives at
+    // a DIFFERENT root_path than the one just passed in, so a re-select
+    // scoped to root_path alone finds nothing; ensure_source must still
+    // resolve to the existing Live source rather than erroring.
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let first = query::ensure_source(&pool, "Live replays", SourceKind::Live, Path::new("D:/a"), now).await.unwrap();
+
+    let second = query::ensure_source(&pool, "Live replays", SourceKind::Live, Path::new("D:/b"), now).await.unwrap();
+
+    assert_eq!(second, first, "a second Live root must resolve to the existing Live source, not error");
+    assert_eq!(row_count_for_root(&pool, "D:/b").await, 0, "no row may be created at the losing root");
+    assert_eq!(query::live_source_id(&pool).await.unwrap(), Some(first), "the original Live source must be untouched");
+}
