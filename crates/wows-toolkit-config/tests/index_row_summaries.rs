@@ -8,6 +8,7 @@ use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
 use wows_core::game_types::GameParamId;
 use wows_toolkit_config::index::query;
+use wows_toolkit_config::index::rows::DivisionMate;
 use wows_toolkit_config::index::rows::IndexedVehicleRow;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::ObjectiveMatch;
@@ -95,6 +96,133 @@ fn sample_vehicle(arena: i64, account: i64, division: Option<i64>, relation: Veh
         is_stream_sniper: None,
         sniper_twitch_login: None,
     }
+}
+
+/// Like [`sample_vehicle`] but with an explicit player name and clan, for tests
+/// that need to distinguish which roster row ended up in `division_mates`.
+fn sample_vehicle_named(
+    arena: i64,
+    account: i64,
+    name: &str,
+    clan: &str,
+    division: Option<i64>,
+    relation: VehicleRelation,
+) -> IndexedVehicleRow {
+    IndexedVehicleRow {
+        player_name: name.into(),
+        clan: clan.into(),
+        ..sample_vehicle(arena, account, division, relation)
+    }
+}
+
+#[tokio::test]
+async fn division_mates_excludes_the_self_player_and_unrelated_players() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "a.wowsreplay", Some(7))).await.unwrap();
+    query::upsert_vehicles(
+        &pool,
+        &[
+            sample_vehicle_named(100, 7, "Self", "SELF", Some(3), VehicleRelation::SelfPlayer),
+            sample_vehicle_named(100, 8, "Mate", "MATE", Some(3), VehicleRelation::Ally),
+            // Same match, different division: must not be reported as a mate.
+            sample_vehicle_named(100, 9, "Enemy1", "FOE", None, VehicleRelation::Enemy),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let summaries = query::row_summaries_for_source(&pool, src).await.unwrap();
+    let row = summaries.get(&PathBuf::from("a.wowsreplay")).expect("summary for the recorded path");
+    assert_eq!(
+        row.division_mates,
+        vec![DivisionMate { player_name: "Mate".into(), clan: "MATE".into() }],
+        "must contain only the other division member, not the self player and not the unrelated enemy"
+    );
+}
+
+#[tokio::test]
+async fn division_mates_are_empty_for_a_solo_player() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "a.wowsreplay", Some(7))).await.unwrap();
+    query::upsert_vehicles(
+        &pool,
+        &[
+            sample_vehicle_named(100, 7, "Solo", "", None, VehicleRelation::SelfPlayer),
+            sample_vehicle_named(100, 8, "Enemy1", "FOE", None, VehicleRelation::Enemy),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let summaries = query::row_summaries_for_source(&pool, src).await.unwrap();
+    let row = summaries.get(&PathBuf::from("a.wowsreplay")).expect("summary for the recorded path");
+    assert!(row.division_mates.is_empty(), "a solo player must not report a division line: {:?}", row.division_mates);
+}
+
+#[tokio::test]
+async fn division_mates_for_a_three_player_division_are_ordered_by_player_name() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "a.wowsreplay", Some(7))).await.unwrap();
+    query::upsert_vehicles(
+        &pool,
+        &[
+            sample_vehicle_named(100, 7, "Self", "SELF", Some(3), VehicleRelation::SelfPlayer),
+            // Inserted out of alphabetical order to prove the query sorts, not the insert order.
+            sample_vehicle_named(100, 8, "Zed", "ZZZ", Some(3), VehicleRelation::Ally),
+            sample_vehicle_named(100, 9, "Anna", "AAA", Some(3), VehicleRelation::Ally),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let summaries = query::row_summaries_for_source(&pool, src).await.unwrap();
+    let row = summaries.get(&PathBuf::from("a.wowsreplay")).expect("summary for the recorded path");
+    assert_eq!(
+        row.division_mates,
+        vec![
+            DivisionMate { player_name: "Anna".into(), clan: "AAA".into() },
+            DivisionMate { player_name: "Zed".into(), clan: "ZZZ".into() },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_division_mate_with_no_clan_keeps_an_empty_clan_rather_than_being_dropped() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "a.wowsreplay", Some(7))).await.unwrap();
+    query::upsert_vehicles(
+        &pool,
+        &[
+            sample_vehicle_named(100, 7, "Self", "", Some(3), VehicleRelation::SelfPlayer),
+            sample_vehicle_named(100, 8, "Mate", "", Some(3), VehicleRelation::Ally),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let summaries = query::row_summaries_for_source(&pool, src).await.unwrap();
+    let row = summaries.get(&PathBuf::from("a.wowsreplay")).expect("summary for the recorded path");
+    assert_eq!(
+        row.division_mates,
+        vec![DivisionMate { player_name: "Mate".into(), clan: "".into() }],
+        "a clanless mate must still be reported, with an empty clan rather than being dropped"
+    );
 }
 
 #[tokio::test]

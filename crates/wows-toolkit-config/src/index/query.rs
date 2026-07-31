@@ -22,6 +22,7 @@ use super::query_model::Query;
 use super::query_model::Subject;
 use super::query_model::Value;
 use super::rows::ClanCorrection;
+use super::rows::DivisionMate;
 use super::rows::DivisionMateEncounter;
 use super::rows::IndexError;
 use super::rows::IndexSource;
@@ -459,6 +460,10 @@ pub async fn record_paths_in_source(pool: &SqlitePool, source: SourceId) -> Resu
 /// was indexed last, while `self_account_id` on the record is perspective-correct
 /// by construction. The subquery form also guarantees one output row per record,
 /// which a join would not.
+///
+/// `division_mates` is filled by one additional source-wide query rather than
+/// one query per row: a listing can hold thousands of replays, and a per-row
+/// roster lookup would be pathological at that scale.
 pub async fn row_summaries_for_source(
     pool: &SqlitePool,
     source: SourceId,
@@ -479,6 +484,36 @@ pub async fn row_summaries_for_source(
         let (path, summary) = row_to_row_summary(row)?;
         out.insert(path, summary);
     }
+
+    // `sv.account_id = r.self_account_id` already excludes a NULL self_account_id
+    // (a spectator recording): SQL NULL never equals anything, including another
+    // NULL, so that record joins to no roster row at all rather than to every
+    // NULL-account row. `sv.division_id IS NOT NULL` then drops solo players,
+    // whose stored division is NULL, before the mate join runs.
+    let mate_rows = sqlx::query(
+        "SELECT DISTINCT r.replay_path, mate.player_name, mate.clan \
+         FROM replay_record r \
+         JOIN indexed_vehicle sv ON sv.arena_id = r.arena_id AND sv.account_id = r.self_account_id \
+         JOIN indexed_vehicle mate ON mate.arena_id = r.arena_id AND mate.division_id = sv.division_id \
+         WHERE r.source_id = ?1 \
+           AND sv.division_id IS NOT NULL \
+           AND mate.account_id <> 0 \
+           AND mate.account_id <> r.self_account_id \
+         ORDER BY r.replay_path, mate.player_name",
+    )
+    .bind(source.0)
+    .fetch_all(pool)
+    .await?;
+
+    for row in &mate_rows {
+        let path = PathBuf::from(row.try_get::<String, _>("replay_path")?);
+        let player_name: String = row.try_get("player_name")?;
+        let clan: String = row.try_get("clan")?;
+        if let Some(summary) = out.get_mut(&path) {
+            summary.division_mates.push(DivisionMate { player_name, clan });
+        }
+    }
+
     Ok(out)
 }
 
@@ -497,6 +532,7 @@ fn row_to_row_summary(row: &sqlx::sqlite::SqliteRow) -> Result<(PathBuf, RowSumm
         self_survived: row.try_get::<Option<bool>, _>("self_survived")?,
         self_pr: row.try_get("self_pr")?,
         division_id: row.try_get("division_id")?,
+        division_mates: Vec::new(),
         results_available: row.try_get("results_available")?,
         file_mtime: row.try_get("file_mtime")?,
     };

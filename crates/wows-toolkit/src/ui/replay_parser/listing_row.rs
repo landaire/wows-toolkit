@@ -6,6 +6,7 @@ use rust_i18n::t;
 use wows_toolkit_config::ReplayGrouping;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
+use crate::db::index::rows::DivisionMate;
 use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::RowSummary;
 use crate::util::separate_number;
@@ -69,6 +70,9 @@ pub(crate) struct RowStats {
     pub kills: Option<i64>,
     pub survived: Option<bool>,
     pub in_division: bool,
+    /// The other players who shared the division, for the hover tooltip. Always
+    /// empty on the parsed branch: a parsed report carries no mate roster.
+    pub division_mates: Vec<DivisionMate>,
     /// False only when neither an index summary nor a parsed report exists.
     pub known: bool,
 }
@@ -86,15 +90,21 @@ pub(crate) fn resolve_row_stats(parsed: Option<ParsedStats>, summary: Option<&Ro
             kills: parsed.kills,
             survived,
             in_division: parsed.in_division,
+            division_mates: Vec::new(),
             known: true,
         },
         None => match summary {
+            // A division id with nobody else recorded in it is not a division:
+            // deriving the flag from the mate list keeps the glyph and the
+            // tooltip consistent, rather than the glyph firing on a division_id
+            // whose mate line would then render empty.
             Some(s) => RowStats {
                 outcome: s.outcome,
                 damage: s.self_damage,
                 kills: s.self_kills,
                 survived,
-                in_division: s.division_id.is_some(),
+                in_division: !s.division_mates.is_empty(),
+                division_mates: s.division_mates.clone(),
                 known: true,
             },
             None => RowStats {
@@ -103,6 +113,7 @@ pub(crate) fn resolve_row_stats(parsed: Option<ParsedStats>, summary: Option<&Ro
                 kills: None,
                 survived: None,
                 in_division: false,
+                division_mates: Vec::new(),
                 known: false,
             },
         },
@@ -180,15 +191,40 @@ fn stats_words(stats: &RowStats, when: &str, locale: Option<&str>) -> String {
     parts.join("  ")
 }
 
+/// The division member list line, formatted `[CLAN] Name` per member when the
+/// member has a clan and bare `Name` otherwise. `None` when there are no
+/// mates, so the tooltip never shows an empty division line.
+fn division_line(stats: &RowStats) -> Option<String> {
+    if stats.division_mates.is_empty() {
+        return None;
+    }
+    let members = stats
+        .division_mates
+        .iter()
+        .map(|m| if m.clan.is_empty() { m.player_name.clone() } else { format!("[{}] {}", m.clan, m.player_name) })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(t!("ui.replay.row_division", members = members).to_string())
+}
+
 /// Hover text for a row. The two drawn lines omit scenario and game mode to
 /// keep the panel narrow, and line 2 now draws icons rather than words, so
-/// the tooltip is where both kinds of detail survive.
+/// the tooltip is where both kinds of detail survive. The division member
+/// line is only present when the row has at least one division mate.
 pub(crate) fn hover_text(identity: &RowIdentity, stats: &RowStats, locale: Option<&str>) -> String {
     let stats_text = stats_words(stats, &identity.date_time, locale);
-    format!(
-        "{}\n{}\n{}\n{}\n{}\n{}",
-        identity.ship, identity.map, identity.scenario, identity.mode, identity.date_time, stats_text
-    )
+    let mut lines = vec![
+        identity.ship.clone(),
+        identity.map.clone(),
+        identity.scenario.clone(),
+        identity.mode.clone(),
+        identity.date_time.clone(),
+    ];
+    if let Some(division) = division_line(stats) {
+        lines.push(division);
+    }
+    lines.push(stats_text);
+    lines.join("\n")
 }
 
 /// The row as drawn: identity on line 1 tinted by outcome, stats on line 2 in
@@ -321,6 +357,7 @@ mod tests {
             self_survived: Some(true),
             self_pr: Some(1500.0),
             division_id: Some(4),
+            division_mates: vec![DivisionMate { player_name: "Mate".into(), clan: "MATE".into() }],
             results_available: true,
             file_mtime: Some(42),
         }
@@ -445,6 +482,49 @@ mod tests {
     }
 
     #[test]
+    fn hover_text_names_division_mates_with_clan_tags_when_present() {
+        let with_mates = RowSummary {
+            division_mates: vec![
+                DivisionMate { player_name: "Clanned".into(), clan: "ABC".into() },
+                DivisionMate { player_name: "Clanless".into(), clan: "".into() },
+            ],
+            ..summary()
+        };
+        let stats = resolve_row_stats(None, Some(&with_mates));
+        let hover = hover_text(&identity(), &stats, Some("en-US"));
+        assert!(hover.contains("[ABC] Clanned"), "a clanned mate must render as [CLAN] Name: {hover:?}");
+        assert!(hover.contains("Clanless"), "a clanless mate must still be named: {hover:?}");
+        assert!(!hover.contains("[] Clanless"), "an empty clan must not render bracketed: {hover:?}");
+    }
+
+    #[test]
+    fn hover_text_has_no_division_line_when_there_are_no_mates() {
+        let with_mates = summary();
+        let solo = RowSummary { division_mates: Vec::new(), ..summary() };
+
+        let with_mates_hover = hover_text(&identity(), &resolve_row_stats(None, Some(&with_mates)), Some("en-US"));
+        let solo_hover = hover_text(&identity(), &resolve_row_stats(None, Some(&solo)), Some("en-US"));
+
+        assert_eq!(
+            with_mates_hover.lines().count(),
+            solo_hover.lines().count() + 1,
+            "a division line must be present exactly when there are mates: with_mates={with_mates_hover:?} solo={solo_hover:?}"
+        );
+        assert!(with_mates_hover.contains("Mate"), "the mates case must actually name the mate: {with_mates_hover:?}");
+        assert!(!solo_hover.contains("Mate"), "the solo case must not carry over the mate name: {solo_hover:?}");
+    }
+
+    #[test]
+    fn resolve_row_stats_treats_a_division_id_with_no_mates_as_not_in_a_division() {
+        // division_id is Some, but the mate list is empty: this is the case that
+        // proves in_division is derived from the mates, not from division_id.
+        let orphaned = RowSummary { division_mates: Vec::new(), ..summary() };
+        assert!(orphaned.division_id.is_some(), "the fixture must still carry a division id for this to be meaningful");
+        let stats = resolve_row_stats(None, Some(&orphaned));
+        assert!(!stats.in_division, "a division id with no recorded mates must not show the division glyph");
+    }
+
+    #[test]
     fn stats_line_shows_the_full_timestamp_without_seconds_when_ungrouped() {
         let stats = resolve_row_stats(None, Some(&summary()));
         let line = stats_line(&identity(), &stats, ReplayGrouping::None, Some("en-US"));
@@ -503,7 +583,15 @@ mod tests {
     }
 
     fn row_stats(outcome: MatchOutcome, in_division: bool) -> RowStats {
-        RowStats { outcome, damage: Some(1000), kills: Some(1), survived: Some(true), in_division, known: true }
+        RowStats {
+            outcome,
+            damage: Some(1000),
+            kills: Some(1),
+            survived: Some(true),
+            in_division,
+            division_mates: Vec::new(),
+            known: true,
+        }
     }
 
     /// Line 1's tint. `LayoutJob::append` coalesces adjacent runs that share a

@@ -201,6 +201,14 @@ pub struct MatchHit {
     pub file_mtime: Option<i64>,
 }
 
+/// Another player who shared the perspective player's division.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DivisionMate {
+    pub player_name: String,
+    /// Empty when the player had no clan.
+    pub clan: String,
+}
+
 /// Everything one replay-listing row draws beyond its identity, for a single
 /// record. Keyed by `replay_path` within a source.
 #[derive(Debug, Clone)]
@@ -214,6 +222,9 @@ pub struct RowSummary {
     /// `replay_record.self_account_id`. `None` when the perspective player had
     /// no account (a spectator recording), had no roster row, or was solo.
     pub division_id: Option<i64>,
+    /// The other players who shared `division_id`, excluding the self player.
+    /// Empty when solo or unknown. Ordered by `player_name`.
+    pub division_mates: Vec<DivisionMate>,
     pub results_available: bool,
     /// Modification time of the file as of indexing. Compared against the
     /// on-disk value to decide whether the row is stale.
