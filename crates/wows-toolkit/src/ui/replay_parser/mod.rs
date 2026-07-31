@@ -121,7 +121,6 @@ use wowsunpack::game_params::types::skill_translation_keys_for;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::recognized::Recognized;
 
-use crate::app::ReplayParserTabState;
 use crate::app::ToolkitTabViewer;
 use crate::ui::plaintext_viewer;
 use crate::ui::plaintext_viewer::FileType;
@@ -152,8 +151,6 @@ pub struct ReplayTab {
     /// Unique identifier for this tab instance.
     pub id: u64,
 }
-
-pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 
 /// A replay file path paired with its parsed replay data.
 type ReplayEntry = (std::path::PathBuf, Arc<RwLock<Replay>>);

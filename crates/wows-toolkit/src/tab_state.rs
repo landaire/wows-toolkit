@@ -46,7 +46,6 @@ use crate::ui::plaintext_viewer::PlaintextFileViewer;
 use crate::ui::player_tracker::PlayerTrackerSubTab;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::ReplayTab;
-use crate::ui::replay_parser::SharedReplayParserTabState;
 use crate::ui::replay_parser::SortOrder;
 use crate::update_background_task;
 use crate::util::personal_rating::PersonalRatingData;
@@ -455,7 +454,6 @@ pub struct TabState {
     pub replays_dir: Option<PathBuf>,
     pub unpacker_progress: Option<mpsc::Receiver<UnpackerProgress>>,
     pub last_progress: Option<UnpackerProgress>,
-    pub replay_parser_tab: SharedReplayParserTabState,
     pub search_tab: crate::ui::search_tab::SearchTabState,
     /// Command palette state (Ctrl+K / Ctrl+P): cascade mode plus on-demand,
     /// bounded sub-search results.
@@ -634,7 +632,6 @@ impl Default for TabState {
             replays_dir: None,
             unpacker_progress: Default::default(),
             last_progress: Default::default(),
-            replay_parser_tab: Default::default(),
             search_tab: Default::default(),
             command_palette: Default::default(),
             pending_search_query: None,
@@ -984,7 +981,6 @@ impl TabState {
         }
         self.replays_for_session_reset = None;
         self.clear_before_session_reset = true;
-        self.replay_parser_tab.lock().game_chat.clear();
         self.file_viewer.lock().clear();
         self.replay_renderers.lock().clear();
         self.available_builds.clear();

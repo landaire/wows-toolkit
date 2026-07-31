@@ -37,7 +37,6 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use tokio::runtime::Runtime;
-use wows_replays::analyzer::battle_controller::GameMessage;
 
 use crate::data::settings::DataSharingMode;
 use crate::icons;
@@ -160,11 +159,6 @@ impl TabViewer for ToolkitTabViewer<'_> {
         // up and forces bars to appear when nothing actually overflows.
         [false, false]
     }
-}
-
-#[derive(Default)]
-pub struct ReplayParserTabState {
-    pub game_chat: Vec<GameMessage>,
 }
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
@@ -1249,7 +1243,6 @@ impl WowsToolkitApp {
                         drop(replay_guard);
                     }
                     if update_ui {
-                        self.tab_state.replay_parser_tab.lock().game_chat.clear();
                         self.tab_state.player_tracker.write().update_from_replay(&replay.read());
                         if open_tab {
                             self.tab_state.open_replay_in_focused_tab(replay);
