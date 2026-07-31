@@ -136,9 +136,23 @@ pub async fn list_sources(pool: &SqlitePool) -> Result<Vec<IndexSource>, IndexEr
 }
 
 /// Point `source` at a new root, rewriting its records' path prefixes. Returns
-/// how many records were repointed. Records whose path does not start with
-/// `old_root` are left alone, so a source holding paths from elsewhere is not
-/// corrupted. Both writes happen in one transaction, rolled back explicitly on
+/// how many records were repointed.
+///
+/// A record's path counts as "under `old_root`" only when the character right
+/// after the matched prefix is a path separator (or the path ends there), so
+/// a sibling directory that merely shares a literal prefix -- `D:/oldarchive`
+/// versus `D:/old` -- is left alone. `old_root` and `new_root` are normalised
+/// by trimming a trailing `/` or `\` before matching, so a caller passing
+/// either form gets the same result.
+///
+/// Fails before opening a transaction if `old_root` and `new_root` overlap
+/// (they name the same directory, or one is an ancestor of the other):
+/// rewriting a prefix while part of it is itself moving cannot be expressed
+/// as one substitution, since a record's rewritten path could land on another
+/// record's not-yet-rewritten path. It also fails up front if `new_root` is
+/// already another source's `root_path`.
+///
+/// The remaining writes happen in one transaction, rolled back explicitly on
 /// any error so the caller never observes a half-relocated source.
 pub async fn relocate_source(
     pool: &SqlitePool,
@@ -146,8 +160,25 @@ pub async fn relocate_source(
     old_root: &Path,
     new_root: &Path,
 ) -> Result<u64, IndexError> {
+    let old = normalize_root(old_root);
+    let new = normalize_root(new_root);
+
+    if roots_overlap(&old, &new) {
+        return Err(IndexError::RelocationNested { old_root: PathBuf::from(old), new_root: PathBuf::from(new) });
+    }
+
+    let owner: Option<(i64,)> =
+        sqlx::query_as("SELECT source_id FROM index_source WHERE root_path = ?1 AND source_id <> ?2")
+            .bind(&new)
+            .bind(source.0)
+            .fetch_optional(pool)
+            .await?;
+    if let Some((owner_id,)) = owner {
+        return Err(IndexError::RootAlreadyOwned { root_path: PathBuf::from(new), owner: SourceId(owner_id) });
+    }
+
     let mut tx = pool.begin().await?;
-    match relocate_source_in_tx(&mut tx, source, old_root, new_root).await {
+    match relocate_source_in_tx(&mut tx, source, &old, &new).await {
         Ok(moved) => {
             tx.commit().await?;
             Ok(moved)
@@ -159,14 +190,35 @@ pub async fn relocate_source(
     }
 }
 
+/// Strips a trailing `/` or `\` so `old_root`/`new_root` can be passed with or
+/// without one and still line up with the boundary-checked prefix match below.
+fn normalize_root(root: &Path) -> String {
+    root.to_string_lossy().trim_end_matches(['/', '\\']).to_string()
+}
+
+/// True if `outer` names the same directory as `inner`, or is an ancestor
+/// directory of it: `inner` equals `outer`, or starts with `outer` followed
+/// immediately by a path separator.
+fn is_root_or_ancestor(outer: &str, inner: &str) -> bool {
+    if inner == outer {
+        return true;
+    }
+    match inner.strip_prefix(outer) {
+        Some(rest) => matches!(rest.chars().next(), Some('/') | Some('\\')),
+        None => false,
+    }
+}
+
+fn roots_overlap(old: &str, new: &str) -> bool {
+    is_root_or_ancestor(old, new) || is_root_or_ancestor(new, old)
+}
+
 async fn relocate_source_in_tx(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     source: SourceId,
-    old_root: &Path,
-    new_root: &Path,
+    old: &str,
+    new: &str,
 ) -> Result<u64, IndexError> {
-    let old = old_root.to_string_lossy().to_string();
-    let new = new_root.to_string_lossy().to_string();
     let old_len = old.chars().count() as i64;
 
     // A record under old_root whose rewritten path already equals another
@@ -174,20 +226,30 @@ async fn relocate_source_in_tx(
     // under old_root (so it keeps its path rather than also moving), would
     // collide on (source_id, replay_path) once rewritten. Detect that up front
     // rather than let the UPDATE below fail partway through the source.
+    //
+    // "Under old_root" requires SUBSTR to match the literal prefix AND the
+    // next character to be a path separator (or the path to end exactly at
+    // the prefix), so a sibling directory such as D:/oldarchive never counts
+    // as being under D:/old.
     let collision: Option<(String,)> = sqlx::query_as(
         "SELECT r2.replay_path FROM replay_record r1 \
          JOIN replay_record r2 ON r2.source_id = r1.source_id \
            AND r2.replay_path = (?1 || SUBSTR(r1.replay_path, ?2)) \
-         WHERE r1.source_id = ?3 AND SUBSTR(r1.replay_path, 1, ?4) = ?5 \
+         WHERE r1.source_id = ?3 \
+           AND SUBSTR(r1.replay_path, 1, ?4) = ?5 \
+           AND (LENGTH(r1.replay_path) = ?4 OR SUBSTR(r1.replay_path, ?4 + 1, 1) IN ('/', '\\')) \
            AND r2.record_id <> r1.record_id \
-           AND SUBSTR(r2.replay_path, 1, ?4) <> ?5 \
+           AND NOT ( \
+             SUBSTR(r2.replay_path, 1, ?4) = ?5 \
+             AND (LENGTH(r2.replay_path) = ?4 OR SUBSTR(r2.replay_path, ?4 + 1, 1) IN ('/', '\\')) \
+           ) \
          LIMIT 1",
     )
-    .bind(&new)
+    .bind(new)
     .bind(old_len + 1)
     .bind(source.0)
     .bind(old_len)
-    .bind(&old)
+    .bind(old)
     .fetch_optional(&mut **tx)
     .await?;
     if let Some((path,)) = collision {
@@ -195,22 +257,25 @@ async fn relocate_source_in_tx(
     }
 
     // LIKE would treat _ and % in a path as wildcards; comparing an explicit
-    // substr keeps the match literal.
+    // substr keeps the match literal. The boundary clause mirrors the
+    // collision precheck above, so a sibling directory is never rewritten.
     let moved = sqlx::query(
         "UPDATE replay_record SET replay_path = ?1 || SUBSTR(replay_path, ?2) \
-         WHERE source_id = ?3 AND SUBSTR(replay_path, 1, ?4) = ?5",
+         WHERE source_id = ?3 \
+           AND SUBSTR(replay_path, 1, ?4) = ?5 \
+           AND (LENGTH(replay_path) = ?4 OR SUBSTR(replay_path, ?4 + 1, 1) IN ('/', '\\'))",
     )
-    .bind(&new)
+    .bind(new)
     .bind(old_len + 1)
     .bind(source.0)
     .bind(old_len)
-    .bind(&old)
+    .bind(old)
     .execute(&mut **tx)
     .await?
     .rows_affected();
 
     sqlx::query("UPDATE index_source SET root_path = ?1 WHERE source_id = ?2")
-        .bind(&new)
+        .bind(new)
         .bind(source.0)
         .execute(&mut **tx)
         .await?;

@@ -568,6 +568,94 @@ async fn relocate_source_rewrites_matching_prefixes_only() {
 }
 
 #[tokio::test]
+async fn relocate_source_leaves_a_sibling_directory_with_a_shared_name_prefix_untouched() {
+    // "D:/oldarchive" shares the literal characters "D:/old" with old_root
+    // but is a different, sibling directory: relocating D:/old must not
+    // touch a record that lives there.
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, Path::new("D:/old"), now).await.unwrap();
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_match(&pool, &sample_match(200)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "D:/old/a.wowsreplay")).await.unwrap();
+    query::upsert_record(&pool, &sample_record(200, src, "D:/oldarchive/b.wowsreplay")).await.unwrap();
+
+    let moved = query::relocate_source(&pool, src, Path::new("D:/old"), Path::new("F:/new")).await.unwrap();
+    assert_eq!(moved, 1, "only the record actually under D:/old is repointed");
+
+    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    assert!(paths.contains("F:/new/a.wowsreplay"), "the record under old_root is rewritten: {paths:?}");
+    assert!(
+        paths.contains("D:/oldarchive/b.wowsreplay"),
+        "the sibling directory's record must be untouched: {paths:?}"
+    );
+}
+
+#[tokio::test]
+async fn relocate_source_rejects_relocating_into_its_own_subdirectory() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, Path::new("D:/replays"), now).await.unwrap();
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_match(&pool, &sample_match(200)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "D:/replays/x.wowsreplay")).await.unwrap();
+    query::upsert_record(&pool, &sample_record(200, src, "D:/replays/archive/x.wowsreplay")).await.unwrap();
+
+    let err =
+        query::relocate_source(&pool, src, Path::new("D:/replays"), Path::new("D:/replays/archive")).await.unwrap_err();
+    match err {
+        IndexError::RelocationNested { old_root, new_root } => {
+            assert_eq!(old_root, PathBuf::from("D:/replays"));
+            assert_eq!(new_root, PathBuf::from("D:/replays/archive"));
+        }
+        other => panic!("expected RelocationNested, got {other:?}"),
+    }
+
+    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    assert!(paths.contains("D:/replays/x.wowsreplay"), "a rejected relocate must leave records untouched: {paths:?}");
+    assert!(
+        paths.contains("D:/replays/archive/x.wowsreplay"),
+        "a rejected relocate must leave records untouched: {paths:?}"
+    );
+}
+
+#[tokio::test]
+async fn relocate_source_rejects_relocating_out_to_its_own_ancestor() {
+    // The reverse direction from the subdirectory test: new_root is an
+    // ancestor of old_root.
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, Path::new("D:/replays/archive"), now)
+        .await
+        .unwrap();
+
+    let err =
+        query::relocate_source(&pool, src, Path::new("D:/replays/archive"), Path::new("D:/replays")).await.unwrap_err();
+    match err {
+        IndexError::RelocationNested { old_root, new_root } => {
+            assert_eq!(old_root, PathBuf::from("D:/replays/archive"));
+            assert_eq!(new_root, PathBuf::from("D:/replays"));
+        }
+        other => panic!("expected RelocationNested, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn relocate_source_allows_a_sibling_name_that_is_not_actually_nested() {
+    // "D:/replays" and "D:/replaysold" share a literal prefix but neither is
+    // an ancestor of the other, so this must be allowed, unlike the two
+    // nesting-rejection tests above.
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, Path::new("D:/replays"), now).await.unwrap();
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "D:/replays/a.wowsreplay")).await.unwrap();
+
+    let moved = query::relocate_source(&pool, src, Path::new("D:/replays"), Path::new("D:/replaysold")).await.unwrap();
+    assert_eq!(moved, 1, "a merely-prefix-sharing sibling root must not be rejected as nested");
+}
+
+#[tokio::test]
 async fn relocate_source_rejects_a_collision_and_leaves_the_database_unchanged() {
     // "F:/new/a.wowsreplay" already names a different record (arena 200) that
     // is not itself under D:/old, so it will not move. Relocating D:/old to
@@ -617,17 +705,20 @@ async fn relocate_source_onto_anothers_root_fails_and_leaves_both_sources_untouc
     query::upsert_match(&pool, &sample_match(100)).await.unwrap();
     query::upsert_record(&pool, &sample_record(100, a, "D:/a/x.wowsreplay")).await.unwrap();
 
-    // Nothing on b would collide at the record level (b has no records), so
-    // this exercises the index_source.root_path unique index failing after
-    // the replay_record rewrite already succeeded within the transaction.
-    let result = query::relocate_source(&pool, a, Path::new("D:/a"), Path::new("D:/b")).await;
-    assert!(result.is_err(), "relocating onto a root another source owns must fail");
+    // Nothing on b would collide at the record level (b has no records);
+    // this exercises the root-ownership check that rejects the request
+    // before any record is touched, because b already owns D:/b.
+    let err = query::relocate_source(&pool, a, Path::new("D:/a"), Path::new("D:/b")).await.unwrap_err();
+    match err {
+        IndexError::RootAlreadyOwned { root_path, owner } => {
+            assert_eq!(root_path, PathBuf::from("D:/b"));
+            assert_eq!(owner, b, "the error names the source that already owns the destination root");
+        }
+        other => panic!("expected RootAlreadyOwned, got {other:?}"),
+    }
 
     let paths = query::record_paths_in_source(&pool, a).await.unwrap();
-    assert!(
-        paths.contains("D:/a/x.wowsreplay"),
-        "a failed relocate must roll back the record rewrite that preceded the root_path failure: {paths:?}"
-    );
+    assert!(paths.contains("D:/a/x.wowsreplay"), "a rejected relocate must never rewrite a record's path: {paths:?}");
 
     let sources = query::list_sources(&pool).await.unwrap();
     let src_a = sources.iter().find(|s| s.id == a).expect("source a still present");

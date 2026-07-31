@@ -284,4 +284,16 @@ pub enum IndexError {
     /// so the relocation is rejected before any row is touched.
     #[error("relocation target {path:?} already exists in the destination")]
     RelocationCollision { path: PathBuf },
+    /// `relocate_source` rejected a request where `old_root` and `new_root`
+    /// name the same directory, or one is an ancestor directory of the other.
+    /// Rewriting records under a root that is itself moving cannot be done as
+    /// a single prefix substitution: a record's rewritten path could land on
+    /// another record's not-yet-rewritten path.
+    #[error("cannot relocate {old_root:?} to {new_root:?}: one contains the other")]
+    RelocationNested { old_root: PathBuf, new_root: PathBuf },
+    /// `relocate_source` rejected a request to point `root_path` at a value
+    /// another source (`owner`) already has. `index_source.root_path` is
+    /// unique among non-NULL values.
+    #[error("cannot relocate to {root_path:?}: already owned by source {owner:?}")]
+    RootAlreadyOwned { root_path: PathBuf, owner: SourceId },
 }
