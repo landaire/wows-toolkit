@@ -857,7 +857,7 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::CheckingGameDataUpdates => {}
                             BackgroundTaskKind::ValidatingGameData { .. } => {}
                             BackgroundTaskKind::ReconcilingIndex { .. } => {}
-                            BackgroundTaskKind::LoadingRowSummaries => {
+                            BackgroundTaskKind::LoadingRowSummaries { .. } => {
                                 self.tab_state.replay_row_summaries_loading = false;
                             }
                         }
@@ -1306,7 +1306,9 @@ impl WowsToolkitApp {
                         self.tab_state.toasts.lock().info(t!("ui.messages.replays_already_indexed", total = total));
                     }
                 }
-                BackgroundTaskCompletion::RowSummariesLoaded { summaries, .. } => {
+                BackgroundTaskCompletion::RowSummariesLoaded { summaries, workspace: _workspace, .. } => {
+                    // A later phase routes this load to the listing named by
+                    // `_workspace`; today there is only the one listing.
                     self.tab_state.replay_row_summaries = summaries;
                     self.tab_state.replay_row_summaries_loaded = true;
                     self.tab_state.replay_rows_need_reindex_scan = true;

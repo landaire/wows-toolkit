@@ -9,6 +9,16 @@ use wows_core::game_types::GameParamId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct SourceId(pub i64);
 
+/// Runtime handle for one open replay workspace. `SourceId` is the durable
+/// identity; this is only ever valid within a single run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct WorkspaceId(pub u64);
+
+impl WorkspaceId {
+    /// The workspace backed by the game's own replays directory.
+    pub const LIVE: WorkspaceId = WorkspaceId(0);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
     Live,

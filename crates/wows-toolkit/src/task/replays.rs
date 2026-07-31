@@ -1406,33 +1406,80 @@ fn run_reconcile_index(
     Ok(BackgroundTaskCompletion::ReconcileIndexComplete { indexed: indexed_count, total })
 }
 
-/// Load the replay-listing row summaries for the live source.
+/// Which source a summary load should read.
+pub enum SourceSelector {
+    /// Resolve the live source, yielding an empty map when the indexer has not
+    /// created it yet. Readers never create it.
+    Live,
+    /// A source already known to the caller.
+    #[allow(dead_code)]
+    Explicit(crate::db::index::rows::SourceId),
+}
+
+/// Load the replay-listing row summaries for `selector`, tagged with `workspace`
+/// so the completion can be routed to the listing that asked for it.
 ///
 /// Resolving the source and running the query both happen on this thread; the
-/// UI never blocks on the pool. This is a read-only path: when the indexing
-/// thread has not created the live source yet there is nothing to summarise, so
-/// it yields an empty map rather than inserting a source row of its own.
+/// UI never blocks on the pool.
 pub fn start_load_row_summaries(
     pool: sqlx::SqlitePool,
     tokio_runtime: Arc<tokio::runtime::Runtime>,
+    selector: SourceSelector,
+    workspace: crate::db::index::rows::WorkspaceId,
     generation: u64,
 ) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
 
     crate::util::thread::spawn_logged("load-row-summaries", move || {
         let result = tokio_runtime.block_on(async {
-            match crate::db::index::query::live_source_id(&pool).await? {
-                Some(source) => crate::db::index::query::row_summaries_for_source(&pool, source).await,
-                None => Ok(HashMap::new()),
-            }
+            let source = match selector {
+                SourceSelector::Live => match crate::db::index::query::live_source_id(&pool).await? {
+                    Some(id) => id,
+                    None => return Ok(HashMap::new()),
+                },
+                SourceSelector::Explicit(id) => id,
+            };
+            crate::db::index::query::row_summaries_for_source(&pool, source).await
         });
 
         let completion = match result {
-            Ok(summaries) => Ok(BackgroundTaskCompletion::RowSummariesLoaded { summaries, generation }),
+            Ok(summaries) => Ok(BackgroundTaskCompletion::RowSummariesLoaded { summaries, generation, workspace }),
             Err(e) => Err(rootcause::report!("failed to load replay row summaries: {e}")),
         };
         let _ = tx.send(completion);
     });
 
-    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingRowSummaries }
+    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingRowSummaries { workspace } }
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    use super::*;
+
+    async fn mem_pool() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("../wows-toolkit-config/migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    /// `SourceSelector::Live` reads the source the indexer has created, but the
+    /// indexer runs on its own schedule and may not have created it yet when a
+    /// listing asks for summaries. That must read as an empty map, not an error.
+    #[test]
+    fn source_selector_live_with_no_source_yields_an_empty_map() {
+        let rt = Arc::new(tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap());
+        let pool = rt.block_on(mem_pool());
+
+        let task =
+            start_load_row_summaries(pool, rt, SourceSelector::Live, crate::db::index::rows::WorkspaceId::LIVE, 0);
+        let completion = task.receiver.unwrap().recv().unwrap().unwrap();
+        match completion {
+            BackgroundTaskCompletion::RowSummariesLoaded { summaries, .. } => {
+                assert!(summaries.is_empty(), "Live with no live source must yield an empty map, not an error");
+            }
+            other => panic!("unexpected completion: {other:?}"),
+        }
+    }
 }

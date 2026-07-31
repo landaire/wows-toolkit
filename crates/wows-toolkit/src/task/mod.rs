@@ -57,6 +57,7 @@ pub use replays::BackgroundParserThread;
 pub use replays::DataExportSettings;
 pub use replays::ReplayBackgroundParserThreadMessage;
 pub use replays::ReplayExportFormat;
+pub use replays::SourceSelector;
 pub use replays::build_game_constants;
 pub use replays::load_nation_flag;
 pub use replays::load_ribbon_icons;
@@ -146,7 +147,9 @@ pub enum BackgroundTaskKind {
         rx: mpsc::Receiver<IndexProgress>,
         last_progress: Option<IndexProgress>,
     },
-    LoadingRowSummaries,
+    LoadingRowSummaries {
+        workspace: crate::db::index::rows::WorkspaceId,
+    },
 }
 
 /// Progress state for a batch video export, shared between the background thread and the UI.
@@ -355,7 +358,7 @@ impl BackgroundTask {
                             }
                         }
                     }
-                    BackgroundTaskKind::LoadingRowSummaries => {
+                    BackgroundTaskKind::LoadingRowSummaries { .. } => {
                         ui.spinner();
                         ui.label(t!("ui.messages.loading_row_summaries"));
                     }
@@ -409,10 +412,12 @@ pub enum BackgroundTaskCompletion {
         indexed: usize,
         total: usize,
     },
-    /// The replay-listing row summaries finished loading for `generation`.
+    /// The replay-listing row summaries finished loading for `generation`, for
+    /// the listing identified by `workspace`.
     RowSummariesLoaded {
         summaries: HashMap<PathBuf, crate::db::index::rows::RowSummary>,
         generation: u64,
+        workspace: crate::db::index::rows::WorkspaceId,
     },
     #[cfg(feature = "mod_manager")]
     ModManager(Box<crate::mod_manager::ModTaskCompletion>),
@@ -457,10 +462,11 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
             Self::ReconcileIndexComplete { indexed, total } => {
                 f.debug_struct("ReconcileIndexComplete").field("indexed", indexed).field("total", total).finish()
             }
-            Self::RowSummariesLoaded { summaries, generation } => f
+            Self::RowSummariesLoaded { summaries, generation, workspace } => f
                 .debug_struct("RowSummariesLoaded")
                 .field("summaries", &summaries.len())
                 .field("generation", generation)
+                .field("workspace", workspace)
                 .finish(),
             #[cfg(feature = "mod_manager")]
             Self::ModManager(mod_manager_completion) => {

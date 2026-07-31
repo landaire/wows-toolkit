@@ -5001,7 +5001,13 @@ impl ToolkitTabViewer<'_> {
         self.tab_state.replay_row_summaries_generation = Some(generation);
         crate::update_background_task!(
             self.tab_state.background_tasks,
-            Some(crate::task::start_load_row_summaries(pool, rt, generation))
+            Some(crate::task::start_load_row_summaries(
+                pool,
+                rt,
+                crate::task::SourceSelector::Live,
+                crate::db::index::rows::WorkspaceId::LIVE,
+                generation
+            ))
         );
     }
 
