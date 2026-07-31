@@ -3749,9 +3749,10 @@ impl ToolkitTabViewer<'_> {
             let focused = self.tab_state.focused_replay();
             let locale = self.tab_state.persisted.read().settings.app.locale.clone();
             let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
-            let row_summaries = self.tab_state.replay_row_summaries.clone();
+            let row_summaries = &self.tab_state.replay_row_summaries;
+            let font_id = egui::TextStyle::Body.resolve(ui.style());
 
-            // Two lines of body text plus the inter-row spacing the grid used to add.
+            // Two lines of body text plus the spacing egui inserts between widgets.
             let row_height = ui.text_style_height(&egui::TextStyle::Body) * 2.0 + ui.spacing().item_spacing.y;
 
             egui::ScrollArea::both().id_salt("replay_listing_scroll_area").show_rows(
@@ -3772,8 +3773,14 @@ impl ToolkitTabViewer<'_> {
                             listing_row::stats_line(&identity, &stats, ReplayGrouping::None, locale.as_deref());
 
                         let is_selected = focused.as_ref().map(|c| Arc::ptr_eq(c, replay)).unwrap_or(false);
-                        let label_text =
-                            listing_row::row_layout_job(&identity_text, &stats_text, &stats, is_selected, ui.visuals());
+                        let label_text = listing_row::row_layout_job(
+                            &identity_text,
+                            &stats_text,
+                            &stats,
+                            is_selected,
+                            ui.visuals(),
+                            font_id.clone(),
+                        );
                         let hover = listing_row::hover_text(&identity, &stats_text);
 
                         let replay_weak = Arc::downgrade(replay);
@@ -3880,6 +3887,7 @@ impl ToolkitTabViewer<'_> {
 
             let fallback_maps = tree_maps.clone();
             let visuals = ui.visuals().clone();
+            let font_id = egui::TextStyle::Body.resolve(ui.style());
             let row_summaries = self.tab_state.replay_row_summaries.clone();
             let locale = self.tab_state.persisted.read().settings.app.locale.clone();
 
@@ -3932,8 +3940,14 @@ impl ToolkitTabViewer<'_> {
                             let stats = listing_row::resolve_row_stats(parsed, summary);
                             let identity_text = listing_row::identity_line(&identity, grouping);
                             let stats_text = listing_row::stats_line(&identity, &stats, grouping, locale.as_deref());
-                            let label_text =
-                                listing_row::row_layout_job(&identity_text, &stats_text, &stats, false, &visuals);
+                            let label_text = listing_row::row_layout_job(
+                                &identity_text,
+                                &stats_text,
+                                &stats,
+                                false,
+                                &visuals,
+                                font_id.clone(),
+                            );
                             let node =
                                 egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
                                     show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir);

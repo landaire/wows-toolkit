@@ -146,6 +146,7 @@ pub(crate) fn row_layout_job(
     stats: &RowStats,
     is_selected: bool,
     visuals: &egui::Visuals,
+    font_id: egui::FontId,
 ) -> egui::text::LayoutJob {
     use egui::TextFormat;
     use egui::text::LayoutJob;
@@ -163,23 +164,27 @@ pub(crate) fn row_layout_job(
     };
 
     let mut job = LayoutJob::default();
-    job.append(identity_text, 0.0, TextFormat { color: identity_color, ..Default::default() });
+    job.append(
+        identity_text,
+        0.0,
+        TextFormat { color: identity_color, font_id: font_id.clone(), ..Default::default() },
+    );
     if matches!(stats.outcome, MatchOutcome::Win | MatchOutcome::Loss | MatchOutcome::Draw) {
         job.append(
             &format!(" {}", crate::icons::TROPHY),
             0.0,
-            TextFormat { color: identity_color, ..Default::default() },
+            TextFormat { color: identity_color, font_id: font_id.clone(), ..Default::default() },
         );
     }
     if stats.in_division {
         job.append(
             &format!(" {}", crate::icons::USERS_THREE),
             0.0,
-            TextFormat { color: sem.division, ..Default::default() },
+            TextFormat { color: sem.division, font_id: font_id.clone(), ..Default::default() },
         );
     }
-    job.append("\n", 0.0, TextFormat::default());
-    job.append(stats_text, 0.0, TextFormat { color: sem.text_dim, ..Default::default() });
+    job.append("\n", 0.0, TextFormat { font_id: font_id.clone(), ..Default::default() });
+    job.append(stats_text, 0.0, TextFormat { color: sem.text_dim, font_id, ..Default::default() });
     job
 }
 
