@@ -943,17 +943,10 @@ impl TabState {
     /// Clears all game-related state. Called when the WoWs directory changes
     /// to ensure no stale data from the previous directory persists.
     pub(crate) fn reset_game_state(&mut self) {
-        let workspace = self.active_workspace_mut();
-        workspace.replay_dock_state = egui_dock::DockState::new(vec![]);
-        workspace.next_replay_tab_id = 0;
-        workspace.replay_files = None;
-        workspace.replay_row_summaries.clear();
-        workspace.replay_row_summaries_generation = None;
-        workspace.replay_row_summaries_loaded = false;
-        workspace.replay_rows_need_reindex_scan = false;
-        workspace.replay_rows_reindex_requested.clear();
-        workspace.replay_listing_auto_sized = false;
-        workspace.replay_listing_collapse_defaulted = false;
+        self.live_workspace.reset();
+        for workspace in self.workspaces.values_mut() {
+            workspace.reset();
+        }
         self.browser_state = Default::default();
         {
             let mut p = self.persisted.write();

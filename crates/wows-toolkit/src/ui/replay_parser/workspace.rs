@@ -104,17 +104,39 @@ impl ReplayWorkspace {
         self.next_replay_tab_id += 1;
         self.replay_dock_state.push_to_focused_leaf(ReplayTab { replay, id });
     }
+
+    /// Clears this workspace's listing and dock state. Called when the WoWs
+    /// directory changes to ensure no stale data from the previous directory
+    /// persists. `root` is preserved: a reset is not a change of directory.
+    /// `replay_row_summaries_loading` is preserved: it is owned by an
+    /// in-flight background task, which clears it on completion, and clearing
+    /// it here would let a second load dispatch while the first is still
+    /// running.
+    pub fn reset(&mut self) {
+        self.replay_dock_state = egui_dock::DockState::new(vec![]);
+        self.next_replay_tab_id = 0;
+        self.replay_files = None;
+        self.replay_row_summaries.clear();
+        self.replay_row_summaries_generation = None;
+        self.replay_row_summaries_loaded = false;
+        self.replay_rows_need_reindex_scan = false;
+        self.replay_rows_reindex_requested.clear();
+        self.replay_listing_auto_sized = false;
+        self.replay_listing_collapse_defaulted = false;
+    }
 }
 
 /// One widget's egui id, scoped to a workspace. Every persistent widget in the
 /// replay listing needs this: egui keys state by id, so two listings sharing an
 /// id share scroll offsets, tree selection and open/closed state.
+#[allow(dead_code)]
 pub(crate) fn workspace_salt(id: WorkspaceId, name: &str) -> egui::Id {
     egui::Id::new((id.0, name))
 }
 
 /// A tree group node's id. `kind` separates the Date and Ship groupings, whose
 /// labels can otherwise coincide.
+#[allow(dead_code)]
 pub(crate) fn workspace_group_salt(id: WorkspaceId, kind: &str, group: &str) -> egui::Id {
     egui::Id::new((id.0, kind, group))
 }
