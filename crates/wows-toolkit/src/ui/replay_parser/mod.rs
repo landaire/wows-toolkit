@@ -3770,13 +3770,23 @@ impl ToolkitTabViewer<'_> {
                             ui.visuals(),
                             font_id.clone(),
                         );
-                        let hover = listing_row::hover_text(&identity, &stats_text);
+                        let hover = listing_row::hover_text(&identity, &stats, locale.as_deref());
 
                         let replay_weak = Arc::downgrade(replay);
                         let path_clone = path.clone();
                         let wows_dir_clone = wows_dir.clone();
-                        let label_response =
-                            ui.add(Label::new(label_text).selectable(false).sense(Sense::click())).on_hover_text(hover);
+                        let label_response = ui
+                            .add(
+                                Label::new(label_text)
+                                    .selectable(false)
+                                    .sense(Sense::click())
+                                    // The scroll area hands rows its full visible width, so a
+                                    // panel dragged narrower than the auto-sized width would
+                                    // otherwise wrap to a third line that `show_rows` has not
+                                    // reserved height for, overlapping the row below.
+                                    .wrap_mode(egui::TextWrapMode::Truncate),
+                            )
+                            .on_hover_text(hover);
                         label_response.context_menu(|ui| {
                             show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir_clone);
                         });
@@ -3880,6 +3890,12 @@ impl ToolkitTabViewer<'_> {
             let row_summaries = &self.tab_state.replay_row_summaries;
             let locale = self.tab_state.persisted.read().settings.app.locale.clone();
 
+            // Unlike `ScrollArea::show_rows`, `egui_ltreeview`'s `ui.set_height` call
+            // (node.rs) clamps the node's layout rect directly to the height we pass,
+            // with no spacing added on top. The two-line label needs that spacing
+            // budgeted in here, or it collides with the row below it.
+            let leaf_node_height = ui.text_style_height(&egui::TextStyle::Body) * 2.0 + ui.spacing().item_spacing.y;
+
             if !self.tab_state.replay_listing_collapse_defaulted && files_len > LARGE_LISTING_THRESHOLD {
                 let tree_id = ui.make_persistent_id(tree_id_salt);
                 ui.ctx().data_mut(|data| {
@@ -3937,8 +3953,10 @@ impl ToolkitTabViewer<'_> {
                                 &visuals,
                                 font_id.clone(),
                             );
-                            let node =
-                                egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
+                            let node = egui_ltreeview::NodeBuilder::leaf(id)
+                                .height(leaf_node_height)
+                                .label(label_text)
+                                .context_menu(move |ui| {
                                     show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir);
                                 });
                             builder.node(node);
@@ -4822,9 +4840,11 @@ impl ToolkitTabViewer<'_> {
                         })
                         .fold(0.0f32, f32::max);
 
-                    // Allowance for tree indentation, the right margin, the
-                    // scrollbar, and the two trailing glyphs on line 1.
-                    default_width = (max_width + 64.0).max(200.0);
+                    // Allowance for tree indentation, the right margin, and the scrollbar.
+                    // Line 1 carries at most one trailing glyph (the division icon), and
+                    // the stats line's icons are already part of the measured text above,
+                    // so this no longer needs to budget for a second glyph.
+                    default_width = (max_width + 44.0).max(200.0);
 
                     self.tab_state.replay_listing_auto_sized = true;
 

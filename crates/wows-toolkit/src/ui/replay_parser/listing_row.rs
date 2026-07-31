@@ -92,21 +92,51 @@ pub(crate) fn identity_line(identity: &RowIdentity, grouping: ReplayGrouping) ->
     }
 }
 
-/// Line 2: the stats, then the timestamp. Absent stats are omitted rather than
-/// rendered as zero.
+/// The timestamp half of line 2: just the time when the group header already
+/// states the date, the full `dd.mm.yyyy HH:MM:SS` otherwise.
+fn timestamp_for(identity: &RowIdentity, grouping: ReplayGrouping) -> String {
+    match grouping {
+        ReplayGrouping::Date => identity.time_part().to_string(),
+        ReplayGrouping::Ship | ReplayGrouping::None => identity.date_time.clone(),
+    }
+}
+
+/// Line 2 as drawn: icons instead of words, so adjacent stats never read as
+/// one phrase (a word-based "0 kills sunk" was misread as "2 sunk"). Survival
+/// is conveyed by the absence of the skull; nothing is drawn for it when the
+/// player survived or when survival is unknown.
 pub(crate) fn stats_line(
     identity: &RowIdentity,
     stats: &RowStats,
     grouping: ReplayGrouping,
     locale: Option<&str>,
 ) -> String {
-    let when = match grouping {
-        ReplayGrouping::Date => identity.time_part().to_string(),
-        ReplayGrouping::Ship | ReplayGrouping::None => identity.date_time.clone(),
-    };
+    let when = timestamp_for(identity, grouping);
 
     if !stats.known {
         return format!("{}  {}", t!("ui.replay.row_not_indexed"), when);
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(damage) = stats.damage {
+        parts.push(format!("{} {}", crate::icons::CROSSHAIR_SIMPLE, separate_number(damage, locale)));
+    }
+    if let Some(kills) = stats.kills {
+        parts.push(format!("{} {}", crate::icons::SWORD, kills));
+    }
+    if stats.survived == Some(false) {
+        parts.push(crate::icons::SKULL.to_string());
+    }
+    parts.push(when);
+    parts.join("  ")
+}
+
+/// The word-based equivalent of [`stats_line`], used only for the hover
+/// tooltip so the icon convention stays discoverable and the translation keys
+/// stay in use.
+fn stats_words(stats: &RowStats, when: &str, locale: Option<&str>) -> String {
+    if !stats.known {
+        return format!("{}  {when}", t!("ui.replay.row_not_indexed"));
     }
 
     let mut parts: Vec<String> = Vec::new();
@@ -121,13 +151,15 @@ pub(crate) fn stats_line(
         Some(false) => parts.push(t!("ui.replay.row_sunk").to_string()),
         None => {}
     }
-    parts.push(when);
+    parts.push(when.to_string());
     parts.join("  ")
 }
 
 /// Hover text for a row. The two drawn lines omit scenario and game mode to
-/// keep the panel narrow, so the tooltip is where that detail survives.
-pub(crate) fn hover_text(identity: &RowIdentity, stats_text: &str) -> String {
+/// keep the panel narrow, and line 2 now draws icons rather than words, so
+/// the tooltip is where both kinds of detail survive.
+pub(crate) fn hover_text(identity: &RowIdentity, stats: &RowStats, locale: Option<&str>) -> String {
+    let stats_text = stats_words(stats, &identity.date_time, locale);
     format!(
         "{}\n{}\n{}\n{}\n{}\n{}",
         identity.ship, identity.map, identity.scenario, identity.mode, identity.date_time, stats_text
@@ -135,7 +167,8 @@ pub(crate) fn hover_text(identity: &RowIdentity, stats_text: &str) -> String {
 }
 
 /// The row as drawn: identity on line 1 tinted by outcome, stats on line 2 in
-/// de-emphasised text, with the outcome and division glyphs closing line 1.
+/// de-emphasised text, with the division glyph closing line 1. The tint
+/// already encodes the outcome, so there is no separate outcome glyph.
 pub(crate) fn row_layout_job(
     identity_text: &str,
     stats_text: &str,
@@ -165,13 +198,6 @@ pub(crate) fn row_layout_job(
         0.0,
         TextFormat { color: identity_color, font_id: font_id.clone(), ..Default::default() },
     );
-    if matches!(stats.outcome, MatchOutcome::Win | MatchOutcome::Loss | MatchOutcome::Draw) {
-        job.append(
-            &format!(" {}", crate::icons::TROPHY),
-            0.0,
-            TextFormat { color: identity_color, font_id: font_id.clone(), ..Default::default() },
-        );
-    }
     if stats.in_division {
         job.append(
             &format!(" {}", crate::icons::USERS_THREE),
@@ -335,20 +361,29 @@ mod tests {
         let stats = resolve_row_stats(None, Some(&summary()));
         let line = stats_line(&identity(), &stats, ReplayGrouping::Date, Some("en-US"));
         assert!(line.contains("114,230"), "expected separated damage in {line:?}");
-        assert!(line.contains(t!("ui.replay.row_kills", count = 3).as_ref()), "expected the kill count in {line:?}");
+        assert!(line.contains(crate::icons::CROSSHAIR_SIMPLE), "expected the damage glyph in {line:?}");
+        assert!(line.contains(&format!("{} 3", crate::icons::SWORD)), "expected the kill glyph and count in {line:?}");
         // Date grouping heads the group with the date, so the row shows the time only.
         assert!(line.contains("14:23:05"), "expected the time in {line:?}");
         assert!(!line.contains("28.07.2026"), "date is already in the group header: {line:?}");
+        assert!(!line.contains(crate::icons::SKULL), "the player survived, so no skull should render: {line:?}");
     }
 
     #[test]
     fn hover_text_keeps_the_detail_the_drawn_rows_drop() {
         let stats = resolve_row_stats(None, Some(&summary()));
-        let stats_text = stats_line(&identity(), &stats, ReplayGrouping::Date, Some("en-US"));
-        let hover = hover_text(&identity(), &stats_text);
+        let hover = hover_text(&identity(), &stats, Some("en-US"));
         assert!(hover.contains("Domination"), "scenario must survive in the tooltip: {hover:?}");
         assert!(hover.contains("Randoms"), "game mode must survive in the tooltip: {hover:?}");
         assert!(hover.contains("28.07.2026 14:23:05"));
+        assert!(
+            hover.contains(t!("ui.replay.row_kills", count = 3).as_ref()),
+            "kills must read as words in the tooltip: {hover:?}"
+        );
+        assert!(
+            hover.contains(t!("ui.replay.row_survived").as_ref()),
+            "survival must read as a word in the tooltip: {hover:?}"
+        );
     }
 
     #[test]
@@ -367,13 +402,31 @@ mod tests {
     }
 
     #[test]
-    fn stats_line_omits_absent_stats_rather_than_defaulting_them() {
-        let partial = RowSummary { self_damage: None, self_kills: None, ..summary() };
+    fn stats_line_shows_the_skull_only_when_the_player_died() {
+        let partial = RowSummary { self_damage: None, self_kills: None, self_survived: Some(false), ..summary() };
         let stats = resolve_row_stats(None, Some(&partial));
         let line = stats_line(&identity(), &stats, ReplayGrouping::Date, Some("en-US"));
         // Exact equality, not a substring check: the timestamp itself contains
         // digits, so "does not render a zero" cannot be tested by searching.
-        assert_eq!(line, format!("{}  14:23:05", t!("ui.replay.row_survived")));
+        assert_eq!(line, format!("{}  14:23:05", crate::icons::SKULL));
+    }
+
+    #[test]
+    fn stats_line_renders_nothing_extra_when_the_player_survived() {
+        // Survival is conveyed by the skull's absence: a survived row must not
+        // draw any stand-in glyph or word in its place.
+        let partial = RowSummary { self_damage: None, self_kills: None, self_survived: Some(true), ..summary() };
+        let stats = resolve_row_stats(None, Some(&partial));
+        let line = stats_line(&identity(), &stats, ReplayGrouping::Date, Some("en-US"));
+        assert_eq!(line, "14:23:05");
+    }
+
+    #[test]
+    fn stats_line_renders_nothing_extra_when_survival_is_unknown() {
+        let partial = RowSummary { self_damage: None, self_kills: None, self_survived: None, ..summary() };
+        let stats = resolve_row_stats(None, Some(&partial));
+        let line = stats_line(&identity(), &stats, ReplayGrouping::Date, Some("en-US"));
+        assert_eq!(line, "14:23:05");
     }
 
     #[test]
@@ -448,27 +501,41 @@ mod tests {
     }
 
     #[test]
+    fn a_draw_tints_line_one_with_the_draw_colour() {
+        let visuals = egui::Visuals::dark();
+        let sem = crate::ui::theme::semantic::semantic(&visuals);
+        let job = row_layout_job(
+            "Yamato - Ocean",
+            "1,000  14:23:05",
+            &row_stats(MatchOutcome::Draw, false),
+            false,
+            &visuals,
+            test_font(),
+        );
+        assert_eq!(identity_color(&job), sem.draw);
+        assert_ne!(sem.draw, sem.win, "swapping the draw colour for the win colour must not pass this test");
+    }
+
+    #[test]
     fn selection_overrides_the_outcome_tint() {
         let visuals = egui::Visuals::dark();
         let sem = crate::ui::theme::semantic::semantic(&visuals);
         let stats = row_stats(MatchOutcome::Loss, false);
         let job = row_layout_job("Yamato - Ocean", "1,000  14:23:05", &stats, true, &visuals, test_font());
         assert_eq!(identity_color(&job), sem.text_strong, "a selected row reads against the selection fill");
-        assert!(
-            !has_section_colored(&job, sem.loss),
-            "the outcome tint must be gone everywhere it applied, trophy glyph included"
-        );
+        assert!(!has_section_colored(&job, sem.loss), "the outcome tint must be gone everywhere it applied");
     }
 
     #[test]
-    fn the_outcome_glyph_appears_only_for_a_decided_match() {
+    fn no_outcome_glyph_is_ever_emitted() {
+        // The trophy used to fire for Win, Loss and Draw alike, so it only
+        // encoded "outcome is known" - which the tint already says - and read
+        // wrong next to a loss. Line 1 carries no outcome glyph at all now.
         let visuals = egui::Visuals::dark();
-        for outcome in [MatchOutcome::Win, MatchOutcome::Loss, MatchOutcome::Draw] {
+        for outcome in [MatchOutcome::Win, MatchOutcome::Loss, MatchOutcome::Draw, MatchOutcome::Unknown] {
             let job = row_layout_job("id", "stats", &row_stats(outcome, false), false, &visuals, test_font());
-            assert!(job.text.contains(crate::icons::TROPHY), "{outcome:?} should carry the outcome glyph");
+            assert!(!job.text.contains(crate::icons::TROPHY), "{outcome:?} must not carry an outcome glyph");
         }
-        let job = row_layout_job("id", "stats", &row_stats(MatchOutcome::Unknown, false), false, &visuals, test_font());
-        assert!(!job.text.contains(crate::icons::TROPHY));
     }
 
     #[test]
