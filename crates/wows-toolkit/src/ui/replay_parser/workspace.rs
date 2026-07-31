@@ -129,14 +129,12 @@ impl ReplayWorkspace {
 /// One widget's egui id, scoped to a workspace. Every persistent widget in the
 /// replay listing needs this: egui keys state by id, so two listings sharing an
 /// id share scroll offsets, tree selection and open/closed state.
-#[allow(dead_code)]
 pub(crate) fn workspace_salt(id: WorkspaceId, name: &str) -> egui::Id {
     egui::Id::new((id.0, name))
 }
 
 /// A tree group node's id. `kind` separates the Date and Ship groupings, whose
 /// labels can otherwise coincide.
-#[allow(dead_code)]
 pub(crate) fn workspace_group_salt(id: WorkspaceId, kind: &str, group: &str) -> egui::Id {
     egui::Id::new((id.0, kind, group))
 }

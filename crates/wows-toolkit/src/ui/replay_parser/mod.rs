@@ -5,6 +5,8 @@ mod sorting;
 mod workspace;
 
 pub(crate) use workspace::ReplayWorkspace;
+use workspace::workspace_group_salt;
+use workspace::workspace_salt;
 
 use std::path::PathBuf;
 
@@ -48,6 +50,7 @@ use crate::data::settings::ReplayGrouping;
 use crate::data::settings::ReplaySettings;
 use crate::data::wows_data::GameAsset;
 use crate::data::wows_data::SharedWoWsData;
+use crate::db::index::rows::WorkspaceId;
 use crate::icons;
 use crate::replay::timeline::TimelineExtractionError;
 use crate::replay::timeline::TimelineState;
@@ -3736,6 +3739,7 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_file_listing_ungrouped(&mut self, ui: &mut egui::Ui) {
+        let ws_id = self.tab_state.active_workspace_id;
         let mut replay_to_open: Option<Arc<RwLock<Replay>>> = None;
         let mut replay_to_open_new: Option<Arc<RwLock<Replay>>> = None;
 
@@ -3759,7 +3763,7 @@ impl ToolkitTabViewer<'_> {
             // so this is just the two-line galley.
             let row_height = ui.text_style_height(&egui::TextStyle::Body) * 2.0;
 
-            egui::ScrollArea::both().id_salt("replay_listing_scroll_area").show_rows(
+            egui::ScrollArea::both().id_salt(workspace_salt(ws_id, "replay_listing_scroll_area")).show_rows(
                 ui,
                 row_height,
                 files.len(),
@@ -3820,6 +3824,7 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_file_listing_grouped(&mut self, ui: &mut egui::Ui, grouping: ReplayGrouping) {
+        let ws_id = self.tab_state.active_workspace_id;
         let Some(mut files) = self
             .tab_state
             .active_workspace()
@@ -3834,7 +3839,7 @@ impl ToolkitTabViewer<'_> {
         let files_len = files.len();
         let metadata_provider = self.metadata_provider().unwrap();
 
-        egui::ScrollArea::both().id_salt("replay_listing_scroll_area").show(ui, |ui| {
+        egui::ScrollArea::both().id_salt(workspace_salt(ws_id, "replay_listing_scroll_area")).show(ui, |ui| {
             // Build groups based on grouping mode
             let (groups, group_id_salt, tree_id_salt) = match grouping {
                 ReplayGrouping::Date => {
@@ -3882,12 +3887,12 @@ impl ToolkitTabViewer<'_> {
             };
 
             for (group_name, replays) in &groups {
-                let group_id = egui::Id::new((group_id_salt, group_name));
+                let group_id = workspace_group_salt(ws_id, group_id_salt, group_name);
                 let mut grp_replays = Vec::new();
                 let mut child_ids = Vec::new();
                 let mut grp_paths = Vec::new();
                 for (path, replay) in replays {
-                    let id = egui::Id::new(path);
+                    let id = egui::Id::new((ws_id.0, path));
                     id_to_replay.insert(id, replay.clone());
                     tree_maps.leaf_replays.insert(id, Arc::downgrade(replay));
                     tree_maps.leaf_paths.insert(id, path.clone());
@@ -3914,11 +3919,11 @@ impl ToolkitTabViewer<'_> {
             if !self.tab_state.active_workspace().replay_listing_collapse_defaulted
                 && files_len > LARGE_LISTING_THRESHOLD
             {
-                let tree_id = ui.make_persistent_id(tree_id_salt);
+                let tree_id = ui.make_persistent_id(workspace_salt(ws_id, tree_id_salt));
                 ui.ctx().data_mut(|data| {
                     let state = data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
                     for (group_name, _) in &groups {
-                        let node_id = egui::Id::new((group_id_salt, group_name));
+                        let node_id = workspace_group_salt(ws_id, group_id_salt, group_name);
                         // Only groups the user has never opened or closed.
                         if state.is_open(&node_id).is_none() {
                             state.set_openness(node_id, false);
@@ -3931,7 +3936,7 @@ impl ToolkitTabViewer<'_> {
             // Bound after the collapse-default write: active_workspace() borrows the whole workspace.
             let row_summaries = &self.tab_state.active_workspace().replay_row_summaries;
 
-            let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id(tree_id_salt))
+            let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id(workspace_salt(ws_id, tree_id_salt)))
                 .allow_multi_selection(true)
                 .fallback_context_menu(move |ui, selected_ids| {
                     fallback_maps.show_multi_selection_context_menu(ui, selected_ids);
@@ -3940,7 +3945,7 @@ impl ToolkitTabViewer<'_> {
             let (response, actions) = tree.show(ui, |builder| {
                 for (group_name, replays) in &groups {
                     let win_rate = win_rate_label(replays);
-                    let group_id = egui::Id::new((group_id_salt, group_name));
+                    let group_id = workspace_group_salt(ws_id, group_id_salt, group_name);
                     let group_replays = tree_maps.group_replays.get(&group_id).cloned().unwrap_or_default();
                     let group_paths = tree_maps.group_paths.get(&group_id).cloned().unwrap_or_default();
                     let dir_node = egui_ltreeview::NodeBuilder::dir(group_id)
@@ -3951,7 +3956,7 @@ impl ToolkitTabViewer<'_> {
                     let is_open = builder.node(dir_node);
                     if is_open {
                         for (path, _replay) in replays {
-                            let id = egui::Id::new(path);
+                            let id = egui::Id::new((ws_id.0, path));
                             let path_clone = path.clone();
                             let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
                             let replay_weak = tree_maps.leaf_replays.get(&id).cloned().unwrap();
@@ -4013,7 +4018,7 @@ impl ToolkitTabViewer<'_> {
                             }
                         }
                         if needs_expansion {
-                            let tree_id = ui.make_persistent_id(tree_id_salt);
+                            let tree_id = ui.make_persistent_id(workspace_salt(ws_id, tree_id_salt));
                             ui.ctx().data_mut(|data| {
                                 let state =
                                     data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
@@ -4036,7 +4041,7 @@ impl ToolkitTabViewer<'_> {
             // Workaround: egui_ltreeview 0.7 doesn't fire Action::Activate on double-click.
             // Fall back to checking the response directly and opening the selected replay.
             if replay_to_open.is_none() && response.double_clicked() {
-                let tree_id = ui.make_persistent_id(tree_id_salt);
+                let tree_id = ui.make_persistent_id(workspace_salt(ws_id, tree_id_salt));
                 let selected = ui.ctx().data(|data| {
                     data.get_temp::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id)
                         .map(|state| state.selected().clone())
@@ -4809,11 +4814,12 @@ impl ToolkitTabViewer<'_> {
         if std::mem::take(&mut self.tab_state.active_workspace_mut().replay_rows_need_reindex_scan) {
             self.queue_stale_rows_for_reindex();
         }
+        let ws_id = self.tab_state.active_workspace_id;
         ui.vertical(|ui| {
             self.build_replay_header(ui);
 
             {
-                let panel_id = egui::Id::new("replay_listing_panel");
+                let panel_id = workspace_salt(ws_id, "replay_listing_panel");
                 let collapsed_before = self.tab_state.persisted.read().settings.replay.listing_collapsed;
                 // `show_collapsible` tracks the expanded state, and flips it itself when the
                 // user drags or double-clicks the resize edge.
@@ -4879,7 +4885,7 @@ impl ToolkitTabViewer<'_> {
                     });
                 }
 
-                egui::Panel::left("replay_listing_panel")
+                egui::Panel::left(panel_id)
                     .default_size(default_width)
                     .size_range(REPLAY_LISTING_MIN_WIDTH..=f32::INFINITY)
                     // Left margin is zero so labels sit flush; the right margin keeps them
@@ -4904,7 +4910,7 @@ impl ToolkitTabViewer<'_> {
                         self.build_file_listing(ui);
                     });
 
-                egui::Panel::left("replay_listing_rail")
+                egui::Panel::left(workspace_salt(ws_id, "replay_listing_rail"))
                     .exact_size(20.0)
                     .resizable(false)
                     .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::same(0)))
@@ -4968,9 +4974,9 @@ impl ToolkitTabViewer<'_> {
                         &mut self.tab_state.active_workspace_mut().replay_dock_state,
                         egui_dock::DockState::new(vec![]),
                     );
-                    let mut viewer = ReplayTabViewer { tab_state: self.tab_state };
+                    let mut viewer = ReplayTabViewer { tab_state: self.tab_state, workspace: ws_id };
                     egui_dock::DockArea::new(&mut dock_state)
-                        .id(egui::Id::new("replay_parser_dock"))
+                        .id(workspace_salt(ws_id, "replay_parser_dock"))
                         .style(egui_dock::Style::from_egui(ui.style().as_ref()))
                         .show_close_buttons(true)
                         .show_leaf_collapse_buttons(false)
@@ -5620,13 +5626,14 @@ impl ToolkitTabViewer<'_> {
 
 struct ReplayTabViewer<'a> {
     tab_state: &'a mut crate::tab_state::TabState,
+    workspace: WorkspaceId,
 }
 
 impl egui_dock::TabViewer for ReplayTabViewer<'_> {
     type Tab = ReplayTab;
 
     fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
-        egui::Id::new(("replay_tab", tab.id))
+        workspace_salt(self.workspace, "replay_tab").with(tab.id)
     }
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
