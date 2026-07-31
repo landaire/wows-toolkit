@@ -333,6 +333,11 @@ mod tests {
         assert!(matches!(row_freshness(Some(&summary()), None), RowFreshness::Stale));
         let no_mtime = RowSummary { file_mtime: None, ..summary() };
         assert!(matches!(row_freshness(Some(&no_mtime), Some(42)), RowFreshness::Stale));
+        let neither_mtime = RowSummary { file_mtime: None, ..summary() };
+        assert!(
+            matches!(row_freshness(Some(&neither_mtime), None), RowFreshness::Stale),
+            "None == None is true, so equality-based implementations would wrongly report Fresh here"
+        );
     }
 
     #[test]
