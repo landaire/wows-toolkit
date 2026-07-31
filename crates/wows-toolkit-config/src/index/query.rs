@@ -43,10 +43,11 @@ use super::rows::VehicleRelation;
 /// that inserted would race the indexing thread's non-atomic check-then-insert
 /// and could leave two `Live` rows behind.
 pub async fn live_source_id(pool: &SqlitePool) -> Result<Option<SourceId>, IndexError> {
-    let existing: Option<(i64,)> = sqlx::query_as("SELECT source_id FROM index_source WHERE kind = ?1 LIMIT 1")
-        .bind(SourceKind::Live.as_db_str())
-        .fetch_optional(pool)
-        .await?;
+    let existing: Option<(i64,)> =
+        sqlx::query_as("SELECT source_id FROM index_source WHERE kind = ?1 ORDER BY source_id LIMIT 1")
+            .bind(SourceKind::Live.as_db_str())
+            .fetch_optional(pool)
+            .await?;
     Ok(existing.map(|(id,)| SourceId(id)))
 }
 
