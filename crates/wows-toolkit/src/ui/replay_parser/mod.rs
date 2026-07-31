@@ -3764,23 +3764,26 @@ impl ToolkitTabViewer<'_> {
         }
     }
 
-    fn build_file_listing(&mut self, ui: &mut egui::Ui) {
+    fn build_file_listing(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
         let grouping = self.tab_state.persisted.read().settings.replay.grouping;
 
         match grouping {
-            ReplayGrouping::None => self.build_file_listing_ungrouped(ui),
-            ReplayGrouping::Date | ReplayGrouping::Ship => self.build_file_listing_grouped(ui, grouping),
+            ReplayGrouping::None => self.build_file_listing_ungrouped(ui, ws_id),
+            ReplayGrouping::Date | ReplayGrouping::Ship => self.build_file_listing_grouped(ui, ws_id, grouping),
         }
     }
 
-    fn build_file_listing_ungrouped(&mut self, ui: &mut egui::Ui) {
-        let ws_id = self.tab_state.active_workspace_id();
+    fn build_file_listing_ungrouped(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
         let mut replay_to_open: Option<Arc<RwLock<Replay>>> = None;
         let mut replay_to_open_new: Option<Arc<RwLock<Replay>>> = None;
 
+        // Existence of `ws_id` is guaranteed by the caller (`build_replay_parser_tab`
+        // checks it before drawing any tab content), so this and the other
+        // `workspace(ws_id)` reads below are justified in assuming `Some`.
         if let Some(mut files) = self
             .tab_state
-            .active_workspace()
+            .workspace(ws_id)
+            .expect("ws_id checked present by build_replay_parser_tab")
             .replay_files
             .as_ref()
             .map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>())
@@ -3788,10 +3791,10 @@ impl ToolkitTabViewer<'_> {
             files.sort_by(|a, b| b.0.cmp(&a.0));
 
             let metadata_provider = self.metadata_provider().unwrap();
-            let focused = self.tab_state.focused_replay();
+            let focused = self.tab_state.workspace(ws_id).expect("checked above").focused_replay();
             let locale = self.tab_state.persisted.read().settings.app.locale.clone();
             let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
-            let row_summaries = &self.tab_state.active_workspace().replay_row_summaries;
+            let row_summaries = &self.tab_state.workspace(ws_id).expect("checked above").replay_row_summaries;
             let font_id = egui::TextStyle::Body.resolve(ui.style());
 
             // `show_rows` takes the height without spacing and adds `item_spacing.y` itself,
@@ -3853,16 +3856,18 @@ impl ToolkitTabViewer<'_> {
             );
         }
 
-        self.handle_context_menu_render(ui);
-        self.handle_batch_render_request(ui);
-        self.handle_replay_open_actions(ui, &mut replay_to_open, &mut replay_to_open_new);
+        self.handle_context_menu_render(ui, ws_id);
+        self.handle_batch_render_request(ui, ws_id);
+        self.handle_replay_open_actions(ui, ws_id, &mut replay_to_open, &mut replay_to_open_new);
     }
 
-    fn build_file_listing_grouped(&mut self, ui: &mut egui::Ui, grouping: ReplayGrouping) {
-        let ws_id = self.tab_state.active_workspace_id();
+    fn build_file_listing_grouped(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId, grouping: ReplayGrouping) {
+        // Existence of `ws_id` is guaranteed by the caller; see
+        // `build_file_listing_ungrouped` for the same justification.
         let Some(mut files) = self
             .tab_state
-            .active_workspace()
+            .workspace(ws_id)
+            .expect("ws_id checked present by build_replay_parser_tab")
             .replay_files
             .as_ref()
             .map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>())
@@ -3951,7 +3956,11 @@ impl ToolkitTabViewer<'_> {
             // budgeted in here, or it collides with the row below it.
             let leaf_node_height = ui.text_style_height(&egui::TextStyle::Body) * 2.0 + ui.spacing().item_spacing.y;
 
-            if !self.tab_state.active_workspace().replay_listing_collapse_defaulted
+            if !self
+                .tab_state
+                .workspace(ws_id)
+                .expect("ws_id checked present by build_replay_parser_tab")
+                .replay_listing_collapse_defaulted
                 && files_len > LARGE_LISTING_THRESHOLD
             {
                 let tree_id = ui.make_persistent_id(workspace_salt(ws_id, tree_id_salt));
@@ -3965,11 +3974,11 @@ impl ToolkitTabViewer<'_> {
                         }
                     }
                 });
-                self.tab_state.active_workspace_mut().replay_listing_collapse_defaulted = true;
+                self.tab_state.workspace_mut(ws_id).expect("checked above").replay_listing_collapse_defaulted = true;
             }
 
-            // Bound after the collapse-default write: active_workspace() borrows the whole workspace.
-            let row_summaries = &self.tab_state.active_workspace().replay_row_summaries;
+            // Bound after the collapse-default write: workspace(ws_id) borrows the whole workspace.
+            let row_summaries = &self.tab_state.workspace(ws_id).expect("checked above").replay_row_summaries;
 
             let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id(workspace_salt(ws_id, tree_id_salt)))
                 .allow_multi_selection(true)
@@ -4030,8 +4039,8 @@ impl ToolkitTabViewer<'_> {
                 }
             });
 
-            self.handle_context_menu_render(ui);
-            self.handle_batch_render_request(ui);
+            self.handle_context_menu_render(ui, ws_id);
+            self.handle_batch_render_request(ui, ws_id);
 
             // Handle tree actions
             let mut replay_to_open: Option<Arc<RwLock<Replay>>> = None;
@@ -4091,7 +4100,7 @@ impl ToolkitTabViewer<'_> {
                 }
             }
 
-            self.handle_replay_open_actions(ui, &mut replay_to_open, &mut replay_to_open_new);
+            self.handle_replay_open_actions(ui, ws_id, &mut replay_to_open, &mut replay_to_open_new);
         });
     }
 
@@ -4162,10 +4171,10 @@ impl ToolkitTabViewer<'_> {
     fn handle_replay_open_actions(
         &mut self,
         ui: &mut egui::Ui,
+        ws_id: WorkspaceId,
         replay_to_open: &mut Option<Arc<RwLock<Replay>>>,
         replay_to_open_new: &mut Option<Arc<RwLock<Replay>>>,
     ) {
-        let ws_id = self.tab_state.active_workspace_id();
         if let Some(replay) = ui
             .ctx()
             .data_mut(|data| {
@@ -4849,13 +4858,37 @@ impl ToolkitTabViewer<'_> {
         }
     }
 
-    /// Builds the replay parser tab
-    pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui) {
-        self.refresh_row_summaries();
-        if std::mem::take(&mut self.tab_state.active_workspace_mut().replay_rows_need_reindex_scan) {
-            self.queue_stale_rows_for_reindex();
+    /// Builds a `Tab::Replays(ws_id)` tab's body, drawing strictly the workspace
+    /// `ws_id` names. Also makes `ws_id` the app-wide active workspace so the
+    /// floating chat, timeline, and replay-controls windows (which have no tab
+    /// payload of their own) follow whichever replay tab was drawn last.
+    pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
+        self.tab_state.set_active_workspace(ws_id);
+
+        // A tab can outlive its workspace (e.g. a stale split after the
+        // workspace's owning tab was closed). Showing a placeholder here
+        // instead of falling back to another workspace is the whole point of
+        // this method taking `ws_id` explicitly.
+        if self.tab_state.workspace_for_tab(ws_id).is_none() {
+            ui.centered_and_justified(|ui| {
+                ui.heading(t!("ui.replay.workspace_closed"));
+            });
+            return;
         }
-        let ws_id = self.tab_state.active_workspace_id();
+
+        self.refresh_row_summaries(ws_id);
+        // The existence check above guarantees this is Some for the rest of the
+        // frame (nothing closes a workspace mid-render); `unwrap_or(false)`
+        // just means "nothing to scan" rather than panicking if that ever stops
+        // holding.
+        let needs_reindex_scan = self
+            .tab_state
+            .workspace_mut(ws_id)
+            .map(|workspace| std::mem::take(&mut workspace.replay_rows_need_reindex_scan))
+            .unwrap_or(false);
+        if needs_reindex_scan {
+            self.queue_stale_rows_for_reindex(ws_id);
+        }
         ui.vertical(|ui| {
             self.build_replay_header(ui);
 
@@ -4871,14 +4904,32 @@ impl ToolkitTabViewer<'_> {
                 // collapsed, so re-expanding does not clobber a width the user chose, and
                 // deferred until a summary load has completed, since measuring before the
                 // stats line exists would latch a width fitted to "not indexed".
-                let has_files = self.tab_state.active_workspace().replay_files.as_ref().is_some_and(|f| !f.is_empty());
+                // `ws_id`'s workspace existence was checked before this function reached
+                // `ui.vertical`, and nothing closes a workspace mid-frame, so every
+                // `workspace(ws_id)` / `workspace_mut(ws_id)` in this block is justified
+                // in assuming `Some`.
+                let has_files = self
+                    .tab_state
+                    .workspace(ws_id)
+                    .expect("ws_id checked present at function entry")
+                    .replay_files
+                    .as_ref()
+                    .is_some_and(|f| !f.is_empty());
 
                 let mut default_width = 250.0f32;
 
                 if has_files
                     && expanded
-                    && !self.tab_state.active_workspace().replay_listing_auto_sized
-                    && self.tab_state.active_workspace().replay_row_summaries_loaded
+                    && !self
+                        .tab_state
+                        .workspace(ws_id)
+                        .expect("ws_id checked present at function entry")
+                        .replay_listing_auto_sized
+                    && self
+                        .tab_state
+                        .workspace(ws_id)
+                        .expect("ws_id checked present at function entry")
+                        .replay_row_summaries_loaded
                     && let Some(metadata_provider) = self.metadata_provider()
                 {
                     let grouping = self.tab_state.persisted.read().settings.replay.grouping;
@@ -4886,7 +4937,8 @@ impl ToolkitTabViewer<'_> {
                     let font_id = egui::TextStyle::Body.resolve(ui.style());
                     let max_width = self
                         .tab_state
-                        .active_workspace()
+                        .workspace(ws_id)
+                        .expect("ws_id checked present at function entry")
                         .replay_files
                         .as_ref()
                         .unwrap()
@@ -4896,7 +4948,12 @@ impl ToolkitTabViewer<'_> {
                             let identity = listing_row::replay_row_identity(&guard, &metadata_provider);
                             let parsed = listing_row::replay_parsed_stats(&guard);
                             drop(guard);
-                            let summary = self.tab_state.active_workspace().replay_row_summaries.get(path);
+                            let summary = self
+                                .tab_state
+                                .workspace(ws_id)
+                                .expect("ws_id checked present at function entry")
+                                .replay_row_summaries
+                                .get(path);
                             let stats = listing_row::resolve_row_stats(parsed, summary);
                             let identity_text = listing_row::identity_line(&identity, grouping);
                             let stats_text = listing_row::stats_line(&identity, &stats, grouping, locale.as_deref());
@@ -4918,7 +4975,10 @@ impl ToolkitTabViewer<'_> {
                     // so this no longer needs to budget for a second glyph.
                     default_width = (max_width + 44.0).max(200.0);
 
-                    self.tab_state.active_workspace_mut().replay_listing_auto_sized = true;
+                    self.tab_state
+                        .workspace_mut(ws_id)
+                        .expect("ws_id checked present at function entry")
+                        .replay_listing_auto_sized = true;
 
                     // Clear stored panel state so default_width takes effect
                     ui.ctx().data_mut(|d| {
@@ -4948,7 +5008,7 @@ impl ToolkitTabViewer<'_> {
                         if clip_width < REPLAY_LISTING_MIN_WIDTH {
                             return;
                         }
-                        self.build_file_listing(ui);
+                        self.build_file_listing(ui, ws_id);
                     });
 
                 egui::Panel::left(workspace_salt(ws_id, "replay_listing_rail"))
@@ -5009,10 +5069,21 @@ impl ToolkitTabViewer<'_> {
             }
 
             egui::CentralPanel::default().show(ui, |ui| {
-                let has_tabs = self.tab_state.active_workspace().replay_dock_state.iter_all_tabs().next().is_some();
+                let has_tabs = self
+                    .tab_state
+                    .workspace(ws_id)
+                    .expect("ws_id checked present at function entry")
+                    .replay_dock_state
+                    .iter_all_tabs()
+                    .next()
+                    .is_some();
                 if has_tabs {
                     let mut dock_state = std::mem::replace(
-                        &mut self.tab_state.active_workspace_mut().replay_dock_state,
+                        &mut self
+                            .tab_state
+                            .workspace_mut(ws_id)
+                            .expect("ws_id checked present at function entry")
+                            .replay_dock_state,
                         egui_dock::DockState::new(vec![]),
                     );
                     let mut viewer = ReplayTabViewer { tab_state: self.tab_state, workspace: ws_id };
@@ -5024,7 +5095,10 @@ impl ToolkitTabViewer<'_> {
                         .show_leaf_close_all_buttons(false)
                         .allowed_splits(egui_dock::AllowedSplits::All)
                         .show_inside(ui, &mut viewer);
-                    self.tab_state.active_workspace_mut().replay_dock_state = dock_state;
+                    self.tab_state
+                        .workspace_mut(ws_id)
+                        .expect("ws_id checked present at function entry")
+                        .replay_dock_state = dock_state;
                 } else {
                     ui.centered_and_justified(|ui| {
                         ui.heading(t!("ui.replay.no_selection"));
@@ -5043,12 +5117,15 @@ impl ToolkitTabViewer<'_> {
     /// written since the last load attempt. `index_generation` is bumped after
     /// every index write, so this is a cheap per-frame comparison rather than a
     /// query.
-    fn refresh_row_summaries(&mut self) {
+    fn refresh_row_summaries(&mut self, ws_id: WorkspaceId) {
+        // `ws_id` existence is checked by the caller (`build_replay_parser_tab`)
+        // before this runs, so every `workspace(ws_id)` / `workspace_mut(ws_id)`
+        // below is justified in assuming `Some`.
         let generation = crate::data::replay_index::index_generation();
-        let ws_id = self.tab_state.active_workspace_id();
+        let workspace = self.tab_state.workspace(ws_id).expect("ws_id checked present by build_replay_parser_tab");
         if !listing_row::should_reload_summaries(
-            self.tab_state.active_workspace().replay_row_summaries_loading,
-            self.tab_state.active_workspace().replay_row_summaries_generation,
+            workspace.replay_row_summaries_loading,
+            workspace.replay_row_summaries_generation,
             generation,
         ) {
             return;
@@ -5058,7 +5135,7 @@ impl ToolkitTabViewer<'_> {
         let deps = match (
             self.tab_state.db_pool.as_ref(),
             self.tab_state.tokio_runtime.as_ref(),
-            self.tab_state.active_workspace().root.as_ref(),
+            self.tab_state.workspace(ws_id).expect("checked above").root.as_ref(),
         ) {
             (Some(pool), Some(rt), Some(_)) => Some((pool.clone(), Arc::clone(rt))),
             _ => None,
@@ -5066,10 +5143,10 @@ impl ToolkitTabViewer<'_> {
         let Some((pool, rt)) = deps else {
             return;
         };
-        let selector = summary_source_selector(self.tab_state.active_workspace().source);
+        let selector = summary_source_selector(self.tab_state.workspace(ws_id).expect("checked above").source);
         // Stamped here rather than on completion so a query that keeps failing does not
         // re-dispatch on every frame. The next attempt waits for the index to move again.
-        let workspace = self.tab_state.active_workspace_mut();
+        let workspace = self.tab_state.workspace_mut(ws_id).expect("checked above");
         workspace.replay_row_summaries_loading = true;
         workspace.replay_row_summaries_generation = Some(generation);
         crate::update_background_task!(
@@ -5089,19 +5166,28 @@ impl ToolkitTabViewer<'_> {
     /// just handled, re-run auto-export over the whole library, and re-parse on
     /// every launch forever for old-version replays that can never index because
     /// their build data is not downloaded.
-    fn queue_stale_rows_for_reindex(&mut self) {
+    fn queue_stale_rows_for_reindex(&mut self, ws_id: WorkspaceId) {
+        // `ws_id` existence is checked by the caller (`build_replay_parser_tab`)
+        // before this runs, so every `workspace(ws_id)` / `workspace_mut(ws_id)`
+        // below is justified in assuming `Some`.
         let Some(sender) = self.tab_state.background_parser_tx.as_ref() else {
             return;
         };
-        let Some(files) = self.tab_state.active_workspace().replay_files.as_ref() else {
+        let Some(files) = self
+            .tab_state
+            .workspace(ws_id)
+            .expect("ws_id checked present by build_replay_parser_tab")
+            .replay_files
+            .as_ref()
+        else {
             return;
         };
         let mut queued: Vec<std::path::PathBuf> = Vec::new();
         for path in files.keys() {
-            if self.tab_state.active_workspace().replay_rows_reindex_requested.contains(path) {
+            if self.tab_state.workspace(ws_id).expect("checked above").replay_rows_reindex_requested.contains(path) {
                 continue;
             }
-            let summary = self.tab_state.active_workspace().replay_row_summaries.get(path);
+            let summary = self.tab_state.workspace(ws_id).expect("checked above").replay_row_summaries.get(path);
             let freshness = listing_row::row_freshness(summary, listing_row::file_mtime_secs(path));
             if !matches!(freshness, listing_row::RowFreshness::Stale) {
                 continue;
@@ -5111,7 +5197,7 @@ impl ToolkitTabViewer<'_> {
             }
         }
         for path in queued {
-            self.tab_state.active_workspace_mut().replay_rows_reindex_requested.insert(path);
+            self.tab_state.workspace_mut(ws_id).expect("checked above").replay_rows_reindex_requested.insert(path);
         }
     }
 
@@ -5392,8 +5478,7 @@ impl ToolkitTabViewer<'_> {
         });
     }
 
-    fn handle_context_menu_render(&mut self, ui: &mut egui::Ui) {
-        let ws_id = self.tab_state.active_workspace_id();
+    fn handle_context_menu_render(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
         let replay_weak: Option<Weak<RwLock<Replay>>> = ui
             .ctx()
             .data_mut(|data| data.remove_temp(request_slot_id(ws_id, ReplayRequestSlot::ContextMenuRenderReplay)));
@@ -5505,8 +5590,7 @@ impl ToolkitTabViewer<'_> {
         batch_infos
     }
 
-    fn handle_batch_render_request(&mut self, ui: &mut egui::Ui) {
-        let ws_id = self.tab_state.active_workspace_id();
+    fn handle_batch_render_request(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
         // Batch render to folder
         if let Some(replay_weaks) = ui.ctx().data_mut(|data| {
             data.remove_temp::<Vec<Weak<RwLock<Replay>>>>(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderReplays))

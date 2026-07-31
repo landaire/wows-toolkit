@@ -122,7 +122,7 @@ impl TabViewer for ToolkitTabViewer<'_> {
         match tab {
             Tab::Unpacker => self.build_unpacker_tab(ui),
             Tab::Settings => self.build_settings_tab(ui),
-            Tab::Replays(_) => self.build_replay_parser_tab(ui),
+            Tab::Replays(id) => self.build_replay_parser_tab(ui, *id),
             Tab::PlayerTracker => self.build_player_tracker_tab(ui),
             Tab::ModManager => self.build_mod_manager_tab(ui),
             Tab::ArmorViewer => self.build_armor_viewer_tab(ui),

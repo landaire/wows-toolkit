@@ -723,6 +723,15 @@ impl TabState {
         if id == WorkspaceId::LIVE { Some(&mut self.live_workspace) } else { self.workspaces.get_mut(&id) }
     }
 
+    /// The workspace a `Tab::Replays(id)` tab should draw. Resolves strictly by
+    /// the id the tab itself carries, with no fallback: unlike
+    /// [`Self::active_workspace`], a closed workspace resolves to `None`
+    /// rather than `live_workspace`, since drawing a different workspace
+    /// under this tab's own title would misrepresent that workspace's data.
+    pub fn workspace_for_tab(&self, id: WorkspaceId) -> Option<&ReplayWorkspace> {
+        self.workspace(id)
+    }
+
     /// The workspace the replay inspector is currently showing. Delegates to
     /// [`Self::workspace`] so both share one resolution rule, falling back to
     /// `live_workspace` when `active_workspace_id` names an id that is neither
@@ -1447,6 +1456,52 @@ mod tests {
 
         assert!(state.workspaces.get(&id).is_none());
         assert_eq!(state.active_workspace_id(), WorkspaceId::LIVE);
+    }
+
+    #[test]
+    fn workspace_for_tab_resolves_live_to_the_live_workspace() {
+        let state = TabState::default();
+        let live_addr = &state.live_workspace as *const ReplayWorkspace as usize;
+        let resolved = state.workspace_for_tab(WorkspaceId::LIVE).expect("LIVE always resolves");
+        assert_eq!(
+            resolved as *const ReplayWorkspace as usize, live_addr,
+            "workspace_for_tab(LIVE) must resolve to live_workspace"
+        );
+    }
+
+    /// Three distinct workspaces (live, the tab's own, and whatever happens to be
+    /// active) so "resolves by the id the tab carries" is distinguishable from
+    /// both "resolves to live" and "resolves to whatever is active" -- a
+    /// regression that fell back to `active_workspace()` would return the
+    /// "active" root here instead of the "tab" root.
+    #[test]
+    fn workspace_for_tab_resolves_a_present_non_live_id_to_that_workspace_not_active_or_live() {
+        let mut state = TabState::default();
+        state.live_workspace.root = Some(PathBuf::from("live"));
+
+        let tab_id = WorkspaceId(1);
+        state.workspaces.insert(tab_id, ReplayWorkspace::new(Some(PathBuf::from("tab"))));
+
+        let active_id = WorkspaceId(2);
+        state.workspaces.insert(active_id, ReplayWorkspace::new(Some(PathBuf::from("active"))));
+        state.set_active_workspace(active_id);
+        assert_eq!(state.active_workspace_id(), active_id, "the active workspace must differ from the tab's id");
+
+        let resolved = state.workspace_for_tab(tab_id).expect("tab_id is open");
+        assert_eq!(
+            resolved.root,
+            Some(PathBuf::from("tab")),
+            "must resolve to the tab's own workspace, not active or live"
+        );
+    }
+
+    #[test]
+    fn workspace_for_tab_does_not_resolve_an_absent_id_to_the_live_workspace() {
+        let state = TabState::default();
+        assert!(
+            state.workspace_for_tab(WorkspaceId(42)).is_none(),
+            "a tab naming a closed workspace must not resolve to live_workspace"
+        );
     }
 
     #[test]
