@@ -30,6 +30,7 @@ use crate::data::wows_data::ReplayDependencies;
 use crate::data::wows_data::ReplayLoader;
 use crate::data::wows_data::SharedWoWsData;
 use crate::data::wows_data::WoWsDataMap;
+use crate::db::index::rows::WorkspaceId;
 use crate::task::BackgroundParserThread;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
@@ -45,7 +46,7 @@ use crate::ui::mod_manager::ModManagerInfo;
 use crate::ui::plaintext_viewer::PlaintextFileViewer;
 use crate::ui::player_tracker::PlayerTrackerSubTab;
 use crate::ui::replay_parser::Replay;
-use crate::ui::replay_parser::ReplayTab;
+use crate::ui::replay_parser::ReplayWorkspace;
 use crate::ui::replay_parser::SortOrder;
 use crate::update_background_task;
 use crate::util::personal_rating::PersonalRatingData;
@@ -450,8 +451,6 @@ pub struct TabState {
     pub items_to_extract: Mutex<Vec<VfsPath>>,
     #[allow(dead_code)]
     pub translations: Option<gettext::Catalog>,
-    /// Derived from `settings.game.wows_dir` — not persisted.
-    pub replays_dir: Option<PathBuf>,
     pub unpacker_progress: Option<mpsc::Receiver<UnpackerProgress>>,
     pub last_progress: Option<UnpackerProgress>,
     pub search_tab: crate::ui::search_tab::SearchTabState,
@@ -477,41 +476,15 @@ pub struct TabState {
     pub window_settings: SharedWindowSettings,
     pub file_watcher: Option<RecommendedWatcher>,
     pub file_receiver: Option<mpsc::Receiver<NotifyFileEvent>>,
-    pub replay_files: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
-    /// Index-sourced display data for the listing, keyed by replay path.
-    /// Reloaded whenever `index_generation()` moves past
-    /// `replay_row_summaries_generation`.
-    pub replay_row_summaries: HashMap<PathBuf, crate::db::index::rows::RowSummary>,
-    /// The `index_generation()` value of the most recent load *attempt*, stamped
-    /// when the task is dispatched rather than when it lands. A load that errors
-    /// therefore waits for the index to move again instead of re-dispatching on
-    /// every frame. `None` before the first attempt.
-    pub replay_row_summaries_generation: Option<u64>,
-    /// True while a summary load is in flight, so a slow query cannot spawn a
-    /// second task on the next frame.
-    pub replay_row_summaries_loading: bool,
-    /// True once a load has landed successfully. The listing's panel auto-size
-    /// waits on this: measuring before any summary exists would fit the panel to
-    /// the "not indexed" placeholder and latch that width for the session.
-    pub replay_row_summaries_loaded: bool,
-    /// Set when a summary load lands, consumed by the listing to run one
-    /// freshness scan over the listed files.
-    pub replay_rows_need_reindex_scan: bool,
-    /// Paths already handed to the background parser for re-indexing this
-    /// session. Prevents a file the parser cannot fix from being re-queued on
-    /// every summary reload.
-    pub replay_rows_reindex_requested: std::collections::HashSet<PathBuf>,
     pub background_tasks: Vec<BackgroundTask>,
     pub toasts: SharedToasts,
     pub can_change_wows_dir: bool,
-    pub replay_dock_state: egui_dock::DockState<ReplayTab>,
-    pub next_replay_tab_id: u64,
-    /// Whether the replay listing panel has been auto-sized to fit content.
-    /// Reset when game state is cleared so the panel re-auto-sizes on next load.
-    pub replay_listing_auto_sized: bool,
-    /// Whether large grouped listings have had their default collapse applied.
-    /// Reset when game state is cleared so the collapse re-applies on next load.
-    pub replay_listing_collapse_defaulted: bool,
+    /// Open replay listings, keyed by runtime handle. `WorkspaceId`s are handed
+    /// out monotonically, so iterating the map in key order is also the order
+    /// the workspaces were opened -- which a later phase needs to restore tabs.
+    pub workspaces: std::collections::BTreeMap<WorkspaceId, ReplayWorkspace>,
+    /// Which workspace the replay inspector is currently showing.
+    pub active_workspace: WorkspaceId,
     pub twitch_update_sender: Option<tokio::sync::mpsc::Sender<crate::twitch::TwitchUpdate>>,
     pub twitch_state: Arc<RwLock<TwitchState>>,
     pub markdown_cache: egui_commonmark::CommonMarkCache,
@@ -629,7 +602,6 @@ impl Default for TabState {
             world_of_warships_data: None,
             items_to_extract: Default::default(),
             translations: Default::default(),
-            replays_dir: None,
             unpacker_progress: Default::default(),
             last_progress: Default::default(),
             search_tab: Default::default(),
@@ -641,21 +613,12 @@ impl Default for TabState {
             replay_renderers: Default::default(),
             renderer_asset_cache: Default::default(),
             file_watcher: None,
-            replay_files: None,
-            replay_row_summaries: HashMap::new(),
-            replay_row_summaries_generation: None,
-            replay_row_summaries_loading: false,
-            replay_row_summaries_loaded: false,
-            replay_rows_need_reindex_scan: false,
-            replay_rows_reindex_requested: std::collections::HashSet::new(),
             file_receiver: None,
             background_tasks: Vec::new(),
             can_change_wows_dir: true,
             toasts: Arc::new(parking_lot::Mutex::new(egui_notify::Toasts::default())),
-            replay_dock_state: egui_dock::DockState::new(vec![]),
-            next_replay_tab_id: 0,
-            replay_listing_auto_sized: false,
-            replay_listing_collapse_defaulted: false,
+            workspaces: std::collections::BTreeMap::from([(WorkspaceId::LIVE, ReplayWorkspace::new(None))]),
+            active_workspace: WorkspaceId::LIVE,
             twitch_update_sender: Default::default(),
             twitch_state: Default::default(),
             markdown_cache: Default::default(),
@@ -718,40 +681,50 @@ impl TabState {
         self.save_notify.notify_one();
     }
 
+    /// Looks up an open workspace by id.
+    #[allow(dead_code)]
+    pub fn workspace(&self, id: WorkspaceId) -> Option<&ReplayWorkspace> {
+        self.workspaces.get(&id)
+    }
+
+    /// Looks up an open workspace by id, mutably.
+    #[allow(dead_code)]
+    pub fn workspace_mut(&mut self, id: WorkspaceId) -> Option<&mut ReplayWorkspace> {
+        self.workspaces.get_mut(&id)
+    }
+
+    /// The workspace the replay inspector is currently showing. Falls back to
+    /// the live workspace, then to whatever workspace exists, so a caller
+    /// never has to handle a missing entry.
+    pub fn active_workspace(&self) -> &ReplayWorkspace {
+        self.workspaces
+            .get(&self.active_workspace)
+            .or_else(|| self.workspaces.get(&WorkspaceId::LIVE))
+            .or_else(|| self.workspaces.values().next())
+            .unwrap()
+    }
+
+    /// Mutable form of [`Self::active_workspace`]. Inserts a fresh live
+    /// workspace if the active id has no entry, so the accessor never returns
+    /// an `Option`.
+    pub fn active_workspace_mut(&mut self) -> &mut ReplayWorkspace {
+        let id = self.active_workspace;
+        self.workspaces.entry(id).or_insert_with(|| ReplayWorkspace::new(None))
+    }
+
     /// Returns the replay shown in the currently focused (or first) replay dock tab, if any.
     pub fn focused_replay(&self) -> Option<Arc<RwLock<Replay>>> {
-        // Try focused leaf first
-        if let Some(path) = self.replay_dock_state.focused_leaf()
-            && let Some(leaf) = self.replay_dock_state[path.surface][path.node].get_leaf()
-            && let Some(tab) = leaf.tabs.get(leaf.active.0)
-        {
-            return Some(Arc::clone(&tab.replay));
-        }
-        // Fall back to the first tab in any leaf
-        let (_, tab) = self.replay_dock_state.iter_all_tabs().next()?;
-        Some(Arc::clone(&tab.replay))
+        self.active_workspace().focused_replay()
     }
 
     /// Replace the focused tab's replay, or open a new tab if none exists.
     pub fn open_replay_in_focused_tab(&mut self, replay: Arc<RwLock<Replay>>) {
-        // Try focused tab first
-        if let Some((_rect, tab)) = self.replay_dock_state.find_active_focused() {
-            tab.replay = replay;
-            return;
-        }
-        // Fall back to the first tab in any leaf
-        if let Some((_, tab)) = self.replay_dock_state.iter_all_tabs_mut().next() {
-            tab.replay = replay;
-            return;
-        }
-        self.open_replay_in_new_tab(replay);
+        self.active_workspace_mut().open_replay_in_focused_tab(replay);
     }
 
     /// Open a replay in a new dock tab.
     pub fn open_replay_in_new_tab(&mut self, replay: Arc<RwLock<Replay>>) {
-        let id = self.next_replay_tab_id;
-        self.next_replay_tab_id += 1;
-        self.replay_dock_state.push_to_focused_leaf(ReplayTab { replay, id });
+        self.active_workspace_mut().open_replay_in_new_tab(replay);
     }
 
     /// Returns the shared dependencies needed for loading replays, if wows_data is available.
@@ -891,8 +864,12 @@ impl TabState {
                         ReplaySource::SessionStatsOnly
                     };
 
-                    let replay_clone =
-                        self.replay_files.as_ref().and_then(|files| files.get(&modified_file)).map(Arc::clone);
+                    let replay_clone = self
+                        .active_workspace()
+                        .replay_files
+                        .as_ref()
+                        .and_then(|files| files.get(&modified_file))
+                        .map(Arc::clone);
 
                     if let Some(replay) = replay_clone {
                         // Invalidate cached data so the reload re-parses the file.
@@ -916,7 +893,7 @@ impl TabState {
                     }
                 }
                 NotifyFileEvent::Removed(old_file) => {
-                    if let Some(replay_files) = &mut self.replay_files {
+                    if let Some(replay_files) = &mut self.active_workspace_mut().replay_files {
                         replay_files.remove(&old_file);
                     }
                 }
@@ -963,16 +940,17 @@ impl TabState {
     /// Clears all game-related state. Called when the WoWs directory changes
     /// to ensure no stale data from the previous directory persists.
     pub(crate) fn reset_game_state(&mut self) {
-        self.replay_dock_state = egui_dock::DockState::new(vec![]);
-        self.next_replay_tab_id = 0;
-        self.replay_files = None;
-        self.replay_row_summaries.clear();
-        self.replay_row_summaries_generation = None;
-        self.replay_row_summaries_loaded = false;
-        self.replay_rows_need_reindex_scan = false;
-        self.replay_rows_reindex_requested.clear();
-        self.replay_listing_auto_sized = false;
-        self.replay_listing_collapse_defaulted = false;
+        let workspace = self.active_workspace_mut();
+        workspace.replay_dock_state = egui_dock::DockState::new(vec![]);
+        workspace.next_replay_tab_id = 0;
+        workspace.replay_files = None;
+        workspace.replay_row_summaries.clear();
+        workspace.replay_row_summaries_generation = None;
+        workspace.replay_row_summaries_loaded = false;
+        workspace.replay_rows_need_reindex_scan = false;
+        workspace.replay_rows_reindex_requested.clear();
+        workspace.replay_listing_auto_sized = false;
+        workspace.replay_listing_collapse_defaulted = false;
         self.browser_state = Default::default();
         {
             let mut p = self.persisted.write();
@@ -1041,7 +1019,7 @@ impl TabState {
     pub(crate) fn update_wows_dir(&mut self, wows_dir: &Path, replay_dir: &Path) {
         // Persist the directory immediately — before anything that might early-return.
         self.persisted.write().settings.game.wows_dir = wows_dir.to_str().unwrap().to_string();
-        self.replays_dir = Some(replay_dir.to_owned());
+        self.active_workspace_mut().root = Some(replay_dir.to_owned());
         self.revalidate_wows_dir();
 
         // Drop old watcher and background parser thread (if any).

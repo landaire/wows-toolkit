@@ -852,7 +852,7 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::ValidatingGameData { .. } => {}
                             BackgroundTaskKind::ReconcilingIndex { .. } => {}
                             BackgroundTaskKind::LoadingRowSummaries { .. } => {
-                                self.tab_state.replay_row_summaries_loading = false;
+                                self.tab_state.active_workspace_mut().replay_row_summaries_loading = false;
                             }
                         }
 
@@ -954,7 +954,7 @@ impl WowsToolkitApp {
                         }
                         // Rebuild loaded data with the new constants from disk.
                         if wows_data.write().rebuild_with_new_constants()
-                            && let Some(replay_files) = &self.tab_state.replay_files
+                            && let Some(replay_files) = &self.tab_state.active_workspace().replay_files
                         {
                             for replay in replay_files.values() {
                                 replay.write().ui_report = None;
@@ -995,7 +995,7 @@ impl WowsToolkitApp {
                         debug!("Rebuilding build {} with newly fetched versioned constants", build);
                         if data.write().rebuild_with_new_constants() {
                             // Invalidate cached reports so they rebuild with correct constants
-                            if let Some(replay_files) = &self.tab_state.replay_files {
+                            if let Some(replay_files) = &self.tab_state.active_workspace().replay_files {
                                 for replay in replay_files.values() {
                                     replay.write().ui_report = None;
                                 }
@@ -1130,7 +1130,7 @@ impl WowsToolkitApp {
 
                     self.tab_state.update_wows_dir(&new_dir, &replays_dir);
                     let no_replays = replays.as_ref().is_none_or(|r| r.is_empty());
-                    self.tab_state.replay_files = replays;
+                    self.tab_state.active_workspace_mut().replay_files = replays;
                     self.tab_state.browser_state.reset_filters();
 
                     self.tab_state.toasts.lock().success(t!("ui.messages.game_data_loaded"));
@@ -1226,7 +1226,7 @@ impl WowsToolkitApp {
                     // most recently completed read wins, so a re-read triggered by
                     // a later modification replaces an earlier, staler parse.
                     if matches!(source, ReplaySource::AutoLoad | ReplaySource::SessionStatsOnly)
-                        && let Some(replay_files) = &mut self.tab_state.replay_files
+                        && let Some(replay_files) = &mut self.tab_state.active_workspace_mut().replay_files
                         && let Some(path) = replay.read().source_path.clone()
                     {
                         replay_files.insert(path, Arc::clone(&replay));
@@ -1302,9 +1302,10 @@ impl WowsToolkitApp {
                 BackgroundTaskCompletion::RowSummariesLoaded { summaries, workspace: _workspace, .. } => {
                     // A later phase routes this load to the listing named by
                     // `_workspace`; today there is only the one listing.
-                    self.tab_state.replay_row_summaries = summaries;
-                    self.tab_state.replay_row_summaries_loaded = true;
-                    self.tab_state.replay_rows_need_reindex_scan = true;
+                    let workspace = self.tab_state.active_workspace_mut();
+                    workspace.replay_row_summaries = summaries;
+                    workspace.replay_row_summaries_loaded = true;
+                    workspace.replay_rows_need_reindex_scan = true;
                 }
                 #[cfg(feature = "mod_manager")]
                 BackgroundTaskCompletion::ModManager(mod_manager_info) => match *mod_manager_info {
@@ -2429,7 +2430,7 @@ impl WowsToolkitApp {
 
                     // Invalidate ui_report on all loaded replays so they re-build
                     // with the new constants on next access
-                    if let Some(replay_files) = &self.tab_state.replay_files {
+                    if let Some(replay_files) = &self.tab_state.active_workspace().replay_files {
                         for replay in replay_files.values() {
                             replay.write().ui_report = None;
                         }

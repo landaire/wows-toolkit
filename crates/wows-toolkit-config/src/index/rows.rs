@@ -11,7 +11,7 @@ pub struct SourceId(pub i64);
 
 /// Runtime handle for one open replay workspace. `SourceId` is the durable
 /// identity; this is only ever valid within a single run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub struct WorkspaceId(pub u64);
 
 impl WorkspaceId {

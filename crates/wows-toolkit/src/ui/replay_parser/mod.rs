@@ -2,6 +2,9 @@ mod damage_types;
 mod listing_row;
 mod models;
 mod sorting;
+mod workspace;
+
+pub(crate) use workspace::ReplayWorkspace;
 
 use std::path::PathBuf;
 
@@ -3738,6 +3741,7 @@ impl ToolkitTabViewer<'_> {
 
         if let Some(mut files) = self
             .tab_state
+            .active_workspace()
             .replay_files
             .as_ref()
             .map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>())
@@ -3748,7 +3752,7 @@ impl ToolkitTabViewer<'_> {
             let focused = self.tab_state.focused_replay();
             let locale = self.tab_state.persisted.read().settings.app.locale.clone();
             let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
-            let row_summaries = &self.tab_state.replay_row_summaries;
+            let row_summaries = &self.tab_state.active_workspace().replay_row_summaries;
             let font_id = egui::TextStyle::Body.resolve(ui.style());
 
             // `show_rows` takes the height without spacing and adds `item_spacing.y` itself,
@@ -3818,6 +3822,7 @@ impl ToolkitTabViewer<'_> {
     fn build_file_listing_grouped(&mut self, ui: &mut egui::Ui, grouping: ReplayGrouping) {
         let Some(mut files) = self
             .tab_state
+            .active_workspace()
             .replay_files
             .as_ref()
             .map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>())
@@ -3898,7 +3903,6 @@ impl ToolkitTabViewer<'_> {
             let fallback_maps = tree_maps.clone();
             let visuals = ui.visuals().clone();
             let font_id = egui::TextStyle::Body.resolve(ui.style());
-            let row_summaries = &self.tab_state.replay_row_summaries;
             let locale = self.tab_state.persisted.read().settings.app.locale.clone();
 
             // Unlike `ScrollArea::show_rows`, `egui_ltreeview`'s `ui.set_height` call
@@ -3907,7 +3911,9 @@ impl ToolkitTabViewer<'_> {
             // budgeted in here, or it collides with the row below it.
             let leaf_node_height = ui.text_style_height(&egui::TextStyle::Body) * 2.0 + ui.spacing().item_spacing.y;
 
-            if !self.tab_state.replay_listing_collapse_defaulted && files_len > LARGE_LISTING_THRESHOLD {
+            if !self.tab_state.active_workspace().replay_listing_collapse_defaulted
+                && files_len > LARGE_LISTING_THRESHOLD
+            {
                 let tree_id = ui.make_persistent_id(tree_id_salt);
                 ui.ctx().data_mut(|data| {
                     let state = data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
@@ -3919,8 +3925,13 @@ impl ToolkitTabViewer<'_> {
                         }
                     }
                 });
-                self.tab_state.replay_listing_collapse_defaulted = true;
+                self.tab_state.active_workspace_mut().replay_listing_collapse_defaulted = true;
             }
+
+            // Bound after the collapse-default block above, which needs its own
+            // mutable access to the workspace: `active_workspace()` borrows the
+            // whole workspace, not just this field, so this can't overlap with it.
+            let row_summaries = &self.tab_state.active_workspace().replay_row_summaries;
 
             let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id(tree_id_salt))
                 .allow_multi_selection(true)
@@ -4797,7 +4808,7 @@ impl ToolkitTabViewer<'_> {
     /// Builds the replay parser tab
     pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui) {
         self.refresh_row_summaries();
-        if std::mem::take(&mut self.tab_state.replay_rows_need_reindex_scan) {
+        if std::mem::take(&mut self.tab_state.active_workspace_mut().replay_rows_need_reindex_scan) {
             self.queue_stale_rows_for_reindex();
         }
         ui.vertical(|ui| {
@@ -4815,14 +4826,14 @@ impl ToolkitTabViewer<'_> {
                 // collapsed, so re-expanding does not clobber a width the user chose, and
                 // deferred until a summary load has completed, since measuring before the
                 // stats line exists would latch a width fitted to "not indexed".
-                let has_files = self.tab_state.replay_files.as_ref().is_some_and(|f| !f.is_empty());
+                let has_files = self.tab_state.active_workspace().replay_files.as_ref().is_some_and(|f| !f.is_empty());
 
                 let mut default_width = 250.0f32;
 
                 if has_files
                     && expanded
-                    && !self.tab_state.replay_listing_auto_sized
-                    && self.tab_state.replay_row_summaries_loaded
+                    && !self.tab_state.active_workspace().replay_listing_auto_sized
+                    && self.tab_state.active_workspace().replay_row_summaries_loaded
                     && let Some(metadata_provider) = self.metadata_provider()
                 {
                     let grouping = self.tab_state.persisted.read().settings.replay.grouping;
@@ -4830,6 +4841,7 @@ impl ToolkitTabViewer<'_> {
                     let font_id = egui::TextStyle::Body.resolve(ui.style());
                     let max_width = self
                         .tab_state
+                        .active_workspace()
                         .replay_files
                         .as_ref()
                         .unwrap()
@@ -4839,7 +4851,7 @@ impl ToolkitTabViewer<'_> {
                             let identity = listing_row::replay_row_identity(&guard, &metadata_provider);
                             let parsed = listing_row::replay_parsed_stats(&guard);
                             drop(guard);
-                            let summary = self.tab_state.replay_row_summaries.get(path);
+                            let summary = self.tab_state.active_workspace().replay_row_summaries.get(path);
                             let stats = listing_row::resolve_row_stats(parsed, summary);
                             let identity_text = listing_row::identity_line(&identity, grouping);
                             let stats_text = listing_row::stats_line(&identity, &stats, grouping, locale.as_deref());
@@ -4861,7 +4873,7 @@ impl ToolkitTabViewer<'_> {
                     // so this no longer needs to budget for a second glyph.
                     default_width = (max_width + 44.0).max(200.0);
 
-                    self.tab_state.replay_listing_auto_sized = true;
+                    self.tab_state.active_workspace_mut().replay_listing_auto_sized = true;
 
                     // Clear stored panel state so default_width takes effect
                     ui.ctx().data_mut(|d| {
@@ -4952,10 +4964,12 @@ impl ToolkitTabViewer<'_> {
             }
 
             egui::CentralPanel::default().show(ui, |ui| {
-                let has_tabs = self.tab_state.replay_dock_state.iter_all_tabs().next().is_some();
+                let has_tabs = self.tab_state.active_workspace().replay_dock_state.iter_all_tabs().next().is_some();
                 if has_tabs {
-                    let mut dock_state =
-                        std::mem::replace(&mut self.tab_state.replay_dock_state, egui_dock::DockState::new(vec![]));
+                    let mut dock_state = std::mem::replace(
+                        &mut self.tab_state.active_workspace_mut().replay_dock_state,
+                        egui_dock::DockState::new(vec![]),
+                    );
                     let mut viewer = ReplayTabViewer { tab_state: self.tab_state };
                     egui_dock::DockArea::new(&mut dock_state)
                         .id(egui::Id::new("replay_parser_dock"))
@@ -4965,7 +4979,7 @@ impl ToolkitTabViewer<'_> {
                         .show_leaf_close_all_buttons(false)
                         .allowed_splits(egui_dock::AllowedSplits::All)
                         .show_inside(ui, &mut viewer);
-                    self.tab_state.replay_dock_state = dock_state;
+                    self.tab_state.active_workspace_mut().replay_dock_state = dock_state;
                 } else {
                     ui.centered_and_justified(|ui| {
                         ui.heading(t!("ui.replay.no_selection"));
@@ -4987,8 +5001,8 @@ impl ToolkitTabViewer<'_> {
     fn refresh_row_summaries(&mut self) {
         let generation = crate::data::replay_index::index_generation();
         if !listing_row::should_reload_summaries(
-            self.tab_state.replay_row_summaries_loading,
-            self.tab_state.replay_row_summaries_generation,
+            self.tab_state.active_workspace().replay_row_summaries_loading,
+            self.tab_state.active_workspace().replay_row_summaries_generation,
             generation,
         ) {
             return;
@@ -4998,7 +5012,7 @@ impl ToolkitTabViewer<'_> {
         let deps = match (
             self.tab_state.db_pool.as_ref(),
             self.tab_state.tokio_runtime.as_ref(),
-            self.tab_state.replays_dir.as_ref(),
+            self.tab_state.active_workspace().root.as_ref(),
         ) {
             (Some(pool), Some(rt), Some(_)) => Some((pool.clone(), Arc::clone(rt))),
             _ => None,
@@ -5008,8 +5022,9 @@ impl ToolkitTabViewer<'_> {
         };
         // Stamped here rather than on completion so a query that keeps failing does not
         // re-dispatch on every frame. The next attempt waits for the index to move again.
-        self.tab_state.replay_row_summaries_loading = true;
-        self.tab_state.replay_row_summaries_generation = Some(generation);
+        let workspace = self.tab_state.active_workspace_mut();
+        workspace.replay_row_summaries_loading = true;
+        workspace.replay_row_summaries_generation = Some(generation);
         crate::update_background_task!(
             self.tab_state.background_tasks,
             Some(crate::task::start_load_row_summaries(
@@ -5037,15 +5052,15 @@ impl ToolkitTabViewer<'_> {
         let Some(sender) = self.tab_state.background_parser_tx.as_ref() else {
             return;
         };
-        let Some(files) = self.tab_state.replay_files.as_ref() else {
+        let Some(files) = self.tab_state.active_workspace().replay_files.as_ref() else {
             return;
         };
         let mut queued: Vec<std::path::PathBuf> = Vec::new();
         for path in files.keys() {
-            if self.tab_state.replay_rows_reindex_requested.contains(path) {
+            if self.tab_state.active_workspace().replay_rows_reindex_requested.contains(path) {
                 continue;
             }
-            let summary = self.tab_state.replay_row_summaries.get(path);
+            let summary = self.tab_state.active_workspace().replay_row_summaries.get(path);
             let freshness = listing_row::row_freshness(summary, listing_row::file_mtime_secs(path));
             if !matches!(freshness, listing_row::RowFreshness::Stale) {
                 continue;
@@ -5055,7 +5070,7 @@ impl ToolkitTabViewer<'_> {
             }
         }
         for path in queued {
-            self.tab_state.replay_rows_reindex_requested.insert(path);
+            self.tab_state.active_workspace_mut().replay_rows_reindex_requested.insert(path);
         }
     }
 

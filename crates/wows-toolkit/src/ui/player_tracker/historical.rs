@@ -435,6 +435,12 @@ impl ToolkitTabViewer<'_> {
         // touch other `self.tab_state` fields from inside a cell body).
         let mut find_matches_target: Option<AccountId> = None;
         let mut copy_text: Option<String> = None;
+        // Set when the fallback (re-parse) population path is picked, and acted
+        // on after the write guard below is released. `active_workspace()` goes
+        // through a method call, so calling it from inside the closure that also
+        // holds the player-tracker write guard would force the closure to
+        // capture the whole `TabState` uniquely for its duration.
+        let mut populate_from_replays_requested = false;
 
         // Scoped so the write guard is released before the deferred actions run.
         {
@@ -445,6 +451,14 @@ impl ToolkitTabViewer<'_> {
             if let (Some(pool), Some(rt)) = (self.tab_state.db_pool.as_ref(), self.tab_state.tokio_runtime.as_deref()) {
                 player_tracker.sync_division_mates_from_index(pool, rt);
             }
+
+            // Never a silent no-op: only enable the button when at least one of the
+            // two population paths (durable index, or on-demand replay re-parse) has
+            // its prerequisites available.
+            let index_path_available = self.tab_state.db_pool.is_some() && self.tab_state.tokio_runtime.is_some();
+            let fallback_path_available =
+                self.tab_state.active_workspace().replay_files.is_some() && self.tab_state.wows_data_map.is_some();
+            let populate_enabled = index_path_available || fallback_path_available;
 
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
@@ -492,15 +506,6 @@ impl ToolkitTabViewer<'_> {
                     ui.label(t!("ui.player_tracker.player_filter"));
                     ui.text_edit_singleline(&mut player_tracker.player_filter);
 
-                    // Never a silent no-op: only enable the button when at least one of the
-                    // two population paths (durable index, or on-demand replay re-parse) has
-                    // its prerequisites available.
-                    let index_path_available =
-                        self.tab_state.db_pool.is_some() && self.tab_state.tokio_runtime.is_some();
-                    let fallback_path_available =
-                        self.tab_state.replay_files.is_some() && self.tab_state.wows_data_map.is_some();
-                    let populate_enabled = index_path_available || fallback_path_available;
-
                     if ui
                         .add_enabled(populate_enabled, egui::Button::new(t!("ui.player_tracker.populate_from_replays")))
                         .clicked()
@@ -514,18 +519,8 @@ impl ToolkitTabViewer<'_> {
                                 _ => false,
                             };
 
-                        if !populated_from_index
-                            && let Some(replay_files) = self.tab_state.replay_files.as_ref()
-                            && let Some(wows_data_map) = self.tab_state.wows_data_map.as_ref()
-                        {
-                            crate::update_background_task!(
-                                self.tab_state.background_tasks,
-                                Some(task::start_populating_player_inspector(
-                                    replay_files.keys().cloned().collect(),
-                                    wows_data_map.clone(),
-                                    Arc::clone(&self.tab_state.player_tracker)
-                                ))
-                            );
+                        if !populated_from_index {
+                            populate_from_replays_requested = true;
                         }
                     }
                 });
@@ -586,6 +581,19 @@ impl ToolkitTabViewer<'_> {
         }
         if let Some(id) = find_matches_target {
             self.queue_player_search(id);
+        }
+        if populate_from_replays_requested
+            && let Some(replay_files) = self.tab_state.active_workspace().replay_files.as_ref()
+            && let Some(wows_data_map) = self.tab_state.wows_data_map.as_ref()
+        {
+            crate::update_background_task!(
+                self.tab_state.background_tasks,
+                Some(task::start_populating_player_inspector(
+                    replay_files.keys().cloned().collect(),
+                    wows_data_map.clone(),
+                    Arc::clone(&self.tab_state.player_tracker)
+                ))
+            );
         }
     }
 }
