@@ -44,6 +44,7 @@ pub enum PaletteAction {
     OpenReplay {
         path: PathBuf,
     },
+    OpenReplayFile,
     OpenSearchTab,
     IndexAllReplays,
     GoToTab(Tab),
@@ -142,6 +143,7 @@ impl CommandPalette {
         };
         entries.push(egui_palette::Entry::new("Games I won", PaletteAction::OpenSearchWith(won_query)));
 
+        entries.push(egui_palette::Entry::new(rust_i18n::t!("ui.replay.open_manually"), PaletteAction::OpenReplayFile));
         entries.push(egui_palette::Entry::new("Advanced search...", PaletteAction::OpenSearchTab));
         entries.push(egui_palette::Entry::new("Index all replays", PaletteAction::IndexAllReplays));
         for (label, choice) in [
@@ -255,6 +257,7 @@ mod tests {
         assert!(entries.iter().any(|e| matches!(e.data, PaletteAction::EnterSub(SubKind::ArmorShips))));
         assert!(entries.iter().any(|e| matches!(e.data, PaletteAction::OpenSearchTab)));
         assert!(entries.iter().any(|e| matches!(e.data, PaletteAction::IndexAllReplays)));
+        assert!(entries.iter().any(|e| matches!(e.data, PaletteAction::OpenReplayFile)));
 
         let died = entries
             .iter()

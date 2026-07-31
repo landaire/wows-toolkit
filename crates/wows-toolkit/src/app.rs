@@ -2989,6 +2989,16 @@ impl WowsToolkitApp {
         }
     }
 
+    /// Parses and loads a replay file picked manually (via the palette or a file dialog).
+    fn open_replay_path(&mut self, path: PathBuf) {
+        if let Some(deps) = self.tab_state.replay_dependencies() {
+            update_background_task!(
+                self.tab_state.background_tasks,
+                deps.parse_replay_from_path(path, crate::task::ReplaySource::ManualOpen)
+            );
+        }
+    }
+
     /// Dispatch a palette-picked action against app state.
     fn dispatch_palette_action(&mut self, ctx: &egui::Context, action: crate::ui::command_palette::PaletteAction) {
         use crate::db::index::query_model::Chip;
@@ -3028,12 +3038,10 @@ impl WowsToolkitApp {
                 self.focus_tab(&Tab::Search);
             }
             PaletteAction::OpenSearchTab => self.focus_tab(&Tab::Search),
-            PaletteAction::OpenReplay { path } => {
-                if let Some(deps) = self.tab_state.replay_dependencies() {
-                    update_background_task!(
-                        self.tab_state.background_tasks,
-                        deps.parse_replay_from_path(path, crate::task::ReplaySource::ManualOpen)
-                    );
+            PaletteAction::OpenReplay { path } => self.open_replay_path(path),
+            PaletteAction::OpenReplayFile => {
+                if let Some(path) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() {
+                    self.open_replay_path(path);
                 }
             }
             PaletteAction::IndexAllReplays => {
