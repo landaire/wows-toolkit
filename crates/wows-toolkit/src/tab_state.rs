@@ -690,8 +690,6 @@ impl TabState {
 
     /// Switch the inspector to `id`. A workspace that is not open resolves to
     /// the live workspace rather than leaving the UI pointing at nothing.
-    // No call site outside tests yet; a later task wires this to the tab UI.
-    #[allow(dead_code)]
     pub fn set_active_workspace(&mut self, id: WorkspaceId) {
         self.active_workspace_id =
             if id == WorkspaceId::LIVE || self.workspaces.contains_key(&id) { id } else { WorkspaceId::LIVE };
@@ -699,6 +697,18 @@ impl TabState {
 
     pub fn active_workspace_id(&self) -> WorkspaceId {
         self.active_workspace_id
+    }
+
+    /// Closes a non-live workspace: drops it from `workspaces`, and if it was
+    /// the active one, returns the inspector to the live workspace. Removing
+    /// an id that is not open is a no-op, so this is safe to call twice for
+    /// the same id -- the tab-close path egui_dock drives this from does
+    /// exactly that.
+    pub fn close_workspace(&mut self, id: WorkspaceId) {
+        self.workspaces.remove(&id);
+        if self.active_workspace_id == id {
+            self.set_active_workspace(WorkspaceId::LIVE);
+        }
     }
 
     /// Looks up an open workspace by id. `WorkspaceId::LIVE` always resolves
@@ -1402,5 +1412,59 @@ mod tests {
         state.workspaces.insert(id, ReplayWorkspace::new(None));
         state.set_active_workspace(id);
         assert_eq!(state.active_workspace_id(), id, "a workspace that is open must become active");
+    }
+
+    #[test]
+    fn close_workspace_removes_the_entry_and_resets_the_active_id_when_it_was_active() {
+        let mut state = TabState::default();
+        let id = WorkspaceId(1);
+        state.workspaces.insert(id, ReplayWorkspace::new(None));
+        state.set_active_workspace(id);
+
+        state.close_workspace(id);
+
+        assert!(state.workspaces.get(&id).is_none(), "the closed workspace must be dropped from the map");
+        assert_eq!(
+            state.active_workspace_id(),
+            WorkspaceId::LIVE,
+            "closing the active workspace must fall back to live"
+        );
+    }
+
+    /// egui_dock calls `on_close` from the context-menu close action and then
+    /// again from the deferred tab removal, so a second call for the same
+    /// already-closed id must not misbehave (e.g. by finding the id absent
+    /// and somehow un-resetting the active id it already reset).
+    #[test]
+    fn close_workspace_is_idempotent_on_a_second_call() {
+        let mut state = TabState::default();
+        let id = WorkspaceId(1);
+        state.workspaces.insert(id, ReplayWorkspace::new(None));
+        state.set_active_workspace(id);
+
+        state.close_workspace(id);
+        state.close_workspace(id);
+
+        assert!(state.workspaces.get(&id).is_none());
+        assert_eq!(state.active_workspace_id(), WorkspaceId::LIVE);
+    }
+
+    #[test]
+    fn close_workspace_leaves_the_active_id_untouched_when_closing_a_different_workspace() {
+        let mut state = TabState::default();
+        let active_id = WorkspaceId(1);
+        let other_id = WorkspaceId(2);
+        state.workspaces.insert(active_id, ReplayWorkspace::new(None));
+        state.workspaces.insert(other_id, ReplayWorkspace::new(None));
+        state.set_active_workspace(active_id);
+
+        state.close_workspace(other_id);
+
+        assert!(state.workspaces.get(&other_id).is_none(), "the closed workspace must be dropped from the map");
+        assert_eq!(
+            state.active_workspace_id(),
+            active_id,
+            "closing a workspace that is not active must not disturb the active id"
+        );
     }
 }

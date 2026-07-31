@@ -39,6 +39,7 @@ use serde::Serialize;
 use tokio::runtime::Runtime;
 
 use crate::data::settings::DataSharingMode;
+use crate::db::index::rows::WorkspaceId;
 use crate::icons;
 use crate::tab_state::TabState;
 use crate::task;
@@ -65,7 +66,8 @@ macro_rules! update_background_task {
 #[derive(Clone, PartialEq, Eq)]
 pub enum Tab {
     Unpacker,
-    ReplayParser,
+    /// One replay listing, identified by which workspace it shows.
+    Replays(WorkspaceId),
     Settings,
     PlayerTracker,
     ModManager,
@@ -74,13 +76,22 @@ pub enum Tab {
     Search,
 }
 
-impl Tab {
-    fn title(&self) -> String {
+pub struct ToolkitTabViewer<'a> {
+    pub tab_state: &'a mut TabState,
+}
+
+impl ToolkitTabViewer<'_> {
+    /// Builds a tab's title. A `Replays` tab needs `tab_state` to look up the
+    /// workspace it names, so this lives on the viewer rather than on `Tab`
+    /// itself. The live workspace's title is the same "Replay parser" label
+    /// it has always had; a non-live workspace uses the same label today and
+    /// gains a distinguishing name once workspaces can be named.
+    fn tab_title(&self, tab: &Tab) -> String {
         use rust_i18n::t;
-        let (icon, key) = match self {
+        let (icon, key) = match tab {
             Tab::Unpacker => (icons::ARCHIVE, "ui.tabs.unpacker"),
             Tab::Settings => (icons::GEAR_FINE, "ui.tabs.settings"),
-            Tab::ReplayParser => (icons::MAGNIFYING_GLASS, "ui.tabs.replay_parser"),
+            Tab::Replays(_) => (icons::MAGNIFYING_GLASS, "ui.tabs.replay_parser"),
             Tab::PlayerTracker => (icons::DETECTIVE, "ui.tabs.player_tracker"),
             Tab::ModManager => (icons::WRENCH, "ui.tabs.mod_manager"),
             Tab::ArmorViewer => (icons::SHIELD, "ui.tabs.armor_viewer"),
@@ -91,17 +102,13 @@ impl Tab {
     }
 }
 
-pub struct ToolkitTabViewer<'a> {
-    pub tab_state: &'a mut TabState,
-}
-
 impl TabViewer for ToolkitTabViewer<'_> {
     // This associated type is used to attach some data to each tab.
     type Tab = Tab;
 
     // Returns the current `tab`'s title.
     fn title(&mut self, tab: &mut Self::Tab) -> WidgetText {
-        tab.title().into()
+        self.tab_title(tab).into()
     }
 
     // Defines the contents of a given `tab`.
@@ -115,13 +122,36 @@ impl TabViewer for ToolkitTabViewer<'_> {
         match tab {
             Tab::Unpacker => self.build_unpacker_tab(ui),
             Tab::Settings => self.build_settings_tab(ui),
-            Tab::ReplayParser => self.build_replay_parser_tab(ui),
+            Tab::Replays(_) => self.build_replay_parser_tab(ui),
             Tab::PlayerTracker => self.build_player_tracker_tab(ui),
             Tab::ModManager => self.build_mod_manager_tab(ui),
             Tab::ArmorViewer => self.build_armor_viewer_tab(ui),
             Tab::Stats => self.build_stats_tab(ui),
             Tab::Search => self.build_search_tab(ui),
         }
+    }
+
+    fn is_closeable(&self, tab: &Self::Tab) -> bool {
+        match tab {
+            Tab::Search => true,
+            Tab::Replays(id) => *id != WorkspaceId::LIVE,
+            Tab::Unpacker | Tab::Settings | Tab::PlayerTracker | Tab::ModManager | Tab::ArmorViewer | Tab::Stats => {
+                false
+            }
+        }
+    }
+
+    // Closing a non-live `Replays` tab also drops its workspace. Runs twice
+    // on egui_dock's context-menu close path (once from the menu action, once
+    // from the deferred removal), so `close_workspace` must tolerate being
+    // called again for an id it already removed.
+    fn on_close(&mut self, tab: &mut Self::Tab) -> egui_dock::tab_viewer::OnCloseResponse {
+        if let Tab::Replays(id) = tab
+            && *id != WorkspaceId::LIVE
+        {
+            self.tab_state.close_workspace(*id);
+        }
+        egui_dock::tab_viewer::OnCloseResponse::Close
     }
 
     fn tab_style_override(&self, tab: &Self::Tab, global_style: &TabStyle) -> Option<TabStyle> {
@@ -282,7 +312,7 @@ impl Default for WowsToolkitApp {
             tab_state: Default::default(),
             dock_state: DockState::new(
                 [
-                    Tab::ReplayParser,
+                    Tab::Replays(WorkspaceId::LIVE),
                     Tab::Stats,
                     Tab::PlayerTracker,
                     Tab::Search,
@@ -1255,7 +1285,7 @@ impl WowsToolkitApp {
                         if open_tab {
                             self.tab_state.open_replay_in_focused_tab(replay);
                             if focus_replay_tab {
-                                self.focus_tab(&Tab::ReplayParser);
+                                self.focus_tab(&Tab::Replays(self.tab_state.active_workspace_id()));
                             }
                         }
                         self.tab_state.toasts.lock().success(t!("ui.messages.replay_loaded"));
@@ -2978,19 +3008,21 @@ impl WowsToolkitApp {
         self.tab_state.send_replay_consent_changed();
     }
 
-    /// Focus the given dock tab, opening it first if it isn't currently docked
-    /// (only `Tab::Search` can be closed by the user today, so it's the only
-    /// variant that gets a fallback push).
+    /// Focus the given dock tab, opening it first if it isn't currently docked.
+    /// Only closeable tabs (`Tab::Search`, non-live `Tab::Replays`) need a
+    /// fallback push: every other variant is always docked.
     fn focus_tab(&mut self, tab: &Tab) {
         if let Some(loc) = self.dock_state.find_tab(tab) {
             let _ = self.dock_state.set_active_tab(loc);
             return;
         }
-        if matches!(tab, Tab::Search) {
-            self.dock_state.push_to_focused_leaf(Tab::Search);
-            if let Some(loc) = self.dock_state.find_tab(tab) {
-                let _ = self.dock_state.set_active_tab(loc);
-            }
+        match tab {
+            Tab::Search => self.dock_state.push_to_focused_leaf(Tab::Search),
+            Tab::Replays(id) => self.dock_state.push_to_focused_leaf(Tab::Replays(*id)),
+            _ => return,
+        }
+        if let Some(loc) = self.dock_state.find_tab(tab) {
+            let _ = self.dock_state.set_active_tab(loc);
         }
     }
 
@@ -3139,7 +3171,7 @@ impl eframe::App for WowsToolkitApp {
                 .allowed_splits(egui_dock::AllowedSplits::None)
                 .show_leaf_collapse_buttons(false)
                 .show_leaf_close_all_buttons(false)
-                .show_close_buttons(false)
+                .show_close_buttons(true)
                 .show_inside(ui, &mut ToolkitTabViewer { tab_state: &mut self.tab_state });
         });
 
@@ -3384,4 +3416,37 @@ pub fn mitigate_wgpu_mem_leak(ctx: &egui::Context) -> bool {
     });
 
     is_minimized
+}
+
+#[cfg(test)]
+mod tab_closeability_tests {
+    use super::*;
+
+    /// Named `is_closeable`, not `closeable`, on purpose: `TabViewer::closeable`
+    /// is dead code in egui_dock 0.20.1 and is never called, so an impl under
+    /// that name would compile, pass every other test, and (because the real
+    /// `is_closeable` default is `true`) make every top-level tab closeable,
+    /// Settings included. This test only exercises `is_closeable`, so renaming
+    /// the outer viewer's impl back to `closeable` makes it fail.
+    #[test]
+    fn only_search_and_non_live_replays_tabs_are_closeable() {
+        let mut tab_state = TabState::default();
+        let viewer = ToolkitTabViewer { tab_state: &mut tab_state };
+
+        for tab in [
+            Tab::Unpacker,
+            Tab::Settings,
+            Tab::PlayerTracker,
+            Tab::ModManager,
+            Tab::ArmorViewer,
+            Tab::Stats,
+            Tab::Replays(WorkspaceId::LIVE),
+        ] {
+            assert!(!viewer.is_closeable(&tab), "must not be closeable: {}", viewer.tab_title(&tab));
+        }
+
+        for tab in [Tab::Search, Tab::Replays(WorkspaceId(1))] {
+            assert!(viewer.is_closeable(&tab), "must be closeable: {}", viewer.tab_title(&tab));
+        }
+    }
 }

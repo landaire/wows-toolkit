@@ -28,6 +28,7 @@ use crate::db::index::query_model::Value;
 use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::PlayerFacet;
 use crate::db::index::rows::ShipFacet;
+use crate::db::index::rows::WorkspaceId;
 
 /// What a picked palette entry does. Carried as the `Entry` payload.
 #[derive(Clone)]
@@ -154,7 +155,7 @@ impl CommandPalette {
             entries.push(egui_palette::Entry::new(label, PaletteAction::SetTheme(choice)));
         }
         for (label, tab) in [
-            ("Go to: Replay parser", Tab::ReplayParser),
+            ("Go to: Replay parser", Tab::Replays(WorkspaceId::LIVE)),
             ("Go to: Player tracker", Tab::PlayerTracker),
             ("Go to: Armor viewer", Tab::ArmorViewer),
             ("Go to: Stats", Tab::Stats),
