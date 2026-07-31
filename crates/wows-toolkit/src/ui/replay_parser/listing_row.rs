@@ -129,8 +129,7 @@ pub(crate) fn stats_line(
 }
 
 /// Hover text for a row. The two drawn lines omit scenario and game mode to
-/// keep the panel narrow, so the tooltip is where that detail survives -- the
-/// ungrouped listing showed all five fields before this change.
+/// keep the panel narrow, so the tooltip is where that detail survives.
 pub(crate) fn hover_text(identity: &RowIdentity, stats_text: &str) -> String {
     format!(
         "{}\n{}\n{}\n{}\n{}\n{}",
@@ -225,7 +224,7 @@ mod tests {
         let stats = resolve_row_stats(None, Some(&summary()));
         let line = stats_line(&identity(), &stats, ReplayGrouping::Date, Some("en-US"));
         assert!(line.contains("114,230"), "expected separated damage in {line:?}");
-        assert!(line.contains('3'), "expected the kill count in {line:?}");
+        assert!(line.contains(t!("ui.replay.row_kills", count = 3).as_ref()), "expected the kill count in {line:?}");
         // Date grouping heads the group with the date, so the row shows the time only.
         assert!(line.contains("14:23:05"), "expected the time in {line:?}");
         assert!(!line.contains("28.07.2026"), "date is already in the group header: {line:?}");
