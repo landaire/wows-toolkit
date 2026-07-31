@@ -139,6 +139,41 @@ pub(crate) fn workspace_group_salt(id: WorkspaceId, kind: &str, group: &str) -> 
     egui::Id::new((id.0, kind, group))
 }
 
+/// A leaf node's id. Takes the path directly: two workspaces can list the same
+/// file, and a `PathBuf -> &str` conversion for `workspace_salt` is lossy.
+pub(crate) fn workspace_leaf_salt(id: WorkspaceId, path: &std::path::Path) -> egui::Id {
+    egui::Id::new((id.0, path))
+}
+
+/// A request raised by a listing context menu and consumed by a handler later
+/// in the same frame. Typed so a writer and its reader cannot name different
+/// slots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReplayRequestSlot {
+    OpenReplayNewTab,
+    AltPerspectivePending,
+    ContextMenuRenderReplay,
+    BatchRenderReplays,
+    BatchRenderClipboard,
+}
+
+impl ReplayRequestSlot {
+    const fn name(self) -> &'static str {
+        match self {
+            ReplayRequestSlot::OpenReplayNewTab => "open_replay_new_tab",
+            ReplayRequestSlot::AltPerspectivePending => "alt_perspective_pending",
+            ReplayRequestSlot::ContextMenuRenderReplay => "context_menu_render_replay",
+            ReplayRequestSlot::BatchRenderReplays => "batch_render_replays",
+            ReplayRequestSlot::BatchRenderClipboard => "batch_render_clipboard",
+        }
+    }
+}
+
+/// The egui id backing a [`ReplayRequestSlot`] in a given workspace.
+pub(crate) fn request_slot_id(workspace: WorkspaceId, slot: ReplayRequestSlot) -> egui::Id {
+    workspace_salt(workspace, slot.name())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +211,81 @@ mod tests {
         let date = workspace_group_salt(WorkspaceId::LIVE, "date_group", "Yamato");
         let ship = workspace_group_salt(WorkspaceId::LIVE, "ship_group", "Yamato");
         assert_ne!(date, ship, "a ship named like a date label must not share tree state");
+    }
+
+    #[test]
+    fn reset_clears_the_listing_but_keeps_the_root_and_an_in_flight_load() {
+        let mut ws = ReplayWorkspace::new(Some(PathBuf::from("replays")));
+        ws.replay_files = Some(HashMap::new());
+        ws.replay_row_summaries.insert(
+            PathBuf::from("a.wowsreplay"),
+            RowSummary {
+                outcome: crate::db::index::rows::MatchOutcome::Unknown,
+                self_damage: None,
+                self_kills: None,
+                self_survived: None,
+                self_pr: None,
+                division_id: None,
+                division_mates: Vec::new(),
+                results_available: false,
+                file_mtime: None,
+            },
+        );
+        ws.replay_row_summaries_generation = Some(7);
+        ws.replay_row_summaries_loading = true;
+        ws.replay_row_summaries_loaded = true;
+        ws.replay_rows_need_reindex_scan = true;
+        ws.replay_rows_reindex_requested.insert(PathBuf::from("a.wowsreplay"));
+        ws.next_replay_tab_id = 3;
+        ws.replay_listing_auto_sized = true;
+        ws.replay_listing_collapse_defaulted = true;
+
+        ws.reset();
+
+        assert_eq!(ws.root, Some(PathBuf::from("replays")));
+        assert!(ws.replay_row_summaries_loading, "an in-flight load owns this flag and clears it on completion");
+        assert!(ws.replay_files.is_none());
+        assert!(ws.replay_row_summaries.is_empty());
+        assert_eq!(ws.replay_row_summaries_generation, None);
+        assert!(!ws.replay_row_summaries_loaded);
+        assert!(!ws.replay_rows_need_reindex_scan);
+        assert!(ws.replay_rows_reindex_requested.is_empty());
+        assert_eq!(ws.next_replay_tab_id, 0);
+        assert!(!ws.replay_listing_auto_sized);
+        assert!(!ws.replay_listing_collapse_defaulted);
+        assert!(ws.replay_dock_state.iter_all_tabs().next().is_none());
+    }
+
+    #[test]
+    fn every_request_slot_round_trips() {
+        let slots = [
+            ReplayRequestSlot::OpenReplayNewTab,
+            ReplayRequestSlot::AltPerspectivePending,
+            ReplayRequestSlot::ContextMenuRenderReplay,
+            ReplayRequestSlot::BatchRenderReplays,
+            ReplayRequestSlot::BatchRenderClipboard,
+        ];
+
+        for &slot in &slots {
+            assert_eq!(
+                request_slot_id(WorkspaceId::LIVE, slot),
+                request_slot_id(WorkspaceId::LIVE, slot),
+                "a slot's id must be stable across calls"
+            );
+            assert_ne!(
+                request_slot_id(WorkspaceId::LIVE, slot),
+                request_slot_id(WorkspaceId(1), slot),
+                "the same slot in different workspaces must not collide"
+            );
+            for &other in &slots {
+                if other != slot {
+                    assert_ne!(
+                        request_slot_id(WorkspaceId::LIVE, slot),
+                        request_slot_id(WorkspaceId::LIVE, other),
+                        "different slots in the same workspace must not collide"
+                    );
+                }
+            }
+        }
     }
 }

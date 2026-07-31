@@ -4,8 +4,11 @@ mod models;
 mod sorting;
 mod workspace;
 
+use workspace::ReplayRequestSlot;
 pub(crate) use workspace::ReplayWorkspace;
+use workspace::request_slot_id;
 use workspace::workspace_group_salt;
+use workspace::workspace_leaf_salt;
 use workspace::workspace_salt;
 
 use std::path::PathBuf;
@@ -209,7 +212,7 @@ fn show_leaf_context_menu(
     if ui.button(wt_translations::icon_t(icons::BROWSER, &t!("ui.replay.context.open_in_new_tab"))).clicked() {
         if let Some(r) = replay_weak.upgrade() {
             ui.ctx().data_mut(|data| {
-                data.insert_temp(workspace_salt(ws_id, "open_replay_new_tab"), Arc::downgrade(&r));
+                data.insert_temp(request_slot_id(ws_id, ReplayRequestSlot::OpenReplayNewTab), Arc::downgrade(&r));
             });
         }
         ui.close_kind(UiKind::Menu);
@@ -253,19 +256,22 @@ fn show_leaf_context_menu(
     }
     if ui.button(wt_translations::icon_t(icons::PLAY, &t!("ui.replay.context.render_replay"))).clicked() {
         ui.ctx().data_mut(|data| {
-            data.insert_temp(workspace_salt(ws_id, "context_menu_render_replay"), replay_weak.clone());
+            data.insert_temp(request_slot_id(ws_id, ReplayRequestSlot::ContextMenuRenderReplay), replay_weak.clone());
         });
         ui.close_kind(UiKind::Menu);
     }
     if ui.button(t!("ui.replay.context.render_to_video")).clicked() {
         ui.ctx().data_mut(|data| {
-            data.insert_temp(workspace_salt(ws_id, "batch_render_replays"), vec![replay_weak.clone()]);
+            data.insert_temp(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderReplays), vec![replay_weak.clone()]);
         });
         ui.close_kind(UiKind::Menu);
     }
     if ui.button(t!("ui.replay.context.render_to_clipboard")).clicked() {
         ui.ctx().data_mut(|data| {
-            data.insert_temp(workspace_salt(ws_id, "batch_render_clipboard"), vec![replay_weak.clone()]);
+            data.insert_temp(
+                request_slot_id(ws_id, ReplayRequestSlot::BatchRenderClipboard),
+                vec![replay_weak.clone()],
+            );
         });
         ui.close_kind(UiKind::Menu);
     }
@@ -305,7 +311,7 @@ fn show_group_context_menu(
     };
     if ui.button(render_label).clicked() {
         ui.ctx().data_mut(|data| {
-            data.insert_temp(workspace_salt(ws_id, "batch_render_replays"), replays.to_vec());
+            data.insert_temp(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderReplays), replays.to_vec());
         });
         ui.close_kind(UiKind::Menu);
     }
@@ -316,7 +322,7 @@ fn show_group_context_menu(
     };
     if ui.button(clipboard_label).clicked() {
         ui.ctx().data_mut(|data| {
-            data.insert_temp(workspace_salt(ws_id, "batch_render_clipboard"), replays.to_vec());
+            data.insert_temp(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderClipboard), replays.to_vec());
         });
         ui.close_kind(UiKind::Menu);
     }
@@ -429,7 +435,10 @@ impl GroupedTreeMaps {
             };
             if ui.button(render_label).clicked() {
                 ui.ctx().data_mut(|data| {
-                    data.insert_temp(workspace_salt(ws_id, "batch_render_replays"), selected_replays.clone());
+                    data.insert_temp(
+                        request_slot_id(ws_id, ReplayRequestSlot::BatchRenderReplays),
+                        selected_replays.clone(),
+                    );
                 });
                 ui.close_kind(UiKind::Menu);
             }
@@ -440,7 +449,10 @@ impl GroupedTreeMaps {
             };
             if ui.button(clipboard_label).clicked() {
                 ui.ctx().data_mut(|data| {
-                    data.insert_temp(workspace_salt(ws_id, "batch_render_clipboard"), selected_replays.clone());
+                    data.insert_temp(
+                        request_slot_id(ws_id, ReplayRequestSlot::BatchRenderClipboard),
+                        selected_replays.clone(),
+                    );
                 });
                 ui.close_kind(UiKind::Menu);
             }
@@ -3903,7 +3915,7 @@ impl ToolkitTabViewer<'_> {
                 let mut child_ids = Vec::new();
                 let mut grp_paths = Vec::new();
                 for (path, replay) in replays {
-                    let id = egui::Id::new((ws_id.0, path));
+                    let id = workspace_leaf_salt(ws_id, path);
                     id_to_replay.insert(id, replay.clone());
                     tree_maps.leaf_replays.insert(id, Arc::downgrade(replay));
                     tree_maps.leaf_paths.insert(id, path.clone());
@@ -3967,7 +3979,7 @@ impl ToolkitTabViewer<'_> {
                     let is_open = builder.node(dir_node);
                     if is_open {
                         for (path, _replay) in replays {
-                            let id = egui::Id::new((ws_id.0, path));
+                            let id = workspace_leaf_salt(ws_id, path);
                             let path_clone = path.clone();
                             let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
                             let replay_weak = tree_maps.leaf_replays.get(&id).cloned().unwrap();
@@ -4128,7 +4140,7 @@ impl ToolkitTabViewer<'_> {
         let ws_id = self.tab_state.active_workspace_id;
         ui.ctx().data_mut(|data| {
             data.insert_temp(
-                workspace_salt(ws_id, "alt_perspective_pending"),
+                request_slot_id(ws_id, ReplayRequestSlot::AltPerspectivePending),
                 PendingAltReparse(Some((replay_weak.clone(), alt_arc))),
             );
         });
@@ -4144,7 +4156,9 @@ impl ToolkitTabViewer<'_> {
         let ws_id = self.tab_state.active_workspace_id;
         if let Some(replay) = ui
             .ctx()
-            .data_mut(|data| data.remove_temp::<Weak<RwLock<Replay>>>(workspace_salt(ws_id, "open_replay_new_tab")))
+            .data_mut(|data| {
+                data.remove_temp::<Weak<RwLock<Replay>>>(request_slot_id(ws_id, ReplayRequestSlot::OpenReplayNewTab))
+            })
             .and_then(|w| w.upgrade())
         {
             *replay_to_open_new = Some(replay);
@@ -4157,7 +4171,9 @@ impl ToolkitTabViewer<'_> {
         // the background re-parse.
         let pending = ui
             .ctx()
-            .data_mut(|data| data.remove_temp::<PendingAltReparse>(workspace_salt(ws_id, "alt_perspective_pending")))
+            .data_mut(|data| {
+                data.remove_temp::<PendingAltReparse>(request_slot_id(ws_id, ReplayRequestSlot::AltPerspectivePending))
+            })
             .and_then(|p| p.0);
         if let Some((weak, alt_arc)) = pending
             && let Some(arc) = weak.upgrade()
@@ -5370,8 +5386,9 @@ impl ToolkitTabViewer<'_> {
 
     fn handle_context_menu_render(&mut self, ui: &mut egui::Ui) {
         let ws_id = self.tab_state.active_workspace_id;
-        let replay_weak: Option<Weak<RwLock<Replay>>> =
-            ui.ctx().data_mut(|data| data.remove_temp(workspace_salt(ws_id, "context_menu_render_replay")));
+        let replay_weak: Option<Weak<RwLock<Replay>>> = ui
+            .ctx()
+            .data_mut(|data| data.remove_temp(request_slot_id(ws_id, ReplayRequestSlot::ContextMenuRenderReplay)));
         if let Some(weak) = replay_weak
             && let Some(arc) = weak.upgrade()
             && self.tab_state.wows_data_map.is_some()
@@ -5484,7 +5501,7 @@ impl ToolkitTabViewer<'_> {
         let ws_id = self.tab_state.active_workspace_id;
         // Batch render to folder
         if let Some(replay_weaks) = ui.ctx().data_mut(|data| {
-            data.remove_temp::<Vec<Weak<RwLock<Replay>>>>(workspace_salt(ws_id, "batch_render_replays"))
+            data.remove_temp::<Vec<Weak<RwLock<Replay>>>>(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderReplays))
         }) {
             let Some(output_dir) =
                 rfd::FileDialog::new().set_title("Select output folder for rendered videos").pick_folder()
@@ -5526,7 +5543,10 @@ impl ToolkitTabViewer<'_> {
 
         // Batch render to clipboard
         if let Some(replay_weaks) = ui.ctx().data_mut(|data| {
-            data.remove_temp::<Vec<Weak<RwLock<Replay>>>>(workspace_salt(ws_id, "batch_render_clipboard"))
+            data.remove_temp::<Vec<Weak<RwLock<Replay>>>>(request_slot_id(
+                ws_id,
+                ReplayRequestSlot::BatchRenderClipboard,
+            ))
         }) {
             let batch_infos = self.collect_batch_replay_infos(&replay_weaks);
             if batch_infos.is_empty() {

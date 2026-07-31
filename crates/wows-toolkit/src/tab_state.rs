@@ -688,7 +688,6 @@ impl TabState {
 
     /// Looks up an open workspace by id. `WorkspaceId::LIVE` always resolves
     /// to `live_workspace`, since it is not stored in `workspaces`.
-    #[allow(dead_code)]
     pub fn workspace(&self, id: WorkspaceId) -> Option<&ReplayWorkspace> {
         if id == WorkspaceId::LIVE { Some(&self.live_workspace) } else { self.workspaces.get(&id) }
     }
@@ -699,17 +698,22 @@ impl TabState {
         if id == WorkspaceId::LIVE { Some(&mut self.live_workspace) } else { self.workspaces.get_mut(&id) }
     }
 
-    /// The workspace the replay inspector is currently showing. `live_workspace`
-    /// is not a map entry, so a miss on `workspaces` always falls back to it --
-    /// there is no id for which this and `active_workspace_mut` disagree.
+    /// The workspace the replay inspector is currently showing. Delegates to
+    /// [`Self::workspace`] so both share one resolution rule, falling back to
+    /// `live_workspace` when `active_workspace_id` names an id that is neither
+    /// `LIVE` nor present in `workspaces`.
     pub fn active_workspace(&self) -> &ReplayWorkspace {
-        self.workspaces.get(&self.active_workspace_id).unwrap_or(&self.live_workspace)
+        self.workspace(self.active_workspace_id).unwrap_or(&self.live_workspace)
     }
 
-    /// Mutable form of [`Self::active_workspace`]. Resolves identically: a
-    /// miss on `workspaces` falls back to `live_workspace`, never inserts.
+    /// Mutable form of [`Self::active_workspace`]. Resolves identically and
+    /// never inserts into `workspaces`.
     pub fn active_workspace_mut(&mut self) -> &mut ReplayWorkspace {
-        match self.workspaces.get_mut(&self.active_workspace_id) {
+        let id = self.active_workspace_id;
+        if id == WorkspaceId::LIVE {
+            return &mut self.live_workspace;
+        }
+        match self.workspaces.get_mut(&id) {
             Some(workspace) => workspace,
             None => &mut self.live_workspace,
         }
@@ -1199,5 +1203,36 @@ mod tests {
 
         state.write().output_dir = "tracked".to_string();
         assert_ne!(state.generation(), start, "a tracked write must wake the save task");
+    }
+
+    #[test]
+    fn workspace_live_and_active_workspace_name_the_same_workspace() {
+        let state = TabState::default();
+        let via_workspace = state.workspace(WorkspaceId::LIVE).expect("LIVE always resolves");
+        let via_active = state.active_workspace();
+        assert!(
+            std::ptr::eq(via_workspace, via_active),
+            "workspace(LIVE) and active_workspace() must resolve to the same ReplayWorkspace by default"
+        );
+    }
+
+    #[test]
+    fn active_workspace_mut_does_not_grow_workspaces() {
+        let mut state = TabState::default();
+        let before = state.workspaces.len();
+        let _ = state.active_workspace_mut();
+        assert_eq!(state.workspaces.len(), before, "active_workspace_mut must never insert into workspaces");
+    }
+
+    #[test]
+    fn unknown_id_misses_workspace_but_active_workspace_still_resolves() {
+        let mut state = TabState::default();
+        state.active_workspace_id = WorkspaceId(9999);
+        assert!(state.workspace(WorkspaceId(9999)).is_none());
+        let via_active = state.active_workspace();
+        assert!(
+            std::ptr::eq(via_active, &state.live_workspace),
+            "an unknown active_workspace_id must fall back to live_workspace"
+        );
     }
 }
