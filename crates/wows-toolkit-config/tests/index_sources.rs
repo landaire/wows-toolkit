@@ -50,6 +50,60 @@ fn sample_record(arena: i64, source: SourceId, path: &str) -> ReplayRecord {
     }
 }
 
+/// Like [`sample_record`], but with the fields the migration's collision
+/// preference actually compares (`results_available`, `indexed_at`) and a
+/// distinguishing `self_damage` so a test can tell which of two colliding
+/// rows won.
+fn record_with_results(
+    arena: i64,
+    source: SourceId,
+    path: &str,
+    results_available: bool,
+    self_damage: u64,
+    indexed_at: i64,
+) -> ReplayRecord {
+    ReplayRecord {
+        arena_id: ArenaId::new(arena),
+        source_id: source,
+        replay_path: PathBuf::from(path),
+        file_mtime: Some(42),
+        outcome: MatchOutcome::Win,
+        self_account_id: Some(AccountId::from(7)),
+        self_ship_id: Some(GameParamId::from(999u64)),
+        self_survived: Some(true),
+        self_damage: Some(self_damage),
+        self_kills: Some(2),
+        self_pr: Some(1500.0),
+        results_available,
+        indexed_at: Timestamp::from_second(indexed_at).unwrap(),
+    }
+}
+
+/// Rebuilds the pre-008 shape inside an already-migrated `mem_pool()` (its
+/// migration 008 indexes are dropped) and creates a second `live` source at a
+/// higher id than the default one, reproducing the duplicate-live-source
+/// condition a racing first launch could leave behind. Returns
+/// `(survivor, doomed)`.
+async fn two_live_sources(pool: &SqlitePool, now: Timestamp) -> (SourceId, SourceId) {
+    sqlx::query("DROP INDEX idx_source_single_live").execute(pool).await.unwrap();
+    sqlx::query("DROP INDEX idx_source_root_path").execute(pool).await.unwrap();
+
+    let survivor = query::ensure_default_source(pool, Path::new("C:/wows/replays"), now).await.unwrap();
+    let doomed_row: (i64,) = sqlx::query_as(
+        "INSERT INTO index_source (name, kind, root_path, added_at) VALUES (?1, ?2, ?3, ?4) RETURNING source_id",
+    )
+    .bind("Live replays (dup)")
+    .bind(SourceKind::Live.as_db_str())
+    .bind("D:/other/replays")
+    .bind(now.as_second())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let doomed = SourceId(doomed_row.0);
+    assert!(doomed.0 > survivor.0, "the doomed source must have the higher id for this scenario to be meaningful");
+    (survivor, doomed)
+}
+
 #[tokio::test]
 async fn a_second_live_source_cannot_be_inserted() {
     let pool = mem_pool().await;
@@ -112,9 +166,12 @@ async fn ensure_default_source_id_round_trips_through_live_source_id() {
 }
 
 #[tokio::test]
-async fn records_survive_the_migration_of_a_single_live_source() {
-    // Guards the dedupe path's UPDATE OR IGNORE: with only one live source
-    // nothing is repointed and nothing may be lost.
+async fn single_live_source_read_write_round_trips_after_migration_008() {
+    // With only one live source the dedupe statements have nothing to do;
+    // this only proves migration 008 does not break the ordinary insert/read
+    // path. It does not exercise the dedupe logic itself -- see
+    // migration_dedupes_two_live_sources_repointing_non_colliding_records and
+    // its siblings for that.
     let pool = mem_pool().await;
     let now = Timestamp::from_second(1_700_000_000).unwrap();
     let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
@@ -127,28 +184,9 @@ async fn records_survive_the_migration_of_a_single_live_source() {
 
 #[tokio::test]
 async fn migration_dedupes_two_live_sources_repointing_non_colliding_records() {
-    // mem_pool() already applied migration 008, so its indexes are in place.
-    // Drop them to rebuild the pre-008 shape the migration is meant to repair,
-    // then recreate the duplicate-live-source condition a racing first launch
-    // could leave behind.
     let pool = mem_pool().await;
     let now = Timestamp::from_second(1_700_000_000).unwrap();
-    sqlx::query("DROP INDEX idx_source_single_live").execute(&pool).await.unwrap();
-    sqlx::query("DROP INDEX idx_source_root_path").execute(&pool).await.unwrap();
-
-    let survivor = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
-    let doomed_row: (i64,) = sqlx::query_as(
-        "INSERT INTO index_source (name, kind, root_path, added_at) VALUES (?1, ?2, ?3, ?4) RETURNING source_id",
-    )
-    .bind("Live replays (dup)")
-    .bind(SourceKind::Live.as_db_str())
-    .bind("D:/other/replays")
-    .bind(now.as_second())
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    let doomed = SourceId(doomed_row.0);
-    assert!(doomed.0 > survivor.0, "the doomed source must have the higher id for this scenario to be meaningful");
+    let (survivor, doomed) = two_live_sources(&pool, now).await;
 
     query::upsert_match(&pool, &sample_match(100)).await.unwrap();
     query::upsert_match(&pool, &sample_match(200)).await.unwrap();
@@ -195,4 +233,135 @@ async fn migration_dedupes_two_live_sources_repointing_non_colliding_records() {
 
     let total: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM replay_record").fetch_one(&pool).await.unwrap();
     assert_eq!(total.0, 3, "one duplicate record must be dropped; the other three must remain");
+}
+
+/// One row's `self_damage` after the migration, for the single-path fixtures
+/// the collision-preference tests use.
+async fn self_damage_at(pool: &SqlitePool, path: &str) -> i64 {
+    let row: (i64,) = sqlx::query_as("SELECT self_damage FROM replay_record WHERE replay_path = ?1")
+        .bind(path)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    row.0
+}
+
+#[tokio::test]
+async fn migration_dedupe_prefers_the_doomed_row_when_it_has_results_and_the_survivor_does_not() {
+    // The two live sources are populated by separate threads at different
+    // times, so a record present under both can disagree: one thread indexed
+    // it before WG post-battle results were written, the other after.
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let (survivor, doomed) = two_live_sources(&pool, now).await;
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &record_with_results(100, survivor, "x.wowsreplay", false, 111, 1_700_000_000))
+        .await
+        .unwrap();
+    query::upsert_record(&pool, &record_with_results(100, doomed, "x.wowsreplay", true, 999, 1_700_000_050))
+        .await
+        .unwrap();
+
+    const DEDUPE_SQL: &str = include_str!("../migrations/008_source_uniqueness.sql");
+    sqlx::raw_sql(DEDUPE_SQL).execute(&pool).await.unwrap();
+
+    let remaining: Vec<(i64,)> =
+        sqlx::query_as("SELECT source_id FROM replay_record WHERE replay_path = 'x.wowsreplay'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(remaining, vec![(survivor.0,)], "exactly one row must remain, repointed onto the survivor");
+    assert_eq!(
+        self_damage_at(&pool, "x.wowsreplay").await,
+        999,
+        "the results-bearing doomed row must win over the results-absent survivor row"
+    );
+}
+
+#[tokio::test]
+async fn migration_dedupe_keeps_the_survivor_row_when_it_already_has_results() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let (survivor, doomed) = two_live_sources(&pool, now).await;
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &record_with_results(100, survivor, "x.wowsreplay", true, 999, 1_700_000_050))
+        .await
+        .unwrap();
+    query::upsert_record(&pool, &record_with_results(100, doomed, "x.wowsreplay", false, 111, 1_700_000_000))
+        .await
+        .unwrap();
+
+    const DEDUPE_SQL: &str = include_str!("../migrations/008_source_uniqueness.sql");
+    sqlx::raw_sql(DEDUPE_SQL).execute(&pool).await.unwrap();
+
+    let remaining: Vec<(i64,)> =
+        sqlx::query_as("SELECT source_id FROM replay_record WHERE replay_path = 'x.wowsreplay'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(remaining, vec![(survivor.0,)], "exactly one row must remain, already on the survivor");
+    assert_eq!(
+        self_damage_at(&pool, "x.wowsreplay").await,
+        999,
+        "the survivor's already-results-bearing row must be kept over the results-absent doomed row"
+    );
+}
+
+#[tokio::test]
+async fn migration_nulls_root_path_for_all_but_the_lowest_id_among_a_group_sharing_one() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    sqlx::query("DROP INDEX idx_source_single_live").execute(&pool).await.unwrap();
+    sqlx::query("DROP INDEX idx_source_root_path").execute(&pool).await.unwrap();
+
+    // Three ad-hoc sources sharing one root_path: the non-obvious case is
+    // whether the correlated subquery picking MIN(source_id) per root_path
+    // still holds across a group larger than two. A fourth, unrelated source
+    // with its own root_path proves the migration does not touch rows outside
+    // any duplicate group.
+    let mut shared_ids = Vec::new();
+    for name in ["shared-a", "shared-b", "shared-c"] {
+        let row: (i64,) = sqlx::query_as(
+            "INSERT INTO index_source (name, kind, root_path, added_at) VALUES (?1, ?2, ?3, ?4) RETURNING source_id",
+        )
+        .bind(name)
+        .bind(SourceKind::AdHoc.as_db_str())
+        .bind("E:/shared")
+        .bind(now.as_second())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        shared_ids.push(row.0);
+    }
+    let lowest_shared = *shared_ids.iter().min().unwrap();
+
+    sqlx::query("INSERT INTO index_source (name, kind, root_path, added_at) VALUES (?1, ?2, ?3, ?4)")
+        .bind("unrelated")
+        .bind(SourceKind::AdHoc.as_db_str())
+        .bind("E:/other")
+        .bind(now.as_second())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    const DEDUPE_SQL: &str = include_str!("../migrations/008_source_uniqueness.sql");
+    sqlx::raw_sql(DEDUPE_SQL).execute(&pool).await.unwrap();
+
+    let rows: Vec<(i64, Option<String>)> =
+        sqlx::query_as("SELECT source_id, root_path FROM index_source ORDER BY source_id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+
+    for (id, root_path) in &rows {
+        if *id == lowest_shared {
+            assert_eq!(root_path.as_deref(), Some("E:/shared"), "the lowest id in the group must keep the root_path");
+        } else if shared_ids.contains(id) {
+            assert_eq!(root_path.as_deref(), None, "every non-lowest id in the group must have root_path nulled out");
+        } else {
+            assert_eq!(root_path.as_deref(), Some("E:/other"), "a source outside the group must be untouched");
+        }
+    }
 }
