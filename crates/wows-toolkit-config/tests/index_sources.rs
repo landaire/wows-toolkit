@@ -400,3 +400,96 @@ async fn migration_nulls_root_path_for_all_but_the_lowest_id_among_a_group_shari
         }
     }
 }
+
+async fn row_count_for_root(pool: &SqlitePool, root: &str) -> i64 {
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM index_source WHERE root_path = ?1")
+        .bind(root)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    row.0
+}
+
+async fn name_for_root(pool: &SqlitePool, root: &str) -> String {
+    let row: (String,) =
+        sqlx::query_as("SELECT name FROM index_source WHERE root_path = ?1").bind(root).fetch_one(pool).await.unwrap();
+    row.0
+}
+
+#[tokio::test]
+async fn ensure_source_is_idempotent_for_a_repeated_root() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let root = Path::new("D:/dump/replays");
+    let first = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, root, now).await.unwrap();
+    let second = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, root, now).await.unwrap();
+    assert_eq!(first, second, "the same root must resolve to the same source");
+}
+
+#[tokio::test]
+async fn ensure_source_distinguishes_roots() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let a = query::ensure_source(&pool, "A", SourceKind::ImportedDir, Path::new("D:/a"), now).await.unwrap();
+    let b = query::ensure_source(&pool, "B", SourceKind::ImportedDir, Path::new("D:/b"), now).await.unwrap();
+    assert_ne!(a, b);
+}
+
+#[tokio::test]
+async fn ensure_source_returns_the_existing_row_rather_than_erroring_on_the_unique_index() {
+    // The insert races another thread; recovering by re-selecting is what makes
+    // the two-writer path safe rather than merely constrained.
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let root = Path::new("D:/dump/replays");
+    let existing = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, root, now).await.unwrap();
+
+    // A differently-named call for the same root must still resolve, not fail.
+    let again = query::ensure_source(&pool, "Renamed", SourceKind::ImportedDir, root, now).await.unwrap();
+    assert_eq!(existing, again);
+
+    // The differing name proves the second insert really did collide on
+    // root_path (a call with identical arguments could resolve to the same id
+    // via a check-then-insert that never touches the conflict arm at all).
+    // A single surviving row, still named "Dump", proves the conflict was
+    // absorbed by ON CONFLICT DO NOTHING and recovered via the re-select,
+    // rather than by inserting a second row or upserting over the first.
+    assert_eq!(row_count_for_root(&pool, "D:/dump/replays").await, 1, "only one row may exist for the root");
+    assert_eq!(
+        name_for_root(&pool, "D:/dump/replays").await,
+        "Dump",
+        "the original row's name must survive untouched; DO NOTHING must not upsert"
+    );
+}
+
+#[tokio::test]
+async fn ensure_default_source_still_yields_the_live_source() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let via_default = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+    assert_eq!(query::live_source_id(&pool).await.unwrap(), Some(via_default));
+}
+
+#[tokio::test]
+async fn ensure_default_source_adopts_an_existing_source_for_the_same_root() {
+    // If a directory is already registered as an imported_dir source before any
+    // live source exists, ensure_default_source must adopt that existing source
+    // rather than fail or create a second row for the same root_path (which the
+    // unique index would reject anyway).
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let root = Path::new("C:/wows/replays");
+    let imported = query::ensure_source(&pool, "Imported", SourceKind::ImportedDir, root, now).await.unwrap();
+
+    let via_default = query::ensure_default_source(&pool, root, now).await.unwrap();
+    assert_eq!(via_default, imported, "ensure_default_source must adopt the pre-existing source for this root");
+
+    // No live source was created: the conflict on root_path prevented the
+    // live-kind insert from ever landing a row.
+    assert_eq!(
+        query::live_source_id(&pool).await.unwrap(),
+        None,
+        "adopting an existing source must not create a live-kind row"
+    );
+    assert_eq!(row_count_for_root(&pool, "C:/wows/replays").await, 1, "only one row may exist for the root");
+}

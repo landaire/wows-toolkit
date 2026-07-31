@@ -273,4 +273,6 @@ pub enum IndexError {
     Sqlx(#[from] sqlx::Error),
     #[error("unknown source: {0:?}")]
     UnknownSource(SourceId),
+    #[error("failed to create or resolve index source for {root_path:?}")]
+    SourceCreationFailed { root_path: std::path::PathBuf },
 }

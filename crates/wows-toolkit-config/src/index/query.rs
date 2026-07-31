@@ -51,6 +51,52 @@ pub async fn live_source_id(pool: &SqlitePool) -> Result<Option<SourceId>, Index
     Ok(existing.map(|(id,)| SourceId(id)))
 }
 
+/// Return the id of the source rooted at `root_path`, creating it if absent.
+///
+/// `INSERT ... ON CONFLICT DO NOTHING` followed by a re-select, so two threads
+/// racing on a fresh database both end up with the same id rather than one
+/// failing. The unique indexes from migration 008 are what make the conflict
+/// arm reachable.
+///
+/// The re-select matches on `root_path` alone, not `(root_path, kind)`, so if
+/// a source already owns `root_path` under a different `kind`, this returns
+/// that existing source rather than creating a second one for `kind`. This is
+/// intentional: a directory has exactly one source, whatever kind it was
+/// first registered as. Callers that need a specific kind must check the
+/// returned source's kind themselves.
+pub async fn ensure_source(
+    pool: &SqlitePool,
+    name: &str,
+    kind: SourceKind,
+    root_path: &Path,
+    now: Timestamp,
+) -> Result<SourceId, IndexError> {
+    let root = root_path.to_string_lossy().to_string();
+
+    sqlx::query(
+        "INSERT INTO index_source (name, kind, root_path, added_at) VALUES (?1, ?2, ?3, ?4) \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(name)
+    .bind(kind.as_db_str())
+    .bind(&root)
+    .bind(now.as_second())
+    .execute(pool)
+    .await?;
+
+    let row: Option<(i64,)> = sqlx::query_as("SELECT source_id FROM index_source WHERE root_path = ?1")
+        .bind(&root)
+        .fetch_optional(pool)
+        .await?;
+
+    match row {
+        Some((id,)) => Ok(SourceId(id)),
+        // The row is absent only if another connection deleted it between the
+        // insert and the select, which the app never does concurrently.
+        None => Err(IndexError::SourceCreationFailed { root_path: root_path.to_path_buf() }),
+    }
+}
+
 /// Return the id of the single `Live` source, creating it if absent. Only the
 /// indexing path may call this; readers use [`live_source_id`].
 pub async fn ensure_default_source(
@@ -58,23 +104,10 @@ pub async fn ensure_default_source(
     root_path: &Path,
     now: Timestamp,
 ) -> Result<SourceId, IndexError> {
-    let existing: Option<(i64,)> = sqlx::query_as("SELECT source_id FROM index_source WHERE kind = ?1 LIMIT 1")
-        .bind(SourceKind::Live.as_db_str())
-        .fetch_optional(pool)
-        .await?;
-    if let Some((id,)) = existing {
-        return Ok(SourceId(id));
+    if let Some(id) = live_source_id(pool).await? {
+        return Ok(id);
     }
-    let id: (i64,) = sqlx::query_as(
-        "INSERT INTO index_source (name, kind, root_path, added_at) VALUES (?1, ?2, ?3, ?4) RETURNING source_id",
-    )
-    .bind("Live replays")
-    .bind(SourceKind::Live.as_db_str())
-    .bind(root_path.to_string_lossy().to_string())
-    .bind(now.as_second())
-    .fetch_one(pool)
-    .await?;
-    Ok(SourceId(id.0))
+    ensure_source(pool, "Live replays", SourceKind::Live, root_path, now).await
 }
 
 /// List every group, newest first.
