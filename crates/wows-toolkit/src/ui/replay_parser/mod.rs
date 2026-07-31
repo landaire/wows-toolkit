@@ -33,6 +33,7 @@ use std::io::Write;
 use std::sync::Arc;
 use std::sync::Weak;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::Sender;
 
 use rootcause::Report;
@@ -103,7 +104,6 @@ use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::types::AccountId;
-use wows_replays::types::ArenaId;
 
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::fire_chance::analysis::ExclusionReason;
@@ -620,7 +620,10 @@ pub struct UiReport {
     self_player: Option<Arc<Player>>,
     /// Salts the row-expansion animation ids so expanding a row in one
     /// report's table does not animate the same row number in another.
-    arena_id: ArenaId,
+    /// Assigned from a process-wide counter rather than the replay's arena id
+    /// because arena id falls back to a shared sentinel when the arena-state
+    /// packet was never observed (spectator recordings, truncated captures).
+    report_salt: u64,
     player_reports: Vec<PlayerReport>,
     sorted: bool,
     is_row_expanded: BTreeMap<u64, bool>,
@@ -648,6 +651,11 @@ pub struct UiReport {
     /// from `&self` while staying Send+Sync.
     icon_textures: Mutex<HashMap<String, egui::TextureHandle>>,
 }
+
+/// Source for `UiReport::report_salt`. Every constructed report gets a
+/// distinct value, so it stays unique even across reports that share an
+/// arena id (or lack one).
+static NEXT_REPORT_SALT: AtomicU64 = AtomicU64::new(0);
 
 impl UiReport {
     pub fn new(
@@ -1035,7 +1043,7 @@ impl UiReport {
         Self {
             match_timestamp,
             version: report.version(),
-            arena_id: report.arena_id(),
+            report_salt: NEXT_REPORT_SALT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             player_reports,
             self_player,
             replay_sort: Arc::clone(&deps.replay_sort),
@@ -1828,7 +1836,7 @@ impl UiReport {
 
     fn cell_content_ui(&mut self, row_nr: u64, col_nr: usize, ui: &mut egui::Ui) {
         let is_expanded = self.is_row_expanded.get(&row_nr).copied().unwrap_or_default();
-        let expandedness = ui.ctx().animate_bool(Id::new(("replay_row", self.arena_id, row_nr)), is_expanded);
+        let expandedness = ui.ctx().animate_bool(Id::new(("replay_row", self.report_salt, row_nr)), is_expanded);
 
         let Some(report) = self.player_reports.get(row_nr as usize) else {
             return;
@@ -2903,7 +2911,7 @@ impl egui_table::TableDelegate for UiReport {
             .range(0..row_nr)
             .map(|(expanded_row_nr, expanded)| {
                 let how_expanded =
-                    ctx.animate_bool(Id::new(("replay_row", self.arena_id, *expanded_row_nr)), *expanded);
+                    ctx.animate_bool(Id::new(("replay_row", self.report_salt, *expanded_row_nr)), *expanded);
                 how_expanded * self.row_heights.get(expanded_row_nr).copied().unwrap()
             })
             .sum::<f32>()
