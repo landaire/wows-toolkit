@@ -1133,7 +1133,10 @@ impl WowsToolkitApp {
 
                     self.tab_state.update_wows_dir(&new_dir, &replays_dir);
                     let no_replays = replays.as_ref().is_none_or(|r| r.is_empty());
-                    self.tab_state.active_workspace_mut().replay_files = replays;
+                    // `replays` was loaded from the game's own replays directory,
+                    // so it belongs to the live workspace regardless of which one
+                    // is active.
+                    self.tab_state.live_workspace.replay_files = replays;
                     self.tab_state.browser_state.reset_filters();
 
                     self.tab_state.toasts.lock().success(t!("ui.messages.game_data_loaded"));
@@ -1227,9 +1230,11 @@ impl WowsToolkitApp {
                     // path) is read and built on the background thread; add it to
                     // the listing here so it appears without a full rescan. The
                     // most recently completed read wins, so a re-read triggered by
-                    // a later modification replaces an earlier, staler parse.
+                    // a later modification replaces an earlier, staler parse. The
+                    // watcher only observes the live replays directory, so this
+                    // always belongs to the live workspace.
                     if matches!(source, ReplaySource::AutoLoad | ReplaySource::SessionStatsOnly)
-                        && let Some(replay_files) = &mut self.tab_state.active_workspace_mut().replay_files
+                        && let Some(replay_files) = &mut self.tab_state.live_workspace.replay_files
                         && let Some(path) = replay.read().source_path.clone()
                     {
                         replay_files.insert(path, Arc::clone(&replay));

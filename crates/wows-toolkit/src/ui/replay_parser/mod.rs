@@ -3762,7 +3762,7 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_file_listing_ungrouped(&mut self, ui: &mut egui::Ui) {
-        let ws_id = self.tab_state.active_workspace_id;
+        let ws_id = self.tab_state.active_workspace_id();
         let mut replay_to_open: Option<Arc<RwLock<Replay>>> = None;
         let mut replay_to_open_new: Option<Arc<RwLock<Replay>>> = None;
 
@@ -3847,7 +3847,7 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_file_listing_grouped(&mut self, ui: &mut egui::Ui, grouping: ReplayGrouping) {
-        let ws_id = self.tab_state.active_workspace_id;
+        let ws_id = self.tab_state.active_workspace_id();
         let Some(mut files) = self
             .tab_state
             .active_workspace()
@@ -4137,7 +4137,7 @@ impl ToolkitTabViewer<'_> {
         // the alt + Weak, upgrades, takes its own write lock, and re-parses.
         tracing::info!(player = %alt.meta.playerName, "alt-perspective validated; staging for re-parse");
         let alt_arc = std::sync::Arc::new(alt);
-        let ws_id = self.tab_state.active_workspace_id;
+        let ws_id = self.tab_state.active_workspace_id();
         ui.ctx().data_mut(|data| {
             data.insert_temp(
                 request_slot_id(ws_id, ReplayRequestSlot::AltPerspectivePending),
@@ -4153,7 +4153,7 @@ impl ToolkitTabViewer<'_> {
         replay_to_open: &mut Option<Arc<RwLock<Replay>>>,
         replay_to_open_new: &mut Option<Arc<RwLock<Replay>>>,
     ) {
-        let ws_id = self.tab_state.active_workspace_id;
+        let ws_id = self.tab_state.active_workspace_id();
         if let Some(replay) = ui
             .ctx()
             .data_mut(|data| {
@@ -4843,7 +4843,7 @@ impl ToolkitTabViewer<'_> {
         if std::mem::take(&mut self.tab_state.active_workspace_mut().replay_rows_need_reindex_scan) {
             self.queue_stale_rows_for_reindex();
         }
-        let ws_id = self.tab_state.active_workspace_id;
+        let ws_id = self.tab_state.active_workspace_id();
         ui.vertical(|ui| {
             self.build_replay_header(ui);
 
@@ -5385,7 +5385,7 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn handle_context_menu_render(&mut self, ui: &mut egui::Ui) {
-        let ws_id = self.tab_state.active_workspace_id;
+        let ws_id = self.tab_state.active_workspace_id();
         let replay_weak: Option<Weak<RwLock<Replay>>> = ui
             .ctx()
             .data_mut(|data| data.remove_temp(request_slot_id(ws_id, ReplayRequestSlot::ContextMenuRenderReplay)));
@@ -5498,7 +5498,7 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn handle_batch_render_request(&mut self, ui: &mut egui::Ui) {
-        let ws_id = self.tab_state.active_workspace_id;
+        let ws_id = self.tab_state.active_workspace_id();
         // Batch render to folder
         if let Some(replay_weaks) = ui.ctx().data_mut(|data| {
             data.remove_temp::<Vec<Weak<RwLock<Replay>>>>(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderReplays))

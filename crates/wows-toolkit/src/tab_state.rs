@@ -487,8 +487,10 @@ pub struct TabState {
     /// key order is also the order the workspaces were opened -- which a
     /// later phase needs to restore tabs.
     pub workspaces: std::collections::BTreeMap<WorkspaceId, ReplayWorkspace>,
-    /// Which workspace the replay inspector is currently showing.
-    pub active_workspace_id: WorkspaceId,
+    /// Which workspace the replay inspector is currently showing. Private so
+    /// it can only be set through [`Self::set_active_workspace`], which
+    /// refuses to point it at a workspace that is not open.
+    active_workspace_id: WorkspaceId,
     pub twitch_update_sender: Option<tokio::sync::mpsc::Sender<crate::twitch::TwitchUpdate>>,
     pub twitch_state: Arc<RwLock<TwitchState>>,
     pub markdown_cache: egui_commonmark::CommonMarkCache,
@@ -686,6 +688,19 @@ impl TabState {
         self.save_notify.notify_one();
     }
 
+    /// Switch the inspector to `id`. A workspace that is not open resolves to
+    /// the live workspace rather than leaving the UI pointing at nothing.
+    // No call site outside tests yet; a later task wires this to the tab UI.
+    #[allow(dead_code)]
+    pub fn set_active_workspace(&mut self, id: WorkspaceId) {
+        self.active_workspace_id =
+            if id == WorkspaceId::LIVE || self.workspaces.contains_key(&id) { id } else { WorkspaceId::LIVE };
+    }
+
+    pub fn active_workspace_id(&self) -> WorkspaceId {
+        self.active_workspace_id
+    }
+
     /// Looks up an open workspace by id. `WorkspaceId::LIVE` always resolves
     /// to `live_workspace`, since it is not stored in `workspaces`.
     pub fn workspace(&self, id: WorkspaceId) -> Option<&ReplayWorkspace> {
@@ -871,8 +886,10 @@ impl TabState {
                         ReplaySource::SessionStatsOnly
                     };
 
+                    // The watcher only observes the live replays directory, so a
+                    // change it reports always belongs to the live workspace.
                     let replay_clone = self
-                        .active_workspace()
+                        .live_workspace
                         .replay_files
                         .as_ref()
                         .and_then(|files| files.get(&modified_file))
@@ -900,7 +917,9 @@ impl TabState {
                     }
                 }
                 NotifyFileEvent::Removed(old_file) => {
-                    if let Some(replay_files) = &mut self.active_workspace_mut().replay_files {
+                    // The watcher only observes the live replays directory, so a
+                    // removal it reports always belongs to the live workspace.
+                    if let Some(replay_files) = &mut self.live_workspace.replay_files {
                         replay_files.remove(&old_file);
                     }
                 }
@@ -1019,7 +1038,9 @@ impl TabState {
     pub(crate) fn update_wows_dir(&mut self, wows_dir: &Path, replay_dir: &Path) {
         // Persist the directory immediately — before anything that might early-return.
         self.persisted.write().settings.game.wows_dir = wows_dir.to_str().unwrap().to_string();
-        self.active_workspace_mut().root = Some(replay_dir.to_owned());
+        // `replay_dir` is always the game's own replays directory, so this
+        // belongs to the live workspace regardless of which one is active.
+        self.live_workspace.root = Some(replay_dir.to_owned());
         self.revalidate_wows_dir();
 
         // Drop old watcher and background parser thread (if any).
@@ -1273,5 +1294,113 @@ mod tests {
             Some(PathBuf::from("decoy")),
             "the decoy map entry itself must be untouched"
         );
+    }
+
+    /// A minimal but real `Replay`: an empty-params `GameMetadataProvider`
+    /// (no VFS needed) backing a hand-built `ReplayMeta` round-tripped
+    /// through `ReplayFile::from_decrypted_parts`, the same entry point the
+    /// app uses for a loaded replay's raw JSON.
+    fn test_replay() -> Arc<RwLock<Replay>> {
+        let meta = wows_replays::ReplayMeta {
+            matchGroup: None,
+            gameMode: 0,
+            gameType: None,
+            clientVersionFromExe: "0,0,0,0".to_string(),
+            scenarioUiCategoryId: None,
+            mapDisplayName: String::new(),
+            mapId: 0,
+            clientVersionFromXml: String::new(),
+            weatherParams: None,
+            duration: 0,
+            gameLogic: None,
+            name: String::new(),
+            scenario: String::new(),
+            playerID: wows_replays::types::AccountId(0),
+            vehicles: Vec::new(),
+            playersPerTeam: 0,
+            dateTime: String::new(),
+            mapName: String::new(),
+            playerName: String::new(),
+            scenarioConfigId: 0,
+            teamsCount: 0,
+            logic: None,
+            playerVehicle: String::new(),
+            battleDuration: None,
+        };
+        let meta_json = serde_json::to_vec(&meta).expect("ReplayMeta serializes");
+        let replay_file = ReplayFile::from_decrypted_parts(meta_json, Vec::new())
+            .expect("a ReplayMeta we just serialized parses back");
+        let resource_loader = Arc::new(
+            wowsunpack::game_params::provider::GameMetadataProvider::from_params_no_specs(Vec::new())
+                .expect("an empty param list is always valid"),
+        );
+        Arc::new(RwLock::new(Replay::new(replay_file, resource_loader)))
+    }
+
+    /// A watcher `Removed` event names a path in the live replays directory
+    /// (the only directory watched), so it must always be applied to
+    /// `live_workspace` -- never to whichever workspace the inspector happens
+    /// to be showing. Both workspaces hold an entry at the same path so a
+    /// routing mistake is observable in both directions: routing to the
+    /// active workspace would leave the live entry in place and delete the
+    /// active one instead of the reverse.
+    #[test]
+    fn removed_watcher_event_mutates_the_live_workspace_not_the_active_one() {
+        let mut state = TabState::default();
+        let path = PathBuf::from("replay.wowsreplay");
+
+        let mut live_files = HashMap::new();
+        live_files.insert(path.clone(), test_replay());
+        state.live_workspace.replay_files = Some(live_files);
+
+        let other_id = WorkspaceId(1);
+        let mut other_workspace = ReplayWorkspace::new(None);
+        let mut other_files = HashMap::new();
+        other_files.insert(path.clone(), test_replay());
+        other_workspace.replay_files = Some(other_files);
+        state.workspaces.insert(other_id, other_workspace);
+        state.set_active_workspace(other_id);
+        assert_eq!(state.active_workspace_id(), other_id, "the other workspace must actually be active");
+
+        let (tx, rx) = mpsc::channel();
+        state.file_receiver = Some(rx);
+        tx.send(NotifyFileEvent::Removed(path.clone())).expect("receiver is held by state, not dropped");
+
+        state.try_update_replays();
+
+        assert!(
+            !state.live_workspace.replay_files.as_ref().expect("set above").contains_key(&path),
+            "the live workspace's entry must be removed"
+        );
+        assert!(
+            state
+                .workspace(other_id)
+                .expect("inserted above")
+                .replay_files
+                .as_ref()
+                .expect("set above")
+                .contains_key(&path),
+            "the active (non-live) workspace's entry must be untouched"
+        );
+    }
+
+    #[test]
+    fn set_active_workspace_falls_back_to_live_for_an_unknown_id() {
+        let mut state = TabState::default();
+        state.set_active_workspace(WorkspaceId(1234));
+        assert_eq!(
+            state.active_workspace_id(),
+            WorkspaceId::LIVE,
+            "a workspace that is not open must not become active"
+        );
+    }
+
+    #[test]
+    fn set_active_workspace_accepts_a_present_non_live_id() {
+        let mut state = TabState::default();
+        let id = WorkspaceId(1);
+        state.workspaces.insert(id, ReplayWorkspace::new(None));
+        state.set_active_workspace(id);
+        assert_eq!(state.active_workspace_id(), id, "a workspace that is open must become active");
     }
 }
