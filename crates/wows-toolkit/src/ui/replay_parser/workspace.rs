@@ -6,6 +6,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 
 use crate::db::index::rows::RowSummary;
+use crate::db::index::rows::WorkspaceId;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::ReplayTab;
 
@@ -102,5 +103,58 @@ impl ReplayWorkspace {
         let id = self.next_replay_tab_id;
         self.next_replay_tab_id += 1;
         self.replay_dock_state.push_to_focused_leaf(ReplayTab { replay, id });
+    }
+}
+
+/// One widget's egui id, scoped to a workspace. Every persistent widget in the
+/// replay listing needs this: egui keys state by id, so two listings sharing an
+/// id share scroll offsets, tree selection and open/closed state.
+pub(crate) fn workspace_salt(id: WorkspaceId, name: &str) -> egui::Id {
+    egui::Id::new((id.0, name))
+}
+
+/// A tree group node's id. `kind` separates the Date and Ship groupings, whose
+/// labels can otherwise coincide.
+pub(crate) fn workspace_group_salt(id: WorkspaceId, kind: &str, group: &str) -> egui::Id {
+    egui::Id::new((id.0, kind, group))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn different_workspaces_get_different_ids_for_the_same_name() {
+        let a = workspace_salt(WorkspaceId::LIVE, "replay_parser_dock");
+        let b = workspace_salt(WorkspaceId(1), "replay_parser_dock");
+        assert_ne!(a, b, "two workspaces must not share one widget's egui state");
+    }
+
+    #[test]
+    fn the_same_workspace_and_name_are_stable_across_calls() {
+        // egui state is looked up by id every frame, so an unstable id would
+        // silently reset the widget's state on each repaint.
+        assert_eq!(workspace_salt(WorkspaceId::LIVE, "x"), workspace_salt(WorkspaceId::LIVE, "x"));
+    }
+
+    #[test]
+    fn different_names_in_one_workspace_do_not_collide() {
+        assert_ne!(workspace_salt(WorkspaceId::LIVE, "a"), workspace_salt(WorkspaceId::LIVE, "b"));
+    }
+
+    #[test]
+    fn identical_group_names_in_different_workspaces_do_not_collide() {
+        // Date group labels collide across directories by construction: every
+        // listing that spans a given day produces the same label.
+        let a = workspace_group_salt(WorkspaceId::LIVE, "date_group", "2026-07-30");
+        let b = workspace_group_salt(WorkspaceId(1), "date_group", "2026-07-30");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn group_kinds_do_not_collide_within_one_workspace() {
+        let date = workspace_group_salt(WorkspaceId::LIVE, "date_group", "Yamato");
+        let ship = workspace_group_salt(WorkspaceId::LIVE, "ship_group", "Yamato");
+        assert_ne!(date, ship, "a ship named like a date label must not share tree state");
     }
 }
