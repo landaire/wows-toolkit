@@ -1,10 +1,6 @@
 //! Pure assembly of the two-line replay-listing row: which stats win when both
 //! the index and an in-memory parse have an opinion, and how the two lines read
 //! for each grouping mode. No `Ui` access, so it is unit-testable.
-//!
-//! `row_freshness` and `file_mtime_secs` are not yet called from the listing;
-//! they are wired up once the listing starts flagging stale index rows.
-#![allow(dead_code)]
 
 use rust_i18n::t;
 use wows_toolkit_config::ReplayGrouping;

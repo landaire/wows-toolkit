@@ -493,6 +493,10 @@ pub struct TabState {
     /// Set when a summary load lands, consumed by the listing to run one
     /// freshness scan over the listed files.
     pub replay_rows_need_reindex_scan: bool,
+    /// Paths already handed to the background parser for re-indexing this
+    /// session. Prevents a file the parser cannot fix from being re-queued on
+    /// every summary reload.
+    pub replay_rows_reindex_requested: std::collections::HashSet<PathBuf>,
     pub background_tasks: Vec<BackgroundTask>,
     pub toasts: SharedToasts,
     pub can_change_wows_dir: bool,
@@ -639,6 +643,7 @@ impl Default for TabState {
             replay_row_summaries_generation: None,
             replay_row_summaries_loading: false,
             replay_rows_need_reindex_scan: false,
+            replay_rows_reindex_requested: std::collections::HashSet::new(),
             file_receiver: None,
             background_tasks: Vec::new(),
             can_change_wows_dir: true,
@@ -960,6 +965,7 @@ impl TabState {
         self.replay_row_summaries.clear();
         self.replay_row_summaries_generation = None;
         self.replay_rows_need_reindex_scan = false;
+        self.replay_rows_reindex_requested.clear();
         self.replay_listing_auto_sized = false;
         self.replay_listing_collapse_defaulted = false;
         self.browser_state = Default::default();

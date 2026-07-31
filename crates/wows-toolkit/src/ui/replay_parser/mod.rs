@@ -4775,6 +4775,9 @@ impl ToolkitTabViewer<'_> {
     /// Builds the replay parser tab
     pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui) {
         self.refresh_row_summaries();
+        if std::mem::take(&mut self.tab_state.replay_rows_need_reindex_scan) {
+            self.queue_stale_rows_for_reindex();
+        }
         ui.vertical(|ui| {
             self.build_replay_header(ui);
 
@@ -4979,6 +4982,35 @@ impl ToolkitTabViewer<'_> {
             self.tab_state.background_tasks,
             Some(crate::task::start_load_row_summaries(pool, rt, dir, generation))
         );
+    }
+
+    /// Hand every listed replay whose index row is absent or out of date to the
+    /// background parser. `ModifiedReplay` re-parses and re-indexes without
+    /// re-uploading, which is exactly the semantics wanted here.
+    fn queue_stale_rows_for_reindex(&mut self) {
+        let Some(sender) = self.tab_state.background_parser_tx.as_ref() else {
+            return;
+        };
+        let Some(files) = self.tab_state.replay_files.as_ref() else {
+            return;
+        };
+        let mut queued: Vec<std::path::PathBuf> = Vec::new();
+        for path in files.keys() {
+            if self.tab_state.replay_rows_reindex_requested.contains(path) {
+                continue;
+            }
+            let summary = self.tab_state.replay_row_summaries.get(path);
+            let freshness = listing_row::row_freshness(summary, listing_row::file_mtime_secs(path));
+            if matches!(freshness, listing_row::RowFreshness::Fresh) {
+                continue;
+            }
+            if sender.send(crate::task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path.clone())).is_ok() {
+                queued.push(path.clone());
+            }
+        }
+        for path in queued {
+            self.tab_state.replay_rows_reindex_requested.insert(path);
+        }
     }
 
     fn show_game_chat_window(&self, ctx: &egui::Context) {
