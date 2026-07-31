@@ -1999,7 +1999,8 @@ impl WowsToolkitApp {
 
         self.tab_state.try_update_replays();
 
-        // Pick up "Add to Session Stats" requests (no confirmation needed)
+        // Pick up "Add to Session Stats" requests (no confirmation needed).
+        // App-wide: feeds the one global session-stats total, not a per-workspace one.
         if let Some(replays) = ctx.data_mut(|data| {
             data.remove_temp::<Vec<std::sync::Weak<parking_lot::RwLock<crate::ui::replay_parser::Replay>>>>(
                 egui::Id::new("add_to_session_stats_request"),
@@ -2539,7 +2540,8 @@ impl WowsToolkitApp {
                 let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
                 let exe = std::path::Path::new(&wows_dir).join("WorldOfWarships.exe");
                 let _ = std::process::Command::new(exe).arg(&replay_path).spawn();
-                // Signal the replay parser to open the controls window
+                // Signal the replay parser to open the controls window.
+                // App-wide: opens the single reference window regardless of workspace.
                 ctx.data_mut(|data| {
                     data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
                 });

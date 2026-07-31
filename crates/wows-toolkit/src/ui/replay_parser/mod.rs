@@ -204,11 +204,12 @@ fn show_leaf_context_menu(
     replay_weak: &Weak<RwLock<Replay>>,
     path: &std::path::PathBuf,
     wows_dir: &str,
+    ws_id: WorkspaceId,
 ) {
     if ui.button(wt_translations::icon_t(icons::BROWSER, &t!("ui.replay.context.open_in_new_tab"))).clicked() {
         if let Some(r) = replay_weak.upgrade() {
             ui.ctx().data_mut(|data| {
-                data.insert_temp(egui::Id::new("open_replay_new_tab"), Arc::downgrade(&r));
+                data.insert_temp(workspace_salt(ws_id, "open_replay_new_tab"), Arc::downgrade(&r));
             });
         }
         ui.close_kind(UiKind::Menu);
@@ -236,6 +237,7 @@ fn show_leaf_context_menu(
         if ui.button(label).clicked() {
             if alt_held {
                 ui.ctx().data_mut(|data| {
+                    // App-wide: opens the single reference window regardless of workspace.
                     data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
                 });
             } else {
@@ -251,19 +253,19 @@ fn show_leaf_context_menu(
     }
     if ui.button(wt_translations::icon_t(icons::PLAY, &t!("ui.replay.context.render_replay"))).clicked() {
         ui.ctx().data_mut(|data| {
-            data.insert_temp(egui::Id::new("context_menu_render_replay"), replay_weak.clone());
+            data.insert_temp(workspace_salt(ws_id, "context_menu_render_replay"), replay_weak.clone());
         });
         ui.close_kind(UiKind::Menu);
     }
     if ui.button(t!("ui.replay.context.render_to_video")).clicked() {
         ui.ctx().data_mut(|data| {
-            data.insert_temp(egui::Id::new("batch_render_replays"), vec![replay_weak.clone()]);
+            data.insert_temp(workspace_salt(ws_id, "batch_render_replays"), vec![replay_weak.clone()]);
         });
         ui.close_kind(UiKind::Menu);
     }
     if ui.button(t!("ui.replay.context.render_to_clipboard")).clicked() {
         ui.ctx().data_mut(|data| {
-            data.insert_temp(egui::Id::new("batch_render_clipboard"), vec![replay_weak.clone()]);
+            data.insert_temp(workspace_salt(ws_id, "batch_render_clipboard"), vec![replay_weak.clone()]);
         });
         ui.close_kind(UiKind::Menu);
     }
@@ -279,6 +281,7 @@ fn show_leaf_context_menu(
     }
     if ui.button(t!("ui.replay.context.add_session_stats_one")).clicked() {
         ui.ctx().data_mut(|data| {
+            // App-wide: feeds the one global session-stats total, not a per-workspace one.
             data.insert_temp(egui::Id::new("add_to_session_stats_request"), vec![replay_weak.clone()]);
         });
         ui.close_kind(UiKind::Menu);
@@ -286,7 +289,12 @@ fn show_leaf_context_menu(
 }
 
 /// Show context menu items for a group node (date or ship).
-fn show_group_context_menu(ui: &mut egui::Ui, paths: &[std::path::PathBuf], replays: &[Weak<RwLock<Replay>>]) {
+fn show_group_context_menu(
+    ui: &mut egui::Ui,
+    paths: &[std::path::PathBuf],
+    replays: &[Weak<RwLock<Replay>>],
+    ws_id: WorkspaceId,
+) {
     let count = replays.len();
 
     // Batch render
@@ -297,7 +305,7 @@ fn show_group_context_menu(ui: &mut egui::Ui, paths: &[std::path::PathBuf], repl
     };
     if ui.button(render_label).clicked() {
         ui.ctx().data_mut(|data| {
-            data.insert_temp(egui::Id::new("batch_render_replays"), replays.to_vec());
+            data.insert_temp(workspace_salt(ws_id, "batch_render_replays"), replays.to_vec());
         });
         ui.close_kind(UiKind::Menu);
     }
@@ -308,7 +316,7 @@ fn show_group_context_menu(ui: &mut egui::Ui, paths: &[std::path::PathBuf], repl
     };
     if ui.button(clipboard_label).clicked() {
         ui.ctx().data_mut(|data| {
-            data.insert_temp(egui::Id::new("batch_render_clipboard"), replays.to_vec());
+            data.insert_temp(workspace_salt(ws_id, "batch_render_clipboard"), replays.to_vec());
         });
         ui.close_kind(UiKind::Menu);
     }
@@ -343,6 +351,7 @@ fn show_group_context_menu(ui: &mut egui::Ui, paths: &[std::path::PathBuf], repl
     };
     if ui.button(add_label).clicked() {
         ui.ctx().data_mut(|data| {
+            // App-wide: feeds the one global session-stats total, not a per-workspace one.
             data.insert_temp(egui::Id::new("add_to_session_stats_request"), replays.to_vec());
         });
         ui.close_kind(UiKind::Menu);
@@ -394,7 +403,7 @@ impl GroupedTreeMaps {
     }
 
     /// Show the fallback (multi-selection) context menu for tree views.
-    fn show_multi_selection_context_menu(&self, ui: &mut egui::Ui, selected_ids: &[egui::Id]) {
+    fn show_multi_selection_context_menu(&self, ui: &mut egui::Ui, selected_ids: &[egui::Id], ws_id: WorkspaceId) {
         let (selected_replays, selected_paths) = self.collect_selected(selected_ids);
 
         if !selected_paths.is_empty() {
@@ -420,7 +429,7 @@ impl GroupedTreeMaps {
             };
             if ui.button(render_label).clicked() {
                 ui.ctx().data_mut(|data| {
-                    data.insert_temp(egui::Id::new("batch_render_replays"), selected_replays.clone());
+                    data.insert_temp(workspace_salt(ws_id, "batch_render_replays"), selected_replays.clone());
                 });
                 ui.close_kind(UiKind::Menu);
             }
@@ -431,7 +440,7 @@ impl GroupedTreeMaps {
             };
             if ui.button(clipboard_label).clicked() {
                 ui.ctx().data_mut(|data| {
-                    data.insert_temp(egui::Id::new("batch_render_clipboard"), selected_replays.clone());
+                    data.insert_temp(workspace_salt(ws_id, "batch_render_clipboard"), selected_replays.clone());
                 });
                 ui.close_kind(UiKind::Menu);
             }
@@ -460,6 +469,7 @@ impl GroupedTreeMaps {
             };
             if ui.button(add_label).clicked() {
                 ui.ctx().data_mut(|data| {
+                    // App-wide: feeds the one global session-stats total, not a per-workspace one.
                     data.insert_temp(egui::Id::new("add_to_session_stats_request"), selected_replays);
                 });
                 ui.close_kind(UiKind::Menu);
@@ -3358,6 +3368,7 @@ impl ToolkitTabViewer<'_> {
                             .clicked()
                         {
                             ui.ctx().data_mut(|data| {
+                                // App-wide: opens the single reference window regardless of workspace.
                                 data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
                             });
                             ui.close_kind(UiKind::Menu);
@@ -3807,7 +3818,7 @@ impl ToolkitTabViewer<'_> {
                             )
                             .on_hover_text(hover);
                         label_response.context_menu(|ui| {
-                            show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir_clone);
+                            show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir_clone, ws_id);
                         });
 
                         if label_response.double_clicked() {
@@ -3939,7 +3950,7 @@ impl ToolkitTabViewer<'_> {
             let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id(workspace_salt(ws_id, tree_id_salt)))
                 .allow_multi_selection(true)
                 .fallback_context_menu(move |ui, selected_ids| {
-                    fallback_maps.show_multi_selection_context_menu(ui, selected_ids);
+                    fallback_maps.show_multi_selection_context_menu(ui, selected_ids, ws_id);
                 });
 
             let (response, actions) = tree.show(ui, |builder| {
@@ -3951,7 +3962,7 @@ impl ToolkitTabViewer<'_> {
                     let dir_node = egui_ltreeview::NodeBuilder::dir(group_id)
                         .label(format!("{} ({}){}", group_name, replays.len(), win_rate))
                         .context_menu(move |ui| {
-                            show_group_context_menu(ui, &group_paths, &group_replays);
+                            show_group_context_menu(ui, &group_paths, &group_replays, ws_id);
                         });
                     let is_open = builder.node(dir_node);
                     if is_open {
@@ -3986,7 +3997,7 @@ impl ToolkitTabViewer<'_> {
                                         .on_hover_text(hover.clone());
                                 })
                                 .context_menu(move |ui| {
-                                    show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir);
+                                    show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir, ws_id);
                                 });
                             builder.node(node);
                         }
@@ -4114,9 +4125,10 @@ impl ToolkitTabViewer<'_> {
         // the alt + Weak, upgrades, takes its own write lock, and re-parses.
         tracing::info!(player = %alt.meta.playerName, "alt-perspective validated; staging for re-parse");
         let alt_arc = std::sync::Arc::new(alt);
+        let ws_id = self.tab_state.active_workspace_id;
         ui.ctx().data_mut(|data| {
             data.insert_temp(
-                egui::Id::new("alt_perspective_pending"),
+                workspace_salt(ws_id, "alt_perspective_pending"),
                 PendingAltReparse(Some((replay_weak.clone(), alt_arc))),
             );
         });
@@ -4129,9 +4141,10 @@ impl ToolkitTabViewer<'_> {
         replay_to_open: &mut Option<Arc<RwLock<Replay>>>,
         replay_to_open_new: &mut Option<Arc<RwLock<Replay>>>,
     ) {
+        let ws_id = self.tab_state.active_workspace_id;
         if let Some(replay) = ui
             .ctx()
-            .data_mut(|data| data.remove_temp::<Weak<RwLock<Replay>>>(egui::Id::new("open_replay_new_tab")))
+            .data_mut(|data| data.remove_temp::<Weak<RwLock<Replay>>>(workspace_salt(ws_id, "open_replay_new_tab")))
             .and_then(|w| w.upgrade())
         {
             *replay_to_open_new = Some(replay);
@@ -4144,7 +4157,7 @@ impl ToolkitTabViewer<'_> {
         // the background re-parse.
         let pending = ui
             .ctx()
-            .data_mut(|data| data.remove_temp::<PendingAltReparse>(egui::Id::new("alt_perspective_pending")))
+            .data_mut(|data| data.remove_temp::<PendingAltReparse>(workspace_salt(ws_id, "alt_perspective_pending")))
             .and_then(|p| p.0);
         if let Some((weak, alt_arc)) = pending
             && let Some(arc) = weak.upgrade()
@@ -5356,8 +5369,9 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn handle_context_menu_render(&mut self, ui: &mut egui::Ui) {
+        let ws_id = self.tab_state.active_workspace_id;
         let replay_weak: Option<Weak<RwLock<Replay>>> =
-            ui.ctx().data_mut(|data| data.remove_temp(egui::Id::new("context_menu_render_replay")));
+            ui.ctx().data_mut(|data| data.remove_temp(workspace_salt(ws_id, "context_menu_render_replay")));
         if let Some(weak) = replay_weak
             && let Some(arc) = weak.upgrade()
             && self.tab_state.wows_data_map.is_some()
@@ -5467,11 +5481,11 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn handle_batch_render_request(&mut self, ui: &mut egui::Ui) {
+        let ws_id = self.tab_state.active_workspace_id;
         // Batch render to folder
-        if let Some(replay_weaks) = ui
-            .ctx()
-            .data_mut(|data| data.remove_temp::<Vec<Weak<RwLock<Replay>>>>(egui::Id::new("batch_render_replays")))
-        {
+        if let Some(replay_weaks) = ui.ctx().data_mut(|data| {
+            data.remove_temp::<Vec<Weak<RwLock<Replay>>>>(workspace_salt(ws_id, "batch_render_replays"))
+        }) {
             let Some(output_dir) =
                 rfd::FileDialog::new().set_title("Select output folder for rendered videos").pick_folder()
             else {
@@ -5511,10 +5525,9 @@ impl ToolkitTabViewer<'_> {
         }
 
         // Batch render to clipboard
-        if let Some(replay_weaks) = ui
-            .ctx()
-            .data_mut(|data| data.remove_temp::<Vec<Weak<RwLock<Replay>>>>(egui::Id::new("batch_render_clipboard")))
-        {
+        if let Some(replay_weaks) = ui.ctx().data_mut(|data| {
+            data.remove_temp::<Vec<Weak<RwLock<Replay>>>>(workspace_salt(ws_id, "batch_render_clipboard"))
+        }) {
             let batch_infos = self.collect_batch_replay_infos(&replay_weaks);
             if batch_infos.is_empty() {
                 self.tab_state.toasts.lock().warning("No renderable replays in selection");
@@ -5576,6 +5589,7 @@ impl ToolkitTabViewer<'_> {
 
     /// Pick up the temp data flag set from context menu closures.
     fn pick_up_replay_controls_request(&mut self, ctx: &egui::Context) {
+        // App-wide: opens the single reference window regardless of workspace.
         let request: Option<bool> = ctx.data_mut(|data| data.remove_temp(egui::Id::new("open_replay_controls_window")));
         if request == Some(true) {
             self.open_replay_controls_window();
