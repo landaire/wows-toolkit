@@ -1053,23 +1053,71 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                     let path_str = path.to_string_lossy();
                     let already_parsed_replay = { data.sent_replays.read().contains(path_str.as_ref()) };
 
-                    debug!("Attempting to parse replay at {}", path_str);
-                    // Mark sent only when the parse fully completed and the upload
-                    // succeeded; transient conditions are left for a later attempt.
-                    if matches!(
-                        parse_replay_data_in_background(&path, &client, already_parsed_replay, &data),
-                        ParseOutcome::ParsedAndSent
-                    ) {
-                        data.sent_replays.write().insert(path_str.into_owned());
+                    if data.unindexable.contains(&path) {
+                        debug!("Skipping blacklisted replay at {}", path_str);
+                    } else {
+                        debug!("Attempting to parse replay at {}", path_str);
+                        // `indexed` is forced false: this loop has no live view of which
+                        // paths are already indexed, so reconcile_one's indexed-and-sent
+                        // skip never applies and every message still gets parsed, matching
+                        // prior behavior. Mark sent only when the parse fully completed and
+                        // the upload succeeded; transient conditions are left for a later
+                        // attempt. A hard failure or panic is caught by reconcile_one and
+                        // blacklisted instead of unwinding through the receive loop.
+                        let outcome = crate::data::replay_reconcile::reconcile_one(
+                            &path,
+                            false,
+                            already_parsed_replay,
+                            std::panic::AssertUnwindSafe(|| {
+                                parse_replay_data_in_background(&path, &client, already_parsed_replay, &data)
+                            }),
+                        );
+                        match outcome {
+                            crate::data::replay_reconcile::FileOutcome::Parsed { sent: true } => {
+                                data.sent_replays.write().insert(path_str.into_owned());
+                            }
+                            crate::data::replay_reconcile::FileOutcome::HardFailure => {
+                                if data.unindexable.insert(&path)
+                                    && let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref())
+                                    && let Err(e) = rt.block_on(data.unindexable.save(pool))
+                                {
+                                    warn!("failed to persist unindexable replay set: {e}");
+                                }
+                            }
+                            crate::data::replay_reconcile::FileOutcome::Parsed { sent: false }
+                            | crate::data::replay_reconcile::FileOutcome::Transient
+                            | crate::data::replay_reconcile::FileOutcome::Skipped => {}
+                        }
                     }
                 }
                 ReplayBackgroundParserThreadMessage::ModifiedReplay(path) => {
                     let path_str = path.to_string_lossy();
                     let already_parsed_replay = { data.sent_replays.read().contains(path_str.as_ref()) };
 
-                    // For a modified replay, we will always re-parse it but never send it.
-                    // TODO: this might export data multiple times?
-                    let _ = parse_replay_data_in_background(&path, &client, already_parsed_replay, &data);
+                    if data.unindexable.contains(&path) {
+                        debug!("Skipping blacklisted replay at {}", path_str);
+                    } else {
+                        // A modified replay always re-parses: `indexed` is forced false so
+                        // reconcile_one's indexed-and-sent skip never applies, and the
+                        // outcome is never used to mark the path sent. A hard failure or
+                        // panic is caught by reconcile_one and blacklisted instead of
+                        // unwinding through the receive loop.
+                        let outcome = crate::data::replay_reconcile::reconcile_one(
+                            &path,
+                            false,
+                            already_parsed_replay,
+                            std::panic::AssertUnwindSafe(|| {
+                                parse_replay_data_in_background(&path, &client, already_parsed_replay, &data)
+                            }),
+                        );
+                        if let crate::data::replay_reconcile::FileOutcome::HardFailure = outcome
+                            && data.unindexable.insert(&path)
+                            && let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref())
+                            && let Err(e) = rt.block_on(data.unindexable.save(pool))
+                        {
+                            warn!("failed to persist unindexable replay set: {e}");
+                        }
+                    }
                 }
                 ReplayBackgroundParserThreadMessage::DataSharingModeChanged(mode) => {
                     data.data_sharing_mode = mode;
