@@ -278,4 +278,10 @@ pub enum IndexError {
     /// resolved to is gone by the time the reads run.
     #[error("failed to create or resolve index source for {root_path:?}")]
     SourceCreationFailed { root_path: PathBuf },
+    /// `relocate_source` found a record whose rewritten path already names a
+    /// different, non-relocating record in the same source. Rewriting it
+    /// would collide on `replay_record`'s `(source_id, replay_path)` uniqueness,
+    /// so the relocation is rejected before any row is touched.
+    #[error("relocation target {path:?} already exists in the destination")]
+    RelocationCollision { path: PathBuf },
 }

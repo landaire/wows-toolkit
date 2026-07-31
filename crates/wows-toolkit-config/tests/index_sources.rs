@@ -8,11 +8,14 @@ use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
 use wows_core::game_types::GameParamId;
 use wows_toolkit_config::index::query;
+use wows_toolkit_config::index::rows::IndexError;
+use wows_toolkit_config::index::rows::IndexedVehicleRow;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::ReplayRecord;
 use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_config::index::rows::SourceKind;
+use wows_toolkit_config::index::rows::VehicleRelation;
 
 async fn mem_pool() -> SqlitePool {
     let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
@@ -47,6 +50,35 @@ fn sample_record(arena: i64, source: SourceId, path: &str) -> ReplayRecord {
         self_pr: Some(1500.0),
         results_available: true,
         indexed_at: Timestamp::from_second(1_700_000_100).unwrap(),
+    }
+}
+
+fn sample_vehicle(arena: i64) -> IndexedVehicleRow {
+    IndexedVehicleRow {
+        arena_id: ArenaId::new(arena),
+        account_id: AccountId::from(7),
+        player_name: "Player".into(),
+        clan: "CLAN".into(),
+        realm: None,
+        ship_id: GameParamId::from(999u64),
+        ship_index: "PASA001".into(),
+        ship_name: "Test Ship".into(),
+        nation: "USA".into(),
+        species: "Cruiser".into(),
+        tier: 8,
+        relation: VehicleRelation::SelfPlayer,
+        division_id: None,
+        survived: Some(true),
+        damage: Some(123_456),
+        kills: Some(2),
+        spotting: None,
+        potential: None,
+        received: None,
+        pr: Some(1500.0),
+        is_test_ship: false,
+        disconnected: Some(false),
+        is_stream_sniper: None,
+        sniper_twitch_login: None,
     }
 }
 
@@ -511,4 +543,144 @@ async fn ensure_source_resolves_an_existing_live_source_at_a_different_root() {
     assert_eq!(second, first, "a second Live root must resolve to the existing Live source, not error");
     assert_eq!(row_count_for_root(&pool, "D:/b").await, 0, "no row may be created at the losing root");
     assert_eq!(query::live_source_id(&pool).await.unwrap(), Some(first), "the original Live source must be untouched");
+}
+
+#[tokio::test]
+async fn relocate_source_rewrites_matching_prefixes_only() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, Path::new("D:/old"), now).await.unwrap();
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_match(&pool, &sample_match(200)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "D:/old/a.wowsreplay")).await.unwrap();
+    query::upsert_record(&pool, &sample_record(200, src, "E:/elsewhere/b.wowsreplay")).await.unwrap();
+
+    let moved = query::relocate_source(&pool, src, Path::new("D:/old"), Path::new("F:/new")).await.unwrap();
+    assert_eq!(moved, 1, "only the record under the old root is repointed");
+
+    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    assert!(paths.contains("F:/new/a.wowsreplay"), "prefix rewritten: {paths:?}");
+    assert!(paths.contains("E:/elsewhere/b.wowsreplay"), "non-matching path untouched: {paths:?}");
+
+    let sources = query::list_sources(&pool).await.unwrap();
+    let updated = sources.iter().find(|s| s.id == src).expect("source still present");
+    assert_eq!(updated.root_path.as_deref(), Some(Path::new("F:/new")));
+}
+
+#[tokio::test]
+async fn relocate_source_rejects_a_collision_and_leaves_the_database_unchanged() {
+    // "F:/new/a.wowsreplay" already names a different record (arena 200) that
+    // is not itself under D:/old, so it will not move. Relocating D:/old to
+    // F:/new would rewrite arena 100's record onto that exact path.
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, Path::new("D:/old"), now).await.unwrap();
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_match(&pool, &sample_match(200)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "D:/old/a.wowsreplay")).await.unwrap();
+    query::upsert_record(&pool, &sample_record(200, src, "F:/new/a.wowsreplay")).await.unwrap();
+
+    let err = query::relocate_source(&pool, src, Path::new("D:/old"), Path::new("F:/new")).await.unwrap_err();
+    match err {
+        IndexError::RelocationCollision { path } => {
+            assert_eq!(path, PathBuf::from("F:/new/a.wowsreplay"), "the error names the colliding destination path");
+        }
+        other => panic!("expected RelocationCollision, got {other:?}"),
+    }
+
+    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    assert!(
+        paths.contains("D:/old/a.wowsreplay"),
+        "failed relocate must leave the moving record's path intact: {paths:?}"
+    );
+    assert!(
+        paths.contains("F:/new/a.wowsreplay"),
+        "failed relocate must leave the untouched record's path intact: {paths:?}"
+    );
+    assert_eq!(paths.len(), 2, "no record may be dropped or duplicated by a failed relocate");
+
+    let sources = query::list_sources(&pool).await.unwrap();
+    let unchanged = sources.iter().find(|s| s.id == src).expect("source still present");
+    assert_eq!(
+        unchanged.root_path.as_deref(),
+        Some(Path::new("D:/old")),
+        "a failed relocate must not update root_path"
+    );
+}
+
+#[tokio::test]
+async fn relocate_source_onto_anothers_root_fails_and_leaves_both_sources_untouched() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let a = query::ensure_source(&pool, "A", SourceKind::ImportedDir, Path::new("D:/a"), now).await.unwrap();
+    let b = query::ensure_source(&pool, "B", SourceKind::ImportedDir, Path::new("D:/b"), now).await.unwrap();
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, a, "D:/a/x.wowsreplay")).await.unwrap();
+
+    // Nothing on b would collide at the record level (b has no records), so
+    // this exercises the index_source.root_path unique index failing after
+    // the replay_record rewrite already succeeded within the transaction.
+    let result = query::relocate_source(&pool, a, Path::new("D:/a"), Path::new("D:/b")).await;
+    assert!(result.is_err(), "relocating onto a root another source owns must fail");
+
+    let paths = query::record_paths_in_source(&pool, a).await.unwrap();
+    assert!(
+        paths.contains("D:/a/x.wowsreplay"),
+        "a failed relocate must roll back the record rewrite that preceded the root_path failure: {paths:?}"
+    );
+
+    let sources = query::list_sources(&pool).await.unwrap();
+    let src_a = sources.iter().find(|s| s.id == a).expect("source a still present");
+    assert_eq!(src_a.root_path.as_deref(), Some(Path::new("D:/a")), "source a's root_path must be untouched");
+    let src_b = sources.iter().find(|s| s.id == b).expect("source b still present");
+    assert_eq!(src_b.root_path.as_deref(), Some(Path::new("D:/b")), "source b's root_path must be untouched");
+}
+
+#[tokio::test]
+async fn forget_source_removes_its_records() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, Path::new("D:/old"), now).await.unwrap();
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "D:/old/a.wowsreplay")).await.unwrap();
+
+    query::forget_source(&pool, src).await.unwrap();
+
+    assert!(query::list_sources(&pool).await.unwrap().iter().all(|s| s.id != src));
+    assert!(query::record_paths_in_source(&pool, src).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn forget_source_leaves_other_sources_alone() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let keep = query::ensure_source(&pool, "Keep", SourceKind::ImportedDir, Path::new("D:/keep"), now).await.unwrap();
+    let drop = query::ensure_source(&pool, "Drop", SourceKind::ImportedDir, Path::new("D:/drop"), now).await.unwrap();
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, keep, "D:/keep/a.wowsreplay")).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, drop, "D:/drop/a.wowsreplay")).await.unwrap();
+
+    query::forget_source(&pool, drop).await.unwrap();
+
+    assert!(query::record_paths_in_source(&pool, keep).await.unwrap().contains("D:/keep/a.wowsreplay"));
+}
+
+#[tokio::test]
+async fn forget_source_leaves_shared_match_and_vehicle_rows_intact() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, Path::new("D:/old"), now).await.unwrap();
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "D:/old/a.wowsreplay")).await.unwrap();
+    query::upsert_vehicles(&pool, &[sample_vehicle(100)]).await.unwrap();
+
+    query::forget_source(&pool, src).await.unwrap();
+
+    let match_count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM indexed_match WHERE arena_id = 100").fetch_one(&pool).await.unwrap();
+    assert_eq!(match_count.0, 1, "indexed_match is shared across sources and must survive forget_source");
+
+    let vehicle_count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM indexed_vehicle WHERE arena_id = 100").fetch_one(&pool).await.unwrap();
+    assert_eq!(vehicle_count.0, 1, "indexed_vehicle is shared across sources and must survive forget_source");
 }

@@ -135,6 +135,97 @@ pub async fn list_sources(pool: &SqlitePool) -> Result<Vec<IndexSource>, IndexEr
         .collect())
 }
 
+/// Point `source` at a new root, rewriting its records' path prefixes. Returns
+/// how many records were repointed. Records whose path does not start with
+/// `old_root` are left alone, so a source holding paths from elsewhere is not
+/// corrupted. Both writes happen in one transaction, rolled back explicitly on
+/// any error so the caller never observes a half-relocated source.
+pub async fn relocate_source(
+    pool: &SqlitePool,
+    source: SourceId,
+    old_root: &Path,
+    new_root: &Path,
+) -> Result<u64, IndexError> {
+    let mut tx = pool.begin().await?;
+    match relocate_source_in_tx(&mut tx, source, old_root, new_root).await {
+        Ok(moved) => {
+            tx.commit().await?;
+            Ok(moved)
+        }
+        Err(err) => {
+            tx.rollback().await?;
+            Err(err)
+        }
+    }
+}
+
+async fn relocate_source_in_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    source: SourceId,
+    old_root: &Path,
+    new_root: &Path,
+) -> Result<u64, IndexError> {
+    let old = old_root.to_string_lossy().to_string();
+    let new = new_root.to_string_lossy().to_string();
+    let old_len = old.chars().count() as i64;
+
+    // A record under old_root whose rewritten path already equals another
+    // record's path in the same source, where that other record is NOT itself
+    // under old_root (so it keeps its path rather than also moving), would
+    // collide on (source_id, replay_path) once rewritten. Detect that up front
+    // rather than let the UPDATE below fail partway through the source.
+    let collision: Option<(String,)> = sqlx::query_as(
+        "SELECT r2.replay_path FROM replay_record r1 \
+         JOIN replay_record r2 ON r2.source_id = r1.source_id \
+           AND r2.replay_path = (?1 || SUBSTR(r1.replay_path, ?2)) \
+         WHERE r1.source_id = ?3 AND SUBSTR(r1.replay_path, 1, ?4) = ?5 \
+           AND r2.record_id <> r1.record_id \
+           AND SUBSTR(r2.replay_path, 1, ?4) <> ?5 \
+         LIMIT 1",
+    )
+    .bind(&new)
+    .bind(old_len + 1)
+    .bind(source.0)
+    .bind(old_len)
+    .bind(&old)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some((path,)) = collision {
+        return Err(IndexError::RelocationCollision { path: PathBuf::from(path) });
+    }
+
+    // LIKE would treat _ and % in a path as wildcards; comparing an explicit
+    // substr keeps the match literal.
+    let moved = sqlx::query(
+        "UPDATE replay_record SET replay_path = ?1 || SUBSTR(replay_path, ?2) \
+         WHERE source_id = ?3 AND SUBSTR(replay_path, 1, ?4) = ?5",
+    )
+    .bind(&new)
+    .bind(old_len + 1)
+    .bind(source.0)
+    .bind(old_len)
+    .bind(&old)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+
+    sqlx::query("UPDATE index_source SET root_path = ?1 WHERE source_id = ?2")
+        .bind(&new)
+        .bind(source.0)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(moved)
+}
+
+/// Delete a source. Its `replay_record` rows go with it via `ON DELETE CASCADE`
+/// on `replay_record.source_id`; `indexed_match` and `indexed_vehicle` are keyed
+/// by `arena_id`, shared across sources, and are not touched.
+pub async fn forget_source(pool: &SqlitePool, source: SourceId) -> Result<(), IndexError> {
+    sqlx::query("DELETE FROM index_source WHERE source_id = ?1").bind(source.0).execute(pool).await?;
+    Ok(())
+}
+
 pub async fn upsert_match(pool: &SqlitePool, m: &ObjectiveMatch) -> Result<(), IndexError> {
     sqlx::query(
         "INSERT INTO indexed_match \
