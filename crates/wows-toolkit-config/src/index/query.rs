@@ -1,7 +1,9 @@
 //! Typed query API for the replay index. Populated in later tasks.
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
+use std::path::PathBuf;
 
 use jiff::Timestamp;
 use sqlx::QueryBuilder;
@@ -30,6 +32,7 @@ use super::rows::MatchOutcome;
 use super::rows::ObjectiveMatch;
 use super::rows::PlayerFacet;
 use super::rows::ReplayRecord;
+use super::rows::RowSummary;
 use super::rows::ShipFacet;
 use super::rows::SourceId;
 use super::rows::SourceKind;
@@ -228,6 +231,56 @@ pub async fn record_paths_in_source(pool: &SqlitePool, source: SourceId) -> Resu
         .fetch_all(pool)
         .await?;
     Ok(rows.into_iter().map(|(p,)| p).collect())
+}
+
+/// Row summaries for every record in `source`, keyed by replay path.
+///
+/// `division_id` is read through a correlated subquery on the roster keyed by
+/// `self_account_id` rather than by `relation = 'self'`. `indexed_vehicle` rows
+/// are shared across perspectives, so `relation` reflects whichever perspective
+/// was indexed last, while `self_account_id` on the record is perspective-correct
+/// by construction. The subquery form also guarantees one output row per record,
+/// which a join would not.
+pub async fn row_summaries_for_source(
+    pool: &SqlitePool,
+    source: SourceId,
+) -> Result<HashMap<PathBuf, RowSummary>, IndexError> {
+    let rows = sqlx::query(
+        "SELECT r.replay_path, r.outcome, r.self_damage, r.self_kills, r.self_survived, r.self_pr, \
+                r.results_available, r.file_mtime, \
+                (SELECT v.division_id FROM indexed_vehicle v \
+                   WHERE v.arena_id = r.arena_id AND v.account_id = r.self_account_id LIMIT 1) AS division_id \
+         FROM replay_record r WHERE r.source_id = ?1",
+    )
+    .bind(source.0)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = HashMap::with_capacity(rows.len());
+    for row in &rows {
+        let (path, summary) = row_to_row_summary(row)?;
+        out.insert(path, summary);
+    }
+    Ok(out)
+}
+
+fn row_to_row_summary(row: &sqlx::sqlite::SqliteRow) -> Result<(PathBuf, RowSummary), IndexError> {
+    let outcome_str: String = row.try_get("outcome")?;
+    let self_damage: Option<i64> = row.try_get("self_damage")?;
+    let path = PathBuf::from(row.try_get::<String, _>("replay_path")?);
+    let summary = RowSummary {
+        // An unrecognised stored string means the row predates a variant we
+        // know; `Unknown` renders untinted, which is the honest fallback.
+        outcome: MatchOutcome::from_db_str(&outcome_str).unwrap_or(MatchOutcome::Unknown),
+        self_damage: self_damage.map(|d| d as u64),
+        self_kills: row.try_get("self_kills")?,
+        self_survived: row.try_get::<Option<bool>, _>("self_survived")?,
+        self_pr: row.try_get("self_pr")?,
+        division_id: row.try_get("division_id")?,
+        results_available: row.try_get("results_available")?,
+        file_mtime: row.try_get("file_mtime")?,
+    };
+    Ok((path, summary))
 }
 
 /// One `MatchHit` per arena. The chosen record prefers `file_mtime IS NOT NULL`

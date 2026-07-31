@@ -191,6 +191,25 @@ pub struct MatchHit {
     pub file_mtime: Option<i64>,
 }
 
+/// Everything one replay-listing row draws beyond its identity, for a single
+/// record. Keyed by `replay_path` within a source.
+#[derive(Debug, Clone)]
+pub struct RowSummary {
+    pub outcome: MatchOutcome,
+    pub self_damage: Option<u64>,
+    pub self_kills: Option<i64>,
+    pub self_survived: Option<bool>,
+    pub self_pr: Option<f64>,
+    /// The self player's division, resolved from the roster row belonging to
+    /// `replay_record.self_account_id`. `None` when the perspective player had
+    /// no account (a spectator recording), had no roster row, or was solo.
+    pub division_id: Option<i64>,
+    pub results_available: bool,
+    /// Modification time of the file as of indexing. Compared against the
+    /// on-disk value to decide whether the row is stale.
+    pub file_mtime: Option<i64>,
+}
+
 /// A roster row whose clan differed from that account's latest known clan.
 #[derive(Debug, Clone)]
 pub struct ClanCorrection {
