@@ -158,26 +158,6 @@ type ReplayGroup = (String, Vec<ReplayEntry>);
 
 use std::cmp::Reverse;
 
-/// Colorize a label based on battle result. Selected items get the strong text role.
-fn colorize_label(
-    label: &str,
-    battle_result: Option<BattleResult>,
-    is_selected: bool,
-    visuals: &egui::Visuals,
-) -> RichText {
-    let sem = crate::ui::theme::semantic::semantic(visuals);
-    if is_selected {
-        RichText::new(label).color(sem.text_strong).background_color(visuals.selection.bg_fill)
-    } else {
-        match battle_result {
-            Some(BattleResult::Win(_)) => RichText::new(label).color(sem.win),
-            Some(BattleResult::Loss(_)) => RichText::new(label).color(sem.loss),
-            Some(BattleResult::Draw) => RichText::new(label).color(sem.draw),
-            None => RichText::new(label),
-        }
-    }
-}
-
 /// Paints `text` rotated a quarter turn counter-clockwise, reading bottom-to-top,
 /// horizontally centred in `rect` and starting `top_offset` below its top edge.
 fn paint_vertical_caption(ui: &egui::Ui, rect: egui::Rect, top_offset: f32, text: &str) {
@@ -3764,21 +3744,29 @@ impl ToolkitTabViewer<'_> {
                     files.sort_by(|a, b| b.0.cmp(&a.0));
                     let metadata_provider = self.metadata_provider().unwrap();
                     let focused = self.tab_state.focused_replay();
+                    let locale = self.tab_state.persisted.read().settings.app.locale.clone();
                     for (path, replay) in files {
                         let replay_guard = replay.read();
-                        let label = replay_guard.label(&metadata_provider);
-                        let battle_result = replay_guard.battle_result();
+                        let identity = listing_row::replay_row_identity(&replay_guard, &metadata_provider);
+                        let parsed = listing_row::replay_parsed_stats(&replay_guard);
                         drop(replay_guard);
 
+                        let summary = self.tab_state.replay_row_summaries.get(&path);
+                        let stats = listing_row::resolve_row_stats(parsed, summary);
+                        let identity_text = listing_row::identity_line(&identity, ReplayGrouping::None);
+                        let stats_text =
+                            listing_row::stats_line(&identity, &stats, ReplayGrouping::None, locale.as_deref());
+
                         let is_selected = focused.as_ref().map(|c| Arc::ptr_eq(c, &replay)).unwrap_or(false);
-                        let label_text = colorize_label(&label, battle_result, is_selected, ui.visuals());
+                        let label_text =
+                            listing_row::row_layout_job(&identity_text, &stats_text, &stats, is_selected, ui.visuals());
+                        let hover = listing_row::hover_text(&identity, &stats_text);
 
                         let replay_weak = Arc::downgrade(&replay);
                         let path_clone = path.clone();
                         let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
-                        let label_response = ui
-                            .add(Label::new(label_text).selectable(false).sense(Sense::click()))
-                            .on_hover_text(label.as_str());
+                        let label_response =
+                            ui.add(Label::new(label_text).selectable(false).sense(Sense::click())).on_hover_text(hover);
                         label_response.context_menu(|ui| {
                             show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir);
                         });
@@ -3877,6 +3865,8 @@ impl ToolkitTabViewer<'_> {
 
         let fallback_maps = tree_maps.clone();
         let visuals = ui.visuals().clone();
+        let row_summaries = self.tab_state.replay_row_summaries.clone();
+        let locale = self.tab_state.persisted.read().settings.app.locale.clone();
 
         let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id(tree_id_salt))
             .allow_multi_selection(true)
@@ -3904,25 +3894,16 @@ impl ToolkitTabViewer<'_> {
                         let replay_weak = tree_maps.leaf_replays.get(&id).cloned().unwrap();
 
                         let replay_guard = id_to_replay.get(&id).unwrap().read();
-                        let battle_result = replay_guard.battle_result();
-                        let label = match grouping {
-                            ReplayGrouping::Date => {
-                                let ship_name = replay_guard.vehicle_name(&metadata_provider);
-                                let map_name = replay_guard.map_name(&metadata_provider);
-                                let game_time = replay_guard.game_time().to_string();
-                                let time_part = game_time.split(' ').nth(1).unwrap_or(&game_time).to_string();
-                                format!("{} - {} ({})", ship_name, map_name, time_part)
-                            }
-                            ReplayGrouping::Ship => {
-                                let map_name = replay_guard.map_name(&metadata_provider);
-                                let game_time = replay_guard.game_time().to_string();
-                                format!("{} - {}", map_name, game_time)
-                            }
-                            ReplayGrouping::None => unreachable!(),
-                        };
+                        let identity = listing_row::replay_row_identity(&replay_guard, &metadata_provider);
+                        let parsed = listing_row::replay_parsed_stats(&replay_guard);
                         drop(replay_guard);
 
-                        let label_text = colorize_label(&label, battle_result, false, &visuals);
+                        let summary = row_summaries.get(path);
+                        let stats = listing_row::resolve_row_stats(parsed, summary);
+                        let identity_text = listing_row::identity_line(&identity, grouping);
+                        let stats_text = listing_row::stats_line(&identity, &stats, grouping, locale.as_deref());
+                        let label_text =
+                            listing_row::row_layout_job(&identity_text, &stats_text, &stats, false, &visuals);
                         let node = egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
                             show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir);
                         });
@@ -4769,18 +4750,26 @@ impl ToolkitTabViewer<'_> {
                     && !self.tab_state.replay_listing_auto_sized
                     && let Some(metadata_provider) = self.metadata_provider()
                 {
+                    let grouping = self.tab_state.persisted.read().settings.replay.grouping;
+                    let locale = self.tab_state.persisted.read().settings.app.locale.clone();
                     let font_id = egui::TextStyle::Body.resolve(ui.style());
                     let max_width = self
                         .tab_state
                         .replay_files
                         .as_ref()
                         .unwrap()
-                        .values()
-                        .map(|replay| {
+                        .iter()
+                        .map(|(path, replay)| {
                             let guard = replay.read();
-                            let label = guard.label(&metadata_provider);
-                            label
-                                .lines()
+                            let identity = listing_row::replay_row_identity(&guard, &metadata_provider);
+                            let parsed = listing_row::replay_parsed_stats(&guard);
+                            drop(guard);
+                            let summary = self.tab_state.replay_row_summaries.get(path);
+                            let stats = listing_row::resolve_row_stats(parsed, summary);
+                            let identity_text = listing_row::identity_line(&identity, grouping);
+                            let stats_text = listing_row::stats_line(&identity, &stats, grouping, locale.as_deref());
+                            [identity_text, stats_text]
+                                .iter()
                                 .map(|line| {
                                     ui.painter()
                                         .layout_no_wrap(line.to_string(), font_id.clone(), ui.sem().text_strong)
@@ -4791,8 +4780,9 @@ impl ToolkitTabViewer<'_> {
                         })
                         .fold(0.0f32, f32::max);
 
-                    // Allowance for tree indentation, the right margin, and the scrollbar.
-                    default_width = (max_width + 52.0).max(200.0);
+                    // Allowance for tree indentation, the right margin, the
+                    // scrollbar, and the two trailing glyphs on line 1.
+                    default_width = (max_width + 64.0).max(200.0);
 
                     self.tab_state.replay_listing_auto_sized = true;
 

@@ -2,12 +2,13 @@
 //! the index and an in-memory parse have an opinion, and how the two lines read
 //! for each grouping mode. No `Ui` access, so it is unit-testable.
 //!
-//! The functions here are consumed by the listing's label construction in the
-//! task that replaces it; until then they have no non-test caller.
+//! `row_freshness` and `file_mtime_secs` are not yet called from the listing;
+//! they are wired up once the listing starts flagging stale index rows.
 #![allow(dead_code)]
 
 use rust_i18n::t;
 use wows_toolkit_config::ReplayGrouping;
+use wowsunpack::game_params::provider::GameMetadataProvider;
 
 use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::RowSummary;
@@ -135,6 +136,76 @@ pub(crate) fn hover_text(identity: &RowIdentity, stats_text: &str) -> String {
         "{}\n{}\n{}\n{}\n{}\n{}",
         identity.ship, identity.map, identity.scenario, identity.mode, identity.date_time, stats_text
     )
+}
+
+/// The row as drawn: identity on line 1 tinted by outcome, stats on line 2 in
+/// de-emphasised text, with the outcome and division glyphs closing line 1.
+pub(crate) fn row_layout_job(
+    identity_text: &str,
+    stats_text: &str,
+    stats: &RowStats,
+    is_selected: bool,
+    visuals: &egui::Visuals,
+) -> egui::text::LayoutJob {
+    use egui::TextFormat;
+    use egui::text::LayoutJob;
+
+    let sem = crate::ui::theme::semantic::semantic(visuals);
+    let identity_color = if is_selected {
+        sem.text_strong
+    } else {
+        match stats.outcome {
+            MatchOutcome::Win => sem.win,
+            MatchOutcome::Loss => sem.loss,
+            MatchOutcome::Draw => sem.draw,
+            MatchOutcome::Unknown => visuals.text_color(),
+        }
+    };
+
+    let mut job = LayoutJob::default();
+    job.append(identity_text, 0.0, TextFormat { color: identity_color, ..Default::default() });
+    if matches!(stats.outcome, MatchOutcome::Win | MatchOutcome::Loss | MatchOutcome::Draw) {
+        job.append(
+            &format!(" {}", crate::icons::TROPHY),
+            0.0,
+            TextFormat { color: identity_color, ..Default::default() },
+        );
+    }
+    if stats.in_division {
+        job.append(
+            &format!(" {}", crate::icons::USERS_THREE),
+            0.0,
+            TextFormat { color: sem.division, ..Default::default() },
+        );
+    }
+    job.append("\n", 0.0, TextFormat::default());
+    job.append(stats_text, 0.0, TextFormat { color: sem.text_dim, ..Default::default() });
+    job
+}
+
+/// Lift the identity fields off a replay. Requires the metadata provider for
+/// every field except the timestamp.
+pub(crate) fn replay_row_identity(replay: &super::Replay, metadata_provider: &GameMetadataProvider) -> RowIdentity {
+    RowIdentity {
+        ship: replay.vehicle_name(metadata_provider),
+        map: replay.map_name(metadata_provider),
+        scenario: replay.scenario(metadata_provider),
+        mode: replay.game_mode(metadata_provider),
+        date_time: replay.game_time().to_string(),
+    }
+}
+
+/// Stats from an in-memory parse, when one exists. `None` for a replay that has
+/// only been read for its metadata.
+pub(crate) fn replay_parsed_stats(replay: &super::Replay) -> Option<ParsedStats> {
+    let ui_report = replay.ui_report.as_ref()?;
+    let self_report = ui_report.player_reports().iter().find(|report| report.relation().is_self())?;
+    Some(ParsedStats {
+        outcome: crate::data::replay_index::outcome_from(replay.battle_result().as_ref()),
+        damage: self_report.actual_damage(),
+        kills: self_report.kills(),
+        in_division: self_report.division_label.is_some(),
+    })
 }
 
 /// Whether a listed replay's index row still describes the file on disk.
