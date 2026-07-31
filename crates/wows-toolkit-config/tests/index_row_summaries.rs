@@ -184,3 +184,47 @@ async fn row_summaries_are_empty_for_an_unused_source() {
     let summaries = query::row_summaries_for_source(&pool, src).await.unwrap();
     assert!(summaries.is_empty());
 }
+
+#[tokio::test]
+async fn division_resolves_for_a_perspective_whose_roster_relation_was_overwritten() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "p7.wowsreplay", Some(7))).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "p8.wowsreplay", Some(8))).await.unwrap();
+
+    // First index player 7's perspective: account 7 is `SelfPlayer` with division 3.
+    query::upsert_vehicles(
+        &pool,
+        &[
+            sample_vehicle(100, 7, Some(3), VehicleRelation::SelfPlayer),
+            sample_vehicle(100, 8, None, VehicleRelation::Enemy),
+        ],
+    )
+    .await
+    .unwrap();
+
+    // Then index player 8's perspective. `indexed_vehicle` upserts on
+    // (arena_id, account_id, ship_id), so this overwrites account 7's
+    // `relation` from `SelfPlayer` to `Enemy` while leaving `division_id = 3`
+    // untouched. This is not redundant setup: without it, a `relation =
+    // 'self'` join would resolve division_id correctly by accident, and the
+    // regression this test guards against would go undetected.
+    query::upsert_vehicles(
+        &pool,
+        &[
+            sample_vehicle(100, 8, Some(9), VehicleRelation::SelfPlayer),
+            sample_vehicle(100, 7, Some(3), VehicleRelation::Enemy),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let summaries = query::row_summaries_for_source(&pool, src).await.unwrap();
+    let row7 = summaries.get(&PathBuf::from("p7.wowsreplay")).expect("summary for p7");
+    let row8 = summaries.get(&PathBuf::from("p8.wowsreplay")).expect("summary for p8");
+    assert_eq!(row7.division_id, Some(3), "must resolve through self_account_id, not the now-stale relation column");
+    assert_eq!(row8.division_id, Some(9), "player 8's own perspective still resolves to their own division");
+}
