@@ -137,6 +137,39 @@ pub(crate) fn hover_text(identity: &RowIdentity, stats_text: &str) -> String {
     )
 }
 
+/// Whether a listed replay's index row still describes the file on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RowFreshness {
+    Fresh,
+    /// No index row for this path at all.
+    Missing,
+    /// The file changed since it was indexed, or one of the two mtimes is
+    /// unavailable. Treated as stale rather than fresh so an unknown never
+    /// masquerades as up to date.
+    Stale,
+}
+
+pub(crate) fn row_freshness(summary: Option<&RowSummary>, on_disk_mtime: Option<i64>) -> RowFreshness {
+    let Some(summary) = summary else {
+        return RowFreshness::Missing;
+    };
+    match (summary.file_mtime, on_disk_mtime) {
+        (Some(indexed), Some(on_disk)) if indexed == on_disk => RowFreshness::Fresh,
+        _ => RowFreshness::Stale,
+    }
+}
+
+/// Unix-seconds modification time, matching how the index mapper records it.
+pub(crate) fn file_mtime_secs(path: &std::path::Path) -> Option<i64> {
+    std::fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs() as i64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,5 +309,41 @@ mod tests {
         assert_eq!(stats.outcome, MatchOutcome::Unknown);
         let line = stats_line(&identity(), &stats, ReplayGrouping::Date, Some("en-US"));
         assert!(line.contains("114,230"), "stats that do exist still render: {line:?}");
+    }
+
+    #[test]
+    fn no_summary_means_the_file_was_never_indexed() {
+        assert!(matches!(row_freshness(None, Some(42)), RowFreshness::Missing));
+        assert!(matches!(row_freshness(None, None), RowFreshness::Missing));
+    }
+
+    #[test]
+    fn an_equal_mtime_is_fresh() {
+        assert!(matches!(row_freshness(Some(&summary()), Some(42)), RowFreshness::Fresh));
+    }
+
+    #[test]
+    fn a_changed_mtime_is_stale() {
+        // The game appends battle results after a match, which is exactly this.
+        assert!(matches!(row_freshness(Some(&summary()), Some(99)), RowFreshness::Stale));
+    }
+
+    #[test]
+    fn an_unreadable_or_unrecorded_mtime_is_stale_not_fresh() {
+        assert!(matches!(row_freshness(Some(&summary()), None), RowFreshness::Stale));
+        let no_mtime = RowSummary { file_mtime: None, ..summary() };
+        assert!(matches!(row_freshness(Some(&no_mtime), Some(42)), RowFreshness::Stale));
+    }
+
+    #[test]
+    fn file_mtime_secs_reads_a_real_file_and_returns_none_for_a_missing_one() {
+        let dir = std::env::temp_dir().join("wt_listing_row_mtime_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("a.wowsreplay");
+        std::fs::write(&path, b"x").unwrap();
+        assert!(file_mtime_secs(&path).is_some());
+        assert_eq!(file_mtime_secs(&dir.join("absent.wowsreplay")), None);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
     }
 }
