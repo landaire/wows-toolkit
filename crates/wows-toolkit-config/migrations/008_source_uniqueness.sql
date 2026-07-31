@@ -29,9 +29,13 @@ WHERE source_id IN (
 );
 
 -- Records that could not be repointed collided with the survivor's row for
--- that path, which is now equal-or-better for every remaining collision: a
--- survivor row that was worse was already dropped above, so whatever is left
--- on a doomed source at this point is redundant.
+-- that path. With exactly two live sources, the survivor's row is now
+-- equal-or-better for every remaining collision (a survivor row that was
+-- worse was already dropped above), so whatever is left on the doomed source
+-- at this point is redundant. With three or more live sources sharing a path,
+-- the UPDATE above resolves multiple doomed candidates by row order rather
+-- than by preference, so the surviving row is whichever repoint happened to
+-- keep, not necessarily the best one.
 DELETE FROM replay_record
 WHERE source_id IN (
   SELECT source_id FROM index_source

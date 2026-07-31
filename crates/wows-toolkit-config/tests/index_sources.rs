@@ -377,6 +377,35 @@ async fn migration_dedupe_prefers_results_over_recency() {
 }
 
 #[tokio::test]
+async fn migration_dedupe_prefers_newer_indexed_at_when_results_available_ties() {
+    // Both rows have results_available: true, so the first preference clause
+    // (results-bearing beats results-absent) cannot distinguish them; only
+    // the second clause (newer indexed_at wins) can pick a winner here.
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let (survivor, doomed) = two_live_sources(&pool, now).await;
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &record_with_results(100, survivor, "x.wowsreplay", true, 111, 10)).await.unwrap();
+    query::upsert_record(&pool, &record_with_results(100, doomed, "x.wowsreplay", true, 999, 99)).await.unwrap();
+
+    const DEDUPE_SQL: &str = include_str!("../migrations/008_source_uniqueness.sql");
+    sqlx::raw_sql(DEDUPE_SQL).execute(&pool).await.unwrap();
+
+    let remaining: Vec<(i64,)> =
+        sqlx::query_as("SELECT source_id FROM replay_record WHERE replay_path = 'x.wowsreplay'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(remaining, vec![(survivor.0,)], "exactly one row must remain, repointed onto the survivor");
+    assert_eq!(
+        self_damage_at(&pool, "x.wowsreplay").await,
+        999,
+        "the doomed row with the newer indexed_at must win when results_available ties"
+    );
+}
+
+#[tokio::test]
 async fn migration_nulls_root_path_for_all_but_the_lowest_id_among_a_group_sharing_one() {
     let pool = mem_pool().await;
     let now = Timestamp::from_second(1_700_000_000).unwrap();
@@ -565,6 +594,21 @@ async fn relocate_source_rewrites_matching_prefixes_only() {
     let sources = query::list_sources(&pool).await.unwrap();
     let updated = sources.iter().find(|s| s.id == src).expect("source still present");
     assert_eq!(updated.root_path.as_deref(), Some(Path::new("F:/new")));
+}
+
+#[tokio::test]
+async fn relocate_source_accepts_a_trailing_separator_on_old_root() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, Path::new("D:/old"), now).await.unwrap();
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "D:/old/a.wowsreplay")).await.unwrap();
+
+    let moved = query::relocate_source(&pool, src, Path::new("D:/old/"), Path::new("F:/new")).await.unwrap();
+    assert_eq!(moved, 1, "a trailing separator on old_root must not prevent the match");
+
+    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    assert!(paths.contains("F:/new/a.wowsreplay"), "prefix rewritten despite trailing separator: {paths:?}");
 }
 
 #[tokio::test]

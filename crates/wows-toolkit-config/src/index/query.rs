@@ -105,8 +105,11 @@ pub async fn ensure_source(
     }
 }
 
-/// Return the id of the single `Live` source, creating it if absent. Only the
-/// indexing path may call this; readers use [`live_source_id`].
+/// Return the id of the source that owns `root_path`, creating a `Live` source
+/// there if none exists yet. When `root_path` is already owned by a source of
+/// some other kind, [`ensure_source`]'s adoption returns that source's id, so
+/// the result may not be a `Live` source. Only the indexing path may call
+/// this; readers use [`live_source_id`].
 pub async fn ensure_default_source(
     pool: &SqlitePool,
     root_path: &Path,
@@ -143,7 +146,10 @@ pub async fn list_sources(pool: &SqlitePool) -> Result<Vec<IndexSource>, IndexEr
 /// a sibling directory that merely shares a literal prefix -- `D:/oldarchive`
 /// versus `D:/old` -- is left alone. `old_root` and `new_root` are normalised
 /// by trimming a trailing `/` or `\` before matching, so a caller passing
-/// either form gets the same result.
+/// either form gets the same result. The prefix match is case-sensitive, so
+/// on a case-insensitive filesystem a root differing only in case from the
+/// stored `replay_path` values (`d:/old` vs `D:/old`) matches no records and
+/// this returns zero moved.
 ///
 /// Fails before opening a transaction if `old_root` and `new_root` overlap
 /// (they name the same directory, or one is an ancestor of the other):

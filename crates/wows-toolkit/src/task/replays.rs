@@ -1482,4 +1482,32 @@ mod tests {
             other => panic!("unexpected completion: {other:?}"),
         }
     }
+
+    /// The workspace passed in must round-trip unchanged through both the task
+    /// kind (read while the load is in flight) and the completion (read once it
+    /// finishes), so the caller can route the result to the right listing.
+    /// `WorkspaceId(7)` rather than `WorkspaceId::LIVE` so a stray default value
+    /// cannot make this pass by coincidence.
+    #[test]
+    fn start_load_row_summaries_tags_the_task_and_completion_with_the_given_workspace() {
+        let rt = Arc::new(tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap());
+        let pool = rt.block_on(mem_pool());
+        let workspace = crate::db::index::rows::WorkspaceId(7);
+
+        let task = start_load_row_summaries(pool, rt, SourceSelector::Live, workspace, 0);
+        match &task.kind {
+            BackgroundTaskKind::LoadingRowSummaries { workspace: tagged } => {
+                assert_eq!(*tagged, workspace, "the task kind must carry the workspace passed in");
+            }
+            _ => panic!("unexpected task kind: not LoadingRowSummaries"),
+        }
+
+        let completion = task.receiver.unwrap().recv().unwrap().unwrap();
+        match completion {
+            BackgroundTaskCompletion::RowSummariesLoaded { workspace: tagged, .. } => {
+                assert_eq!(tagged, workspace, "the completion must carry the same workspace passed in");
+            }
+            other => panic!("unexpected completion: {other:?}"),
+        }
+    }
 }
