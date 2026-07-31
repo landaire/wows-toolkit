@@ -103,6 +103,7 @@ use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::types::AccountId;
+use wows_replays::types::ArenaId;
 
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::fire_chance::analysis::ExclusionReason;
@@ -617,6 +618,9 @@ pub struct UiReport {
     /// the captain-skill translation key style).
     version: wowsunpack::data::Version,
     self_player: Option<Arc<Player>>,
+    /// Salts the row-expansion animation ids so expanding a row in one
+    /// report's table does not animate the same row number in another.
+    arena_id: ArenaId,
     player_reports: Vec<PlayerReport>,
     sorted: bool,
     is_row_expanded: BTreeMap<u64, bool>,
@@ -1031,6 +1035,7 @@ impl UiReport {
         Self {
             match_timestamp,
             version: report.version(),
+            arena_id: report.arena_id(),
             player_reports,
             self_player,
             replay_sort: Arc::clone(&deps.replay_sort),
@@ -1823,7 +1828,7 @@ impl UiReport {
 
     fn cell_content_ui(&mut self, row_nr: u64, col_nr: usize, ui: &mut egui::Ui) {
         let is_expanded = self.is_row_expanded.get(&row_nr).copied().unwrap_or_default();
-        let expandedness = ui.ctx().animate_bool(Id::new(row_nr), is_expanded);
+        let expandedness = ui.ctx().animate_bool(Id::new(("replay_row", self.arena_id, row_nr)), is_expanded);
 
         let Some(report) = self.player_reports.get(row_nr as usize) else {
             return;
@@ -2897,7 +2902,8 @@ impl egui_table::TableDelegate for UiReport {
         self.is_row_expanded
             .range(0..row_nr)
             .map(|(expanded_row_nr, expanded)| {
-                let how_expanded = ctx.animate_bool(Id::new(expanded_row_nr), *expanded);
+                let how_expanded =
+                    ctx.animate_bool(Id::new(("replay_row", self.arena_id, *expanded_row_nr)), *expanded);
                 how_expanded * self.row_heights.get(expanded_row_nr).copied().unwrap()
             })
             .sum::<f32>()
