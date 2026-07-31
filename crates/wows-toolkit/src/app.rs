@@ -851,8 +851,11 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::CheckingGameDataUpdates => {}
                             BackgroundTaskKind::ValidatingGameData { .. } => {}
                             BackgroundTaskKind::ReconcilingIndex { .. } => {}
-                            BackgroundTaskKind::LoadingRowSummaries { .. } => {
-                                self.tab_state.active_workspace_mut().replay_row_summaries_loading = false;
+                            BackgroundTaskKind::LoadingRowSummaries { workspace } => {
+                                let workspace_id = *workspace;
+                                if let Some(target) = self.tab_state.workspace_mut(workspace_id) {
+                                    target.replay_row_summaries_loading = false;
+                                }
                             }
                         }
 
@@ -1299,13 +1302,12 @@ impl WowsToolkitApp {
                         self.tab_state.toasts.lock().info(t!("ui.messages.replays_already_indexed", total = total));
                     }
                 }
-                BackgroundTaskCompletion::RowSummariesLoaded { summaries, workspace: _workspace, .. } => {
-                    // A later phase routes this load to the listing named by
-                    // `_workspace`; today there is only the one listing.
-                    let workspace = self.tab_state.active_workspace_mut();
-                    workspace.replay_row_summaries = summaries;
-                    workspace.replay_row_summaries_loaded = true;
-                    workspace.replay_rows_need_reindex_scan = true;
+                BackgroundTaskCompletion::RowSummariesLoaded { summaries, workspace, .. } => {
+                    if let Some(target) = self.tab_state.workspace_mut(workspace) {
+                        target.replay_row_summaries = summaries;
+                        target.replay_row_summaries_loaded = true;
+                        target.replay_rows_need_reindex_scan = true;
+                    }
                 }
                 #[cfg(feature = "mod_manager")]
                 BackgroundTaskCompletion::ModManager(mod_manager_info) => match *mod_manager_info {

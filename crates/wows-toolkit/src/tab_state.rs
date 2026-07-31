@@ -479,12 +479,16 @@ pub struct TabState {
     pub background_tasks: Vec<BackgroundTask>,
     pub toasts: SharedToasts,
     pub can_change_wows_dir: bool,
-    /// Open replay listings, keyed by runtime handle. `WorkspaceId`s are handed
-    /// out monotonically, so iterating the map in key order is also the order
-    /// the workspaces were opened -- which a later phase needs to restore tabs.
+    /// The live workspace always exists, so it is a field rather than a map
+    /// entry: "at least one workspace exists" is a property of the type.
+    pub live_workspace: ReplayWorkspace,
+    /// Additional workspaces opened this session, keyed by runtime handle.
+    /// `WorkspaceId`s are handed out monotonically, so iterating the map in
+    /// key order is also the order the workspaces were opened -- which a
+    /// later phase needs to restore tabs.
     pub workspaces: std::collections::BTreeMap<WorkspaceId, ReplayWorkspace>,
     /// Which workspace the replay inspector is currently showing.
-    pub active_workspace: WorkspaceId,
+    pub active_workspace_id: WorkspaceId,
     pub twitch_update_sender: Option<tokio::sync::mpsc::Sender<crate::twitch::TwitchUpdate>>,
     pub twitch_state: Arc<RwLock<TwitchState>>,
     pub markdown_cache: egui_commonmark::CommonMarkCache,
@@ -617,8 +621,9 @@ impl Default for TabState {
             background_tasks: Vec::new(),
             can_change_wows_dir: true,
             toasts: Arc::new(parking_lot::Mutex::new(egui_notify::Toasts::default())),
-            workspaces: std::collections::BTreeMap::from([(WorkspaceId::LIVE, ReplayWorkspace::new(None))]),
-            active_workspace: WorkspaceId::LIVE,
+            live_workspace: ReplayWorkspace::new(None),
+            workspaces: std::collections::BTreeMap::new(),
+            active_workspace_id: WorkspaceId::LIVE,
             twitch_update_sender: Default::default(),
             twitch_state: Default::default(),
             markdown_cache: Default::default(),
@@ -681,35 +686,33 @@ impl TabState {
         self.save_notify.notify_one();
     }
 
-    /// Looks up an open workspace by id.
+    /// Looks up an open workspace by id. `WorkspaceId::LIVE` always resolves
+    /// to `live_workspace`, since it is not stored in `workspaces`.
     #[allow(dead_code)]
     pub fn workspace(&self, id: WorkspaceId) -> Option<&ReplayWorkspace> {
-        self.workspaces.get(&id)
+        if id == WorkspaceId::LIVE { Some(&self.live_workspace) } else { self.workspaces.get(&id) }
     }
 
-    /// Looks up an open workspace by id, mutably.
-    #[allow(dead_code)]
+    /// Looks up an open workspace by id, mutably. `WorkspaceId::LIVE` always
+    /// resolves to `live_workspace`, since it is not stored in `workspaces`.
     pub fn workspace_mut(&mut self, id: WorkspaceId) -> Option<&mut ReplayWorkspace> {
-        self.workspaces.get_mut(&id)
+        if id == WorkspaceId::LIVE { Some(&mut self.live_workspace) } else { self.workspaces.get_mut(&id) }
     }
 
-    /// The workspace the replay inspector is currently showing. Falls back to
-    /// the live workspace, then to whatever workspace exists, so a caller
-    /// never has to handle a missing entry.
+    /// The workspace the replay inspector is currently showing. `live_workspace`
+    /// is not a map entry, so a miss on `workspaces` always falls back to it --
+    /// there is no id for which this and `active_workspace_mut` disagree.
     pub fn active_workspace(&self) -> &ReplayWorkspace {
-        self.workspaces
-            .get(&self.active_workspace)
-            .or_else(|| self.workspaces.get(&WorkspaceId::LIVE))
-            .or_else(|| self.workspaces.values().next())
-            .unwrap()
+        self.workspaces.get(&self.active_workspace_id).unwrap_or(&self.live_workspace)
     }
 
-    /// Mutable form of [`Self::active_workspace`]. Inserts a fresh live
-    /// workspace if the active id has no entry, so the accessor never returns
-    /// an `Option`.
+    /// Mutable form of [`Self::active_workspace`]. Resolves identically: a
+    /// miss on `workspaces` falls back to `live_workspace`, never inserts.
     pub fn active_workspace_mut(&mut self) -> &mut ReplayWorkspace {
-        let id = self.active_workspace;
-        self.workspaces.entry(id).or_insert_with(|| ReplayWorkspace::new(None))
+        match self.workspaces.get_mut(&self.active_workspace_id) {
+            Some(workspace) => workspace,
+            None => &mut self.live_workspace,
+        }
     }
 
     /// Returns the replay shown in the currently focused (or first) replay dock tab, if any.

@@ -3928,9 +3928,7 @@ impl ToolkitTabViewer<'_> {
                 self.tab_state.active_workspace_mut().replay_listing_collapse_defaulted = true;
             }
 
-            // Bound after the collapse-default block above, which needs its own
-            // mutable access to the workspace: `active_workspace()` borrows the
-            // whole workspace, not just this field, so this can't overlap with it.
+            // Bound after the collapse-default write: active_workspace() borrows the whole workspace.
             let row_summaries = &self.tab_state.active_workspace().replay_row_summaries;
 
             let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id(tree_id_salt))
