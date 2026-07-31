@@ -64,6 +64,7 @@ pub use replays::load_ship_icons;
 pub use replays::load_wows_data_for_build;
 pub use replays::load_wows_files;
 pub use replays::start_background_parsing_thread;
+pub use replays::start_load_row_summaries;
 pub use replays::start_populating_player_inspector;
 pub use replays::start_reconcile_index;
 
@@ -145,6 +146,7 @@ pub enum BackgroundTaskKind {
         rx: mpsc::Receiver<IndexProgress>,
         last_progress: Option<IndexProgress>,
     },
+    LoadingRowSummaries,
 }
 
 /// Progress state for a batch video export, shared between the background thread and the UI.
@@ -353,6 +355,10 @@ impl BackgroundTask {
                             }
                         }
                     }
+                    BackgroundTaskKind::LoadingRowSummaries => {
+                        ui.spinner();
+                        ui.label(t!("ui.messages.loading_row_summaries"));
+                    }
                     BackgroundTaskKind::LoadingPersonalRatingData
                     | BackgroundTaskKind::UpdateTimedMessage(_)
                     | BackgroundTaskKind::OpenFileViewer(_) => {
@@ -403,6 +409,11 @@ pub enum BackgroundTaskCompletion {
         indexed: usize,
         total: usize,
     },
+    /// The replay-listing row summaries finished loading for `generation`.
+    RowSummariesLoaded {
+        summaries: HashMap<PathBuf, crate::db::index::rows::RowSummary>,
+        generation: u64,
+    },
     #[cfg(feature = "mod_manager")]
     ModManager(Box<crate::mod_manager::ModTaskCompletion>),
     NoReceiver,
@@ -446,6 +457,11 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
             Self::ReconcileIndexComplete { indexed, total } => {
                 f.debug_struct("ReconcileIndexComplete").field("indexed", indexed).field("total", total).finish()
             }
+            Self::RowSummariesLoaded { summaries, generation } => f
+                .debug_struct("RowSummariesLoaded")
+                .field("summaries", &summaries.len())
+                .field("generation", generation)
+                .finish(),
             #[cfg(feature = "mod_manager")]
             Self::ModManager(mod_manager_completion) => {
                 f.write_fmt(format_args!("ModManager({:?})", mod_manager_completion))

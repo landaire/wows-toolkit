@@ -480,6 +480,19 @@ pub struct TabState {
     pub file_watcher: Option<RecommendedWatcher>,
     pub file_receiver: Option<mpsc::Receiver<NotifyFileEvent>>,
     pub replay_files: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
+    /// Index-sourced display data for the listing, keyed by replay path.
+    /// Reloaded whenever `index_generation()` moves past
+    /// `replay_row_summaries_generation`.
+    pub replay_row_summaries: HashMap<PathBuf, crate::db::index::rows::RowSummary>,
+    /// The `index_generation()` value `replay_row_summaries` was built from.
+    /// `None` before the first load completes.
+    pub replay_row_summaries_generation: Option<u64>,
+    /// True while a summary load is in flight, so a slow query cannot spawn a
+    /// second task on the next frame.
+    pub replay_row_summaries_loading: bool,
+    /// Set when a summary load lands, consumed by the listing to run one
+    /// freshness scan over the listed files.
+    pub replay_rows_need_reindex_scan: bool,
     pub background_tasks: Vec<BackgroundTask>,
     pub toasts: SharedToasts,
     pub can_change_wows_dir: bool,
@@ -619,6 +632,10 @@ impl Default for TabState {
             renderer_asset_cache: Default::default(),
             file_watcher: None,
             replay_files: None,
+            replay_row_summaries: HashMap::new(),
+            replay_row_summaries_generation: None,
+            replay_row_summaries_loading: false,
+            replay_rows_need_reindex_scan: false,
             file_receiver: None,
             background_tasks: Vec::new(),
             can_change_wows_dir: true,
@@ -936,6 +953,9 @@ impl TabState {
         self.replay_dock_state = egui_dock::DockState::new(vec![]);
         self.next_replay_tab_id = 0;
         self.replay_files = None;
+        self.replay_row_summaries.clear();
+        self.replay_row_summaries_generation = None;
+        self.replay_rows_need_reindex_scan = false;
         self.replay_listing_auto_sized = false;
         self.browser_state = Default::default();
         {

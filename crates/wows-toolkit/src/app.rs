@@ -857,6 +857,9 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::CheckingGameDataUpdates => {}
                             BackgroundTaskKind::ValidatingGameData { .. } => {}
                             BackgroundTaskKind::ReconcilingIndex { .. } => {}
+                            BackgroundTaskKind::LoadingRowSummaries => {
+                                self.tab_state.replay_row_summaries_loading = false;
+                            }
                         }
 
                         self.handle_task_completion(ui.ctx(), result);
@@ -1302,6 +1305,11 @@ impl WowsToolkitApp {
                     } else {
                         self.tab_state.toasts.lock().info(t!("ui.messages.replays_already_indexed", total = total));
                     }
+                }
+                BackgroundTaskCompletion::RowSummariesLoaded { summaries, generation } => {
+                    self.tab_state.replay_row_summaries = summaries;
+                    self.tab_state.replay_row_summaries_generation = Some(generation);
+                    self.tab_state.replay_rows_need_reindex_scan = true;
                 }
                 #[cfg(feature = "mod_manager")]
                 BackgroundTaskCompletion::ModManager(mod_manager_info) => match *mod_manager_info {

@@ -136,6 +136,7 @@ indexing_replays = "Indexing replays..."
 indexing_replays_progress = "Indexing replays (%{done}/%{total})"
 replays_indexed = "Indexed %{indexed} of %{total} replay(s)"
 replays_already_indexed = "All %{total} replay(s) already indexed"
+loading_row_summaries = "Loading replay details..."
 
 # -- Stat names --
 

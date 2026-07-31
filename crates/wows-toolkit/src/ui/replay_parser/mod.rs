@@ -4746,6 +4746,7 @@ impl ToolkitTabViewer<'_> {
 
     /// Builds the replay parser tab
     pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui) {
+        self.refresh_row_summaries();
         ui.vertical(|ui| {
             self.build_replay_header(ui);
 
@@ -4912,6 +4913,37 @@ impl ToolkitTabViewer<'_> {
         self.show_timeline_window(ui.ctx());
         self.pick_up_replay_controls_request(ui.ctx());
         self.show_replay_controls_window(ui.ctx());
+    }
+
+    /// Reload the listing's index-sourced row data when the index has been
+    /// written since the cached map was built. `index_generation` is bumped
+    /// after every index write, so this is a cheap per-frame comparison rather
+    /// than a query.
+    fn refresh_row_summaries(&mut self) {
+        let generation = crate::data::replay_index::index_generation();
+        if !listing_row::should_reload_summaries(
+            self.tab_state.replay_row_summaries_loading,
+            self.tab_state.replay_row_summaries_generation,
+            generation,
+        ) {
+            return;
+        }
+        let deps = match (
+            self.tab_state.db_pool.as_ref(),
+            self.tab_state.tokio_runtime.as_ref(),
+            self.tab_state.replays_dir.as_ref(),
+        ) {
+            (Some(pool), Some(rt), Some(dir)) => Some((pool.clone(), Arc::clone(rt), dir.clone())),
+            _ => None,
+        };
+        let Some((pool, rt, dir)) = deps else {
+            return;
+        };
+        self.tab_state.replay_row_summaries_loading = true;
+        crate::update_background_task!(
+            self.tab_state.background_tasks,
+            Some(crate::task::start_load_row_summaries(pool, rt, dir, generation))
+        );
     }
 
     fn show_game_chat_window(&self, ctx: &egui::Context) {

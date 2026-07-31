@@ -1353,3 +1353,33 @@ fn run_reconcile_index(
 
     Ok(BackgroundTaskCompletion::ReconcileIndexComplete { indexed: indexed_count, total })
 }
+
+/// Load the replay-listing row summaries for the live source.
+///
+/// Resolving the source and running the query both happen on this thread; the
+/// UI never blocks on the pool. `generation` is echoed back so the completion
+/// handler can tell whether a newer write landed while the query was running.
+pub fn start_load_row_summaries(
+    pool: sqlx::SqlitePool,
+    tokio_runtime: Arc<tokio::runtime::Runtime>,
+    replays_dir: PathBuf,
+    generation: u64,
+) -> BackgroundTask {
+    let (tx, rx) = mpsc::channel();
+
+    crate::util::thread::spawn_logged("load-row-summaries", move || {
+        let result = tokio_runtime.block_on(async {
+            let source =
+                crate::db::index::query::ensure_default_source(&pool, &replays_dir, jiff::Timestamp::now()).await?;
+            crate::db::index::query::row_summaries_for_source(&pool, source).await
+        });
+
+        let completion = match result {
+            Ok(summaries) => Ok(BackgroundTaskCompletion::RowSummariesLoaded { summaries, generation }),
+            Err(e) => Err(rootcause::report!("failed to load replay row summaries: {e}")),
+        };
+        let _ = tx.send(completion);
+    });
+
+    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingRowSummaries }
+}

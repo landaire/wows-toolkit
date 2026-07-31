@@ -159,6 +159,12 @@ pub(crate) fn row_freshness(summary: Option<&RowSummary>, on_disk_mtime: Option<
     }
 }
 
+/// Whether a summary reload should start. False while one is in flight, and
+/// false when the cached map already reflects the current index generation.
+pub(crate) fn should_reload_summaries(loading: bool, cached: Option<u64>, current: u64) -> bool {
+    !loading && cached != Some(current)
+}
+
 /// Unix-seconds modification time, matching how the index mapper records it.
 pub(crate) fn file_mtime_secs(path: &std::path::Path) -> Option<i64> {
     std::fs::metadata(path)
@@ -338,6 +344,28 @@ mod tests {
             matches!(row_freshness(Some(&neither_mtime), None), RowFreshness::Stale),
             "None == None is true, so equality-based implementations would wrongly report Fresh here"
         );
+    }
+
+    #[test]
+    fn should_reload_summaries_starts_on_first_load() {
+        assert!(should_reload_summaries(false, None, 5));
+    }
+
+    #[test]
+    fn should_reload_summaries_skips_when_cached_matches_current() {
+        assert!(!should_reload_summaries(false, Some(5), 5));
+    }
+
+    #[test]
+    fn should_reload_summaries_reloads_when_cached_is_behind() {
+        assert!(should_reload_summaries(false, Some(4), 5));
+    }
+
+    #[test]
+    fn should_reload_summaries_blocks_while_loading() {
+        assert!(!should_reload_summaries(true, None, 5), "in-flight load must block the never-loaded case too");
+        assert!(!should_reload_summaries(true, Some(4), 5));
+        assert!(!should_reload_summaries(true, Some(5), 5));
     }
 
     #[test]
