@@ -656,6 +656,83 @@ async fn relocate_source_allows_a_sibling_name_that_is_not_actually_nested() {
 }
 
 #[tokio::test]
+async fn relocate_source_rejects_relocating_to_its_own_current_root() {
+    // old_root == new_root is treated as containment (a directory trivially
+    // contains itself), so it is rejected the same way as any other nested
+    // relocation rather than silently succeeding as a no-op.
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, Path::new("D:/replays"), now).await.unwrap();
+
+    let err = query::relocate_source(&pool, src, Path::new("D:/replays"), Path::new("D:/replays")).await.unwrap_err();
+    match err {
+        IndexError::RelocationNested { old_root, new_root } => {
+            assert_eq!(old_root, PathBuf::from("D:/replays"));
+            assert_eq!(new_root, PathBuf::from("D:/replays"));
+        }
+        other => panic!("expected RelocationNested, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn relocate_source_precheck_does_not_treat_a_sibling_directory_as_colliding() {
+    // Without the precheck's own r1 boundary check (a separate copy of the
+    // same rule from the UPDATE's WHERE clause), "D:/oldarchive/x.wowsreplay"
+    // -- a sibling of D:/old, out of scope -- would be computed as if it were
+    // moving to "F:/new" + "archive/x.wowsreplay" = "F:/newarchive/x.wowsreplay",
+    // which happens to already exist here as an unrelated record. That would
+    // be a false positive RelocationCollision. With the boundary check, the
+    // sibling is correctly out of scope, nothing here collides, and the
+    // relocation succeeds moving nothing.
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, Path::new("D:/old"), now).await.unwrap();
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_match(&pool, &sample_match(200)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "D:/oldarchive/x.wowsreplay")).await.unwrap();
+    query::upsert_record(&pool, &sample_record(200, src, "F:/newarchive/x.wowsreplay")).await.unwrap();
+
+    let moved = query::relocate_source(&pool, src, Path::new("D:/old"), Path::new("F:/new")).await.unwrap();
+    assert_eq!(moved, 0, "neither record is actually under D:/old, so nothing moves and nothing collides");
+
+    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    assert!(paths.contains("D:/oldarchive/x.wowsreplay"), "untouched: {paths:?}");
+    assert!(paths.contains("F:/newarchive/x.wowsreplay"), "untouched: {paths:?}");
+}
+
+#[tokio::test]
+async fn relocate_source_precheck_still_detects_a_collision_that_shares_old_roots_literal_prefix() {
+    // new_root ("D:/oldish") happens to share old_root's ("D:/old") literal
+    // characters without being nested under it (no path separator right after
+    // "D:/old" in "D:/oldish"), so a real mover's rewritten target can land on
+    // a path that itself starts with the literal characters of old_root.
+    // Without the precheck's r2 boundary check (a separate copy of the same
+    // rule from the UPDATE's WHERE clause), the existing record at that path
+    // would be wrongly treated as "also under old_root", excluded as a
+    // collision partner, and the real collision would slip past the precheck
+    // and surface as a raw constraint violation instead of RelocationCollision.
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, Path::new("D:/old"), now).await.unwrap();
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_match(&pool, &sample_match(200)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "D:/old/a.wowsreplay")).await.unwrap();
+    query::upsert_record(&pool, &sample_record(200, src, "D:/oldish/a.wowsreplay")).await.unwrap();
+
+    let err = query::relocate_source(&pool, src, Path::new("D:/old"), Path::new("D:/oldish")).await.unwrap_err();
+    match err {
+        IndexError::RelocationCollision { path } => {
+            assert_eq!(path, PathBuf::from("D:/oldish/a.wowsreplay"), "the error names the colliding destination path");
+        }
+        other => panic!("expected RelocationCollision, got {other:?}"),
+    }
+
+    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    assert!(paths.contains("D:/old/a.wowsreplay"), "a rejected relocate must leave records untouched: {paths:?}");
+    assert!(paths.contains("D:/oldish/a.wowsreplay"), "a rejected relocate must leave records untouched: {paths:?}");
+}
+
+#[tokio::test]
 async fn relocate_source_rejects_a_collision_and_leaves_the_database_unchanged() {
     // "F:/new/a.wowsreplay" already names a different record (arena 200) that
     // is not itself under D:/old, so it will not move. Relocating D:/old to

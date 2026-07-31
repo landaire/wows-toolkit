@@ -149,8 +149,9 @@ pub async fn list_sources(pool: &SqlitePool) -> Result<Vec<IndexSource>, IndexEr
 /// (they name the same directory, or one is an ancestor of the other):
 /// rewriting a prefix while part of it is itself moving cannot be expressed
 /// as one substitution, since a record's rewritten path could land on another
-/// record's not-yet-rewritten path. It also fails up front if `new_root` is
-/// already another source's `root_path`.
+/// record's not-yet-rewritten path. `old_root == new_root` falls under "name
+/// the same directory" and is rejected the same way, not treated as a no-op.
+/// It also fails up front if `new_root` is already another source's `root_path`.
 ///
 /// The remaining writes happen in one transaction, rolled back explicitly on
 /// any error so the caller never observes a half-relocated source.
