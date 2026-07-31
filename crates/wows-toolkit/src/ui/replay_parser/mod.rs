@@ -1,4 +1,5 @@
 mod damage_types;
+mod listing_row;
 mod models;
 mod sorting;
 
