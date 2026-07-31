@@ -3232,6 +3232,18 @@ fn alt_perspective_label(replay_file: &Replay) -> String {
     label
 }
 
+/// Which source a workspace's summary load should read: its own resolved
+/// source once it has one, or the live source while it does not. A workspace
+/// stuck on `None` forever (the live workspace) keeps reading the live
+/// source for its whole life; an imported workspace moves to `Explicit` once
+/// its source is ensured.
+fn summary_source_selector(source: Option<crate::db::index::rows::SourceId>) -> crate::task::SourceSelector {
+    match source {
+        Some(source) => crate::task::SourceSelector::Explicit(source),
+        None => crate::task::SourceSelector::Live,
+    }
+}
+
 impl ToolkitTabViewer<'_> {
     fn metadata_provider(&self) -> Option<Arc<GameMetadataProvider>> {
         self.tab_state.world_of_warships_data.as_ref().and_then(|wows_data| wows_data.read().game_metadata.clone())
@@ -5033,6 +5045,7 @@ impl ToolkitTabViewer<'_> {
     /// query.
     fn refresh_row_summaries(&mut self) {
         let generation = crate::data::replay_index::index_generation();
+        let ws_id = self.tab_state.active_workspace_id();
         if !listing_row::should_reload_summaries(
             self.tab_state.active_workspace().replay_row_summaries_loading,
             self.tab_state.active_workspace().replay_row_summaries_generation,
@@ -5053,6 +5066,7 @@ impl ToolkitTabViewer<'_> {
         let Some((pool, rt)) = deps else {
             return;
         };
+        let selector = summary_source_selector(self.tab_state.active_workspace().source);
         // Stamped here rather than on completion so a query that keeps failing does not
         // re-dispatch on every frame. The next attempt waits for the index to move again.
         let workspace = self.tab_state.active_workspace_mut();
@@ -5060,13 +5074,7 @@ impl ToolkitTabViewer<'_> {
         workspace.replay_row_summaries_generation = Some(generation);
         crate::update_background_task!(
             self.tab_state.background_tasks,
-            Some(crate::task::start_load_row_summaries(
-                pool,
-                rt,
-                crate::task::SourceSelector::Live,
-                crate::db::index::rows::WorkspaceId::LIVE,
-                generation
-            ))
+            Some(crate::task::start_load_row_summaries(pool, rt, selector, ws_id, generation))
         );
     }
 
@@ -6844,5 +6852,31 @@ mod fire_chance_render_tests {
         let lines = fire_chance_formula_lines(&formula_fixture(Some(0.12), formula), &no_localization);
         assert_eq!(lines[1], "    base burnProb 12.0%");
         assert_eq!(lines[2], format!("  x {name}    1.00"));
+    }
+}
+
+#[cfg(test)]
+mod summary_source_selector_tests {
+    use super::summary_source_selector;
+    use crate::db::index::rows::SourceId;
+    use crate::task::SourceSelector;
+
+    /// A workspace with a resolved source reads that source explicitly,
+    /// rather than falling back to the live source it may not even be.
+    #[test]
+    fn a_resolved_source_yields_explicit() {
+        let selector = summary_source_selector(Some(SourceId(42)));
+        assert_eq!(selector, SourceSelector::Explicit(SourceId(42)));
+    }
+
+    /// A workspace with no resolved source yet -- the live workspace for its
+    /// whole life, or an imported workspace before its source is ensured --
+    /// reads the live source. Getting this branch wrong strands the
+    /// workspace's loading flag true forever, since the completion would
+    /// never route back to it.
+    #[test]
+    fn no_resolved_source_yields_live() {
+        let selector = summary_source_selector(None);
+        assert_eq!(selector, SourceSelector::Live);
     }
 }

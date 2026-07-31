@@ -1407,12 +1407,12 @@ fn run_reconcile_index(
 }
 
 /// Which source a summary load should read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceSelector {
     /// Resolve the live source, yielding an empty map when the indexer has not
     /// created it yet. Readers never create it.
     Live,
     /// A source already known to the caller.
-    #[allow(dead_code)]
     Explicit(crate::db::index::rows::SourceId),
 }
 

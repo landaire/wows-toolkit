@@ -6,6 +6,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 
 use crate::db::index::rows::RowSummary;
+use crate::db::index::rows::SourceId;
 use crate::db::index::rows::WorkspaceId;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::ReplayTab;
@@ -17,6 +18,11 @@ pub(crate) struct ReplayWorkspace {
     /// The directory this workspace lists. `None` before a WoWs directory has
     /// been configured.
     pub root: Option<PathBuf>,
+    /// The index source this workspace's listing reads. `None` for the live
+    /// workspace, which always resolves the live source at load time because
+    /// the indexer -- not this workspace -- creates it and it may not exist
+    /// yet. An imported workspace sets this once its source is ensured.
+    pub source: Option<SourceId>,
     pub replay_files: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
     /// Index-sourced display data for the listing, keyed by replay path.
     /// Reloaded whenever `index_generation()` moves past
@@ -55,6 +61,7 @@ impl ReplayWorkspace {
     pub fn new(root: Option<PathBuf>) -> Self {
         Self {
             root,
+            source: None,
             replay_files: None,
             replay_row_summaries: HashMap::new(),
             replay_row_summaries_generation: None,
