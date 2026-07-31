@@ -310,6 +310,41 @@ async fn migration_dedupe_keeps_the_survivor_row_when_it_already_has_results() {
 }
 
 #[tokio::test]
+async fn migration_dedupe_prefers_results_over_recency() {
+    // The other two preference tests covary results_available and indexed_at,
+    // so neither pins the ordering between them: a predicate that compared
+    // only indexed_at would pass both. Here the fields disagree -- the
+    // survivor is more recent but results-absent, the doomed row is older but
+    // results-bearing -- so only "results beats recency" picks the doomed row.
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let (survivor, doomed) = two_live_sources(&pool, now).await;
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &record_with_results(100, survivor, "x.wowsreplay", false, 111, 1_700_000_100))
+        .await
+        .unwrap();
+    query::upsert_record(&pool, &record_with_results(100, doomed, "x.wowsreplay", true, 999, 1_700_000_000))
+        .await
+        .unwrap();
+
+    const DEDUPE_SQL: &str = include_str!("../migrations/008_source_uniqueness.sql");
+    sqlx::raw_sql(DEDUPE_SQL).execute(&pool).await.unwrap();
+
+    let remaining: Vec<(i64,)> =
+        sqlx::query_as("SELECT source_id FROM replay_record WHERE replay_path = 'x.wowsreplay'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(remaining, vec![(survivor.0,)], "exactly one row must remain, repointed onto the survivor");
+    assert_eq!(
+        self_damage_at(&pool, "x.wowsreplay").await,
+        999,
+        "the older, results-bearing doomed row must win over the newer, results-absent survivor row"
+    );
+}
+
+#[tokio::test]
 async fn migration_nulls_root_path_for_all_but_the_lowest_id_among_a_group_sharing_one() {
     let pool = mem_pool().await;
     let now = Timestamp::from_second(1_700_000_000).unwrap();
