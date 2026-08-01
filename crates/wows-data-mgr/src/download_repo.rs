@@ -213,13 +213,16 @@ pub async fn validate_cache(
                     Some(text) => {
                         let remote_md: BuildMetadata =
                             toml::from_str(&text).attach_with(|| "failed to parse remote metadata.toml")?;
+                        let mut corrupt_here = BTreeSet::new();
                         let issues = validate_build(
                             &cas_root,
                             &output_base.join(&entry.dir),
                             &remote_md,
                             &mut verified,
                             &mut corrupt,
+                            &mut corrupt_here,
                         );
+                        log_corrupt_objects(entry, &corrupt_here);
                         if issues.is_clean() {
                             ValidationOutcome::Clean
                         } else {
@@ -243,13 +246,38 @@ enum ObjectState {
     Corrupt,
 }
 
+/// Write the identity of the objects a build's validation found corrupt to the
+/// log.
+///
+/// The caller of [`validate_cache`] only ever sees a count, and a count is not
+/// something a user can report or a maintainer can act on. This line is the
+/// only place the failing objects are named, which is the same standard the
+/// download path is held to.
+fn log_corrupt_objects(entry: &BuildEntry, corrupt: &BTreeSet<String>) {
+    if corrupt.is_empty() {
+        return;
+    }
+    tracing::error!(
+        "build {} ({}) references {} corrupt content object(s): {}",
+        entry.build,
+        entry.version,
+        corrupt.len(),
+        corrupt.iter().cloned().collect::<Vec<_>>().join(", ")
+    );
+}
+
 /// Check one build's local content against its remote metadata.
+///
+/// `corrupt` is the store-wide verdict cache, so an object already known bad is
+/// not re-read; `corrupt_here` collects every bad object *this* build
+/// references, including ones an earlier build already found.
 fn validate_build(
     cas_root: &Path,
     output_dir: &Path,
     remote_md: &BuildMetadata,
     verified: &mut BTreeSet<String>,
     corrupt: &mut BTreeSet<String>,
+    corrupt_here: &mut BTreeSet<String>,
 ) -> BuildIssues {
     let mut issues = BuildIssues {
         stale_metadata: match BuildMetadata::load(&output_dir.join("metadata.toml")) {
@@ -259,8 +287,8 @@ fn validate_build(
         ..Default::default()
     };
 
-    check_entries(cas_root, &remote_md.files, &mut issues, verified, corrupt);
-    check_entries(cas_root, &remote_md.derived, &mut issues, verified, corrupt);
+    check_entries(cas_root, &remote_md.files, &mut issues, verified, corrupt, corrupt_here);
+    check_entries(cas_root, &remote_md.derived, &mut issues, verified, corrupt, corrupt_here);
 
     issues
 }
@@ -273,12 +301,16 @@ fn check_entries(
     issues: &mut BuildIssues,
     verified: &mut BTreeSet<String>,
     corrupt: &mut BTreeSet<String>,
+    corrupt_here: &mut BTreeSet<String>,
 ) {
     for hash in entries.values() {
         match object_state(cas_root, hash, verified, corrupt) {
             ObjectState::Ok => {}
             ObjectState::Missing => issues.missing_objects += 1,
-            ObjectState::Corrupt => issues.corrupt_objects += 1,
+            ObjectState::Corrupt => {
+                issues.corrupt_objects += 1;
+                corrupt_here.insert(hash.clone());
+            }
         }
     }
 }
@@ -634,7 +666,7 @@ fn report_corrupt_object(entry: &BuildEntry, metadata: &BuildMetadata, hash: &st
         corrupt.version,
         corrupt.hash,
         corrupt.actual,
-        corrupt.total_files,
+        corrupt.files.len(),
         corrupt.all_files()
     );
     report!("{corrupt}")
@@ -998,6 +1030,92 @@ mod tests {
         assert!(rendered.contains("and 6 more"), "{rendered}");
         assert!(!rendered.contains("res/spaces/s3/space.settings"), "capped at three: {rendered}");
         assert!(rendered.contains("re-publishing"), "the user needs to know a retry is pointless: {rendered}");
+    }
+
+    /// Collects everything logged on the calling thread.
+    #[derive(Clone, Default)]
+    struct CapturedLog(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for CapturedLog {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLog {
+        type Writer = Self;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// Run `body` with a subscriber that captures the log, and return what it
+    /// wrote. The default is thread-local, so parallel tests do not see each
+    /// other's output.
+    fn captured_log(body: impl FnOnce()) -> String {
+        let captured = CapturedLog::default();
+        let subscriber =
+            tracing_subscriber::fmt().with_writer(captured.clone()).with_ansi(false).without_time().finish();
+        tracing::subscriber::with_default(subscriber, body);
+        let bytes = captured.0.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
+    // The returned message is capped because it reaches a toast; the log is
+    // where the evidence lives. Asserting only on the message lets the log line
+    // be deleted with every test still passing, which is how the requirement
+    // that put it there silently regresses.
+    #[test]
+    fn a_corrupt_object_failure_writes_every_file_to_the_log() {
+        let entry = entry("15.4.0", 12506899, "15.4.0_12506899");
+        let mut metadata = BuildMetadata { version: "15.4.0".into(), build: 12506899, ..Default::default() };
+        let files: Vec<String> = (0..9).map(|i| format!("res/spaces/s{i}/space.settings")).collect();
+        for file in &files {
+            metadata.files.insert(file.clone(), "a24a46f62dc08fd95fc7".into());
+        }
+
+        let log = captured_log(|| {
+            let _ = report_corrupt_object(&entry, &metadata, "a24a46f62dc08fd95fc7", "674dcbf6a9204c9fe942");
+        });
+
+        assert!(log.contains("a24a46f62dc08fd95fc7"), "{log}");
+        assert!(log.contains("674dcbf6a9204c9fe942"), "{log}");
+        assert!(log.contains("12506899"), "{log}");
+        for file in &files {
+            assert!(log.contains(file.as_str()), "the log dropped {file}: {log}");
+        }
+    }
+
+    // The in-app validation surface reports a bare count. Without this line
+    // nothing anywhere records which objects failed, on the surface a user hits
+    // before they ever try a download.
+    #[test]
+    fn validation_writes_the_corrupt_objects_it_found_to_the_log() {
+        let entry = entry("15.4.0", 12506899, "15.4.0_12506899");
+        let corrupt = BTreeSet::from(["a24a46f62dc08fd95fc7".to_string(), "674dcbf6a9204c9fe942".to_string()]);
+
+        let log = captured_log(|| log_corrupt_objects(&entry, &corrupt));
+
+        assert!(log.contains("a24a46f62dc08fd95fc7"), "{log}");
+        assert!(log.contains("674dcbf6a9204c9fe942"), "{log}");
+        assert!(log.contains("12506899"), "{log}");
+        assert!(log.contains("15.4.0"), "{log}");
+    }
+
+    // A build with nothing wrong must not write an error line saying so.
+    #[test]
+    fn validation_logs_nothing_when_no_object_is_corrupt() {
+        let entry = entry("15.4.0", 12506899, "15.4.0_12506899");
+
+        let log = captured_log(|| log_corrupt_objects(&entry, &BTreeSet::new()));
+
+        assert!(log.is_empty(), "{log}");
     }
 
     // The requested-version hint is `Option<String>` end to end: a supplied

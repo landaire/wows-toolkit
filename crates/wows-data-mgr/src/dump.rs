@@ -877,6 +877,21 @@ pub fn verify_builds(
     check_links: bool,
     check_hashes: bool,
 ) -> Result<Vec<BuildVerification>, Report> {
+    let cas_root = cas::cas_root(output_base);
+    verify_builds_audited(output_base, check_links, check_hashes, |hash| audit_object_on_disk(&cas_root, hash))
+}
+
+/// [`verify_builds`] with the object audit supplied, so a test can count how
+/// many times each object is read. Production has exactly one auditor; the
+/// parameter exists because "each object is read once" is otherwise
+/// unobservable from outside, and a `verify_builds` that audited per build
+/// would pass every other test in this module.
+fn verify_builds_audited(
+    output_base: &Path,
+    check_links: bool,
+    check_hashes: bool,
+    audit: impl FnMut(&str) -> ObjectAudit,
+) -> Result<Vec<BuildVerification>, Report> {
     let index = BuildsIndex::load(&output_base.join("builds.toml"));
     let cas_root = cas::cas_root(output_base);
 
@@ -888,7 +903,7 @@ pub fn verify_builds(
 
     let audits = if check_hashes {
         let readable: Vec<&BuildMetadata> = loaded.iter().filter_map(|(_, meta)| meta.as_ref()).collect();
-        audit_objects(&readable, |hash| audit_object_on_disk(&cas_root, hash))
+        audit_objects(&readable, audit)
     } else {
         BTreeMap::new()
     };
@@ -1384,6 +1399,61 @@ mod maintenance_tests {
         assert_eq!(reads.iter().filter(|h| h.as_str() == "shared").count(), 1, "read {reads:?}");
         assert_eq!(reads.len(), 2, "read {reads:?}");
         assert_eq!(verdicts.len(), 2);
+    }
+
+    /// The test above exercises `audit_objects` directly, which says nothing
+    /// about how `verify_builds` calls it. A `verify_builds` that called it once
+    /// per build with a one-element slice would re-read every shared object per
+    /// referencing build -- 12 GB times 127 builds -- and pass every other test
+    /// here. This one counts the reads the whole verification makes.
+    #[test]
+    fn verifying_a_whole_dump_base_hashes_each_shared_object_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+
+        for (version, build, own) in [("15.3.0", 12400000u32, "only_in_first"), ("15.4.0", 12506899, "only_in_second")]
+        {
+            write_build_metadata(
+                &base.join(format!("{version}_{build}")),
+                version,
+                build,
+                &[("res/shared.xml", "shared"), ("res/own.xml", own)],
+            );
+            register(base, version, build);
+        }
+
+        let mut reads: Vec<String> = Vec::new();
+        let reports = verify_builds_audited(base, false, true, |hash| {
+            reads.push(hash.to_string());
+            ObjectAudit::Intact
+        })
+        .unwrap();
+
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reads.iter().filter(|h| h.as_str() == "shared").count(), 1, "read {reads:?}");
+        assert_eq!(reads.len(), 3, "read {reads:?}");
+    }
+
+    /// Without `check_hashes` no object is read at all, which is what makes
+    /// reporting a corrupt count on that path a claim about an audit that never
+    /// ran.
+    #[test]
+    fn verifying_without_hash_checking_reads_no_object() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        write_build_metadata(&base.join("15.4.0_12506899"), "15.4.0", 12506899, &[("res/a.xml", "shared")]);
+        register(base, "15.4.0", 12506899);
+
+        let mut reads: Vec<String> = Vec::new();
+        let reports = verify_builds_audited(base, false, false, |hash| {
+            reads.push(hash.to_string());
+            ObjectAudit::Intact
+        })
+        .unwrap();
+
+        assert_eq!(reports.len(), 1);
+        assert!(reads.is_empty(), "read {reads:?}");
+        assert!(reports[0].corrupt_objects.is_empty(), "nothing was hashed, so nothing can be called corrupt");
     }
 
     /// Reading each object once must not cost per-build attribution: the user

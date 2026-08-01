@@ -4837,6 +4837,17 @@ mod logging_target_tests {
             targets.would_enable(wows_data_mgr::LOG_TARGET, &tracing::Level::INFO),
             "wows-data-mgr progress is filtered out of the log file"
         );
+        // Every event actually emitted carries a module target, never the bare
+        // crate name, so the assertions above pass on prefix matching alone and
+        // would keep passing if that stopped working.
+        assert!(
+            targets.would_enable("wows_data_mgr::download_repo", &tracing::Level::ERROR),
+            "the corrupt-object evidence is filtered out of the log file"
+        );
+        assert!(
+            targets.would_enable("wows_data_mgr::dump", &tracing::Level::WARN),
+            "unreadable content objects are filtered out of the log file"
+        );
         assert!(
             !targets.would_enable("hyper_util", &tracing::Level::ERROR),
             "the filter must stay an allowlist, not turn into a catch-all"

@@ -152,11 +152,36 @@ impl BuildMetadata {
 /// a string that ends up in a toast.
 const NAMED_FILES: usize = 3;
 
+/// Maximum number of characters those paths may occupy between them.
+///
+/// A cap on how many paths are named is not a cap on how long the message gets:
+/// measured over `15.6.0_12830008` (4074 paths) a path is 49 characters at the
+/// median, 88 at the 99th percentile and 101 at the longest, so "three paths"
+/// is anywhere from 150 to 300 characters of message. Paths are named whole or
+/// not at all -- half a path identifies nothing -- and the count in the tail
+/// accounts for every one left out.
+const NAMED_FILES_BUDGET: usize = 160;
+
+/// The length a [`CorruptObject`] message stays within, whatever it is handed.
+///
+/// This holds for any file list, and for a build number up to [`u32::MAX`], a
+/// version string up to 20 characters and the 20-character digests this crate
+/// produces. The toast that shows it renders the enclosing report rather than
+/// this string alone, so what the user sees also carries the report's tree
+/// glyphs and its location attachment on top of this.
+pub const MAX_MESSAGE_CHARS: usize = 400;
+
+/// What separates named paths in the message.
+const FILE_SEPARATOR: &str = ", ";
+
 /// A content object whose bytes do not hash to the name it is stored under,
 /// attributed to the build that references it and the files it backs.
 ///
 /// A hash is 20 hex characters and says nothing on its own. Carrying the build,
 /// the version and the referencing paths is what makes the failure reportable.
+///
+/// Its [`Display`](std::fmt::Display) is what reaches a toast, and renders
+/// within [`MAX_MESSAGE_CHARS`] however many paths the object backs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CorruptObject {
     pub build: u32,
@@ -166,12 +191,10 @@ pub struct CorruptObject {
     pub hash: String,
     /// What the bytes actually hashed to.
     pub actual: String,
-    /// Paths in the build that read through this object. Goes to the log in
-    /// full; [`Display`](std::fmt::Display) names at most [`NAMED_FILES`].
+    /// Every path in the build that reads through this object. Goes to the log
+    /// in full; [`Display`](std::fmt::Display) names at most [`NAMED_FILES`] of
+    /// them and counts the rest.
     pub files: Vec<String>,
-    /// How many paths reference the object, held separately so a caller that
-    /// trims `files` still reports the true count.
-    pub total_files: usize,
 }
 
 impl CorruptObject {
@@ -190,14 +213,30 @@ impl CorruptObject {
             version: entry.version.clone(),
             hash: hash.to_string(),
             actual: actual.to_string(),
-            total_files: files.len(),
             files,
         }
     }
 
     /// The full list of referencing paths, for the log.
     pub fn all_files(&self) -> String {
-        self.files.join(", ")
+        self.files.join(FILE_SEPARATOR)
+    }
+
+    /// The paths the message names, and how many it leaves out. Whole paths
+    /// only, within both the count cap and the character budget.
+    fn named_files(&self) -> (Vec<&str>, usize) {
+        let mut named: Vec<&str> = Vec::new();
+        let mut used = 0;
+        for file in self.files.iter().take(NAMED_FILES) {
+            let separator = if named.is_empty() { 0 } else { FILE_SEPARATOR.len() };
+            if used + separator + file.len() > NAMED_FILES_BUDGET {
+                break;
+            }
+            used += separator + file.len();
+            named.push(file.as_str());
+        }
+        let rest = self.files.len() - named.len();
+        (named, rest)
     }
 }
 
@@ -208,14 +247,13 @@ impl std::fmt::Display for CorruptObject {
             "build {} ({}) has a corrupt content object: {} hashed to {}. ",
             self.build, self.version, self.hash, self.actual
         )?;
-        if self.total_files == 0 {
-            write!(f, "No file in the build's metadata references it. ")?;
-        } else {
-            let named = self.files.iter().take(NAMED_FILES).cloned().collect::<Vec<_>>().join(", ");
-            match self.total_files.saturating_sub(NAMED_FILES) {
-                0 => write!(f, "It backs {named}. ")?,
-                rest => write!(f, "It backs {named} and {rest} more. ")?,
+        match self.named_files() {
+            (named, 0) if named.is_empty() => write!(f, "No file in the build's metadata references it. ")?,
+            (named, rest) if named.is_empty() => {
+                write!(f, "It backs {rest} file(s) whose paths are too long to name here. ")?
             }
+            (named, 0) => write!(f, "It backs {}. ", named.join(FILE_SEPARATOR))?,
+            (named, rest) => write!(f, "It backs {} and {rest} more. ", named.join(FILE_SEPARATOR))?,
         }
         write!(f, "Retrying will not help: the data is corrupt at rest, and the build needs re-publishing.")
     }
@@ -313,25 +351,79 @@ mod tests {
             hash: "a24a46f62dc08fd95fc7".into(),
             actual: "674dcbf6a9204c9fe942".into(),
             files: files.iter().map(|f| f.to_string()).collect(),
-            total_files: files.len(),
         }
     }
 
+    /// A path of exactly `len` characters, unique per `index` and shaped like a
+    /// real one. Paths in `15.6.0_12830008` measure 49 at the median, 71 at p90,
+    /// 88 at p99 and 101 at the longest.
+    fn path_of(len: usize, index: usize) -> String {
+        let prefix = "res/content/gameplay/common/spaces/";
+        let tail = format!("/{index:05}.dds");
+        let filler = len.saturating_sub(prefix.len() + tail.len());
+        format!("{prefix}{}{tail}", "s".repeat(filler))
+    }
+
+    /// The fixture is p99-realistic (88 characters), because a fixture of short
+    /// synthetic paths makes a length assertion certify nothing: 28-character
+    /// paths render at 304 characters where the real archive's render at 433.
     #[test]
     fn a_corrupt_object_message_names_the_build_and_caps_the_file_list() {
-        let files: Vec<String> = (0..9).map(|i| format!("res/spaces/s{i}/space.settings")).collect();
+        let files: Vec<String> = (0..9).map(|i| path_of(88, i)).collect();
         let err = corrupt(&files.iter().map(String::as_str).collect::<Vec<_>>());
 
         let rendered = err.to_string();
         assert_eq!(
             rendered,
-            "build 12506899 (15.4.0) has a corrupt content object: a24a46f62dc08fd95fc7 hashed to \
-             674dcbf6a9204c9fe942. It backs res/spaces/s0/space.settings, res/spaces/s1/space.settings, \
-             res/spaces/s2/space.settings and 6 more. Retrying will not help: the data is corrupt at rest, and \
-             the build needs re-publishing."
+            format!(
+                "build 12506899 (15.4.0) has a corrupt content object: a24a46f62dc08fd95fc7 hashed to \
+                 674dcbf6a9204c9fe942. It backs {} and 8 more. Retrying will not help: the data is corrupt at \
+                 rest, and the build needs re-publishing.",
+                files[0]
+            )
         );
-        assert!(!rendered.contains("res/spaces/s3/space.settings"), "capped at three: {rendered}");
-        assert!(rendered.len() < 400, "message must stay toast-sized, got {}", rendered.len());
+        assert!(!rendered.contains("00001.dds"), "a second path of this length does not fit: {rendered}");
+        assert!(rendered.len() <= MAX_MESSAGE_CHARS, "got {}", rendered.len());
+    }
+
+    /// The bound is on the rendered string, not on how many paths went into it.
+    /// Every combination of path length and count the real archive can produce,
+    /// plus lengths well past anything it holds, and the widest build number
+    /// and version the fields can carry.
+    #[test]
+    fn a_corrupt_object_message_stays_within_its_length_bound() {
+        let mut worst = String::new();
+        for path_len in [28, 49, 71, 88, 101, 250, 4_000] {
+            for count in [1, 2, 3, 4, 9, 4_074] {
+                let files: Vec<String> = (0..count).map(|i| path_of(path_len, i)).collect();
+                let err = CorruptObject {
+                    build: u32::MAX,
+                    version: "15.6.0-preview-build".into(),
+                    hash: "a24a46f62dc08fd95fc7".into(),
+                    actual: "674dcbf6a9204c9fe942".into(),
+                    files,
+                };
+
+                let rendered = err.to_string();
+                if rendered.len() > worst.len() {
+                    worst = rendered;
+                }
+            }
+        }
+
+        assert!(worst.len() <= MAX_MESSAGE_CHARS, "the longest rendered at {}: {worst}", worst.len());
+    }
+
+    /// A truncated path identifies nothing, so a path that does not fit is
+    /// dropped rather than cut, and the count still accounts for it.
+    #[test]
+    fn a_path_too_long_for_the_budget_is_dropped_whole_and_still_counted() {
+        let long = path_of(4_000, 0);
+        let err = corrupt(&[long.as_str(), "res/b.xml"]);
+
+        let rendered = err.to_string();
+        assert!(rendered.contains("It backs 2 file(s) whose paths are too long to name here."), "{rendered}");
+        assert!(!rendered.contains("res/content/gameplay"), "no partial path may appear: {rendered}");
     }
 
     /// An implementation that always appends the tail says "and 0 more".
@@ -377,7 +469,6 @@ mod tests {
         let err = CorruptObject::attribute(&entry, &metadata, "a24a46f62dc08fd95fc7", "674dcbf6a9204c9fe942");
 
         assert_eq!(err.files, vec!["res/a.xml", "res/b.xml", "GameParams.rkyv"]);
-        assert_eq!(err.total_files, 3);
         assert_eq!(err.build, 12506899);
         assert_eq!(err.version, "15.4.0");
     }

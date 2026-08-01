@@ -322,12 +322,20 @@ fn main() -> Result<(), Report> {
                     if r.metadata_unreadable {
                         println!("  FAIL {} - metadata.toml unreadable", r.dir);
                     } else {
+                        // Without --check-hashes nothing read the bytes, so
+                        // "0 corrupt" would assert an audit that never ran.
+                        // That is the reassurance 77 corrupt objects hid
+                        // behind for months.
+                        let corrupt = if *check_hashes {
+                            format!("{} corrupt", r.corrupt_objects.len())
+                        } else {
+                            "hashes not checked".to_string()
+                        };
                         println!(
-                            "  FAIL {} - {}/{} objects missing, {} corrupt, {} broken link(s)",
+                            "  FAIL {} - {}/{} objects missing, {corrupt}, {} broken link(s)",
                             r.dir,
                             r.missing_objects.len(),
                             r.referenced,
-                            r.corrupt_objects.len(),
                             r.broken_links.len()
                         );
                         for corrupt in r.corrupt_objects.iter().take(NAMED_CORRUPT_OBJECTS) {
