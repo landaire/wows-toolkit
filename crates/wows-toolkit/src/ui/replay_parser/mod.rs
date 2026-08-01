@@ -4865,265 +4865,269 @@ impl ToolkitTabViewer<'_> {
     pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
         self.tab_state.set_active_workspace(ws_id);
 
-        // These four resolve through the active workspace (just set above) or
-        // are workspace-independent outright -- never through ws_id's own
-        // workspace -- so they must run even when ws_id's workspace turns out
-        // to be closed below. A tab's context-menu "Close" runs synchronously
-        // during that leaf's tab-bar render, before this function's tab-body
-        // call for the same leaf in the same frame, so closing the only drawn
-        // replay tab can reach the early return right after; skipping these
-        // calls in that case would leave an open chat/timeline/controls window
-        // undrawn for the frame even though the (now-live) active workspace is
-        // perfectly able to feed them.
-        self.show_game_chat_window(ui.ctx());
-        self.show_timeline_window(ui.ctx());
-        self.pick_up_replay_controls_request(ui.ctx());
-        self.show_replay_controls_window(ui.ctx());
-
         // A tab can outlive its workspace (e.g. a stale split after the
         // workspace's owning tab was closed). Showing a placeholder here
         // instead of falling back to another workspace is the whole point of
-        // this method taking `ws_id` explicitly.
-        if self.tab_state.workspace_for_tab(ws_id).is_none() {
-            ui.centered_and_justified(|ui| {
-                ui.heading(t!("ui.replay.workspace_closed"));
-            });
-            return;
-        }
+        // this method taking `ws_id` explicitly. Both arms fall through to the
+        // same four floating-window calls at the end of this function instead
+        // of returning early, so a closed workspace never skips them.
+        if self.tab_state.workspace_for_tab(ws_id).is_some() {
+            self.refresh_row_summaries(ws_id);
+            // Nothing can close ws_id's workspace during this function's own
+            // execution: there is no reentrant call back into
+            // `build_replay_parser_tab` (or anything it calls) between the
+            // existence check above and this read. `unwrap_or(false)` is still
+            // the right shape here rather than `.expect(...)`: if that ever
+            // stopped holding, "nothing to scan" is the safe reading, not a panic.
+            let needs_reindex_scan = self
+                .tab_state
+                .workspace_mut(ws_id)
+                .map(|workspace| std::mem::take(&mut workspace.replay_rows_need_reindex_scan))
+                .unwrap_or(false);
+            if needs_reindex_scan {
+                self.queue_stale_rows_for_reindex(ws_id);
+            }
+            ui.vertical(|ui| {
+                self.build_replay_header(ui);
 
-        self.refresh_row_summaries(ws_id);
-        // Nothing can close ws_id's workspace during this function's own
-        // execution: there is no reentrant call back into
-        // `build_replay_parser_tab` (or anything it calls) between the
-        // existence check above and this read. `unwrap_or(false)` is still
-        // the right shape here rather than `.expect(...)`: if that ever
-        // stopped holding, "nothing to scan" is the safe reading, not a panic.
-        let needs_reindex_scan = self
-            .tab_state
-            .workspace_mut(ws_id)
-            .map(|workspace| std::mem::take(&mut workspace.replay_rows_need_reindex_scan))
-            .unwrap_or(false);
-        if needs_reindex_scan {
-            self.queue_stale_rows_for_reindex(ws_id);
-        }
-        ui.vertical(|ui| {
-            self.build_replay_header(ui);
-
-            {
-                let panel_id = workspace_salt(ws_id, "replay_listing_panel");
-                let collapsed_before = self.tab_state.persisted.read().settings.replay.listing_collapsed;
-                // `show_collapsible` tracks the expanded state, and flips it itself when the
-                // user drags or double-clicks the resize edge.
-                let mut expanded = !collapsed_before;
-
-                // Auto-size the panel to the widest label when files are first populated.
-                // Uses a flag on TabState (not egui temp data) to survive GC. Deferred while
-                // collapsed, so re-expanding does not clobber a width the user chose, and
-                // deferred until a summary load has completed, since measuring before the
-                // stats line exists would latch a width fitted to "not indexed".
-                // `ws_id`'s workspace existence was checked before this function reached
-                // `ui.vertical`. No reentrant call back into `build_replay_parser_tab` (or
-                // anything it calls) happens between that check and here, so every
-                // `workspace(ws_id)` / `workspace_mut(ws_id)` in this block is justified
-                // in assuming `Some`.
-                let has_files = self
-                    .tab_state
-                    .workspace(ws_id)
-                    .expect("ws_id checked present at function entry")
-                    .replay_files
-                    .as_ref()
-                    .is_some_and(|f| !f.is_empty());
-
-                let mut default_width = 250.0f32;
-
-                if has_files
-                    && expanded
-                    && !self
-                        .tab_state
-                        .workspace(ws_id)
-                        .expect("ws_id checked present at function entry")
-                        .replay_listing_auto_sized
-                    && self
-                        .tab_state
-                        .workspace(ws_id)
-                        .expect("ws_id checked present at function entry")
-                        .replay_row_summaries_loaded
-                    && let Some(metadata_provider) = self.metadata_provider()
                 {
-                    let grouping = self.tab_state.persisted.read().settings.replay.grouping;
-                    let locale = self.tab_state.persisted.read().settings.app.locale.clone();
-                    let font_id = egui::TextStyle::Body.resolve(ui.style());
-                    let max_width = self
+                    let panel_id = workspace_salt(ws_id, "replay_listing_panel");
+                    let collapsed_before = self.tab_state.persisted.read().settings.replay.listing_collapsed;
+                    // `show_collapsible` tracks the expanded state, and flips it itself when the
+                    // user drags or double-clicks the resize edge.
+                    let mut expanded = !collapsed_before;
+
+                    // Auto-size the panel to the widest label when files are first populated.
+                    // Uses a flag on TabState (not egui temp data) to survive GC. Deferred while
+                    // collapsed, so re-expanding does not clobber a width the user chose, and
+                    // deferred until a summary load has completed, since measuring before the
+                    // stats line exists would latch a width fitted to "not indexed".
+                    // `ws_id`'s workspace existence was checked before this function reached
+                    // `ui.vertical`. No reentrant call back into `build_replay_parser_tab` (or
+                    // anything it calls) happens between that check and here, so every
+                    // `workspace(ws_id)` / `workspace_mut(ws_id)` in this block is justified
+                    // in assuming `Some`.
+                    let has_files = self
                         .tab_state
                         .workspace(ws_id)
                         .expect("ws_id checked present at function entry")
                         .replay_files
                         .as_ref()
-                        .unwrap()
-                        .iter()
-                        .map(|(path, replay)| {
-                            let guard = replay.read();
-                            let identity = listing_row::replay_row_identity(&guard, &metadata_provider);
-                            let parsed = listing_row::replay_parsed_stats(&guard);
-                            drop(guard);
-                            let summary = self
-                                .tab_state
-                                .workspace(ws_id)
-                                .expect("ws_id checked present at function entry")
-                                .replay_row_summaries
-                                .get(path);
-                            let stats = listing_row::resolve_row_stats(parsed, summary);
-                            let identity_text = listing_row::identity_line(&identity, grouping);
-                            let stats_text = listing_row::stats_line(&identity, &stats, grouping, locale.as_deref());
-                            [identity_text, stats_text]
-                                .iter()
-                                .map(|line| {
-                                    ui.painter()
-                                        .layout_no_wrap(line.to_string(), font_id.clone(), ui.sem().text_strong)
-                                        .size()
-                                        .x
-                                })
-                                .fold(0.0f32, f32::max)
-                        })
-                        .fold(0.0f32, f32::max);
+                        .is_some_and(|f| !f.is_empty());
 
-                    // Allowance for tree indentation, the right margin, and the scrollbar.
-                    // Line 1 carries at most one trailing glyph (the division icon), and
-                    // the stats line's icons are already part of the measured text above,
-                    // so this no longer needs to budget for a second glyph.
-                    default_width = (max_width + 44.0).max(200.0);
+                    let mut default_width = 250.0f32;
 
-                    self.tab_state
-                        .workspace_mut(ws_id)
-                        .expect("ws_id checked present at function entry")
-                        .replay_listing_auto_sized = true;
-
-                    // Clear stored panel state so default_width takes effect
-                    ui.ctx().data_mut(|d| {
-                        d.remove::<egui::containers::panel::PanelState>(panel_id);
-                    });
-                }
-
-                egui::Panel::left(panel_id)
-                    .default_size(default_width)
-                    .size_range(REPLAY_LISTING_MIN_WIDTH..=f32::INFINITY)
-                    // Left margin is zero so labels sit flush; the right margin keeps them
-                    // clear of the resize divider.
-                    .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin {
-                        left: 0,
-                        right: 8,
-                        top: 2,
-                        bottom: 2,
-                    }))
-                    .show_collapsible(ui, &mut expanded, |ui| {
-                        // egui_ltreeview 0.8.0 draw_indent_hint clamps against an
-                        // un-normalized clip rect. `show_collapsible` slides the panel
-                        // off-screen rather than shrinking it, so the clip rect - not
-                        // the panel width - is what collapses and inverts mid-animation;
-                        // an inverted rect makes the clamp panic. Skip drawing the tree
-                        // until we're past it.
-                        let clip_width = ui.clip_rect().width();
-                        if clip_width < REPLAY_LISTING_MIN_WIDTH {
-                            return;
-                        }
-                        self.build_file_listing(ui, ws_id);
-                    });
-
-                egui::Panel::left(workspace_salt(ws_id, "replay_listing_rail"))
-                    .exact_size(20.0)
-                    .resizable(false)
-                    .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::same(0)))
-                    .show(ui, |ui| {
-                        let icon = if expanded { icons::CARET_LEFT } else { icons::CARET_RIGHT };
-                        let tooltip =
-                            if expanded { t!("ui.replay.collapse_listing") } else { t!("ui.replay.expand_listing") };
-
-                        // The listing panel's resize divider is registered on its own
-                        // right edge, i.e. exactly where this rail begins (the listing
-                        // is declared first). Cede that strip to the divider so a
-                        // full-rail click can't swallow the resize / drag-to-collapse
-                        // gesture.
-                        let mut rect = ui.max_rect();
-                        rect.min.x += ui.style().interaction.resize_grab_radius_side;
-
-                        let response = ui.interact(rect, ui.id().with("listing_rail_toggle"), egui::Sense::click());
-                        if response.hovered() {
-                            ui.painter().rect_filled(
-                                rect,
-                                ui.visuals().widgets.hovered.corner_radius,
-                                ui.visuals().widgets.hovered.weak_bg_fill,
-                            );
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                        }
-
-                        let fg_color = if response.hovered() {
-                            ui.visuals().widgets.hovered.fg_stroke.color
-                        } else {
-                            ui.visuals().widgets.inactive.fg_stroke.color
-                        };
-                        ui.painter().text(
-                            egui::pos2(rect.center().x, rect.top() + 14.0),
-                            egui::Align2::CENTER_CENTER,
-                            icon,
-                            egui::TextStyle::Button.resolve(ui.style()),
-                            fg_color,
-                        );
-
-                        if !expanded {
-                            paint_vertical_caption(ui, rect, 28.0, &t!("ui.replay.listing_caption"));
-                        }
-
-                        if response.on_hover_text(tooltip).clicked() {
-                            expanded = !expanded;
-                        }
-                    });
-
-                // `show_collapsible` may have flipped `expanded` itself via a resize drag or a
-                // double-click on the edge, so persist on any change, not just a caret click.
-                let collapsed_now = !expanded;
-                if collapsed_now != collapsed_before {
-                    self.tab_state.persisted.write().settings.replay.listing_collapsed = collapsed_now;
-                }
-            }
-
-            egui::CentralPanel::default().show(ui, |ui| {
-                let has_tabs = self
-                    .tab_state
-                    .workspace(ws_id)
-                    .expect("ws_id checked present at function entry")
-                    .replay_dock_state
-                    .iter_all_tabs()
-                    .next()
-                    .is_some();
-                if has_tabs {
-                    let mut dock_state = std::mem::replace(
-                        &mut self
+                    if has_files
+                        && expanded
+                        && !self
                             .tab_state
+                            .workspace(ws_id)
+                            .expect("ws_id checked present at function entry")
+                            .replay_listing_auto_sized
+                        && self
+                            .tab_state
+                            .workspace(ws_id)
+                            .expect("ws_id checked present at function entry")
+                            .replay_row_summaries_loaded
+                        && let Some(metadata_provider) = self.metadata_provider()
+                    {
+                        let grouping = self.tab_state.persisted.read().settings.replay.grouping;
+                        let locale = self.tab_state.persisted.read().settings.app.locale.clone();
+                        let font_id = egui::TextStyle::Body.resolve(ui.style());
+                        let max_width = self
+                            .tab_state
+                            .workspace(ws_id)
+                            .expect("ws_id checked present at function entry")
+                            .replay_files
+                            .as_ref()
+                            .unwrap()
+                            .iter()
+                            .map(|(path, replay)| {
+                                let guard = replay.read();
+                                let identity = listing_row::replay_row_identity(&guard, &metadata_provider);
+                                let parsed = listing_row::replay_parsed_stats(&guard);
+                                drop(guard);
+                                let summary = self
+                                    .tab_state
+                                    .workspace(ws_id)
+                                    .expect("ws_id checked present at function entry")
+                                    .replay_row_summaries
+                                    .get(path);
+                                let stats = listing_row::resolve_row_stats(parsed, summary);
+                                let identity_text = listing_row::identity_line(&identity, grouping);
+                                let stats_text =
+                                    listing_row::stats_line(&identity, &stats, grouping, locale.as_deref());
+                                [identity_text, stats_text]
+                                    .iter()
+                                    .map(|line| {
+                                        ui.painter()
+                                            .layout_no_wrap(line.to_string(), font_id.clone(), ui.sem().text_strong)
+                                            .size()
+                                            .x
+                                    })
+                                    .fold(0.0f32, f32::max)
+                            })
+                            .fold(0.0f32, f32::max);
+
+                        // Allowance for tree indentation, the right margin, and the scrollbar.
+                        // Line 1 carries at most one trailing glyph (the division icon), and
+                        // the stats line's icons are already part of the measured text above,
+                        // so this no longer needs to budget for a second glyph.
+                        default_width = (max_width + 44.0).max(200.0);
+
+                        self.tab_state
                             .workspace_mut(ws_id)
                             .expect("ws_id checked present at function entry")
-                            .replay_dock_state,
-                        egui_dock::DockState::new(vec![]),
-                    );
-                    let mut viewer = ReplayTabViewer { tab_state: self.tab_state, workspace: ws_id };
-                    egui_dock::DockArea::new(&mut dock_state)
-                        .id(workspace_salt(ws_id, "replay_parser_dock"))
-                        .style(egui_dock::Style::from_egui(ui.style().as_ref()))
-                        .show_close_buttons(true)
-                        .show_leaf_collapse_buttons(false)
-                        .show_leaf_close_all_buttons(false)
-                        .allowed_splits(egui_dock::AllowedSplits::All)
-                        .show_inside(ui, &mut viewer);
-                    self.tab_state
-                        .workspace_mut(ws_id)
-                        .expect("ws_id checked present at function entry")
-                        .replay_dock_state = dock_state;
-                } else {
-                    ui.centered_and_justified(|ui| {
-                        ui.heading(t!("ui.replay.no_selection"));
-                    });
+                            .replay_listing_auto_sized = true;
+
+                        // Clear stored panel state so default_width takes effect
+                        ui.ctx().data_mut(|d| {
+                            d.remove::<egui::containers::panel::PanelState>(panel_id);
+                        });
+                    }
+
+                    egui::Panel::left(panel_id)
+                        .default_size(default_width)
+                        .size_range(REPLAY_LISTING_MIN_WIDTH..=f32::INFINITY)
+                        // Left margin is zero so labels sit flush; the right margin keeps them
+                        // clear of the resize divider.
+                        .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin {
+                            left: 0,
+                            right: 8,
+                            top: 2,
+                            bottom: 2,
+                        }))
+                        .show_collapsible(ui, &mut expanded, |ui| {
+                            // egui_ltreeview 0.8.0 draw_indent_hint clamps against an
+                            // un-normalized clip rect. `show_collapsible` slides the panel
+                            // off-screen rather than shrinking it, so the clip rect - not
+                            // the panel width - is what collapses and inverts mid-animation;
+                            // an inverted rect makes the clamp panic. Skip drawing the tree
+                            // until we're past it.
+                            let clip_width = ui.clip_rect().width();
+                            if clip_width < REPLAY_LISTING_MIN_WIDTH {
+                                return;
+                            }
+                            self.build_file_listing(ui, ws_id);
+                        });
+
+                    egui::Panel::left(workspace_salt(ws_id, "replay_listing_rail"))
+                        .exact_size(20.0)
+                        .resizable(false)
+                        .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::same(0)))
+                        .show(ui, |ui| {
+                            let icon = if expanded { icons::CARET_LEFT } else { icons::CARET_RIGHT };
+                            let tooltip = if expanded {
+                                t!("ui.replay.collapse_listing")
+                            } else {
+                                t!("ui.replay.expand_listing")
+                            };
+
+                            // The listing panel's resize divider is registered on its own
+                            // right edge, i.e. exactly where this rail begins (the listing
+                            // is declared first). Cede that strip to the divider so a
+                            // full-rail click can't swallow the resize / drag-to-collapse
+                            // gesture.
+                            let mut rect = ui.max_rect();
+                            rect.min.x += ui.style().interaction.resize_grab_radius_side;
+
+                            let response = ui.interact(rect, ui.id().with("listing_rail_toggle"), egui::Sense::click());
+                            if response.hovered() {
+                                ui.painter().rect_filled(
+                                    rect,
+                                    ui.visuals().widgets.hovered.corner_radius,
+                                    ui.visuals().widgets.hovered.weak_bg_fill,
+                                );
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+
+                            let fg_color = if response.hovered() {
+                                ui.visuals().widgets.hovered.fg_stroke.color
+                            } else {
+                                ui.visuals().widgets.inactive.fg_stroke.color
+                            };
+                            ui.painter().text(
+                                egui::pos2(rect.center().x, rect.top() + 14.0),
+                                egui::Align2::CENTER_CENTER,
+                                icon,
+                                egui::TextStyle::Button.resolve(ui.style()),
+                                fg_color,
+                            );
+
+                            if !expanded {
+                                paint_vertical_caption(ui, rect, 28.0, &t!("ui.replay.listing_caption"));
+                            }
+
+                            if response.on_hover_text(tooltip).clicked() {
+                                expanded = !expanded;
+                            }
+                        });
+
+                    // `show_collapsible` may have flipped `expanded` itself via a resize drag or a
+                    // double-click on the edge, so persist on any change, not just a caret click.
+                    let collapsed_now = !expanded;
+                    if collapsed_now != collapsed_before {
+                        self.tab_state.persisted.write().settings.replay.listing_collapsed = collapsed_now;
+                    }
                 }
+
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let has_tabs = self
+                        .tab_state
+                        .workspace(ws_id)
+                        .expect("ws_id checked present at function entry")
+                        .replay_dock_state
+                        .iter_all_tabs()
+                        .next()
+                        .is_some();
+                    if has_tabs {
+                        let mut dock_state = std::mem::replace(
+                            &mut self
+                                .tab_state
+                                .workspace_mut(ws_id)
+                                .expect("ws_id checked present at function entry")
+                                .replay_dock_state,
+                            egui_dock::DockState::new(vec![]),
+                        );
+                        let mut viewer = ReplayTabViewer { tab_state: self.tab_state, workspace: ws_id };
+                        egui_dock::DockArea::new(&mut dock_state)
+                            .id(workspace_salt(ws_id, "replay_parser_dock"))
+                            .style(egui_dock::Style::from_egui(ui.style().as_ref()))
+                            .show_close_buttons(true)
+                            .show_leaf_collapse_buttons(false)
+                            .show_leaf_close_all_buttons(false)
+                            .allowed_splits(egui_dock::AllowedSplits::All)
+                            .show_inside(ui, &mut viewer);
+                        self.tab_state
+                            .workspace_mut(ws_id)
+                            .expect("ws_id checked present at function entry")
+                            .replay_dock_state = dock_state;
+                    } else {
+                        ui.centered_and_justified(|ui| {
+                            ui.heading(t!("ui.replay.no_selection"));
+                        });
+                    }
+                });
             });
-        });
+        } else {
+            ui.centered_and_justified(|ui| {
+                ui.heading(t!("ui.replay.workspace_closed"));
+            });
+        }
+
+        // These four resolve through the active workspace (set at the top of
+        // this function) or are workspace-independent outright, never through
+        // ws_id's own workspace, so both branches above reach them. Staying
+        // here, after the normal path's dock write-back
+        // (`replay_dock_state = dock_state` above), matters: `focused_replay()`
+        // reads `replay_dock_state.focused_leaf()`, so calling these before the
+        // write-back (as an earlier revision of this fix did) showed the
+        // previously focused replay sub-tab's chat/timeline for one frame after
+        // switching sub-tabs, catching up only on the next frame.
+        self.show_game_chat_window(ui.ctx());
+        self.show_timeline_window(ui.ctx());
+        self.pick_up_replay_controls_request(ui.ctx());
+        self.show_replay_controls_window(ui.ctx());
     }
 
     /// Reload the listing's index-sourced row data when the index has been
