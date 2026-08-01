@@ -23,3 +23,7 @@ docs/superpowers/
 .superpowers/
 
 dhat-heap.json
+
+# Profiler captures (samply writes profile.json.gz into the cwd)
+profile.json.gz
+*.json.gz
