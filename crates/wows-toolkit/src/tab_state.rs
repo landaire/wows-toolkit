@@ -1013,6 +1013,7 @@ impl TabState {
         if let Some(map) = self.wows_data_map.as_mut() {
             map.set_game_data_cache_dir(dir);
         }
+        crate::ui::replay_parser::clear_fire_section_failures();
     }
 
     /// Clears all game-related state. Called when the WoWs directory changes
@@ -1034,7 +1035,10 @@ impl TabState {
         self.replay_renderers.lock().clear();
         self.available_builds.clear();
         self.selected_browser_build = 0;
+        // Dropping the map drops which builds it could not resolve; the
+        // fire-section record lives outside it and is cleared on its own.
         self.wows_data_map = None;
+        crate::ui::replay_parser::clear_fire_section_failures();
     }
 
     /// Process replays selected for session stats update.

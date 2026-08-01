@@ -37,10 +37,12 @@ use wt_translations::keys;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::BufWriter;
 use std::io::Write;
 
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::Weak;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
@@ -508,6 +510,110 @@ enum FireSectionSourceError {
     Open(String),
     #[error("could not read assets.bin: {0}")]
     Read(#[from] std::io::Error),
+    #[error("could not parse assets.bin: {0}")]
+    Parse(String),
+}
+
+/// Where fire-section geometry comes from for one game build.
+///
+/// The whole batch of hulls is resolved in one call because opening the source
+/// means parsing a ~178 MB `assets.bin`, which is the cost worth paying once.
+trait FireSectionSource {
+    /// Geometry for the hulls in `wanted`, keyed by hull model path. A hull the
+    /// source has no geometry for is absent from the map; `Err` means the
+    /// source itself could not be read, which is true of builds shipping no
+    /// `assets.bin` at all.
+    fn resolve_all(
+        &self,
+        wanted: &[(&str, usize)],
+    ) -> Result<HashMap<String, wowsunpack::models::fire_nodes::FireSectionGeometry>, FireSectionSourceError>;
+}
+
+/// The real source: `content/assets.bin` out of a resolved build's game data.
+struct GameDataFireSections<'a> {
+    wows_data: &'a crate::data::wows_data::WorldOfWarshipsData,
+}
+
+impl FireSectionSource for GameDataFireSections<'_> {
+    fn resolve_all(
+        &self,
+        wanted: &[(&str, usize)],
+    ) -> Result<HashMap<String, wowsunpack::models::fire_nodes::FireSectionGeometry>, FireSectionSourceError> {
+        let bytes = open_assets_bin(self.wows_data)?;
+        let db = wowsunpack::models::assets_bin::parse_assets_bin(&bytes)
+            .map_err(|error| FireSectionSourceError::Parse(error.to_string()))?;
+        let self_id_index = db.build_self_id_index();
+        let mut resolved = HashMap::new();
+        for &(path, nodes) in wanted {
+            match wowsunpack::models::fire_nodes::resolve_fire_sections(&db, &self_id_index, path, nodes) {
+                Ok(geom) => {
+                    resolved.insert(path.to_string(), geom);
+                }
+                Err(error) => tracing::debug!(hull = path, %error, "fire-section geometry unresolved"),
+            }
+        }
+        Ok(resolved)
+    }
+}
+
+/// Fire-section lookups that came back empty for a reason that holds until the
+/// build's game data changes. The on-disk [`FireSectionCache`] stores what
+/// resolved; without this, what did not resolve is retried for every replay.
+///
+/// [`FireSectionCache`]: wowsunpack::models::fire_nodes_cache::FireSectionCache
+#[derive(Default)]
+struct FireSectionFailures {
+    /// Builds whose `assets.bin` could not be read or parsed. Builds older than
+    /// the file itself ship none at all.
+    no_source: HashSet<u32>,
+    /// Hulls a readable `assets.bin` held no geometry for, per build.
+    unresolvable_hulls: HashMap<u32, HashSet<String>>,
+}
+
+impl FireSectionFailures {
+    fn has_no_source(&self, build: u32) -> bool {
+        self.no_source.contains(&build)
+    }
+
+    fn note_no_source(&mut self, build: u32) {
+        self.no_source.insert(build);
+    }
+
+    fn hull_is_unresolvable(&self, build: u32, hull_model_path: &str) -> bool {
+        self.unresolvable_hulls.get(&build).is_some_and(|hulls| hulls.contains(hull_model_path))
+    }
+
+    fn note_unresolvable_hull(&mut self, build: u32, hull_model_path: &str) {
+        self.unresolvable_hulls.entry(build).or_default().insert(hull_model_path.to_string());
+    }
+
+    /// Downloading a build's data can supply the `assets.bin` that was missing,
+    /// so nothing recorded against it survives the download.
+    fn forget_build(&mut self, build: u32) {
+        self.no_source.remove(&build);
+        self.unresolvable_hulls.remove(&build);
+    }
+
+    fn clear(&mut self) {
+        self.no_source.clear();
+        self.unresolvable_hulls.clear();
+    }
+}
+
+/// Process-wide: these failures are facts about the game data on disk, not
+/// about any one replay or report.
+static FIRE_SECTION_FAILURES: LazyLock<RwLock<FireSectionFailures>> = LazyLock::new(RwLock::default);
+
+/// Let `build` be probed for fire-section geometry again, after its game data
+/// was downloaded.
+pub(crate) fn forget_fire_section_failures(build: u32) {
+    FIRE_SECTION_FAILURES.write().forget_build(build);
+}
+
+/// Let every build be probed for fire-section geometry again, after the game
+/// directory or the game data cache directory changed.
+pub(crate) fn clear_fire_section_failures() {
+    FIRE_SECTION_FAILURES.write().clear();
 }
 
 /// Read `content/assets.bin` from the resolved build's game data.
@@ -541,11 +647,29 @@ fn resolve_fire_section_geometry(
         expected_nodes.entry(victim.hull_model_path.as_str()).or_insert_with(|| victim.hull_section_count());
     }
 
+    resolve_fire_section_geometry_from(
+        &GameDataFireSections { wows_data },
+        &FIRE_SECTION_FAILURES,
+        cache_dir,
+        build_number,
+        &expected_nodes,
+    )
+}
+
+/// [`resolve_fire_section_geometry`] against a given source and failure record,
+/// with the hulls already reduced to one entry per hull model path.
+fn resolve_fire_section_geometry_from(
+    source: &dyn FireSectionSource,
+    failures: &RwLock<FireSectionFailures>,
+    cache_dir: Option<&std::path::Path>,
+    build_number: u32,
+    expected_nodes: &HashMap<&str, usize>,
+) -> HashMap<String, wowsunpack::models::fire_nodes::FireSectionGeometry> {
     let mut cache =
         cache_dir.map(|dir| wowsunpack::models::fire_nodes_cache::FireSectionCache::load(dir, build_number));
     let mut resolved = HashMap::new();
     let mut misses = Vec::new();
-    for (&path, &nodes) in &expected_nodes {
+    for (&path, &nodes) in expected_nodes {
         match cache.as_ref().and_then(|cache| cache.get(path, nodes)) {
             Some(geom) => {
                 resolved.insert(path.to_string(), geom);
@@ -554,40 +678,48 @@ fn resolve_fire_section_geometry(
         }
     }
 
-    if misses.is_empty() {
-        return resolved;
+    {
+        let failures = failures.read();
+        misses.retain(|(path, _)| !failures.hull_is_unresolvable(build_number, path));
+        if misses.is_empty() || failures.has_no_source(build_number) {
+            return resolved;
+        }
     }
 
-    match open_assets_bin(wows_data) {
-        Ok(bytes) => match wowsunpack::models::assets_bin::parse_assets_bin(&bytes) {
-            Ok(db) => {
-                let self_id_index = db.build_self_id_index();
-                for (path, nodes) in misses {
-                    match wowsunpack::models::fire_nodes::resolve_fire_sections(&db, &self_id_index, path, nodes) {
-                        Ok(geom) => {
-                            if let Some(cache) = cache.as_mut()
-                                && let Err(error) = cache.insert(path, nodes, &geom)
-                            {
-                                tracing::warn!(
-                                    hull = path,
-                                    %error,
-                                    "freshly resolved fire-section geometry disagreed with the cache"
-                                );
-                            }
-                            resolved.insert(path.to_string(), geom);
-                        }
-                        Err(error) => {
-                            tracing::debug!(hull = path, %error, "fire-section geometry unresolved");
-                        }
+    let mut stored = false;
+    match source.resolve_all(&misses) {
+        Ok(mut geometries) => {
+            for (path, nodes) in misses {
+                let Some(geom) = geometries.remove(path) else {
+                    failures.write().note_unresolvable_hull(build_number, path);
+                    continue;
+                };
+                if let Some(cache) = cache.as_mut() {
+                    match cache.insert(path, nodes, &geom) {
+                        Ok(()) => stored = true,
+                        Err(error) => tracing::warn!(
+                            hull = path,
+                            %error,
+                            "freshly resolved fire-section geometry disagreed with the cache"
+                        ),
                     }
                 }
+                resolved.insert(path.to_string(), geom);
             }
-            Err(error) => tracing::warn!(%error, "could not parse assets.bin for fire-section geometry"),
-        },
-        Err(error) => tracing::debug!(%error, "assets.bin unavailable for fire-section geometry"),
+        }
+        Err(error) => {
+            match error {
+                FireSectionSourceError::Parse(_) => {
+                    tracing::warn!(%error, "could not parse assets.bin for fire-section geometry")
+                }
+                _ => tracing::debug!(%error, "assets.bin unavailable for fire-section geometry"),
+            }
+            failures.write().note_no_source(build_number);
+        }
     }
 
-    if let (Some(cache), Some(dir)) = (&cache, cache_dir)
+    if stored
+        && let (Some(cache), Some(dir)) = (&cache, cache_dir)
         && let Err(error) = cache.save(dir)
     {
         tracing::warn!(%error, "could not save fire-section cache");
@@ -6999,6 +7131,163 @@ mod fire_chance_render_tests {
         let lines = fire_chance_formula_lines(&formula_fixture(Some(0.12), formula), &no_localization);
         assert_eq!(lines[1], "    base burnProb 12.0%");
         assert_eq!(lines[2], format!("  x {name}    1.00"));
+    }
+}
+
+#[cfg(test)]
+mod fire_section_failure_tests {
+    use std::cell::Cell;
+    use std::cell::RefCell;
+
+    use wowsunpack::game_params::types::Meters;
+    use wowsunpack::models::fire_nodes::FireSectionGeometry;
+
+    use super::FireSectionFailures;
+    use super::FireSectionSource;
+    use super::FireSectionSourceError;
+    use super::HashMap;
+    use super::RwLock;
+    use super::resolve_fire_section_geometry_from;
+
+    /// A stand-in for one build's `assets.bin` that records what was asked of
+    /// it. `hulls` is what it has geometry for; `None` is a build shipping no
+    /// `assets.bin` at all, which is the case that fills the user's log.
+    struct CountingSource {
+        hulls: Option<Vec<&'static str>>,
+        opens: Cell<u32>,
+        asked: RefCell<Vec<String>>,
+    }
+
+    impl CountingSource {
+        fn without_assets_bin() -> CountingSource {
+            CountingSource { hulls: None, opens: Cell::new(0), asked: RefCell::new(Vec::new()) }
+        }
+
+        fn with_hulls(hulls: &[&'static str]) -> CountingSource {
+            CountingSource { hulls: Some(hulls.to_vec()), opens: Cell::new(0), asked: RefCell::new(Vec::new()) }
+        }
+
+        fn opens(&self) -> u32 {
+            self.opens.get()
+        }
+
+        fn times_asked_for(&self, hull: &str) -> usize {
+            self.asked.borrow().iter().filter(|asked| *asked == hull).count()
+        }
+    }
+
+    impl FireSectionSource for CountingSource {
+        fn resolve_all(
+            &self,
+            wanted: &[(&str, usize)],
+        ) -> Result<HashMap<String, FireSectionGeometry>, FireSectionSourceError> {
+            self.opens.set(self.opens.get() + 1);
+            let Some(hulls) = &self.hulls else {
+                return Err(FireSectionSourceError::Open("no such file".to_string()));
+            };
+            let mut resolved = HashMap::new();
+            for &(path, nodes) in wanted {
+                self.asked.borrow_mut().push(path.to_string());
+                if hulls.contains(&path) {
+                    resolved.insert(path.to_string(), geometry(nodes));
+                }
+            }
+            Ok(resolved)
+        }
+    }
+
+    fn geometry(nodes: usize) -> FireSectionGeometry {
+        FireSectionGeometry::from_longitudinal((0..nodes).map(|i| Meters::from(-(i as f32))).collect())
+            .expect("a small node count is a valid geometry")
+    }
+
+    fn hulls(entries: &[(&'static str, usize)]) -> HashMap<&'static str, usize> {
+        entries.iter().copied().collect()
+    }
+
+    /// The on-disk cache only holds what resolved, so a build with no
+    /// `assets.bin` leaves every hull a miss and re-opens the file for every
+    /// replay unless the failure itself is remembered.
+    #[test]
+    fn a_build_without_assets_bin_is_only_probed_once() {
+        let source = CountingSource::without_assets_bin();
+        let failures = RwLock::new(FireSectionFailures::default());
+        let wanted = hulls(&[("iowa.model", 4)]);
+
+        assert!(resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted).is_empty());
+        assert!(resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted).is_empty());
+
+        assert_eq!(source.opens(), 1, "the second replay of this build must not re-open assets.bin");
+    }
+
+    /// One build's missing `assets.bin` says nothing about another build's.
+    /// A record that is not per build silently drops fire chance for every
+    /// build the user does have data for.
+    #[test]
+    fn a_build_with_assets_bin_is_still_probed() {
+        let missing = CountingSource::without_assets_bin();
+        let present = CountingSource::with_hulls(&["iowa.model"]);
+        let failures = RwLock::new(FireSectionFailures::default());
+        let wanted = hulls(&[("iowa.model", 4)]);
+
+        assert!(resolve_fire_section_geometry_from(&missing, &failures, None, 111, &wanted).is_empty());
+
+        let resolved = resolve_fire_section_geometry_from(&present, &failures, None, 222, &wanted);
+        assert!(resolved.contains_key("iowa.model"), "a build that has assets.bin still resolves");
+        assert_eq!(present.opens(), 1);
+    }
+
+    /// A hull a readable `assets.bin` has no geometry for is permanently
+    /// unresolvable for that build, and every replay featuring that ship would
+    /// otherwise walk the path store for it again.
+    #[test]
+    fn an_unresolvable_hull_is_not_retried_for_every_replay() {
+        let source = CountingSource::with_hulls(&["iowa.model"]);
+        let failures = RwLock::new(FireSectionFailures::default());
+        let wanted = hulls(&[("iowa.model", 4), ("ghost.model", 3)]);
+
+        let first = resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted);
+        assert!(first.contains_key("iowa.model"));
+        assert!(!first.contains_key("ghost.model"));
+
+        let second = resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted);
+        assert!(second.contains_key("iowa.model"), "the resolvable hull is still resolved");
+
+        assert_eq!(source.times_asked_for("ghost.model"), 1, "the unresolvable hull is asked for once");
+        assert_eq!(source.times_asked_for("iowa.model"), 2, "the resolvable hull is not swept up in the record");
+    }
+
+    /// The app tells the user to download the build's data and then downloads
+    /// it. A record surviving that leaves fire chance permanently off for a
+    /// build whose `assets.bin` is now on disk.
+    #[test]
+    fn downloading_a_builds_data_lets_it_be_probed_again() {
+        let source = CountingSource::without_assets_bin();
+        let failures = RwLock::new(FireSectionFailures::default());
+        let wanted = hulls(&[("iowa.model", 4)]);
+
+        assert!(resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted).is_empty());
+        assert_eq!(source.opens(), 1);
+
+        failures.write().forget_build(111);
+
+        assert!(resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted).is_empty());
+        assert_eq!(source.opens(), 2, "the download must buy the build a second probe");
+    }
+
+    /// Pointing the app at different game data invalidates every record, hull
+    /// records included.
+    #[test]
+    fn clearing_the_record_lets_an_unresolvable_hull_be_probed_again() {
+        let source = CountingSource::with_hulls(&[]);
+        let failures = RwLock::new(FireSectionFailures::default());
+        let wanted = hulls(&[("ghost.model", 3)]);
+
+        resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted);
+        failures.write().clear();
+        resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted);
+
+        assert_eq!(source.times_asked_for("ghost.model"), 2);
     }
 }
 

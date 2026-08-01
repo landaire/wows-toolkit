@@ -1537,6 +1537,8 @@ impl WowsToolkitApp {
                         map.forget_unresolvable_build(build);
                         map.forget_unresolvable_build(requested_build);
                     }
+                    crate::ui::replay_parser::forget_fire_section_failures(build);
+                    crate::ui::replay_parser::forget_fire_section_failures(requested_build);
 
                     // Reopen the replay that triggered the download, now that its
                     // data is available.
