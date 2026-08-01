@@ -493,6 +493,28 @@ pub fn game_data_dump_base_with_override(custom_dir: &str) -> Option<PathBuf> {
 
 /// Load game data from a previously dumped directory.
 /// Used as a fallback when the live game install no longer has the build.
+/// Cache a re-parsed provider's params into the build's override directory, so
+/// the next load of this dump skips the parse.
+///
+/// Parsing GameParams from a dump's VFS costs seconds; decoding the cache costs
+/// tens of milliseconds. Best-effort: a failure to write only means the next
+/// load pays the parse again.
+fn write_params_override(
+    cas: &wows_data_mgr::cas_vfs::BuildCas,
+    provider: &wowsunpack::game_params::provider::GameMetadataProvider,
+) {
+    use wowsunpack::game_params::types::GameParamProvider;
+
+    let Some(path) = cas.derived_write_path("game_params.rkyv") else {
+        return;
+    };
+    let params: Vec<_> = provider.params().iter().map(|param| Arc::unwrap_or_clone(Arc::clone(param))).collect();
+    match wowsunpack::game_params::cache::save(&path, &params) {
+        Ok(()) => debug!("wrote GameParams override to {}", path.display()),
+        Err(e) => warn!("failed to write GameParams override to {}: {e}", path.display()),
+    }
+}
+
 pub fn load_wows_data_from_dump(
     dump_dir: &Path,
     build: u32,
@@ -504,8 +526,30 @@ pub fn load_wows_data_from_dump(
 
     debug!("Loading game data from dump: {}", dump_dir.display());
 
-    let cas = wows_data_mgr::cas_vfs::BuildCas::open(dump_dir)
+    let mut cas = wows_data_mgr::cas_vfs::BuildCas::open(dump_dir)
         .ok_or_else(|| report!("metadata.toml not found in dump: {}", dump_dir.display()))?;
+
+    // Build numbers are per-server: the China client ships a different one for
+    // the same major.minor.patch, so resolution keys on the friendly version and
+    // a near-neighbour dump is expected to serve. Record which dump actually
+    // answered, since it is otherwise invisible when reading logs.
+    let dump_build = cas.metadata().build;
+    if dump_build != build {
+        tracing::info!(
+            requested_build = build,
+            dump_build,
+            version = %cas.metadata().version,
+            "serving build from a different dump of the same version"
+        );
+    }
+
+    // Key the override directory on the dump's own build rather than its
+    // version: a version does not identify a dump (18 of the 109 versions in
+    // the reference archive have more than one build), so a version-keyed cache
+    // would let one server's params answer for another's.
+    if let Some(root) = crate::util::game_params::build_override_root(dump_build) {
+        cas.set_override_root(root);
+    }
     let vfs = cas.vfs();
 
     // Recover the semantic version from the dump's metadata so version-aware
@@ -553,8 +597,10 @@ pub fn load_wows_data_from_dump(
         }
         None => {
             debug!("Falling back to GameParams.data in dump VFS (rkyv missing or stale)");
-            GameMetadataProvider::from_vfs(&vfs)
-                .map_err(|e| report!("Failed to load GameParams from dump VFS: {e:?}"))?
+            let provider = GameMetadataProvider::from_vfs(&vfs)
+                .map_err(|e| report!("Failed to load GameParams from dump VFS: {e:?}"))?;
+            write_params_override(&cas, &provider);
+            provider
         }
     };
     if let Some(catalog) = found_catalog {

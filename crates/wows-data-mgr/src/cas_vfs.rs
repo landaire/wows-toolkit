@@ -50,6 +50,7 @@ pub struct BuildCas {
     cas_root: PathBuf,
     dump_dir: PathBuf,
     metadata: BuildMetadata,
+    override_root: Option<PathBuf>,
 }
 
 impl BuildCas {
@@ -59,7 +60,25 @@ impl BuildCas {
     pub fn open(dump_dir: &Path) -> Option<Self> {
         let metadata = BuildMetadata::load(&dump_dir.join("metadata.toml"))?;
         let dump_base = dump_dir.parent()?;
-        Some(Self { cas_root: cas::cas_root(dump_base), dump_dir: dump_dir.to_path_buf(), metadata })
+        Some(Self {
+            cas_root: cas::cas_root(dump_base),
+            dump_dir: dump_dir.to_path_buf(),
+            metadata,
+            override_root: None,
+        })
+    }
+
+    /// Point this build at a writable directory whose contents shadow the
+    /// dump's derived artifacts.
+    ///
+    /// A dump is content-addressed and may be shared (the `wows-replay-data`
+    /// archive), so regenerating an artifact in place would change its hash and
+    /// make the dump diverge from the published one. An override directory is
+    /// local, and lets a derived artifact that no longer loads (a game-params
+    /// cache written before the current [`wowsunpack::game_params::cache`]
+    /// format version, say) be rebuilt once and reused, leaving the dump alone.
+    pub fn set_override_root(&mut self, root: PathBuf) {
+        self.override_root = Some(root);
     }
 
     /// The build's parsed metadata.
@@ -83,12 +102,28 @@ impl BuildCas {
     /// `translations/.../global.mo`). CAS-format builds resolve it to a CAS
     /// object (a real file usable for mmap); legacy builds resolve it to the
     /// build-dir path when that file exists. `None` when not available.
+    /// An override, when one has been written, shadows the dump's own copy.
     pub fn derived_path(&self, rel: &str) -> Option<PathBuf> {
+        if let Some(root) = &self.override_root {
+            let path = root.join(rel);
+            if path.exists() {
+                return Some(path);
+            }
+        }
         if let Some(hash) = self.metadata.derived.get(rel) {
             return Some(cas::cas_path(&self.cas_root, hash));
         }
         let path = self.dump_dir.join(rel);
         path.exists().then_some(path)
+    }
+
+    /// Where to write an override for `rel`, creating its parent directory.
+    /// `None` when no override root is set or the directory cannot be created,
+    /// in which case the caller simply does not cache.
+    pub fn derived_write_path(&self, rel: &str) -> Option<PathBuf> {
+        let path = self.override_root.as_ref()?.join(rel);
+        std::fs::create_dir_all(path.parent()?).ok()?;
+        Some(path)
     }
 
     /// Remove the redundant materialized tree a symlink-era download left behind:

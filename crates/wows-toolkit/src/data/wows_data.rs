@@ -451,11 +451,17 @@ impl WoWsDataMap {
         if let Some(dump_base) = crate::task::replays::game_data_dump_base_with_override(&self.game_data_cache_dir) {
             let index = wows_data_mgr::builds::BuildsIndex::load(&dump_base.join("builds.toml"));
 
-            // Construct version string for cross-region fallback
-            let version_hint = self
-                .loaded_builds()
-                .first()
-                .and_then(|d| d.read().full_version.as_ref().map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch)));
+            // Friendly version for the cross-region fallback. Build numbers are
+            // per-server (the China client ships a different one for the same
+            // major.minor.patch), so the version is what identifies the data a
+            // replay needs. Prefer the caller's, which is the replay's own; a
+            // loaded build's version is only a guess about an unrelated replay,
+            // and stands in solely when the caller had none.
+            let version_hint = version.map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch)).or_else(|| {
+                self.loaded_builds().first().and_then(|d| {
+                    d.read().full_version.as_ref().map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch))
+                })
+            });
 
             if let Some((entry, exact)) = index.resolve_build(build, version_hint.as_deref()) {
                 if !exact {

@@ -28,6 +28,16 @@ pub fn game_params_bin_path(build: u32) -> PathBuf {
     if let Some(storage_dir) = crate::storage_dir() { storage_dir.join(filename) } else { PathBuf::from(filename) }
 }
 
+/// Local directory whose contents shadow a dumped build's derived artifacts.
+///
+/// Deliberately not the `game_params_{build}.bin` namespace next to it:
+/// [`cleanup_stale_caches`] deletes those for any build absent from the live
+/// install, and a dumped build never appears there, so a cache written for one
+/// would be removed on the next start.
+pub fn build_override_root(build: u32) -> Option<PathBuf> {
+    Some(crate::storage_dir()?.join("build_overrides").join(build.to_string()))
+}
+
 /// Remove ALL versioned game_params cache files (for schema changes).
 #[instrument]
 pub fn clear_all_game_params_caches() {

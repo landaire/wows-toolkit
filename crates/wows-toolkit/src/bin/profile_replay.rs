@@ -17,6 +17,16 @@ static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 fn main() {
     use std::path::PathBuf;
 
+    // Data resolution reports which dump answered for a build through tracing,
+    // which is worth seeing when a run is slower or emptier than expected.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .with_writer(std::io::stderr)
+        .init();
+
     let wows_dir = std::env::var("WOWS_DIR").unwrap_or_else(|_| r"E:\WoWs\World_of_Warships".to_string());
     let dump_dir = std::env::var("WOWS_BUILDS_DIR").unwrap_or_else(|_| r"G:\wows_builds".to_string());
 
