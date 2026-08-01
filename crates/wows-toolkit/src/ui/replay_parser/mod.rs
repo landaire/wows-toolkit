@@ -5117,13 +5117,12 @@ impl ToolkitTabViewer<'_> {
 
         // These four resolve through the active workspace (set at the top of
         // this function) or are workspace-independent outright, never through
-        // ws_id's own workspace, so both branches above reach them. Staying
-        // here, after the normal path's dock write-back
-        // (`replay_dock_state = dock_state` above), matters: `focused_replay()`
-        // reads `replay_dock_state.focused_leaf()`, so calling these before the
-        // write-back (as an earlier revision of this fix did) showed the
-        // previously focused replay sub-tab's chat/timeline for one frame after
-        // switching sub-tabs, catching up only on the next frame.
+        // ws_id's own workspace, so both branches above reach them. They must
+        // stay after the normal path's dock write-back
+        // (`replay_dock_state = dock_state` above): `focused_replay()` reads
+        // `replay_dock_state.focused_leaf()`, so running them any earlier
+        // renders the previously focused sub-tab's chat and timeline for a
+        // frame after every sub-tab switch.
         self.show_game_chat_window(ui.ctx());
         self.show_timeline_window(ui.ctx());
         self.pick_up_replay_controls_request(ui.ctx());
