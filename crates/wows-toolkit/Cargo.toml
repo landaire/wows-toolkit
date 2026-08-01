@@ -107,6 +107,7 @@ ron = "0.12.1"
 egui_inbox = "0.12.0"
 memmap2 = "0.9"
 walkdir = { workspace = true }
+mimalloc = { version = "0.1.52", optional = true }
 
 [dev-dependencies]
 insta = { workspace = true }
@@ -133,8 +134,15 @@ mod_manager = ["dep:tar", "dep:scopeguard"]
 logging = ["dep:tracing-subscriber", "dep:tracing-appender"]
 panic_handler = []
 dhat-heap = ["dep:dhat"]
+# Stage-timing binaries (`profile_replay`). Kept off by default so release
+# builds don't carry the instrumentation module.
+profile-bins = []
 # Opt in to rav1e's hand-tuned x86 SIMD for AV1 (~3x faster encode). Requires
 # NASM at build time, so it's off by default to keep local builds NASM-free;
 # the release CI enables it. Plain (non-asm) AV1 is always available via the
 # `cpu-av1` feature wired on the dependency above.
 av1-asm = ["wows_minimap_renderer/cpu-av1-asm"]
+# A/B test the global allocator in `profile_replay`. The Windows process heap
+# shows up heavily in profiles of the replay load; this measures what a
+# different allocator is worth before committing the app to one.
+mimalloc = ["dep:mimalloc"]

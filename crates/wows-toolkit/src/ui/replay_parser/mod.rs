@@ -814,7 +814,7 @@ impl UiReport {
         // Captured before locking the replay's build below (sequential, avoids a
         // re-entrant read on the same data). Used to borrow class icons when the
         // replay's own (pre-12.0) build shipped none.
-        let fallback_ship_icons = deps.wows_data_map.newest_ship_icons();
+        let fallback_ship_icons = crate::timed_stage!("newest_ship_icons", deps.wows_data_map.newest_ship_icons());
 
         let wows_data_inner = wows_data.read();
         let metadata_provider = wows_data_inner.game_metadata.as_ref().expect("no game metadata?");
@@ -829,12 +829,18 @@ impl UiReport {
         // Computed once for the recording player and attached only to that
         // player's report below: `analyze` already refuses any other attacker,
         // so per-player computation would be wasted work.
-        let self_fire_chance = compute_fire_chance(report, metadata_provider, &wows_data_inner, deps);
+        let self_fire_chance = crate::timed_stage!(
+            "compute_fire_chance",
+            compute_fire_chance(report, metadata_provider, &wows_data_inner, deps)
+        );
 
-        let resolved_results: Option<serde_json::Value> = report
-            .battle_results()
-            .and_then(|s| serde_json::from_str(s).ok())
-            .map(|raw| resolve_battle_results(raw, &constants_inner));
+        let resolved_results: Option<serde_json::Value> = crate::timed_stage!(
+            "resolve_battle_results",
+            report
+                .battle_results()
+                .and_then(|s| serde_json::from_str(s).ok())
+                .map(|raw| resolve_battle_results(raw, &constants_inner))
+        );
 
         let battle_result = resolved_results.as_ref().and_then(|results| {
             let self_team_id = self_player.as_ref().map(|player| player.initial_state().team_id())?;
@@ -853,11 +859,14 @@ impl UiReport {
 
         // Single source of truth for per-player numbers: the egui-free normalized
         // report. PlayerReport below is presentation rebuilt over these values.
-        let normalized = wows_replay_insights::battle_report::NormalizedBattleReport::from_battle_report(
-            report,
-            &replay_file.meta,
-            metadata_provider,
-            &constants_inner,
+        let normalized = crate::timed_stage!(
+            "normalized_report",
+            wows_replay_insights::battle_report::NormalizedBattleReport::from_battle_report(
+                report,
+                &replay_file.meta,
+                metadata_provider,
+                &constants_inner,
+            )
         );
 
         let self_normalized = normalized.players.iter().find(|np| np.is_self);
@@ -867,7 +876,7 @@ impl UiReport {
         // normalized.players is built positionally from report.players() (plain
         // .map(), no filter/reorder), so zip it against `players` instead of
         // joining on db_id, which is not unique (bots are all AccountId(0)).
-        let player_reports: Vec<PlayerReport> = players
+        let player_reports: Vec<PlayerReport> = crate::timed_stage!("player_reports", players
             .iter()
             .zip(normalized.players.iter())
             .map(|(player, np)| {
@@ -1181,7 +1190,7 @@ impl UiReport {
                     fire_chance: np.is_self.then(|| self_fire_chance.clone()).flatten(),
                 }
             })
-            .collect();
+            .collect());
 
         drop(constants_inner);
         drop(wows_data_inner);
@@ -1223,8 +1232,11 @@ impl UiReport {
             debug_mode: deps.is_debug_mode,
             merge_active,
             resolved_results,
-            fallback_ribbon_icons: deps.wows_data_map.newest_ribbon_icons(),
-            fallback_subribbon_icons: deps.wows_data_map.newest_subribbon_icons(),
+            fallback_ribbon_icons: crate::timed_stage!("newest_ribbon_icons", deps.wows_data_map.newest_ribbon_icons()),
+            fallback_subribbon_icons: crate::timed_stage!(
+                "newest_subribbon_icons",
+                deps.wows_data_map.newest_subribbon_icons()
+            ),
             icon_textures: Mutex::new(HashMap::new()),
         }
     }

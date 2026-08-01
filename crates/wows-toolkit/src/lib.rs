@@ -10,6 +10,30 @@ pub mod data;
 pub(crate) mod db;
 #[cfg(feature = "mod_manager")]
 mod mod_manager;
+#[cfg(feature = "profile-bins")]
+pub mod profiling;
+
+/// Accumulate the wall time of an expression against a named sub-stage, for
+/// the `profile_replay` binary. Compiles to the bare expression without the
+/// `profile-bins` feature.
+#[cfg(feature = "profile-bins")]
+macro_rules! timed_stage {
+    ($name:expr, $e:expr) => {{
+        let start = std::time::Instant::now();
+        let value = $e;
+        $crate::profiling::record($name, start.elapsed());
+        value
+    }};
+}
+
+#[cfg(not(feature = "profile-bins"))]
+macro_rules! timed_stage {
+    ($name:expr, $e:expr) => {
+        $e
+    };
+}
+
+pub(crate) use timed_stage;
 pub(crate) mod replay;
 mod tab_state;
 mod task;

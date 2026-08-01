@@ -28,7 +28,13 @@ default = []
 vfs = ["wows_replays/vfs"]
 
 [dev-dependencies]
+criterion = { workspace = true }
 insta = { workspace = true }
 serde = { workspace = true }
 wowsunpack = { workspace = true, features = ["arc", "vfs"] }
 wows-data-mgr = { workspace = true }
+
+[[bench]]
+name = "replay_pipeline"
+harness = false
+required-features = ["vfs"]
