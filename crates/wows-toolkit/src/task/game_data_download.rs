@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 
 use rootcause::Report;
@@ -9,21 +11,34 @@ use super::BackgroundTaskCompletion;
 use super::BackgroundTaskKind;
 use super::DownloadProgress;
 
+/// What the toolkit should redo once a game data download has been tried.
+///
+/// A download carries at most one of these, so it cannot be waiting to reopen a
+/// replay and to walk a directory at the same time.
+#[derive(Clone)]
+pub enum GameDataFollowUp {
+    /// One replay was opened directly; reopen it.
+    Replay(PathBuf),
+    /// A directory listing was short of the replays this build covers; walk it
+    /// again.
+    Directory(crate::db::index::rows::WorkspaceId),
+}
+
 /// Download game data for `target_build` from the wows-replay-data repository
 /// into `output_base`. `version_hint` (the replay's `major.minor.patch` string)
 /// allows falling back to a different build of the same version when no exact
 /// match is published. When `force` is true an existing copy is rebuilt to pick
 /// up newer remote data.
 ///
-/// `reingest` names the directory workspace whose walk asked for this build, so
-/// the walk can be repeated once the data is there. `None` for downloads that
-/// no listing is waiting on.
+/// `follow_up` rides on the task rather than on the app so the thing to redo is
+/// released with the download that asked for it, whatever the download's
+/// outcome. `None` for downloads nothing is waiting on.
 pub fn start_game_data_download_task(
     output_base: PathBuf,
     target_build: u32,
     version_hint: Option<String>,
     force: bool,
-    reingest: Option<crate::db::index::rows::WorkspaceId>,
+    follow_up: Option<GameDataFollowUp>,
 ) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
     let (progress_tx, progress_rx) = mpsc::channel();
@@ -34,22 +49,43 @@ pub fn start_game_data_download_task(
 
     BackgroundTask {
         receiver: Some(rx),
-        kind: BackgroundTaskKind::DownloadingGameData { rx: progress_rx, last_progress: None, reingest },
+        kind: BackgroundTaskKind::DownloadingGameData { rx: progress_rx, last_progress: None, follow_up },
+    }
+}
+
+/// Identifies one run of the planner. Both a delivered plan and the reaping of
+/// the task that produced it are matched back to the request through this, so
+/// two offers over the same builds are told apart where comparing the builds
+/// they asked about cannot.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PlanTicket(u64);
+
+impl PlanTicket {
+    /// Hand out the next ticket. Monotonic for the life of the process.
+    pub fn next() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        Self(NEXT.fetch_add(1, Ordering::Relaxed))
     }
 }
 
 /// Resolve `builds` against the remote repository and count the CAS objects the
 /// whole selection would have to fetch. Runs off the UI thread: it makes one
 /// index request plus one metadata request per distinct resolved build.
-pub fn start_game_data_plan_task(output_base: PathBuf, builds: Vec<(u32, Option<String>)>) -> BackgroundTask {
+///
+/// `ticket` is the caller's handle on this run; it comes back on both the task
+/// kind and the completion.
+pub fn start_game_data_plan_task(
+    output_base: PathBuf,
+    builds: Vec<(u32, Option<String>)>,
+    ticket: PlanTicket,
+) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
-    let selection = builds.iter().map(|(build, _)| *build).collect();
 
     crate::util::thread::spawn_logged("plan-game-data-download", move || {
-        let _ = tx.send(plan(output_base, builds));
+        let _ = tx.send(plan(output_base, builds, ticket));
     });
 
-    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::PlanningGameDataDownload { selection } }
+    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::PlanningGameDataDownload { ticket } }
 }
 
 /// Check the repository for updates to builds already cached in `output_base`.
@@ -114,7 +150,11 @@ fn download(
     Ok(BackgroundTaskCompletion::GameDataDownloaded { requested_build: target_build, build })
 }
 
-fn plan(output_base: PathBuf, builds: Vec<(u32, Option<String>)>) -> Result<BackgroundTaskCompletion, Report> {
+fn plan(
+    output_base: PathBuf,
+    builds: Vec<(u32, Option<String>)>,
+    ticket: PlanTicket,
+) -> Result<BackgroundTaskCompletion, Report> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -129,7 +169,7 @@ fn plan(output_base: PathBuf, builds: Vec<(u32, Option<String>)>) -> Result<Back
         &builds,
     ))?;
 
-    Ok(BackgroundTaskCompletion::GameDataDownloadPlanned { plan })
+    Ok(BackgroundTaskCompletion::GameDataDownloadPlanned { ticket, plan })
 }
 
 fn check_for_updates(output_base: PathBuf, known_tip: Option<String>) -> Result<BackgroundTaskCompletion, Report> {

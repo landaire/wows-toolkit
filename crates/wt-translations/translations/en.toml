@@ -95,6 +95,7 @@ download_availability_unreachable = "published, but its file list could not be r
 download_plan_pending = "Working out what needs fetching..."
 download_objects_to_fetch = "Objects to fetch for the ticked builds: %{count}"
 download_plan_failed = "Could not work out what needs fetching"
+download_plan_no_cache_dir = "No game data cache directory is set. Choose one in Settings, then try again."
 
 # -- Labels --
 

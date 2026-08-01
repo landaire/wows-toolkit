@@ -42,6 +42,8 @@ pub enum ReplaySource {
 }
 
 // Re-export everything so `use crate::task::*` still works
+pub use game_data_download::GameDataFollowUp;
+pub use game_data_download::PlanTicket;
 pub use game_data_download::start_game_data_download_task;
 pub use game_data_download::start_game_data_plan_task;
 pub use game_data_download::start_game_data_update_check_task;
@@ -132,16 +134,15 @@ pub enum BackgroundTaskKind {
     DownloadingGameData {
         rx: mpsc::Receiver<DownloadProgress>,
         last_progress: Option<DownloadProgress>,
-        /// The directory workspace waiting on this build, to be walked again
-        /// once the data lands. `None` for downloads nothing is waiting on.
-        reingest: Option<crate::db::index::rows::WorkspaceId>,
+        /// What is waiting on this build: a replay to reopen or a directory to
+        /// walk again. `None` for downloads nothing is waiting on.
+        follow_up: Option<GameDataFollowUp>,
     },
     /// Resolving a selection of builds against the remote repository to report
     /// what each one's availability is and how much the selection would fetch.
-    /// `selection` is the set of builds asked about, which identifies the task
-    /// against the offer that started it.
+    /// `ticket` identifies this run against the offer that started it.
     PlanningGameDataDownload {
-        selection: std::collections::BTreeSet<u32>,
+        ticket: PlanTicket,
     },
     CheckingGameDataUpdates,
     ValidatingGameData {
@@ -418,6 +419,9 @@ pub enum BackgroundTaskCompletion {
     /// requested build's availability is reported alongside the deduplicated
     /// count of CAS objects the whole selection would fetch.
     GameDataDownloadPlanned {
+        /// The planner run this answers, so an offer only ever applies the plan
+        /// it asked for.
+        ticket: PlanTicket,
         plan: wows_data_mgr::download_repo::DownloadPlan,
     },
     GameDataUpdatesChecked {
@@ -491,8 +495,9 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .field("requested_build", requested_build)
                 .field("build", build)
                 .finish(),
-            Self::GameDataDownloadPlanned { plan } => f
+            Self::GameDataDownloadPlanned { ticket, plan } => f
                 .debug_struct("GameDataDownloadPlanned")
+                .field("ticket", ticket)
                 .field("unique_missing_objects", &plan.unique_missing_objects)
                 .field("resolved", &plan.resolved.len())
                 .finish(),
