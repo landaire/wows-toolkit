@@ -3007,9 +3007,18 @@ mod tests {
 
     /// A stage that has not started reads as zero, not as finished. A total of
     /// zero would otherwise divide into a full bar.
+    ///
+    /// `Downloading` is set the moment the task is spawned, before planning has
+    /// found a single object to fetch, so a zero total is what it reports for
+    /// as long as that takes.
     #[test]
     fn an_empty_stage_reads_as_zero_not_complete() {
+        assert_eq!(IngestStage::Scanning(IngestProgress { done: 0, total: 0 }).fraction(), Some(0.0));
         assert_eq!(IngestStage::Reading(IngestProgress { done: 0, total: 0 }).fraction(), Some(0.0));
+        assert_eq!(
+            IngestStage::Downloading(crate::task::DownloadProgress { downloaded: 0, total: 0 }).fraction(),
+            Some(0.0)
+        );
     }
 
     fn test_request() -> crate::task::BuildRequest {

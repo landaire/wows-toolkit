@@ -1220,10 +1220,7 @@ impl WowsToolkitApp {
             // download above its listing: the listing is short until it lands,
             // and the status bar does not say which directory is short.
             for (workspace, progress) in directories_downloading {
-                if let Some(target) = self.tab_state.workspace_mut(workspace) {
-                    target.ingest_in_flight = true;
-                    target.ingest_stage = Some(crate::task::replays::IngestStage::Downloading(progress));
-                }
+                self.mark_directory_downloading(workspace, progress);
             }
             let mut shown_download_progress = false;
 
@@ -3335,6 +3332,7 @@ impl WowsToolkitApp {
             let workspace = *workspace;
             self.directory_reingest
                 .insert(workspace, DirectoryReingest::AwaitingDownload { offered: prompt.offered_builds() });
+            self.mark_directory_downloading(workspace, task::DownloadProgress { downloaded: 0, total: 0 });
         }
 
         update_background_task!(
@@ -3348,6 +3346,19 @@ impl WowsToolkitApp {
             ))
         );
         true
+    }
+
+    /// Report a download above `workspace`'s listing.
+    ///
+    /// Called when the download task is spawned as well as on every progress
+    /// message it sends: the first message arrives only after planning and a
+    /// metadata fetch per build, and a listing reporting no stage across that
+    /// window draws as a finished, empty directory.
+    fn mark_directory_downloading(&mut self, workspace: WorkspaceId, progress: task::DownloadProgress) {
+        if let Some(target) = self.tab_state.workspace_mut(workspace) {
+            target.ingest_in_flight = true;
+            target.ingest_stage = Some(crate::task::replays::IngestStage::Downloading(progress));
+        }
     }
 
     /// Start the read a directory's offer was holding back, for an offer that
@@ -3902,9 +3913,22 @@ impl WowsToolkitApp {
         self.start_directory_scan(id, root);
     }
 
+    /// Whether `id` already has a scan, either running or taken and waiting on
+    /// the download offer.
+    ///
+    /// The offer's window is the part `ingest_in_flight` does not cover: it is
+    /// cleared when the scan finishes and set again only when the read starts.
+    /// The offer is not modal, and re-picking the directory resolves to this
+    /// same workspace, so a second scan there would overwrite the retained one
+    /// and its read would start without the offer ever being answered.
+    fn scan_already_taken(&self, id: WorkspaceId) -> bool {
+        self.tab_state.workspace(id).is_some_and(|workspace| workspace.ingest_in_flight)
+            || self.pending_scans.contains_key(&id)
+    }
+
     /// Start the scan that counts `root`'s replays and groups them by build,
-    /// without touching which tab is focused. Returns whether it started: a run
-    /// already going over this workspace, or a missing prerequisite, leaves it
+    /// without touching which tab is focused. Returns whether it started: a
+    /// scan this workspace already has, or a missing prerequisite, leaves it
     /// for the caller to retry rather than losing it.
     ///
     /// The three-way prerequisite check covers the read stage that follows, not
@@ -3912,8 +3936,7 @@ impl WowsToolkitApp {
     /// a directory beats scanning a thousand files and then discovering there is
     /// nowhere to put them.
     fn start_directory_scan(&mut self, id: WorkspaceId, root: PathBuf) -> bool {
-        let already_walking = self.tab_state.workspace(id).is_some_and(|workspace| workspace.ingest_in_flight);
-        if already_walking {
+        if self.scan_already_taken(id) {
             return false;
         }
 
@@ -3950,7 +3973,10 @@ impl WowsToolkitApp {
     /// Start the read stage over a scan already taken for `workspace`.
     ///
     /// The scan is taken rather than borrowed: a read consumes it, and a scan
-    /// left behind would start a second read of the same directory.
+    /// left behind would start a second read of the same directory. It is taken
+    /// only once the read is going to start, so a refusal keeps it: the offer
+    /// this is called from is answered once, and a scan dropped here is a
+    /// listing that never fills.
     fn start_directory_read(&mut self, workspace: WorkspaceId) -> bool {
         // Symmetric with `start_directory_scan`, and refused before the scan is
         // taken so a run that cannot start now keeps it: a re-opened directory
@@ -3960,7 +3986,7 @@ impl WowsToolkitApp {
         if already_running {
             return false;
         }
-        let Some(scan) = self.pending_scans.remove(&workspace) else {
+        let Some(root) = self.pending_scans.get(&workspace).map(|scan| scan.root.clone()) else {
             return false;
         };
         let ingest_deps = match (
@@ -3976,10 +4002,13 @@ impl WowsToolkitApp {
         let (deps, pool, rt) = match ingest_deps {
             Ok(resolved) => resolved,
             Err(missing) => {
-                warn!("cannot read replay directory {}: {missing} is not available", scan.root.display());
+                warn!("cannot read replay directory {}: {missing} is not available", root.display());
                 self.tab_state.set_ingest_finished(workspace);
                 return false;
             }
+        };
+        let Some(scan) = self.pending_scans.remove(&workspace) else {
+            return false;
         };
 
         if let Some(target) = self.tab_state.workspace_mut(workspace) {
@@ -5390,6 +5419,86 @@ mod download_prompt_tests {
         app.finished_reingest_offer = Some((WorkspaceId(3), offered.clone()));
         assert_eq!(app.take_finished_reingest_offer(WorkspaceId(3)), Some(offered));
         assert!(app.finished_reingest_offer.is_none(), "a release must not answer for a second walk");
+    }
+
+    /// A scan of a directory nothing was found in: enough to stand in for one
+    /// retained across the download offer, which is the only property these
+    /// tests read off it.
+    fn empty_scan(root: PathBuf) -> crate::task::scan::DirectoryScan {
+        crate::task::scan::DirectoryScan {
+            root,
+            by_build: BTreeMap::new(),
+            unreadable: Vec::new(),
+            missing_builds: BTreeSet::new(),
+            total: 0,
+        }
+    }
+
+    /// The download task sends its first progress only after planning and a
+    /// metadata fetch per build, which is seconds to tens of seconds on a slow
+    /// link. A listing reporting no stage across that window draws as a
+    /// finished, empty directory, which is the failure the staging removes.
+    #[test]
+    fn a_directory_download_is_reported_before_its_first_progress() {
+        let mut app = WowsToolkitApp::default();
+        let workspace = app.tab_state.open_directory_workspace(PathBuf::from("replays"));
+
+        app.mark_directory_downloading(workspace, task::DownloadProgress { downloaded: 0, total: 0 });
+
+        let listed = app.tab_state.workspace(workspace).expect("the workspace was just opened");
+        assert!(listed.ingest_in_flight, "the listing must not draw as finished while the download runs");
+        let stage = listed.ingest_stage.clone().expect("the progress line returns early without a stage");
+        assert!(matches!(stage, crate::task::replays::IngestStage::Downloading(_)));
+        assert_eq!(stage.fraction(), Some(0.0), "a download with nothing planned yet is not a full bar");
+    }
+
+    /// The workspace can close between the download starting and its progress
+    /// arriving. Neither its stage nor a workspace to hold it may be created.
+    #[test]
+    fn a_download_stage_for_a_closed_workspace_lands_nowhere() {
+        let mut app = WowsToolkitApp::default();
+        let closed = WorkspaceId(7);
+
+        app.mark_directory_downloading(closed, task::DownloadProgress { downloaded: 0, total: 0 });
+
+        assert!(app.tab_state.workspace(closed).is_none(), "a departed workspace must not be reopened by its download");
+    }
+
+    /// The offer is not modal, and re-picking the same directory while it is
+    /// open resolves to the same workspace. `ingest_in_flight` is clear across
+    /// that window, so the retained scan is what has to refuse the second scan:
+    /// otherwise it overwrites the first and its read starts unanswered.
+    #[test]
+    fn a_scan_held_across_the_offer_refuses_a_second_one() {
+        let mut app = WowsToolkitApp::default();
+        let root = PathBuf::from("replays");
+        let workspace = app.tab_state.open_directory_workspace(root.clone());
+
+        assert!(!app.scan_already_taken(workspace), "a directory nothing has scanned is scannable");
+
+        app.pending_scans.insert(workspace, Box::new(empty_scan(root)));
+        assert!(app.scan_already_taken(workspace), "a scan waiting on the offer is still this workspace's scan");
+
+        // The re-scan `service_directory_reingests` falls back to is reached
+        // only when no scan is retained, which is this state.
+        app.pending_scans.remove(&workspace);
+        assert!(!app.scan_already_taken(workspace), "a download that outlived its scan must still be able to re-scan");
+    }
+
+    /// Dismissing the offer is the only thing that starts this read, and it
+    /// leaves no reingest record to retry from. A scan dropped by a read that
+    /// then refused is a listing that never fills and never says why.
+    #[test]
+    fn a_read_that_cannot_start_keeps_the_scan_it_would_have_consumed() {
+        let mut app = WowsToolkitApp::default();
+        let root = PathBuf::from("replays");
+        let workspace = app.tab_state.open_directory_workspace(root.clone());
+        app.pending_scans.insert(workspace, Box::new(empty_scan(root)));
+
+        // No game data is loaded, so the prerequisite check is what refuses.
+        assert!(!app.start_directory_read(workspace), "a read without game data cannot start");
+
+        assert!(app.pending_scans.contains_key(&workspace), "the scan must outlive a read that never started");
     }
 }
 

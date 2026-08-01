@@ -44,7 +44,6 @@ pub enum ReplaySource {
 }
 
 // Re-export everything so `use crate::task::*` still works
-#[allow(unused_imports)]
 pub use build_request::BuildRequest;
 pub use game_data_download::GameDataFollowUp;
 pub use game_data_download::PlanTicket;
