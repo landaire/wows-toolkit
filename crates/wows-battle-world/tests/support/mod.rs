@@ -20,8 +20,6 @@ use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::rpc::entitydefs::EntitySpec;
-use wowsunpack::vfs::VfsPath;
-use wowsunpack::vfs::impls::physical::PhysicalFS;
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -61,12 +59,18 @@ fn resources_for_build(version: &Version) -> BuildResources {
 
     let dir = wows_data_mgr::game_dir_for_build(build)
         .unwrap_or_else(|| panic!("game data for build {} not available", build));
-    let vfs_root = dir.join("vfs");
-    assert!(vfs_root.exists(), "vfs dir not found at {}", vfs_root.display());
-    let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
 
-    let rkyv_path = dir.join("game_params.rkyv");
-    let provider = match wowsunpack::game_params::cache::load(&rkyv_path) {
+    // Read the dump through `BuildCas`, the way the app does, rather than
+    // assuming a physical `vfs/` tree. A CAS-format dump serves its files out
+    // of the shared `common/` store, and opening one prunes any leftover
+    // symlinked `vfs/` directory, so requiring that directory here made the
+    // fixtures fail as soon as anything had opened the same dump.
+    let cas = wows_data_mgr::cas_vfs::BuildCas::open(&dir)
+        .unwrap_or_else(|| panic!("no readable metadata.toml for build {build} at {}", dir.display()));
+    let vfs = cas.vfs();
+
+    let rkyv_path = cas.derived_path("game_params.rkyv");
+    let provider = match rkyv_path.as_deref().and_then(wowsunpack::game_params::cache::load) {
         Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs)
             .unwrap_or_else(|e| panic!("failed to build game metadata for build {build}: {e:?}")),
         None => GameMetadataProvider::from_vfs(&vfs)
