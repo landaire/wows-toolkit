@@ -408,7 +408,7 @@ pub enum BackgroundTaskCompletion {
     DataLoaded {
         new_dir: PathBuf,
         wows_data: Box<WorldOfWarshipsData>,
-        replays: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
+        replays: Option<HashMap<PathBuf, Arc<crate::ui::replay_parser::ListedReplay>>>,
         available_builds: Vec<u32>,
     },
     BuildDataLoaded {

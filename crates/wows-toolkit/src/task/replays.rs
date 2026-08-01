@@ -39,6 +39,7 @@ use crate::task::replay_upload::ReplayUploadAction;
 use crate::task::replay_upload::decide_upload_action;
 use crate::twitch::TwitchState;
 use crate::ui::player_tracker::PlayerTracker;
+use crate::ui::replay_parser::ListedReplay;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
 use crate::util::build_tracker;
@@ -411,19 +412,10 @@ pub fn load_wows_files(
     data.full_version = full_version;
     data.replays_dir = replays_dir.clone();
 
-    let metadata_provider = data.game_metadata.clone();
-    let game_constants = Arc::clone(&data.game_constants);
-
     debug!("Loading replays");
     let replays = replay_filepaths(&replays_dir).map(|replays| {
         let iter = replays.into_iter().filter_map(|path| match ReplayFile::from_file(&path) {
-            Ok(replay_file) => {
-                let mut replay = Replay::new(replay_file, metadata_provider.clone().unwrap());
-                replay.game_constants = Some(Arc::clone(&game_constants));
-                replay.source_path = Some(path.clone());
-                let replay = Arc::new(RwLock::new(replay));
-                Some((path, replay))
-            }
+            Ok(replay_file) => Some((path, Arc::new(ListedReplay::from_meta(&replay_file.meta)))),
             Err(e) => {
                 error!("Failed to parse replay {}: {:?}", path.display(), e);
                 None
@@ -1518,7 +1510,10 @@ pub struct IngestBatch {
     /// listing reads its row summaries against the right source from the first
     /// replay onwards rather than waiting for the walk to finish.
     pub source: crate::db::index::rows::SourceId,
-    pub replays: HashMap<PathBuf, Arc<RwLock<Replay>>>,
+    /// Only the metadata each row draws. A hydrated `Replay` pins its build's
+    /// game data and packet stream, so the walk hands the listing the fields it
+    /// needs and lets the read it made go.
+    pub replays: HashMap<PathBuf, Arc<ListedReplay>>,
     pub progress: IngestProgress,
 }
 
@@ -1666,7 +1661,7 @@ where
 {
     let total = paths.len();
     let mut outcome = WalkOutcome::default();
-    let mut pending: HashMap<PathBuf, Arc<RwLock<Replay>>> = HashMap::new();
+    let mut pending: HashMap<PathBuf, Arc<ListedReplay>> = HashMap::new();
     let mut last_flush = std::time::Instant::now();
 
     let found: HashSet<PathBuf> = paths.iter().cloned().collect();
@@ -1701,7 +1696,8 @@ where
                         }
                     }
                 }
-                pending.insert(path, built.replay);
+                let listed = ListedReplay::from_meta(&built.replay.read().replay_file.meta);
+                pending.insert(path, Arc::new(listed));
             }
             Ok(Err(e)) => {
                 outcome.failures.record(&e);
@@ -2281,6 +2277,42 @@ mod tests {
         );
         assert_eq!(outcome.failures.missing_builds.values().sum::<usize>(), 1);
         assert_eq!(outcome.failures.unreadable, 1);
+    }
+
+    /// The walk reads a replay to index it, then hands the listing only the
+    /// metadata its row draws. Passing the hydrated replay on -- in the batch,
+    /// or in what the walk leaves behind -- would keep that build's
+    /// `GameMetadataProvider` and packet stream resident for as long as the
+    /// directory is listed, which is what makes a directory spanning many
+    /// builds hold all of them at once.
+    #[test]
+    fn the_walk_does_not_hand_the_listing_the_replay_it_read() {
+        let read_replays: std::cell::RefCell<Vec<std::sync::Weak<RwLock<Replay>>>> =
+            std::cell::RefCell::new(Vec::new());
+        let (updates, _outcome) = run_walk(
+            &["a.wowsreplay", "b.wowsreplay"],
+            |_| true,
+            |_| {
+                let built = read_replay(11);
+                read_replays.borrow_mut().push(Arc::downgrade(&built.replay));
+                Ok(built)
+            },
+            |_, _| Ok(()),
+        );
+
+        assert_eq!(
+            listed(&updates),
+            BTreeSet::from([PathBuf::from("a.wowsreplay"), PathBuf::from("b.wowsreplay")]),
+            "both replays must reach the listing, or the assertion below holds vacuously"
+        );
+        let read_replays = read_replays.into_inner();
+        assert_eq!(read_replays.len(), 2, "the read step must actually have built a replay for each file");
+        for (index, replay) in read_replays.iter().enumerate() {
+            assert!(
+                replay.upgrade().is_none(),
+                "replay {index} was still alive after its batch went out: the walk retained what it read"
+            );
+        }
     }
 
     /// The listing is merged into, never replaced, so a replay deleted between

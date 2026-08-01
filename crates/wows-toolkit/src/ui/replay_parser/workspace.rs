@@ -11,6 +11,7 @@ use crate::db::index::rows::RowSummary;
 use crate::db::index::rows::SourceId;
 use crate::db::index::rows::WorkspaceId;
 use crate::task::replays::IngestProgress;
+use crate::ui::replay_parser::ListedReplay;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::ReplayTab;
 
@@ -26,7 +27,10 @@ pub(crate) struct ReplayWorkspace {
     /// the indexer -- not this workspace -- creates it and it may not exist
     /// yet. An imported workspace sets this once its source is ensured.
     pub source: Option<SourceId>,
-    pub replay_files: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
+    /// Every file the listing shows, with just the metadata its row draws. A
+    /// fully hydrated `Replay` exists only for the files open in this
+    /// workspace's dock, reachable through [`Self::hydrated_replay`].
+    pub replay_files: Option<HashMap<PathBuf, Arc<ListedReplay>>>,
     /// True while a directory ingest is walking this workspace's root, so
     /// re-picking the same directory cannot start a second walk over it.
     /// Owned by the in-flight task, which clears it when it finishes.
@@ -103,16 +107,56 @@ impl ReplayWorkspace {
         Some(Arc::clone(&tab.replay))
     }
 
+    /// The file path of the replay in the focused (or first) dock tab.
+    pub fn focused_replay_path(&self) -> Option<PathBuf> {
+        if let Some(path) = self.replay_dock_state.focused_leaf()
+            && let Some(leaf) = self.replay_dock_state[path.surface][path.node].get_leaf()
+            && let Some(tab) = leaf.tabs.get(leaf.active.0)
+        {
+            return tab.path.clone();
+        }
+        let (_, tab) = self.replay_dock_state.iter_all_tabs().next()?;
+        tab.path.clone()
+    }
+
+    /// The hydrated replay for `path`, if this workspace has it open in a dock
+    /// tab. Opening is what hydrates a replay, so this is the only place one
+    /// exists for a workspace: a listed but unopened file has none.
+    pub fn hydrated_replay(&self, path: &Path) -> Option<Arc<RwLock<Replay>>> {
+        self.replay_dock_state
+            .iter_all_tabs()
+            .find(|(_, tab)| tab.path.as_deref() == Some(path))
+            .map(|(_, tab)| Arc::clone(&tab.replay))
+    }
+
+    /// Every replay this workspace has hydrated, keyed by path. The same tab
+    /// path can appear in two tabs, in which case either is equivalent.
+    pub fn hydrated_replays(&self) -> HashMap<PathBuf, Arc<RwLock<Replay>>> {
+        self.replay_dock_state
+            .iter_all_tabs()
+            .filter_map(|(_, tab)| tab.path.clone().map(|path| (path, Arc::clone(&tab.replay))))
+            .collect()
+    }
+
+    /// Every replay open in this workspace's dock, whether or not it came from
+    /// a file on disk.
+    pub fn open_replays(&self) -> Vec<Arc<RwLock<Replay>>> {
+        self.replay_dock_state.iter_all_tabs().map(|(_, tab)| Arc::clone(&tab.replay)).collect()
+    }
+
     /// Replace the focused tab's replay, or open a new tab if none exists.
     pub fn open_replay_in_focused_tab(&mut self, replay: Arc<RwLock<Replay>>) {
+        let path = replay.read().source_path.clone();
         // Try focused tab first
         if let Some((_rect, tab)) = self.replay_dock_state.find_active_focused() {
             tab.replay = replay;
+            tab.path = path;
             return;
         }
         // Fall back to the first tab in any leaf
         if let Some((_, tab)) = self.replay_dock_state.iter_all_tabs_mut().next() {
             tab.replay = replay;
+            tab.path = path;
             return;
         }
         self.open_replay_in_new_tab(replay);
@@ -122,7 +166,8 @@ impl ReplayWorkspace {
     pub fn open_replay_in_new_tab(&mut self, replay: Arc<RwLock<Replay>>) {
         let id = self.next_replay_tab_id;
         self.next_replay_tab_id += 1;
-        self.replay_dock_state.push_to_focused_leaf(ReplayTab { replay, id });
+        let path = replay.read().source_path.clone();
+        self.replay_dock_state.push_to_focused_leaf(ReplayTab { replay, id, path });
     }
 
     /// Clears this workspace's listing and dock state. Called when the WoWs
@@ -303,12 +348,8 @@ mod tests {
         assert_ne!(date, ship, "a ship named like a date label must not share tree state");
     }
 
-    /// A minimal but real `ReplayTab`: an empty-params `GameMetadataProvider`
-    /// (no VFS needed) backing a `Replay` built from a hand-built `ReplayMeta`
-    /// round-tripped through `ReplayFile::from_decrypted_parts`, the same
-    /// entry point the app uses for a loaded replay's raw JSON.
-    fn test_replay_tab(id: u64) -> ReplayTab {
-        let meta = wows_replays::ReplayMeta {
+    fn test_meta() -> wows_replays::ReplayMeta {
+        wows_replays::ReplayMeta {
             matchGroup: None,
             gameMode: 0,
             gameType: None,
@@ -325,7 +366,7 @@ mod tests {
             playerID: wows_replays::types::AccountId(0),
             vehicles: Vec::new(),
             playersPerTeam: 0,
-            dateTime: String::new(),
+            dateTime: "28.07.2026 14:23:05".to_string(),
             mapName: String::new(),
             playerName: String::new(),
             scenarioConfigId: 0,
@@ -333,16 +374,161 @@ mod tests {
             logic: None,
             playerVehicle: String::new(),
             battleDuration: None,
-        };
-        let meta_json = serde_json::to_vec(&meta).expect("ReplayMeta serializes");
-        let replay_file = wows_replays::ReplayFile::from_decrypted_parts(meta_json, Vec::new())
-            .expect("a ReplayMeta we just serialized parses back");
-        let resource_loader = Arc::new(
+        }
+    }
+
+    fn empty_metadata_provider() -> Arc<wowsunpack::game_params::provider::GameMetadataProvider> {
+        Arc::new(
             wowsunpack::game_params::provider::GameMetadataProvider::from_params_no_specs(Vec::new())
                 .expect("an empty param list is always valid"),
+        )
+    }
+
+    /// A minimal but real hydrated `Replay`: a hand-built `ReplayMeta` round-tripped
+    /// through `ReplayFile::from_decrypted_parts` -- the same entry point the app
+    /// uses for a loaded replay's raw JSON -- wired to `resource_loader`, which
+    /// stands in for the build's game data a real one pins.
+    fn test_replay(
+        path: Option<&str>,
+        resource_loader: Arc<wowsunpack::game_params::provider::GameMetadataProvider>,
+    ) -> Arc<RwLock<Replay>> {
+        let meta_json = serde_json::to_vec(&test_meta()).expect("ReplayMeta serializes");
+        let replay_file = wows_replays::ReplayFile::from_decrypted_parts(meta_json, Vec::new())
+            .expect("a ReplayMeta we just serialized parses back");
+        let mut replay = Replay::new(replay_file, resource_loader);
+        replay.source_path = path.map(PathBuf::from);
+        Arc::new(RwLock::new(replay))
+    }
+
+    fn test_replay_tab(id: u64) -> ReplayTab {
+        let replay = test_replay(None, empty_metadata_provider());
+        ReplayTab { replay, id, path: None }
+    }
+
+    fn listed(path: &str) -> (PathBuf, Arc<ListedReplay>) {
+        (PathBuf::from(path), Arc::new(ListedReplay::from_meta(&test_meta())))
+    }
+
+    /// Listing a directory must not hold a hydrated `Replay` for anything in
+    /// it. Each one pins an `Arc<GameMetadataProvider>` for the build it was
+    /// recorded on, so an eager implementation makes a directory spanning
+    /// thirty builds hold thirty builds' game data resident, and the build
+    /// cache can reclaim none of it.
+    #[test]
+    fn a_listed_but_unopened_replay_holds_no_parsed_data() {
+        let resource_loader = empty_metadata_provider();
+        let pinned_before = Arc::strong_count(&resource_loader);
+
+        let mut ws = ReplayWorkspace::new(Some(PathBuf::from("replays")));
+        ws.replay_files = Some(HashMap::from([listed("a.wowsreplay"), listed("b.wowsreplay"), listed("c.wowsreplay")]));
+
+        assert_eq!(
+            ws.replay_files.as_ref().map(HashMap::len),
+            Some(3),
+            "the fixture must actually list files, or the assertions below hold vacuously"
         );
-        let replay = Arc::new(RwLock::new(Replay::new(replay_file, resource_loader)));
-        ReplayTab { replay, id }
+        assert!(ws.hydrated_replays().is_empty(), "nothing has been opened, so nothing may be hydrated");
+        assert!(ws.hydrated_replay(Path::new("b.wowsreplay")).is_none());
+        assert_eq!(
+            Arc::strong_count(&resource_loader),
+            pinned_before,
+            "a listed replay must not pin its build's game data"
+        );
+
+        ws.open_replay_in_new_tab(test_replay(Some("b.wowsreplay"), Arc::clone(&resource_loader)));
+
+        assert_eq!(
+            ws.hydrated_replays().keys().collect::<Vec<_>>(),
+            vec![&PathBuf::from("b.wowsreplay")],
+            "opening one replay hydrates exactly that one"
+        );
+        assert!(ws.hydrated_replay(Path::new("b.wowsreplay")).is_some());
+        assert!(ws.hydrated_replay(Path::new("a.wowsreplay")).is_none(), "its neighbours stay unhydrated");
+        assert!(
+            Arc::strong_count(&resource_loader) > pinned_before,
+            "the opened replay does pin the build's data, which is what makes the count above meaningful"
+        );
+        assert_eq!(
+            ws.replay_files.as_ref().map(HashMap::len),
+            Some(3),
+            "opening a replay must not disturb what is listed"
+        );
+    }
+
+    /// The listing highlights the row whose file the focused tab is showing, so
+    /// that tab has to report the path it was opened from, and keep reporting
+    /// the right one after its replay is replaced in place.
+    #[test]
+    fn the_focused_tab_reports_the_path_the_listing_highlights() {
+        let mut ws = ReplayWorkspace::new(None);
+        assert_eq!(ws.focused_replay_path(), None, "with no tabs open no row is highlighted");
+
+        ws.open_replay_in_new_tab(test_replay(Some("a.wowsreplay"), empty_metadata_provider()));
+        assert_eq!(ws.focused_replay_path(), Some(PathBuf::from("a.wowsreplay")));
+
+        ws.open_replay_in_focused_tab(test_replay(Some("b.wowsreplay"), empty_metadata_provider()));
+        assert_eq!(
+            ws.focused_replay_path(),
+            Some(PathBuf::from("b.wowsreplay")),
+            "replacing the focused tab's replay moves the highlight with it"
+        );
+        assert!(
+            ws.hydrated_replay(Path::new("a.wowsreplay")).is_none(),
+            "the replaced replay is no longer hydrated by any tab"
+        );
+    }
+
+    /// A row's identity and stats come from the index until the file is opened,
+    /// and from the parse afterwards -- except survival, which the index
+    /// supplies either way because a parsed `PlayerReport` has no survival flag.
+    #[test]
+    fn opening_a_replay_still_prefers_its_parsed_data_over_the_index_row() {
+        use crate::db::index::rows::MatchOutcome;
+        use crate::ui::replay_parser::listing_row::ParsedStats;
+        use crate::ui::replay_parser::listing_row::resolve_row_stats;
+
+        let index_row = RowSummary {
+            outcome: MatchOutcome::Loss,
+            self_damage: Some(1_000),
+            self_kills: Some(0),
+            self_survived: Some(true),
+            self_pr: None,
+            division_id: None,
+            division_mates: Vec::new(),
+            results_available: true,
+            file_mtime: Some(42),
+        };
+
+        let mut ws = ReplayWorkspace::new(Some(PathBuf::from("replays")));
+        ws.replay_files = Some(HashMap::from([listed("a.wowsreplay")]));
+
+        // Listed but unopened: there is no parse to prefer, so the index wins.
+        let unopened = resolve_row_stats(
+            ws.hydrated_replay(Path::new("a.wowsreplay"))
+                .and_then(|replay| crate::ui::replay_parser::listing_row::replay_parsed_stats(&replay.read())),
+            Some(&index_row),
+        );
+        assert_eq!(unopened.outcome, MatchOutcome::Loss);
+        assert_eq!(unopened.damage, Some(1_000));
+        assert_eq!(unopened.kills, Some(0));
+
+        // Opened but not yet parsed: hydrating alone does not invent stats.
+        ws.open_replay_in_new_tab(test_replay(Some("a.wowsreplay"), empty_metadata_provider()));
+        let opened = ws.hydrated_replay(Path::new("a.wowsreplay")).expect("just opened");
+        assert!(
+            crate::ui::replay_parser::listing_row::replay_parsed_stats(&opened.read()).is_none(),
+            "a hydrated replay with no report yet must not claim parsed stats"
+        );
+
+        // Once the parse exists it wins everywhere it has an opinion.
+        let parsed =
+            ParsedStats { outcome: MatchOutcome::Win, damage: Some(200_000), kills: Some(5), in_division: true };
+        let stats = resolve_row_stats(Some(parsed), Some(&index_row));
+        assert_eq!(stats.outcome, MatchOutcome::Win);
+        assert_eq!(stats.damage, Some(200_000));
+        assert_eq!(stats.kills, Some(5));
+        assert!(stats.in_division);
+        assert_eq!(stats.survived, Some(true), "survival still comes from the index");
     }
 
     #[test]

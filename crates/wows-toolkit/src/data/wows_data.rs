@@ -1067,6 +1067,28 @@ impl ReplayLoader {
         path: PathBuf,
     ) -> Result<(Arc<RwLock<Replay>>, SharedWoWsData), rootcause::Report> {
         let replay_file = read_replay_file_with_retry(&path)?;
+        Self::build_replay_from_file(deps, replay_file, path)
+    }
+
+    /// Read a replay the caller already knows exists and construct a [`Replay`]
+    /// for it. Unlike [`Self::build_replay_from_path`] this does not wait out a
+    /// game still flushing the file: a listing row names a file that was
+    /// complete when it was listed, and a retry loop here would run on the UI
+    /// thread.
+    pub(crate) fn build_replay_from_existing_file(
+        deps: &ReplayDependencies,
+        path: PathBuf,
+    ) -> Result<(Arc<RwLock<Replay>>, SharedWoWsData), rootcause::Report> {
+        let replay_file =
+            ReplayFile::from_file(&path).map_err(|e| e.into_dynamic().attach(format!("path: {}", path.display())))?;
+        Self::build_replay_from_file(deps, replay_file, path)
+    }
+
+    fn build_replay_from_file(
+        deps: &ReplayDependencies,
+        replay_file: ReplayFile,
+        path: PathBuf,
+    ) -> Result<(Arc<RwLock<Replay>>, SharedWoWsData), rootcause::Report> {
         let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
 
         let Some(wows_data_for_build) = deps.wows_data_map.resolve(&replay_version) else {

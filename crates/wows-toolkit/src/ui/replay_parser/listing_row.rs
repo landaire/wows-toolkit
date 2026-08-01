@@ -3,13 +3,49 @@
 //! for each grouping mode. No `Ui` access, so it is unit-testable.
 
 use rust_i18n::t;
+use wows_replays::ReplayMeta;
+use wows_replays::types::GameParamId;
 use wows_toolkit_config::ReplayGrouping;
+use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
 use crate::db::index::rows::DivisionMate;
 use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::RowSummary;
 use crate::util::separate_number;
+
+/// What a listing keeps for one replay file: the raw metadata fields its row
+/// draws, and nothing else.
+///
+/// A hydrated `Replay` holds an `Arc<GameMetadataProvider>` and an
+/// `Arc<GameConstants>` for the build it was recorded on, plus the whole packet
+/// stream. Keeping one per listed file makes a directory spanning thirty builds
+/// hold thirty builds' game data resident. These fields are translated at draw
+/// time against the currently loaded metadata provider, which is also what
+/// makes a locale change show up without re-reading anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedReplay {
+    /// The perspective player's ship. `None` for a spectator recording.
+    pub ship_id: Option<GameParamId>,
+    pub map_name: String,
+    /// `ReplayMeta::gameType`, empty when the replay carries none.
+    pub game_type: String,
+    pub scenario: String,
+    /// Raw `dd.mm.yyyy HH:MM:SS` from the replay meta.
+    pub date_time: String,
+}
+
+impl ListedReplay {
+    pub fn from_meta(meta: &ReplayMeta) -> Self {
+        ListedReplay {
+            ship_id: meta.vehicles.iter().find(|vehicle| vehicle.relation == 0).map(|vehicle| vehicle.shipId),
+            map_name: meta.mapName.clone(),
+            game_type: meta.gameType.clone().unwrap_or_default(),
+            scenario: meta.scenario.clone(),
+            date_time: meta.dateTime.clone(),
+        }
+    }
+}
 
 /// Identity fields lifted off a `Replay` before any layout work.
 pub(crate) struct RowIdentity {
@@ -271,15 +307,51 @@ pub(crate) fn row_layout_job(
     job
 }
 
-/// Lift the identity fields off a replay. Requires the metadata provider for
-/// every field except the timestamp.
-pub(crate) fn replay_row_identity(replay: &super::Replay, metadata_provider: &GameMetadataProvider) -> RowIdentity {
+/// The perspective player's ship name, translated against the currently loaded
+/// metadata. A spectator recording names no ship, so it reads as such.
+pub(crate) fn listed_ship_name(listed: &ListedReplay, metadata_provider: &GameMetadataProvider) -> String {
+    listed
+        .ship_id
+        .and_then(|ship_id| metadata_provider.param_localization_id(ship_id.raw().into()))
+        .and_then(|id| metadata_provider.localized_name_from_id(&wowsunpack::data::TranslationKey::new(id)))
+        .unwrap_or_else(|| t!("ui.replay.spectator").into())
+}
+
+/// Translate a listed replay's raw metadata into what the row draws. Requires
+/// the metadata provider for every field except the timestamp.
+pub(crate) fn listed_row_identity(listed: &ListedReplay, metadata_provider: &GameMetadataProvider) -> RowIdentity {
+    use wowsunpack::game_params::translations;
+
     RowIdentity {
-        ship: replay.vehicle_name(metadata_provider),
-        map: replay.map_name(metadata_provider),
-        scenario: replay.scenario(metadata_provider),
-        mode: replay.game_mode(metadata_provider),
-        date_time: replay.game_time().to_string(),
+        ship: listed_ship_name(listed, metadata_provider),
+        map: translations::translate_map_name(&listed.map_name, metadata_provider),
+        scenario: translations::translate_scenario(&listed.scenario, metadata_provider),
+        mode: translations::translate_game_mode(&listed.game_type, metadata_provider),
+        date_time: listed.date_time.clone(),
+    }
+}
+
+/// The outcome a row draws, under the same precedence [`resolve_row_stats`]
+/// applies. Split out because a group header needs every member's outcome for
+/// its win rate, and cloning each member's full stats -- division mates
+/// included -- to read one field would cost a list of allocations per frame.
+pub(crate) fn resolved_outcome(parsed: Option<MatchOutcome>, summary: Option<&RowSummary>) -> MatchOutcome {
+    parsed.or_else(|| summary.map(|summary| summary.outcome)).unwrap_or(MatchOutcome::Unknown)
+}
+
+/// The `W/L (%)` suffix a group header carries, from its members' outcomes.
+/// Empty when no member has a decided result.
+pub(crate) fn win_rate_label(outcomes: &[MatchOutcome]) -> String {
+    let (wins, losses) = outcomes.iter().fold((0u32, 0u32), |(wins, losses), outcome| match outcome {
+        MatchOutcome::Win => (wins + 1, losses),
+        MatchOutcome::Loss => (wins, losses + 1),
+        MatchOutcome::Draw | MatchOutcome::Unknown => (wins, losses),
+    });
+    let total = wins + losses;
+    if total > 0 {
+        format!(" - {}W/{}L ({:.0}%)", wins, losses, (wins as f64 / total as f64) * 100.0)
+    } else {
+        String::new()
     }
 }
 
@@ -361,6 +433,94 @@ mod tests {
             results_available: true,
             file_mtime: Some(42),
         }
+    }
+
+    fn meta(vehicles: Vec<wows_replays::VehicleInfoMeta>) -> ReplayMeta {
+        ReplayMeta {
+            matchGroup: None,
+            gameMode: 0,
+            gameType: Some("RandomBattle".to_string()),
+            clientVersionFromExe: "0,0,0,0".to_string(),
+            scenarioUiCategoryId: None,
+            mapDisplayName: String::new(),
+            mapId: 0,
+            clientVersionFromXml: String::new(),
+            weatherParams: None,
+            duration: 0,
+            gameLogic: None,
+            name: String::new(),
+            scenario: "Domination".to_string(),
+            playerID: wows_replays::types::AccountId(0),
+            vehicles,
+            playersPerTeam: 0,
+            dateTime: "28.07.2026 14:23:05".to_string(),
+            mapName: "spaces/ocean".to_string(),
+            playerName: String::new(),
+            scenarioConfigId: 0,
+            teamsCount: 0,
+            logic: None,
+            playerVehicle: String::new(),
+            battleDuration: None,
+        }
+    }
+
+    fn vehicle(relation: u32, ship_id: u32) -> wows_replays::VehicleInfoMeta {
+        wows_replays::VehicleInfoMeta {
+            shipId: GameParamId::from(ship_id),
+            relation,
+            id: wows_replays::types::AccountId(1),
+            name: "Someone".to_string(),
+        }
+    }
+
+    /// The listed entry keeps the raw metadata a row draws and nothing else, so
+    /// the fields it carries have to be the ones the identity line needs.
+    #[test]
+    fn from_meta_keeps_the_perspective_players_ship_and_the_raw_identity_fields() {
+        // relation 0 is the recording player; the others are on the roster too,
+        // so an implementation taking the first vehicle picks the wrong ship.
+        let listed = ListedReplay::from_meta(&meta(vec![vehicle(1, 777), vehicle(0, 4_281_269_200), vehicle(2, 999)]));
+        assert_eq!(listed.ship_id, Some(GameParamId::from(4_281_269_200u32)));
+        assert_eq!(listed.map_name, "spaces/ocean");
+        assert_eq!(listed.game_type, "RandomBattle");
+        assert_eq!(listed.scenario, "Domination");
+        assert_eq!(listed.date_time, "28.07.2026 14:23:05");
+    }
+
+    /// A spectator recording has no vehicle of its own, and an absent game type
+    /// is an empty string rather than a missing field, since that is what the
+    /// translation call takes.
+    #[test]
+    fn from_meta_leaves_a_spectator_recording_without_a_ship() {
+        let mut spectator = meta(vec![vehicle(1, 777)]);
+        spectator.gameType = None;
+        let listed = ListedReplay::from_meta(&spectator);
+        assert_eq!(listed.ship_id, None);
+        assert_eq!(listed.game_type, "");
+    }
+
+    #[test]
+    fn win_rate_label_counts_only_decided_outcomes() {
+        use MatchOutcome::Draw;
+        use MatchOutcome::Loss;
+        use MatchOutcome::Unknown;
+        use MatchOutcome::Win;
+
+        assert_eq!(win_rate_label(&[Win, Win, Win, Loss]), " - 3W/1L (75%)");
+        // A draw and an unindexed row are neither a win nor a loss, and must
+        // not enter the denominator either.
+        assert_eq!(win_rate_label(&[Win, Loss, Draw, Unknown]), " - 1W/1L (50%)");
+        assert_eq!(win_rate_label(&[Draw, Unknown]), "", "no decided result means no label at all");
+        assert_eq!(win_rate_label(&[]), "");
+    }
+
+    #[test]
+    fn resolved_outcome_prefers_a_parse_over_the_index_row() {
+        let summary = summary();
+        assert_eq!(summary.outcome, MatchOutcome::Win, "the fixture must disagree with the parse below");
+        assert_eq!(resolved_outcome(Some(MatchOutcome::Loss), Some(&summary)), MatchOutcome::Loss);
+        assert_eq!(resolved_outcome(None, Some(&summary)), MatchOutcome::Win);
+        assert_eq!(resolved_outcome(None, None), MatchOutcome::Unknown);
     }
 
     #[test]

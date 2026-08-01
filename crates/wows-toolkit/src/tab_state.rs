@@ -407,7 +407,7 @@ pub enum ConfirmableAction {
     /// Clear session stats for a specific ship.
     ClearShipSessionStats { ship_id: GameParamId },
     /// Replace session stats with the given replays.
-    SetAsSessionStats { replays: Vec<std::sync::Weak<RwLock<Replay>>> },
+    SetAsSessionStats { replays: Vec<PathBuf> },
 }
 
 impl ConfirmableAction {
@@ -512,8 +512,9 @@ pub struct TabState {
     /// Replays selected for session stats update. When Some, they will be
     /// processed and added to session stats. If `clear_before_session_reset` is true,
     /// existing stats are cleared first.
-    /// Uses Weak references to avoid retaining stale replays if they're removed from the listing.
-    pub replays_for_session_reset: Option<Vec<std::sync::Weak<RwLock<Replay>>>>,
+    /// Named by path so a queued batch retains nothing: each is read and parsed
+    /// when its turn comes.
+    pub replays_for_session_reset: Option<Vec<PathBuf>>,
     pub clear_before_session_reset: bool,
     /// Pending action awaiting user confirmation.
     pub pending_confirmation: Option<ConfirmableAction>,
@@ -784,6 +785,18 @@ impl TabState {
         self.active_workspace().focused_replay()
     }
 
+    /// Every workspace, live one included.
+    pub fn all_workspaces(&self) -> impl Iterator<Item = &ReplayWorkspace> {
+        std::iter::once(&self.live_workspace).chain(self.workspaces.values())
+    }
+
+    /// The hydrated replay for `path` if any workspace has that file open in a
+    /// dock tab. Opening is what hydrates a replay, so a file that is only
+    /// listed has none.
+    pub fn open_replay_at(&self, path: &Path) -> Option<Arc<RwLock<Replay>>> {
+        self.all_workspaces().find_map(|workspace| workspace.hydrated_replay(path))
+    }
+
     /// Replace the focused tab's replay, or open a new tab if none exists.
     pub fn open_replay_in_focused_tab(&mut self, replay: Arc<RwLock<Replay>>) {
         self.active_workspace_mut().open_replay_in_focused_tab(replay);
@@ -800,6 +813,18 @@ impl TabState {
             is_debug_mode: self.persisted.read().settings.app.debug_mode,
             personal_rating_data: Arc::clone(&self.personal_rating_data),
         })
+    }
+
+    /// Read a listed replay off disk and wire it to its build's game data.
+    ///
+    /// The listing keeps only the metadata its rows draw, so this is what turns
+    /// a row into something a replay tab can show. The packet parse that
+    /// follows still happens in the background; only the file read is here.
+    pub fn hydrate_replay(&self, path: &Path) -> Result<Arc<RwLock<Replay>>, rootcause::Report> {
+        let Some(deps) = self.replay_dependencies() else {
+            return Err(rootcause::report!("game data is not loaded"));
+        };
+        ReplayLoader::build_replay_from_existing_file(&deps, path.to_path_buf()).map(|(replay, _data)| replay)
     }
 
     /// Send a job to the background networking thread.
@@ -930,14 +955,11 @@ impl TabState {
 
                     // The watcher only observes the live replays directory, so a
                     // change it reports always belongs to the live workspace.
-                    let replay_clone = self
-                        .live_workspace
-                        .replay_files
-                        .as_ref()
-                        .and_then(|files| files.get(&modified_file))
-                        .map(Arc::clone);
+                    // Only a replay open in one of its tabs is hydrated; a
+                    // merely listed one is re-read from the path below.
+                    let open_replay = self.live_workspace.hydrated_replay(&modified_file);
 
-                    if let Some(replay) = replay_clone {
+                    if let Some(replay) = open_replay {
                         // Invalidate cached data so the reload re-parses the file.
                         let mut replay_inner = replay.write();
                         replay_inner.battle_report = None;
@@ -948,10 +970,9 @@ impl TabState {
                             update_background_task!(self.background_tasks, deps.load_replay(replay, source));
                         }
                     } else if let Some(deps) = self.replay_dependencies() {
-                        // The Added task for this replay may still be parsing, so
-                        // the listing entry does not exist yet. Read from the path
-                        // so the modification is not dropped; the freshest read
-                        // wins on completion.
+                        // Nothing is open on this file. Read from the path so the
+                        // modification is not dropped; the freshest read wins on
+                        // completion, and its listing row is refreshed with it.
                         update_background_task!(
                             self.background_tasks,
                             deps.parse_replay_from_path(modified_file, source)
@@ -1095,7 +1116,7 @@ impl TabState {
     /// If `clear_before_session_reset` is true, clears existing stats first.
     /// If any replays haven't been parsed yet, they will be queued for parsing.
     pub(crate) fn process_session_stats_reset(&mut self) {
-        let Some(weak_replays) = self.replays_for_session_reset.take() else {
+        let Some(paths) = self.replays_for_session_reset.take() else {
             return;
         };
 
@@ -1103,34 +1124,28 @@ impl TabState {
             self.persisted.write().session_stats.clear();
         }
 
-        // Upgrade weak references and add to session stats
-        for weak_replay in weak_replays {
-            if let Some(replay) = weak_replay.upgrade() {
-                let replay_guard = replay.read();
+        for path in paths {
+            // A replay already open in a tab carries its parse, so its stats
+            // can be taken straight off it rather than paying for the file
+            // again.
+            let parsed = self.open_replay_at(&path).and_then(|replay| {
+                let guard = replay.read();
+                guard.ui_report.as_ref()?;
+                PerGameStat::from_replay(&guard, &guard.resource_loader)
+            });
 
-                // Check if the replay needs parsing (no ui_report means not parsed)
-                let needs_parsing = replay_guard.ui_report.is_none();
+            if let Some(stat) = parsed {
+                self.persisted.write().session_stats.add_game(stat);
+                continue;
+            }
 
-                // If already parsed, extract stats and add immediately
-                if !needs_parsing
-                    && let Some(stat) = PerGameStat::from_replay(&replay_guard, &replay_guard.resource_loader)
-                {
-                    self.persisted.write().session_stats.add_game(stat);
-                }
-
-                drop(replay_guard);
-
-                if needs_parsing {
-                    // Queue the replay for parsing (skip UI update since this is batch loading)
-                    if let Some(deps) = self.replay_dependencies() {
-                        update_background_task!(
-                            self.background_tasks,
-                            ReplayLoader::from_replay(deps, replay.clone())
-                                .source(ReplaySource::SessionStatsOnly)
-                                .load()
-                        );
-                    }
-                }
+            // Read and parse in the background, skipping the UI update since
+            // this is batch loading.
+            if let Some(deps) = self.replay_dependencies() {
+                update_background_task!(
+                    self.background_tasks,
+                    ReplayLoader::from_path(deps, path).source(ReplaySource::SessionStatsOnly).load()
+                );
             }
         }
 
@@ -1402,45 +1417,15 @@ mod tests {
         );
     }
 
-    /// A minimal but real `Replay`: an empty-params `GameMetadataProvider`
-    /// (no VFS needed) backing a hand-built `ReplayMeta` round-tripped
-    /// through `ReplayFile::from_decrypted_parts`, the same entry point the
-    /// app uses for a loaded replay's raw JSON.
-    fn test_replay() -> Arc<RwLock<Replay>> {
-        let meta = wows_replays::ReplayMeta {
-            matchGroup: None,
-            gameMode: 0,
-            gameType: None,
-            clientVersionFromExe: "0,0,0,0".to_string(),
-            scenarioUiCategoryId: None,
-            mapDisplayName: String::new(),
-            mapId: 0,
-            clientVersionFromXml: String::new(),
-            weatherParams: None,
-            duration: 0,
-            gameLogic: None,
-            name: String::new(),
-            scenario: String::new(),
-            playerID: wows_replays::types::AccountId(0),
-            vehicles: Vec::new(),
-            playersPerTeam: 0,
-            dateTime: String::new(),
-            mapName: String::new(),
-            playerName: String::new(),
-            scenarioConfigId: 0,
-            teamsCount: 0,
-            logic: None,
-            playerVehicle: String::new(),
-            battleDuration: None,
-        };
-        let meta_json = serde_json::to_vec(&meta).expect("ReplayMeta serializes");
-        let replay_file = ReplayFile::from_decrypted_parts(meta_json, Vec::new())
-            .expect("a ReplayMeta we just serialized parses back");
-        let resource_loader = Arc::new(
-            wowsunpack::game_params::provider::GameMetadataProvider::from_params_no_specs(Vec::new())
-                .expect("an empty param list is always valid"),
-        );
-        Arc::new(RwLock::new(Replay::new(replay_file, resource_loader)))
+    /// One listing entry, with the shape a directory walk produces.
+    fn listed_replay() -> Arc<crate::ui::replay_parser::ListedReplay> {
+        Arc::new(crate::ui::replay_parser::ListedReplay {
+            ship_id: None,
+            map_name: "spaces".into(),
+            game_type: "RandomBattle".into(),
+            scenario: "Domination".into(),
+            date_time: "28.07.2026 14:23:05".into(),
+        })
     }
 
     /// A watcher `Removed` event names a path in the live replays directory
@@ -1456,13 +1441,13 @@ mod tests {
         let path = PathBuf::from("replay.wowsreplay");
 
         let mut live_files = HashMap::new();
-        live_files.insert(path.clone(), test_replay());
+        live_files.insert(path.clone(), listed_replay());
         state.live_workspace.replay_files = Some(live_files);
 
         let other_id = WorkspaceId(1);
         let mut other_workspace = ReplayWorkspace::new(None);
         let mut other_files = HashMap::new();
-        other_files.insert(path.clone(), test_replay());
+        other_files.insert(path.clone(), listed_replay());
         other_workspace.replay_files = Some(other_files);
         state.workspaces.insert(other_id, other_workspace);
         state.set_active_workspace(other_id);
@@ -1499,7 +1484,7 @@ mod tests {
         crate::task::replays::IngestBatch {
             workspace,
             source: crate::db::index::rows::SourceId(3),
-            replays: paths.iter().map(|path| (PathBuf::from(path), test_replay())).collect(),
+            replays: paths.iter().map(|path| (PathBuf::from(path), listed_replay())).collect(),
             progress: crate::task::replays::IngestProgress { done, total },
         }
     }
@@ -1512,7 +1497,7 @@ mod tests {
         let mut state = TabState::default();
         let id = WorkspaceId(1);
         let mut workspace = ReplayWorkspace::new(None);
-        workspace.replay_files = Some(HashMap::from([(PathBuf::from("a.wowsreplay"), test_replay())]));
+        workspace.replay_files = Some(HashMap::from([(PathBuf::from("a.wowsreplay"), listed_replay())]));
         state.workspaces.insert(id, workspace);
 
         state.apply_ingest_batch(ingest_batch(id, &["b.wowsreplay"], 2, 2));
@@ -1589,8 +1574,8 @@ mod tests {
         let id = WorkspaceId(1);
         let mut workspace = ReplayWorkspace::new(None);
         workspace.replay_files = Some(HashMap::from([
-            (PathBuf::from("kept.wowsreplay"), test_replay()),
-            (PathBuf::from("deleted.wowsreplay"), test_replay()),
+            (PathBuf::from("kept.wowsreplay"), listed_replay()),
+            (PathBuf::from("deleted.wowsreplay"), listed_replay()),
         ]));
         state.workspaces.insert(id, workspace);
 
@@ -1634,7 +1619,7 @@ mod tests {
         let mut state = TabState::default();
         let id = WorkspaceId(1);
         let mut workspace = ReplayWorkspace::new(None);
-        workspace.replay_files = Some(HashMap::from([(PathBuf::from("a.wowsreplay"), test_replay())]));
+        workspace.replay_files = Some(HashMap::from([(PathBuf::from("a.wowsreplay"), listed_replay())]));
         state.workspaces.insert(id, workspace);
 
         state.apply_ingest_update(crate::task::replays::IngestUpdate::Progress {

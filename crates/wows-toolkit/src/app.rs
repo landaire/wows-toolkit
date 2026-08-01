@@ -1357,10 +1357,8 @@ impl WowsToolkitApp {
                             let _ = std::fs::write(path, data.as_slice());
                         }
                         // Rebuild loaded data with the new constants from disk.
-                        if wows_data.write().rebuild_with_new_constants()
-                            && let Some(replay_files) = &self.tab_state.active_workspace().replay_files
-                        {
-                            for replay in replay_files.values() {
+                        if wows_data.write().rebuild_with_new_constants() {
+                            for replay in self.tab_state.active_workspace().open_replays() {
                                 replay.write().ui_report = None;
                             }
                         }
@@ -1399,10 +1397,8 @@ impl WowsToolkitApp {
                         debug!("Rebuilding build {} with newly fetched versioned constants", build);
                         if data.write().rebuild_with_new_constants() {
                             // Invalidate cached reports so they rebuild with correct constants
-                            if let Some(replay_files) = &self.tab_state.active_workspace().replay_files {
-                                for replay in replay_files.values() {
-                                    replay.write().ui_report = None;
-                                }
+                            for replay in self.tab_state.active_workspace().open_replays() {
+                                replay.write().ui_report = None;
                             }
                         }
                     }
@@ -1645,11 +1641,18 @@ impl WowsToolkitApp {
                     // a later modification replaces an earlier, staler parse. The
                     // watcher only observes the live replays directory, so this
                     // always belongs to the live workspace.
-                    if matches!(source, ReplaySource::AutoLoad | ReplaySource::SessionStatsOnly)
-                        && let Some(replay_files) = &mut self.tab_state.live_workspace.replay_files
-                        && let Some(path) = replay.read().source_path.clone()
-                    {
-                        replay_files.insert(path, Arc::clone(&replay));
+                    if matches!(source, ReplaySource::AutoLoad | ReplaySource::SessionStatsOnly) {
+                        let listed = {
+                            let guard = replay.read();
+                            guard.source_path.clone().map(|path| {
+                                (path, crate::ui::replay_parser::ListedReplay::from_meta(&guard.replay_file.meta))
+                            })
+                        };
+                        if let Some((path, listed)) = listed
+                            && let Some(replay_files) = &mut self.tab_state.live_workspace.replay_files
+                        {
+                            replay_files.insert(path, Arc::new(listed));
+                        }
                     }
 
                     if track_session_stats {
@@ -2479,11 +2482,9 @@ impl WowsToolkitApp {
 
         // Pick up "Add to Session Stats" requests (no confirmation needed).
         // App-wide: feeds the one global session-stats total, not a per-workspace one.
-        if let Some(replays) = ctx.data_mut(|data| {
-            data.remove_temp::<Vec<std::sync::Weak<parking_lot::RwLock<crate::ui::replay_parser::Replay>>>>(
-                egui::Id::new("add_to_session_stats_request"),
-            )
-        }) {
+        if let Some(replays) =
+            ctx.data_mut(|data| data.remove_temp::<Vec<PathBuf>>(egui::Id::new("add_to_session_stats_request")))
+        {
             self.tab_state.clear_before_session_reset = false;
             self.tab_state.replays_for_session_reset = Some(replays);
         }
@@ -2880,10 +2881,8 @@ impl WowsToolkitApp {
 
                     // Invalidate ui_report on all loaded replays so they re-build
                     // with the new constants on next access
-                    if let Some(replay_files) = &self.tab_state.active_workspace().replay_files {
-                        for replay in replay_files.values() {
-                            replay.write().ui_report = None;
-                        }
+                    for replay in self.tab_state.active_workspace().open_replays() {
+                        replay.write().ui_report = None;
                     }
 
                     // Re-load the focused replay to rebuild its ui_report
