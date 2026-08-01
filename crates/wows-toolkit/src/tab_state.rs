@@ -22,6 +22,7 @@ use tracing::debug;
 use tracing::warn;
 use wows_replays::ReplayFile;
 use wows_replays::types::GameParamId;
+use wowsunpack::data::Version;
 use wowsunpack::vfs::VfsPath;
 
 use crate::data::session_stats::PerGameStat;
@@ -694,6 +695,28 @@ impl Default for TabState {
     }
 }
 
+/// Turn flagged builds into download requests, dropping any whose version
+/// string does not even parse a major component; nothing can be requested for
+/// those. A build the remote resolves through a fallback still needs an entry
+/// here to trigger the request, not to name the exact build fetched.
+fn build_requests_from_updates(
+    updates: Vec<wows_data_mgr::download_repo::BuildUpdateStatus>,
+) -> Vec<crate::task::BuildRequest> {
+    updates
+        .into_iter()
+        .filter_map(|update| {
+            let mut parts = update.version.split('.').filter_map(|p| p.trim().parse::<u32>().ok());
+            let version = Version {
+                major: parts.next()?,
+                minor: parts.next().unwrap_or(0),
+                patch: parts.next().unwrap_or(0),
+                build: std::num::NonZeroU32::new(update.build),
+            };
+            crate::task::BuildRequest::new(version)
+        })
+        .collect()
+}
+
 impl TabState {
     /// Notify the background save task that state has changed and should be
     /// persisted. The save task debounces rapid calls (1 second).
@@ -906,18 +929,18 @@ impl TabState {
         let Some(output_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir) else {
             return;
         };
-        for update in std::mem::take(&mut self.game_data_updates) {
-            update_background_task!(
-                self.background_tasks,
-                Some(crate::task::start_game_data_download_task(
-                    output_base.clone(),
-                    update.build,
-                    Some(update.version),
-                    true,
-                    None,
-                ))
-            );
+        let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
+            warn!("cannot download game data: tokio runtime is not available");
+            return;
+        };
+        let requests = build_requests_from_updates(std::mem::take(&mut self.game_data_updates));
+        if requests.is_empty() {
+            return;
         }
+        update_background_task!(
+            self.background_tasks,
+            Some(crate::task::start_game_data_download_task(output_base, requests, runtime, true, None))
+        );
     }
 
     /// Validate the cache against the remote repo. No-op if a validation is
@@ -940,18 +963,18 @@ impl TabState {
         let Some(output_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir) else {
             return;
         };
-        for build in std::mem::take(&mut self.game_data_repair) {
-            update_background_task!(
-                self.background_tasks,
-                Some(crate::task::start_game_data_download_task(
-                    output_base.clone(),
-                    build.build,
-                    Some(build.version),
-                    true,
-                    None,
-                ))
-            );
+        let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
+            warn!("cannot download game data: tokio runtime is not available");
+            return;
+        };
+        let requests = build_requests_from_updates(std::mem::take(&mut self.game_data_repair));
+        if requests.is_empty() {
+            return;
         }
+        update_background_task!(
+            self.background_tasks,
+            Some(crate::task::start_game_data_download_task(output_base, requests, runtime, true, None))
+        );
     }
 
     pub(crate) fn send_replay_consent_changed(&self) {

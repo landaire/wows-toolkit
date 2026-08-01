@@ -41,6 +41,7 @@ use serde::Serialize;
 use tokio::runtime::Runtime;
 use wows_data_mgr::download_repo::DownloadPlan;
 use wows_data_mgr::download_repo::RemoteAvailability;
+use wowsunpack::data::Version;
 
 use crate::data::settings::DataSharingMode;
 use crate::db::index::rows::SourceId;
@@ -423,10 +424,10 @@ pub struct WowsToolkitApp {
 
 /// A directory workspace whose listing is waiting on downloaded game data.
 enum DirectoryReingest {
-    /// Downloads are still running. `outstanding` counts the ones not back
-    /// yet; the walk is only worth doing once the last of them has been tried.
-    AwaitingDownloads { outstanding: usize, offered: BTreeSet<u32> },
-    /// Every download has been tried and the walk is owed, but has not started
+    /// The download is still running; the whole selection goes out as one
+    /// task, so there is nothing left to count down.
+    AwaitingDownload { offered: BTreeSet<u32> },
+    /// The download has been tried and the walk is owed, but has not started
     /// yet: the workspace can be mid-walk from a deliberate reopen, and a walk
     /// that could not be started must not be dropped.
     Owed { offered: BTreeSet<u32> },
@@ -439,7 +440,7 @@ impl DirectoryReingest {
     /// the walk does not re-raise the offer it came from.
     fn offered(&self) -> &BTreeSet<u32> {
         match self {
-            Self::AwaitingDownloads { offered, .. } | Self::Owed { offered } | Self::Walking { offered } => offered,
+            Self::AwaitingDownload { offered } | Self::Owed { offered } | Self::Walking { offered } => offered,
         }
     }
 }
@@ -1633,31 +1634,44 @@ impl WowsToolkitApp {
                     self.tab_state.browser_state.reset_filters();
                     self.tab_state.toasts.lock().success(t!("ui.messages.build_loaded", build = build));
                 }
-                BackgroundTaskCompletion::GameDataDownloaded { requested_build, build } => {
-                    self.tab_state.toasts.lock().success(t!("ui.messages.game_data_downloaded", build = build));
+                BackgroundTaskCompletion::GameDataDownloaded { downloaded, failures } => {
+                    for (requested_build, build) in &downloaded {
+                        self.tab_state.toasts.lock().success(t!("ui.messages.game_data_downloaded", build = build));
 
-                    // The data that was missing is now on disk, so an earlier
-                    // failure to find it says nothing about this build any more.
-                    // The requested build is cleared too: a fallback build can
-                    // be what makes it resolvable.
-                    if let Some(map) = &self.tab_state.wows_data_map {
-                        map.forget_unresolvable_build(build);
-                        map.forget_unresolvable_build(requested_build);
+                        // The data that was missing is now on disk, so an
+                        // earlier failure to find it says nothing about this
+                        // build any more. The requested build is cleared too: a
+                        // fallback build can be what makes it resolvable.
+                        if let Some(map) = &self.tab_state.wows_data_map {
+                            map.forget_unresolvable_build(*build);
+                            map.forget_unresolvable_build(*requested_build);
+                        }
+                        crate::ui::replay_parser::forget_fire_section_failures(*build);
+                        crate::ui::replay_parser::forget_fire_section_failures(*requested_build);
+
+                        if requested_build != build {
+                            debug!("downloaded build {build} as a fallback for requested build {requested_build}");
+                        }
                     }
-                    crate::ui::replay_parser::forget_fire_section_failures(build);
-                    crate::ui::replay_parser::forget_fire_section_failures(requested_build);
 
-                    // Reopen the replay that triggered the download, now that its
-                    // data is available.
-                    if let Some(path) = self.finished_download_replay.take()
+                    for build in &failures {
+                        self.tab_state
+                            .toasts
+                            .lock()
+                            .error(t!("ui.messages.game_data_build_download_failed", build = build));
+                    }
+
+                    // Reopen the replay that triggered the download. Attempted
+                    // whenever anything landed: the replay's own build may have
+                    // been served by a fallback under another request.
+                    if !downloaded.is_empty()
+                        && let Some(path) = self.finished_download_replay.take()
                         && let Some(deps) = self.tab_state.replay_dependencies()
                     {
                         update_background_task!(
                             self.tab_state.background_tasks,
                             deps.parse_replay_from_path(path, crate::task::ReplaySource::ManualOpen)
                         );
-                    } else if requested_build != build {
-                        debug!("downloaded build {build} as a fallback for requested build {requested_build}");
                     }
                 }
                 BackgroundTaskCompletion::GameDataDownloadPlanned { ticket, plan } => {
@@ -3196,24 +3210,42 @@ impl WowsToolkitApp {
 
         if let Some(GameDataFollowUp::Directory(workspace)) = &prompt.trigger {
             let workspace = *workspace;
-            self.directory_reingest.insert(
-                workspace,
-                DirectoryReingest::AwaitingDownloads { outstanding: builds.len(), offered: prompt.offered_builds() },
-            );
+            self.directory_reingest
+                .insert(workspace, DirectoryReingest::AwaitingDownload { offered: prompt.offered_builds() });
         }
 
-        for (build, version) in builds {
-            update_background_task!(
-                self.tab_state.background_tasks,
-                Some(crate::task::start_game_data_download_task(
-                    output_base.clone(),
-                    build,
-                    Some(version),
-                    false,
-                    prompt.trigger.clone(),
-                ))
-            );
+        let Some(runtime) = self.tab_state.tokio_runtime.as_ref().map(Arc::clone) else {
+            warn!("cannot download game data: tokio runtime is not available");
+            return;
+        };
+
+        let requests: Vec<crate::task::BuildRequest> = builds
+            .into_iter()
+            .filter_map(|(build, version)| {
+                let mut parts = version.split('.').filter_map(|p| p.trim().parse::<u32>().ok());
+                let version = Version {
+                    major: parts.next()?,
+                    minor: parts.next().unwrap_or(0),
+                    patch: parts.next().unwrap_or(0),
+                    build: std::num::NonZeroU32::new(build),
+                };
+                crate::task::BuildRequest::new(version)
+            })
+            .collect();
+        if requests.is_empty() {
+            return;
         }
+
+        update_background_task!(
+            self.tab_state.background_tasks,
+            Some(crate::task::start_game_data_download_task(
+                output_base,
+                requests,
+                runtime,
+                false,
+                prompt.trigger.clone(),
+            ))
+        );
     }
 
     /// One download a directory was waiting on has finished. Once the last of
@@ -3221,15 +3253,9 @@ impl WowsToolkitApp {
     /// so the replays skipped for want of game data appear without the user
     /// reopening the directory.
     fn note_reingest_download_finished(&mut self, workspace: WorkspaceId) {
-        let Some(DirectoryReingest::AwaitingDownloads { outstanding, offered }) =
-            self.directory_reingest.get_mut(&workspace)
-        else {
+        let Some(DirectoryReingest::AwaitingDownload { offered }) = self.directory_reingest.get_mut(&workspace) else {
             return;
         };
-        *outstanding = outstanding.saturating_sub(1);
-        if *outstanding > 0 {
-            return;
-        }
         let offered = std::mem::take(offered);
         self.directory_reingest.insert(workspace, DirectoryReingest::Owed { offered });
     }
@@ -5149,20 +5175,17 @@ mod download_prompt_tests {
 
         assert_eq!(app.finish_directory_reingest(workspace), None, "a walk nobody queued is an explicit open");
 
-        app.directory_reingest
-            .insert(workspace, DirectoryReingest::AwaitingDownloads { outstanding: 2, offered: offered.clone() });
+        app.directory_reingest.insert(workspace, DirectoryReingest::AwaitingDownload { offered: offered.clone() });
         assert_eq!(
             app.finish_directory_reingest(workspace),
             None,
-            "a walk finishing while downloads are still running is not the queued one"
+            "a walk finishing while the download is still running is not the queued one"
         );
 
         app.note_reingest_download_finished(workspace);
-        assert!(matches!(app.directory_reingest.get(&workspace), Some(DirectoryReingest::AwaitingDownloads { .. })));
-        app.note_reingest_download_finished(workspace);
         assert!(
             matches!(app.directory_reingest.get(&workspace), Some(DirectoryReingest::Owed { .. })),
-            "the walk is owed only once every download has been tried"
+            "the walk is owed once the single download task has been tried"
         );
 
         // The owed walk has not started, so a walk finishing now is some other

@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
@@ -36,8 +37,8 @@ pub enum GameDataFollowUp {
 /// outcome. `None` for downloads nothing is waiting on.
 pub fn start_game_data_download_task(
     output_base: PathBuf,
-    target_build: u32,
-    version_hint: Option<String>,
+    requests: Vec<crate::task::BuildRequest>,
+    runtime: Arc<tokio::runtime::Runtime>,
     force: bool,
     follow_up: Option<GameDataFollowUp>,
 ) -> BackgroundTask {
@@ -45,7 +46,7 @@ pub fn start_game_data_download_task(
     let (progress_tx, progress_rx) = mpsc::channel();
 
     crate::util::thread::spawn_logged("download-game-data", move || {
-        let _ = tx.send(download(output_base, target_build, version_hint, force, &progress_tx));
+        let _ = tx.send(download(output_base, requests, &runtime, force, &progress_tx));
     });
 
     BackgroundTask {
@@ -125,30 +126,40 @@ fn build_client() -> Result<&'static reqwest::Client, Report> {
 
 fn download(
     output_base: PathBuf,
-    target_build: u32,
-    version_hint: Option<String>,
+    requests: Vec<crate::task::BuildRequest>,
+    runtime: &tokio::runtime::Runtime,
     force: bool,
     progress_tx: &mpsc::Sender<DownloadProgress>,
 ) -> Result<BackgroundTaskCompletion, Report> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .attach_with(|| "failed to create download runtime")?;
     let client = build_client()?;
 
-    let build = runtime.block_on(wows_data_mgr::download_repo::download_build(
+    let plain: Vec<(u32, Option<String>)> =
+        requests.iter().map(|r| (r.build_u32(), Some(r.friendly_version()))).collect();
+
+    let results = runtime.block_on(wows_data_mgr::download_repo::download_builds(
         client,
         wows_data_mgr::download_repo::DEFAULT_REPO_BASE_URL,
         &output_base,
-        target_build,
-        version_hint.as_deref(),
+        &plain,
         force,
         |downloaded, total| {
             let _ = progress_tx.send(DownloadProgress { downloaded, total });
         },
-    ))?;
+    ));
 
-    Ok(BackgroundTaskCompletion::GameDataDownloaded { requested_build: target_build, build })
+    let mut downloaded = Vec::new();
+    let mut failures = Vec::new();
+    for (request, result) in requests.iter().zip(results) {
+        match result {
+            Ok(build) => downloaded.push((request.build_u32(), build)),
+            Err(e) => {
+                tracing::warn!("failed to download build {}: {e}", request.build_u32());
+                failures.push(request.build_u32());
+            }
+        }
+    }
+
+    Ok(BackgroundTaskCompletion::GameDataDownloaded { downloaded, failures })
 }
 
 fn plan(

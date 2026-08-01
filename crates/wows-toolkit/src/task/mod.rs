@@ -448,8 +448,12 @@ pub enum BackgroundTaskCompletion {
         build: u32,
     },
     GameDataDownloaded {
-        requested_build: u32,
-        build: u32,
+        /// Each requested build paired with the build actually downloaded for
+        /// it, which differs when a version fallback served it.
+        downloaded: Vec<(u32, u32)>,
+        /// Builds whose download failed. Their replays stay unread; the rest of
+        /// the selection is unaffected.
+        failures: Vec<u32>,
     },
     /// A selection of builds was resolved against the remote repository. Each
     /// requested build's availability is reported alongside the deduplicated
@@ -526,10 +530,10 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .field("available_builds", available_builds)
                 .finish(),
             Self::BuildDataLoaded { build } => f.debug_struct("BuildDataLoaded").field("build", build).finish(),
-            Self::GameDataDownloaded { requested_build, build } => f
+            Self::GameDataDownloaded { downloaded, failures } => f
                 .debug_struct("GameDataDownloaded")
-                .field("requested_build", requested_build)
-                .field("build", build)
+                .field("downloaded", downloaded)
+                .field("failures", failures)
                 .finish(),
             Self::GameDataDownloadPlanned { ticket, plan } => f
                 .debug_struct("GameDataDownloadPlanned")

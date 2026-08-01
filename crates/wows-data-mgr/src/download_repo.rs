@@ -511,6 +511,101 @@ fn build_plan(
     DownloadPlan { unique_missing_objects, resolved }
 }
 
+/// Download a selection of builds one after another into the shared CAS.
+///
+/// Sequential rather than concurrent: each build's missing-object set is
+/// computed against the CAS as it starts, so a build that runs after another
+/// fetches only what that one did not. Adjacent builds overlap by well over 90
+/// percent, so running them concurrently multiplies the transfer by the number
+/// of builds.
+///
+/// One build's failure does not stop the rest; the caller gets a result per
+/// request, in request order.
+pub async fn download_builds(
+    client: &reqwest::Client,
+    base_url: &str,
+    output_base: &Path,
+    requests: &[(u32, Option<String>)],
+    force: bool,
+    on_progress: impl Fn(u64, u64),
+) -> Vec<Result<u32, Report>> {
+    // One plan up front gives the bar a real total: the union of every selected
+    // build's missing objects, which is exactly what the sequential downloads
+    // below fetch. `None` when the plan could not be reached, in which case the
+    // running total stands in and the bar grows as each build is opened.
+    let planned_total: Option<u64> = plan_download(client, base_url, &cas::cas_root(output_base), requests)
+        .await
+        .inspect_err(|e| tracing::warn!("could not plan the download total: {e}"))
+        .ok()
+        .map(|plan| plan.unique_missing_objects as u64);
+
+    drive_downloads_with_total(
+        requests,
+        planned_total,
+        on_progress,
+        async |build: u32, version: Option<&str>, on_build_progress: &dyn Fn(u64, u64)| {
+            download_build(client, base_url, output_base, build, version, force, on_build_progress).await
+        },
+    )
+    .await
+}
+
+/// Run `download_one` over each request in turn, accumulating progress across
+/// the whole selection.
+///
+/// `download_one` is a parameter so the sequencing, the accumulation and the
+/// per-build failure isolation are exercisable without a network or a CAS.
+async fn drive_downloads_with_total<F>(
+    requests: &[(u32, Option<String>)],
+    planned_total: Option<u64>,
+    on_progress: impl Fn(u64, u64),
+    download_one: F,
+) -> Vec<Result<u32, Report>>
+where
+    F: AsyncFn(u32, Option<&str>, &dyn Fn(u64, u64)) -> Result<u32, Report>,
+{
+    let mut results = Vec::with_capacity(requests.len());
+    // Objects fetched by the builds already done. `Cell` because the progress
+    // closure borrows it while the loop advances it between builds.
+    let completed_before = std::cell::Cell::new(0u64);
+
+    for (build, version) in requests {
+        let build_total = std::cell::Cell::new(0u64);
+        let result = {
+            let report = |done: u64, total: u64| {
+                build_total.set(total);
+                let running = completed_before.get() + total;
+                on_progress(completed_before.get() + done, planned_total.unwrap_or(running).max(running));
+            };
+            download_one(*build, version.as_deref(), &report).await
+        };
+
+        match &result {
+            Ok(downloaded) => tracing::info!("downloaded game data for build {downloaded}"),
+            Err(e) => tracing::warn!("failed to download build {build}: {e}"),
+        }
+        completed_before.set(completed_before.get() + build_total.get());
+        results.push(result);
+    }
+
+    results
+}
+
+#[cfg(test)]
+/// `drive_downloads_with_total` with no planned total, which is what the tests
+/// drive: they assert the accumulation the loop does, not a total fetched from
+/// a network they do not have.
+async fn drive_downloads<F>(
+    requests: &[(u32, Option<String>)],
+    download_one: F,
+    on_progress: impl Fn(u64, u64),
+) -> Vec<Result<u32, Report>>
+where
+    F: AsyncFn(u32, Option<&str>, &dyn Fn(u64, u64)) -> Result<u32, Report>,
+{
+    drive_downloads_with_total(requests, None, on_progress, download_one).await
+}
+
 /// Plan a deduplicated download of a selection of builds: resolve each one
 /// against the remote index, fetch each distinct resolved build's metadata at
 /// most once, and report the union of missing CAS objects across the whole
@@ -552,7 +647,7 @@ pub async fn download_build(
     target_build: u32,
     version_hint: Option<&str>,
     force: bool,
-    on_progress: impl Fn(u64, u64),
+    on_progress: &dyn Fn(u64, u64),
 ) -> Result<u32, Report> {
     let index = fetch_builds_index(client, base_url).await?;
     let (entry, exact) = index
@@ -695,7 +790,10 @@ async fn download_object(
             get_bytes(client, &url).await?.ok_or_else(|| report!("content object {hash} missing from remote"))?;
         let actual = cas::hash_bytes(&bytes);
         if actual == hash {
-            cas::store(cas_root, &bytes)?;
+            let cas_root = cas_root.to_path_buf();
+            tokio::task::spawn_blocking(move || cas::store(&cas_root, &bytes))
+                .await
+                .map_err(|e| ObjectFailure::Other(report!("CAS store task failed: {e}")))??;
             return Ok(());
         }
         if attempt >= MAX_GET_ATTEMPTS {
@@ -788,7 +886,7 @@ mod tests {
         let client = reqwest::Client::builder().user_agent("wows-data-mgr-test").build().unwrap();
 
         let build = runtime
-            .block_on(download_build(&client, DEFAULT_REPO_BASE_URL, base, 296659, Some("0.6.13"), false, |_, _| {}))
+            .block_on(download_build(&client, DEFAULT_REPO_BASE_URL, base, 296659, Some("0.6.13"), false, &|_, _| {}))
             .unwrap();
         assert_eq!(build, 296659);
 
@@ -808,7 +906,7 @@ mod tests {
 
         // A second download is a cheap no-op that still reports the same build.
         let again = runtime
-            .block_on(download_build(&client, DEFAULT_REPO_BASE_URL, base, 296659, Some("0.6.13"), false, |_, _| {}))
+            .block_on(download_build(&client, DEFAULT_REPO_BASE_URL, base, 296659, Some("0.6.13"), false, &|_, _| {}))
             .unwrap();
         assert_eq!(again, 296659);
 
@@ -1133,5 +1231,76 @@ mod tests {
 
         assert_eq!(plan.resolved[0].requested_version, Some("15.2.0".to_string()));
         assert_eq!(plan.resolved[1].requested_version, None);
+    }
+
+    /// The CAS is shared, so a build downloaded after another must only fetch what
+    /// the first one did not. Computing every build's missing set before any object
+    /// has landed makes adjacent builds each fetch the full set; they overlap by
+    /// well over 90 percent in practice, so that multiplies the real transfer by
+    /// the number of builds.
+    #[test]
+    fn a_later_build_only_fetches_what_the_earlier_one_did_not() {
+        let objects = |build: u32| -> BTreeSet<String> {
+            match build {
+                1 => hashes(&["a", "b", "c"]),
+                _ => hashes(&["b", "c", "d"]),
+            }
+        };
+        let stored = std::cell::RefCell::new(BTreeSet::<String>::new());
+        let fetched = std::cell::Cell::new(0usize);
+
+        let results = futures::executor::block_on(drive_downloads(
+            &[(1, None), (2, None)],
+            |build: u32, _version: Option<&str>, _on_progress: &dyn Fn(u64, u64)| {
+                let missing: Vec<String> =
+                    objects(build).into_iter().filter(|h| !stored.borrow().contains(h)).collect();
+                fetched.set(fetched.get() + missing.len());
+                stored.borrow_mut().extend(missing);
+                std::future::ready(Ok(build))
+            },
+            |_, _| {},
+        ));
+
+        assert_eq!(fetched.get(), 4, "b and c are fetched once across both builds, not twice");
+        assert_eq!(results.len(), 2);
+    }
+
+    /// One build's failure is not the selection's. The rest still download, and the
+    /// caller gets a result per request so it can say which build went missing.
+    #[test]
+    fn a_failed_build_does_not_stop_the_ones_after_it() {
+        let results = futures::executor::block_on(drive_downloads(
+            &[(1, None), (2, None), (3, None)],
+            |build: u32, _version: Option<&str>, _on_progress: &dyn Fn(u64, u64)| {
+                std::future::ready(if build == 2 { Err(report!("build 2 is unreachable")) } else { Ok(build) })
+            },
+            |_, _| {},
+        ));
+
+        assert_eq!(results.len(), 3);
+        assert!(results[0].is_ok());
+        assert!(results[1].is_err());
+        assert!(results[2].is_ok(), "a failure must not sink the builds queued behind it");
+    }
+
+    /// The bar spans the selection. Resetting per build makes a three-build
+    /// download look like it restarts twice.
+    #[test]
+    fn progress_accumulates_across_builds() {
+        let seen = std::cell::RefCell::new(Vec::new());
+
+        futures::executor::block_on(drive_downloads(
+            &[(1, None), (2, None)],
+            |build: u32, _version: Option<&str>, on_progress: &dyn Fn(u64, u64)| {
+                on_progress(0, 2);
+                on_progress(2, 2);
+                std::future::ready(Ok(build))
+            },
+            |done, total| seen.borrow_mut().push((done, total)),
+        ));
+
+        let seen = seen.borrow();
+        assert_eq!(seen.last(), Some(&(4u64, 4u64)), "the second build continues the first build's count");
+        assert!(seen.windows(2).all(|w| w[0].0 <= w[1].0), "the count never goes backwards");
     }
 }
