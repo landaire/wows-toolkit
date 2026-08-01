@@ -94,6 +94,13 @@ impl LoadedBuilds {
         self.main.iter().chain(self.others.iter()).map(|(_, data)| Arc::clone(data)).collect()
     }
 
+    /// Whether `build` is resident, without counting as a use of it. An
+    /// availability check must not reorder the cache it is asking about.
+    fn contains(&self, build: u32) -> bool {
+        self.main.as_ref().is_some_and(|(resident, _)| *resident == build)
+            || self.others.iter().any(|(resident, _)| *resident == build)
+    }
+
     fn insert(&mut self, build: u32, data: SharedWoWsData) {
         if let Some((main_build, main_data)) = &mut self.main
             && *main_build == build
@@ -175,6 +182,27 @@ impl WoWsDataMap {
     /// How many times the loading path ran for `build`.
     pub fn resolution_attempts(&self, build: u32) -> u32 {
         self.resolution_attempts.read().get(&build).copied().unwrap_or(0)
+    }
+
+    /// Whether data for `request` is on this machine, without loading it.
+    ///
+    /// Resolution proper loads the build, which is exactly the cost a scan must
+    /// not pay to discover a build is absent: this checks what is already
+    /// resident, then the live install's `bin/<build>`, then the dump index, and
+    /// nothing else.
+    pub fn has_data_for(&self, request: &crate::task::BuildRequest) -> bool {
+        let build = request.build_u32();
+        if self.builds.read().contains(build) {
+            return true;
+        }
+        if self.wows_dir.join("bin").join(build.to_string()).exists() {
+            return true;
+        }
+        let Some(dump_base) = crate::task::replays::game_data_dump_base_with_override(&self.game_data_cache_dir) else {
+            return false;
+        };
+        let index = wows_data_mgr::builds::BuildsIndex::load(&dump_base.join("builds.toml"));
+        index.resolve_build(build, Some(&request.friendly_version())).is_some()
     }
 
     /// Custom game data cache directory as configured in settings. Empty means
@@ -536,6 +564,11 @@ mod build_resolution_tests {
         WoWsDataMap::new(root.join("wows"), "en".to_string(), root.join("cache").to_string_lossy().into_owned())
     }
 
+    fn request(major: u32, minor: u32, patch: u32, build: u32) -> crate::task::BuildRequest {
+        crate::task::BuildRequest::new(Version { major, minor, patch, build: std::num::NonZeroU32::new(build) })
+            .expect("build is present")
+    }
+
     /// Game data with nothing in it, standing in for a loaded build. The cache
     /// only ever moves the `Arc` around, so what it points at does not matter
     /// beyond being able to tell one build's data from another's.
@@ -687,6 +720,24 @@ mod build_resolution_tests {
 
         assert!(map.get(1).is_none(), "build 1 was evicted");
         assert!(!map.is_unresolvable_build(1), "an evicted build was loadable and still is");
+    }
+
+    /// The scan asks about every build in a directory. Answering by loading would
+    /// cost seconds per build for the ones that are absent, which is the whole
+    /// reason this check exists apart from resolution.
+    #[test]
+    fn checking_availability_does_not_run_the_loading_path() {
+        let map = test_map_with_no_data();
+        assert!(!map.has_data_for(&request(15, 0, 0, 9_999_999)));
+        assert_eq!(map.resolution_attempts(9_999_999), 0, "no load may be paid to answer this");
+    }
+
+    /// A build already resident is available without consulting the disk at all.
+    #[test]
+    fn a_loaded_build_is_available() {
+        let map = test_map_with_no_data();
+        map.insert(7_000_000, empty_build_data(7_000_000));
+        assert!(map.has_data_for(&request(15, 0, 0, 7_000_000)));
     }
 }
 
