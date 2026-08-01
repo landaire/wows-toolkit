@@ -3,6 +3,7 @@ pub mod game_data_download;
 pub mod networking;
 pub mod replay_upload;
 pub mod replays;
+pub mod scan;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
