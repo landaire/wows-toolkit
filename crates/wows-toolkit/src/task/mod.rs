@@ -65,6 +65,7 @@ pub use replays::load_ship_icons;
 pub use replays::load_wows_data_for_build;
 pub use replays::load_wows_files;
 pub use replays::start_background_parsing_thread;
+pub use replays::start_ingest_directory;
 pub use replays::start_load_row_summaries;
 pub use replays::start_populating_player_inspector;
 pub use replays::start_reconcile_index;
@@ -148,6 +149,11 @@ pub enum BackgroundTaskKind {
         last_progress: Option<IndexProgress>,
     },
     LoadingRowSummaries {
+        workspace: crate::db::index::rows::WorkspaceId,
+    },
+    /// Walking a picked directory and building a `Replay` per file it holds,
+    /// for the workspace that directory was opened as.
+    IngestingDirectory {
         workspace: crate::db::index::rows::WorkspaceId,
     },
 }
@@ -362,6 +368,10 @@ impl BackgroundTask {
                         ui.spinner();
                         ui.label(t!("ui.messages.loading_row_summaries"));
                     }
+                    BackgroundTaskKind::IngestingDirectory { .. } => {
+                        ui.spinner();
+                        ui.label(t!("ui.messages.reading_replay_directory"));
+                    }
                     BackgroundTaskKind::LoadingPersonalRatingData
                     | BackgroundTaskKind::UpdateTimedMessage(_)
                     | BackgroundTaskKind::OpenFileViewer(_) => {
@@ -419,6 +429,18 @@ pub enum BackgroundTaskCompletion {
         generation: u64,
         workspace: crate::db::index::rows::WorkspaceId,
     },
+    /// A picked directory finished being walked. `replays` is one entry per
+    /// file that built successfully; `skipped` counts the files that did not,
+    /// most often because no game data is installed for the build that wrote
+    /// them. `workspace` is carried so the result lands on the workspace that
+    /// asked for it even if the inspector has since moved on, and is dropped
+    /// if that workspace was closed while the walk was running.
+    DirectoryIngested {
+        workspace: crate::db::index::rows::WorkspaceId,
+        source: crate::db::index::rows::SourceId,
+        replays: HashMap<PathBuf, Arc<RwLock<Replay>>>,
+        skipped: usize,
+    },
     #[cfg(feature = "mod_manager")]
     ModManager(Box<crate::mod_manager::ModTaskCompletion>),
     NoReceiver,
@@ -467,6 +489,13 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .field("summaries", &summaries.len())
                 .field("generation", generation)
                 .field("workspace", workspace)
+                .finish(),
+            Self::DirectoryIngested { workspace, source, replays, skipped } => f
+                .debug_struct("DirectoryIngested")
+                .field("workspace", workspace)
+                .field("source", source)
+                .field("replays", &replays.len())
+                .field("skipped", skipped)
                 .finish(),
             #[cfg(feature = "mod_manager")]
             Self::ModManager(mod_manager_completion) => {

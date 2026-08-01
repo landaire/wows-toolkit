@@ -7,6 +7,7 @@ mod workspace;
 use workspace::ReplayRequestSlot;
 pub(crate) use workspace::ReplayWorkspace;
 use workspace::request_slot_id;
+pub(crate) use workspace::shorten_root;
 use workspace::workspace_group_salt;
 use workspace::workspace_leaf_salt;
 use workspace::workspace_salt;

@@ -83,6 +83,31 @@ pub fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
     }
 }
 
+/// Every `.wowsreplay` under `root`, recursively.
+///
+/// `temp.wowsreplay` is the file the game rewrites while a battle is running,
+/// so it is excluded exactly as the live listing excludes it. Symlinks are not
+/// followed: a directory the user picked may link back into its own ancestry,
+/// which would loop the walk. Entries that cannot be read are skipped rather
+/// than aborting, so one unreadable subdirectory does not lose the rest of a
+/// dropped tree. The result is sorted so an ingest visits a directory in the
+/// same order every time.
+pub fn walk_replay_files(root: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+        .map(|entry| entry.into_path())
+        .filter(|path| {
+            path.extension().is_some_and(|extension| extension == "wowsreplay")
+                && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
+        })
+        .collect();
+    files.sort();
+    files
+}
+
 #[instrument(skip(vfs))]
 pub fn load_ribbon_icons(
     vfs: &VfsPath,
@@ -1452,11 +1477,150 @@ pub fn start_load_row_summaries(
     BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingRowSummaries { workspace } }
 }
 
+/// Walk `root`, resolve or create its index source, and build a [`Replay`] per
+/// file it holds, for the workspace `root` was opened as.
+///
+/// The build is resolved per replay rather than once for the directory: a
+/// dropped folder routinely spans game versions, and the single-latest-build
+/// shortcut `load_wows_files` takes would panic on the first replay from a
+/// version that is not the newest one installed.
+pub fn start_ingest_directory(
+    deps: crate::data::wows_data::ReplayDependencies,
+    pool: sqlx::SqlitePool,
+    tokio_runtime: Arc<tokio::runtime::Runtime>,
+    workspace: crate::db::index::rows::WorkspaceId,
+    root: PathBuf,
+) -> BackgroundTask {
+    let (tx, rx) = mpsc::channel();
+
+    crate::util::thread::spawn_logged("ingest-directory", move || {
+        let _ = tx.send(run_ingest_directory(deps, pool, tokio_runtime, workspace, root));
+    });
+
+    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::IngestingDirectory { workspace } }
+}
+
+fn run_ingest_directory(
+    deps: crate::data::wows_data::ReplayDependencies,
+    pool: sqlx::SqlitePool,
+    tokio_runtime: Arc<tokio::runtime::Runtime>,
+    workspace: crate::db::index::rows::WorkspaceId,
+    root: PathBuf,
+) -> Result<BackgroundTaskCompletion, Report> {
+    let source = tokio_runtime
+        .block_on(crate::db::index::query::ensure_source(
+            &pool,
+            &crate::ui::replay_parser::shorten_root(&root),
+            crate::db::index::rows::SourceKind::ImportedDir,
+            &root,
+            jiff::Timestamp::now(),
+        ))
+        .map_err(|e| report!("failed to resolve replay index source for {}: {e}", root.display()))?;
+
+    let mut replays = HashMap::new();
+    let mut skipped = 0usize;
+
+    for path in walk_replay_files(&root) {
+        // One unreadable, malformed or version-orphaned file must cost only
+        // itself. An uncaught parser panic would take this thread with it and
+        // leave the rest of the directory unread.
+        let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::data::wows_data::ReplayLoader::build_replay_from_path(&deps, path.clone())
+        }));
+
+        match built {
+            Ok(Ok(replay)) => {
+                replays.insert(path, replay);
+            }
+            Ok(Err(e)) => {
+                skipped += 1;
+                warn!("skipping replay {}: {e}", path.display());
+            }
+            Err(_) => {
+                skipped += 1;
+                warn!("panic while reading replay {}, skipping it", path.display());
+            }
+        }
+    }
+
+    Ok(BackgroundTaskCompletion::DirectoryIngested { workspace, source, replays, skipped })
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use sqlx::sqlite::SqlitePoolOptions;
 
     use super::*;
+
+    /// Creates `root/relative`, including any parent directories.
+    fn touch(root: &Path, relative: &str) -> PathBuf {
+        let path = root.join(relative);
+        std::fs::create_dir_all(path.parent().expect("a relative path under root always has a parent")).unwrap();
+        std::fs::write(&path, b"not a real replay").unwrap();
+        path
+    }
+
+    fn walked(root: &Path) -> BTreeSet<PathBuf> {
+        walk_replay_files(root).into_iter().collect()
+    }
+
+    /// The exact set of paths, not just how many: a walk that recursed but
+    /// returned the wrong three files would pass a count-only assertion.
+    #[test]
+    fn the_walk_finds_replays_in_nested_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let top = touch(root, "top.wowsreplay");
+        let nested = touch(root, "sub/nested.wowsreplay");
+        let deeper = touch(root, "sub/deeper/still/deeper.wowsreplay");
+
+        assert_eq!(walked(root), BTreeSet::from([top, nested, deeper]));
+    }
+
+    /// The in-progress file the game keeps rewriting is never a listed replay.
+    /// A legitimate sibling is present so an implementation that returns
+    /// nothing at all cannot pass this.
+    #[test]
+    fn the_walk_excludes_temp_wowsreplay_but_keeps_its_siblings() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "temp.wowsreplay");
+        touch(root, "sub/temp.wowsreplay");
+        let real = touch(root, "real.wowsreplay");
+        let nested_real = touch(root, "sub/real.wowsreplay");
+
+        assert_eq!(walked(root), BTreeSet::from([real, nested_real]));
+    }
+
+    #[test]
+    fn the_walk_excludes_non_replay_extensions() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "notes.txt");
+        touch(root, "tempArenaInfo.json");
+        touch(root, "archive.wowsreplay.zip");
+        touch(root, "noextension");
+        let real = touch(root, "real.wowsreplay");
+
+        assert_eq!(walked(root), BTreeSet::from([real]));
+    }
+
+    #[test]
+    fn the_walk_of_an_empty_directory_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("sub/deeper")).unwrap();
+        assert!(walk_replay_files(dir.path()).is_empty());
+    }
+
+    /// A directory the user picked may no longer exist by the time the ingest
+    /// thread walks it. That must read as no replays, not a panic.
+    #[test]
+    fn the_walk_of_a_missing_directory_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(walk_replay_files(&dir.path().join("does-not-exist")).is_empty());
+    }
 
     async fn mem_pool() -> sqlx::SqlitePool {
         let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();

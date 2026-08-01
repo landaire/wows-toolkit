@@ -26,6 +26,10 @@ pub(crate) struct ReplayWorkspace {
     /// yet. An imported workspace sets this once its source is ensured.
     pub source: Option<SourceId>,
     pub replay_files: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
+    /// True while a directory ingest is walking this workspace's root, so
+    /// re-picking the same directory cannot start a second walk over it.
+    /// Owned by the in-flight task, which clears it when it finishes.
+    pub ingest_in_flight: bool,
     /// Index-sourced display data for the listing, keyed by replay path.
     /// Reloaded whenever `index_generation()` moves past
     /// `replay_row_summaries_generation`.
@@ -65,6 +69,7 @@ impl ReplayWorkspace {
             root,
             source: None,
             replay_files: None,
+            ingest_in_flight: false,
             replay_row_summaries: HashMap::new(),
             replay_row_summaries_generation: None,
             replay_row_summaries_loading: false,
@@ -117,10 +122,10 @@ impl ReplayWorkspace {
     /// Clears this workspace's listing and dock state. Called when the WoWs
     /// directory changes to ensure no stale data from the previous directory
     /// persists. `root` is preserved: a reset is not a change of directory.
-    /// `replay_row_summaries_loading` is preserved: it is owned by an
-    /// in-flight background task, which clears it on completion, and clearing
-    /// it here would let a second load dispatch while the first is still
-    /// running.
+    /// `replay_row_summaries_loading` and `ingest_in_flight` are preserved:
+    /// both are owned by an in-flight background task, which clears them on
+    /// completion, and clearing them here would let a second task dispatch
+    /// while the first is still running.
     pub fn reset(&mut self) {
         self.replay_dock_state = egui_dock::DockState::new(vec![]);
         self.next_replay_tab_id = 0;
@@ -347,6 +352,7 @@ mod tests {
             },
         );
         ws.replay_row_summaries_generation = Some(7);
+        ws.ingest_in_flight = true;
         ws.replay_row_summaries_loading = true;
         ws.replay_row_summaries_loaded = true;
         ws.replay_rows_need_reindex_scan = true;
@@ -359,6 +365,7 @@ mod tests {
 
         assert_eq!(ws.root, Some(PathBuf::from("replays")));
         assert!(ws.replay_row_summaries_loading, "an in-flight load owns this flag and clears it on completion");
+        assert!(ws.ingest_in_flight, "an in-flight ingest owns this flag and clears it on completion");
         assert!(ws.replay_files.is_none());
         assert!(ws.replay_row_summaries.is_empty());
         assert_eq!(ws.replay_row_summaries_generation, None);

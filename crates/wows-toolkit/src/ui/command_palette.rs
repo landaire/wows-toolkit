@@ -46,6 +46,10 @@ pub enum PaletteAction {
         path: PathBuf,
     },
     OpenReplayFile,
+    /// Pick a directory and open it as its own replay workspace. The folder
+    /// picker runs at dispatch time: `root_entries` is rebuilt every frame,
+    /// so a dialog opened while entries are built would refire endlessly.
+    OpenReplayDirectory,
     OpenSearchTab,
     IndexAllReplays,
     GoToTab(Tab),
@@ -145,6 +149,10 @@ impl CommandPalette {
         entries.push(egui_palette::Entry::new("Games I won", PaletteAction::OpenSearchWith(won_query)));
 
         entries.push(egui_palette::Entry::new(rust_i18n::t!("ui.replay.open_manually"), PaletteAction::OpenReplayFile));
+        entries.push(egui_palette::Entry::new(
+            rust_i18n::t!("ui.replay.open_directory"),
+            PaletteAction::OpenReplayDirectory,
+        ));
         entries.push(egui_palette::Entry::new("Advanced search...", PaletteAction::OpenSearchTab));
         entries.push(egui_palette::Entry::new("Index all replays", PaletteAction::IndexAllReplays));
         for (label, choice) in [

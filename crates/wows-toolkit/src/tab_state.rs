@@ -487,6 +487,10 @@ pub struct TabState {
     /// key order is also the order the workspaces were opened -- which a
     /// later phase needs to restore tabs.
     pub workspaces: std::collections::BTreeMap<WorkspaceId, ReplayWorkspace>,
+    /// The next id [`Self::open_directory_workspace`] will hand out. Starts at
+    /// one because zero is [`WorkspaceId::LIVE`], and only ever increases, so a
+    /// closed workspace's id is never reused by a later one.
+    next_workspace_id: u64,
     /// Which workspace the replay inspector is currently showing. Private so
     /// it can only be set through [`Self::set_active_workspace`], which
     /// refuses to point it at a workspace that is not open.
@@ -625,6 +629,7 @@ impl Default for TabState {
             toasts: Arc::new(parking_lot::Mutex::new(egui_notify::Toasts::default())),
             live_workspace: ReplayWorkspace::new(None),
             workspaces: std::collections::BTreeMap::new(),
+            next_workspace_id: 1,
             active_workspace_id: WorkspaceId::LIVE,
             twitch_update_sender: Default::default(),
             twitch_state: Default::default(),
@@ -697,6 +702,26 @@ impl TabState {
 
     pub fn active_workspace_id(&self) -> WorkspaceId {
         self.active_workspace_id
+    }
+
+    /// Opens `root` as a replay workspace and returns the id of the workspace
+    /// that lists it.
+    ///
+    /// A root that is already open resolves to the workspace already listing
+    /// it rather than a second one, so the caller focuses the tab that is
+    /// already there instead of stacking duplicates. The live workspace is
+    /// never a candidate: its root is the game's own replays directory, which
+    /// has its own permanent tab.
+    pub fn open_directory_workspace(&mut self, root: PathBuf) -> WorkspaceId {
+        if let Some((&id, _)) =
+            self.workspaces.iter().find(|(_, workspace)| workspace.root.as_deref() == Some(root.as_path()))
+        {
+            return id;
+        }
+        let id = WorkspaceId(self.next_workspace_id);
+        self.next_workspace_id += 1;
+        self.workspaces.insert(id, ReplayWorkspace::new(Some(root)));
+        id
     }
 
     /// Closes a non-live workspace: drops it from `workspaces`, and if it was
@@ -1502,6 +1527,67 @@ mod tests {
             state.workspace_for_tab(WorkspaceId(42)).is_none(),
             "a tab naming a closed workspace must not resolve to live_workspace"
         );
+    }
+
+    /// The map length matters as much as the id: an implementation that
+    /// returned the existing id but *also* inserted a second entry for the
+    /// same root would satisfy an id-only assertion and still leave the user
+    /// with two tabs listing one directory.
+    #[test]
+    fn opening_the_same_root_twice_returns_the_same_id_without_growing_the_map() {
+        let mut state = TabState::default();
+        let first = state.open_directory_workspace(PathBuf::from("D:/replays"));
+        assert_eq!(state.workspaces.len(), 1, "the first open must create exactly one workspace");
+
+        let second = state.open_directory_workspace(PathBuf::from("D:/replays"));
+
+        assert_eq!(second, first, "a root that is already open must resolve to its existing workspace");
+        assert_eq!(state.workspaces.len(), 1, "re-opening a root must not insert a second workspace");
+        assert_eq!(
+            state.workspace(first).expect("just opened").root,
+            Some(PathBuf::from("D:/replays")),
+            "the surviving workspace must still list the root it was opened for"
+        );
+    }
+
+    #[test]
+    fn opening_two_different_roots_gives_two_workspaces_with_different_ids() {
+        let mut state = TabState::default();
+        let first = state.open_directory_workspace(PathBuf::from("D:/replays"));
+        let second = state.open_directory_workspace(PathBuf::from("D:/other"));
+
+        assert_ne!(first, second, "two directories must not share one workspace");
+        assert_eq!(state.workspaces.len(), 2);
+        assert_eq!(state.workspace(first).expect("just opened").root, Some(PathBuf::from("D:/replays")));
+        assert_eq!(state.workspace(second).expect("just opened").root, Some(PathBuf::from("D:/other")));
+    }
+
+    /// `WorkspaceId::LIVE` names the game's own replays directory and has its
+    /// own permanent tab. Handing it out here would make a directory tab draw
+    /// (and closing it destroy) the live listing instead.
+    #[test]
+    fn opening_a_directory_never_returns_the_live_id() {
+        let mut state = TabState::default();
+        state.live_workspace.root = Some(PathBuf::from("D:/replays"));
+
+        let id = state.open_directory_workspace(PathBuf::from("D:/replays"));
+
+        assert_ne!(id, WorkspaceId::LIVE, "even the live root must open as its own workspace, not as LIVE");
+        assert_eq!(state.workspaces.len(), 1);
+    }
+
+    /// Ids are handed out monotonically and never reused, so a completion that
+    /// arrives for a workspace the user already closed cannot land on whichever
+    /// directory was opened next.
+    #[test]
+    fn a_closed_workspaces_id_is_not_reused_by_the_next_directory() {
+        let mut state = TabState::default();
+        let first = state.open_directory_workspace(PathBuf::from("D:/replays"));
+        state.close_workspace(first);
+
+        let second = state.open_directory_workspace(PathBuf::from("D:/other"));
+
+        assert_ne!(second, first, "a closed workspace's id must not be recycled");
     }
 
     #[test]

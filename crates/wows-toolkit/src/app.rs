@@ -83,11 +83,30 @@ pub struct ToolkitTabViewer<'a> {
 impl ToolkitTabViewer<'_> {
     /// Builds a tab's title. A `Replays` tab needs `tab_state` to look up the
     /// workspace it names, so this lives on the viewer rather than on `Tab`
-    /// itself. The live workspace's title is the same "Replay parser" label
-    /// it has always had; a non-live workspace uses the same label today and
-    /// gains a distinguishing name once workspaces can be named.
+    /// itself. The live workspace's title is the same "Replay parser" label it
+    /// has always had; a directory workspace is titled with its own shortened
+    /// root, which is the only thing distinguishing two directory tabs from
+    /// each other.
     fn tab_title(&self, tab: &Tab) -> String {
         use rust_i18n::t;
+        if let Tab::Replays(id) = tab
+            && *id != WorkspaceId::LIVE
+        {
+            // A tab outlives its workspace by a frame on the close path, and a
+            // root can be empty, so neither the lookup nor the shortening is
+            // allowed to be the only source of the title.
+            let named = self
+                .tab_state
+                .workspace(*id)
+                .and_then(|workspace| workspace.root.as_deref())
+                .map(crate::ui::replay_parser::shorten_root)
+                .filter(|title| !title.is_empty());
+            let title = match named {
+                Some(title) => title,
+                None => t!("ui.tabs.replay_directory").into_owned(),
+            };
+            return wt_translations::icon_t(icons::FOLDER_OPEN, &title);
+        }
         let (icon, key) = match tab {
             Tab::Unpacker => (icons::ARCHIVE, "ui.tabs.unpacker"),
             Tab::Settings => (icons::GEAR_FINE, "ui.tabs.settings"),
@@ -887,6 +906,15 @@ impl WowsToolkitApp {
                                     target.replay_row_summaries_loading = false;
                                 }
                             }
+                            // Cleared here rather than in the completion arm so
+                            // an errored or disconnected ingest also releases
+                            // the workspace for another attempt.
+                            BackgroundTaskKind::IngestingDirectory { workspace } => {
+                                let workspace_id = *workspace;
+                                if let Some(target) = self.tab_state.workspace_mut(workspace_id) {
+                                    target.ingest_in_flight = false;
+                                }
+                            }
                         }
 
                         self.handle_task_completion(ui.ctx(), result);
@@ -1335,6 +1363,27 @@ impl WowsToolkitApp {
                         ));
                     } else {
                         self.tab_state.toasts.lock().info(t!("ui.messages.replays_already_indexed", total = total));
+                    }
+                }
+                BackgroundTaskCompletion::DirectoryIngested { workspace, source, replays, skipped } => {
+                    // A workspace that is gone was closed while the walk ran,
+                    // and the result belongs to nothing else: carrying the id
+                    // is what lets this be dropped instead of landing on
+                    // whichever listing happens to be showing.
+                    if let Some(target) = self.tab_state.workspace_mut(workspace) {
+                        target.source = Some(source);
+                        target.replay_files = Some(replays);
+                        // Any summaries already loaded were read against the
+                        // live source. Drop the stamp so the next frame reads
+                        // them against the source just resolved.
+                        target.replay_row_summaries_generation = None;
+
+                        if skipped > 0 {
+                            self.tab_state
+                                .toasts
+                                .lock()
+                                .warning(t!("ui.messages.directory_replays_skipped", skipped = skipped));
+                        }
                     }
                 }
                 BackgroundTaskCompletion::RowSummariesLoaded { summaries, workspace, .. } => {
@@ -3036,6 +3085,44 @@ impl WowsToolkitApp {
         }
     }
 
+    /// Open `root` as a replay workspace: focus its tab, opening one if this
+    /// directory is not already listed, and start the walk that fills it.
+    ///
+    /// The ingest needs game data, a database and a runtime; without all three
+    /// the tab still opens, showing an empty listing, rather than the pick
+    /// silently doing nothing.
+    fn open_replay_directory(&mut self, root: PathBuf) {
+        // `build_replay_parser_tab` makes the tab it draws the active
+        // workspace, so focusing the tab is all this needs to do.
+        let id = self.tab_state.open_directory_workspace(root.clone());
+        self.focus_tab(&Tab::Replays(id));
+
+        let already_walking = self.tab_state.workspace(id).is_some_and(|workspace| workspace.ingest_in_flight);
+        if already_walking {
+            return;
+        }
+
+        let ingest_deps = match (
+            self.tab_state.replay_dependencies(),
+            self.tab_state.db_pool.as_ref(),
+            self.tab_state.tokio_runtime.as_ref(),
+        ) {
+            (Some(deps), Some(pool), Some(rt)) => Some((deps, pool.clone(), Arc::clone(rt))),
+            _ => None,
+        };
+        let Some((deps, pool, rt)) = ingest_deps else {
+            return;
+        };
+
+        if let Some(workspace) = self.tab_state.workspace_mut(id) {
+            workspace.ingest_in_flight = true;
+        }
+        update_background_task!(
+            self.tab_state.background_tasks,
+            Some(crate::task::start_ingest_directory(deps, pool, rt, id, root))
+        );
+    }
+
     /// Dispatch a palette-picked action against app state.
     fn dispatch_palette_action(&mut self, ctx: &egui::Context, action: crate::ui::command_palette::PaletteAction) {
         use crate::db::index::query_model::Chip;
@@ -3079,6 +3166,11 @@ impl WowsToolkitApp {
             PaletteAction::OpenReplayFile => {
                 if let Some(path) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() {
                     self.open_replay_path(path);
+                }
+            }
+            PaletteAction::OpenReplayDirectory => {
+                if let Some(root) = rfd::FileDialog::new().pick_folder() {
+                    self.open_replay_directory(root);
                 }
             }
             PaletteAction::IndexAllReplays => {
@@ -3419,7 +3511,7 @@ pub fn mitigate_wgpu_mem_leak(ctx: &egui::Context) -> bool {
 }
 
 #[cfg(test)]
-mod tab_closeability_tests {
+mod tab_viewer_tests {
     use super::*;
 
     /// Named `is_closeable`, not `closeable`, on purpose: `TabViewer::closeable`
@@ -3448,5 +3540,75 @@ mod tab_closeability_tests {
         for tab in [Tab::Search, Tab::Replays(WorkspaceId(1))] {
             assert!(viewer.is_closeable(&tab), "must be closeable: {}", viewer.tab_title(&tab));
         }
+    }
+
+    /// Two directory tabs would otherwise carry the same static label and be
+    /// indistinguishable, so the title has to come from the workspace's own
+    /// root. Asserts the full string, not a substring, because the icon and
+    /// the shortening are both part of what the tab strip shows.
+    #[test]
+    fn a_directory_tab_is_titled_with_its_shortened_root() {
+        let mut tab_state = TabState::default();
+        let id = tab_state.open_directory_workspace(PathBuf::from("G:/dev/wows/replays"));
+        let viewer = ToolkitTabViewer { tab_state: &mut tab_state };
+
+        let title = viewer.tab_title(&Tab::Replays(id));
+
+        assert_eq!(title, wt_translations::icon_t(icons::FOLDER_OPEN, "G:/d/w/replays"));
+        assert_ne!(
+            title,
+            viewer.tab_title(&Tab::Replays(WorkspaceId::LIVE)),
+            "a directory tab must not share the live tab's label"
+        );
+    }
+
+    /// Two directories whose names differ only deep in the path still have to
+    /// produce different tab strip entries.
+    #[test]
+    fn two_directory_tabs_get_different_titles() {
+        let mut tab_state = TabState::default();
+        let first = tab_state.open_directory_workspace(PathBuf::from("D:/archive/2025"));
+        let second = tab_state.open_directory_workspace(PathBuf::from("D:/archive/2026"));
+        let viewer = ToolkitTabViewer { tab_state: &mut tab_state };
+
+        assert_eq!(viewer.tab_title(&Tab::Replays(first)), wt_translations::icon_t(icons::FOLDER_OPEN, "D:/a/2025"));
+        assert_eq!(viewer.tab_title(&Tab::Replays(second)), wt_translations::icon_t(icons::FOLDER_OPEN, "D:/a/2026"));
+    }
+
+    /// The live tab keeps the label it has always had, whatever its root is.
+    #[test]
+    fn the_live_replays_tab_keeps_its_translated_label() {
+        let mut tab_state = TabState::default();
+        tab_state.live_workspace.root = Some(PathBuf::from("G:/dev/wows/replays"));
+        let viewer = ToolkitTabViewer { tab_state: &mut tab_state };
+
+        assert_eq!(
+            viewer.tab_title(&Tab::Replays(WorkspaceId::LIVE)),
+            wt_translations::icon_t(icons::MAGNIFYING_GLASS, &rust_i18n::t!("ui.tabs.replay_parser"))
+        );
+    }
+
+    /// A tab can outlive its workspace by a frame (egui_dock removes the tab
+    /// after `on_close` has already dropped the workspace), and a workspace
+    /// can exist before its root is known. Neither may panic or render a
+    /// blank tab.
+    #[test]
+    fn a_directory_tab_without_a_resolvable_root_falls_back_to_a_generic_label() {
+        let mut tab_state = TabState::default();
+        let rootless = WorkspaceId(7);
+        tab_state.workspaces.insert(rootless, crate::ui::replay_parser::ReplayWorkspace::new(None));
+        let empty_root = WorkspaceId(8);
+        tab_state.workspaces.insert(empty_root, crate::ui::replay_parser::ReplayWorkspace::new(Some(PathBuf::new())));
+        let viewer = ToolkitTabViewer { tab_state: &mut tab_state };
+
+        let expected = wt_translations::icon_t(icons::FOLDER_OPEN, &rust_i18n::t!("ui.tabs.replay_directory"));
+        assert_eq!(viewer.tab_title(&Tab::Replays(rootless)), expected);
+        assert_eq!(viewer.tab_title(&Tab::Replays(empty_root)), expected);
+        assert_eq!(
+            viewer.tab_title(&Tab::Replays(WorkspaceId(9999))),
+            expected,
+            "a closed workspace still needs a title"
+        );
+        assert!(!expected.trim().is_empty());
     }
 }

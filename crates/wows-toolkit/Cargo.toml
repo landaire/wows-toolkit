@@ -106,6 +106,7 @@ sys-locale = { workspace = true }
 ron = "0.12.1"
 egui_inbox = "0.12.0"
 memmap2 = "0.9"
+walkdir = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }

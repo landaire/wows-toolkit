@@ -771,7 +771,7 @@ impl ReplayLoader {
     /// Read a replay file and construct a [`Replay`] wired to the version-matched
     /// game data. Runs on the background thread; resolving the data may lazily
     /// load a build, which is exactly the work we keep off the UI thread.
-    fn build_replay_from_path(
+    pub(crate) fn build_replay_from_path(
         deps: &ReplayDependencies,
         path: PathBuf,
     ) -> Result<Arc<RwLock<Replay>>, rootcause::Report> {
