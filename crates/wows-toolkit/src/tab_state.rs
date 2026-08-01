@@ -1004,6 +1004,17 @@ impl TabState {
         self.persisted.write().chart_configs.remove(&id);
     }
 
+    /// Point the app at a different game data cache. The live data map keeps
+    /// its own copy of this directory and remembers which builds it could not
+    /// find there, so both follow the setting.
+    pub(crate) fn set_game_data_cache_dir(&mut self, dir: String) {
+        self.persisted.write().settings.game.game_data_cache_dir = dir.clone();
+        self.game_data_cache_stats = None;
+        if let Some(map) = self.wows_data_map.as_mut() {
+            map.set_game_data_cache_dir(dir);
+        }
+    }
+
     /// Clears all game-related state. Called when the WoWs directory changes
     /// to ensure no stale data from the previous directory persists.
     pub(crate) fn reset_game_state(&mut self) {

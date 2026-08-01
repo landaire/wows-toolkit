@@ -1529,6 +1529,15 @@ impl WowsToolkitApp {
                 BackgroundTaskCompletion::GameDataDownloaded { requested_build, build } => {
                     self.tab_state.toasts.lock().success(t!("ui.messages.game_data_downloaded", build = build));
 
+                    // The data that was missing is now on disk, so an earlier
+                    // failure to find it says nothing about this build any more.
+                    // The requested build is cleared too: a fallback build can
+                    // be what makes it resolvable.
+                    if let Some(map) = &self.tab_state.wows_data_map {
+                        map.forget_unresolvable_build(build);
+                        map.forget_unresolvable_build(requested_build);
+                    }
+
                     // Reopen the replay that triggered the download, now that its
                     // data is available.
                     if let Some(path) = self.finished_download_replay.take()

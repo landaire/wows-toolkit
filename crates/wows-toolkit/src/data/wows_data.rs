@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
@@ -47,6 +48,13 @@ pub type SharedWoWsData = Arc<RwLock<Box<WorldOfWarshipsData>>>;
 #[derive(Clone)]
 pub struct WoWsDataMap {
     builds: Arc<RwLock<HashMap<u32, SharedWoWsData>>>,
+    /// Builds that were looked for and are not on this machine. Kept apart from
+    /// `builds` so a failure is never confusable with a loaded build.
+    unresolvable_builds: Arc<RwLock<HashSet<u32>>>,
+    /// How many times the loading path in [`Self::resolve_build_with_version`]
+    /// has run for each build. Reads as the number of times the full cost of a
+    /// lookup was paid.
+    resolution_attempts: Arc<RwLock<HashMap<u32, u32>>>,
     wows_dir: PathBuf,
     locale: String,
     network_job_tx: Option<mpsc::Sender<NetworkJob>>,
@@ -58,6 +66,8 @@ impl WoWsDataMap {
     pub fn new(wows_dir: PathBuf, locale: String) -> Self {
         Self {
             builds: Arc::new(RwLock::new(HashMap::new())),
+            unresolvable_builds: Arc::new(RwLock::new(HashSet::new())),
+            resolution_attempts: Arc::new(RwLock::new(HashMap::new())),
             wows_dir,
             locale,
             network_job_tx: None,
@@ -65,8 +75,27 @@ impl WoWsDataMap {
         }
     }
 
+    /// Changing where dumped game data lives can make a build that was not
+    /// findable findable, so the failures recorded against the old directory
+    /// are dropped.
     pub fn set_game_data_cache_dir(&mut self, dir: String) {
         self.game_data_cache_dir = dir;
+        self.forget_unresolvable_builds();
+    }
+
+    /// Allow `build` to be looked for again after its data was downloaded.
+    pub fn forget_unresolvable_build(&self, build: u32) {
+        self.unresolvable_builds.write().remove(&build);
+    }
+
+    /// Allow every previously unresolvable build to be looked for again.
+    pub fn forget_unresolvable_builds(&self) {
+        self.unresolvable_builds.write().clear();
+    }
+
+    /// How many times the loading path ran for `build`.
+    pub fn resolution_attempts(&self, build: u32) -> u32 {
+        self.resolution_attempts.read().get(&build).copied().unwrap_or(0)
     }
 
     /// Custom game data cache directory as configured in settings. Empty means
@@ -283,6 +312,16 @@ impl WoWsDataMap {
             return Some(data);
         }
 
+        // Every path below is expensive and every one of them stays expensive
+        // when it fails, so a build already looked for and not found is
+        // answered from the record until new data arrives for it.
+        if self.unresolvable_builds.read().contains(&build) {
+            debug!("Build {} was already looked for and is not available", build);
+            return None;
+        }
+
+        *self.resolution_attempts.write().entry(build).or_insert(0) += 1;
+
         // Constants (CONSUMABLE_IDS / BATTLE_STAGES) are version-specific. Only
         // bridge them FORWARD: an already-loaded build's constants may stand in
         // for a build we're loading that is NEWER than it (a fresh game version
@@ -392,7 +431,78 @@ impl WoWsDataMap {
             }
         }
 
+        self.unresolvable_builds.write().insert(build);
         None
+    }
+}
+
+#[cfg(test)]
+mod build_resolution_tests {
+    use super::*;
+
+    /// A map pointed at directories that hold no game data at all, so every
+    /// lookup runs the whole loading path and comes back empty: no live
+    /// install, no builds index, no legacy dump.
+    fn test_map_with_no_data() -> WoWsDataMap {
+        let root = std::env::temp_dir().join(format!("wt-no-game-data-{}", std::process::id()));
+        let mut map = WoWsDataMap::new(root.join("wows"), "en".to_string());
+        map.set_game_data_cache_dir(root.join("cache").to_string_lossy().into_owned());
+        map
+    }
+
+    /// The loading path reads and parses the whole builds index and clones every
+    /// loaded build's constants. A directory of replays for one build the user
+    /// does not have pays that once per replay unless the failure is remembered.
+    #[test]
+    fn an_unresolvable_build_is_only_attempted_once() {
+        let map = test_map_with_no_data();
+        assert!(map.resolve_build(9_999_999).is_none());
+        assert!(map.resolve_build(9_999_999).is_none());
+        assert!(map.resolve_build(9_999_999).is_none());
+        assert_eq!(map.resolution_attempts(9_999_999), 1);
+    }
+
+    /// Remembering one build's failure must not stand in for every build's:
+    /// a second build is a separate question and is still asked.
+    #[test]
+    fn a_different_build_is_still_attempted() {
+        let map = test_map_with_no_data();
+        assert!(map.resolve_build(9_999_999).is_none());
+        assert!(map.resolve_build(8_888_888).is_none());
+        assert_eq!(map.resolution_attempts(9_999_999), 1);
+        assert_eq!(map.resolution_attempts(8_888_888), 1);
+    }
+
+    /// The app tells the user which build to download and then downloads it.
+    /// A record that outlives that download leaves the app refusing to read
+    /// replays whose data is now sitting on disk.
+    #[test]
+    fn downloading_a_build_lets_it_be_attempted_again() {
+        let map = test_map_with_no_data();
+        assert!(map.resolve_build(9_999_999).is_none());
+        assert_eq!(map.resolution_attempts(9_999_999), 1);
+
+        map.forget_unresolvable_build(9_999_999);
+
+        assert!(map.resolve_build(9_999_999).is_none());
+        assert_eq!(map.resolution_attempts(9_999_999), 2, "the download must buy the build a second attempt");
+    }
+
+    /// Pointing the app at a different game data cache is the other way a
+    /// previously missing build arrives, and it invalidates every record.
+    #[test]
+    fn changing_the_cache_directory_lets_every_build_be_attempted_again() {
+        let mut map = test_map_with_no_data();
+        assert!(map.resolve_build(9_999_999).is_none());
+        assert!(map.resolve_build(8_888_888).is_none());
+
+        let elsewhere = std::env::temp_dir().join(format!("wt-other-cache-{}", std::process::id()));
+        map.set_game_data_cache_dir(elsewhere.to_string_lossy().into_owned());
+
+        assert!(map.resolve_build(9_999_999).is_none());
+        assert!(map.resolve_build(8_888_888).is_none());
+        assert_eq!(map.resolution_attempts(9_999_999), 2);
+        assert_eq!(map.resolution_attempts(8_888_888), 2);
     }
 }
 

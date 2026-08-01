@@ -209,15 +209,12 @@ impl ToolkitTabViewer<'_> {
                             .desired_width(ui.available_width() - 70.0),
                     );
                     if response.changed() {
-                        self.tab_state.persisted.write().settings.game.game_data_cache_dir = cache_dir;
-                        self.tab_state.game_data_cache_stats = None;
+                        self.tab_state.set_game_data_cache_dir(cache_dir);
                     }
                     if ui.button(t!("ui.settings.wows.cache.browse")).clicked()
                         && let Some(folder) = rfd::FileDialog::new().pick_folder()
                     {
-                        self.tab_state.persisted.write().settings.game.game_data_cache_dir =
-                            folder.to_string_lossy().into_owned();
-                        self.tab_state.game_data_cache_stats = None;
+                        self.tab_state.set_game_data_cache_dir(folder.to_string_lossy().into_owned());
                     }
                 });
 
