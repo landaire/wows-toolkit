@@ -474,6 +474,11 @@ pub struct TabState {
     pub tokio_runtime: Option<Arc<tokio::runtime::Runtime>>,
     /// SQLite connection pool for persistence.
     pub db_pool: Option<sqlx::SqlitePool>,
+    /// Id of the live replay-index source, remembered once a lookup finds it.
+    /// The indexer creates that source, never a reader, so it stays `None`
+    /// until the indexer has written it. Private so every reader goes through
+    /// [`Self::live_index_source`] and shares the one lookup.
+    live_index_source: Option<crate::db::index::rows::SourceId>,
     pub window_settings: SharedWindowSettings,
     pub file_watcher: Option<RecommendedWatcher>,
     pub file_receiver: Option<mpsc::Receiver<NotifyFileEvent>>,
@@ -681,6 +686,7 @@ impl Default for TabState {
             tactics_boards: Default::default(),
             tactics_auto_opened_board_ids: Default::default(),
             db_pool: None,
+            live_index_source: None,
             window_settings: Default::default(),
             active_viewports: Arc::new(parking_lot::Mutex::new(Vec::new())),
             save_notify: Arc::new(tokio::sync::Notify::new()),
@@ -735,6 +741,32 @@ impl TabState {
         self.workspaces.remove(&id);
         if self.active_workspace_id == id {
             self.set_active_workspace(WorkspaceId::LIVE);
+        }
+    }
+
+    /// The live replay-index source, looked up through the pool the first time
+    /// it is needed and remembered afterwards.
+    ///
+    /// `None` while the indexer has not created that source yet, and when
+    /// there is no pool or runtime to ask through. A caller that needs to scope
+    /// work to the live replays has to treat `None` as "cannot scope", never as
+    /// "scope to everything".
+    pub fn live_index_source(&mut self) -> Option<crate::db::index::rows::SourceId> {
+        if self.live_index_source.is_some() {
+            return self.live_index_source;
+        }
+        let (Some(pool), Some(rt)) = (self.db_pool.as_ref(), self.tokio_runtime.as_ref()) else {
+            return None;
+        };
+        match rt.block_on(crate::db::index::query::live_source_id(pool)) {
+            Ok(found) => {
+                self.live_index_source = found;
+                found
+            }
+            Err(e) => {
+                warn!("failed to resolve the live replay index source: {e}");
+                None
+            }
         }
     }
 

@@ -43,6 +43,7 @@ use wows_data_mgr::download_repo::DownloadPlan;
 use wows_data_mgr::download_repo::RemoteAvailability;
 
 use crate::data::settings::DataSharingMode;
+use crate::db::index::rows::SourceId;
 use crate::db::index::rows::WorkspaceId;
 use crate::icons;
 use crate::tab_state::TabState;
@@ -86,7 +87,78 @@ pub struct ToolkitTabViewer<'a> {
     pub tab_state: &'a mut TabState,
 }
 
+/// Which index source a `Tab::Replays` context-menu search covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TabSearchScope {
+    /// Search this source, which holds exactly the tab's own replays.
+    Source(SourceId),
+    /// There is no source to scope by: an imported workspace's ingest has not
+    /// reached `ensure_source`, or the indexer has not created the live source.
+    /// The entry is drawn disabled, because searching the whole library when
+    /// the user asked for one directory returns plausible-looking wrong results
+    /// with nothing on screen to say so.
+    Unresolved,
+}
+
+/// The scope a replay tab's search should use. The live workspace never
+/// carries a source of its own -- the indexer owns the live source -- so it
+/// reads `live`. Every other workspace reads only its own source, with no
+/// fallback to `live`.
+fn replay_tab_search_scope(
+    id: WorkspaceId,
+    workspace: Option<&crate::ui::replay_parser::ReplayWorkspace>,
+    live: Option<SourceId>,
+) -> TabSearchScope {
+    let source = if id == WorkspaceId::LIVE { live } else { workspace.and_then(|workspace| workspace.source) };
+    match source {
+        Some(source) => TabSearchScope::Source(source),
+        None => TabSearchScope::Unresolved,
+    }
+}
+
+/// A query selecting every match indexed under `source` and nothing else.
+fn source_scoped_query(source: SourceId) -> crate::db::index::query_model::Query {
+    use crate::db::index::query_model::Chip;
+    use crate::db::index::query_model::Connector;
+    use crate::db::index::query_model::Field;
+    use crate::db::index::query_model::Group;
+    use crate::db::index::query_model::Op;
+    use crate::db::index::query_model::Query;
+    use crate::db::index::query_model::Value;
+
+    Query {
+        groups: vec![Group { chips: vec![Chip { field: Field::Group, op: Op::Is, value: Value::Source(source) }] }],
+        connector: Connector::And,
+    }
+}
+
+/// Draws the replay tab's search entry and returns its response, so both the
+/// caller and a test can see whether it is enabled.
+fn replay_search_menu_entry(ui: &mut Ui, scope: TabSearchScope) -> egui::Response {
+    let enabled = matches!(scope, TabSearchScope::Source(_));
+    let response = ui.add_enabled(enabled, egui::Button::new(t!("ui.tabs.search_these_replays")));
+    if enabled {
+        response
+    } else {
+        response.on_disabled_hover_text(t!("ui.tabs.search_these_replays_unavailable").into_owned())
+    }
+}
+
 impl ToolkitTabViewer<'_> {
+    /// The scope a search launched from the `Tab::Replays(id)` tab covers.
+    fn resolve_tab_search_scope(&mut self, id: WorkspaceId) -> TabSearchScope {
+        let live = self.tab_state.live_index_source();
+        replay_tab_search_scope(id, self.tab_state.workspace(id), live)
+    }
+
+    /// Hand the Search tab a query covering `source` alone, and focus it. Both
+    /// halves matter: the query without the focus leaves the user looking at
+    /// the tab they right-clicked.
+    fn search_replay_source(&mut self, source: SourceId) {
+        self.tab_state.pending_search_query = Some(source_scoped_query(source));
+        self.tab_state.pending_focus_search = true;
+    }
+
     /// Builds a tab's title. A `Replays` tab needs `tab_state` to look up the
     /// workspace it names, so this lives on the viewer rather than on `Tab`
     /// itself. The live workspace's title is the same "Replay parser" label it
@@ -153,6 +225,23 @@ impl TabViewer for ToolkitTabViewer<'_> {
             Tab::ArmorViewer => self.build_armor_viewer_tab(ui),
             Tab::Stats => self.build_stats_tab(ui),
             Tab::Search => self.build_search_tab(ui),
+        }
+    }
+
+    /// Right-clicking a replay tab offers a search over just that tab's own
+    /// replays. egui_dock 0.20.1 calls this hook from its leaf tab-bar
+    /// (`show/leaf.rs`) whenever `DockArea::tab_context_menus` is on, which it
+    /// is by default and which this app leaves alone.
+    fn context_menu(&mut self, ui: &mut Ui, tab: &mut Self::Tab, _path: egui_dock::NodePath) {
+        let Tab::Replays(id) = *tab else {
+            return;
+        };
+        let scope = self.resolve_tab_search_scope(id);
+        if replay_search_menu_entry(ui, scope).clicked()
+            && let TabSearchScope::Source(source) = scope
+        {
+            self.search_replay_source(source);
+            ui.close();
         }
     }
 
@@ -4200,6 +4289,263 @@ mod tab_viewer_tests {
             "a closed workspace still needs a title"
         );
         assert!(!expected.trim().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod replay_tab_search_tests {
+    use std::path::Path;
+
+    use jiff::Timestamp;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use wows_replays::types::ArenaId;
+
+    use super::*;
+    use crate::db::index::query;
+    use crate::db::index::query_model::Chip;
+    use crate::db::index::query_model::Field;
+    use crate::db::index::query_model::Op;
+    use crate::db::index::query_model::Value;
+    use crate::db::index::rows::MatchOutcome;
+    use crate::db::index::rows::ObjectiveMatch;
+    use crate::db::index::rows::ReplayRecord;
+    use crate::db::index::rows::SourceKind;
+    use crate::ui::replay_parser::ReplayWorkspace;
+
+    fn now() -> Timestamp {
+        Timestamp::from_second(1_700_000_000).expect("a fixed valid timestamp")
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a current-thread runtime")
+    }
+
+    fn mem_pool(rt: &tokio::runtime::Runtime) -> sqlx::SqlitePool {
+        rt.block_on(async {
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .expect("an in-memory sqlite pool");
+            sqlx::migrate!("../wows-toolkit-config/migrations").run(&pool).await.expect("migrations apply");
+            pool
+        })
+    }
+
+    fn sample_match(arena: i64) -> ObjectiveMatch {
+        ObjectiveMatch {
+            arena_id: ArenaId::new(arena),
+            timestamp: now(),
+            map: "Ocean".into(),
+            game_mode: "Domination".into(),
+            game_type: "pvp".into(),
+            match_group: "pvp".into(),
+            version_build: Some(1234),
+        }
+    }
+
+    fn sample_record(arena: i64, source: SourceId, path: &str) -> ReplayRecord {
+        ReplayRecord {
+            arena_id: ArenaId::new(arena),
+            source_id: source,
+            replay_path: PathBuf::from(path),
+            file_mtime: Some(42),
+            outcome: MatchOutcome::Win,
+            self_account_id: None,
+            self_ship_id: None,
+            self_survived: Some(true),
+            self_damage: Some(10),
+            self_kills: Some(1),
+            self_pr: None,
+            results_available: true,
+            indexed_at: now(),
+        }
+    }
+
+    /// Seed one match per source so a query that ignores the source scope
+    /// returns both arenas, and one that honours it returns exactly one.
+    fn seed(rt: &tokio::runtime::Runtime, pool: &sqlx::SqlitePool, arena: i64, source: SourceId, path: &str) {
+        rt.block_on(async {
+            query::upsert_match(pool, &sample_match(arena)).await.expect("the match inserts");
+            query::upsert_record(pool, &sample_record(arena, source, path)).await.expect("the record inserts");
+        });
+    }
+
+    /// Two open directory tabs with distinct sources: the entry on tab B must
+    /// carry B's source, not A's and not the live source.
+    #[test]
+    fn searching_from_a_directory_tab_scopes_to_that_directory_source() {
+        let mut tab_state = TabState::default();
+        let a = tab_state.open_directory_workspace(PathBuf::from("D:/archive/a"));
+        let b = tab_state.open_directory_workspace(PathBuf::from("D:/archive/b"));
+        tab_state.workspace_mut(a).expect("a is open").source = Some(SourceId(11));
+        tab_state.workspace_mut(b).expect("b is open").source = Some(SourceId(22));
+
+        let mut viewer = ToolkitTabViewer { tab_state: &mut tab_state };
+        assert_eq!(viewer.resolve_tab_search_scope(a), TabSearchScope::Source(SourceId(11)));
+        let scope = viewer.resolve_tab_search_scope(b);
+        assert_eq!(scope, TabSearchScope::Source(SourceId(22)), "tab B must scope to B's own source");
+
+        let TabSearchScope::Source(source) = scope else {
+            panic!("b has a source, so its scope must be resolved");
+        };
+        viewer.search_replay_source(source);
+
+        let query = tab_state.pending_search_query.take().expect("the Search tab must be handed a query");
+        assert_eq!(
+            query.groups.iter().map(|group| group.chips.as_slice()).collect::<Vec<_>>(),
+            vec![[Chip { field: Field::Group, op: Op::Is, value: Value::Source(SourceId(22)) }].as_slice()],
+            "the query must hold exactly one source chip, naming B"
+        );
+        assert!(tab_state.pending_focus_search, "the Search tab must also be focused");
+    }
+
+    /// The scope has to survive the whole way into the SQL, not just into the
+    /// query struct: run the dispatched query against a seeded index and check
+    /// only the tab's own directory comes back.
+    #[test]
+    fn the_dispatched_query_returns_only_that_directorys_matches() {
+        let rt = runtime();
+        let pool = mem_pool(&rt);
+        let mine = rt
+            .block_on(query::ensure_source(&pool, "Mine", SourceKind::ImportedDir, Path::new("D:/mine"), now()))
+            .expect("the source is created");
+        let other = rt
+            .block_on(query::ensure_source(&pool, "Other", SourceKind::ImportedDir, Path::new("D:/other"), now()))
+            .expect("the source is created");
+        seed(&rt, &pool, 100, mine, "D:/mine/a.wowsreplay");
+        seed(&rt, &pool, 200, other, "D:/other/b.wowsreplay");
+
+        let mut tab_state = TabState::default();
+        let id = tab_state.open_directory_workspace(PathBuf::from("D:/mine"));
+        tab_state.workspace_mut(id).expect("the workspace is open").source = Some(mine);
+
+        let mut viewer = ToolkitTabViewer { tab_state: &mut tab_state };
+        let TabSearchScope::Source(source) = viewer.resolve_tab_search_scope(id) else {
+            panic!("the workspace has a source, so its scope must be resolved");
+        };
+        viewer.search_replay_source(source);
+        let query = tab_state.pending_search_query.take().expect("the Search tab must be handed a query");
+
+        let hits = rt.block_on(query::search_by_query(&pool, &query, 500)).expect("the search runs");
+        let arenas: Vec<i64> = hits.iter().map(|hit| hit.arena_id.raw()).collect();
+        assert_eq!(arenas, vec![100], "only the tab's own directory may match");
+
+        // The same seed with no scope returns both, so the assertion above is
+        // about the scope rather than about the index holding one row.
+        let unscoped = crate::db::index::query_model::Query::default();
+        let all = rt.block_on(query::search_by_query(&pool, &unscoped, 500)).expect("the search runs");
+        assert_eq!(all.len(), 2, "both directories are indexed");
+    }
+
+    /// A directory whose ingest has not reached `ensure_source` has nothing to
+    /// scope by. The entry stays visible but disabled, and nothing is
+    /// dispatched: quietly searching the whole library instead would look like
+    /// a working search returning wrong results.
+    #[test]
+    fn a_workspace_without_a_source_yet_cannot_be_searched() {
+        let mut tab_state = TabState::default();
+        let pending = tab_state.open_directory_workspace(PathBuf::from("D:/archive/pending"));
+        let ready = tab_state.open_directory_workspace(PathBuf::from("D:/archive/ready"));
+        tab_state.workspace_mut(ready).expect("ready is open").source = Some(SourceId(5));
+
+        let mut viewer = ToolkitTabViewer { tab_state: &mut tab_state };
+        let unresolved = viewer.resolve_tab_search_scope(pending);
+        let resolved = viewer.resolve_tab_search_scope(ready);
+        assert_eq!(unresolved, TabSearchScope::Unresolved);
+
+        let mut states = Vec::new();
+        egui::__run_test_ui(|ui| {
+            states = vec![
+                replay_search_menu_entry(ui, unresolved).enabled(),
+                replay_search_menu_entry(ui, resolved).enabled(),
+            ];
+        });
+        assert_eq!(states, vec![false, true], "the entry must be shown disabled, not hidden, and not always disabled");
+
+        assert!(tab_state.pending_search_query.is_none(), "no unscoped search may be dispatched");
+        assert!(!tab_state.pending_focus_search, "and the Search tab must not be focused");
+    }
+
+    /// The live workspace never carries a source of its own, so its tab reads
+    /// the live source the indexer created. A directory workspace that has not
+    /// resolved its own source must NOT borrow that fallback.
+    #[test]
+    fn the_live_tab_scopes_to_the_live_source_and_a_pending_directory_does_not() {
+        let rt = runtime();
+        let pool = mem_pool(&rt);
+        let live = rt
+            .block_on(query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now()))
+            .expect("the live source is created");
+
+        let mut tab_state = TabState::default();
+        tab_state.db_pool = Some(pool);
+        tab_state.tokio_runtime = Some(Arc::new(rt));
+        let pending = tab_state.open_directory_workspace(PathBuf::from("D:/archive/pending"));
+
+        let mut viewer = ToolkitTabViewer { tab_state: &mut tab_state };
+        assert_eq!(viewer.resolve_tab_search_scope(WorkspaceId::LIVE), TabSearchScope::Source(live));
+        assert_eq!(
+            viewer.resolve_tab_search_scope(pending),
+            TabSearchScope::Unresolved,
+            "a directory with no source of its own must not fall back to the live source"
+        );
+    }
+
+    /// Exercises the trait hook egui_dock calls, not just the helper it draws
+    /// with: a replay tab gets the entry, and a tab that owns no replays gets
+    /// an empty menu rather than an entry that would search someone else's
+    /// directory.
+    #[test]
+    fn the_context_menu_hook_adds_the_entry_only_for_replay_tabs() {
+        let mut tab_state = TabState::default();
+        let id = tab_state.open_directory_workspace(PathBuf::from("D:/archive/a"));
+        tab_state.workspace_mut(id).expect("the workspace is open").source = Some(SourceId(4));
+
+        let mut drawn = Vec::new();
+        for mut tab in [Tab::Replays(id), Tab::Settings] {
+            let mut viewer = ToolkitTabViewer { tab_state: &mut tab_state };
+            egui::__run_test_ui(|ui| {
+                let before = ui.min_rect().height();
+                viewer.context_menu(ui, &mut tab, egui_dock::NodePath::MAIN_ROOT);
+                drawn.push(ui.min_rect().height() > before);
+            });
+        }
+
+        assert_eq!(drawn, vec![true, false], "only a replay tab may add the entry");
+    }
+
+    /// A tab outlives its workspace by a frame on the close path, so the menu
+    /// has to answer for an id that no longer resolves.
+    #[test]
+    fn a_closed_workspace_has_no_search_scope() {
+        assert_eq!(replay_tab_search_scope(WorkspaceId(42), None, Some(SourceId(9))), TabSearchScope::Unresolved);
+    }
+
+    /// The entry's label is the translated string, not the key: rust-i18n
+    /// returns the key itself when the catalog has no entry, so comparing it
+    /// against a literal is the only check that proves the text was written.
+    #[test]
+    fn the_menu_entry_is_labelled_from_the_catalog() {
+        assert_eq!(t!("ui.tabs.search_these_replays"), "Search these replays");
+        assert_eq!(t!("ui.tabs.search_these_replays_unavailable"), "These replays have not been indexed yet");
+    }
+
+    /// A workspace with no source that is also not open behaves the same as a
+    /// present-but-unresolved one, and a resolved source is never confused with
+    /// the live one.
+    #[test]
+    fn only_the_live_id_reads_the_live_source() {
+        let workspace = ReplayWorkspace::new(Some(PathBuf::from("D:/archive")));
+        assert_eq!(
+            replay_tab_search_scope(WorkspaceId::LIVE, Some(&workspace), Some(SourceId(3))),
+            TabSearchScope::Source(SourceId(3))
+        );
+        assert_eq!(replay_tab_search_scope(WorkspaceId::LIVE, Some(&workspace), None), TabSearchScope::Unresolved);
+        assert_eq!(
+            replay_tab_search_scope(WorkspaceId(1), Some(&workspace), Some(SourceId(3))),
+            TabSearchScope::Unresolved
+        );
     }
 }
 

@@ -24,6 +24,8 @@ mod_manager = "Mod Manager"
 armor_viewer = "Armor Viewer"
 stats = "Stats"
 search = "Search"
+search_these_replays = "Search these replays"
+search_these_replays_unavailable = "These replays have not been indexed yet"
 
 # -- Common buttons --
 
