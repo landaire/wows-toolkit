@@ -165,11 +165,11 @@ pub enum BackgroundTaskKind {
     },
     /// Walking a picked directory and building a `Replay` per file it holds,
     /// for the workspace that directory was opened as. `rx` carries the
-    /// replays the walk has read so far, so the listing fills as the walk runs
-    /// rather than when it ends.
+    /// replays the walk has read so far and how far it has got, so the listing
+    /// fills as the walk runs rather than when it ends.
     IngestingDirectory {
         workspace: crate::db::index::rows::WorkspaceId,
-        rx: mpsc::Receiver<replays::IngestBatch>,
+        rx: mpsc::Receiver<replays::IngestUpdate>,
     },
 }
 

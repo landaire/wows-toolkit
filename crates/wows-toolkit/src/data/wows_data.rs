@@ -980,7 +980,7 @@ impl ReplayLoader {
             let replay = match input {
                 ReplayInput::Built(replay) => replay,
                 ReplayInput::Path(path) => match Self::build_replay_from_path(&deps, path) {
-                    Ok(replay) => replay,
+                    Ok((replay, _)) => replay,
                     Err(e) => {
                         let _ = tx.send(Err(e));
                         return;
@@ -1059,10 +1059,13 @@ impl ReplayLoader {
     /// Read a replay file and construct a [`Replay`] wired to the version-matched
     /// game data. Runs on the background thread; resolving the data may lazily
     /// load a build, which is exactly the work we keep off the UI thread.
+    ///
+    /// The resolved data is returned with the replay so a caller that needs the
+    /// build behind it does not resolve the same version again.
     pub(crate) fn build_replay_from_path(
         deps: &ReplayDependencies,
         path: PathBuf,
-    ) -> Result<Arc<RwLock<Replay>>, rootcause::Report> {
+    ) -> Result<(Arc<RwLock<Replay>>, SharedWoWsData), rootcause::Report> {
         let replay_file = read_replay_file_with_retry(&path)?;
         let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
 
@@ -1090,7 +1093,7 @@ impl ReplayLoader {
         let mut replay = Replay::new(replay_file, game_metadata);
         replay.game_constants = Some(game_constants);
         replay.source_path = Some(path);
-        Ok(Arc::new(RwLock::new(replay)))
+        Ok((Arc::new(RwLock::new(replay)), wows_data_for_build))
     }
 }
 

@@ -1114,7 +1114,7 @@ impl WowsToolkitApp {
             }
             let mut shown_download_progress = false;
 
-            self.drain_ingest_batches();
+            self.drain_ingest_updates();
 
             for i in 0..self.tab_state.background_tasks.len() {
                 let task = &mut self.tab_state.background_tasks[i];
@@ -1231,8 +1231,8 @@ impl WowsToolkitApp {
                                 // and now, before the receiver goes away with the
                                 // task.
                                 let tail: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
-                                for batch in tail {
-                                    self.tab_state.apply_ingest_batch(batch);
+                                for update in tail {
+                                    self.tab_state.apply_ingest_update(update);
                                 }
                                 if let Some(target) = self.tab_state.workspace_mut(workspace_id) {
                                     target.ingest_in_flight = false;
@@ -1298,20 +1298,20 @@ impl WowsToolkitApp {
         });
     }
 
-    /// Move whatever every running directory walk has read since the last frame
+    /// Move whatever every running directory walk has sent since the last frame
     /// into the listings those walks belong to.
     ///
     /// Collected before anything is applied so the tasks are done being borrowed
     /// by the time the workspaces they name are touched.
-    fn drain_ingest_batches(&mut self) {
-        let mut batches = Vec::new();
-        for task in &mut self.tab_state.background_tasks {
+    fn drain_ingest_updates(&mut self) {
+        let mut updates = Vec::new();
+        for task in &self.tab_state.background_tasks {
             if let BackgroundTaskKind::IngestingDirectory { rx, .. } = &task.kind {
-                batches.extend(std::iter::from_fn(|| rx.try_recv().ok()));
+                updates.extend(std::iter::from_fn(|| rx.try_recv().ok()));
             }
         }
-        for batch in batches {
-            self.tab_state.apply_ingest_batch(batch);
+        for update in updates {
+            self.tab_state.apply_ingest_update(update);
         }
     }
 

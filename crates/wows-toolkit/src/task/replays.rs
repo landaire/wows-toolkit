@@ -1490,13 +1490,13 @@ pub fn start_ingest_directory(
     root: PathBuf,
 ) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
-    let (batch_tx, batch_rx) = mpsc::channel();
+    let (update_tx, update_rx) = mpsc::channel();
 
     crate::util::thread::spawn_logged("ingest-directory", move || {
-        let _ = tx.send(run_ingest_directory(deps, pool, tokio_runtime, workspace, root, &batch_tx));
+        let _ = tx.send(run_ingest_directory(deps, pool, tokio_runtime, workspace, root, &update_tx));
     });
 
-    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::IngestingDirectory { workspace, rx: batch_rx } }
+    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::IngestingDirectory { workspace, rx: update_rx } }
 }
 
 /// How far a directory walk has got.
@@ -1522,6 +1522,20 @@ pub struct IngestBatch {
     pub progress: IngestProgress,
 }
 
+/// What a running directory walk sends the listing it is filling.
+pub enum IngestUpdate {
+    /// The files the walk found, sent before it reads any of them so entries
+    /// the listing holds for replays that are no longer on disk leave with the
+    /// files they name.
+    Walked { workspace: crate::db::index::rows::WorkspaceId, paths: HashSet<PathBuf> },
+    /// Replays read since the last update, with how far the walk has got.
+    Batch(IngestBatch),
+    /// How far the walk has got, with no replay to carry it. A run of files the
+    /// walk cannot read would otherwise leave the count standing still, which
+    /// is what a stalled walk looks like.
+    Progress { workspace: crate::db::index::rows::WorkspaceId, progress: IngestProgress },
+}
+
 /// Replays held back before a batch goes to the UI. Sized so a directory of
 /// thousands of files does not wake the UI once per replay.
 const INGEST_BATCH_SIZE: usize = 16;
@@ -1531,9 +1545,30 @@ const INGEST_BATCH_SIZE: usize = 16;
 /// for a noticeable time on a large directory.
 const INGEST_FLUSH_INTERVAL: Duration = Duration::from_millis(500);
 
-/// Whether the replays held back so far should go to the UI now.
-fn should_flush_batch(pending: usize, since_last_flush: Duration) -> bool {
-    pending > 0 && (pending >= INGEST_BATCH_SIZE || since_last_flush >= INGEST_FLUSH_INTERVAL)
+/// What the walk owes the UI at one point in its loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Flush {
+    /// Nothing: too few replays are held back to fill a batch, and the interval
+    /// has not elapsed.
+    Hold,
+    /// The replays held back so far, carrying the walk's progress.
+    Batch,
+    /// The walk's progress on its own, because nothing has been read since the
+    /// last update went out.
+    Progress,
+}
+
+/// What the walk should send now.
+fn flush_now(pending: usize, since_last_flush: Duration) -> Flush {
+    if pending >= INGEST_BATCH_SIZE {
+        Flush::Batch
+    } else if since_last_flush < INGEST_FLUSH_INTERVAL {
+        Flush::Hold
+    } else if pending > 0 {
+        Flush::Batch
+    } else {
+        Flush::Progress
+    }
 }
 
 /// A game build some replay needed and the toolkit does not have installed.
@@ -1591,13 +1626,127 @@ impl IngestFailures {
     }
 }
 
+/// A replay the walk read, with the build number of the game data its client
+/// version resolved to. Indexing parses the replay against that build, and the
+/// read has resolved it already.
+struct ReadReplay {
+    replay: Arc<RwLock<Replay>>,
+    game_build: usize,
+}
+
+/// What a walk leaves behind once the replays it read have been sent.
+#[derive(Debug, Default)]
+struct WalkOutcome {
+    failures: IngestFailures,
+    /// Replays whose indexing panicked. The parse behind the panic is
+    /// deterministic and expensive, so these are worth remembering rather than
+    /// paying again on the next walk of the same directory.
+    index_panics: Vec<PathBuf>,
+}
+
+/// Read every path in `paths`, sending the replays that load as batches and
+/// keeping the progress count moving through the ones that do not.
+///
+/// `read` and `index` are the steps that touch the filesystem, the game data
+/// and the database. They are parameters so the gating, ordering and failure
+/// handling around them are exercisable without any of the three.
+fn ingest_walk<N, R, I>(
+    paths: Vec<PathBuf>,
+    workspace: crate::db::index::rows::WorkspaceId,
+    source: crate::db::index::rows::SourceId,
+    needs_index: N,
+    read: R,
+    index: I,
+    tx: &mpsc::Sender<IngestUpdate>,
+) -> WalkOutcome
+where
+    N: Fn(&Path) -> bool,
+    R: Fn(&Path) -> Result<ReadReplay, Report>,
+    I: Fn(&ReadReplay, crate::db::index::rows::SourceId) -> Result<(), Report>,
+{
+    let total = paths.len();
+    let mut outcome = WalkOutcome::default();
+    let mut pending: HashMap<PathBuf, Arc<RwLock<Replay>>> = HashMap::new();
+    let mut last_flush = std::time::Instant::now();
+
+    let found: HashSet<PathBuf> = paths.iter().cloned().collect();
+    if tx.send(IngestUpdate::Walked { workspace, paths: found }).is_err() {
+        return outcome;
+    }
+
+    for (visited, path) in paths.into_iter().enumerate() {
+        // One unreadable, malformed or version-orphaned file must cost only
+        // itself. An uncaught parser panic would take this thread with it and
+        // leave the rest of the directory unread.
+        let read_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read(&path)));
+
+        match read_result {
+            Ok(Ok(built)) => {
+                if needs_index(&path) {
+                    // Indexing parses, so it carries the same panic risk the
+                    // read does, and a replay that will not index is still
+                    // worth listing.
+                    let indexed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| index(&built, source)));
+                    match indexed {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            outcome.failures.record_index_failure();
+                            warn!("listing replay {} without an index row: {e}", path.display());
+                        }
+                        Err(payload) => {
+                            outcome.failures.record_index_failure();
+                            outcome.index_panics.push(path.clone());
+                            let msg = crate::util::thread::panic_payload_to_string(&payload);
+                            warn!("panic while indexing replay {}, listing it anyway: {msg}", path.display());
+                        }
+                    }
+                }
+                pending.insert(path, built.replay);
+            }
+            Ok(Err(e)) => {
+                outcome.failures.record(&e);
+                warn!("skipping replay {}: {e}", path.display());
+            }
+            Err(payload) => {
+                outcome.failures.record_panic();
+                let msg = crate::util::thread::panic_payload_to_string(&payload);
+                warn!("panic while reading replay {}, skipping it: {msg}", path.display());
+            }
+        }
+
+        let progress = IngestProgress { done: visited + 1, total };
+        let update = match flush_now(pending.len(), last_flush.elapsed()) {
+            Flush::Hold => continue,
+            Flush::Batch => {
+                IngestUpdate::Batch(IngestBatch { workspace, source, replays: std::mem::take(&mut pending), progress })
+            }
+            Flush::Progress => IngestUpdate::Progress { workspace, progress },
+        };
+        if tx.send(update).is_err() {
+            // Nothing is listening any more: the workspace closed or the app is
+            // shutting down. The rest of the walk has no reader.
+            return outcome;
+        }
+        last_flush = std::time::Instant::now();
+    }
+
+    let progress = IngestProgress { done: total, total };
+    let _ = tx.send(if pending.is_empty() {
+        IngestUpdate::Progress { workspace, progress }
+    } else {
+        IngestUpdate::Batch(IngestBatch { workspace, source, replays: pending, progress })
+    });
+
+    outcome
+}
+
 fn run_ingest_directory(
     deps: crate::data::wows_data::ReplayDependencies,
     pool: sqlx::SqlitePool,
     tokio_runtime: Arc<tokio::runtime::Runtime>,
     workspace: crate::db::index::rows::WorkspaceId,
     root: PathBuf,
-    batch_tx: &mpsc::Sender<IngestBatch>,
+    update_tx: &mpsc::Sender<IngestUpdate>,
 ) -> Result<BackgroundTaskCompletion, Report> {
     let source = tokio_runtime
         .block_on(crate::db::index::query::ensure_source(
@@ -1614,70 +1763,29 @@ fn run_ingest_directory(
     let indexed_paths: HashSet<String> =
         tokio_runtime.block_on(crate::db::index::query::record_paths_in_source(&pool, source)).unwrap_or_default();
 
-    let paths = walk_replay_files(&root);
-    let total = paths.len();
-    let mut failures = IngestFailures::default();
-    let mut pending: HashMap<PathBuf, Arc<RwLock<Replay>>> = HashMap::new();
-    let mut last_flush = std::time::Instant::now();
+    // The replays a previous run found to be un-parseable. Their parse panics
+    // reliably, so indexing them again costs the walk and yields nothing.
+    let mut unindexable = tokio_runtime.block_on(crate::data::replay_reconcile::Unindexable::load(&pool));
 
-    for (visited, path) in paths.into_iter().enumerate() {
-        // One unreadable, malformed or version-orphaned file must cost only
-        // itself. An uncaught parser panic would take this thread with it and
-        // leave the rest of the directory unread.
-        let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            crate::data::wows_data::ReplayLoader::build_replay_from_path(&deps, path.clone())
-        }));
+    let read = |path: &Path| -> Result<ReadReplay, Report> {
+        let (replay, wows_data) =
+            crate::data::wows_data::ReplayLoader::build_replay_from_path(&deps, path.to_path_buf())?;
+        let game_build = wows_data.read().patch_version;
+        Ok(ReadReplay { replay, game_build })
+    };
+    let index = |replay: &ReadReplay, source| index_ingested_replay(replay, &deps, &pool, &tokio_runtime, source);
+    let needs_index =
+        |path: &Path| !indexed_paths.contains(path.to_string_lossy().as_ref()) && !unindexable.contains(path);
 
-        match built {
-            Ok(Ok(replay)) => {
-                if !indexed_paths.contains(path.to_string_lossy().as_ref()) {
-                    // Indexing parses, so it carries the same panic risk the
-                    // read does, and a replay that will not index is still
-                    // worth listing.
-                    let indexed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        index_ingested_replay(&replay, &deps, &pool, &tokio_runtime, source)
-                    }));
-                    match indexed {
-                        Ok(Ok(())) => {}
-                        Ok(Err(e)) => {
-                            failures.record_index_failure();
-                            warn!("listing replay {} without an index row: {e}", path.display());
-                        }
-                        Err(payload) => {
-                            failures.record_index_failure();
-                            let msg = crate::util::thread::panic_payload_to_string(&payload);
-                            warn!("panic while indexing replay {}, listing it anyway: {msg}", path.display());
-                        }
-                    }
-                }
-                pending.insert(path, replay);
-            }
-            Ok(Err(e)) => {
-                failures.record(&e);
-                warn!("skipping replay {}: {e}", path.display());
-            }
-            Err(payload) => {
-                failures.record_panic();
-                let msg = crate::util::thread::panic_payload_to_string(&payload);
-                warn!("panic while reading replay {}, skipping it: {msg}", path.display());
-            }
-        }
+    let WalkOutcome { failures, index_panics } =
+        ingest_walk(walk_replay_files(&root), workspace, source, needs_index, read, index, update_tx);
 
-        if should_flush_batch(pending.len(), last_flush.elapsed()) {
-            let progress = IngestProgress { done: visited + 1, total };
-            let batch = IngestBatch { workspace, source, replays: std::mem::take(&mut pending), progress };
-            if batch_tx.send(batch).is_err() {
-                // Nothing is listening any more: the workspace closed or the
-                // app is shutting down. The rest of the walk has no reader.
-                return Ok(BackgroundTaskCompletion::DirectoryIngested { workspace, source, failures });
-            }
-            last_flush = std::time::Instant::now();
-        }
+    let mut unindexable_dirty = false;
+    for path in &index_panics {
+        unindexable_dirty |= unindexable.insert(path);
     }
-
-    if !pending.is_empty() {
-        let progress = IngestProgress { done: total, total };
-        let _ = batch_tx.send(IngestBatch { workspace, source, replays: pending, progress });
+    if unindexable_dirty && let Err(e) = tokio_runtime.block_on(unindexable.save(&pool)) {
+        warn!("failed to persist unindexable replay set: {e}");
     }
 
     if failures.total() > 0 {
@@ -1704,32 +1812,54 @@ fn run_ingest_directory(
 /// can hold thousands of replays, and a battle report per listed replay would
 /// hold far more memory than the listing needs. The row data now lives in the
 /// index, which is where the listing reads it from.
+///
+/// A parse that panics drops them too: the caller lists the replay either way,
+/// and a listed replay holding a report both costs that memory and reads as
+/// having battle results still pending.
 fn index_ingested_replay(
-    replay: &Arc<RwLock<Replay>>,
+    replay: &ReadReplay,
     deps: &crate::data::wows_data::ReplayDependencies,
     pool: &sqlx::SqlitePool,
     tokio_runtime: &tokio::runtime::Runtime,
     source: crate::db::index::rows::SourceId,
 ) -> Result<(), Report> {
-    let mut guard = replay.write();
+    let mut guard = replay.replay.write();
+    let expected_build = replay.game_build.to_string();
 
-    let replay_version = Version::from_client_exe(&guard.replay_file.meta.clientVersionFromExe);
-    let Some(wows_data) = deps.resolve_versioned_deps(&replay_version) else {
-        return Err(report!("no game data for build {}", replay_version.to_path()));
-    };
-    let expected_build = wows_data.read().patch_version.to_string();
+    reset_after(
+        &mut *guard,
+        |replay| {
+            let report = replay.parse(&expected_build)?;
+            replay.battle_report = Some(report);
+            replay.build_ui_report(deps);
+            crate::data::replay_index::index_replay_reporting(
+                tokio_runtime,
+                pool,
+                replay,
+                source,
+                jiff::Timestamp::now(),
+            )
+        },
+        |replay| {
+            replay.battle_report = None;
+            replay.ui_report = None;
+        },
+    )
+}
 
-    let report = guard.parse(&expected_build)?;
-    guard.battle_report = Some(report);
-    guard.build_ui_report(deps);
-
-    let result =
-        crate::data::replay_index::index_replay_reporting(tokio_runtime, pool, &guard, source, jiff::Timestamp::now());
-
-    guard.battle_report = None;
-    guard.ui_report = None;
-
-    result
+/// Run `work` over `value` and `reset` it however `work` ended, panic included,
+/// then hand the caller what `work` produced or the panic it raised.
+///
+/// The parse behind an indexing step panics on some replays, and the caller
+/// lists the replay either way. Leaving the reset to the returning path would
+/// list it holding everything the parse attached.
+fn reset_after<V, T>(value: &mut V, work: impl FnOnce(&mut V) -> T, reset: impl FnOnce(&mut V)) -> T {
+    let produced = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(value)));
+    reset(value);
+    match produced {
+        Ok(produced) => produced,
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
 }
 
 #[cfg(test)]
@@ -1959,19 +2089,292 @@ mod tests {
         assert_eq!(failures.total(), 1, "only the replays that did not load count as skipped");
     }
 
-    /// Waking the UI for a batch with nothing in it is the one case that is
-    /// never worth a message, however long the walk has been stuck on one file.
+    const WALK_WORKSPACE: crate::db::index::rows::WorkspaceId = crate::db::index::rows::WorkspaceId(7);
+    const WALK_SOURCE: crate::db::index::rows::SourceId = crate::db::index::rows::SourceId(42);
+
+    /// A minimal but real `Replay`: an empty-params `GameMetadataProvider` (no
+    /// VFS needed) backing a hand-built `ReplayMeta` round-tripped through
+    /// `ReplayFile::from_decrypted_parts`, the same entry point the app uses
+    /// for a loaded replay's raw JSON.
+    fn test_replay() -> Arc<RwLock<Replay>> {
+        let meta = wows_replays::ReplayMeta {
+            matchGroup: None,
+            gameMode: 0,
+            gameType: None,
+            clientVersionFromExe: "0,0,0,0".to_string(),
+            scenarioUiCategoryId: None,
+            mapDisplayName: String::new(),
+            mapId: 0,
+            clientVersionFromXml: String::new(),
+            weatherParams: None,
+            duration: 0,
+            gameLogic: None,
+            name: String::new(),
+            scenario: String::new(),
+            playerID: wows_replays::types::AccountId(0),
+            vehicles: Vec::new(),
+            playersPerTeam: 0,
+            dateTime: String::new(),
+            mapName: String::new(),
+            playerName: String::new(),
+            scenarioConfigId: 0,
+            teamsCount: 0,
+            logic: None,
+            playerVehicle: String::new(),
+            battleDuration: None,
+        };
+        let meta_json = serde_json::to_vec(&meta).expect("ReplayMeta serializes");
+        let replay_file = ReplayFile::from_decrypted_parts(meta_json, Vec::new())
+            .expect("a ReplayMeta we just serialized parses back");
+        let resource_loader = Arc::new(
+            wowsunpack::game_params::provider::GameMetadataProvider::from_params_no_specs(Vec::new())
+                .expect("an empty param list is always valid"),
+        );
+        Arc::new(RwLock::new(Replay::new(replay_file, resource_loader)))
+    }
+
+    /// A replay the read step produced, tagged with `game_build` so a test can
+    /// tell one of them from another wherever the walk hands it on.
+    fn read_replay(game_build: usize) -> ReadReplay {
+        ReadReplay { replay: test_replay(), game_build }
+    }
+
+    /// Walk `paths` with steps the test supplies, returning everything the walk
+    /// sent, in the order it sent it, and what it left behind.
+    fn run_walk<N, R, I>(paths: &[&str], needs_index: N, read: R, index: I) -> (Vec<IngestUpdate>, WalkOutcome)
+    where
+        N: Fn(&Path) -> bool,
+        R: Fn(&Path) -> Result<ReadReplay, Report>,
+        I: Fn(&ReadReplay, crate::db::index::rows::SourceId) -> Result<(), Report>,
+    {
+        let (tx, rx) = mpsc::channel();
+        let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+        let outcome = ingest_walk(paths, WALK_WORKSPACE, WALK_SOURCE, needs_index, read, index, &tx);
+        drop(tx);
+        (rx.into_iter().collect(), outcome)
+    }
+
+    /// Every replay the walk sent to the listing, whichever batch carried it.
+    fn listed(updates: &[IngestUpdate]) -> BTreeSet<PathBuf> {
+        updates
+            .iter()
+            .filter_map(|update| match update {
+                IngestUpdate::Batch(batch) => Some(batch.replays.keys().cloned()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    /// Indexing is what puts a listing row's damage, kills and outcome on the
+    /// screen: an imported directory whose replays are never indexed shows the
+    /// not-indexed placeholder on every row. It has to happen once per replay
+    /// read, against the source the walk resolved for that directory.
     #[test]
-    fn an_empty_batch_is_never_flushed() {
-        assert!(!should_flush_batch(0, Duration::ZERO));
-        assert!(!should_flush_batch(0, INGEST_FLUSH_INTERVAL * 10));
+    fn each_replay_the_walk_reads_is_indexed_against_the_source_the_walk_resolved() {
+        let indexed = std::cell::RefCell::new(Vec::new());
+        let (updates, outcome) = run_walk(
+            &["a.wowsreplay", "b.wowsreplay"],
+            |_| true,
+            |path| Ok(read_replay(if path == Path::new("a.wowsreplay") { 11 } else { 22 })),
+            |replay, source| {
+                indexed.borrow_mut().push((replay.game_build, source));
+                Ok(())
+            },
+        );
+
+        assert_eq!(
+            indexed.into_inner(),
+            vec![(11, WALK_SOURCE), (22, WALK_SOURCE)],
+            "both replays must be indexed, against the source the walk resolved"
+        );
+        assert_eq!(
+            listed(&updates),
+            BTreeSet::from([PathBuf::from("a.wowsreplay"), PathBuf::from("b.wowsreplay")]),
+            "both replays must reach the listing"
+        );
+        assert_eq!(outcome.failures.not_indexed, 0);
+    }
+
+    /// Re-opening a directory must cost a read per replay, not a re-parse of
+    /// the whole tree, so a replay the source already has rows for is listed
+    /// without being indexed again.
+    #[test]
+    fn a_replay_the_gate_rejects_is_listed_without_being_indexed() {
+        let indexed = std::cell::RefCell::new(Vec::new());
+        let (updates, _) = run_walk(
+            &["a.wowsreplay", "b.wowsreplay"],
+            |path| path == Path::new("b.wowsreplay"),
+            |path| Ok(read_replay(if path == Path::new("a.wowsreplay") { 11 } else { 22 })),
+            |replay, _| {
+                indexed.borrow_mut().push(replay.game_build);
+                Ok(())
+            },
+        );
+
+        assert_eq!(indexed.into_inner(), vec![22], "the gated replay must not be indexed again");
+        assert_eq!(
+            listed(&updates),
+            BTreeSet::from([PathBuf::from("a.wowsreplay"), PathBuf::from("b.wowsreplay")]),
+            "a replay that was not indexed by this walk is still listed"
+        );
+    }
+
+    /// A replay whose index rows cannot be written is still a replay the user
+    /// dropped a directory to see. It is listed, with its failure counted apart
+    /// from the files that never loaded.
+    #[test]
+    fn a_replay_whose_indexing_fails_is_still_listed() {
+        let (updates, outcome) =
+            run_walk(&["a.wowsreplay"], |_| true, |_| Ok(read_replay(11)), |_, _| Err(report!("no database")));
+
+        assert_eq!(listed(&updates), BTreeSet::from([PathBuf::from("a.wowsreplay")]));
+        assert_eq!(outcome.failures.not_indexed, 1);
+        assert_eq!(outcome.failures.total(), 0, "a listed replay is not a replay the walk skipped");
+        assert!(outcome.index_panics.is_empty(), "an error is not a panic and must not be blacklisted");
+    }
+
+    /// A parse that panics is deterministic, so the walk reports it for the
+    /// blacklist the other index paths read. The replay is still listed: it was
+    /// read, and only its index rows are missing.
+    #[test]
+    fn a_replay_whose_indexing_panics_is_listed_and_reported_for_the_blacklist() {
+        let (updates, outcome) = run_walk(
+            &["a.wowsreplay", "b.wowsreplay"],
+            |_| true,
+            |_| Ok(read_replay(11)),
+            |_, _| panic!("parser exploded"),
+        );
+
+        assert_eq!(
+            listed(&updates),
+            BTreeSet::from([PathBuf::from("a.wowsreplay"), PathBuf::from("b.wowsreplay")]),
+            "a replay whose indexing panicked is still listed, and the walk carries on"
+        );
+        assert_eq!(outcome.failures.not_indexed, 2);
+        assert_eq!(
+            outcome.index_panics,
+            vec![PathBuf::from("a.wowsreplay"), PathBuf::from("b.wowsreplay")],
+            "both panicking replays must be reported so the next walk skips their parse"
+        );
+    }
+
+    /// One file the walk cannot read costs only itself: it is not listed, it is
+    /// classified for the failure report, and the files after it are still read.
+    #[test]
+    fn a_file_that_cannot_be_read_is_not_listed_and_does_not_stop_the_walk() {
+        let (updates, outcome) = run_walk(
+            &["a.wowsreplay", "b.wowsreplay", "c.wowsreplay"],
+            |_| true,
+            |path| match path.file_name().and_then(|name| name.to_str()) {
+                Some("a.wowsreplay") => Err(missing_build_report(9_876, "13.5.0")),
+                Some("b.wowsreplay") => panic!("parser exploded"),
+                _ => Ok(read_replay(11)),
+            },
+            |_, _| Ok(()),
+        );
+
+        assert_eq!(
+            listed(&updates),
+            BTreeSet::from([PathBuf::from("c.wowsreplay")]),
+            "only the file that read must be listed, and it must still be reached"
+        );
+        assert_eq!(outcome.failures.missing_builds.values().sum::<usize>(), 1);
+        assert_eq!(outcome.failures.unreadable, 1);
+    }
+
+    /// The listing is merged into, never replaced, so a replay deleted between
+    /// two walks of the same directory would otherwise outlive its file. The
+    /// walk names the files it found before reading any of them, which is what
+    /// lets the listing drop the rest.
+    #[test]
+    fn the_walk_names_the_files_it_found_before_it_sends_any_replay() {
+        let (updates, _) = run_walk(&["a.wowsreplay"], |_| true, |_| Ok(read_replay(11)), |_, _| Ok(()));
+
+        match updates.first() {
+            Some(IngestUpdate::Walked { workspace, paths }) => {
+                assert_eq!(*workspace, WALK_WORKSPACE);
+                assert_eq!(*paths, HashSet::from([PathBuf::from("a.wowsreplay")]));
+            }
+            _ => panic!("the walk must announce the files it found before anything else"),
+        }
+    }
+
+    /// The population that fails to read is contiguous -- a whole game
+    /// version's replays share a missing build, and the walk visits files in
+    /// date order -- so a walk that only speaks when it has a replay in hand
+    /// shows one frozen count next to a spinner for the entire run.
+    #[test]
+    fn a_walk_reading_nothing_reports_progress_before_it_finishes() {
+        let (updates, _) = run_walk(
+            &["a.wowsreplay", "b.wowsreplay"],
+            |_| true,
+            |_| {
+                std::thread::sleep(INGEST_FLUSH_INTERVAL + Duration::from_millis(50));
+                Err(report!("no game data for this build"))
+            },
+            |_, _| Ok(()),
+        );
+
+        let mid_walk = updates.iter().any(|update| {
+            matches!(
+                update,
+                IngestUpdate::Progress { workspace, progress }
+                    if *workspace == WALK_WORKSPACE && *progress == IngestProgress { done: 1, total: 2 }
+            )
+        });
+        assert!(mid_walk, "the count must move while the walk is still running, not only when it ends");
+    }
+
+    /// The reports a parse attaches are dropped again once the index rows are
+    /// written, and a parse that panics has attached them too. The panic still
+    /// has to reach the caller, which counts it and lists the replay anyway.
+    #[test]
+    fn a_panicking_step_resets_before_its_panic_reaches_the_caller() {
+        let mut held = Some("battle report");
+
+        let outcome: Result<(), _> = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            reset_after(
+                &mut held,
+                |held| {
+                    *held = Some("battle report");
+                    panic!("parser exploded")
+                },
+                |held| *held = None,
+            )
+        }));
+
+        assert!(outcome.is_err(), "the panic must still reach the caller");
+        assert_eq!(held, None, "the reset must have run before the panic resumed");
+    }
+
+    #[test]
+    fn a_step_that_returns_normally_resets_and_yields_what_it_produced() {
+        let mut held = Some("battle report");
+        let produced = reset_after(&mut held, |_| 7, |held| *held = None);
+
+        assert_eq!(produced, 7, "the caller must get what the step produced");
+        assert_eq!(held, None, "the reset must run on the returning path too");
+    }
+
+    /// Replays that fail to load are contiguous in a walk -- the files are
+    /// visited in date order and a whole game version's worth of them shares a
+    /// missing build -- so a rule that only ever speaks when it has a replay in
+    /// hand leaves the count frozen for the whole run, which is what a stalled
+    /// walk looks like. Once the interval has elapsed the walk reports progress
+    /// with nothing to carry it.
+    #[test]
+    fn a_walk_holding_no_replays_reports_progress_once_the_interval_elapses() {
+        assert_eq!(flush_now(0, Duration::ZERO), Flush::Hold);
+        assert_eq!(flush_now(0, INGEST_FLUSH_INTERVAL), Flush::Progress);
+        assert_eq!(flush_now(0, INGEST_FLUSH_INTERVAL * 10), Flush::Progress);
     }
 
     /// Size is what keeps a fast walk from waking the UI per replay, so a full
     /// batch goes out without waiting for the interval.
     #[test]
     fn a_full_batch_flushes_before_the_interval_elapses() {
-        assert!(should_flush_batch(INGEST_BATCH_SIZE, Duration::ZERO));
+        assert_eq!(flush_now(INGEST_BATCH_SIZE, Duration::ZERO), Flush::Batch);
     }
 
     /// The interval is what keeps a slow walk from holding replays back until
@@ -1979,7 +2382,7 @@ mod tests {
     /// not before.
     #[test]
     fn a_partial_batch_waits_for_the_interval() {
-        assert!(!should_flush_batch(1, Duration::ZERO));
-        assert!(should_flush_batch(1, INGEST_FLUSH_INTERVAL));
+        assert_eq!(flush_now(1, Duration::ZERO), Flush::Hold);
+        assert_eq!(flush_now(1, INGEST_FLUSH_INTERVAL), Flush::Batch);
     }
 }

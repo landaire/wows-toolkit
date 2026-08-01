@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -991,6 +992,36 @@ impl TabState {
         }
     }
 
+    /// Apply one message from a running directory walk to the listing it names.
+    pub fn apply_ingest_update(&mut self, update: crate::task::replays::IngestUpdate) {
+        use crate::task::replays::IngestUpdate;
+
+        match update {
+            IngestUpdate::Walked { workspace, paths } => self.retain_listed_replays(workspace, &paths),
+            IngestUpdate::Batch(batch) => self.apply_ingest_batch(batch),
+            IngestUpdate::Progress { workspace, progress } => {
+                if let Some(workspace) = self.workspace_mut(workspace) {
+                    workspace.ingest_progress = Some(progress);
+                }
+            }
+        }
+    }
+
+    /// Drop listing entries for replays a fresh walk of the same directory no
+    /// longer finds on disk.
+    ///
+    /// Only a listing that already exists is touched: a walk that found nothing
+    /// must not start one, or an empty directory would list as loaded before it
+    /// has been read.
+    fn retain_listed_replays(&mut self, workspace: WorkspaceId, present: &HashSet<PathBuf>) {
+        let Some(workspace) = self.workspace_mut(workspace) else {
+            return;
+        };
+        if let Some(files) = workspace.replay_files.as_mut() {
+            files.retain(|path, _| present.contains(path));
+        }
+    }
+
     /// Add one slice of a running directory walk to the listing it names.
     ///
     /// Batches are merged, never assigned: every batch after the first lands on
@@ -1547,6 +1578,98 @@ mod tests {
 
         assert!(state.live_workspace.replay_files.is_none(), "a departed workspace's batch must not land on live");
         assert!(state.workspaces.is_empty(), "a departed workspace must not be recreated by its own batch");
+    }
+
+    /// Batches merge into the listing rather than replacing it, so a replay
+    /// deleted between two walks of the same directory would outlive its file.
+    /// The list of what the walk found is what drops it, and only it.
+    #[test]
+    fn the_files_a_walk_found_drop_the_listing_entries_it_did_not_find() {
+        let mut state = TabState::default();
+        let id = WorkspaceId(1);
+        let mut workspace = ReplayWorkspace::new(None);
+        workspace.replay_files = Some(HashMap::from([
+            (PathBuf::from("kept.wowsreplay"), test_replay()),
+            (PathBuf::from("deleted.wowsreplay"), test_replay()),
+        ]));
+        state.workspaces.insert(id, workspace);
+
+        state.apply_ingest_update(crate::task::replays::IngestUpdate::Walked {
+            workspace: id,
+            paths: HashSet::from([PathBuf::from("kept.wowsreplay")]),
+        });
+
+        let files = state.workspace(id).expect("inserted above").replay_files.as_ref().expect("set above");
+        assert!(files.contains_key(Path::new("kept.wowsreplay")), "a file the walk found must stay listed");
+        assert!(
+            !files.contains_key(Path::new("deleted.wowsreplay")),
+            "a file the walk no longer finds must leave the listing with it"
+        );
+    }
+
+    /// The listing existing at all is what the UI reads as "this directory has
+    /// been read", so the walk naming its files must not create one.
+    #[test]
+    fn the_files_a_walk_found_do_not_start_a_listing() {
+        let mut state = TabState::default();
+        let id = WorkspaceId(1);
+        state.workspaces.insert(id, ReplayWorkspace::new(None));
+
+        state.apply_ingest_update(crate::task::replays::IngestUpdate::Walked {
+            workspace: id,
+            paths: HashSet::from([PathBuf::from("a.wowsreplay")]),
+        });
+
+        assert!(
+            state.workspace(id).expect("inserted above").replay_files.is_none(),
+            "a walk that has listed nothing yet must not leave an empty listing behind"
+        );
+    }
+
+    /// A run of files that all fail to read carries no replay, and the count
+    /// still has to move: a frozen count next to a spinner is what a stalled
+    /// walk looks like. It must move without disturbing what is listed.
+    #[test]
+    fn a_progress_update_moves_the_count_without_touching_the_listing() {
+        let mut state = TabState::default();
+        let id = WorkspaceId(1);
+        let mut workspace = ReplayWorkspace::new(None);
+        workspace.replay_files = Some(HashMap::from([(PathBuf::from("a.wowsreplay"), test_replay())]));
+        state.workspaces.insert(id, workspace);
+
+        state.apply_ingest_update(crate::task::replays::IngestUpdate::Progress {
+            workspace: id,
+            progress: crate::task::replays::IngestProgress { done: 4_000, total: 5_000 },
+        });
+
+        let workspace = state.workspace(id).expect("inserted above");
+        assert_eq!(
+            workspace.ingest_progress.map(|progress| (progress.done, progress.total)),
+            Some((4_000, 5_000)),
+            "progress with no replay to carry it must still reach the listing"
+        );
+        assert_eq!(
+            workspace.replay_files.as_ref().map(|files| files.len()),
+            Some(1),
+            "progress must not disturb the replays already listed"
+        );
+    }
+
+    /// Progress is routed by the id it carries, exactly as a batch is: a walk
+    /// whose tab has closed has nothing to report to.
+    #[test]
+    fn a_progress_update_for_a_closed_workspace_is_dropped() {
+        let mut state = TabState::default();
+        state.apply_ingest_update(crate::task::replays::IngestUpdate::Progress {
+            workspace: WorkspaceId(99),
+            progress: crate::task::replays::IngestProgress { done: 1, total: 2 },
+        });
+
+        assert!(
+            state.live_workspace.ingest_progress.is_none(),
+            "a departed workspace's progress must not land on live"
+        );
+        assert!(state.workspaces.is_empty(), "a departed workspace must not be recreated by its own progress");
     }
 
     #[test]
