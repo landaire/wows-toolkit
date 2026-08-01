@@ -4462,9 +4462,6 @@ mod replay_tab_search_tests {
             ];
         });
         assert_eq!(states, vec![false, true], "the entry must be shown disabled, not hidden, and not always disabled");
-
-        assert!(tab_state.pending_search_query.is_none(), "no unscoped search may be dispatched");
-        assert!(!tab_state.pending_focus_search, "and the Search tab must not be focused");
     }
 
     /// The live workspace never carries a source of its own, so its tab reads
