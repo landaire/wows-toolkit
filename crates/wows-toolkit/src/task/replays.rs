@@ -980,8 +980,7 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
 
         {
             debug!("Attempting to enumerate replays directory to see if there are any new ones to send");
-            let Some(replays_dir) =
-                data.wows_data_map.with_builds(|builds| builds.values().next().map(|d| d.read().replays_dir.clone()))
+            let Some(replays_dir) = data.wows_data_map.loaded_builds().first().map(|d| d.read().replays_dir.clone())
             else {
                 error!("No game data loaded, cannot enumerate replays directory");
                 return;
@@ -1360,9 +1359,7 @@ fn run_reconcile_index(
     force_reindex: bool,
     progress_tx: &mpsc::Sender<IndexProgress>,
 ) -> Result<BackgroundTaskCompletion, Report> {
-    let Some(replays_dir) =
-        wows_data_map.with_builds(|builds| builds.values().next().map(|d| d.read().replays_dir.clone()))
-    else {
+    let Some(replays_dir) = wows_data_map.loaded_builds().first().map(|d| d.read().replays_dir.clone()) else {
         return Err(report!("no game data loaded, cannot enumerate replays directory"));
     };
 

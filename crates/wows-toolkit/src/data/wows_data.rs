@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
@@ -43,11 +44,88 @@ impl std::fmt::Debug for GameAsset {
 
 pub type SharedWoWsData = Arc<RwLock<Box<WorldOfWarshipsData>>>;
 
+/// How many builds other than the live install's stay loaded. A replay
+/// directory can span dozens of game versions and each build carries its own
+/// game params and VFS index, so old builds are held only long enough to serve
+/// a run of replays from the same era.
+const NON_MAIN_BUILD_CAPACITY: usize = 2;
+
+/// The loaded builds of a [`WoWsDataMap`].
+///
+/// The build of the live WoWs install is pinned, since nearly every replay
+/// wants it. The rest are bounded: the least recently used one is dropped once
+/// there are more than `capacity` of them.
+///
+/// Dropping is only ever the removal of this cache's `Arc`. [`SharedWoWsData`]
+/// is reference counted, so a caller that is already holding one keeps reading
+/// through it, and the memory comes back when the last holder lets go. The
+/// build itself is not gone: resolving it again loads it again.
+struct LoadedBuilds {
+    /// The live install's build, if it has been loaded.
+    main: Option<(u32, SharedWoWsData)>,
+    /// Every other loaded build, least recently used first.
+    others: VecDeque<(u32, SharedWoWsData)>,
+    capacity: usize,
+}
+
+impl LoadedBuilds {
+    fn new(capacity: usize) -> Self {
+        Self { main: None, others: VecDeque::new(), capacity }
+    }
+
+    /// Look up `build`, counting the lookup as a use.
+    fn get(&mut self, build: u32) -> Option<SharedWoWsData> {
+        if let Some((main_build, data)) = &self.main
+            && *main_build == build
+        {
+            return Some(Arc::clone(data));
+        }
+
+        let position = self.others.iter().position(|(other, _)| *other == build)?;
+        let entry = self.others.remove(position)?;
+        let data = Arc::clone(&entry.1);
+        self.others.push_back(entry);
+        Some(data)
+    }
+
+    /// Data for every loaded build, most recently used last, without counting
+    /// as a use of any of them.
+    fn all(&self) -> Vec<SharedWoWsData> {
+        self.main.iter().chain(self.others.iter()).map(|(_, data)| Arc::clone(data)).collect()
+    }
+
+    fn insert(&mut self, build: u32, data: SharedWoWsData) {
+        if let Some((main_build, main_data)) = &mut self.main
+            && *main_build == build
+        {
+            *main_data = data;
+            return;
+        }
+
+        self.remove_other(build);
+        self.others.push_back((build, data));
+        while self.others.len() > self.capacity {
+            self.others.pop_front();
+        }
+    }
+
+    fn insert_main(&mut self, build: u32, data: SharedWoWsData) {
+        self.remove_other(build);
+        self.main = Some((build, data));
+    }
+
+    fn remove_other(&mut self, build: u32) {
+        if let Some(position) = self.others.iter().position(|(other, _)| *other == build) {
+            self.others.remove(position);
+        }
+    }
+}
+
 /// Manages all loaded game data versions, keyed by build number.
 /// Provides version resolution for replay parsing and lazy-loading of build data.
 #[derive(Clone)]
 pub struct WoWsDataMap {
-    builds: Arc<RwLock<HashMap<u32, SharedWoWsData>>>,
+    builds: Arc<RwLock<LoadedBuilds>>,
     /// Builds that were looked for and are not on this machine. Kept apart from
     /// `builds` so a failure is never confusable with a loaded build.
     unresolvable_builds: Arc<RwLock<HashSet<u32>>>,
@@ -63,24 +141,19 @@ pub struct WoWsDataMap {
 }
 
 impl WoWsDataMap {
-    pub fn new(wows_dir: PathBuf, locale: String) -> Self {
+    /// `game_data_cache_dir` is where dumped game data lives; empty means the
+    /// default location. It is fixed for the life of the map: editing the
+    /// setting takes effect on the next start.
+    pub fn new(wows_dir: PathBuf, locale: String, game_data_cache_dir: String) -> Self {
         Self {
-            builds: Arc::new(RwLock::new(HashMap::new())),
+            builds: Arc::new(RwLock::new(LoadedBuilds::new(NON_MAIN_BUILD_CAPACITY))),
             unresolvable_builds: Arc::new(RwLock::new(HashSet::new())),
             resolution_attempts: Arc::new(RwLock::new(HashMap::new())),
             wows_dir,
             locale,
             network_job_tx: None,
-            game_data_cache_dir: String::new(),
+            game_data_cache_dir,
         }
-    }
-
-    /// Changing where dumped game data lives can make a build that was not
-    /// findable findable, so the failures recorded against the old directory
-    /// are dropped.
-    pub fn set_game_data_cache_dir(&mut self, dir: String) {
-        self.game_data_cache_dir = dir;
-        self.forget_unresolvable_builds();
     }
 
     /// Allow `build` to be looked for again after its data was downloaded.
@@ -91,6 +164,12 @@ impl WoWsDataMap {
     /// Allow every previously unresolvable build to be looked for again.
     pub fn forget_unresolvable_builds(&self) {
         self.unresolvable_builds.write().clear();
+    }
+
+    /// Whether `build` is recorded as not available on this machine, which is
+    /// what stops the loading path being paid for it again.
+    pub fn is_unresolvable_build(&self, build: u32) -> bool {
+        self.unresolvable_builds.read().contains(&build)
     }
 
     /// How many times the loading path ran for `build`.
@@ -109,30 +188,39 @@ impl WoWsDataMap {
         self.network_job_tx = Some(tx);
     }
 
-    /// Insert data for a specific build number.
+    /// Insert data for a specific build number. The build is subject to
+    /// eviction once [`NON_MAIN_BUILD_CAPACITY`] others are in front of it;
+    /// use [`Self::insert_main`] for the live install's build.
     pub fn insert(&self, build: u32, data: SharedWoWsData) {
         self.builds.write().insert(build, data);
     }
 
-    /// Look up already-loaded data by build number. Does NOT lazy-load.
-    pub fn get(&self, build: u32) -> Option<SharedWoWsData> {
-        self.builds.read().get(&build).cloned()
+    /// Insert the build of the live WoWs install, which stays loaded.
+    pub fn insert_main(&self, build: u32, data: SharedWoWsData) {
+        self.builds.write().insert_main(build, data);
     }
 
-    /// Iterate over loaded builds with a closure (avoids exposing the inner lock).
-    pub fn with_builds<R>(&self, f: impl FnOnce(&HashMap<u32, SharedWoWsData>) -> R) -> R {
-        f(&self.builds.read())
+    /// Look up already-loaded data by build number, counting as a use of that
+    /// build. Does NOT lazy-load.
+    pub fn get(&self, build: u32) -> Option<SharedWoWsData> {
+        self.builds.write().get(build)
+    }
+
+    /// Data for every currently loaded build. Taking a snapshot keeps the
+    /// cache's lock held for the clone alone, and leaves eviction order alone.
+    pub fn loaded_builds(&self) -> Vec<SharedWoWsData> {
+        self.builds.read().all()
     }
 
     /// Rebuild all loaded builds' data after constants have changed.
     /// Returns `true` if all builds rebuilt successfully, `false` if any failed.
     #[instrument(skip(self))]
     pub fn rebuild_all_with_new_constants(&self) -> bool {
-        let builds = self.builds.read();
         let mut all_ok = true;
-        for (build, data) in builds.iter() {
-            debug!("Rebuilding data for build {}", build);
-            if !data.write().rebuild_with_new_constants() {
+        for data in self.loaded_builds() {
+            let mut data = data.write();
+            debug!("Rebuilding data for build {}", data.build_number);
+            if !data.rebuild_with_new_constants() {
                 all_ok = false;
             }
         }
@@ -154,9 +242,9 @@ impl WoWsDataMap {
             .unwrap_or_else(|_| locale.to_string());
         let attempted_dirs = [locale, &primary_lang, "en"];
 
-        let builds = self.builds.read();
-        for (build, data) in builds.iter() {
+        for data in self.loaded_builds() {
             let data = data.read();
+            let build = data.build_number;
             let provider = match data.game_metadata.as_ref() {
                 Some(p) => p,
                 None => continue,
@@ -243,9 +331,8 @@ impl WoWsDataMap {
     /// old replay is loaded), reads them straight from the newest dump on disk.
     pub fn newest_ship_icons(&self) -> HashMap<Species, Arc<GameAsset>> {
         let loaded = self
-            .builds
-            .read()
-            .values()
+            .loaded_builds()
+            .into_iter()
             .max_by_key(|data| data.read().build_number)
             .map(|data| data.read().ship_icons.clone())
             .unwrap_or_default();
@@ -266,9 +353,8 @@ impl WoWsDataMap {
     /// Prefers the newest loaded build, then falls back to the newest dump on disk.
     pub fn newest_ribbon_icons(&self) -> HashMap<String, Arc<GameAsset>> {
         let loaded = self
-            .builds
-            .read()
-            .values()
+            .loaded_builds()
+            .into_iter()
             .max_by_key(|data| data.read().build_number)
             .map(|data| data.read().ribbon_icons.clone())
             .unwrap_or_default();
@@ -286,9 +372,8 @@ impl WoWsDataMap {
     /// [`Self::newest_ribbon_icons`] for the same Flash-era fallback.
     pub fn newest_subribbon_icons(&self) -> HashMap<String, Arc<GameAsset>> {
         let loaded = self
-            .builds
-            .read()
-            .values()
+            .loaded_builds()
+            .into_iter()
             .max_by_key(|data| data.read().build_number)
             .map(|data| data.read().subribbon_icons.clone())
             .unwrap_or_default();
@@ -330,9 +415,8 @@ impl WoWsDataMap {
         // connection/observed state all read wrong). For older builds, fall back
         // to the build's own VFS constants (Null = no override).
         let fallback_constants = {
-            let builds = self.builds.read();
             let mut best: Option<(u32, serde_json::Value)> = None;
-            for data in builds.values() {
+            for data in self.loaded_builds() {
                 let guard = data.read();
                 if guard.build_number < build && best.as_ref().is_none_or(|(b, _)| guard.build_number > *b) {
                     best = Some((guard.build_number, guard.replay_constants.read().clone()));
@@ -368,12 +452,10 @@ impl WoWsDataMap {
             let index = wows_data_mgr::builds::BuildsIndex::load(&dump_base.join("builds.toml"));
 
             // Construct version string for cross-region fallback
-            let version_hint = {
-                let builds = self.builds.read();
-                builds.values().next().and_then(|d| {
-                    d.read().full_version.as_ref().map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch))
-                })
-            };
+            let version_hint = self
+                .loaded_builds()
+                .first()
+                .and_then(|d| d.read().full_version.as_ref().map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch)));
 
             if let Some((entry, exact)) = index.resolve_build(build, version_hint.as_deref()) {
                 if !exact {
@@ -445,9 +527,34 @@ mod build_resolution_tests {
     /// install, no builds index, no legacy dump.
     fn test_map_with_no_data() -> WoWsDataMap {
         let root = std::env::temp_dir().join(format!("wt-no-game-data-{}", std::process::id()));
-        let mut map = WoWsDataMap::new(root.join("wows"), "en".to_string());
-        map.set_game_data_cache_dir(root.join("cache").to_string_lossy().into_owned());
-        map
+        WoWsDataMap::new(root.join("wows"), "en".to_string(), root.join("cache").to_string_lossy().into_owned())
+    }
+
+    /// Game data with nothing in it, standing in for a loaded build. The cache
+    /// only ever moves the `Arc` around, so what it points at does not matter
+    /// beyond being able to tell one build's data from another's.
+    fn empty_build_data(build: u32) -> SharedWoWsData {
+        Arc::new(RwLock::new(Box::new(WorldOfWarshipsData {
+            vfs: VfsPath::new(wowsunpack::vfs::MemoryFS::new()),
+            game_metadata: None,
+            ship_icons: HashMap::new(),
+            ribbon_icons: HashMap::new(),
+            subribbon_icons: HashMap::new(),
+            achievement_icons: HashMap::new(),
+            consumable_icons: HashMap::new(),
+            crew_skill_icons: HashMap::new(),
+            modernization_icons: HashMap::new(),
+            signal_flag_icons: HashMap::new(),
+            game_constants: Arc::new(GameConstants::defaults()),
+            replay_constants: Arc::new(RwLock::new(serde_json::Value::Null)),
+            replay_constants_exact_match: false,
+            full_version: None,
+            patch_version: 0,
+            build_number: build,
+            replays_dir: PathBuf::new(),
+            build_dir: PathBuf::new(),
+            dump_dir: None,
+        })))
     }
 
     /// The loading path reads and parses the whole builds index and clones every
@@ -488,21 +595,92 @@ mod build_resolution_tests {
         assert_eq!(map.resolution_attempts(9_999_999), 2, "the download must buy the build a second attempt");
     }
 
-    /// Pointing the app at a different game data cache is the other way a
-    /// previously missing build arrives, and it invalidates every record.
+    /// The live install's build is the one nearly every replay wants. Loading
+    /// it costs seconds, so it is pinned: cycling through old builds must not
+    /// push it out.
     #[test]
-    fn changing_the_cache_directory_lets_every_build_be_attempted_again() {
-        let mut map = test_map_with_no_data();
-        assert!(map.resolve_build(9_999_999).is_none());
-        assert!(map.resolve_build(8_888_888).is_none());
+    fn the_main_build_is_never_evicted() {
+        let map = test_map_with_no_data();
+        map.insert_main(7_000_000, empty_build_data(7_000_000));
+        for build in 1..=NON_MAIN_BUILD_CAPACITY as u32 {
+            map.insert(build, empty_build_data(build));
+        }
 
-        let elsewhere = std::env::temp_dir().join(format!("wt-other-cache-{}", std::process::id()));
-        map.set_game_data_cache_dir(elsewhere.to_string_lossy().into_owned());
+        map.insert(9_000_000, empty_build_data(9_000_000));
 
-        assert!(map.resolve_build(9_999_999).is_none());
-        assert!(map.resolve_build(8_888_888).is_none());
-        assert_eq!(map.resolution_attempts(9_999_999), 2);
-        assert_eq!(map.resolution_attempts(8_888_888), 2);
+        assert!(map.get(7_000_000).is_some(), "the live install's build stays loaded");
+        assert!(map.get(1).is_none(), "the least recently used other build is the one that goes");
+        assert!(map.get(9_000_000).is_some());
+    }
+
+    /// Eviction is a cache decision, never a failure. The evicted build has to
+    /// be looked for again on the next resolve; an implementation that treats
+    /// it as unresolvable never re-runs the loading path.
+    ///
+    /// Nothing this test can point the map at holds real game data, so the
+    /// reachable observation is that the loading path runs again rather than
+    /// that it succeeds.
+    #[test]
+    fn resolving_an_evicted_build_reloads_it_rather_than_failing() {
+        let map = test_map_with_no_data();
+        map.insert(1, empty_build_data(1));
+        for build in 2..=NON_MAIN_BUILD_CAPACITY as u32 + 1 {
+            map.insert(build, empty_build_data(build));
+        }
+        assert!(map.get(1).is_none(), "build 1 was evicted");
+
+        assert_eq!(map.resolution_attempts(1), 0, "build 1 was inserted, never resolved");
+        map.resolve_build(1);
+        assert_eq!(map.resolution_attempts(1), 1, "an evicted build is looked for again");
+    }
+
+    /// What separates an LRU from an insertion-ordered queue: build 1 is the
+    /// oldest insertion but the newest use, so build 2 is what goes.
+    #[test]
+    fn a_recently_used_build_outlives_an_older_one() {
+        let map = test_map_with_no_data();
+        assert_eq!(NON_MAIN_BUILD_CAPACITY, 2, "this test reasons about exactly two resident builds");
+        map.insert(1, empty_build_data(1));
+        map.insert(2, empty_build_data(2));
+        assert!(map.get(1).is_some(), "using build 1 makes it the most recently used");
+
+        map.insert(3, empty_build_data(3));
+
+        assert!(map.get(1).is_some(), "the recently used build stays");
+        assert!(map.get(2).is_none(), "the least recently used build goes");
+        assert!(map.get(3).is_some());
+    }
+
+    /// Eviction drops the map's `Arc` and nothing else. A caller mid-parse
+    /// holds its own and must keep reading through it.
+    #[test]
+    fn eviction_does_not_invalidate_a_handle_a_caller_already_holds() {
+        let map = test_map_with_no_data();
+        map.insert(1, empty_build_data(1));
+        let held = map.get(1).expect("the build was just inserted");
+
+        for build in 2..=NON_MAIN_BUILD_CAPACITY as u32 + 1 {
+            map.insert(build, empty_build_data(build));
+        }
+
+        assert!(map.get(1).is_none(), "the map dropped its handle on build 1");
+        assert_eq!(held.read().build_number, 1, "the caller's handle still reads");
+    }
+
+    /// The negative cache and the LRU are individually correct and would
+    /// destroy each other if joined: a directory spanning many builds evicts
+    /// constantly, and an eviction that counted as a failure would walk the
+    /// whole directory into "unavailable".
+    #[test]
+    fn evicting_a_build_does_not_mark_it_unresolvable() {
+        let map = test_map_with_no_data();
+        map.insert(1, empty_build_data(1));
+        for build in 2..=NON_MAIN_BUILD_CAPACITY as u32 + 1 {
+            map.insert(build, empty_build_data(build));
+        }
+
+        assert!(map.get(1).is_none(), "build 1 was evicted");
+        assert!(!map.is_unresolvable_build(1), "an evicted build was loadable and still is");
     }
 }
 

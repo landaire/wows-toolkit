@@ -1026,15 +1026,12 @@ impl TabState {
         self.persisted.write().chart_configs.remove(&id);
     }
 
-    /// Point the app at a different game data cache. The live data map keeps
-    /// its own copy of this directory and remembers which builds it could not
-    /// find there, so both follow the setting.
+    /// Point the app at a different game data cache. The live data map reads
+    /// the directory it was constructed with and keeps it until the app is
+    /// restarted, so this only moves where new work looks.
     pub(crate) fn set_game_data_cache_dir(&mut self, dir: String) {
-        self.persisted.write().settings.game.game_data_cache_dir = dir.clone();
+        self.persisted.write().settings.game.game_data_cache_dir = dir;
         self.game_data_cache_stats = None;
-        if let Some(map) = self.wows_data_map.as_mut() {
-            map.set_game_data_cache_dir(dir);
-        }
         crate::ui::replay_parser::clear_fire_section_failures();
     }
 

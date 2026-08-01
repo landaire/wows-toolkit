@@ -5902,22 +5902,17 @@ impl ToolkitTabViewer<'_> {
         if self.tab_state.replay_controls_cache.is_none()
             && let Some(map) = &self.tab_state.wows_data_map
         {
-            let result = map.with_builds(|builds| {
-                for data in builds.values() {
-                    let data = data.read();
-                    let path = "system/data/commands.scheme.xml";
-                    let mut buf = Vec::new();
-                    if let Ok(mut file) = data.vfs.join(path).and_then(|p| p.open_file()) {
-                        use std::io::Read;
-                        if file.read_to_end(&mut buf).is_ok() && !buf.is_empty() {
-                            let groups = crate::util::controls::parse_commands_scheme(&buf);
-                            if !groups.is_empty() {
-                                return Some(groups);
-                            }
-                        }
-                    }
+            let result = map.loaded_builds().into_iter().find_map(|data| {
+                let data = data.read();
+                let path = "system/data/commands.scheme.xml";
+                let mut buf = Vec::new();
+                let mut file = data.vfs.join(path).and_then(|p| p.open_file()).ok()?;
+                use std::io::Read;
+                if file.read_to_end(&mut buf).is_err() || buf.is_empty() {
+                    return None;
                 }
-                None
+                let groups = crate::util::controls::parse_commands_scheme(&buf);
+                (!groups.is_empty()).then_some(groups)
             });
             self.tab_state.replay_controls_cache = result;
         }

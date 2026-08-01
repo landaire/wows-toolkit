@@ -1486,26 +1486,21 @@ impl WowsToolkitApp {
                     // (reset_game_state sets wows_data_map to None).
                     let wows_data_ref = self.tab_state.world_of_warships_data.as_ref().unwrap();
                     if let Some(map) = &self.tab_state.wows_data_map {
-                        map.insert(build_number, Arc::clone(wows_data_ref));
+                        map.insert_main(build_number, Arc::clone(wows_data_ref));
                     } else {
-                        let mut map = crate::data::wows_data::WoWsDataMap::new(
-                            PathBuf::from(&new_dir),
-                            self.tab_state
-                                .persisted
-                                .read()
-                                .settings
-                                .app
-                                .locale
-                                .clone()
-                                .unwrap_or_else(|| "en".to_string()),
-                        );
+                        let (locale, cache_dir) = {
+                            let persisted = self.tab_state.persisted.read();
+                            (
+                                persisted.settings.app.locale.clone().unwrap_or_else(|| "en".to_string()),
+                                persisted.settings.game.game_data_cache_dir.clone(),
+                            )
+                        };
+                        let mut map =
+                            crate::data::wows_data::WoWsDataMap::new(PathBuf::from(&new_dir), locale, cache_dir);
                         if let Some(tx) = self.tab_state.network_job_tx.clone() {
                             map.set_network_job_tx(tx);
                         }
-                        map.set_game_data_cache_dir(
-                            self.tab_state.persisted.read().settings.game.game_data_cache_dir.clone(),
-                        );
-                        map.insert(build_number, Arc::clone(wows_data_ref));
+                        map.insert_main(build_number, Arc::clone(wows_data_ref));
                         self.tab_state.wows_data_map = Some(map);
                     }
 
