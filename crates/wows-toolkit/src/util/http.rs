@@ -84,3 +84,28 @@ pub async fn get_with_retry(client: &reqwest::Client, url: &str) -> reqwest::Res
         }
     }
 }
+
+/// The process-wide async client, so every caller shares one connection pool
+/// and TLS session cache. `None` only when the client cannot be built at all,
+/// which is a broken TLS backend rather than a per-call failure.
+pub fn shared_async_client() -> Option<&'static reqwest::Client> {
+    static SHARED: std::sync::OnceLock<Option<reqwest::Client>> = std::sync::OnceLock::new();
+    SHARED
+        .get_or_init(|| async_client().inspect_err(|e| tracing::error!("failed to build shared HTTP client: {e}")).ok())
+        .as_ref()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Four call sites fetch from the same host. Handing each its own client
+    /// gives each its own connection pool and TLS session cache, so a download
+    /// of thousands of small objects reconnects instead of reusing.
+    #[test]
+    fn the_shared_client_is_one_client() {
+        let first = shared_async_client().expect("a client can be built in this environment");
+        let second = shared_async_client().expect("a client can be built in this environment");
+        assert!(std::ptr::eq(first, second));
+    }
+}

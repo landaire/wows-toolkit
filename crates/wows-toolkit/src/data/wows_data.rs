@@ -205,13 +205,13 @@ impl WoWsDataMap {
         if index.resolve_build(build, Some(&request.friendly_version())).is_some() {
             return true;
         }
-        if index.builds.is_empty() {
-            if let Ok(entries) = std::fs::read_dir(&dump_base) {
-                for entry in entries.flatten() {
-                    let name_str = entry.file_name().to_string_lossy().to_string();
-                    if name_str.ends_with(&format!("_{build}")) && entry.path().join("metadata.toml").exists() {
-                        return true;
-                    }
+        if index.builds.is_empty()
+            && let Ok(entries) = std::fs::read_dir(&dump_base)
+        {
+            for entry in entries.flatten() {
+                let name_str = entry.file_name().to_string_lossy().to_string();
+                if name_str.ends_with(&format!("_{build}")) && entry.path().join("metadata.toml").exists() {
+                    return true;
                 }
             }
         }

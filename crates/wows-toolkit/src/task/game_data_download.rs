@@ -5,6 +5,7 @@ use std::sync::mpsc;
 
 use rootcause::Report;
 use rootcause::prelude::*;
+use rootcause::report;
 
 use super::BackgroundTask;
 use super::BackgroundTaskCompletion;
@@ -118,8 +119,8 @@ pub fn start_game_data_validation_task(output_base: PathBuf) -> BackgroundTask {
     }
 }
 
-fn build_client() -> Result<reqwest::Client, Report> {
-    Ok(crate::util::http::async_client().attach_with(|| "failed to build HTTP client")?)
+fn build_client() -> Result<&'static reqwest::Client, Report> {
+    crate::util::http::shared_async_client().ok_or_else(|| report!("failed to build HTTP client"))
 }
 
 fn download(
@@ -136,7 +137,7 @@ fn download(
     let client = build_client()?;
 
     let build = runtime.block_on(wows_data_mgr::download_repo::download_build(
-        &client,
+        client,
         wows_data_mgr::download_repo::DEFAULT_REPO_BASE_URL,
         &output_base,
         target_build,
@@ -163,7 +164,7 @@ fn plan(
     let cas_root = wows_data_mgr::cas::cas_root(&output_base);
 
     let plan = runtime.block_on(wows_data_mgr::download_repo::plan_download(
-        &client,
+        client,
         wows_data_mgr::download_repo::DEFAULT_REPO_BASE_URL,
         &cas_root,
         &builds,
@@ -180,7 +181,7 @@ fn check_for_updates(output_base: PathBuf, known_tip: Option<String>) -> Result<
     let client = build_client()?;
 
     let result = runtime.block_on(wows_data_mgr::download_repo::check_for_updates(
-        &client,
+        client,
         wows_data_mgr::download_repo::DEFAULT_REPO_BASE_URL,
         &output_base,
         known_tip.as_deref(),
@@ -200,7 +201,7 @@ fn validate(
     let client = build_client()?;
 
     let result = runtime.block_on(wows_data_mgr::download_repo::validate_cache(
-        &client,
+        client,
         wows_data_mgr::download_repo::DEFAULT_REPO_BASE_URL,
         &output_base,
         |downloaded, total| {
