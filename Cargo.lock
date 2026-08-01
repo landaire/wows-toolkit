@@ -11451,6 +11451,7 @@ dependencies = [
  "rkyv",
  "rootcause",
  "roxmltree 0.21.1",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "sha2 0.10.9",

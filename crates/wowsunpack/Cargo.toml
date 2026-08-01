@@ -61,6 +61,7 @@ async-std = { version = "1.13", optional = true }
 futures = { version = "0.3", optional = true }
 ciborium = { workspace = true, optional = true }
 dhat = { version = "0.3", optional = true }
+rustc-hash = "2.1.3"
 
 [build-dependencies]
 serde = { workspace = true }

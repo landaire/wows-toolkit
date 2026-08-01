@@ -6,6 +6,9 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+
+use rustc_hash::FxBuildHasher;
+use rustc_hash::FxHashMap;
 use std::io::Cursor;
 use std::ops::Range;
 
@@ -19,7 +22,6 @@ use vfs::error::VfsErrorKind;
 
 use crate::data::idx;
 use crate::data::idx::IdxFile;
-use crate::data::idx::VfsEntry;
 
 /// Trait for providing raw byte access to PKG volume data (sync).
 ///
@@ -63,15 +65,13 @@ pub enum VfsEntryMeta {
 #[derive(Debug)]
 pub struct IdxVfs<T> {
     source: T,
-    entries: HashMap<String, VfsEntryMeta>,
+    entries: FxHashMap<Rc<str>, VfsEntryMeta>,
 }
 
 impl<T> IdxVfs<T> {
     /// Build a VFS from parsed IDX files and a data source.
     pub fn new(source: T, idx_files: &[IdxFile]) -> Self {
-        let tree = idx::build_file_tree(idx_files);
-        let entries = build_vfs_entries(&tree);
-        Self { source, entries }
+        Self { source, entries: build_vfs_entries(idx_files) }
     }
 
     /// Look up an entry by path.
@@ -88,47 +88,56 @@ impl<T> IdxVfs<T> {
 
     /// Iterate over all paths in the VFS.
     pub fn paths(&self) -> impl Iterator<Item = (&str, &VfsEntryMeta)> {
-        self.entries.iter().map(|(k, v)| (k.as_str(), v))
+        self.entries.iter().map(|(k, v)| (&**k, v))
     }
 }
 
-/// Convert the flat `BTreeMap<String, VfsEntry>` from `build_file_tree` into
-/// a `HashMap<String, VfsEntryMeta>` with directory children populated.
-fn build_vfs_entries(tree: &HashMap<String, VfsEntry>) -> HashMap<String, VfsEntryMeta> {
-    let mut entries = HashMap::with_capacity(tree.len());
+/// Build the VFS entry map straight from the parsed IDX files.
+///
+/// Goes directly to `VfsEntryMeta` rather than through `idx::build_file_tree`'s
+/// `VfsEntry` map: that intermediate owns a copy of every path and of every
+/// file-info record, and a build has hundreds of thousands of each.
+fn build_vfs_entries(idx_files: &[IdxFile]) -> FxHashMap<Rc<str>, VfsEntryMeta> {
+    let count = idx_files.iter().fold(0, |acc, file| acc + file.resources.len());
+    let mut entries: FxHashMap<Rc<str>, VfsEntryMeta> = FxHashMap::with_capacity_and_hasher(count, FxBuildHasher);
 
     // Volume filenames repeat across hundreds of thousands of files but only a
     // couple hundred are distinct; intern them so every file entry shares one
     // refcounted handle instead of owning a duplicate String.
-    let mut volume_names: HashMap<&str, Rc<str>> = HashMap::new();
+    let mut volume_names: HashMap<&str, Rc<str>> = HashMap::default();
 
     // First pass: add all entries
-    for (path, entry) in tree {
-        let meta = match entry {
-            VfsEntry::File { file_info, volume } => {
+    idx::visit_entries(idx_files, |path, file| {
+        let meta = match file {
+            Some(file) => {
                 let volume_filename = volume_names
-                    .entry(volume.filename.as_str())
-                    .or_insert_with(|| Rc::from(volume.filename.as_str()))
+                    .entry(file.volume.filename.as_str())
+                    .or_insert_with(|| Rc::from(file.volume.filename.as_str()))
                     .clone();
                 VfsEntryMeta::File(VfsFileEntry {
                     volume_filename,
-                    offset: file_info.offset,
-                    size: file_info.size,
-                    unpacked_size: file_info.unpacked_size,
-                    compression_info: file_info.compression_info,
-                    crc32: file_info.crc32,
+                    offset: file.file_info.offset,
+                    size: file.file_info.size,
+                    unpacked_size: file.file_info.unpacked_size,
+                    compression_info: file.file_info.compression_info,
+                    crc32: file.file_info.crc32,
                 })
             }
-            VfsEntry::Directory => VfsEntryMeta::Directory { children: Vec::new() },
+            None => VfsEntryMeta::Directory { children: Vec::new() },
         };
 
-        entries.insert(path.clone(), meta);
-    }
+        entries.insert(Rc::clone(path), meta);
+    });
 
-    // Second pass: populate directory children. The tree keys are the same set
-    // as the entries just inserted, so iterate them directly instead of cloning
-    // every path into a temporary Vec.
-    for path in tree.keys() {
+    // The root is the one directory with no resource of its own, so
+    // `visit_entries` never yields it.
+    entries.entry(Rc::from("/")).or_insert_with(|| VfsEntryMeta::Directory { children: Vec::new() });
+
+    // Second pass: populate directory children. Snapshot the keys first, since
+    // the loop inserts into `entries`; the handles are refcounted, so the
+    // snapshot costs pointers rather than copies of every path.
+    let paths: Vec<Rc<str>> = entries.keys().map(Rc::clone).collect();
+    for path in &paths {
         let mut parent_path = match path.rfind('/') {
             Some(pos) => &path[..pos],
             None => "/", // top-level entry, parent is root
@@ -140,16 +149,22 @@ fn build_vfs_entries(tree: &HashMap<String, VfsEntry>) -> HashMap<String, VfsEnt
 
         let child_name = match path.rfind('/') {
             Some(pos) => &path[pos + 1..],
-            None => path.as_str(),
+            None => &**path,
         };
-
-        // Ensure parent directory exists and add this child
-        let parent =
-            entries.entry(parent_path.to_string()).or_insert_with(|| VfsEntryMeta::Directory { children: Vec::new() });
 
         if child_name.is_empty() {
             continue;
         }
+
+        // Every ancestor of a resource is itself a resource, so the parent is
+        // already present and this is a lookup rather than an insert; the
+        // fallback covers a parent that somehow is not.
+        let parent = match entries.get_mut(parent_path) {
+            Some(parent) => parent,
+            None => {
+                entries.entry(Rc::from(parent_path)).or_insert_with(|| VfsEntryMeta::Directory { children: Vec::new() })
+            }
+        };
 
         if let VfsEntryMeta::Directory { children } = parent {
             children.push(child_name.to_string());
