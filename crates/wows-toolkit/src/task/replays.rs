@@ -1533,6 +1533,13 @@ impl IngestFailures {
         }
     }
 
+    /// Attribute one replay whose read panicked. A recovered panic carries no
+    /// report to classify, and nothing can be offered for it, so it counts as
+    /// unreadable.
+    pub fn record_panic(&mut self) {
+        self.unreadable += 1;
+    }
+
     /// Every replay the directory holds that did not load, for either reason.
     pub fn total(&self) -> usize {
         self.unreadable + self.missing_builds.values().sum::<usize>()
@@ -1576,8 +1583,7 @@ fn run_ingest_directory(
                 warn!("skipping replay {}: {e}", path.display());
             }
             Err(payload) => {
-                // A recovered panic carries no report to classify.
-                failures.unreadable += 1;
+                failures.record_panic();
                 let msg = crate::util::thread::panic_payload_to_string(&payload);
                 warn!("panic while reading replay {}, skipping it: {msg}", path.display());
             }
@@ -1784,6 +1790,20 @@ mod tests {
             .record(&missing_build_report(9_876, "13.5.0").attach("try installing the matching game client version"));
         assert_eq!(failures.unreadable, 0);
         assert_eq!(failures.missing_builds.values().sum::<usize>(), 1);
+    }
+
+    /// A parser panic is recovered per file and carries no report to
+    /// classify, so it has its own entry point. It still has to land in the
+    /// same bucket as an unreadable file and leave the actionable missing
+    /// builds untouched.
+    #[test]
+    fn a_recovered_panic_is_counted_as_unreadable() {
+        let mut failures = IngestFailures::default();
+        failures.record(&missing_build_report(9_876, "13.5.0"));
+        failures.record_panic();
+        assert_eq!(failures.unreadable, 1);
+        assert_eq!(failures.missing_builds.values().sum::<usize>(), 1);
+        assert_eq!(failures.total(), 2);
     }
 
     #[test]

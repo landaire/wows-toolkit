@@ -840,6 +840,7 @@ impl TabState {
                     update.build,
                     Some(update.version),
                     true,
+                    None,
                 ))
             );
         }
@@ -873,6 +874,7 @@ impl TabState {
                     build.build,
                     Some(build.version),
                     true,
+                    None,
                 ))
             );
         }

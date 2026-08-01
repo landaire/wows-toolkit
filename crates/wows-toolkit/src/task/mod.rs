@@ -43,6 +43,7 @@ pub enum ReplaySource {
 
 // Re-export everything so `use crate::task::*` still works
 pub use game_data_download::start_game_data_download_task;
+pub use game_data_download::start_game_data_plan_task;
 pub use game_data_download::start_game_data_update_check_task;
 pub use game_data_download::start_game_data_validation_task;
 pub use networking::NetworkJob;
@@ -131,7 +132,13 @@ pub enum BackgroundTaskKind {
     DownloadingGameData {
         rx: mpsc::Receiver<DownloadProgress>,
         last_progress: Option<DownloadProgress>,
+        /// The directory workspace waiting on this build, to be walked again
+        /// once the data lands. `None` for downloads nothing is waiting on.
+        reingest: Option<crate::db::index::rows::WorkspaceId>,
     },
+    /// Resolving a selection of builds against the remote repository to report
+    /// what each one's availability is and how much the selection would fetch.
+    PlanningGameDataDownload,
     CheckingGameDataUpdates,
     ValidatingGameData {
         rx: mpsc::Receiver<DownloadProgress>,
@@ -238,7 +245,7 @@ impl BackgroundTask {
                         ui.spinner();
                         ui.label("Populating player inspector from historical replays...");
                     }
-                    BackgroundTaskKind::DownloadingGameData { rx, last_progress } => {
+                    BackgroundTaskKind::DownloadingGameData { rx, last_progress, .. } => {
                         match rx.try_recv() {
                             Ok(progress) => *last_progress = Some(progress),
                             Err(TryRecvError::Empty) => {}
@@ -260,6 +267,10 @@ impl BackgroundTask {
                     BackgroundTaskKind::CheckingGameDataUpdates => {
                         ui.spinner();
                         ui.label(t!("ui.messages.checking_game_data_updates"));
+                    }
+                    BackgroundTaskKind::PlanningGameDataDownload => {
+                        // The dialog that asked for this plan shows its own
+                        // pending footer, so the task bar stays quiet.
                     }
                     BackgroundTaskKind::ValidatingGameData { rx, last_progress } => {
                         match rx.try_recv() {
@@ -399,6 +410,12 @@ pub enum BackgroundTaskCompletion {
         requested_build: u32,
         build: u32,
     },
+    /// A selection of builds was resolved against the remote repository. Each
+    /// requested build's availability is reported alongside the deduplicated
+    /// count of CAS objects the whole selection would fetch.
+    GameDataDownloadPlanned {
+        plan: wows_data_mgr::download_repo::DownloadPlan,
+    },
     GameDataUpdatesChecked {
         tip: String,
         updates: Vec<wows_data_mgr::download_repo::BuildUpdateStatus>,
@@ -469,6 +486,11 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .debug_struct("GameDataDownloaded")
                 .field("requested_build", requested_build)
                 .field("build", build)
+                .finish(),
+            Self::GameDataDownloadPlanned { plan } => f
+                .debug_struct("GameDataDownloadPlanned")
+                .field("unique_missing_objects", &plan.unique_missing_objects)
+                .field("resolved", &plan.resolved.len())
                 .finish(),
             Self::GameDataUpdatesChecked { tip, updates } => {
                 f.debug_struct("GameDataUpdatesChecked").field("tip", tip).field("updates", updates).finish()

@@ -49,6 +49,8 @@ github = "GitHub"
 view_github = "View Project on GitHub"
 choose = "Choose..."
 reset = "Reset"
+download = "Download"
+dismiss = "Dismiss"
 
 # -- Menu items --
 
@@ -81,7 +83,17 @@ crash_clear_settings = "If for some reason data that the application persists ma
 update_message = "Version %{tag} of WoWs Toolkit is available"
 update_windows_only = "Update available, but only Windows is supported at this time."
 p2p_warning = "Collaborative sessions use peer-to-peer networking. Other users in the session may be able to see your IP address."
-download_game_data_message = "Game data for build %{build} (version %{version}) is not available locally. Would you like to check if it can be downloaded?"
+download_game_data_intro = "Some replays need game data that is not installed. Pick the builds to download."
+download_build_row = "Version %{version} (build %{build})"
+download_replays_needing = "needed by %{count} replay(s)"
+download_availability_resolving = "checking the repository"
+download_availability_exact = "published"
+download_availability_nearest = "no exact match, nearest is %{version} (build %{build})"
+download_availability_unpublished = "never published"
+download_availability_unreachable = "published, but the repository could not be reached"
+download_plan_pending = "Working out what needs fetching..."
+download_objects_to_fetch = "Objects to fetch for the ticked builds: %{count}"
+download_plan_failed = "Could not work out what needs fetching"
 
 # -- Labels --
 
