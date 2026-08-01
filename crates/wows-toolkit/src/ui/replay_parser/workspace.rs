@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::path::Component;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -150,6 +152,68 @@ pub(crate) fn workspace_group_salt(id: WorkspaceId, kind: &str, group: &str) -> 
 /// file, and a `PathBuf -> &str` conversion for `workspace_salt` is lossy.
 pub(crate) fn workspace_leaf_salt(id: WorkspaceId, path: &std::path::Path) -> egui::Id {
     egui::Id::new((id.0, path))
+}
+
+/// Fish-style shorthand for a workspace root, used as a directory tab's
+/// title. The drive/UNC prefix is kept, every ancestor directory is cut to
+/// its first character, and the final component -- the directory the
+/// workspace actually lists -- is kept in full (middle-truncated if it is
+/// implausibly long). The input's separator style is preserved rather than
+/// normalised, since a root picked via a folder dialog is already in the
+/// platform's native form.
+pub(crate) fn shorten_root(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    let separator = if raw.contains('\\') { '\\' } else { '/' };
+
+    let mut prefix = String::new();
+    let mut has_root = false;
+    let mut parts: Vec<String> = Vec::new();
+
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix_component) => {
+                prefix.push_str(&prefix_component.as_os_str().to_string_lossy());
+            }
+            Component::RootDir => has_root = true,
+            Component::CurDir | Component::ParentDir | Component::Normal(_) => {
+                parts.push(component.as_os_str().to_string_lossy().into_owned());
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        return prefix;
+    }
+
+    let leaf_index = parts.len() - 1;
+    let shortened = parts
+        .into_iter()
+        .enumerate()
+        .map(|(i, part)| if i == leaf_index { shorten_leaf(&part) } else { first_char(&part) })
+        .collect::<Vec<_>>()
+        .join(&separator.to_string());
+
+    if prefix.is_empty() && !has_root { shortened } else { format!("{prefix}{separator}{shortened}") }
+}
+
+fn first_char(component: &str) -> String {
+    component.chars().next().map(String::from).unwrap_or_default()
+}
+
+/// The final path component is kept in full unless it is implausibly long,
+/// in which case it is middle-truncated so a stray huge directory name
+/// cannot blow out the tab title.
+fn shorten_leaf(leaf: &str) -> String {
+    const MAX_LEAF_CHARS: usize = 24;
+    let chars: Vec<char> = leaf.chars().collect();
+    if chars.len() <= MAX_LEAF_CHARS {
+        return leaf.to_string();
+    }
+    let head_len = MAX_LEAF_CHARS / 2;
+    let tail_len = MAX_LEAF_CHARS - head_len;
+    let head: String = chars[..head_len].iter().collect();
+    let tail: String = chars[chars.len() - tail_len..].iter().collect();
+    format!("{head}..{tail}")
 }
 
 /// A request raised by a listing context menu and consumed by a handler later
@@ -305,6 +369,40 @@ mod tests {
         assert!(!ws.replay_listing_auto_sized);
         assert!(!ws.replay_listing_collapse_defaulted);
         assert!(ws.replay_dock_state.iter_all_tabs().next().is_none());
+    }
+
+    #[test]
+    fn a_deep_path_abbreviates_its_ancestors() {
+        assert_eq!(shorten_root(Path::new("G:/dev/wows/replays/2026-07")), "G:/d/w/r/2026-07");
+    }
+
+    #[test]
+    fn a_shallow_path_is_left_alone() {
+        assert_eq!(shorten_root(Path::new("D:/replays")), "D:/replays");
+    }
+
+    #[test]
+    fn a_bare_directory_name_is_returned_as_is() {
+        assert_eq!(shorten_root(Path::new("replays")), "replays");
+    }
+
+    #[test]
+    fn an_empty_path_does_not_panic() {
+        assert_eq!(shorten_root(Path::new("")), "");
+    }
+
+    #[test]
+    fn a_very_long_leaf_is_middle_truncated() {
+        let long = "a".repeat(60);
+        let out = shorten_root(Path::new(&format!("D:/x/{long}")));
+        assert!(out.len() < 60, "expected truncation, got {out:?}");
+        assert!(out.contains(".."), "expected an elision marker, got {out:?}");
+    }
+
+    #[test]
+    fn backslash_separators_are_handled() {
+        // Windows paths arrive backslashed from the folder picker.
+        assert_eq!(shorten_root(Path::new(r"G:\dev\wows\replays")), r"G:\d\w\replays");
     }
 
     #[test]
