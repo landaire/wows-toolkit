@@ -10,7 +10,7 @@ use parking_lot::RwLock;
 use crate::db::index::rows::RowSummary;
 use crate::db::index::rows::SourceId;
 use crate::db::index::rows::WorkspaceId;
-use crate::task::replays::IngestProgress;
+use crate::task::replays::IngestStage;
 use crate::ui::replay_parser::ListedReplay;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::ReplayTab;
@@ -35,10 +35,9 @@ pub(crate) struct ReplayWorkspace {
     /// re-picking the same directory cannot start a second walk over it.
     /// Owned by the in-flight task, which clears it when it finishes.
     pub ingest_in_flight: bool,
-    /// How far the in-flight walk has got, as of the last batch it delivered.
-    /// `None` before the first batch. Owned by the in-flight task, which clears
-    /// it when it finishes, so the listing stops reporting a walk that is over.
-    pub ingest_progress: Option<IngestProgress>,
+    /// What the in-flight run is doing, as of its last update. `None` when no
+    /// run is in flight, so the listing stops reporting one that is over.
+    pub ingest_stage: Option<IngestStage>,
     /// Index-sourced display data for the listing, keyed by replay path.
     /// Reloaded whenever `index_generation()` moves past
     /// `replay_row_summaries_generation`.
@@ -79,7 +78,7 @@ impl ReplayWorkspace {
             source: None,
             replay_files: None,
             ingest_in_flight: false,
-            ingest_progress: None,
+            ingest_stage: None,
             replay_row_summaries: HashMap::new(),
             replay_row_summaries_generation: None,
             replay_row_summaries_loading: false,
@@ -173,7 +172,7 @@ impl ReplayWorkspace {
     /// Clears this workspace's listing and dock state. Called when the WoWs
     /// directory changes to ensure no stale data from the previous directory
     /// persists. `root` is preserved: a reset is not a change of directory.
-    /// `replay_row_summaries_loading`, `ingest_in_flight` and `ingest_progress`
+    /// `replay_row_summaries_loading`, `ingest_in_flight` and `ingest_stage`
     /// are preserved: all are owned by an in-flight background task, which
     /// clears them on completion, and clearing them here would let a second
     /// task dispatch while the first is still running.
@@ -614,7 +613,7 @@ mod tests {
         );
         ws.replay_row_summaries_generation = Some(7);
         ws.ingest_in_flight = true;
-        ws.ingest_progress = Some(IngestProgress { done: 2, total: 9 });
+        ws.ingest_stage = Some(IngestStage::Reading(crate::task::replays::IngestProgress { done: 2, total: 9 }));
         ws.replay_row_summaries_loading = true;
         ws.replay_row_summaries_loaded = true;
         ws.replay_rows_need_reindex_scan = true;
@@ -629,8 +628,8 @@ mod tests {
         assert!(ws.replay_row_summaries_loading, "an in-flight load owns this flag and clears it on completion");
         assert!(ws.ingest_in_flight, "an in-flight ingest owns this flag and clears it on completion");
         assert_eq!(
-            ws.ingest_progress,
-            Some(IngestProgress { done: 2, total: 9 }),
+            ws.ingest_stage,
+            Some(IngestStage::Reading(crate::task::replays::IngestProgress { done: 2, total: 9 })),
             "an in-flight ingest owns its progress and clears it on completion"
         );
         assert!(ws.replay_files.is_none());

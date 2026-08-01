@@ -73,6 +73,7 @@ use crate::task::BackgroundTaskKind;
 use crate::task::ReplayExportFormat;
 use crate::task::ReplaySource;
 use crate::task::ToastMessage;
+use crate::task::replays::IngestStage;
 use crate::ui::theme::semantic::SemanticExt;
 use crate::update_background_task;
 use crate::util::replay_export::FlattenedVehicle;
@@ -3931,12 +3932,9 @@ impl ToolkitTabViewer<'_> {
         }
     }
 
-    /// Report the walk filling this listing, above the rows it is filling.
-    ///
-    /// The listing grows a batch at a time while a walk runs, so without this a
-    /// partly-filled listing is indistinguishable from a finished one. Both the
-    /// flag and the counts are cleared when the task finishes, however it
-    /// finishes, so this disappears with it.
+    /// Report what the run filling this listing is doing, above the rows it is
+    /// filling. A partly-filled listing is otherwise indistinguishable from a
+    /// finished one.
     fn show_ingest_progress(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
         let Some(workspace) = self.tab_state.workspace(ws_id) else {
             return;
@@ -3944,19 +3942,33 @@ impl ToolkitTabViewer<'_> {
         if !workspace.ingest_in_flight {
             return;
         }
-        let progress = workspace.ingest_progress;
+        let Some(stage) = workspace.ingest_stage.clone() else {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(t!("ui.messages.reading_replay_directory"));
+            });
+            return;
+        };
+
+        let label = match &stage {
+            IngestStage::Scanning(progress) | IngestStage::Reading(progress) => {
+                t!(stage.key(), done = progress.done, total = progress.total)
+            }
+            IngestStage::Downloading(progress) => {
+                t!(stage.key(), done = progress.downloaded, total = progress.total)
+            }
+            IngestStage::LoadingData { build, position } => {
+                t!(stage.key(), version = build.friendly_version(), index = position.index + 1, count = position.count)
+            }
+        };
 
         ui.horizontal(|ui| {
             ui.spinner();
-            match progress {
-                Some(progress) => {
-                    ui.label(t!("ui.replay.listing_reading", done = progress.done, total = progress.total));
-                }
-                None => {
-                    ui.label(t!("ui.messages.reading_replay_directory"));
-                }
-            }
+            ui.label(label);
         });
+        if let Some(fraction) = stage.fraction() {
+            ui.add(egui::ProgressBar::new(fraction).desired_height(4.0));
+        }
     }
 
     fn build_file_listing_ungrouped(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {

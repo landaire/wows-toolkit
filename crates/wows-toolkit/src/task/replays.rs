@@ -1546,6 +1546,51 @@ pub struct IngestProgress {
     pub total: usize,
 }
 
+/// Which build's data is loading, and where it falls in the run. Named because
+/// the position and the count are both `usize` and mean opposite things.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildLoadPosition {
+    pub index: usize,
+    pub count: usize,
+}
+
+/// What an open directory is doing, reported above its listing.
+#[derive(Debug, Clone, PartialEq)]
+pub enum IngestStage {
+    /// Reading each replay's header to count them and group them by build.
+    Scanning(IngestProgress),
+    /// Fetching game data for builds this machine does not have.
+    Downloading(super::DownloadProgress),
+    /// Loading one build's game data. Open-ended: the cost is a GameParams
+    /// decode with no intermediate count to report.
+    LoadingData { build: crate::task::BuildRequest, position: BuildLoadPosition },
+    /// Reading and indexing the replays themselves.
+    Reading(IngestProgress),
+}
+
+impl IngestStage {
+    pub const fn key(&self) -> &'static str {
+        match self {
+            Self::Scanning(_) => "ui.replay.listing_scanning",
+            Self::Downloading(_) => "ui.replay.listing_downloading",
+            Self::LoadingData { .. } => "ui.replay.listing_loading_data",
+            Self::Reading(_) => "ui.replay.listing_reading",
+        }
+    }
+
+    /// How far this stage has got, or `None` when it has nothing to report.
+    pub fn fraction(&self) -> Option<f32> {
+        let (done, total) = match self {
+            Self::Scanning(progress) | Self::Reading(progress) => (progress.done as f64, progress.total as f64),
+            Self::Downloading(progress) => (progress.downloaded as f64, progress.total as f64),
+            Self::LoadingData { .. } => return None,
+        };
+        // A stage yet to find anything has not finished; dividing by its zero
+        // total would report it as complete.
+        Some(if total > 0.0 { (done / total) as f32 } else { 0.0 })
+    }
+}
+
 /// One slice of a directory walk, delivered while the walk is still running so
 /// the listing fills as replays are read rather than when the last one is done.
 pub struct IngestBatch {
@@ -1575,6 +1620,8 @@ pub enum IngestUpdate {
     /// walk cannot read would otherwise leave the count standing still, which
     /// is what a stalled walk looks like.
     Progress { workspace: crate::db::index::rows::WorkspaceId, progress: IngestProgress },
+    /// Which stage the run has moved into.
+    Stage { workspace: crate::db::index::rows::WorkspaceId, stage: IngestStage },
 }
 
 /// Replays held back before a batch goes to the UI. Sized so a directory of
@@ -2462,5 +2509,43 @@ mod tests {
     fn a_partial_batch_waits_for_the_interval() {
         assert_eq!(flush_now(1, Duration::ZERO), Flush::Hold);
         assert_eq!(flush_now(1, INGEST_FLUSH_INTERVAL), Flush::Batch);
+    }
+
+    /// Every stage needs its own label. A shared key would report a download as a
+    /// read, which is the one thing the staging exists to distinguish.
+    #[test]
+    fn every_stage_has_its_own_key() {
+        let stages = [
+            IngestStage::Scanning(IngestProgress { done: 0, total: 1 }),
+            IngestStage::Downloading(crate::task::DownloadProgress { downloaded: 0, total: 1 }),
+            IngestStage::LoadingData { build: test_request(), position: BuildLoadPosition { index: 0, count: 1 } },
+            IngestStage::Reading(IngestProgress { done: 0, total: 1 }),
+        ];
+        let keys: BTreeSet<&str> = stages.iter().map(|stage| stage.key()).collect();
+        assert_eq!(keys.len(), stages.len());
+    }
+
+    /// Only the data load is open-ended. Reporting a determinate stage as
+    /// indefinite loses a bar the user can read progress from.
+    #[test]
+    fn only_the_data_load_is_indefinite() {
+        assert!(
+            IngestStage::LoadingData { build: test_request(), position: BuildLoadPosition { index: 0, count: 1 } }
+                .fraction()
+                .is_none()
+        );
+        assert_eq!(IngestStage::Reading(IngestProgress { done: 1, total: 4 }).fraction(), Some(0.25));
+    }
+
+    /// A stage that has not started reads as zero, not as finished. A total of
+    /// zero would otherwise divide into a full bar.
+    #[test]
+    fn an_empty_stage_reads_as_zero_not_complete() {
+        assert_eq!(IngestStage::Reading(IngestProgress { done: 0, total: 0 }).fraction(), Some(0.0));
+    }
+
+    fn test_request() -> crate::task::BuildRequest {
+        crate::task::BuildRequest::new(Version { major: 15, minor: 0, patch: 0, build: std::num::NonZeroU32::new(100) })
+            .expect("build is present")
     }
 }

@@ -77,6 +77,7 @@ pub use replays::start_load_row_summaries;
 pub use replays::start_populating_player_inspector;
 pub use replays::start_reconcile_index;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DownloadProgress {
     pub downloaded: u64,
     pub total: u64,

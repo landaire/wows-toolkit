@@ -1326,7 +1326,7 @@ impl WowsToolkitApp {
                                 }
                                 if let Some(target) = self.tab_state.workspace_mut(workspace_id) {
                                     target.ingest_in_flight = false;
-                                    target.ingest_progress = None;
+                                    target.ingest_stage = None;
                                 }
                                 let offered = self.finish_directory_reingest(workspace_id);
                                 self.finished_reingest_offer = offered.map(|offered| (workspace_id, offered));

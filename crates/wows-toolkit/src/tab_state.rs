@@ -1096,7 +1096,12 @@ impl TabState {
             IngestUpdate::Batch(batch) => self.apply_ingest_batch(batch),
             IngestUpdate::Progress { workspace, progress } => {
                 if let Some(workspace) = self.workspace_mut(workspace) {
-                    workspace.ingest_progress = Some(progress);
+                    workspace.ingest_stage = Some(crate::task::replays::IngestStage::Reading(progress));
+                }
+            }
+            IngestUpdate::Stage { workspace, stage } => {
+                if let Some(workspace) = self.workspace_mut(workspace) {
+                    workspace.ingest_stage = Some(stage);
                 }
             }
         }
@@ -1129,7 +1134,7 @@ impl TabState {
         };
 
         workspace.replay_files.get_or_insert_with(HashMap::new).extend(batch.replays);
-        workspace.ingest_progress = Some(batch.progress);
+        workspace.ingest_stage = Some(crate::task::replays::IngestStage::Reading(batch.progress));
 
         if workspace.source != Some(batch.source) {
             workspace.source = Some(batch.source);
@@ -1676,8 +1681,11 @@ mod tests {
         assert_eq!(workspace.replay_files.as_ref().map(|files| files.len()), Some(1));
         assert_eq!(workspace.source, Some(crate::db::index::rows::SourceId(3)), "the batch's source must be adopted");
         assert_eq!(
-            workspace.ingest_progress.map(|progress| (progress.done, progress.total)),
-            Some((1, 4)),
+            workspace.ingest_stage.clone(),
+            Some(crate::task::replays::IngestStage::Reading(crate::task::replays::IngestProgress {
+                done: 1,
+                total: 4
+            })),
             "the listing needs the walk's progress to report it"
         );
     }
@@ -1784,8 +1792,11 @@ mod tests {
 
         let workspace = state.workspace(id).expect("inserted above");
         assert_eq!(
-            workspace.ingest_progress.map(|progress| (progress.done, progress.total)),
-            Some((4_000, 5_000)),
+            workspace.ingest_stage.clone(),
+            Some(crate::task::replays::IngestStage::Reading(crate::task::replays::IngestProgress {
+                done: 4_000,
+                total: 5_000
+            })),
             "progress with no replay to carry it must still reach the listing"
         );
         assert_eq!(
@@ -1805,11 +1816,26 @@ mod tests {
             progress: crate::task::replays::IngestProgress { done: 1, total: 2 },
         });
 
-        assert!(
-            state.live_workspace.ingest_progress.is_none(),
-            "a departed workspace's progress must not land on live"
-        );
+        assert!(state.live_workspace.ingest_stage.is_none(), "a departed workspace's progress must not land on live");
         assert!(state.workspaces.is_empty(), "a departed workspace must not be recreated by its own progress");
+    }
+
+    /// A stage update names the workspace it belongs to, so one landing after its
+    /// tab closed is dropped rather than reported on whichever listing is showing.
+    #[test]
+    fn a_stage_update_for_a_closed_workspace_is_dropped() {
+        let mut state = TabState::default();
+        let id = WorkspaceId(4242);
+
+        state.apply_ingest_update(crate::task::replays::IngestUpdate::Stage {
+            workspace: id,
+            stage: crate::task::replays::IngestStage::Scanning(crate::task::replays::IngestProgress {
+                done: 1,
+                total: 2,
+            }),
+        });
+
+        assert!(state.workspace(id).is_none(), "no workspace may be created by an update naming a closed one");
     }
 
     #[test]
