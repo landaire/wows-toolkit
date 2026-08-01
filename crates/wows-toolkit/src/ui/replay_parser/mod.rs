@@ -4865,6 +4865,21 @@ impl ToolkitTabViewer<'_> {
     pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
         self.tab_state.set_active_workspace(ws_id);
 
+        // These four resolve through the active workspace (just set above) or
+        // are workspace-independent outright -- never through ws_id's own
+        // workspace -- so they must run even when ws_id's workspace turns out
+        // to be closed below. A tab's context-menu "Close" runs synchronously
+        // during that leaf's tab-bar render, before this function's tab-body
+        // call for the same leaf in the same frame, so closing the only drawn
+        // replay tab can reach the early return right after; skipping these
+        // calls in that case would leave an open chat/timeline/controls window
+        // undrawn for the frame even though the (now-live) active workspace is
+        // perfectly able to feed them.
+        self.show_game_chat_window(ui.ctx());
+        self.show_timeline_window(ui.ctx());
+        self.pick_up_replay_controls_request(ui.ctx());
+        self.show_replay_controls_window(ui.ctx());
+
         // A tab can outlive its workspace (e.g. a stale split after the
         // workspace's owning tab was closed). Showing a placeholder here
         // instead of falling back to another workspace is the whole point of
@@ -4877,10 +4892,12 @@ impl ToolkitTabViewer<'_> {
         }
 
         self.refresh_row_summaries(ws_id);
-        // The existence check above guarantees this is Some for the rest of the
-        // frame (nothing closes a workspace mid-render); `unwrap_or(false)`
-        // just means "nothing to scan" rather than panicking if that ever stops
-        // holding.
+        // Nothing can close ws_id's workspace during this function's own
+        // execution: there is no reentrant call back into
+        // `build_replay_parser_tab` (or anything it calls) between the
+        // existence check above and this read. `unwrap_or(false)` is still
+        // the right shape here rather than `.expect(...)`: if that ever
+        // stopped holding, "nothing to scan" is the safe reading, not a panic.
         let needs_reindex_scan = self
             .tab_state
             .workspace_mut(ws_id)
@@ -4905,7 +4922,8 @@ impl ToolkitTabViewer<'_> {
                 // deferred until a summary load has completed, since measuring before the
                 // stats line exists would latch a width fitted to "not indexed".
                 // `ws_id`'s workspace existence was checked before this function reached
-                // `ui.vertical`, and nothing closes a workspace mid-frame, so every
+                // `ui.vertical`. No reentrant call back into `build_replay_parser_tab` (or
+                // anything it calls) happens between that check and here, so every
                 // `workspace(ws_id)` / `workspace_mut(ws_id)` in this block is justified
                 // in assuming `Some`.
                 let has_files = self
@@ -5106,11 +5124,6 @@ impl ToolkitTabViewer<'_> {
                 }
             });
         });
-
-        self.show_game_chat_window(ui.ctx());
-        self.show_timeline_window(ui.ctx());
-        self.pick_up_replay_controls_request(ui.ctx());
-        self.show_replay_controls_window(ui.ctx());
     }
 
     /// Reload the listing's index-sourced row data when the index has been
