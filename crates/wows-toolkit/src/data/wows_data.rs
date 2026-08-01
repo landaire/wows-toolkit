@@ -188,12 +188,23 @@ impl WoWsDataMap {
     ///
     /// Resolution proper loads the build, which is exactly the cost a scan must
     /// not pay to discover a build is absent: this checks what is already
-    /// resident, then the live install's `bin/<build>`, then the dump index, and
-    /// nothing else.
+    /// resident, then the record of builds that would not load, then the live
+    /// install's `bin/<build>`, then the dump index, and nothing else.
+    ///
+    /// The first two checks are [`Self::resolve_build_with_version`]'s own first
+    /// two, in its order. Where this answers `true` and resolution then fails,
+    /// the replays of that build are skipped by a directory read that has
+    /// already passed the point where a download could be offered for them.
     pub fn has_data_for(&self, request: &crate::task::BuildRequest) -> bool {
         let build = request.build_u32();
         if self.builds.read().contains(build) {
             return true;
+        }
+        // A build this session has already looked for and failed to load is one
+        // resolution answers from its record rather than trying again, whatever
+        // is on disk for it.
+        if self.is_unresolvable_build(build) {
+            return false;
         }
         if self.wows_dir.join("bin").join(build.to_string()).exists() {
             return true;
@@ -1269,5 +1280,30 @@ mod tests {
             }
             _ => panic!("a resolvable build must produce ReplayBuildUnavailable: {report:?}"),
         }
+    }
+
+    /// A directory scan decides a build is missing with `has_data_for` and
+    /// raises its download offer from that; the read stage then loads it with
+    /// `resolve`, long after the offer could still be raised. A build this
+    /// session has already proved unloadable is one `resolve` answers `None`
+    /// for from its record, so reporting it available leaves every replay of
+    /// that build unread with nothing ever offered for it.
+    #[test]
+    fn a_build_already_proved_unloadable_is_unavailable_even_with_its_directory_on_disk() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let build = 11_965_230;
+        std::fs::create_dir_all(dir.path().join("bin").join(build.to_string())).expect("build dir");
+        let map = WoWsDataMap::new(dir.path().to_path_buf(), "en".to_string(), String::new());
+        let request = crate::task::BuildRequest::new(Version::from_client_exe("15,4,0,11965230"))
+            .expect("the fixture version carries a build");
+
+        assert!(
+            map.has_data_for(&request),
+            "the fixture must report available on its own, or the assertion below holds vacuously"
+        );
+
+        map.unresolvable_builds.write().insert(build);
+
+        assert!(!map.has_data_for(&request), "a build that would not load is not data this machine has");
     }
 }
