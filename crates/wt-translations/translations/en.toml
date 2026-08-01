@@ -139,7 +139,7 @@ replays_indexed = "Indexed %{indexed} of %{total} replay(s)"
 replays_already_indexed = "All %{total} replay(s) already indexed"
 loading_row_summaries = "Loading replay details..."
 reading_replay_directory = "Reading replay directory..."
-directory_replays_skipped = "Skipped %{skipped} replay(s) with no matching game data"
+directory_replays_skipped = "Skipped %{skipped} replay(s) that could not be read"
 
 # -- Stat names --
 

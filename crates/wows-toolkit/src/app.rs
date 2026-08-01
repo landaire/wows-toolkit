@@ -3111,6 +3111,17 @@ impl WowsToolkitApp {
             _ => None,
         };
         let Some((deps, pool, rt)) = ingest_deps else {
+            let missing = match (
+                self.tab_state.replay_dependencies().is_some(),
+                self.tab_state.db_pool.is_some(),
+                self.tab_state.tokio_runtime.is_some(),
+            ) {
+                (false, _, _) => "game data",
+                (true, false, _) => "database pool",
+                (true, true, false) => "tokio runtime",
+                (true, true, true) => unreachable!("all three prerequisites present"),
+            };
+            warn!("cannot ingest replay directory {}: {missing} is not available", root.display());
             return;
         };
 
@@ -3584,7 +3595,7 @@ mod tab_viewer_tests {
 
         assert_eq!(
             viewer.tab_title(&Tab::Replays(WorkspaceId::LIVE)),
-            wt_translations::icon_t(icons::MAGNIFYING_GLASS, &rust_i18n::t!("ui.tabs.replay_parser"))
+            wt_translations::icon_t(icons::MAGNIFYING_GLASS, "Replay Inspector")
         );
     }
 
@@ -3601,7 +3612,7 @@ mod tab_viewer_tests {
         tab_state.workspaces.insert(empty_root, crate::ui::replay_parser::ReplayWorkspace::new(Some(PathBuf::new())));
         let viewer = ToolkitTabViewer { tab_state: &mut tab_state };
 
-        let expected = wt_translations::icon_t(icons::FOLDER_OPEN, &rust_i18n::t!("ui.tabs.replay_directory"));
+        let expected = wt_translations::icon_t(icons::FOLDER_OPEN, "Replay Directory");
         assert_eq!(viewer.tab_title(&Tab::Replays(rootless)), expected);
         assert_eq!(viewer.tab_title(&Tab::Replays(empty_root)), expected);
         assert_eq!(

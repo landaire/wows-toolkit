@@ -1536,9 +1536,10 @@ fn run_ingest_directory(
                 skipped += 1;
                 warn!("skipping replay {}: {e}", path.display());
             }
-            Err(_) => {
+            Err(payload) => {
                 skipped += 1;
-                warn!("panic while reading replay {}, skipping it", path.display());
+                let msg = crate::util::thread::panic_payload_to_string(&payload);
+                warn!("panic while reading replay {}, skipping it: {msg}", path.display());
             }
         }
     }

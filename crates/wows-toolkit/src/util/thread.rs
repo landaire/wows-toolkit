@@ -25,7 +25,7 @@ where
         .expect("failed to spawn thread")
 }
 
-fn panic_payload_to_string(payload: &Box<dyn std::any::Any + Send>) -> String {
+pub(crate) fn panic_payload_to_string(payload: &Box<dyn std::any::Any + Send>) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
         (*s).to_string()
     } else if let Some(s) = payload.downcast_ref::<String>() {
