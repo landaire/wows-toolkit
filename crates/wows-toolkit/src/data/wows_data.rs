@@ -202,7 +202,20 @@ impl WoWsDataMap {
             return false;
         };
         let index = wows_data_mgr::builds::BuildsIndex::load(&dump_base.join("builds.toml"));
-        index.resolve_build(build, Some(&request.friendly_version())).is_some()
+        if index.resolve_build(build, Some(&request.friendly_version())).is_some() {
+            return true;
+        }
+        if index.builds.is_empty() {
+            if let Ok(entries) = std::fs::read_dir(&dump_base) {
+                for entry in entries.flatten() {
+                    let name_str = entry.file_name().to_string_lossy().to_string();
+                    if name_str.ends_with(&format!("_{build}")) && entry.path().join("metadata.toml").exists() {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     /// Custom game data cache directory as configured in settings. Empty means
