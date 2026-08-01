@@ -26,11 +26,12 @@ pub enum GameDataFollowUp {
     Directory(crate::db::index::rows::WorkspaceId),
 }
 
-/// Download game data for `target_build` from the wows-replay-data repository
-/// into `output_base`. `version_hint` (the replay's `major.minor.patch` string)
-/// allows falling back to a different build of the same version when no exact
-/// match is published. When `force` is true an existing copy is rebuilt to pick
-/// up newer remote data.
+/// Download game data for `requests` from the wows-replay-data repository into
+/// `output_base`, one build after another so a build's missing-object set is
+/// computed against what the ones before it in the selection already stored.
+/// `runtime` runs the downloads and the CAS writes they spawn onto blocking
+/// threads; it must be multi-threaded. When `force` is true an existing copy
+/// is rebuilt to pick up newer remote data.
 ///
 /// `follow_up` rides on the task rather than on the app so the thing to redo is
 /// released with the download that asked for it, whatever the download's

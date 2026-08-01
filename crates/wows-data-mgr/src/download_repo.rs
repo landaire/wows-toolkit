@@ -1233,11 +1233,43 @@ mod tests {
         assert_eq!(plan.resolved[1].requested_version, None);
     }
 
+    /// Resolves to `()` after one `Pending` poll, so an `async` closure that
+    /// awaits it actually suspends and hands control back to whatever is
+    /// driving it, instead of running to completion the moment it is called.
+    /// A driver that starts every future up front and only then awaits them
+    /// (`join_all`, `FuturesUnordered`) interleaves at this point; a driver
+    /// that awaits each future before starting the next does not. Works under
+    /// any executor, including the `futures::executor::block_on` these tests
+    /// use, since it only relies on the waker contract.
+    struct YieldOnce(bool);
+
+    impl std::future::Future for YieldOnce {
+        type Output = ();
+
+        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+            if self.0 {
+                std::task::Poll::Ready(())
+            } else {
+                self.0 = true;
+                cx.waker().wake_by_ref();
+                std::task::Poll::Pending
+            }
+        }
+    }
+
     /// The CAS is shared, so a build downloaded after another must only fetch what
     /// the first one did not. Computing every build's missing set before any object
     /// has landed makes adjacent builds each fetch the full set; they overlap by
     /// well over 90 percent in practice, so that multiplies the real transfer by
     /// the number of builds.
+    ///
+    /// The fake is a real `async` closure with a yield point before it touches
+    /// `stored`/`fetched`, not a plain closure that does that work at call time
+    /// and returns `std::future::ready`. A plain closure's effects happen
+    /// before the driver ever awaits anything, so it cannot tell a driver that
+    /// serializes its builds apart from one that starts every build's future up
+    /// front and awaits them all together -- exactly the regression this test
+    /// exists to catch.
     #[test]
     fn a_later_build_only_fetches_what_the_earlier_one_did_not() {
         let objects = |build: u32| -> BTreeSet<String> {
@@ -1251,12 +1283,23 @@ mod tests {
 
         let results = futures::executor::block_on(drive_downloads(
             &[(1, None), (2, None)],
-            |build: u32, _version: Option<&str>, _on_progress: &dyn Fn(u64, u64)| {
+            async |build: u32, _version: Option<&str>, _on_progress: &dyn Fn(u64, u64)| {
+                // Two yield points, not one: a driver that starts both builds'
+                // futures up front and polls them together (`join_all`) can
+                // still finish one future to completion before the other's
+                // second poll if there is only a single suspend point, because
+                // the join adapter polls sub-futures in order within one outer
+                // poll call. Splitting "read `stored`" and "write `stored`"
+                // across separate suspend points forces a real interleaving:
+                // under `join_all` both builds compute their missing set from
+                // `stored` before either has written to it.
+                YieldOnce(false).await;
                 let missing: Vec<String> =
                     objects(build).into_iter().filter(|h| !stored.borrow().contains(h)).collect();
+                YieldOnce(false).await;
                 fetched.set(fetched.get() + missing.len());
                 stored.borrow_mut().extend(missing);
-                std::future::ready(Ok(build))
+                Ok(build)
             },
             |_, _| {},
         ));
@@ -1302,5 +1345,43 @@ mod tests {
         let seen = seen.borrow();
         assert_eq!(seen.last(), Some(&(4u64, 4u64)), "the second build continues the first build's count");
         assert!(seen.windows(2).all(|w| w[0].0 <= w[1].0), "the count never goes backwards");
+    }
+
+    /// A planned total is only as good as the CAS state it was computed
+    /// against; a concurrent write (or, as here, a plan that simply
+    /// undercounted) can make it stale before the downloads it describes even
+    /// start. `.max(running)` is what keeps the reported total from lagging
+    /// behind the count of objects actually fetched -- without it a bar could
+    /// show more done than total, which reads as more broken than a bar that
+    /// just grows past its original estimate. Exercises `drive_downloads_with_total`
+    /// directly, since `drive_downloads` always passes `None`.
+    #[test]
+    fn a_stale_planned_total_never_reports_more_done_than_total() {
+        let seen = std::cell::RefCell::new(Vec::new());
+
+        // The plan thought there were 2 objects total; each of the two builds
+        // below reports 2 objects on its own, so the real running total (4)
+        // overtakes the stale plan (2) partway through the selection.
+        futures::executor::block_on(drive_downloads_with_total(
+            &[(1, None), (2, None)],
+            Some(2),
+            |done, total| seen.borrow_mut().push((done, total)),
+            async |build: u32, _version: Option<&str>, on_progress: &dyn Fn(u64, u64)| {
+                on_progress(0, 2);
+                on_progress(2, 2);
+                Ok(build)
+            },
+        ));
+
+        let seen = seen.borrow();
+        assert!(
+            seen.iter().all(|&(done, total)| done <= total),
+            "a stale planned total must never let done exceed total: {seen:?}"
+        );
+        assert_eq!(
+            seen.last(),
+            Some(&(4u64, 4u64)),
+            "the real running count overtakes the stale plan once it exceeds it"
+        );
     }
 }

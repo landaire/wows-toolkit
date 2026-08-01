@@ -424,8 +424,8 @@ pub struct WowsToolkitApp {
 
 /// A directory workspace whose listing is waiting on downloaded game data.
 enum DirectoryReingest {
-    /// The download is still running; the whole selection goes out as one
-    /// task, so there is nothing left to count down.
+    /// The download is still running. The whole selection goes out as a
+    /// single task, so the walk is owed as soon as that one task finishes.
     AwaitingDownload { offered: BTreeSet<u32> },
     /// The download has been tried and the walk is owed, but has not started
     /// yet: the workspace can be mid-walk from a deliberate reopen, and a walk
@@ -3208,12 +3208,6 @@ impl WowsToolkitApp {
             return;
         }
 
-        if let Some(GameDataFollowUp::Directory(workspace)) = &prompt.trigger {
-            let workspace = *workspace;
-            self.directory_reingest
-                .insert(workspace, DirectoryReingest::AwaitingDownload { offered: prompt.offered_builds() });
-        }
-
         let Some(runtime) = self.tab_state.tokio_runtime.as_ref().map(Arc::clone) else {
             warn!("cannot download game data: tokio runtime is not available");
             return;
@@ -3236,6 +3230,16 @@ impl WowsToolkitApp {
             return;
         }
 
+        // Recorded only once a task is actually about to be spawned: an
+        // earlier return here would leave a record nothing clears, since
+        // `service_directory_reingests` only ever advances an `Owed` state and
+        // `finish_directory_reingest` only ever consumes a `Walking` one.
+        if let Some(GameDataFollowUp::Directory(workspace)) = &prompt.trigger {
+            let workspace = *workspace;
+            self.directory_reingest
+                .insert(workspace, DirectoryReingest::AwaitingDownload { offered: prompt.offered_builds() });
+        }
+
         update_background_task!(
             self.tab_state.background_tasks,
             Some(crate::task::start_game_data_download_task(
@@ -3248,10 +3252,9 @@ impl WowsToolkitApp {
         );
     }
 
-    /// One download a directory was waiting on has finished. Once the last of
-    /// them is back the walk is owed; `service_directory_reingests` starts it,
-    /// so the replays skipped for want of game data appear without the user
-    /// reopening the directory.
+    /// The download a directory was waiting on has finished. The walk is now
+    /// owed; `service_directory_reingests` starts it, so the replays skipped
+    /// for want of game data appear without the user reopening the directory.
     fn note_reingest_download_finished(&mut self, workspace: WorkspaceId) {
         let Some(DirectoryReingest::AwaitingDownload { offered }) = self.directory_reingest.get_mut(&workspace) else {
             return;
