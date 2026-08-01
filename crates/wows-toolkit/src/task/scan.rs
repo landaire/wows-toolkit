@@ -119,6 +119,55 @@ pub fn scan_paths(
     DirectoryScan { root, by_build, unreadable, missing_builds, total }
 }
 
+/// Walk `root` and read each replay's header, without reading any packet
+/// stream. The result is retained by the caller so the read stage does not walk
+/// the directory a second time.
+pub fn start_scan_directory(
+    deps: crate::data::wows_data::ReplayDependencies,
+    workspace: crate::db::index::rows::WorkspaceId,
+    root: PathBuf,
+) -> crate::task::BackgroundTask {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (update_tx, update_rx) = std::sync::mpsc::channel();
+
+    crate::util::thread::spawn_logged("scan-directory", move || {
+        let paths = crate::task::replays::walk_replay_files(&root);
+        let found: std::collections::HashSet<PathBuf> = paths.iter().cloned().collect();
+        let _ = update_tx.send(crate::task::replays::IngestUpdate::Walked { workspace, paths: found });
+
+        let scan = scan_paths(
+            root,
+            paths,
+            |path| {
+                // Only the plaintext header is read: no decrypt, no inflate, no
+                // packet stream. A header that will not parse costs this file.
+                wows_replays::ReplayFile::meta_from_file(path)
+                    .ok()
+                    .and_then(|meta| Version::try_from_client_exe(&meta.clientVersionFromExe))
+            },
+            |request| deps.wows_data_map.has_data_for(request),
+            |progress| {
+                let sent = update_tx.send(crate::task::replays::IngestUpdate::Stage {
+                    workspace,
+                    stage: crate::task::replays::IngestStage::Scanning(progress),
+                });
+                // Nothing is listening any more: the run was dropped or the app
+                // is shutting down, and the rest of a large directory's headers
+                // would be read for a listing nobody is watching.
+                if sent.is_ok() { ControlFlow::Continue(()) } else { ControlFlow::Break(()) }
+            },
+        );
+
+        let _ =
+            tx.send(Ok(crate::task::BackgroundTaskCompletion::DirectoryScanned { workspace, scan: Box::new(scan) }));
+    });
+
+    crate::task::BackgroundTask {
+        receiver: Some(rx),
+        kind: crate::task::BackgroundTaskKind::ScanningDirectory { workspace, rx: update_rx },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,5 +264,40 @@ mod tests {
         );
 
         assert_eq!(seen, vec![1, 2]);
+    }
+
+    /// The scan is what a directory open now starts with, and the read stage
+    /// consumes its grouping. Reading the groups back in order is what keeps one
+    /// build's data resident across all of its replays.
+    #[test]
+    fn read_order_visits_one_build_at_a_time() {
+        let files = [("a", version(15, 0, 0, 100)), ("b", version(14, 11, 0, 90)), ("c", version(15, 0, 0, 100))];
+        let scan = scan_paths(
+            path("root"),
+            files.iter().map(|(name, _)| path(name)).collect(),
+            |p| files.iter().find(|(name, _)| Path::new(name) == p).map(|(_, v)| *v),
+            |_| true,
+            |_| ControlFlow::Continue(()),
+        );
+
+        let visited: Vec<u32> = scan.read_order().map(|(request, _)| request.build_u32()).collect();
+        assert_eq!(visited, vec![90, 100], "each build appears exactly once, in build order");
+    }
+
+    /// The prompt names how many replays each absent build is holding back.
+    #[test]
+    fn a_missing_build_reports_the_replays_waiting_on_it() {
+        let files = [("a", version(15, 0, 0, 100)), ("b", version(15, 0, 0, 100))];
+        let scan = scan_paths(
+            path("root"),
+            files.iter().map(|(name, _)| path(name)).collect(),
+            |p| files.iter().find(|(name, _)| Path::new(name) == p).map(|(_, v)| *v),
+            |_| false,
+            |_| ControlFlow::Continue(()),
+        );
+
+        let build = std::num::NonZeroU32::new(100).expect("nonzero");
+        assert_eq!(scan.by_build[&build].paths.len(), 2);
+        assert!(scan.missing_builds.contains(&build));
     }
 }

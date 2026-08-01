@@ -1513,25 +1513,27 @@ pub fn start_load_row_summaries(
     BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingRowSummaries { workspace } }
 }
 
-/// Walk `root`, resolve or create its index source, and build a [`Replay`] per
-/// file it holds, for the workspace `root` was opened as.
+/// Resolve or create the index source for a scanned directory, and build a
+/// [`Replay`] per file the scan grouped, for the workspace it was opened as.
 ///
-/// The build is resolved per replay rather than once for the directory: a
-/// dropped folder routinely spans game versions, and the single-latest-build
-/// shortcut `load_wows_files` takes would panic on the first replay from a
-/// version that is not the newest one installed.
-pub fn start_ingest_directory(
+/// The scan grouped those files by build, and the read visits one group at a
+/// time: a dropped folder routinely spans game versions, the in-memory data map
+/// holds only a couple of non-main builds at once, and resolving per replay
+/// would evict and reload a build between neighbouring files.
+pub fn start_read_directory(
     deps: crate::data::wows_data::ReplayDependencies,
     pool: sqlx::SqlitePool,
     tokio_runtime: Arc<tokio::runtime::Runtime>,
     workspace: crate::db::index::rows::WorkspaceId,
-    root: PathBuf,
+    scan: Box<crate::task::scan::DirectoryScan>,
 ) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
     let (update_tx, update_rx) = mpsc::channel();
 
-    crate::util::thread::spawn_logged("ingest-directory", move || {
-        let _ = tx.send(run_ingest_directory(deps, pool, tokio_runtime, workspace, root, &update_tx));
+    crate::util::thread::spawn_logged("read-directory", move || {
+        // The box carried the scan through the task channel; the read itself
+        // owns it outright.
+        let _ = tx.send(run_read_directory(deps, pool, tokio_runtime, workspace, *scan, &update_tx));
     });
 
     BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::IngestingDirectory { workspace, rx: update_rx } }
@@ -1616,11 +1618,9 @@ pub enum IngestUpdate {
     Walked { workspace: crate::db::index::rows::WorkspaceId, paths: HashSet<PathBuf> },
     /// Replays read since the last update, with how far the walk has got.
     Batch(IngestBatch),
-    /// How far the walk has got, with no replay to carry it. A run of files the
-    /// walk cannot read would otherwise leave the count standing still, which
-    /// is what a stalled walk looks like.
-    Progress { workspace: crate::db::index::rows::WorkspaceId, progress: IngestProgress },
-    /// Which stage the run has moved into.
+    /// Which stage the run has moved into, and how far that stage has got. A
+    /// run of files the walk cannot read carries no replay, and would otherwise
+    /// leave the count standing still, which is what a stalled walk looks like.
     Stage { workspace: crate::db::index::rows::WorkspaceId, stage: IngestStage },
 }
 
@@ -1659,27 +1659,36 @@ fn flush_now(pending: usize, since_last_flush: Duration) -> Flush {
     }
 }
 
-/// A game build some replay needed and the toolkit does not have installed.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct MissingBuild {
-    pub build: u32,
-    /// The replay's `major.minor.patch` version, which is what the game-data
-    /// repository is keyed on when no exact build match is published.
-    pub version: String,
-}
-
 /// Why replays in a directory could not be loaded. Missing game data is
 /// actionable -- the toolkit can offer to fetch it -- so it is tracked
 /// separately from failures the user can do nothing about.
 #[derive(Debug, Default, Clone)]
 pub struct IngestFailures {
-    pub missing_builds: BTreeMap<MissingBuild, usize>,
+    pub missing_builds: BTreeMap<crate::task::BuildRequest, usize>,
     pub unreadable: usize,
     /// Replays that loaded and are listed, but whose index rows could not be
     /// written. Their rows fall back to the not-indexed placeholder, so they
     /// are worth reporting, but they are not missing from the listing and so
     /// are counted apart from the replays that never loaded.
     pub not_indexed: usize,
+}
+
+/// Rebuild the request a replay was asking for from what its failure carried.
+///
+/// The error reports the build and the `major.minor.patch` it came from as
+/// text, which is what the download offer and the game-data repository are
+/// keyed on. `None` when neither can be recovered, since nothing can be
+/// offered for a build that cannot be named.
+fn build_request_from_failure(build: u32, version: &str) -> Option<crate::task::BuildRequest> {
+    let mut parts = version.split('.').filter_map(|part| part.trim().parse::<u32>().ok());
+    crate::task::BuildRequest::new(Version {
+        major: parts.next()?,
+        // A version reported as `13` or `13.5` names the parts it leaves out as
+        // zero, which is how the repository publishes them.
+        minor: parts.next().unwrap_or(0),
+        patch: parts.next().unwrap_or(0),
+        build: std::num::NonZeroU32::new(build),
+    })
 }
 
 impl IngestFailures {
@@ -1689,11 +1698,24 @@ impl IngestFailures {
     pub fn record(&mut self, report: &Report) {
         match report.downcast_current_context::<ToolkitError>() {
             Some(ToolkitError::ReplayBuildUnavailable { build, version, .. }) => {
-                let missing = MissingBuild { build: *build, version: version.clone() };
-                *self.missing_builds.entry(missing).or_default() += 1;
+                match build_request_from_failure(*build, version) {
+                    Some(request) => *self.missing_builds.entry(request).or_default() += 1,
+                    // A build nothing can be requested for is a replay nothing
+                    // can be done about, which is what unreadable means here.
+                    None => self.unreadable += 1,
+                }
             }
             _ => self.unreadable += 1,
         }
+    }
+
+    /// Fold one group's failures into the directory's total.
+    fn merge(&mut self, other: Self) {
+        for (request, count) in other.missing_builds {
+            *self.missing_builds.entry(request).or_default() += count;
+        }
+        self.unreadable += other.unreadable;
+        self.not_indexed += other.not_indexed;
     }
 
     /// Attribute one replay whose read panicked. A recovered panic carries no
@@ -1730,6 +1752,127 @@ struct WalkOutcome {
     /// deterministic and expensive, so these are worth remembering rather than
     /// paying again on the next walk of the same directory.
     index_panics: Vec<PathBuf>,
+    /// Set when an update could not be sent. The listing this was filling is
+    /// gone, so the build groups after it have nobody to fill either, and each
+    /// of those costs a game-data load and a parse per replay.
+    channel_closed: bool,
+}
+
+impl WalkOutcome {
+    /// Fold one group's result into the directory read's.
+    fn absorb(&mut self, group: Self) {
+        self.failures.merge(group.failures);
+        self.index_panics.extend(group.index_panics);
+        self.channel_closed |= group.channel_closed;
+    }
+}
+
+/// The one build group a walk covers: the listing its replays belong to, and
+/// where its files fall in the directory read they are part of.
+#[derive(Debug, Clone, Copy)]
+struct WalkSlice {
+    workspace: crate::db::index::rows::WorkspaceId,
+    source: crate::db::index::rows::SourceId,
+    /// The directory's replays visited before this group. A count restarting at
+    /// each build boundary reads as the run starting over.
+    offset: usize,
+    /// The replays the whole read stage will visit.
+    total: usize,
+}
+
+/// What a directory read does with one build group.
+///
+/// These are the steps that touch the game data, the filesystem and the
+/// database. They are parameters so the order the groups are visited in, the
+/// counter that spans them and the skip branch are exercisable without any of
+/// the three.
+struct BuildSteps<'a, D, L, W> {
+    /// Whether this machine has the build's data, without loading it.
+    has_data: &'a D,
+    /// Load the build's data, reporting whether it is now resident.
+    load: &'a L,
+    /// Read one build group's replays.
+    walk: &'a W,
+}
+
+/// Read the replays the scan grouped, one build at a time.
+///
+/// Ascending build order and one group at a time are both load-bearing: the
+/// data map holds only a couple of non-main builds at once, so a group split in
+/// two would evict and reload its build, and resolution bridges constants
+/// forward from an already-loaded older build, which requires the older build to
+/// have been visited first.
+fn read_build_groups<D, L, W>(
+    scan: &crate::task::scan::DirectoryScan,
+    workspace: crate::db::index::rows::WorkspaceId,
+    source: crate::db::index::rows::SourceId,
+    steps: BuildSteps<'_, D, L, W>,
+    tx: &mpsc::Sender<IngestUpdate>,
+) -> WalkOutcome
+where
+    D: Fn(&crate::task::BuildRequest) -> bool,
+    L: Fn(&crate::task::BuildRequest) -> bool,
+    W: Fn(Vec<PathBuf>, WalkSlice) -> WalkOutcome,
+{
+    let build_count = scan.by_build.len();
+    // Not scan.total: the unreadable files are never opened again, so a bar over
+    // total would stop short of full on any directory holding one.
+    let to_read = scan.to_read();
+    let mut outcome = WalkOutcome::default();
+    let mut done = 0usize;
+
+    // The scan already found these files; entries for replays no longer on disk
+    // left with the scan's `Walked` update.
+    for (position, (request, paths)) in scan.read_order().enumerate() {
+        // The announce is cosmetic: it names the wait the load is about to be,
+        // so a build with nothing to load has no wait to name. The load below
+        // runs either way, and it alone decides what is read. Do not collapse
+        // these -- gating the load on this check would put a cheap existence
+        // test in charge of which replays reach the listing, and a check that
+        // grew stricter than resolution would drop replays that load fine, with
+        // nothing said anywhere.
+        if (steps.has_data)(request) {
+            let announced = tx.send(IngestUpdate::Stage {
+                workspace,
+                stage: IngestStage::LoadingData {
+                    build: request.clone(),
+                    position: BuildLoadPosition { index: position, count: build_count },
+                },
+            });
+            if announced.is_err() {
+                outcome.channel_closed = true;
+                break;
+            }
+        }
+
+        // Loading here, once per group, is what keeps this build's data
+        // resident for every replay under it.
+        if !(steps.load)(request) {
+            // Its download failed or was declined. Its replays stay unread and
+            // the rest of the directory is unaffected, so the count moves over
+            // them rather than stopping short of full.
+            *outcome.failures.missing_builds.entry(request.clone()).or_default() += paths.len();
+            done += paths.len();
+            let progress = IngestProgress { done, total: to_read };
+            if tx.send(IngestUpdate::Stage { workspace, stage: IngestStage::Reading(progress) }).is_err() {
+                outcome.channel_closed = true;
+                break;
+            }
+            continue;
+        }
+
+        let slice = WalkSlice { workspace, source, offset: done, total: to_read };
+        outcome.absorb((steps.walk)(paths.to_vec(), slice));
+        done += paths.len();
+        if outcome.channel_closed {
+            break;
+        }
+    }
+
+    // Every file the scan could not read is one the listing will not show.
+    // The scan already classified why; the listing only reports the count.
+    outcome.failures.unreadable += scan.unreadable.len();
+    outcome
 }
 
 /// Read every path in `paths`, sending the replays that load as batches and
@@ -1740,11 +1883,10 @@ struct WalkOutcome {
 /// handling around them are exercisable without any of the three.
 fn ingest_walk<N, R, I>(
     paths: Vec<PathBuf>,
-    workspace: crate::db::index::rows::WorkspaceId,
-    source: crate::db::index::rows::SourceId,
-    needs_index: N,
-    read: R,
-    index: I,
+    slice: WalkSlice,
+    needs_index: &N,
+    read: &R,
+    index: &I,
     tx: &mpsc::Sender<IngestUpdate>,
 ) -> WalkOutcome
 where
@@ -1752,15 +1894,11 @@ where
     R: Fn(&Path) -> Result<ReadReplay, Report>,
     I: Fn(&ReadReplay, crate::db::index::rows::SourceId) -> Result<(), Report>,
 {
-    let total = paths.len();
+    let WalkSlice { workspace, source, offset, total } = slice;
     let mut outcome = WalkOutcome::default();
     let mut pending: HashMap<PathBuf, Arc<ListedReplay>> = HashMap::new();
     let mut last_flush = std::time::Instant::now();
-
-    let found: HashSet<PathBuf> = paths.iter().cloned().collect();
-    if tx.send(IngestUpdate::Walked { workspace, paths: found }).is_err() {
-        return outcome;
-    }
+    let group_size = paths.len();
 
     for (visited, path) in paths.into_iter().enumerate() {
         // One unreadable, malformed or version-orphaned file must cost only
@@ -1803,46 +1941,51 @@ where
             }
         }
 
-        let progress = IngestProgress { done: visited + 1, total };
+        let progress = IngestProgress { done: offset + visited + 1, total };
         let update = match flush_now(pending.len(), last_flush.elapsed()) {
             Flush::Hold => continue,
             Flush::Batch => {
                 IngestUpdate::Batch(IngestBatch { workspace, source, replays: std::mem::take(&mut pending), progress })
             }
-            Flush::Progress => IngestUpdate::Progress { workspace, progress },
+            Flush::Progress => IngestUpdate::Stage { workspace, stage: IngestStage::Reading(progress) },
         };
         if tx.send(update).is_err() {
             // Nothing is listening any more: the workspace closed or the app is
             // shutting down. The rest of the walk has no reader.
+            outcome.channel_closed = true;
             return outcome;
         }
         last_flush = std::time::Instant::now();
     }
 
-    let progress = IngestProgress { done: total, total };
-    let _ = tx.send(if pending.is_empty() {
-        IngestUpdate::Progress { workspace, progress }
+    let progress = IngestProgress { done: offset + group_size, total };
+    let last = if pending.is_empty() {
+        IngestUpdate::Stage { workspace, stage: IngestStage::Reading(progress) }
     } else {
         IngestUpdate::Batch(IngestBatch { workspace, source, replays: pending, progress })
-    });
+    };
+    if tx.send(last).is_err() {
+        outcome.channel_closed = true;
+    }
 
     outcome
 }
 
-fn run_ingest_directory(
+fn run_read_directory(
     deps: crate::data::wows_data::ReplayDependencies,
     pool: sqlx::SqlitePool,
     tokio_runtime: Arc<tokio::runtime::Runtime>,
     workspace: crate::db::index::rows::WorkspaceId,
-    root: PathBuf,
+    scan: crate::task::scan::DirectoryScan,
     update_tx: &mpsc::Sender<IngestUpdate>,
 ) -> Result<BackgroundTaskCompletion, Report> {
+    let root = &scan.root;
     let source = tokio_runtime
         .block_on(crate::db::index::query::ensure_source(
             &pool,
-            &crate::ui::replay_parser::shorten_root(&root),
+            &crate::ui::replay_parser::shorten_root(root),
             crate::db::index::rows::SourceKind::ImportedDir,
-            &root,
+            root,
             jiff::Timestamp::now(),
         ))
         .map_err(|e| report!("failed to resolve replay index source for {}: {e}", root.display()))?;
@@ -1857,8 +2000,11 @@ fn run_ingest_directory(
     let mut unindexable = tokio_runtime.block_on(crate::data::replay_reconcile::Unindexable::load(&pool));
 
     let read = |path: &Path| -> Result<ReadReplay, Report> {
+        // The scan opened every one of these files. The retry loop in
+        // `build_replay_from_path` answers the live watcher racing the game
+        // flushing a replay, a race a directory read does not have.
         let (replay, wows_data) =
-            crate::data::wows_data::ReplayLoader::build_replay_from_path(&deps, path.to_path_buf())?;
+            crate::data::wows_data::ReplayLoader::build_replay_from_existing_file(&deps, path.to_path_buf())?;
         let game_build = wows_data.read().patch_version;
         Ok(ReadReplay { replay, game_build })
     };
@@ -1866,8 +2012,13 @@ fn run_ingest_directory(
     let needs_index =
         |path: &Path| !indexed_paths.contains(path.to_string_lossy().as_ref()) && !unindexable.contains(path);
 
-    let WalkOutcome { failures, index_panics } =
-        ingest_walk(walk_replay_files(&root), workspace, source, needs_index, read, index, update_tx);
+    let has_data = |request: &crate::task::BuildRequest| deps.wows_data_map.has_data_for(request);
+    let load = |request: &crate::task::BuildRequest| deps.wows_data_map.resolve(&request.version()).is_some();
+    let walk = |paths, slice| ingest_walk(paths, slice, &needs_index, &read, &index, update_tx);
+
+    let steps = BuildSteps { has_data: &has_data, load: &load, walk: &walk };
+    let WalkOutcome { failures, index_panics, channel_closed: _ } =
+        read_build_groups(&scan, workspace, source, steps, update_tx);
 
     let mut unindexable_dirty = false;
     for path in &index_panics {
@@ -2086,15 +2237,52 @@ mod tests {
         ToolkitError::ReplayBuildUnavailable { build, version: version.to_string(), replay_path: None }.into()
     }
 
+    /// The request that failure names, as the offer keys it.
+    fn missing_request(build: u32, version: &str) -> crate::task::BuildRequest {
+        build_request_from_failure(build, version).expect("a build and a parseable version are requestable")
+    }
+
     #[test]
     fn a_missing_build_report_is_classified_as_a_missing_build() {
         let mut failures = IngestFailures::default();
         failures.record(&missing_build_report(9_876, "13.5.0"));
         assert_eq!(failures.unreadable, 0);
+        assert_eq!(failures.missing_builds, BTreeMap::from([(missing_request(9_876, "13.5.0"), 1)]));
+    }
+
+    /// A pre-0.10 replay reports build 0, which is no build at all. Nothing can
+    /// be offered for it, so it is one of the replays nothing can be done about
+    /// rather than a row in the download prompt.
+    #[test]
+    fn a_failure_naming_no_build_is_counted_as_unreadable() {
+        let mut failures = IngestFailures::default();
+        failures.record(&missing_build_report(0, "0.6.13"));
+        assert_eq!(failures.unreadable, 1);
+        assert!(failures.missing_builds.is_empty());
+    }
+
+    /// Each group is walked on its own and reports its own failures, and the
+    /// prompt is built from the directory's total: two groups short of the same
+    /// build must add up rather than one replacing the other.
+    #[test]
+    fn merging_two_groups_adds_up_the_replays_waiting_on_each_build() {
+        let mut directory = IngestFailures::default();
+        directory.record(&missing_build_report(9_876, "13.5.0"));
+        directory.record_index_failure();
+
+        let mut group = IngestFailures::default();
+        group.record(&missing_build_report(9_876, "13.5.0"));
+        group.record(&missing_build_report(9_877, "13.6.0"));
+        group.record(&report!("file is truncated"));
+
+        directory.merge(group);
+
         assert_eq!(
-            failures.missing_builds,
-            BTreeMap::from([(MissingBuild { build: 9_876, version: "13.5.0".into() }, 1)])
+            directory.missing_builds,
+            BTreeMap::from([(missing_request(9_876, "13.5.0"), 2), (missing_request(9_877, "13.6.0"), 1)])
         );
+        assert_eq!(directory.unreadable, 1);
+        assert_eq!(directory.not_indexed, 1);
     }
 
     #[test]
@@ -2111,10 +2299,7 @@ mod tests {
         for _ in 0..3 {
             failures.record(&missing_build_report(9_876, "13.5.0"));
         }
-        assert_eq!(
-            failures.missing_builds,
-            BTreeMap::from([(MissingBuild { build: 9_876, version: "13.5.0".into() }, 3)])
-        );
+        assert_eq!(failures.missing_builds, BTreeMap::from([(missing_request(9_876, "13.5.0"), 3)]));
         assert_eq!(failures.unreadable, 0);
     }
 
@@ -2229,8 +2414,27 @@ mod tests {
     }
 
     /// Walk `paths` with steps the test supplies, returning everything the walk
-    /// sent, in the order it sent it, and what it left behind.
+    /// sent, in the order it sent it, and what it left behind. The group is the
+    /// whole run here, so it starts at nothing and its total is its own length.
     fn run_walk<N, R, I>(paths: &[&str], needs_index: N, read: R, index: I) -> (Vec<IngestUpdate>, WalkOutcome)
+    where
+        N: Fn(&Path) -> bool,
+        R: Fn(&Path) -> Result<ReadReplay, Report>,
+        I: Fn(&ReadReplay, crate::db::index::rows::SourceId) -> Result<(), Report>,
+    {
+        run_walk_within(paths, 0, paths.len(), needs_index, read, index)
+    }
+
+    /// Walk `paths` as one group of a run that has already visited `offset`
+    /// files and holds `total` in all.
+    fn run_walk_within<N, R, I>(
+        paths: &[&str],
+        offset: usize,
+        total: usize,
+        needs_index: N,
+        read: R,
+        index: I,
+    ) -> (Vec<IngestUpdate>, WalkOutcome)
     where
         N: Fn(&Path) -> bool,
         R: Fn(&Path) -> Result<ReadReplay, Report>,
@@ -2238,9 +2442,22 @@ mod tests {
     {
         let (tx, rx) = mpsc::channel();
         let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
-        let outcome = ingest_walk(paths, WALK_WORKSPACE, WALK_SOURCE, needs_index, read, index, &tx);
+        let slice = WalkSlice { workspace: WALK_WORKSPACE, source: WALK_SOURCE, offset, total };
+        let outcome = ingest_walk(paths, slice, &needs_index, &read, &index, &tx);
         drop(tx);
         (rx.into_iter().collect(), outcome)
+    }
+
+    /// Every count a walk reported, whichever update carried it.
+    fn progress(updates: &[IngestUpdate]) -> Vec<IngestProgress> {
+        updates
+            .iter()
+            .filter_map(|update| match update {
+                IngestUpdate::Batch(batch) => Some(batch.progress),
+                IngestUpdate::Stage { stage: IngestStage::Reading(progress), .. } => Some(*progress),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Every replay the walk sent to the listing, whichever batch carried it.
@@ -2408,21 +2625,32 @@ mod tests {
         }
     }
 
-    /// The listing is merged into, never replaced, so a replay deleted between
-    /// two walks of the same directory would otherwise outlive its file. The
-    /// walk names the files it found before reading any of them, which is what
-    /// lets the listing drop the rest.
+    /// The listing retains exactly the files it is told the directory holds,
+    /// and the scan tells it once, before any group is read. A walk naming its
+    /// own group's files would drop every other build's rows from the listing.
     #[test]
-    fn the_walk_names_the_files_it_found_before_it_sends_any_replay() {
+    fn a_group_walk_does_not_claim_the_directorys_file_set() {
         let (updates, _) = run_walk(&["a.wowsreplay"], |_| true, |_| Ok(read_replay(11)), |_, _| Ok(()));
 
-        match updates.first() {
-            Some(IngestUpdate::Walked { workspace, paths }) => {
-                assert_eq!(*workspace, WALK_WORKSPACE);
-                assert_eq!(*paths, HashSet::from([PathBuf::from("a.wowsreplay")]));
-            }
-            _ => panic!("the walk must announce the files it found before anything else"),
-        }
+        assert!(
+            !updates.iter().any(|update| matches!(update, IngestUpdate::Walked { .. })),
+            "naming the files found belongs to the scan, which sees the whole directory"
+        );
+    }
+
+    /// A group is one slice of a run that spans several, so its count carries
+    /// on from what came before it and is measured against the directory. A
+    /// count restarting per group reads as the run starting over.
+    #[test]
+    fn a_group_counts_from_where_the_run_had_got_to() {
+        let (updates, _) =
+            run_walk_within(&["b.wowsreplay", "c.wowsreplay"], 2, 5, |_| true, |_| Ok(read_replay(11)), |_, _| Ok(()));
+
+        assert_eq!(
+            progress(&updates).last(),
+            Some(&IngestProgress { done: 4, total: 5 }),
+            "two files after two already visited is four of five, not two of two"
+        );
     }
 
     /// The population that fails to read is contiguous -- a whole game
@@ -2444,7 +2672,7 @@ mod tests {
         let mid_walk = updates.iter().any(|update| {
             matches!(
                 update,
-                IngestUpdate::Progress { workspace, progress }
+                IngestUpdate::Stage { workspace, stage: IngestStage::Reading(progress) }
                     if *workspace == WALK_WORKSPACE && *progress == IngestProgress { done: 1, total: 2 }
             )
         });
@@ -2509,6 +2737,246 @@ mod tests {
     fn a_partial_batch_waits_for_the_interval() {
         assert_eq!(flush_now(1, Duration::ZERO), Flush::Hold);
         assert_eq!(flush_now(1, INGEST_FLUSH_INTERVAL), Flush::Batch);
+    }
+
+    /// A scan of `files`, each named by a string and reporting a build, or no
+    /// readable header at all when its build is `None`. No filesystem and no
+    /// game install behind it.
+    fn scan_for(files: &[(&str, Option<u32>)]) -> crate::task::scan::DirectoryScan {
+        let owned: Vec<(String, Option<u32>)> = files.iter().map(|(n, b)| ((*n).to_string(), *b)).collect();
+        crate::task::scan::scan_paths(
+            PathBuf::from("root"),
+            owned.iter().map(|(n, _)| PathBuf::from(n)).collect(),
+            |p| {
+                owned.iter().find(|(n, _)| Path::new(n) == p).and_then(|(_, b)| {
+                    b.map(|build| Version { major: 15, minor: 0, patch: 0, build: std::num::NonZeroU32::new(build) })
+                })
+            },
+            |_| true,
+            |_| std::ops::ControlFlow::Continue(()),
+        )
+    }
+
+    /// Every path one group's walk was handed, and where that group was told
+    /// the run had got to.
+    #[derive(Debug, PartialEq, Eq)]
+    struct WalkCall {
+        paths: Vec<PathBuf>,
+        offset: usize,
+        total: usize,
+    }
+
+    /// What a directory read did, as seen from its injected steps: which builds
+    /// it tried to load and in what order, what it handed each group's walk, and
+    /// everything it sent.
+    struct ReadRun {
+        loaded: Vec<u32>,
+        walks: Vec<WalkCall>,
+        updates: Vec<IngestUpdate>,
+        outcome: WalkOutcome,
+    }
+
+    /// Run the real group loop over `scan`, with `has_data` answering whatever
+    /// `load` will. That is what a machine whose cheap check and loader agree
+    /// looks like, which is every case but the one
+    /// [`run_read_with`] exists for.
+    fn run_read<L, W>(scan: &crate::task::scan::DirectoryScan, load: L, walk: W) -> ReadRun
+    where
+        L: Fn(&crate::task::BuildRequest) -> bool,
+        W: Fn(Vec<PathBuf>, WalkSlice) -> WalkOutcome,
+    {
+        run_read_with(scan, &load, &load, walk)
+    }
+
+    /// Run the real group loop over `scan` with steps the test supplies.
+    ///
+    /// `has_data` is the cheap check the announce is gated on, `load` decides
+    /// whether each build's data comes up, and `walk` stands in for reading a
+    /// group's replays. The first two are separate parameters so a test can
+    /// make them disagree.
+    fn run_read_with<D, L, W>(scan: &crate::task::scan::DirectoryScan, has_data: D, load: L, walk: W) -> ReadRun
+    where
+        D: Fn(&crate::task::BuildRequest) -> bool,
+        L: Fn(&crate::task::BuildRequest) -> bool,
+        W: Fn(Vec<PathBuf>, WalkSlice) -> WalkOutcome,
+    {
+        let loaded = std::cell::RefCell::new(Vec::new());
+        let walks = std::cell::RefCell::new(Vec::new());
+        let (tx, rx) = mpsc::channel();
+
+        let record_load = |request: &crate::task::BuildRequest| {
+            loaded.borrow_mut().push(request.build_u32());
+            load(request)
+        };
+        let record_walk = |paths: Vec<PathBuf>, slice: WalkSlice| {
+            walks.borrow_mut().push(WalkCall { paths: paths.clone(), offset: slice.offset, total: slice.total });
+            walk(paths, slice)
+        };
+
+        let steps = BuildSteps { has_data: &has_data, load: &record_load, walk: &record_walk };
+        let outcome = read_build_groups(scan, WALK_WORKSPACE, WALK_SOURCE, steps, &tx);
+        drop(tx);
+
+        ReadRun { loaded: loaded.into_inner(), walks: walks.into_inner(), updates: rx.into_iter().collect(), outcome }
+    }
+
+    /// Every count the run reported, whichever update carried it.
+    fn read_progress(updates: &[IngestUpdate]) -> Vec<IngestProgress> {
+        updates
+            .iter()
+            .filter_map(|update| match update {
+                IngestUpdate::Stage { stage: IngestStage::Reading(progress), .. } => Some(*progress),
+                IngestUpdate::Batch(batch) => Some(batch.progress),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Each build's data is loaded once, at the head of its group, and every
+    /// replay of that build is read under that one load. Loading per replay, or
+    /// splitting a build across two visits, lets a directory spanning more
+    /// builds than the data map holds evict and reload between neighbouring
+    /// files. Ascending order is what lets an older build's constants bridge
+    /// forward to a newer one and never the other way round.
+    #[test]
+    fn each_build_is_resolved_once_for_its_whole_group() {
+        let scan = scan_for(&[("a", Some(100)), ("b", Some(90)), ("c", Some(100)), ("d", Some(90))]);
+
+        let run = run_read(&scan, |_| true, |_, _| WalkOutcome::default());
+
+        assert_eq!(run.loaded, vec![90, 100], "each build loads exactly once, in ascending build order");
+        assert_eq!(
+            run.walks.iter().map(|call| call.paths.clone()).collect::<Vec<_>>(),
+            vec![vec![PathBuf::from("b"), PathBuf::from("d")], vec![PathBuf::from("a"), PathBuf::from("c")]],
+            "each build's replays are read in one visit, never interleaved with another build's"
+        );
+    }
+
+    /// The counter spans the directory rather than each group, so it advances
+    /// monotonically across build boundaries instead of resetting at each one,
+    /// and reaches full when the last group ends.
+    #[test]
+    fn the_read_counter_spans_the_whole_directory() {
+        let scan = scan_for(&[("a", Some(100)), ("b", Some(90)), ("c", Some(100)), ("d", Some(90))]);
+
+        let run = run_read(&scan, |_| true, |_, _| WalkOutcome::default());
+
+        assert_eq!(
+            run.walks,
+            vec![
+                WalkCall { paths: vec![PathBuf::from("b"), PathBuf::from("d")], offset: 0, total: 4 },
+                WalkCall { paths: vec![PathBuf::from("a"), PathBuf::from("c")], offset: 2, total: 4 },
+            ],
+            "the second group starts from where the first left off, against the directory's own total"
+        );
+        let last = run.walks.last().expect("two groups were walked");
+        assert_eq!(last.offset + last.paths.len(), scan.to_read(), "the last group ends at full");
+    }
+
+    /// A build whose data will not come up costs its own replays and nothing
+    /// else: they are reported against that build so the count of what is
+    /// waiting on it is right, the counter moves over them so the bar still
+    /// reaches full, and the builds after it are read normally.
+    #[test]
+    fn a_build_whose_data_will_not_load_is_skipped_without_stopping_the_read() {
+        let scan = scan_for(&[("a", Some(100)), ("b", Some(90)), ("c", Some(90))]);
+
+        let run = run_read(&scan, |request| request.build_u32() != 90, |_, _| WalkOutcome::default());
+
+        assert_eq!(
+            run.walks,
+            vec![WalkCall { paths: vec![PathBuf::from("a")], offset: 2, total: 3 }],
+            "only the build that loaded is walked, and it starts past the two replays that were skipped"
+        );
+        assert_eq!(
+            run.outcome.failures.missing_builds.values().copied().collect::<Vec<_>>(),
+            vec![2],
+            "both replays of the build that would not load are reported against it"
+        );
+        assert_eq!(
+            run.outcome.failures.missing_builds.keys().map(crate::task::BuildRequest::build_u32).collect::<Vec<_>>(),
+            vec![90],
+            "and against that build, not another"
+        );
+        assert!(
+            read_progress(&run.updates).contains(&IngestProgress { done: 2, total: 3 }),
+            "the count must move over a skipped build, or the bar stops short of full"
+        );
+    }
+
+    /// A build with no data on this machine is skipped, not loaded, so
+    /// announcing a load for it names work that never happens.
+    #[test]
+    fn a_build_with_no_data_is_not_announced_as_loading() {
+        let scan = scan_for(&[("a", Some(100)), ("b", Some(90))]);
+
+        let run = run_read(&scan, |request| request.build_u32() == 100, |_, _| WalkOutcome::default());
+
+        assert_eq!(announced_builds(&run.updates), vec![100], "only the build that is actually loaded is announced");
+    }
+
+    /// The announce is a hint about what to say; the load is what decides what
+    /// is read. A build the cheap availability check does not know about, but
+    /// whose data loads anyway, must still have its replays read. Gating the
+    /// load on that check would let it drop replays that load perfectly well,
+    /// silently, the moment it grew stricter than resolution.
+    #[test]
+    fn a_build_the_availability_check_missed_is_still_read_when_its_data_loads() {
+        let scan = scan_for(&[("a", Some(100))]);
+
+        let run = run_read_with(&scan, |_| false, |_| true, |_, _| WalkOutcome::default());
+
+        assert_eq!(run.loaded, vec![100], "the load must be attempted whatever the cheap check answered");
+        assert_eq!(
+            run.walks,
+            vec![WalkCall { paths: vec![PathBuf::from("a")], offset: 0, total: 1 }],
+            "a build whose data loads must have its replays read"
+        );
+        assert!(
+            run.outcome.failures.missing_builds.is_empty(),
+            "a build that loaded is not one the directory is waiting on"
+        );
+        assert!(announced_builds(&run.updates).is_empty(), "and it is read without being announced");
+    }
+
+    /// The builds a run said out loud it was loading data for.
+    fn announced_builds(updates: &[IngestUpdate]) -> Vec<u32> {
+        updates
+            .iter()
+            .filter_map(|update| match update {
+                IngestUpdate::Stage { stage: IngestStage::LoadingData { build, .. }, .. } => Some(build.build_u32()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The files the scan could not read are files the listing will never show.
+    /// The scan already classified why; the read only adds their count, and a
+    /// read that dropped it would report a directory as fully listed when it is
+    /// not.
+    #[test]
+    fn the_files_the_scan_could_not_read_are_counted_as_unreadable() {
+        let scan = scan_for(&[("a", Some(100)), ("bad", None), ("worse", None)]);
+        assert_eq!(scan.unreadable.len(), 2, "the fixture must actually hold unreadable files");
+
+        let run = run_read(&scan, |_| true, |_, _| WalkOutcome::default());
+
+        assert_eq!(run.outcome.failures.unreadable, 2);
+        assert_eq!(scan.to_read(), 1, "an unreadable file is not one the read stage visits");
+    }
+
+    /// A walk whose updates cannot be sent has lost its listing, and every
+    /// build after it costs a full game-data load and a parse per replay for a
+    /// listing nobody is watching.
+    #[test]
+    fn a_lost_listing_stops_the_read_before_the_next_build_loads() {
+        let scan = scan_for(&[("a", Some(100)), ("b", Some(90))]);
+
+        let run = run_read(&scan, |_| true, |_, _| WalkOutcome { channel_closed: true, ..WalkOutcome::default() });
+
+        assert_eq!(run.loaded, vec![90], "the build after the one that lost its listing must not be loaded");
+        assert_eq!(run.walks.len(), 1, "and its replays must not be read");
+        assert!(run.outcome.channel_closed);
     }
 
     /// Every stage needs its own label. A shared key would report a download as a

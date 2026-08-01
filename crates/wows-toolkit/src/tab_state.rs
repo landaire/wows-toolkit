@@ -1094,16 +1094,23 @@ impl TabState {
         match update {
             IngestUpdate::Walked { workspace, paths } => self.retain_listed_replays(workspace, &paths),
             IngestUpdate::Batch(batch) => self.apply_ingest_batch(batch),
-            IngestUpdate::Progress { workspace, progress } => {
-                if let Some(workspace) = self.workspace_mut(workspace) {
-                    workspace.ingest_stage = Some(crate::task::replays::IngestStage::Reading(progress));
-                }
-            }
             IngestUpdate::Stage { workspace, stage } => {
                 if let Some(workspace) = self.workspace_mut(workspace) {
                     workspace.ingest_stage = Some(stage);
                 }
             }
+        }
+    }
+
+    /// Mark the run filling `workspace`'s listing as over, however it ended.
+    ///
+    /// The flag and the stage go together: a stage left behind draws progress
+    /// for a run that is not happening, and a flag left behind refuses the next
+    /// attempt at the directory.
+    pub fn set_ingest_finished(&mut self, workspace: WorkspaceId) {
+        if let Some(workspace) = self.workspace_mut(workspace) {
+            workspace.ingest_in_flight = false;
+            workspace.ingest_stage = None;
         }
     }
 
@@ -1785,9 +1792,12 @@ mod tests {
         workspace.replay_files = Some(HashMap::from([(PathBuf::from("a.wowsreplay"), listed_replay())]));
         state.workspaces.insert(id, workspace);
 
-        state.apply_ingest_update(crate::task::replays::IngestUpdate::Progress {
+        state.apply_ingest_update(crate::task::replays::IngestUpdate::Stage {
             workspace: id,
-            progress: crate::task::replays::IngestProgress { done: 4_000, total: 5_000 },
+            stage: crate::task::replays::IngestStage::Reading(crate::task::replays::IngestProgress {
+                done: 4_000,
+                total: 5_000,
+            }),
         });
 
         let workspace = state.workspace(id).expect("inserted above");
@@ -1806,20 +1816,6 @@ mod tests {
         );
     }
 
-    /// Progress is routed by the id it carries, exactly as a batch is: a walk
-    /// whose tab has closed has nothing to report to.
-    #[test]
-    fn a_progress_update_for_a_closed_workspace_is_dropped() {
-        let mut state = TabState::default();
-        state.apply_ingest_update(crate::task::replays::IngestUpdate::Progress {
-            workspace: WorkspaceId(99),
-            progress: crate::task::replays::IngestProgress { done: 1, total: 2 },
-        });
-
-        assert!(state.live_workspace.ingest_stage.is_none(), "a departed workspace's progress must not land on live");
-        assert!(state.workspaces.is_empty(), "a departed workspace must not be recreated by its own progress");
-    }
-
     /// A stage update names the workspace it belongs to, so one landing after its
     /// tab closed is dropped rather than reported on whichever listing is showing.
     #[test]
@@ -1836,6 +1832,8 @@ mod tests {
         });
 
         assert!(state.workspace(id).is_none(), "no workspace may be created by an update naming a closed one");
+        assert!(state.live_workspace.ingest_stage.is_none(), "a departed workspace's stage must not land on live");
+        assert!(state.workspaces.is_empty(), "a departed workspace must not be recreated by its own stage");
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use rust_i18n::t;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -401,6 +402,12 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     directory_reingest: BTreeMap<WorkspaceId, DirectoryReingest>,
 
+    /// Scans whose read stage has not started, keyed by the workspace they
+    /// describe. Retaining the scan is what lets a directory be walked once
+    /// even when a download happens between the scan and the read.
+    #[serde(skip)]
+    pending_scans: HashMap<WorkspaceId, Box<crate::task::scan::DirectoryScan>>,
+
     /// Replay to reopen, released by the download task that was fetching its
     /// build. See [`WowsToolkitApp::finished_reingest_offer`] for why both of
     /// these are handed over rather than read from the task's own completion.
@@ -740,6 +747,7 @@ impl Default for WowsToolkitApp {
             save_task_handle: None,
             download_prompt: None,
             directory_reingest: BTreeMap::new(),
+            pending_scans: HashMap::new(),
             finished_download_replay: None,
             finished_reingest_offer: None,
             pending_constants_data: None,
@@ -1187,19 +1195,34 @@ impl WowsToolkitApp {
             let mut downloading_count = 0usize;
             let mut download_done = 0u64;
             let mut download_total = 0u64;
+            // Collected rather than applied in place: the workspaces these land
+            // on live beside the tasks being borrowed here.
+            let mut directories_downloading: Vec<(WorkspaceId, task::DownloadProgress)> = Vec::new();
             for task in &mut self.tab_state.background_tasks {
                 if task.receiver.is_none() {
                     continue;
                 }
-                if let BackgroundTaskKind::DownloadingGameData { rx, last_progress, .. } = &mut task.kind {
+                if let BackgroundTaskKind::DownloadingGameData { rx, last_progress, follow_up } = &mut task.kind {
                     while let Ok(progress) = rx.try_recv() {
                         *last_progress = Some(progress);
                     }
                     if let Some(progress) = last_progress {
                         download_done += progress.downloaded;
                         download_total += progress.total;
+                        if let Some(GameDataFollowUp::Directory(workspace)) = follow_up {
+                            directories_downloading.push((*workspace, *progress));
+                        }
                     }
                     downloading_count += 1;
+                }
+            }
+            // A directory whose read is waiting on this download reports the
+            // download above its listing: the listing is short until it lands,
+            // and the status bar does not say which directory is short.
+            for (workspace, progress) in directories_downloading {
+                if let Some(target) = self.tab_state.workspace_mut(workspace) {
+                    target.ingest_in_flight = true;
+                    target.ingest_stage = Some(crate::task::replays::IngestStage::Downloading(progress));
                 }
             }
             let mut shown_download_progress = false;
@@ -1281,6 +1304,10 @@ impl WowsToolkitApp {
                                 self.finished_download_replay = None;
                                 match follow_up {
                                     Some(GameDataFollowUp::Directory(workspace)) => {
+                                        // The download owned the stage while it
+                                        // ran; the read stage this owes takes
+                                        // it back when it starts.
+                                        self.tab_state.set_ingest_finished(workspace);
                                         self.note_reingest_download_finished(workspace);
                                     }
                                     Some(GameDataFollowUp::Replay(path)) => {
@@ -1310,11 +1337,8 @@ impl WowsToolkitApp {
                                 }
                             }
                             // Released here rather than in the completion arm so
-                            // an errored or disconnected ingest also frees the
-                            // workspace for another attempt and drops its
-                            // re-walk record, which would otherwise mark the
-                            // next explicit open as automatic and silence its
-                            // offer.
+                            // an errored or disconnected read also frees the
+                            // workspace for another attempt.
                             BackgroundTaskKind::IngestingDirectory { workspace, rx } => {
                                 let workspace_id = *workspace;
                                 // Whatever the walk sent between the drain above
@@ -1324,10 +1348,24 @@ impl WowsToolkitApp {
                                 for update in tail {
                                     self.tab_state.apply_ingest_update(update);
                                 }
-                                if let Some(target) = self.tab_state.workspace_mut(workspace_id) {
-                                    target.ingest_in_flight = false;
-                                    target.ingest_stage = None;
+                                self.tab_state.set_ingest_finished(workspace_id);
+                            }
+                            // The re-walk record is dropped here rather than in
+                            // the completion arm so an errored or disconnected
+                            // scan also releases it, which would otherwise mark
+                            // the next explicit open as automatic and silence
+                            // its offer. The scan is the stage that raises the
+                            // offer, so it is the stage the record answers.
+                            BackgroundTaskKind::ScanningDirectory { workspace, rx } => {
+                                let workspace_id = *workspace;
+                                let tail: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+                                for update in tail {
+                                    self.tab_state.apply_ingest_update(update);
                                 }
+                                // The read stage that follows sets this again.
+                                // Clearing it here is what lets a scan that
+                                // failed be retried at all.
+                                self.tab_state.set_ingest_finished(workspace_id);
                                 let offered = self.finish_directory_reingest(workspace_id);
                                 self.finished_reingest_offer = offered.map(|offered| (workspace_id, offered));
                             }
@@ -1396,8 +1434,12 @@ impl WowsToolkitApp {
     fn drain_ingest_updates(&mut self) {
         let mut updates = Vec::new();
         for task in &self.tab_state.background_tasks {
-            if let BackgroundTaskKind::IngestingDirectory { rx, .. } = &task.kind {
-                updates.extend(std::iter::from_fn(|| rx.try_recv().ok()));
+            match &task.kind {
+                BackgroundTaskKind::IngestingDirectory { rx, .. }
+                | BackgroundTaskKind::ScanningDirectory { rx, .. } => {
+                    updates.extend(std::iter::from_fn(|| rx.try_recv().ok()));
+                }
+                _ => {}
             }
         }
         for update in updates {
@@ -1826,7 +1868,7 @@ impl WowsToolkitApp {
                     }
                 }
                 BackgroundTaskCompletion::DirectoryIngested { workspace, source, failures } => {
-                    let just_offered = self.take_finished_reingest_offer(workspace);
+                    self.tab_state.set_ingest_finished(workspace);
 
                     // A workspace that is gone was closed while the walk ran,
                     // and the result belongs to nothing else: carrying the id
@@ -1843,32 +1885,15 @@ impl WowsToolkitApp {
                         // them against the source just resolved.
                         target.replay_row_summaries_generation = None;
 
-                        let missing: BTreeSet<u32> = failures.missing_builds.keys().map(|m| m.build).collect();
-                        let offer = !missing.is_empty()
-                            && self.download_prompt.is_none()
-                            && !offer_was_just_made(just_offered.as_ref(), &missing);
-
-                        if offer {
-                            // The map is ordered, so the rows do not depend on
-                            // the order the walk visited files in.
-                            let candidates = failures
-                                .missing_builds
-                                .iter()
-                                .map(|(build, count)| {
-                                    DownloadCandidate::unresolved(build.build, build.version.clone(), Some(*count))
-                                })
-                                .collect();
-                            self.download_prompt = Some(GameDataDownloadPrompt::new(
-                                candidates,
-                                Some(GameDataFollowUp::Directory(workspace)),
-                            ));
-                        }
-
-                        // Replays waiting on game data are left out of the
-                        // toast only when the dialog is about to account for
-                        // them. With no dialog, saying nothing would leave the
-                        // listing short with no indication anywhere.
-                        let skipped = if offer { failures.unreadable } else { failures.total() };
+                        // No offer is raised here. The scan that preceded this
+                        // read already offered every build it found missing; a
+                        // build still missing now is one whose download failed
+                        // or was declined, and asking again is the loop the
+                        // retained scan exists to break.
+                        //
+                        // Nothing else is going to account for these replays,
+                        // so the toast names all of them.
+                        let skipped = failures.total();
                         if skipped > 0 {
                             self.tab_state
                                 .toasts
@@ -1884,6 +1909,49 @@ impl WowsToolkitApp {
                                 .toasts
                                 .lock()
                                 .warning(t!("ui.messages.directory_replays_not_indexed", count = failures.not_indexed));
+                        }
+                    }
+                }
+                BackgroundTaskCompletion::DirectoryScanned { workspace, scan } => {
+                    // A workspace that is gone was closed while the scan ran,
+                    // and the scan belongs to nothing else.
+                    if self.tab_state.workspace(workspace).is_some() {
+                        let missing: BTreeSet<u32> = scan.missing_builds.iter().map(|build| build.get()).collect();
+                        let just_offered = self.take_finished_reingest_offer(workspace);
+                        let offer = !missing.is_empty()
+                            && self.download_prompt.is_none()
+                            && !offer_was_just_made(just_offered.as_ref(), &missing);
+
+                        // Built before the scan is retained, since retaining it
+                        // hands the scan over. The map is ordered, so the rows
+                        // do not depend on the order the walk found files in.
+                        let candidates: Vec<DownloadCandidate> = if offer {
+                            scan.by_build
+                                .iter()
+                                .filter(|(build, _)| scan.missing_builds.contains(*build))
+                                .map(|(build, group)| {
+                                    DownloadCandidate::unresolved(
+                                        build.get(),
+                                        group.request.friendly_version(),
+                                        Some(group.paths.len()),
+                                    )
+                                })
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
+
+                        self.pending_scans.insert(workspace, scan);
+                        if offer {
+                            // The read waits on the answer: fetching the data
+                            // first is what keeps these replays from being
+                            // read, missed, and read again after the download.
+                            self.download_prompt = Some(GameDataDownloadPrompt::new(
+                                candidates,
+                                Some(GameDataFollowUp::Directory(workspace)),
+                            ));
+                        } else {
+                            self.start_directory_read(workspace);
                         }
                     }
                 }
@@ -3026,6 +3094,10 @@ impl WowsToolkitApp {
     /// that could not start would be dropped, leaving the listing permanently
     /// short of the replays the download was for.
     fn service_directory_reingests(&mut self) {
+        // A scan whose tab closed before its read started describes a directory
+        // nothing is listing any more.
+        self.pending_scans.retain(|workspace, _| self.tab_state.workspace(*workspace).is_some());
+
         let owed: Vec<WorkspaceId> = self
             .directory_reingest
             .iter()
@@ -3040,7 +3112,21 @@ impl WowsToolkitApp {
                 self.directory_reingest.remove(&workspace);
                 continue;
             };
-            if !self.start_directory_ingest(workspace, root) {
+
+            // The scan taken before the download still describes this
+            // directory, so the read starts from it rather than walking the
+            // directory a second time. That read raises no offer of its own,
+            // which leaves the record with nothing to suppress.
+            if self.pending_scans.contains_key(&workspace) {
+                if self.start_directory_read(workspace) {
+                    self.directory_reingest.remove(&workspace);
+                }
+                continue;
+            }
+
+            // A download that finished after its scan was dropped still owes
+            // the user a listing, and the scan it needs has to be taken again.
+            if !self.start_directory_scan(workspace, root) {
                 continue;
             }
             if let Some(state) = self.directory_reingest.get_mut(&workspace)
@@ -3189,7 +3275,8 @@ impl WowsToolkitApp {
             // opening those replays again is a fresh request and gets a fresh
             // offer; the only offer ever suppressed is the automatic one the
             // walk after a download would otherwise repeat.
-            self.download_prompt = None;
+            let trigger = self.download_prompt.take().and_then(|prompt| prompt.trigger);
+            self.resume_unanswered_directory(trigger.as_ref());
         }
     }
 
@@ -3197,20 +3284,30 @@ impl WowsToolkitApp {
     /// checked against the remote repository and, if published, fetched into
     /// the local cache directory.
     fn start_game_data_download(&mut self, prompt: GameDataDownloadPrompt) {
+        if !self.spawn_game_data_download(&prompt) {
+            // Nothing is going to fetch these builds, so nothing is going to
+            // start the read the offer was holding back either.
+            self.resume_unanswered_directory(prompt.trigger.as_ref());
+        }
+    }
+
+    /// Spawn the download task for what `prompt` has ticked, reporting whether
+    /// one was actually started.
+    fn spawn_game_data_download(&mut self, prompt: &GameDataDownloadPrompt) -> bool {
         let cache_dir = self.tab_state.persisted.read().settings.game.game_data_cache_dir.clone();
         let Some(output_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir) else {
             self.tab_state.toasts.lock().error(t!("ui.messages.game_data_download_failed"));
-            return;
+            return false;
         };
 
         let builds = prompt.downloadable();
         if builds.is_empty() {
-            return;
+            return false;
         }
 
         let Some(runtime) = self.tab_state.tokio_runtime.as_ref().map(Arc::clone) else {
             warn!("cannot download game data: tokio runtime is not available");
-            return;
+            return false;
         };
 
         let requests: Vec<crate::task::BuildRequest> = builds
@@ -3227,7 +3324,7 @@ impl WowsToolkitApp {
             })
             .collect();
         if requests.is_empty() {
-            return;
+            return false;
         }
 
         // Recorded only once a task is actually about to be spawned: an
@@ -3250,6 +3347,20 @@ impl WowsToolkitApp {
                 prompt.trigger.clone(),
             ))
         );
+        true
+    }
+
+    /// Start the read a directory's offer was holding back, for an offer that
+    /// ended without a download.
+    ///
+    /// The scan is retained across the offer, and the read that consumes it is
+    /// started by the download that answers the offer. An offer answered with
+    /// anything else has to start the read itself, or the directory is left
+    /// with a listing that never fills.
+    fn resume_unanswered_directory(&mut self, trigger: Option<&GameDataFollowUp>) {
+        if let Some(GameDataFollowUp::Directory(workspace)) = trigger {
+            self.start_directory_read(*workspace);
+        }
     }
 
     /// The download a directory was waiting on has finished. The walk is now
@@ -3788,14 +3899,19 @@ impl WowsToolkitApp {
         // workspace, so focusing the tab is all this needs to do.
         let id = self.tab_state.open_directory_workspace(root.clone());
         self.focus_tab(&Tab::Replays(id));
-        self.start_directory_ingest(id, root);
+        self.start_directory_scan(id, root);
     }
 
-    /// Start the walk that fills `id`'s listing from `root`, without touching
-    /// which tab is focused. Returns whether it started: a walk already running
-    /// over this workspace, or a missing prerequisite, leaves it for the
-    /// caller to retry rather than losing it.
-    fn start_directory_ingest(&mut self, id: WorkspaceId, root: PathBuf) -> bool {
+    /// Start the scan that counts `root`'s replays and groups them by build,
+    /// without touching which tab is focused. Returns whether it started: a run
+    /// already going over this workspace, or a missing prerequisite, leaves it
+    /// for the caller to retry rather than losing it.
+    ///
+    /// The three-way prerequisite check covers the read stage that follows, not
+    /// the scan, which needs only `deps`: refusing at the point the user picked
+    /// a directory beats scanning a thousand files and then discovering there is
+    /// nowhere to put them.
+    fn start_directory_scan(&mut self, id: WorkspaceId, root: PathBuf) -> bool {
         let already_walking = self.tab_state.workspace(id).is_some_and(|workspace| workspace.ingest_in_flight);
         if already_walking {
             return false;
@@ -3803,6 +3919,50 @@ impl WowsToolkitApp {
 
         // One match over the three options, so the name of the missing
         // prerequisite comes from the same evaluation that found it absent.
+        let ingest_deps = match (
+            self.tab_state.replay_dependencies(),
+            self.tab_state.db_pool.as_ref(),
+            self.tab_state.tokio_runtime.as_ref(),
+        ) {
+            (Some(deps), Some(_pool), Some(_rt)) => Ok(deps),
+            (None, _, _) => Err("game data"),
+            (_, None, _) => Err("database pool"),
+            (_, _, None) => Err("tokio runtime"),
+        };
+        let deps = match ingest_deps {
+            Ok(resolved) => resolved,
+            Err(missing) => {
+                warn!("cannot ingest replay directory {}: {missing} is not available", root.display());
+                return false;
+            }
+        };
+
+        if let Some(workspace) = self.tab_state.workspace_mut(id) {
+            workspace.ingest_in_flight = true;
+        }
+        update_background_task!(
+            self.tab_state.background_tasks,
+            Some(crate::task::scan::start_scan_directory(deps, id, root))
+        );
+        true
+    }
+
+    /// Start the read stage over a scan already taken for `workspace`.
+    ///
+    /// The scan is taken rather than borrowed: a read consumes it, and a scan
+    /// left behind would start a second read of the same directory.
+    fn start_directory_read(&mut self, workspace: WorkspaceId) -> bool {
+        // Symmetric with `start_directory_scan`, and refused before the scan is
+        // taken so a run that cannot start now keeps it: a re-opened directory
+        // resolves to the workspace it is already open as, so an open the user
+        // repeats while a run is going would otherwise put two on one listing.
+        let already_running = self.tab_state.workspace(workspace).is_some_and(|workspace| workspace.ingest_in_flight);
+        if already_running {
+            return false;
+        }
+        let Some(scan) = self.pending_scans.remove(&workspace) else {
+            return false;
+        };
         let ingest_deps = match (
             self.tab_state.replay_dependencies(),
             self.tab_state.db_pool.as_ref(),
@@ -3816,17 +3976,18 @@ impl WowsToolkitApp {
         let (deps, pool, rt) = match ingest_deps {
             Ok(resolved) => resolved,
             Err(missing) => {
-                warn!("cannot ingest replay directory {}: {missing} is not available", root.display());
+                warn!("cannot read replay directory {}: {missing} is not available", scan.root.display());
+                self.tab_state.set_ingest_finished(workspace);
                 return false;
             }
         };
 
-        if let Some(workspace) = self.tab_state.workspace_mut(id) {
-            workspace.ingest_in_flight = true;
+        if let Some(target) = self.tab_state.workspace_mut(workspace) {
+            target.ingest_in_flight = true;
         }
         update_background_task!(
             self.tab_state.background_tasks,
-            Some(crate::task::start_ingest_directory(deps, pool, rt, id, root))
+            Some(crate::task::start_read_directory(deps, pool, rt, workspace, scan))
         );
         true
     }

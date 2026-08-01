@@ -72,9 +72,9 @@ pub use replays::load_ship_icons;
 pub use replays::load_wows_data_for_build;
 pub use replays::load_wows_files;
 pub use replays::start_background_parsing_thread;
-pub use replays::start_ingest_directory;
 pub use replays::start_load_row_summaries;
 pub use replays::start_populating_player_inspector;
+pub use replays::start_read_directory;
 pub use replays::start_reconcile_index;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,6 +173,12 @@ pub enum BackgroundTaskKind {
     /// replays the walk has read so far and how far it has got, so the listing
     /// fills as the walk runs rather than when it ends.
     IngestingDirectory {
+        workspace: crate::db::index::rows::WorkspaceId,
+        rx: mpsc::Receiver<replays::IngestUpdate>,
+    },
+    /// Reading the header of every replay under a picked directory, to count
+    /// them and group them by build before any is read in full.
+    ScanningDirectory {
         workspace: crate::db::index::rows::WorkspaceId,
         rx: mpsc::Receiver<replays::IngestUpdate>,
     },
@@ -421,7 +427,9 @@ impl BackgroundTask {
                         ui.spinner();
                         ui.label(t!("ui.messages.loading_row_summaries"));
                     }
-                    BackgroundTaskKind::IngestingDirectory { .. } => {
+                    // Both stages of a directory open read the same directory,
+                    // and the listing itself reports which one is running.
+                    BackgroundTaskKind::IngestingDirectory { .. } | BackgroundTaskKind::ScanningDirectory { .. } => {
                         ui.spinner();
                         ui.label(t!("ui.messages.reading_replay_directory"));
                     }
@@ -508,6 +516,16 @@ pub enum BackgroundTaskCompletion {
         source: crate::db::index::rows::SourceId,
         failures: crate::task::replays::IngestFailures,
     },
+    /// A picked directory finished being scanned: every replay under it has had
+    /// its header read, and nothing else. What the scan found is what the
+    /// download offer is built from and what the read stage then consumes, so
+    /// the caller retains it rather than walking the directory again.
+    DirectoryScanned {
+        workspace: crate::db::index::rows::WorkspaceId,
+        /// Boxed: a scan of a large directory holds a path per replay, and this
+        /// enum is moved through the task channel by value.
+        scan: Box<crate::task::scan::DirectoryScan>,
+    },
     #[cfg(feature = "mod_manager")]
     ModManager(Box<crate::mod_manager::ModTaskCompletion>),
     NoReceiver,
@@ -569,6 +587,9 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .field("source", source)
                 .field("failures", failures)
                 .finish(),
+            Self::DirectoryScanned { workspace, scan } => {
+                f.debug_struct("DirectoryScanned").field("workspace", workspace).field("total", &scan.total).finish()
+            }
             #[cfg(feature = "mod_manager")]
             Self::ModManager(mod_manager_completion) => {
                 f.write_fmt(format_args!("ModManager({:?})", mod_manager_completion))
