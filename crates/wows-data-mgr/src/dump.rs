@@ -17,6 +17,7 @@ use wowsunpack::vfs::VfsPath;
 use crate::builds::BuildEntry;
 use crate::builds::BuildMetadata;
 use crate::builds::BuildsIndex;
+use crate::builds::CorruptObject;
 use crate::cas;
 
 /// VFS directories dumped in their entirety. `gui/battle_hud` is dumped whole
@@ -795,6 +796,9 @@ pub struct BuildVerification {
     pub referenced: usize,
     /// Referenced hashes with no object in the shared store.
     pub missing_objects: Vec<String>,
+    /// Referenced objects present in the store whose bytes hash to something
+    /// else. Only populated when hash checking is requested.
+    pub corrupt_objects: Vec<CorruptObject>,
     /// VFS-relative paths whose symlink target does not resolve to a file.
     pub broken_links: Vec<String>,
     /// True when `metadata.toml` was missing or unparseable.
@@ -803,7 +807,59 @@ pub struct BuildVerification {
 
 impl BuildVerification {
     pub fn is_ok(&self) -> bool {
-        !self.metadata_unreadable && self.missing_objects.is_empty() && self.broken_links.is_empty()
+        !self.metadata_unreadable
+            && self.missing_objects.is_empty()
+            && self.corrupt_objects.is_empty()
+            && self.broken_links.is_empty()
+    }
+}
+
+/// Verdict for one content object in the shared store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObjectAudit {
+    /// The object is present and its bytes hash to its name.
+    Intact,
+    /// Nothing is stored under this hash, or what is there cannot be read.
+    Absent,
+    /// The object is present but its bytes hash to something else.
+    Corrupt { actual: String },
+}
+
+/// Audit every content hash referenced by any of `builds`, invoking `audit` at
+/// most once per distinct hash.
+///
+/// The store is shared across builds, so one object is typically referenced by
+/// dozens of them. Auditing per build would re-read the same gigabytes once per
+/// referencing build.
+fn audit_objects(
+    builds: &[&BuildMetadata],
+    mut audit: impl FnMut(&str) -> ObjectAudit,
+) -> BTreeMap<String, ObjectAudit> {
+    let mut verdicts: BTreeMap<String, ObjectAudit> = BTreeMap::new();
+    for meta in builds {
+        for hash in meta.referenced_hashes() {
+            if verdicts.contains_key(&hash) {
+                continue;
+            }
+            let verdict = audit(&hash);
+            verdicts.insert(hash, verdict);
+        }
+    }
+    verdicts
+}
+
+/// Read one content object and compare its bytes against the name it is stored
+/// under.
+fn audit_object_on_disk(cas_root: &Path, hash: &str) -> ObjectAudit {
+    let path = cas::cas_path(cas_root, hash);
+    match cas::hash_file(&path) {
+        Ok(actual) if actual == hash => ObjectAudit::Intact,
+        Ok(actual) => ObjectAudit::Corrupt { actual },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => ObjectAudit::Absent,
+        Err(e) => {
+            tracing::warn!("could not read content object {}: {e}", path.display());
+            ObjectAudit::Absent
+        }
     }
 }
 
@@ -811,20 +867,43 @@ impl BuildVerification {
 /// `metadata.toml` parses, every referenced content object exists in the shared
 /// store, and (when `check_links` is set) every reconstructed symlink resolves
 /// to a readable file. Returns a report per build; the caller decides how to act.
-pub fn verify_builds(output_base: &Path, check_links: bool) -> Result<Vec<BuildVerification>, Report> {
+///
+/// With `check_hashes` set, every referenced object is read and re-hashed rather
+/// than merely checked for presence, which is the only way to catch an object
+/// whose name is right and whose bytes are not. Each distinct object is read
+/// once across the whole dump base.
+pub fn verify_builds(
+    output_base: &Path,
+    check_links: bool,
+    check_hashes: bool,
+) -> Result<Vec<BuildVerification>, Report> {
     let index = BuildsIndex::load(&output_base.join("builds.toml"));
     let cas_root = cas::cas_root(output_base);
 
+    let loaded: Vec<(&BuildEntry, Option<BuildMetadata>)> = index
+        .builds
+        .iter()
+        .map(|entry| (entry, BuildMetadata::load(&output_base.join(&entry.dir).join("metadata.toml"))))
+        .collect();
+
+    let audits = if check_hashes {
+        let readable: Vec<&BuildMetadata> = loaded.iter().filter_map(|(_, meta)| meta.as_ref()).collect();
+        audit_objects(&readable, |hash| audit_object_on_disk(&cas_root, hash))
+    } else {
+        BTreeMap::new()
+    };
+
     let mut reports = Vec::new();
-    for entry in &index.builds {
+    for (entry, meta) in loaded {
         let build_dir = output_base.join(&entry.dir);
-        let Some(meta) = BuildMetadata::load(&build_dir.join("metadata.toml")) else {
+        let Some(meta) = meta else {
             reports.push(BuildVerification {
                 dir: entry.dir.clone(),
                 build: entry.build,
                 version: entry.version.clone(),
                 referenced: 0,
                 missing_objects: Vec::new(),
+                corrupt_objects: Vec::new(),
                 broken_links: Vec::new(),
                 metadata_unreadable: true,
             });
@@ -832,9 +911,25 @@ pub fn verify_builds(output_base: &Path, check_links: bool) -> Result<Vec<BuildV
         };
 
         let referenced = meta.referenced_hashes();
-        let mut missing_objects: Vec<String> =
-            referenced.iter().filter(|h| !cas::object_exists(&cas_root, h)).cloned().collect();
+        let mut missing_objects = Vec::new();
+        let mut corrupt_objects = Vec::new();
+        for hash in &referenced {
+            match audits.get(hash) {
+                Some(ObjectAudit::Intact) => {}
+                Some(ObjectAudit::Absent) => missing_objects.push(hash.clone()),
+                Some(ObjectAudit::Corrupt { actual }) => {
+                    corrupt_objects.push(CorruptObject::attribute(entry, &meta, hash, actual));
+                }
+                // Without hash checking, presence is all that can be known.
+                None => {
+                    if !cas::object_exists(&cas_root, hash) {
+                        missing_objects.push(hash.clone());
+                    }
+                }
+            }
+        }
         missing_objects.sort();
+        corrupt_objects.sort_by(|a, b| a.hash.cmp(&b.hash));
 
         let mut broken_links = Vec::new();
         if check_links {
@@ -855,6 +950,7 @@ pub fn verify_builds(output_base: &Path, check_links: bool) -> Result<Vec<BuildV
             version: entry.version.clone(),
             referenced: referenced.len(),
             missing_objects,
+            corrupt_objects,
             broken_links,
             metadata_unreadable: false,
         });
@@ -1214,6 +1310,126 @@ mod maintenance_tests {
             meta.files.insert((*rel).to_string(), (*hash).to_string());
         }
         meta.save(&build_dir.join("metadata.toml")).unwrap();
+    }
+
+    fn register(base: &Path, version: &str, build: u32) {
+        let path = base.join("builds.toml");
+        let mut index = BuildsIndex::load(&path);
+        index.upsert(BuildEntry {
+            version: version.to_string(),
+            build,
+            dir: format!("{version}_{build}"),
+            dumped_at: String::new(),
+        });
+        index.save(&path).unwrap();
+    }
+
+    /// An object rewritten in place keeps its name, so existence checking sees
+    /// nothing wrong. This is exactly what `core.autocrlf` did to the published
+    /// archive: same path, different bytes, different length.
+    #[test]
+    fn hash_checking_finds_an_object_whose_bytes_were_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let cas_root = base.join("common");
+
+        let intact = cas::store(&cas_root, b"an object nobody touched").unwrap();
+        let tampered = cas::store(&cas_root, b"<xml>\r\n  <node />\r\n</xml>\r\n").unwrap();
+        write_build_metadata(
+            &base.join("15.4.0_12506899"),
+            "15.4.0",
+            12506899,
+            &[("res/a.xml", &intact), ("res/b.xml", &tampered), ("res/c.xml", &tampered)],
+        );
+        register(base, "15.4.0", 12506899);
+
+        let rewritten: &[u8] = b"<xml>\n  <node />\n</xml>\n";
+        std::fs::write(cas::cas_path(&cas_root, &tampered), rewritten).unwrap();
+
+        let unchecked = verify_builds(base, false, false).unwrap();
+        assert!(unchecked[0].is_ok(), "existence checking cannot see rewritten bytes");
+
+        let checked = verify_builds(base, false, true).unwrap();
+        let report = &checked[0];
+        assert!(!report.is_ok(), "hash checking must reject the rewritten object");
+        assert!(report.missing_objects.is_empty(), "the object is present, just wrong");
+        assert_eq!(report.corrupt_objects.len(), 1, "only the rewritten object is corrupt");
+
+        let corrupt = &report.corrupt_objects[0];
+        assert_eq!(corrupt.hash, tampered);
+        assert_eq!(corrupt.actual, cas::hash_bytes(rewritten));
+        assert_eq!(corrupt.build, 12506899);
+        assert_eq!(corrupt.version, "15.4.0");
+        assert_eq!(corrupt.files, vec!["res/b.xml", "res/c.xml"]);
+    }
+
+    /// The single-pass design is the whole reason auditing 12 GB across 127
+    /// builds is feasible: a per-build audit re-reads every shared object once
+    /// per referencing build.
+    #[test]
+    fn an_object_is_hashed_once_even_when_several_builds_reference_it() {
+        let mut first = BuildMetadata { version: "15.3.0".into(), build: 12400000, ..Default::default() };
+        first.files.insert("res/a.xml".into(), "shared".into());
+        first.files.insert("res/only_in_first.xml".into(), "unique".into());
+        let mut second = BuildMetadata { version: "15.4.0".into(), build: 12506899, ..Default::default() };
+        second.files.insert("res/b.xml".into(), "shared".into());
+        second.derived.insert("GameParams.rkyv".into(), "shared".into());
+
+        let mut reads: Vec<String> = Vec::new();
+        let verdicts = audit_objects(&[&first, &second], |hash| {
+            reads.push(hash.to_string());
+            ObjectAudit::Intact
+        });
+
+        assert_eq!(reads.iter().filter(|h| h.as_str() == "shared").count(), 1, "read {reads:?}");
+        assert_eq!(reads.len(), 2, "read {reads:?}");
+        assert_eq!(verdicts.len(), 2);
+    }
+
+    /// Reading each object once must not cost per-build attribution: the user
+    /// needs to know every build a corrupt object breaks.
+    #[test]
+    fn a_shared_corrupt_object_is_reported_against_every_build_that_references_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let cas_root = base.join("common");
+
+        let shared = cas::store(&cas_root, b"shared between two builds\r\n").unwrap();
+        write_build_metadata(&base.join("15.3.0_12400000"), "15.3.0", 12400000, &[("res/a.xml", &shared)]);
+        write_build_metadata(&base.join("15.4.0_12506899"), "15.4.0", 12506899, &[("res/b.xml", &shared)]);
+        register(base, "15.3.0", 12400000);
+        register(base, "15.4.0", 12506899);
+
+        std::fs::write(cas::cas_path(&cas_root, &shared), b"rewritten\n").unwrap();
+
+        let reports = verify_builds(base, false, true).unwrap();
+        assert_eq!(reports.len(), 2);
+        for report in &reports {
+            assert_eq!(report.corrupt_objects.len(), 1, "{} missed the corrupt object", report.dir);
+            assert_eq!(report.corrupt_objects[0].hash, shared);
+        }
+        assert_eq!(reports[0].corrupt_objects[0].files, vec!["res/a.xml"]);
+        assert_eq!(reports[1].corrupt_objects[0].files, vec!["res/b.xml"]);
+    }
+
+    /// A hash with no object at all is missing, not corrupt: re-downloading
+    /// fixes one and cannot fix the other.
+    #[test]
+    fn a_missing_object_is_not_reported_as_corrupt() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+
+        write_build_metadata(
+            &base.join("15.4.0_12506899"),
+            "15.4.0",
+            12506899,
+            &[("res/a.xml", "0123456789abcdef0123")],
+        );
+        register(base, "15.4.0", 12506899);
+
+        let reports = verify_builds(base, false, true).unwrap();
+        assert_eq!(reports[0].missing_objects, vec!["0123456789abcdef0123"]);
+        assert!(reports[0].corrupt_objects.is_empty());
     }
 
     #[test]

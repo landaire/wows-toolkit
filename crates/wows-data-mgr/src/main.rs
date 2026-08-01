@@ -10,6 +10,10 @@ use wows_data_mgr::dump;
 use wows_data_mgr::manifest;
 use wows_data_mgr::registry;
 
+/// Corrupt objects described in full per build before the rest are summarised.
+/// A build can reference dozens of them and each message names files.
+const NAMED_CORRUPT_OBJECTS: usize = 3;
+
 #[derive(Parser)]
 #[command(name = "wows-data-mgr", about = "Download and manage World of Warships game data")]
 struct Args {
@@ -162,7 +166,8 @@ enum Commands {
     },
 
     /// Verify that every build in a dump base is internally consistent: its
-    /// metadata parses and every referenced content object exists in common/.
+    /// metadata parses and every referenced content object exists in common/,
+    /// and with --check-hashes that each object's bytes still hash to its name.
     /// Exits non-zero if any build is broken.
     Verify {
         /// Directory containing dumps (same as dump-renderer-data --output)
@@ -172,6 +177,11 @@ enum Commands {
         /// Also check that each reconstructed symlink resolves to a readable file
         #[arg(long)]
         check_links: bool,
+
+        /// Also read every referenced object and check its bytes against its
+        /// name, catching content that was rewritten in place
+        #[arg(long)]
+        check_hashes: bool,
     },
 
     /// Copy dumped builds from a local source dump base into a destination
@@ -296,13 +306,14 @@ fn main() -> Result<(), Report> {
             }
             return Ok(());
         }
-        Commands::Verify { output, check_links } => {
-            let reports = dump::verify_builds(output, *check_links)?;
+        Commands::Verify { output, check_links, check_hashes } => {
+            let reports = dump::verify_builds(output, *check_links, *check_hashes)?;
             if reports.is_empty() {
                 println!("No builds found in {}", output.display());
                 return Ok(());
             }
             let mut broken = 0;
+            let mut corrupt_hashes = std::collections::BTreeSet::new();
             for r in &reports {
                 if r.is_ok() {
                     println!("  OK   {} ({} objects)", r.dir, r.referenced);
@@ -312,17 +323,33 @@ fn main() -> Result<(), Report> {
                         println!("  FAIL {} - metadata.toml unreadable", r.dir);
                     } else {
                         println!(
-                            "  FAIL {} - {}/{} objects missing, {} broken link(s)",
+                            "  FAIL {} - {}/{} objects missing, {} corrupt, {} broken link(s)",
                             r.dir,
                             r.missing_objects.len(),
                             r.referenced,
+                            r.corrupt_objects.len(),
                             r.broken_links.len()
                         );
+                        for corrupt in r.corrupt_objects.iter().take(NAMED_CORRUPT_OBJECTS) {
+                            println!("         {corrupt}");
+                        }
+                        let rest = r.corrupt_objects.len().saturating_sub(NAMED_CORRUPT_OBJECTS);
+                        if rest > 0 {
+                            println!("         and {rest} more corrupt object(s)");
+                        }
                     }
                 }
+                corrupt_hashes.extend(r.corrupt_objects.iter().map(|c| c.hash.clone()));
             }
             let ok = reports.len() - broken;
             println!("\n{ok}/{} builds consistent.", reports.len());
+            if !corrupt_hashes.is_empty() {
+                println!(
+                    "{} distinct corrupt object(s) across the store; re-publishing the affected builds is the \
+                     only fix.",
+                    corrupt_hashes.len()
+                );
+            }
             if broken > 0 {
                 bail!("{broken} build(s) inconsistent");
             }

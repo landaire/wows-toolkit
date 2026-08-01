@@ -588,6 +588,20 @@ impl GameDataDownloadPrompt {
     }
 }
 
+/// Targets whose events are written to the log file and the debug console.
+///
+/// `Targets` is an allowlist: any target not named here is dropped entirely, so
+/// a crate whose diagnostics matter to a bug report has to be listed or the user
+/// has nothing to send.
+#[cfg(feature = "logging")]
+fn log_targets() -> tracing_subscriber::filter::Targets {
+    tracing_subscriber::filter::Targets::new()
+        .with_target("wows_toolkit", tracing::Level::DEBUG)
+        .with_target("wows_replay_insights", tracing::Level::DEBUG)
+        .with_target("wows_replays", tracing::Level::INFO)
+        .with_target(wows_data_mgr::LOG_TARGET, tracing::Level::INFO)
+}
+
 impl Default for WowsToolkitApp {
     fn default() -> Self {
         Self {
@@ -1009,7 +1023,6 @@ impl WowsToolkitApp {
     }
 
     /// Initialize the tracing subscriber with file logging.
-    /// Captures logs from `wows_toolkit`, `wows_replay_insights`, and `wows_replays`.
     #[cfg(feature = "logging")]
     fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
         use tracing_appender::rolling::Rotation;
@@ -1030,30 +1043,19 @@ impl WowsToolkitApp {
             .ok()?;
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-        let target_filter = tracing_subscriber::filter::Targets::new()
-            .with_target("wows_toolkit", tracing::Level::DEBUG)
-            .with_target("wows_replay_insights", tracing::Level::DEBUG)
-            .with_target("wows_replays", tracing::Level::INFO);
-
         let subscriber = tracing_subscriber::registry().with(
             fmt::Layer::new()
                 .with_writer(non_blocking)
                 .with_timer(LocalTime::rfc_3339())
                 .with_ansi(false)
                 .with_target(true)
-                .with_filter(target_filter),
+                .with_filter(log_targets()),
         );
 
         // In debug builds, also log to the console
         #[cfg(debug_assertions)]
-        let subscriber = {
-            let console_filter = tracing_subscriber::filter::Targets::new()
-                .with_target("wows_toolkit", tracing::Level::DEBUG)
-                .with_target("wows_replay_insights", tracing::Level::DEBUG)
-                .with_target("wows_replays", tracing::Level::INFO);
-
-            subscriber.with(fmt::Layer::new().with_ansi(true).with_target(true).with_filter(console_filter))
-        };
+        let subscriber =
+            subscriber.with(fmt::Layer::new().with_ansi(true).with_target(true).with_filter(log_targets()));
 
         let _ = tracing::subscriber::set_global_default(subscriber);
 
@@ -4675,5 +4677,31 @@ mod download_prompt_tests {
         app.directory_reingest.insert(workspace, DirectoryReingest::Walking { offered: offered.clone() });
         assert_eq!(app.finish_directory_reingest(workspace), Some(offered));
         assert!(app.directory_reingest.is_empty(), "the record must not outlive the walk it describes");
+    }
+}
+
+#[cfg(all(test, feature = "logging"))]
+mod logging_target_tests {
+    use super::log_targets;
+
+    /// The download crate's diagnostics are the only record of a corrupt or
+    /// missing content object, and an allowlist that omits its target discards
+    /// them before they reach the file.
+    #[test]
+    fn game_data_download_diagnostics_reach_the_log() {
+        let targets = log_targets();
+
+        assert!(
+            targets.would_enable(wows_data_mgr::LOG_TARGET, &tracing::Level::ERROR),
+            "wows-data-mgr errors are filtered out of the log file"
+        );
+        assert!(
+            targets.would_enable(wows_data_mgr::LOG_TARGET, &tracing::Level::INFO),
+            "wows-data-mgr progress is filtered out of the log file"
+        );
+        assert!(
+            !targets.would_enable("hyper_util", &tracing::Level::ERROR),
+            "the filter must stay an allowlist, not turn into a catch-all"
+        );
     }
 }

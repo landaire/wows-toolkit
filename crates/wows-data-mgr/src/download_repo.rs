@@ -16,6 +16,7 @@ use tokio::task::JoinSet;
 use crate::builds::BuildEntry;
 use crate::builds::BuildMetadata;
 use crate::builds::BuildsIndex;
+use crate::builds::CorruptObject;
 use crate::cas;
 
 /// Base URL of the published game data repository, served as raw files.
@@ -578,7 +579,13 @@ pub async fn download_build(
     }
     let mut completed = 0u64;
     while let Some(joined) = set.join_next().await {
-        joined.attach_with(|| "download task failed")??;
+        match joined.attach_with(|| "download task failed")? {
+            Ok(()) => {}
+            Err(ObjectFailure::HashMismatch { hash, actual }) => {
+                return Err(report_corrupt_object(&entry, &metadata, &hash, &actual));
+            }
+            Err(ObjectFailure::Other(report)) => return Err(report),
+        }
         completed += 1;
         on_progress(completed, total);
     }
@@ -599,16 +606,55 @@ pub async fn download_build(
     Ok(entry.build)
 }
 
+/// Why fetching one content object failed.
+enum ObjectFailure {
+    /// Every attempt served bytes that do not hash to the object's name. Bad
+    /// data at rest rather than a transient fault, and the only failure the
+    /// caller can attribute to specific files.
+    HashMismatch { hash: String, actual: String },
+    /// The object was missing from the remote, or the transfer itself failed.
+    Other(Report),
+}
+
+impl From<Report> for ObjectFailure {
+    fn from(report: Report) -> Self {
+        Self::Other(report)
+    }
+}
+
+/// Turn a hash mismatch into a reportable failure, naming the build and the
+/// files the object backs. The full file list goes to the log; the returned
+/// message is bounded because it reaches a toast.
+fn report_corrupt_object(entry: &BuildEntry, metadata: &BuildMetadata, hash: &str, actual: &str) -> Report {
+    let corrupt = CorruptObject::attribute(entry, metadata, hash, actual);
+    tracing::error!(
+        "build {} ({}) references corrupt content object {} (hashed to {}) after {MAX_GET_ATTEMPTS} attempts; \
+         it backs {} file(s): {}",
+        corrupt.build,
+        corrupt.version,
+        corrupt.hash,
+        corrupt.actual,
+        corrupt.total_files,
+        corrupt.all_files()
+    );
+    report!("{corrupt}")
+}
+
 /// Download a single content object, verify it against its expected hash, and
 /// store it in the CAS.
 ///
-/// A hash mismatch is treated as transient corruption: the object is re-fetched
-/// with exponential backoff before the error is surfaced, so a one-off bad
-/// response does not abort a whole build's download. Genuinely corrupt remote
-/// content (a mismatch that persists across every attempt) still fails loudly,
-/// and only verified bytes are ever stored, so the CAS never holds an object
+/// A hash mismatch is retried first: the object is re-fetched with exponential
+/// backoff, so a one-off bad response does not abort a whole build's download.
+/// A mismatch that persists across every attempt is reported as
+/// [`ObjectFailure::HashMismatch`] so the caller can name the build and files it
+/// breaks. Only verified bytes are ever stored, so the CAS never holds an object
 /// that does not match its name.
-async fn download_object(client: &reqwest::Client, base_url: &str, cas_root: &Path, hash: &str) -> Result<(), Report> {
+async fn download_object(
+    client: &reqwest::Client,
+    base_url: &str,
+    cas_root: &Path,
+    hash: &str,
+) -> Result<(), ObjectFailure> {
     let url = format!("{base_url}/{}/{}/{}", cas::CAS_DIR, &hash[..2], &hash[2..]);
     let mut attempt = 0;
     loop {
@@ -621,7 +667,7 @@ async fn download_object(client: &reqwest::Client, base_url: &str, cas_root: &Pa
             return Ok(());
         }
         if attempt >= MAX_GET_ATTEMPTS {
-            bail!("hash mismatch for {hash}: remote object hashed to {actual} after {attempt} attempts");
+            return Err(ObjectFailure::HashMismatch { hash: hash.to_string(), actual });
         }
         let delay = std::time::Duration::from_millis(500 * 2u64.pow(attempt - 1));
         tracing::warn!(
@@ -929,6 +975,29 @@ mod tests {
 
         assert_eq!(fetched, EntryHashesOutcome::Fetched(hashes(&["h1"])));
         assert_eq!(unparseable, EntryHashesOutcome::Unreachable);
+    }
+
+    // A corrupt object is only reportable if the failure carries the build and
+    // the files it breaks: a bare 20-character hash tells the user nothing and
+    // gives a bug report nothing to act on.
+    #[test]
+    fn a_corrupt_object_failure_names_the_build_and_the_files_it_breaks() {
+        let entry = entry("15.4.0", 12506899, "15.4.0_12506899");
+        let mut metadata = BuildMetadata { version: "15.4.0".into(), build: 12506899, ..Default::default() };
+        for i in 0..9 {
+            metadata.files.insert(format!("res/spaces/s{i}/space.settings"), "a24a46f62dc08fd95fc7".into());
+        }
+
+        let rendered =
+            report_corrupt_object(&entry, &metadata, "a24a46f62dc08fd95fc7", "674dcbf6a9204c9fe942").to_string();
+
+        assert!(rendered.contains("15.4.0"), "{rendered}");
+        assert!(rendered.contains("12506899"), "{rendered}");
+        assert!(rendered.contains("a24a46f62dc08fd95fc7"), "{rendered}");
+        assert!(rendered.contains("res/spaces/s0/space.settings"), "{rendered}");
+        assert!(rendered.contains("and 6 more"), "{rendered}");
+        assert!(!rendered.contains("res/spaces/s3/space.settings"), "capped at three: {rendered}");
+        assert!(rendered.contains("re-publishing"), "the user needs to know a retry is pointless: {rendered}");
     }
 
     // The requested-version hint is `Option<String>` end to end: a supplied

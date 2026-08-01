@@ -147,6 +147,80 @@ impl BuildMetadata {
     }
 }
 
+/// Maximum number of file paths named in a [`CorruptObject`] message. One
+/// object can back hundreds of files; the full list belongs in the log, not in
+/// a string that ends up in a toast.
+const NAMED_FILES: usize = 3;
+
+/// A content object whose bytes do not hash to the name it is stored under,
+/// attributed to the build that references it and the files it backs.
+///
+/// A hash is 20 hex characters and says nothing on its own. Carrying the build,
+/// the version and the referencing paths is what makes the failure reportable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CorruptObject {
+    pub build: u32,
+    pub version: String,
+    /// The name the object is stored under, which is the hash its bytes must
+    /// reproduce.
+    pub hash: String,
+    /// What the bytes actually hashed to.
+    pub actual: String,
+    /// Paths in the build that read through this object. Goes to the log in
+    /// full; [`Display`](std::fmt::Display) names at most [`NAMED_FILES`].
+    pub files: Vec<String>,
+    /// How many paths reference the object, held separately so a caller that
+    /// trims `files` still reports the true count.
+    pub total_files: usize,
+}
+
+impl CorruptObject {
+    /// Attribute a hash mismatch to a build by reverse-mapping the hash through
+    /// the build's metadata, which names every path the object backs.
+    pub fn attribute(entry: &BuildEntry, metadata: &BuildMetadata, hash: &str, actual: &str) -> Self {
+        let files: Vec<String> = metadata
+            .files
+            .iter()
+            .chain(metadata.derived.iter())
+            .filter(|(_, referenced)| referenced.as_str() == hash)
+            .map(|(path, _)| path.clone())
+            .collect();
+        Self {
+            build: entry.build,
+            version: entry.version.clone(),
+            hash: hash.to_string(),
+            actual: actual.to_string(),
+            total_files: files.len(),
+            files,
+        }
+    }
+
+    /// The full list of referencing paths, for the log.
+    pub fn all_files(&self) -> String {
+        self.files.join(", ")
+    }
+}
+
+impl std::fmt::Display for CorruptObject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "build {} ({}) has a corrupt content object: {} hashed to {}. ",
+            self.build, self.version, self.hash, self.actual
+        )?;
+        if self.total_files == 0 {
+            write!(f, "No file in the build's metadata references it. ")?;
+        } else {
+            let named = self.files.iter().take(NAMED_FILES).cloned().collect::<Vec<_>>().join(", ");
+            match self.total_files.saturating_sub(NAMED_FILES) {
+                0 => write!(f, "It backs {named}. ")?,
+                rest => write!(f, "It backs {named} and {rest} more. ")?,
+            }
+        }
+        write!(f, "Retrying will not help: the data is corrupt at rest, and the build needs re-publishing.")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,6 +304,91 @@ mod tests {
         let loaded = BuildMetadata::load(&path).unwrap();
         assert_eq!(loaded.files.len(), 1);
         assert!(loaded.has_file_hashes());
+    }
+
+    fn corrupt(files: &[&str]) -> CorruptObject {
+        CorruptObject {
+            build: 12506899,
+            version: "15.4.0".into(),
+            hash: "a24a46f62dc08fd95fc7".into(),
+            actual: "674dcbf6a9204c9fe942".into(),
+            files: files.iter().map(|f| f.to_string()).collect(),
+            total_files: files.len(),
+        }
+    }
+
+    #[test]
+    fn a_corrupt_object_message_names_the_build_and_caps_the_file_list() {
+        let files: Vec<String> = (0..9).map(|i| format!("res/spaces/s{i}/space.settings")).collect();
+        let err = corrupt(&files.iter().map(String::as_str).collect::<Vec<_>>());
+
+        let rendered = err.to_string();
+        assert_eq!(
+            rendered,
+            "build 12506899 (15.4.0) has a corrupt content object: a24a46f62dc08fd95fc7 hashed to \
+             674dcbf6a9204c9fe942. It backs res/spaces/s0/space.settings, res/spaces/s1/space.settings, \
+             res/spaces/s2/space.settings and 6 more. Retrying will not help: the data is corrupt at rest, and \
+             the build needs re-publishing."
+        );
+        assert!(!rendered.contains("res/spaces/s3/space.settings"), "capped at three: {rendered}");
+        assert!(rendered.len() < 400, "message must stay toast-sized, got {}", rendered.len());
+    }
+
+    /// An implementation that always appends the tail says "and 0 more".
+    #[test]
+    fn three_or_fewer_files_are_all_named_with_no_more_suffix() {
+        let rendered = corrupt(&["content/GameParams.data", "gui/ribbons.png"]).to_string();
+
+        assert_eq!(
+            rendered,
+            "build 12506899 (15.4.0) has a corrupt content object: a24a46f62dc08fd95fc7 hashed to \
+             674dcbf6a9204c9fe942. It backs content/GameParams.data, gui/ribbons.png. Retrying will not help: \
+             the data is corrupt at rest, and the build needs re-publishing."
+        );
+        assert!(!rendered.contains("more"), "no truncation tail belongs here: {rendered}");
+    }
+
+    /// The log gets what the message drops.
+    #[test]
+    fn the_full_file_list_survives_for_the_log() {
+        let files: Vec<String> = (0..9).map(|i| format!("res/spaces/s{i}/space.settings")).collect();
+        let err = corrupt(&files.iter().map(String::as_str).collect::<Vec<_>>());
+
+        assert_eq!(err.all_files(), files.join(", "));
+        assert!(err.all_files().contains("res/spaces/s8/space.settings"));
+    }
+
+    /// The reverse lookup spans both the extracted tree and derived artifacts,
+    /// and names only the paths that actually read through the bad object.
+    #[test]
+    fn attribution_names_every_path_backed_by_the_hash() {
+        let entry = BuildEntry {
+            version: "15.4.0".into(),
+            build: 12506899,
+            dir: "15.4.0_12506899".into(),
+            dumped_at: String::new(),
+        };
+        let mut metadata = BuildMetadata { version: "15.4.0".into(), build: 12506899, ..Default::default() };
+        metadata.files.insert("res/a.xml".into(), "a24a46f62dc08fd95fc7".into());
+        metadata.files.insert("res/b.xml".into(), "a24a46f62dc08fd95fc7".into());
+        metadata.files.insert("res/other.xml".into(), "11111111111111111111".into());
+        metadata.derived.insert("GameParams.rkyv".into(), "a24a46f62dc08fd95fc7".into());
+
+        let err = CorruptObject::attribute(&entry, &metadata, "a24a46f62dc08fd95fc7", "674dcbf6a9204c9fe942");
+
+        assert_eq!(err.files, vec!["res/a.xml", "res/b.xml", "GameParams.rkyv"]);
+        assert_eq!(err.total_files, 3);
+        assert_eq!(err.build, 12506899);
+        assert_eq!(err.version, "15.4.0");
+    }
+
+    /// A hash no path claims must not render an empty file list.
+    #[test]
+    fn an_unreferenced_hash_still_renders_a_sensible_message() {
+        let rendered = corrupt(&[]).to_string();
+
+        assert!(rendered.contains("No file in the build's metadata references it"), "{rendered}");
+        assert!(!rendered.contains("It backs"), "{rendered}");
     }
 
     #[test]

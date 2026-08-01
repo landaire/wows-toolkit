@@ -38,6 +38,28 @@ pub fn hash_bytes(data: &[u8]) -> String {
     full_hex[..HASH_LEN].to_string()
 }
 
+/// Compute the truncated SHA-256 hash of a file's contents.
+///
+/// Streams the file rather than reading it whole: content objects run to
+/// hundreds of megabytes, and auditing a store means doing this thousands of
+/// times.
+pub fn hash_file(path: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let full_hex = format!("{:x}", hasher.finalize());
+    Ok(full_hex[..HASH_LEN].to_string())
+}
+
 /// Returns the path within the CAS root for a given hash.
 /// Uses the first 2 hex characters as a fanout directory.
 /// e.g. `cas_root/ab/cdef1234567890ab1234`
@@ -211,6 +233,26 @@ mod tests {
         assert_eq!(hash.len(), HASH_LEN);
         assert_eq!(hash, hash_bytes(b"hello world"));
         assert_ne!(hash, hash_bytes(b"hello world!"));
+    }
+
+    /// Streaming a file in chunks must agree with hashing its bytes in one go,
+    /// including across a buffer boundary.
+    #[test]
+    fn hashing_a_file_matches_hashing_its_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let cas_root = dir.path().join("common");
+
+        let data: Vec<u8> = (0..200_000).map(|i| (i % 251) as u8).collect();
+        let hash = store(&cas_root, &data).unwrap();
+
+        assert_eq!(hash_file(&cas_path(&cas_root, &hash)).unwrap(), hash_bytes(&data));
+    }
+
+    #[test]
+    fn hashing_a_missing_file_reports_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = hash_file(&dir.path().join("nothing")).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 
     #[test]

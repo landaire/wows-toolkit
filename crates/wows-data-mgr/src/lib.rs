@@ -22,6 +22,13 @@
 //! }
 //! ```
 
+/// The `tracing` target every log statement in this crate is emitted under.
+///
+/// Consumers that filter by target (the toolkit's log file writes through an
+/// allowlist) reference this instead of a hand-copied literal, so renaming the
+/// crate cannot silently drop its logs on the floor.
+pub const LOG_TARGET: &str = module_path!();
+
 pub mod builds;
 pub mod cas;
 pub mod cas_vfs;
@@ -100,4 +107,17 @@ pub fn latest_build() -> Option<(u32, VfsPath)> {
     let build = *builds.last()?;
     let vfs = vfs_for_build(build)?;
     Some((build, vfs))
+}
+
+#[cfg(test)]
+mod log_target_tests {
+    /// `tracing` targets default to the emitting module's path, and a target
+    /// filter matches on the leading segments, so every module in this crate is
+    /// covered by the crate-level target. Renaming the crate changes both sides
+    /// together, which is why consumers must not hard-code the string.
+    #[test]
+    fn every_module_in_this_crate_logs_under_the_crate_target() {
+        assert_eq!(super::LOG_TARGET, "wows_data_mgr");
+        assert!(module_path!().starts_with(super::LOG_TARGET), "{}", module_path!());
+    }
 }
