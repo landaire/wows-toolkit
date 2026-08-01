@@ -21,7 +21,7 @@ const MAGIC: [u8; 4] = *b"WUGP";
 /// comes from the parser or from the cached types. New writes always carry
 /// the latest version; reads that see an older or unknown version return
 /// `None`, prompting the caller to re-parse from the source VFS.
-pub const FORMAT_VERSION: u32 = 15;
+pub const FORMAT_VERSION: u32 = 16;
 
 const HEADER_LEN: usize = MAGIC.len() + std::mem::size_of::<u32>();
 
@@ -83,7 +83,7 @@ mod tests {
     use super::FORMAT_VERSION;
 
     #[test]
-    fn format_version_is_15() {
-        assert_eq!(FORMAT_VERSION, 15);
+    fn format_version_is_16() {
+        assert_eq!(FORMAT_VERSION, 16);
     }
 }
