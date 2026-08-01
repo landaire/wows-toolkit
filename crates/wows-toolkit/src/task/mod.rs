@@ -430,16 +430,17 @@ pub enum BackgroundTaskCompletion {
         workspace: crate::db::index::rows::WorkspaceId,
     },
     /// A picked directory finished being walked. `replays` is one entry per
-    /// file that built successfully; `skipped` counts the files that did not,
-    /// most often because no game data is installed for the build that wrote
-    /// them. `workspace` is carried so the result lands on the workspace that
-    /// asked for it even if the inspector has since moved on, and is dropped
-    /// if that workspace was closed while the walk was running.
+    /// file that built successfully; `failures` accounts for the files that did
+    /// not, keeping the builds no game data is installed for apart from the
+    /// files nothing can be done about. `workspace` is carried so the result
+    /// lands on the workspace that asked for it even if the inspector has since
+    /// moved on, and is dropped if that workspace was closed while the walk was
+    /// running.
     DirectoryIngested {
         workspace: crate::db::index::rows::WorkspaceId,
         source: crate::db::index::rows::SourceId,
         replays: HashMap<PathBuf, Arc<RwLock<Replay>>>,
-        skipped: usize,
+        failures: crate::task::replays::IngestFailures,
     },
     #[cfg(feature = "mod_manager")]
     ModManager(Box<crate::mod_manager::ModTaskCompletion>),
@@ -490,12 +491,12 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .field("generation", generation)
                 .field("workspace", workspace)
                 .finish(),
-            Self::DirectoryIngested { workspace, source, replays, skipped } => f
+            Self::DirectoryIngested { workspace, source, replays, failures } => f
                 .debug_struct("DirectoryIngested")
                 .field("workspace", workspace)
                 .field("source", source)
                 .field("replays", &replays.len())
-                .field("skipped", skipped)
+                .field("failures", failures)
                 .finish(),
             #[cfg(feature = "mod_manager")]
             Self::ModManager(mod_manager_completion) => {

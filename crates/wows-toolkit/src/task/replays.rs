@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs::File;
@@ -1500,6 +1501,44 @@ pub fn start_ingest_directory(
     BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::IngestingDirectory { workspace } }
 }
 
+/// A game build some replay needed and the toolkit does not have installed.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MissingBuild {
+    pub build: u32,
+    /// The replay's `major.minor.patch` version, which is what the game-data
+    /// repository is keyed on when no exact build match is published.
+    pub version: String,
+}
+
+/// Why replays in a directory could not be loaded. Missing game data is
+/// actionable -- the toolkit can offer to fetch it -- so it is tracked
+/// separately from failures the user can do nothing about.
+#[derive(Debug, Default, Clone)]
+pub struct IngestFailures {
+    pub missing_builds: BTreeMap<MissingBuild, usize>,
+    pub unreadable: usize,
+}
+
+impl IngestFailures {
+    /// Attribute one failed replay. Anything that is not a recognisably
+    /// missing build is counted as unreadable, since nothing can be offered
+    /// for it.
+    pub fn record(&mut self, report: &Report) {
+        match report.downcast_current_context::<ToolkitError>() {
+            Some(ToolkitError::ReplayBuildUnavailable { build, version, .. }) => {
+                let missing = MissingBuild { build: *build, version: version.clone() };
+                *self.missing_builds.entry(missing).or_default() += 1;
+            }
+            _ => self.unreadable += 1,
+        }
+    }
+
+    /// Every replay the directory holds that did not load, for either reason.
+    pub fn total(&self) -> usize {
+        self.unreadable + self.missing_builds.values().sum::<usize>()
+    }
+}
+
 fn run_ingest_directory(
     deps: crate::data::wows_data::ReplayDependencies,
     pool: sqlx::SqlitePool,
@@ -1518,7 +1557,7 @@ fn run_ingest_directory(
         .map_err(|e| report!("failed to resolve replay index source for {}: {e}", root.display()))?;
 
     let mut replays = HashMap::new();
-    let mut skipped = 0usize;
+    let mut failures = IngestFailures::default();
 
     for path in walk_replay_files(&root) {
         // One unreadable, malformed or version-orphaned file must cost only
@@ -1533,18 +1572,30 @@ fn run_ingest_directory(
                 replays.insert(path, replay);
             }
             Ok(Err(e)) => {
-                skipped += 1;
+                failures.record(&e);
                 warn!("skipping replay {}: {e}", path.display());
             }
             Err(payload) => {
-                skipped += 1;
+                // A recovered panic carries no report to classify.
+                failures.unreadable += 1;
                 let msg = crate::util::thread::panic_payload_to_string(&payload);
                 warn!("panic while reading replay {}, skipping it: {msg}", path.display());
             }
         }
     }
 
-    Ok(BackgroundTaskCompletion::DirectoryIngested { workspace, source, replays, skipped })
+    if failures.total() > 0 {
+        warn!(
+            "ingest of {} skipped {} replay(s): {} unreadable, {} awaiting {} missing build(s)",
+            root.display(),
+            failures.total(),
+            failures.unreadable,
+            failures.missing_builds.values().sum::<usize>(),
+            failures.missing_builds.len(),
+        );
+    }
+
+    Ok(BackgroundTaskCompletion::DirectoryIngested { workspace, source, replays, failures })
 }
 
 #[cfg(test)]
@@ -1674,5 +1725,73 @@ mod tests {
             }
             other => panic!("unexpected completion: {other:?}"),
         }
+    }
+
+    /// Built the way `build_replay_from_path` builds it, so the downcast under
+    /// test is the one production exercises.
+    fn missing_build_report(build: u32, version: &str) -> rootcause::Report {
+        ToolkitError::ReplayBuildUnavailable { build, version: version.to_string(), replay_path: None }.into()
+    }
+
+    #[test]
+    fn a_missing_build_report_is_classified_as_a_missing_build() {
+        let mut failures = IngestFailures::default();
+        failures.record(&missing_build_report(9_876, "13.5.0"));
+        assert_eq!(failures.unreadable, 0);
+        assert_eq!(
+            failures.missing_builds,
+            BTreeMap::from([(MissingBuild { build: 9_876, version: "13.5.0".into() }, 1)])
+        );
+    }
+
+    #[test]
+    fn an_unrelated_report_is_classified_as_unreadable() {
+        let mut failures = IngestFailures::default();
+        failures.record(&rootcause::report!("file is truncated"));
+        assert_eq!(failures.unreadable, 1);
+        assert!(failures.missing_builds.is_empty());
+    }
+
+    #[test]
+    fn several_replays_needing_one_build_coalesce_into_one_entry() {
+        let mut failures = IngestFailures::default();
+        for _ in 0..3 {
+            failures.record(&missing_build_report(9_876, "13.5.0"));
+        }
+        assert_eq!(
+            failures.missing_builds,
+            BTreeMap::from([(MissingBuild { build: 9_876, version: "13.5.0".into() }, 3)])
+        );
+        assert_eq!(failures.unreadable, 0);
+    }
+
+    #[test]
+    fn different_builds_stay_separate() {
+        let mut failures = IngestFailures::default();
+        failures.record(&missing_build_report(9_876, "13.5.0"));
+        failures.record(&missing_build_report(9_877, "13.6.0"));
+        assert_eq!(failures.missing_builds.len(), 2);
+        assert_eq!(failures.missing_builds.values().copied().collect::<Vec<_>>(), vec![1, 1]);
+    }
+
+    /// `build_replay_from_path` hangs a hint off the report before returning
+    /// it. The classification has to survive that, or every real ingest would
+    /// count missing builds as unreadable while these tests still passed.
+    #[test]
+    fn an_attachment_does_not_hide_the_missing_build() {
+        let mut failures = IngestFailures::default();
+        failures
+            .record(&missing_build_report(9_876, "13.5.0").attach("try installing the matching game client version"));
+        assert_eq!(failures.unreadable, 0);
+        assert_eq!(failures.missing_builds.values().sum::<usize>(), 1);
+    }
+
+    #[test]
+    fn a_mixed_directory_reports_both_kinds() {
+        let mut failures = IngestFailures::default();
+        failures.record(&missing_build_report(9_876, "13.5.0"));
+        failures.record(&rootcause::report!("file is truncated"));
+        assert_eq!(failures.unreadable, 1);
+        assert_eq!(failures.missing_builds.values().sum::<usize>(), 1);
     }
 }

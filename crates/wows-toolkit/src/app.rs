@@ -1365,7 +1365,7 @@ impl WowsToolkitApp {
                         self.tab_state.toasts.lock().info(t!("ui.messages.replays_already_indexed", total = total));
                     }
                 }
-                BackgroundTaskCompletion::DirectoryIngested { workspace, source, replays, skipped } => {
+                BackgroundTaskCompletion::DirectoryIngested { workspace, source, replays, failures } => {
                     // A workspace that is gone was closed while the walk ran,
                     // and the result belongs to nothing else: carrying the id
                     // is what lets this be dropped instead of landing on
@@ -1378,11 +1378,28 @@ impl WowsToolkitApp {
                         // them against the source just resolved.
                         target.replay_row_summaries_generation = None;
 
-                        if skipped > 0 {
+                        // Replays waiting on game data are offered as a
+                        // download instead, so they are deliberately absent
+                        // from this toast.
+                        if failures.unreadable > 0 {
                             self.tab_state
                                 .toasts
                                 .lock()
-                                .warning(t!("ui.messages.directory_replays_skipped", skipped = skipped));
+                                .warning(t!("ui.messages.directory_replays_skipped", skipped = failures.unreadable));
+                        }
+
+                        // Offer the first build the directory needs unless a
+                        // prompt is already open. The map is ordered, so which
+                        // one that is does not depend on the order the walk
+                        // happened to visit files in.
+                        if let Some(missing) = failures.missing_builds.keys().next()
+                            && self.download_prompt.is_none()
+                        {
+                            self.download_prompt = Some(GameDataDownloadPrompt {
+                                build: missing.build,
+                                version: missing.version.clone(),
+                                replay_path: None,
+                            });
                         }
                     }
                 }
