@@ -51,19 +51,50 @@ pub fn object_exists(cas_root: &Path, hash: &str) -> bool {
 }
 
 /// Store data into the CAS. Returns the hash.
-/// Idempotent: skips writing if the hash file already exists.
+///
+/// Idempotent, and safe to call concurrently for the same content from several
+/// threads or processes. Builds share most of their objects, so two downloads
+/// running at once routinely reach this for the same hash; writing straight to
+/// the final path would let both write it at once and leave an interleaved file
+/// that [`object_exists`] then reports as present forever. Instead the bytes go
+/// to a uniquely-named temporary in the same directory and are renamed onto the
+/// final path, which is atomic within a directory on Windows and Unix alike: a
+/// concurrent reader sees either no file or a complete one.
 pub fn store(cas_root: &Path, data: &[u8]) -> Result<String, rootcause::Report> {
     let hash = hash_bytes(data);
     let path = cas_path(cas_root, &hash);
     if path.exists() {
         return Ok(hash);
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .attach_with(|| format!("Failed to create CAS directory {}", parent.display()))?;
+    let Some(parent) = path.parent() else {
+        bail!("CAS object path {} has no parent directory", path.display());
+    };
+    std::fs::create_dir_all(parent).attach_with(|| format!("Failed to create CAS directory {}", parent.display()))?;
+
+    let temp_path = parent.join(temp_name(&hash));
+    std::fs::write(&temp_path, data).attach_with(|| format!("Failed to write CAS object {}", temp_path.display()))?;
+
+    // Losing the rename race is success: the destination is named after the
+    // content hash, so whatever got there first holds these exact bytes.
+    match std::fs::rename(&temp_path, &path) {
+        Ok(()) => Ok(hash),
+        Err(_) if path.exists() => {
+            let _ = std::fs::remove_file(&temp_path);
+            Ok(hash)
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp_path);
+            Err(e).attach_with(|| format!("Failed to store CAS object {}", path.display()))?
+        }
     }
-    std::fs::write(&path, data).attach_with(|| format!("Failed to write CAS object {}", path.display()))?;
-    Ok(hash)
+}
+
+/// Name for a partially-written object, unique per writer so two threads or
+/// processes storing the same content never share a temporary.
+fn temp_name(hash: &str) -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let ticket = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!(".{}.{}.{}.tmp", &hash[2..], std::process::id(), ticket)
 }
 
 /// Create a symlink from `link_path` pointing to the CAS object.
@@ -197,6 +228,85 @@ mod tests {
         // Idempotent
         let hash2 = store(&cas_root, data).unwrap();
         assert_eq!(hash, hash2);
+    }
+
+    /// The hazard is not two writers producing wrong bytes -- they write
+    /// identical content, so interleaving them is invisible -- it is that a
+    /// direct write publishes the object at its final path progressively.
+    /// `object_exists` then reports it present from the first byte, a
+    /// concurrent `store` returns success on its fast path, and every reader
+    /// downstream (the CAS-backed VFS, `validate_cache`, the next build's
+    /// dedup check) can read a file that is not all there.
+    ///
+    /// So a reader is what asserts here, because a reader is what breaks, and
+    /// it samples the published length rather than reading the whole object:
+    /// an 8 MiB read is far too slow to land inside the window it is looking
+    /// for. Sampling the length catches it. Verified to fail against a direct
+    /// write, which tears on the order of ten times per run.
+    #[test]
+    fn an_object_is_never_visible_before_it_is_complete() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+
+        let dir = tempfile::tempdir().unwrap();
+        let cas_root = dir.path().join("common");
+
+        // Large enough that publishing it is not instantaneous, so a reader
+        // spinning alongside genuinely lands inside the write.
+        let data: Vec<u8> = (0..8 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+        let expected = hash_bytes(&data);
+        let expected_len = data.len() as u64;
+        let path = cas_path(&cas_root, &expected);
+
+        let torn = AtomicUsize::new(0);
+        let complete = AtomicUsize::new(0);
+        let done = AtomicBool::new(false);
+
+        std::thread::scope(|scope| {
+            for _ in 0..3 {
+                let path = path.clone();
+                let expected_len = expected_len;
+                let (torn, complete, done) = (&torn, &complete, &done);
+                scope.spawn(move || {
+                    loop {
+                        // Read after sampling the flag, so the last pass always
+                        // sees the finished object and `complete` cannot be 0
+                        // just because the writer won the race.
+                        let finished = done.load(Ordering::Acquire);
+                        if let Ok(meta) = std::fs::metadata(&path) {
+                            if meta.len() == expected_len {
+                                complete.fetch_add(1, Ordering::Relaxed);
+                            } else {
+                                torn.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                        if finished {
+                            break;
+                        }
+                    }
+                });
+            }
+
+            // Removed between rounds so the `path.exists()` fast path does not
+            // turn every round after the first into a no-op.
+            for _ in 0..8 {
+                let _ = std::fs::remove_file(&path);
+                store(&cas_root, &data).unwrap();
+            }
+            done.store(true, Ordering::Release);
+        });
+
+        assert!(complete.load(Ordering::Relaxed) > 0, "readers never saw the object at all, so nothing was checked");
+        assert_eq!(torn.load(Ordering::Relaxed), 0, "a reader saw the published object before all of it was there");
+
+        let stored = std::fs::read(&path).unwrap();
+        assert_eq!(hash_bytes(&stored), expected, "the stored object does not hash to its own name");
+
+        // No half-written temporaries left behind, and exactly one object.
+        let fanout = cas_root.join(&expected[..2]);
+        let entries: Vec<_> = std::fs::read_dir(&fanout).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(entries.len(), 1, "expected one object in the fanout directory, found {entries:?}");
     }
 
     #[test]

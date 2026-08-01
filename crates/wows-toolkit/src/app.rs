@@ -309,24 +309,38 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     pending_replay_retry: Option<PathBuf>,
 
-    /// Directory workspaces waiting to be walked again, each with the number
-    /// of downloads it is still waiting on. A directory is only worth walking
-    /// again once every build it asked for has been attempted, so the count
-    /// is decremented per finished download rather than triggering on the
-    /// first one back.
+    /// Directory workspaces being brought up to date after a download, keyed
+    /// by the workspace whose listing is short.
     #[serde(skip)]
-    pending_directory_reingest: BTreeMap<WorkspaceId, usize>,
+    directory_reingest: BTreeMap<WorkspaceId, DirectoryReingest>,
+}
 
-    /// Builds the user has already been offered and declined. Suppresses
-    /// re-offering the same data every time the same directory is opened.
-    #[serde(skip)]
-    dismissed_missing_builds: BTreeSet<u32>,
+/// A directory workspace whose listing is waiting on downloaded game data.
+enum DirectoryReingest {
+    /// Downloads are still running. `outstanding` counts the ones not back
+    /// yet; the walk is only worth doing once the last of them has been tried.
+    AwaitingDownloads { outstanding: usize, offered: BTreeSet<u32> },
+    /// Every download has been tried and the walk is owed, but has not started
+    /// yet: the workspace can be mid-walk from a deliberate reopen, and a walk
+    /// that could not be started must not be dropped.
+    Owed { offered: BTreeSet<u32> },
+    /// The walk is running.
+    Walking { offered: BTreeSet<u32> },
+}
+
+impl DirectoryReingest {
+    /// The builds the user was shown in the offer that led to this walk, so
+    /// the walk does not re-raise the offer it came from.
+    fn offered(&self) -> &BTreeSet<u32> {
+        match self {
+            Self::AwaitingDownloads { offered, .. } | Self::Owed { offered } | Self::Walking { offered } => offered,
+        }
+    }
 }
 
 /// What the toolkit should redo once the downloads an offer starts have
 /// finished. Both entry points into the dialog have exactly one of these, so
 /// there is no state where a download is running with two things to retry.
-#[derive(Clone)]
 enum DownloadTrigger {
     /// One replay was opened directly; reopen it.
     Replay(PathBuf),
@@ -403,6 +417,24 @@ fn availability_label(availability: &RemoteAvailability) -> String {
     }
 }
 
+/// Whether a walk's leftovers are just the offer that caused the walk coming
+/// back around.
+///
+/// This is the only thing that ever suppresses the offer. `just_offered` is
+/// `Some` only for the one automatic walk a download starts; every explicit
+/// open -- the palette, a file dialog, a replay by name -- passes `None` and
+/// always gets its offer, however many times the user has dismissed it before.
+/// Dismissing is an answer to being asked, not a standing instruction to hide
+/// data the user has just gone back and asked for again.
+///
+/// A subset rather than equality: the downloads that ran removed some builds
+/// from `missing`, and what is left is the part of the same offer the user
+/// chose not to fetch. A build that was not in the offer at all is new and
+/// must be raised.
+fn offer_was_just_made(just_offered: Option<&BTreeSet<u32>>, missing: &BTreeSet<u32>) -> bool {
+    just_offered.is_some_and(|offered| missing.is_subset(offered))
+}
+
 /// How far along the planner is for the selection currently ticked.
 enum DownloadPlanState {
     /// No plan requested yet for the current selection.
@@ -477,22 +509,29 @@ impl GameDataDownloadPrompt {
         plan.resolved.iter().map(|r| r.requested_build).collect()
     }
 
-    /// Fold a finished plan back into the rows. Availability is applied only to
-    /// rows that had none: a later plan covers just the ticked builds, and
-    /// re-deriving selection from it would tick rows the user unticked and
-    /// blank the rows the user removed from the selection.
+    /// Fold a finished plan back into the rows.
+    ///
+    /// A row the user could act on keeps its answer and its tick: that tick is
+    /// the user's, and re-deriving it from a later plan would undo their
+    /// choice. A row they could not act on -- unresolved, unpublished or
+    /// unreachable -- carries no choice to preserve, so a later plan replaces
+    /// it. That is what lets a build whose metadata fetch merely blipped stop
+    /// being unselectable for the life of the dialog.
     ///
     /// A plan describing some other selection is dropped. One offer can be
     /// dismissed and another raised while a planner is still running, and
     /// showing that planner's object count against the new selection would put
     /// a number on screen that answers a question nobody asked.
+    ///
+    /// Runs after [`Self::plan_task_finished`] on the completion path, so a
+    /// delivered plan is what the dialog ends the frame showing.
     fn apply_plan(&mut self, plan: DownloadPlan) {
         if self.planned_selection.as_ref() != Some(&Self::planned_builds(&plan)) {
             return;
         }
         for resolved in &plan.resolved {
             let matching = self.candidates.iter_mut().find(|c| {
-                c.availability.is_none()
+                !c.is_selectable()
                     && c.build == resolved.requested_build
                     && resolved.requested_version.as_deref() == Some(c.version.as_str())
             });
@@ -508,13 +547,44 @@ impl GameDataDownloadPrompt {
         self.plan = DownloadPlanState::Ready(plan);
     }
 
-    /// Called when the planning task ends for any reason. A task that
-    /// disconnected without sending a plan would otherwise leave the dialog
-    /// showing a spinner and its Download button disabled forever.
-    fn plan_task_finished(&mut self) {
+    /// Called when the planning task for `selection` ends for any reason. A
+    /// task that disconnected without sending a plan would otherwise leave the
+    /// dialog showing a spinner and its Download button disabled forever.
+    ///
+    /// `selection` identifies the task: a planner started for an offer that has
+    /// since been answered must not report failure against the offer now open.
+    fn plan_task_finished(&mut self, selection: &BTreeSet<u32>) {
+        if self.planned_selection.as_ref() != Some(selection) {
+            return;
+        }
         if matches!(self.plan, DownloadPlanState::Planning) {
             self.plan = DownloadPlanState::Failed(t!("ui.dialogs.download_plan_failed").into_owned());
         }
+    }
+
+    /// Whether there is anything a retry could improve: a plan that failed
+    /// outright, or a row whose build the remote could not be asked about.
+    fn can_retry(&self) -> bool {
+        matches!(self.plan, DownloadPlanState::Failed(_))
+            || self.candidates.iter().any(|c| matches!(c.availability, Some(RemoteAvailability::Unreachable)))
+    }
+
+    /// Ask the planner again. Rows the user cannot act on go back to
+    /// unresolved, which re-ticks them so the retry covers them and the count
+    /// it comes back with describes exactly the selection it was asked about.
+    /// Rows the user can act on keep their answer and their tick.
+    fn retry(&mut self) {
+        for candidate in &mut self.candidates {
+            if !candidate.is_selectable() {
+                *candidate = DownloadCandidate::unresolved(
+                    candidate.build,
+                    candidate.version.clone(),
+                    candidate.replays_needing,
+                );
+            }
+        }
+        self.plan = DownloadPlanState::Idle;
+        self.planned_selection = None;
     }
 }
 
@@ -560,8 +630,7 @@ impl Default for WowsToolkitApp {
             save_task_handle: None,
             download_prompt: None,
             pending_replay_retry: None,
-            pending_directory_reingest: BTreeMap::new(),
-            dismissed_missing_builds: BTreeSet::new(),
+            directory_reingest: BTreeMap::new(),
             pending_constants_data: None,
         }
     }
@@ -1111,10 +1180,13 @@ impl WowsToolkitApp {
                             }
                             // Cleared here rather than in the completion arm so
                             // a disconnected planner cannot leave the dialog
-                            // stuck showing a plan that will never arrive.
-                            BackgroundTaskKind::PlanningGameDataDownload => {
+                            // stuck showing a plan that will never arrive. A
+                            // plan that did arrive is applied by the completion
+                            // arm, which runs after this, and wins.
+                            BackgroundTaskKind::PlanningGameDataDownload { selection } => {
+                                let selection = selection.clone();
                                 if let Some(prompt) = &mut self.download_prompt {
-                                    prompt.plan_task_finished();
+                                    prompt.plan_task_finished(&selection);
                                 }
                             }
                             BackgroundTaskKind::CheckingGameDataUpdates => {}
@@ -1591,6 +1663,10 @@ impl WowsToolkitApp {
                     }
                 }
                 BackgroundTaskCompletion::DirectoryIngested { workspace, source, replays, failures } => {
+                    // Taken whether or not the workspace survived, so a walk
+                    // whose listing was closed under it leaves nothing behind.
+                    let just_offered = self.finish_directory_reingest(workspace);
+
                     // A workspace that is gone was closed while the walk ran,
                     // and the result belongs to nothing else: carrying the id
                     // is what lets this be dropped instead of landing on
@@ -1603,18 +1679,12 @@ impl WowsToolkitApp {
                         // them against the source just resolved.
                         target.replay_row_summaries_generation = None;
 
-                        // Replays waiting on game data are offered as a
-                        // download instead, so they are deliberately absent
-                        // from this toast.
-                        if failures.unreadable > 0 {
-                            self.tab_state
-                                .toasts
-                                .lock()
-                                .warning(t!("ui.messages.directory_replays_skipped", skipped = failures.unreadable));
-                        }
-
                         let missing: BTreeSet<u32> = failures.missing_builds.keys().map(|m| m.build).collect();
-                        if self.download_prompt.is_none() && self.should_prompt_for(&missing) {
+                        let offer = !missing.is_empty()
+                            && self.download_prompt.is_none()
+                            && !offer_was_just_made(just_offered.as_ref(), &missing);
+
+                        if offer {
                             // The map is ordered, so the rows do not depend on
                             // the order the walk visited files in.
                             let candidates = failures
@@ -1628,6 +1698,18 @@ impl WowsToolkitApp {
                                 candidates,
                                 Some(DownloadTrigger::Directory(workspace)),
                             ));
+                        }
+
+                        // Replays waiting on game data are left out of the
+                        // toast only when the dialog is about to account for
+                        // them. With no dialog, saying nothing would leave the
+                        // listing short with no indication anywhere.
+                        let skipped = if offer { failures.unreadable } else { failures.total() };
+                        if skipped > 0 {
+                            self.tab_state
+                                .toasts
+                                .lock()
+                                .warning(t!("ui.messages.directory_replays_skipped", skipped = skipped));
                         }
                     }
                 }
@@ -2405,6 +2487,7 @@ impl WowsToolkitApp {
             });
         }
 
+        self.service_directory_reingests();
         self.show_download_prompt(ctx);
 
         if self.language_selection_open {
@@ -2768,19 +2851,46 @@ impl WowsToolkitApp {
         self.error_to_show = Some(format!("{formatted}"));
     }
 
-    /// Whether the user should be shown an offer for `builds`. A build already
-    /// declined stays quiet, but one the user has not seen reopens the offer
-    /// even when it arrives alongside declined ones: the point of the offer is
-    /// the data that is still missing and unanswered for.
-    fn should_prompt_for(&self, builds: &BTreeSet<u32>) -> bool {
-        builds.iter().any(|build| !self.dismissed_missing_builds.contains(build))
+    /// Start the walks owed to directories whose downloads have finished.
+    ///
+    /// Done here rather than at the moment the last download landed: the
+    /// workspace can be mid-walk from a deliberate reopen just then, and a walk
+    /// that could not start would be dropped, leaving the listing permanently
+    /// short of the replays the download was for.
+    fn service_directory_reingests(&mut self) {
+        let owed: Vec<WorkspaceId> = self
+            .directory_reingest
+            .iter()
+            .filter(|(_, state)| matches!(state, DirectoryReingest::Owed { .. }))
+            .map(|(workspace, _)| *workspace)
+            .collect();
+
+        for workspace in owed {
+            // A workspace closed while its downloads ran has no listing left to
+            // fill, and reopening one the user closed would be a surprise.
+            let Some(root) = self.tab_state.workspace(workspace).and_then(|w| w.root.clone()) else {
+                self.directory_reingest.remove(&workspace);
+                continue;
+            };
+            if !self.start_directory_ingest(workspace, root) {
+                continue;
+            }
+            if let Some(state) = self.directory_reingest.get_mut(&workspace)
+                && let DirectoryReingest::Owed { offered } = state
+            {
+                *state = DirectoryReingest::Walking { offered: std::mem::take(offered) };
+            }
+        }
     }
 
-    /// Record that `builds` have been answered for, whether by downloading
-    /// them or by declining. Both are answers: re-offering a build the user
-    /// looked at and left alone every time a directory is reopened is a nag.
-    fn dismiss_missing_builds(&mut self, builds: &BTreeSet<u32>) {
-        self.dismissed_missing_builds.extend(builds.iter().copied());
+    /// Take the record of a finished re-walk, returning the builds the offer
+    /// that caused it showed. `None` when this walk was not one: a deliberate
+    /// reopen is a fresh question and its offer is not suppressed.
+    fn finish_directory_reingest(&mut self, workspace: WorkspaceId) -> Option<BTreeSet<u32>> {
+        if !matches!(self.directory_reingest.get(&workspace), Some(DirectoryReingest::Walking { .. })) {
+            return None;
+        }
+        self.directory_reingest.remove(&workspace).map(|state| state.offered().clone())
     }
 
     /// Keep the plan in step with what is ticked. Planning reads the remote
@@ -2817,6 +2927,7 @@ impl WowsToolkitApp {
         };
 
         let mut start_download = false;
+        let mut retry = false;
         let mut dismiss = false;
         egui::Window::new(t!("ui.windows.download_game_data"))
             .collapsible(false)
@@ -2869,6 +2980,12 @@ impl WowsToolkitApp {
                     if ui.add_enabled(can_download, egui::Button::new(t!("ui.buttons.download"))).clicked() {
                         start_download = true;
                     }
+                    // Without this the dialog is a dead end after a network
+                    // blip: nothing is resolved, so every checkbox is disabled
+                    // and no selection change can ask the planner again.
+                    if prompt.can_retry() && ui.button(t!("ui.buttons.retry")).clicked() {
+                        retry = true;
+                    }
                     if ui.button(t!("ui.buttons.dismiss")).clicked() {
                         dismiss = true;
                     }
@@ -2879,22 +2996,22 @@ impl WowsToolkitApp {
             if let Some(prompt) = self.download_prompt.take() {
                 self.start_game_data_download(prompt);
             }
-        } else if dismiss {
-            if let Some(prompt) = self.download_prompt.take() {
-                let offered = prompt.offered_builds();
-                self.dismiss_missing_builds(&offered);
+        } else if retry {
+            if let Some(prompt) = &mut self.download_prompt {
+                prompt.retry();
             }
-            self.pending_replay_retry = None;
+        } else if dismiss {
+            // Dismissing closes this offer and nothing more. Going back and
+            // opening those replays again is a fresh request and gets a fresh
+            // offer; the only offer ever suppressed is the automatic one the
+            // walk after a download would otherwise repeat.
+            self.download_prompt = None;
         }
     }
 
     /// Start downloading every build ticked in `prompt`. Each build's data is
     /// checked against the remote repository and, if published, fetched into
     /// the local cache directory.
-    ///
-    /// Every build the offer covered counts as answered for, including ones
-    /// left unticked: the user saw them and chose. Without that, the walk this
-    /// download triggers would raise the same offer again for the leftovers.
     fn start_game_data_download(&mut self, prompt: GameDataDownloadPrompt) {
         let cache_dir = self.tab_state.persisted.read().settings.game.game_data_cache_dir.clone();
         let Some(output_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir) else {
@@ -2907,19 +3024,21 @@ impl WowsToolkitApp {
             return;
         }
 
-        // Recorded only once the downloads are actually going out, so an offer
-        // that could not be acted on is still made again next time.
-        let offered = prompt.offered_builds();
-        self.dismiss_missing_builds(&offered);
-
         let reingest = match &prompt.trigger {
             Some(DownloadTrigger::Replay(path)) => {
                 self.pending_replay_retry = Some(path.clone());
                 None
             }
             Some(DownloadTrigger::Directory(workspace)) => {
-                *self.pending_directory_reingest.entry(*workspace).or_default() += builds.len();
-                Some(*workspace)
+                let workspace = *workspace;
+                self.directory_reingest.insert(
+                    workspace,
+                    DirectoryReingest::AwaitingDownloads {
+                        outstanding: builds.len(),
+                        offered: prompt.offered_builds(),
+                    },
+                );
+                Some(workspace)
             }
             None => None,
         };
@@ -2938,25 +3057,22 @@ impl WowsToolkitApp {
         }
     }
 
-    /// One download a directory was waiting on has finished. The directory is
-    /// walked again once the last of them is done, so the replays that were
-    /// skipped for want of game data appear without the user reopening it.
+    /// One download a directory was waiting on has finished. Once the last of
+    /// them is back the walk is owed; `service_directory_reingests` starts it,
+    /// so the replays skipped for want of game data appear without the user
+    /// reopening the directory.
     fn note_reingest_download_finished(&mut self, workspace: WorkspaceId) {
-        let Some(outstanding) = self.pending_directory_reingest.get_mut(&workspace) else {
+        let Some(DirectoryReingest::AwaitingDownloads { outstanding, offered }) =
+            self.directory_reingest.get_mut(&workspace)
+        else {
             return;
         };
         *outstanding = outstanding.saturating_sub(1);
         if *outstanding > 0 {
             return;
         }
-        self.pending_directory_reingest.remove(&workspace);
-
-        // A workspace closed while its downloads ran has no listing left to
-        // fill, and reopening one the user closed would be a surprise.
-        let Some(root) = self.tab_state.workspace(workspace).and_then(|w| w.root.clone()) else {
-            return;
-        };
-        self.open_replay_directory(root);
+        let offered = std::mem::take(offered);
+        self.directory_reingest.insert(workspace, DirectoryReingest::Owed { offered });
     }
 
     fn pick_up_confirmation_request(&mut self, ctx: &egui::Context) {
@@ -3484,10 +3600,17 @@ impl WowsToolkitApp {
         // workspace, so focusing the tab is all this needs to do.
         let id = self.tab_state.open_directory_workspace(root.clone());
         self.focus_tab(&Tab::Replays(id));
+        self.start_directory_ingest(id, root);
+    }
 
+    /// Start the walk that fills `id`'s listing from `root`, without touching
+    /// which tab is focused. Returns whether it started: a walk already running
+    /// over this workspace, or a missing prerequisite, leaves it for the
+    /// caller to retry rather than losing it.
+    fn start_directory_ingest(&mut self, id: WorkspaceId, root: PathBuf) -> bool {
         let already_walking = self.tab_state.workspace(id).is_some_and(|workspace| workspace.ingest_in_flight);
         if already_walking {
-            return;
+            return false;
         }
 
         // One match over the three options, so the name of the missing
@@ -3506,7 +3629,7 @@ impl WowsToolkitApp {
             Ok(resolved) => resolved,
             Err(missing) => {
                 warn!("cannot ingest replay directory {}: {missing} is not available", root.display());
-                return;
+                return false;
             }
         };
 
@@ -3517,6 +3640,7 @@ impl WowsToolkitApp {
             self.tab_state.background_tasks,
             Some(crate::task::start_ingest_directory(deps, pool, rt, id, root))
         );
+        true
     }
 
     /// Dispatch a palette-picked action against app state.
@@ -4018,10 +4142,6 @@ mod download_prompt_tests {
 
     use super::*;
 
-    fn test_app() -> WowsToolkitApp {
-        WowsToolkitApp::default()
-    }
-
     #[test]
     fn an_exact_candidate_starts_selected() {
         let c = DownloadCandidate::new(9_876, "13.5.0".into(), Some(2), RemoteAvailability::Exact);
@@ -4081,6 +4201,30 @@ mod download_prompt_tests {
         }
     }
 
+    /// Every string this dialog puts on screen, not just the availability
+    /// labels. A missing catalog entry renders as the key itself, which is
+    /// non-empty, so an "is not empty" assertion cannot catch it.
+    #[test]
+    fn every_dialog_string_has_a_catalog_entry() {
+        for key in [
+            "ui.dialogs.download_game_data_intro",
+            "ui.dialogs.download_build_row",
+            "ui.dialogs.download_replays_needing",
+            "ui.dialogs.download_availability_resolving",
+            "ui.dialogs.download_plan_pending",
+            "ui.dialogs.download_objects_to_fetch",
+            "ui.dialogs.download_plan_failed",
+            "ui.windows.download_game_data",
+            "ui.buttons.download",
+            "ui.buttons.dismiss",
+            "ui.buttons.retry",
+        ] {
+            let rendered = t!(key).into_owned();
+            assert_ne!(rendered, key, "no catalog entry for {key}");
+            assert!(!rendered.trim().is_empty(), "empty catalog entry for {key}");
+        }
+    }
+
     /// A nearest match is the one label carrying data, and the whole point of
     /// it is naming the build that would actually be fetched instead.
     #[test]
@@ -4122,25 +4266,206 @@ mod download_prompt_tests {
         assert_eq!(prompt.downloadable(), vec![(9_876, "13.5.0".to_string())]);
     }
 
-    /// Later plans cover only what is ticked. Folding one back in must not
-    /// re-tick a row the user deliberately unticked, which is what a plan that
-    /// re-derived selection from every result would do.
+    /// Unticking a row asks for a new plan, and that plan covers only what is
+    /// still ticked. The unticked row must come through untouched rather than
+    /// being re-derived from an earlier answer.
     #[test]
     fn a_later_plan_does_not_re_tick_a_row_the_user_unticked() {
-        let mut prompt =
-            GameDataDownloadPrompt::new(vec![DownloadCandidate::unresolved(9_876, "13.5.0".into(), Some(2))], None);
+        let mut prompt = GameDataDownloadPrompt::new(
+            vec![
+                DownloadCandidate::unresolved(9_876, "13.5.0".into(), Some(2)),
+                DownloadCandidate::unresolved(9_900, "13.6.0".into(), Some(1)),
+            ],
+            None,
+        );
+        prompt.begin_planning();
+        prompt.apply_plan(DownloadPlan {
+            unique_missing_objects: 12,
+            resolved: vec![
+                resolved(9_876, "13.5.0", RemoteAvailability::Exact),
+                resolved(9_900, "13.6.0", RemoteAvailability::Exact),
+            ],
+        });
+        prompt.candidates[0].selected = false;
+
+        prompt.begin_planning();
+        prompt.apply_plan(DownloadPlan {
+            unique_missing_objects: 5,
+            resolved: vec![resolved(9_900, "13.6.0", RemoteAvailability::Exact)],
+        });
+
+        assert!(!prompt.candidates[0].selected, "a plan about other rows must not re-tick this one");
+        assert!(prompt.candidates[1].selected);
+        assert_eq!(prompt.downloadable(), vec![(9_900, "13.6.0".to_string())]);
+    }
+
+    /// The reachable half of the same rule. A nearest match starts unticked but
+    /// is selectable, so the user can tick it; that puts it in the next plan's
+    /// request, and the answer that comes back is still `Nearest`. Re-deriving
+    /// the row from that answer would silently untick it under the user's
+    /// hands, and the object count would then describe a different selection
+    /// from the one on screen.
+    #[test]
+    fn a_later_plan_does_not_undo_a_tick_the_user_added() {
+        let mut prompt = GameDataDownloadPrompt::new(
+            vec![
+                DownloadCandidate::unresolved(9_876, "13.5.0".into(), Some(2)),
+                DownloadCandidate::unresolved(9_900, "13.6.0".into(), Some(1)),
+            ],
+            None,
+        );
+        let nearest = RemoteAvailability::Nearest { version: "13.5.0".into(), build: 9_876 };
+        prompt.begin_planning();
+        prompt.apply_plan(DownloadPlan {
+            unique_missing_objects: 12,
+            resolved: vec![
+                resolved(9_876, "13.5.0", RemoteAvailability::Exact),
+                resolved(9_900, "13.6.0", nearest.clone()),
+            ],
+        });
+        assert!(!prompt.candidates[1].selected, "a nearest match starts unticked");
+
+        // Unticking itself narrows the selection, so the corrected count for
+        // the ticked rows alone is fetched first, exactly as production does.
+        assert!(prompt.needs_plan());
         prompt.begin_planning();
         prompt.apply_plan(DownloadPlan {
             unique_missing_objects: 12,
             resolved: vec![resolved(9_876, "13.5.0", RemoteAvailability::Exact)],
         });
-        prompt.candidates[0].selected = false;
 
+        prompt.candidates[1].selected = true;
+        assert!(prompt.needs_plan(), "ticking a row must ask what it costs");
         prompt.begin_planning();
-        prompt.apply_plan(DownloadPlan { unique_missing_objects: 0, resolved: Vec::new() });
+        prompt.apply_plan(DownloadPlan {
+            unique_missing_objects: 20,
+            resolved: vec![resolved(9_876, "13.5.0", RemoteAvailability::Exact), resolved(9_900, "13.6.0", nearest)],
+        });
 
-        assert!(!prompt.candidates[0].selected);
-        assert!(prompt.downloadable().is_empty());
+        assert!(prompt.candidates[1].selected, "the user ticked this row; a later answer must not untick it");
+        assert_eq!(prompt.selected_builds(), BTreeSet::from([9_876, 9_900]));
+    }
+
+    /// The other half of the same rule: a row the user could never act on
+    /// carries no choice to preserve, so a later answer replaces it. Without
+    /// this a build whose metadata fetch merely blipped stays unselectable for
+    /// the life of the dialog.
+    #[test]
+    fn a_later_plan_re_resolves_a_row_the_user_could_not_act_on() {
+        let mut prompt =
+            GameDataDownloadPrompt::new(vec![DownloadCandidate::unresolved(9_876, "13.5.0".into(), Some(2))], None);
+        prompt.begin_planning();
+        prompt.apply_plan(DownloadPlan {
+            unique_missing_objects: 0,
+            resolved: vec![resolved(9_876, "13.5.0", RemoteAvailability::Unreachable)],
+        });
+        assert!(!prompt.candidates[0].is_selectable());
+
+        prompt.retry();
+        prompt.begin_planning();
+        prompt.apply_plan(DownloadPlan {
+            unique_missing_objects: 9,
+            resolved: vec![resolved(9_876, "13.5.0", RemoteAvailability::Exact)],
+        });
+
+        assert!(prompt.candidates[0].is_selectable(), "a blip must not make a build unselectable forever");
+        assert!(prompt.candidates[0].selected);
+        assert_eq!(prompt.downloadable(), vec![(9_876, "13.5.0".to_string())]);
+    }
+
+    /// The dead end this closes: on a fresh offer nothing is resolved, so every
+    /// checkbox is disabled, Download needs a Ready plan, and no selection
+    /// change can ask again. Without a retry the only live control is Dismiss,
+    /// and a transient network blip hides the user's replays for the session.
+    #[test]
+    fn a_failed_first_plan_can_be_retried() {
+        let selection = BTreeSet::from([9_876_u32]);
+        let mut prompt =
+            GameDataDownloadPrompt::new(vec![DownloadCandidate::unresolved(9_876, "13.5.0".into(), Some(2))], None);
+        prompt.begin_planning();
+        prompt.plan_task_finished(&selection);
+
+        assert!(matches!(prompt.plan, DownloadPlanState::Failed(_)));
+        assert!(!prompt.needs_plan(), "nothing about the selection changed, so nothing re-asks on its own");
+        assert!(prompt.can_retry(), "a failed plan must offer a way out");
+
+        prompt.retry();
+
+        assert!(prompt.needs_plan(), "a retry must actually ask the planner again");
+        prompt.begin_planning();
+        prompt.apply_plan(DownloadPlan {
+            unique_missing_objects: 9,
+            resolved: vec![resolved(9_876, "13.5.0", RemoteAvailability::Exact)],
+        });
+        assert!(prompt.candidates[0].is_downloadable());
+    }
+
+    /// A resolved offer with nothing wrong has nothing to retry, so the button
+    /// is not there to be pressed.
+    #[test]
+    fn a_healthy_offer_offers_no_retry() {
+        let mut prompt =
+            GameDataDownloadPrompt::new(vec![DownloadCandidate::unresolved(9_876, "13.5.0".into(), Some(2))], None);
+        prompt.begin_planning();
+        prompt.apply_plan(DownloadPlan {
+            unique_missing_objects: 9,
+            resolved: vec![resolved(9_876, "13.5.0", RemoteAvailability::Exact)],
+        });
+
+        assert!(!prompt.can_retry());
+    }
+
+    /// An unreachable row is a fetch that failed, not an absence, so it is
+    /// worth asking again even though the plan as a whole succeeded.
+    #[test]
+    fn an_unreachable_row_offers_a_retry_even_when_the_plan_succeeded() {
+        let mut prompt = GameDataDownloadPrompt::new(
+            vec![
+                DownloadCandidate::unresolved(9_876, "13.5.0".into(), Some(2)),
+                DownloadCandidate::unresolved(9_900, "13.6.0".into(), Some(1)),
+            ],
+            None,
+        );
+        prompt.begin_planning();
+        prompt.apply_plan(DownloadPlan {
+            unique_missing_objects: 9,
+            resolved: vec![
+                resolved(9_876, "13.5.0", RemoteAvailability::Exact),
+                resolved(9_900, "13.6.0", RemoteAvailability::Unreachable),
+            ],
+        });
+
+        assert!(matches!(prompt.plan, DownloadPlanState::Ready(_)));
+        assert!(prompt.can_retry());
+    }
+
+    /// A retry must not throw away answers the user has already acted on. The
+    /// exact row keeps its resolution and its tick; only the row that could not
+    /// be answered goes back to being asked about.
+    #[test]
+    fn a_retry_keeps_the_rows_the_user_can_already_act_on() {
+        let mut prompt = GameDataDownloadPrompt::new(
+            vec![
+                DownloadCandidate::unresolved(9_876, "13.5.0".into(), Some(2)),
+                DownloadCandidate::unresolved(9_900, "13.6.0".into(), Some(1)),
+            ],
+            None,
+        );
+        prompt.begin_planning();
+        prompt.apply_plan(DownloadPlan {
+            unique_missing_objects: 9,
+            resolved: vec![
+                resolved(9_876, "13.5.0", RemoteAvailability::Exact),
+                resolved(9_900, "13.6.0", RemoteAvailability::Unreachable),
+            ],
+        });
+
+        prompt.retry();
+
+        assert_eq!(prompt.candidates[0].availability, Some(RemoteAvailability::Exact));
+        assert!(prompt.candidates[0].selected);
+        assert!(prompt.candidates[1].availability.is_none(), "the unanswerable row must be asked about again");
+        assert!(prompt.candidates[1].selected, "and must be in the selection the retry asks about");
     }
 
     /// Untick a row and the object count on screen no longer describes what is
@@ -4193,16 +4518,34 @@ mod download_prompt_tests {
 
     /// A plan that fails must not be re-requested on the next frame: the
     /// dialog would dispatch a network task per frame for as long as it is
-    /// open.
+    /// open. Getting out of it is the Retry button's job, not a spin loop's.
     #[test]
-    fn a_failed_plan_is_not_retried_until_the_selection_changes() {
+    fn a_failed_plan_is_not_retried_until_the_user_asks() {
+        let selection = BTreeSet::from([9_876_u32]);
         let mut prompt =
             GameDataDownloadPrompt::new(vec![DownloadCandidate::unresolved(9_876, "13.5.0".into(), None)], None);
         prompt.begin_planning();
-        prompt.plan_task_finished();
+        prompt.plan_task_finished(&selection);
 
         assert!(matches!(prompt.plan, DownloadPlanState::Failed(_)));
         assert!(!prompt.needs_plan(), "a failed plan still describes the selection it was asked for");
+    }
+
+    /// A planner started for an offer that has since been answered must not
+    /// report failure against the offer now open, which would flip a healthy
+    /// dialog to Failed for no reason.
+    #[test]
+    fn a_stale_planner_reaping_does_not_fail_the_current_offer() {
+        let mut prompt =
+            GameDataDownloadPrompt::new(vec![DownloadCandidate::unresolved(9_876, "13.5.0".into(), None)], None);
+        prompt.begin_planning();
+
+        prompt.plan_task_finished(&BTreeSet::from([1_111_u32]));
+
+        assert!(
+            matches!(prompt.plan, DownloadPlanState::Planning),
+            "another offer's planner ending says nothing about this one"
+        );
     }
 
     /// An unresolved row is ticked so the first plan covers it, but nothing is
@@ -4220,11 +4563,12 @@ mod download_prompt_tests {
     /// waiting on it.
     #[test]
     fn a_planning_task_that_ends_without_a_plan_leaves_the_dialog_usable() {
+        let selection = BTreeSet::from([9_876_u32]);
         let mut prompt =
             GameDataDownloadPrompt::new(vec![DownloadCandidate::unresolved(9_876, "13.5.0".into(), None)], None);
-        prompt.plan = DownloadPlanState::Planning;
+        prompt.begin_planning();
 
-        prompt.plan_task_finished();
+        prompt.plan_task_finished(&selection);
 
         match &prompt.plan {
             DownloadPlanState::Failed(message) => assert!(!message.is_empty()),
@@ -4232,51 +4576,104 @@ mod download_prompt_tests {
         }
     }
 
-    /// Ready plans are the ones the Download button reads; a finished task must
-    /// not overwrite the plan it just delivered.
+    /// In the drain loop the `match &task.kind` dispatch runs before
+    /// `handle_task_completion`, so a successful plan really does arrive as
+    /// Planning -> plan_task_finished -> Failed -> apply_plan -> Ready. Run in
+    /// the other order this passes while a defensive `if !Planning { return }`
+    /// in `apply_plan` would discard every successful plan in production.
     #[test]
-    fn a_delivered_plan_survives_its_task_finishing() {
+    fn a_plan_delivered_after_its_task_was_reaped_still_lands() {
+        let selection = BTreeSet::from([9_876_u32]);
         let mut prompt =
             GameDataDownloadPrompt::new(vec![DownloadCandidate::unresolved(9_876, "13.5.0".into(), None)], None);
         prompt.begin_planning();
+
+        prompt.plan_task_finished(&selection);
         prompt.apply_plan(DownloadPlan {
             unique_missing_objects: 7,
             resolved: vec![resolved(9_876, "13.5.0", RemoteAvailability::Exact)],
         });
 
-        prompt.plan_task_finished();
-
         match &prompt.plan {
             DownloadPlanState::Ready(plan) => assert_eq!(plan.unique_missing_objects, 7),
-            _ => panic!("a delivered plan must survive its task being reaped"),
+            other => panic!(
+                "a delivered plan must win over its own task being reaped, got {}",
+                match other {
+                    DownloadPlanState::Failed(message) => message.as_str(),
+                    _ => "a non-Ready state",
+                }
+            ),
         }
+        assert!(prompt.candidates[0].is_downloadable());
     }
 
+    /// The walk a download itself triggers is not a question the user asked.
+    /// Its leftovers are the part of the offer they chose not to fetch, so
+    /// re-raising the identical offer is a loop.
     #[test]
-    fn a_dismissed_set_suppresses_an_identical_prompt() {
-        let mut app = test_app();
-        let builds = BTreeSet::from([9_876_u32, 9_877]);
-        app.dismiss_missing_builds(&builds);
-        assert!(!app.should_prompt_for(&builds));
+    fn the_walk_a_download_triggers_does_not_repeat_the_offer_it_came_from() {
+        let offered = BTreeSet::from([9_876_u32, 9_877]);
+        assert!(offer_was_just_made(Some(&offered), &BTreeSet::from([9_876, 9_877])));
     }
 
+    /// The downloads that ran remove builds from `missing`, so what comes back
+    /// is a subset of the offer, not the same set. Comparing for equality would
+    /// re-raise the offer for exactly the common case: the user fetched some of
+    /// what they were shown.
     #[test]
-    fn a_dismissed_set_suppresses_a_subset_prompt() {
-        let mut app = test_app();
-        app.dismiss_missing_builds(&BTreeSet::from([9_876_u32, 9_877]));
-        assert!(!app.should_prompt_for(&BTreeSet::from([9_876_u32])));
+    fn a_partly_satisfied_offer_is_still_the_same_offer() {
+        let offered = BTreeSet::from([9_876_u32, 9_877]);
+        assert!(offer_was_just_made(Some(&offered), &BTreeSet::from([9_877])));
     }
 
+    /// A build that was not in the offer is new data the user has never been
+    /// told about, and must be raised even though it arrives on the automatic
+    /// walk alongside builds that were.
     #[test]
-    fn a_new_build_reopens_the_prompt_even_alongside_dismissed_ones() {
-        let mut app = test_app();
-        app.dismiss_missing_builds(&BTreeSet::from([9_876_u32]));
-        assert!(app.should_prompt_for(&BTreeSet::from([9_876_u32, 9_999])));
+    fn a_build_the_offer_did_not_cover_is_still_raised() {
+        let offered = BTreeSet::from([9_876_u32]);
+        assert!(!offer_was_just_made(Some(&offered), &BTreeSet::from([9_876, 9_999])));
     }
 
+    /// The user going back and opening those replays again is an explicit
+    /// request, and gets an answer however many times they have dismissed the
+    /// offer before. Suppressing it is what made the feature look like it had
+    /// swallowed their replays.
     #[test]
-    fn nothing_missing_never_prompts() {
-        let app = test_app();
-        assert!(!app.should_prompt_for(&BTreeSet::new()));
+    fn an_explicit_open_is_never_suppressed() {
+        assert!(!offer_was_just_made(None, &BTreeSet::from([9_876_u32])));
+        assert!(!offer_was_just_made(None, &BTreeSet::from([9_876_u32, 9_877])));
+    }
+
+    /// Only the walk a download started carries a suppression record, and only
+    /// while it is the walk in flight. Every other completed walk is one the
+    /// user asked for.
+    #[test]
+    fn only_the_walk_a_download_started_is_marked_as_automatic() {
+        let mut app = WowsToolkitApp::default();
+        let workspace = WorkspaceId(3);
+        let offered = BTreeSet::from([9_876_u32]);
+
+        assert_eq!(app.finish_directory_reingest(workspace), None, "a walk nobody queued is an explicit open");
+
+        app.directory_reingest
+            .insert(workspace, DirectoryReingest::AwaitingDownloads { outstanding: 2, offered: offered.clone() });
+        assert_eq!(
+            app.finish_directory_reingest(workspace),
+            None,
+            "a walk finishing while downloads are still running is not the queued one"
+        );
+
+        app.note_reingest_download_finished(workspace);
+        assert!(matches!(app.directory_reingest.get(&workspace), Some(DirectoryReingest::AwaitingDownloads { .. })));
+        app.note_reingest_download_finished(workspace);
+        assert!(
+            matches!(app.directory_reingest.get(&workspace), Some(DirectoryReingest::Owed { .. })),
+            "the walk is owed only once every download has been tried"
+        );
+
+        app.directory_reingest.insert(workspace, DirectoryReingest::Walking { offered: offered.clone() });
+        assert_eq!(app.finish_directory_reingest(workspace), Some(offered));
+        assert!(app.directory_reingest.is_empty(), "the record must not outlive the walk it describes");
     }
 }

@@ -43,12 +43,13 @@ pub fn start_game_data_download_task(
 /// index request plus one metadata request per distinct resolved build.
 pub fn start_game_data_plan_task(output_base: PathBuf, builds: Vec<(u32, Option<String>)>) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
+    let selection = builds.iter().map(|(build, _)| *build).collect();
 
     crate::util::thread::spawn_logged("plan-game-data-download", move || {
         let _ = tx.send(plan(output_base, builds));
     });
 
-    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::PlanningGameDataDownload }
+    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::PlanningGameDataDownload { selection } }
 }
 
 /// Check the repository for updates to builds already cached in `output_base`.

@@ -138,7 +138,11 @@ pub enum BackgroundTaskKind {
     },
     /// Resolving a selection of builds against the remote repository to report
     /// what each one's availability is and how much the selection would fetch.
-    PlanningGameDataDownload,
+    /// `selection` is the set of builds asked about, which identifies the task
+    /// against the offer that started it.
+    PlanningGameDataDownload {
+        selection: std::collections::BTreeSet<u32>,
+    },
     CheckingGameDataUpdates,
     ValidatingGameData {
         rx: mpsc::Receiver<DownloadProgress>,
@@ -268,7 +272,7 @@ impl BackgroundTask {
                         ui.spinner();
                         ui.label(t!("ui.messages.checking_game_data_updates"));
                     }
-                    BackgroundTaskKind::PlanningGameDataDownload => {
+                    BackgroundTaskKind::PlanningGameDataDownload { .. } => {
                         // The dialog that asked for this plan shows its own
                         // pending footer, so the task bar stays quiet.
                     }

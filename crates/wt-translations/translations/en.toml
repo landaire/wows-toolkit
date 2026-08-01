@@ -51,6 +51,7 @@ choose = "Choose..."
 reset = "Reset"
 download = "Download"
 dismiss = "Dismiss"
+retry = "Retry"
 
 # -- Menu items --
 
@@ -90,7 +91,7 @@ download_availability_resolving = "checking the repository"
 download_availability_exact = "published"
 download_availability_nearest = "no exact match, nearest is %{version} (build %{build})"
 download_availability_unpublished = "never published"
-download_availability_unreachable = "published, but the repository could not be reached"
+download_availability_unreachable = "published, but its file list could not be read"
 download_plan_pending = "Working out what needs fetching..."
 download_objects_to_fetch = "Objects to fetch for the ticked builds: %{count}"
 download_plan_failed = "Could not work out what needs fetching"
