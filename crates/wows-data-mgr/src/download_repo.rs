@@ -320,13 +320,19 @@ pub enum RemoteAvailability {
     Nearest { version: String, build: u32 },
     /// The remote publishes nothing usable for this build.
     Unpublished,
+    /// The remote could not be asked: the build resolved in the index, but
+    /// fetching its metadata failed. Distinct from `Unpublished` because
+    /// reporting a network failure as an absence tells the user something
+    /// untrue about their data.
+    Unreachable,
 }
 
 /// The outcome of resolving one requested build against the remote index.
 #[derive(Debug, Clone)]
 pub struct ResolvedBuild {
     pub requested_build: u32,
-    pub requested_version: String,
+    /// The version hint the caller supplied for this request, if any.
+    pub requested_version: Option<String>,
     pub availability: RemoteAvailability,
 }
 
@@ -375,35 +381,59 @@ fn distinct_entries(resolutions: &[Option<(BuildEntry, bool)>]) -> Vec<BuildEntr
     entries
 }
 
-/// Fetch `metadata.toml` for each entry, keyed by directory. A 404 or a parse
-/// failure yields `None` for that directory instead of an error, so one bad
-/// build's metadata does not prevent planning the others.
+/// Outcome of fetching and parsing one resolved build entry's `metadata.toml`.
+///
+/// `entries` passed to `fetch_entry_hashes` have already resolved in the
+/// index, so every one of these outcomes is about a build the index knows
+/// about; the question is only whether its metadata could be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EntryHashesOutcome {
+    /// The metadata was fetched and parsed; these are the hashes it references.
+    Fetched(BTreeSet<String>),
+    /// The remote gave a definitive answer: `metadata.toml` does not exist at
+    /// this path (a 404), even though the index lists the build.
+    NotFound,
+    /// The remote never gave a definitive answer: the request failed, or the
+    /// response it returned could not be parsed as metadata.
+    Unreachable,
+}
+
+/// Classify one `metadata.toml` fetch outcome. Pure, so the 404-vs-network-
+/// failure and valid-vs-unparseable distinctions can be unit tested without a
+/// live network.
+fn classify_metadata_response(dir: &str, fetch_result: Result<Option<String>, Report>) -> EntryHashesOutcome {
+    match fetch_result {
+        Ok(Some(text)) => match toml::from_str::<BuildMetadata>(&text) {
+            Ok(metadata) => EntryHashesOutcome::Fetched(metadata.referenced_hashes().into_iter().collect()),
+            Err(e) => {
+                tracing::warn!("could not parse remote metadata.toml for {dir}: {e}");
+                EntryHashesOutcome::Unreachable
+            }
+        },
+        Ok(None) => {
+            tracing::warn!("remote metadata.toml missing for {dir}");
+            EntryHashesOutcome::NotFound
+        }
+        Err(e) => {
+            tracing::warn!("failed to fetch remote metadata.toml for {dir}: {e}");
+            EntryHashesOutcome::Unreachable
+        }
+    }
+}
+
+/// Fetch `metadata.toml` for each entry, keyed by directory. Neither a 404 nor
+/// a fetch or parse failure aborts the loop, so one bad build's metadata does
+/// not prevent planning the others.
 async fn fetch_entry_hashes(
     client: &reqwest::Client,
     base_url: &str,
     entries: &[BuildEntry],
-) -> BTreeMap<String, Option<BTreeSet<String>>> {
+) -> BTreeMap<String, EntryHashesOutcome> {
     let mut result = BTreeMap::new();
     for entry in entries {
         let url = format!("{base_url}/{}/metadata.toml", entry.dir);
-        let hashes = match get_text(client, &url).await {
-            Ok(Some(text)) => match toml::from_str::<BuildMetadata>(&text) {
-                Ok(metadata) => Some(metadata.referenced_hashes().into_iter().collect::<BTreeSet<String>>()),
-                Err(e) => {
-                    tracing::warn!("could not parse remote metadata.toml for {}: {e}", entry.dir);
-                    None
-                }
-            },
-            Ok(None) => {
-                tracing::warn!("remote metadata.toml missing for {}", entry.dir);
-                None
-            }
-            Err(e) => {
-                tracing::warn!("failed to fetch remote metadata.toml for {}: {e}", entry.dir);
-                None
-            }
-        };
-        result.insert(entry.dir.clone(), hashes);
+        let outcome = classify_metadata_response(&entry.dir, get_text(client, &url).await);
+        result.insert(entry.dir.clone(), outcome);
     }
     result
 }
@@ -414,10 +444,16 @@ async fn fetch_entry_hashes(
 fn build_plan(
     builds: &[(u32, Option<String>)],
     resolutions: &[Option<(BuildEntry, bool)>],
-    entry_hashes: &BTreeMap<String, Option<BTreeSet<String>>>,
+    entry_hashes: &BTreeMap<String, EntryHashesOutcome>,
     is_local: impl Fn(&str) -> bool,
 ) -> DownloadPlan {
-    let per_build_hashes: Vec<BTreeSet<String>> = entry_hashes.values().filter_map(|h| h.clone()).collect();
+    let per_build_hashes: Vec<BTreeSet<String>> = entry_hashes
+        .values()
+        .filter_map(|outcome| match outcome {
+            EntryHashesOutcome::Fetched(hashes) => Some(hashes.clone()),
+            EntryHashesOutcome::NotFound | EntryHashesOutcome::Unreachable => None,
+        })
+        .collect();
     let unique_missing_objects = plan_objects_to_fetch(&per_build_hashes, is_local);
 
     let resolved = builds
@@ -427,16 +463,15 @@ fn build_plan(
             let availability = match resolution {
                 None => RemoteAvailability::Unpublished,
                 Some((entry, exact)) => match entry_hashes.get(&entry.dir) {
-                    Some(Some(_)) if *exact => RemoteAvailability::Exact,
-                    Some(Some(_)) => RemoteAvailability::Nearest { version: entry.version.clone(), build: entry.build },
-                    _ => RemoteAvailability::Unpublished,
+                    Some(EntryHashesOutcome::Fetched(_)) if *exact => RemoteAvailability::Exact,
+                    Some(EntryHashesOutcome::Fetched(_)) => {
+                        RemoteAvailability::Nearest { version: entry.version.clone(), build: entry.build }
+                    }
+                    Some(EntryHashesOutcome::Unreachable) => RemoteAvailability::Unreachable,
+                    Some(EntryHashesOutcome::NotFound) | None => RemoteAvailability::Unpublished,
                 },
             };
-            ResolvedBuild {
-                requested_build: *build,
-                requested_version: version.clone().unwrap_or_default(),
-                availability,
-            }
+            ResolvedBuild { requested_build: *build, requested_version: version.clone(), availability }
         })
         .collect();
 
@@ -784,21 +819,20 @@ mod tests {
     }
 
     // build_plan is the pure tail of plan_download: everything after the
-    // network fetches. Simulating a failed metadata fetch for one build lets
+    // network fetches. Simulating a 404 for one build's metadata.toml lets
     // the "one bad build does not sink the plan" rule be checked without a
     // live network: the failed build's own hashes are excluded, but the
     // other, healthy build's hashes and resolution are unaffected.
     #[test]
-    fn plan_a_metadata_fetch_failure_yields_unpublished_without_sinking_other_builds() {
+    fn plan_a_metadata_404_yields_unpublished_without_sinking_other_builds() {
         let good = entry("15.2.0", 12100000, "15.2.0_12100000");
         let bad = entry("15.3.0", 12200000, "15.3.0_12200000");
         let builds = vec![(12100000, Some("15.2.0".to_string())), (12200000, Some("15.3.0".to_string()))];
         let resolutions = vec![Some((good.clone(), true)), Some((bad.clone(), true))];
 
         let mut entry_hashes = BTreeMap::new();
-        entry_hashes.insert(good.dir.clone(), Some(hashes(&["h1", "h2"])));
-        // Simulates a 404 or parse failure for `bad`'s metadata.toml.
-        entry_hashes.insert(bad.dir.clone(), None);
+        entry_hashes.insert(good.dir.clone(), EntryHashesOutcome::Fetched(hashes(&["h1", "h2"])));
+        entry_hashes.insert(bad.dir.clone(), EntryHashesOutcome::NotFound);
 
         let plan = build_plan(&builds, &resolutions, &entry_hashes, |_| false);
 
@@ -817,7 +851,7 @@ mod tests {
         let resolutions = vec![Some((good.clone(), true)), None];
 
         let mut entry_hashes = BTreeMap::new();
-        entry_hashes.insert(good.dir.clone(), Some(hashes(&["h1"])));
+        entry_hashes.insert(good.dir.clone(), EntryHashesOutcome::Fetched(hashes(&["h1"])));
 
         let plan = build_plan(&builds, &resolutions, &entry_hashes, |_| false);
 
@@ -836,7 +870,7 @@ mod tests {
         let resolutions = vec![Some((shared.clone(), false)), Some((shared.clone(), true))];
 
         let mut entry_hashes = BTreeMap::new();
-        entry_hashes.insert(shared.dir.clone(), Some(hashes(&["h1", "h2", "h3"])));
+        entry_hashes.insert(shared.dir.clone(), EntryHashesOutcome::Fetched(hashes(&["h1", "h2", "h3"])));
 
         let plan = build_plan(&builds, &resolutions, &entry_hashes, |_| false);
 
@@ -846,5 +880,71 @@ mod tests {
             RemoteAvailability::Nearest { version: "15.2.0".into(), build: 12100000 }
         );
         assert_eq!(plan.resolved[1].availability, RemoteAvailability::Exact);
+    }
+
+    // A build that resolves in the index but whose metadata.toml could not be
+    // fetched must report `Unreachable`, not `Unpublished`: the index found it,
+    // the network just could not confirm what is there. A build that never
+    // resolved in the index at all (no exact or nearest match) stays
+    // `Unpublished`. Both are asserted in one test so the two outcomes are
+    // proven distinguishable, not just individually non-`Exact`.
+    #[test]
+    fn plan_unreachable_metadata_is_distinct_from_an_unresolvable_build() {
+        let reachable_but_broken = entry("15.3.0", 12200000, "15.3.0_12200000");
+        let builds = vec![(12200000, Some("15.3.0".to_string())), (99999999, None)];
+        let resolutions = vec![Some((reachable_but_broken.clone(), true)), None];
+
+        let mut entry_hashes = BTreeMap::new();
+        entry_hashes.insert(reachable_but_broken.dir.clone(), EntryHashesOutcome::Unreachable);
+
+        let plan = build_plan(&builds, &resolutions, &entry_hashes, |_| false);
+
+        assert_eq!(plan.unique_missing_objects, 0);
+        assert_eq!(plan.resolved[0].availability, RemoteAvailability::Unreachable);
+        assert_eq!(plan.resolved[1].availability, RemoteAvailability::Unpublished);
+    }
+
+    // classify_metadata_response is the pure mapping fetch_entry_hashes applies
+    // to each metadata.toml request outcome, so the 404-vs-network-failure and
+    // valid-vs-unparseable distinctions can be checked without a live network.
+    // A 404 (`Ok(None)`) is a definitive answer from the remote -- nothing is
+    // there -- so it maps to `NotFound`, matching how `validate_cache` treats a
+    // missing `metadata.toml` as `MissingFromRemote` elsewhere in this file. A
+    // request error never got a definitive answer at all, so it maps to
+    // `Unreachable`, and so does a response that came back but failed to parse.
+    #[test]
+    fn classify_metadata_response_distinguishes_404_from_network_failure() {
+        let not_found = classify_metadata_response("15.2.0_12100000", Ok(None));
+        let unreachable = classify_metadata_response("15.2.0_12100000", Err(report!("simulated network failure")));
+
+        assert_eq!(not_found, EntryHashesOutcome::NotFound);
+        assert_eq!(unreachable, EntryHashesOutcome::Unreachable);
+    }
+
+    #[test]
+    fn classify_metadata_response_distinguishes_valid_from_unparseable_toml() {
+        let valid_toml = "version = \"15.2.0\"\nbuild = 12100000\n\n[files]\na = \"h1\"\n".to_string();
+        let fetched = classify_metadata_response("15.2.0_12100000", Ok(Some(valid_toml)));
+        let unparseable = classify_metadata_response("15.2.0_12100000", Ok(Some("not valid toml {{{".to_string())));
+
+        assert_eq!(fetched, EntryHashesOutcome::Fetched(hashes(&["h1"])));
+        assert_eq!(unparseable, EntryHashesOutcome::Unreachable);
+    }
+
+    // The requested-version hint is `Option<String>` end to end: a supplied
+    // hint round-trips as `Some`, and an absent one is `None`, never `""`.
+    #[test]
+    fn plan_resolved_build_carries_the_version_hint_or_none_exactly() {
+        let good = entry("15.2.0", 12100000, "15.2.0_12100000");
+        let builds = vec![(12100000, Some("15.2.0".to_string())), (12100000, None)];
+        let resolutions = vec![Some((good.clone(), true)), Some((good.clone(), true))];
+
+        let mut entry_hashes = BTreeMap::new();
+        entry_hashes.insert(good.dir.clone(), EntryHashesOutcome::Fetched(hashes(&["h1"])));
+
+        let plan = build_plan(&builds, &resolutions, &entry_hashes, |_| false);
+
+        assert_eq!(plan.resolved[0].requested_version, Some("15.2.0".to_string()));
+        assert_eq!(plan.resolved[1].requested_version, None);
     }
 }
