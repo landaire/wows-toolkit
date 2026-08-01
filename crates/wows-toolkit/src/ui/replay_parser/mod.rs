@@ -7093,7 +7093,10 @@ mod alt_perspective_handoff_tests {
         let taken = take_alt_reparse(&ctx).expect("the request we just stashed comes back");
         assert_eq!(taken.workspace, WorkspaceId(4));
         assert!(Arc::ptr_eq(&taken.alt, &alt), "the delivered alt is the one that was picked");
-        assert!(taken.replay.upgrade().is_some(), "the delivered request still names its replay");
+        assert!(
+            taken.replay.upgrade().is_some_and(|delivered| Arc::ptr_eq(&delivered, &replay)),
+            "the delivered request names the replay it was stashed against"
+        );
 
         drop(taken);
         assert_eq!(Arc::strong_count(&alt), 1, "the take leaves no copy of the alt in egui's store");

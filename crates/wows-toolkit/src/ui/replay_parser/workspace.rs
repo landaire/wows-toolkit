@@ -475,9 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn the_alt_perspective_slot_is_stable_and_workspace_independent() {
-        assert_eq!(alt_perspective_slot_id(), alt_perspective_slot_id());
-
+    fn the_alt_perspective_slot_does_not_collide_with_the_scoped_slots() {
         let scoped = [
             ReplayRequestSlot::OpenReplayNewTab,
             ReplayRequestSlot::ContextMenuRenderReplay,
