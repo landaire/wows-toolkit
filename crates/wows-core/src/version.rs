@@ -177,6 +177,34 @@ mod test {
         assert_older_newer(older, newer);
     }
 
+    /// The fallible parse is what the replay-opening path uses, because opening
+    /// runs on the UI thread and a malformed or truncated header must not take
+    /// the app down with it.
+    #[test]
+    fn try_from_client_exe_rejects_a_malformed_version_instead_of_panicking() {
+        assert_eq!(Version::try_from_client_exe(""), None, "an empty header has no parts");
+        assert_eq!(Version::try_from_client_exe("0,10,9"), None, "three parts is not four");
+        assert_eq!(Version::try_from_client_exe("0,10,9,0,1"), None, "five parts is not four");
+        assert_eq!(Version::try_from_client_exe("0,ten,9,0"), None, "a non-numeric part is not a version");
+        assert_eq!(Version::try_from_client_exe("0,-1,9,0"), None, "a negative part is not a version");
+    }
+
+    /// A `0` build field is what the pre-0.10 era records. It parses, and the
+    /// version it produces carries no build rather than a build of zero.
+    #[test]
+    fn try_from_client_exe_reads_a_zero_build_as_no_build() {
+        let version = Version::try_from_client_exe("0,9,4,0").expect("a well-formed header parses");
+        assert_eq!((version.major, version.minor, version.patch), (0, 9, 4));
+        assert_eq!(version.build_number(), None);
+    }
+
+    #[test]
+    fn try_from_client_exe_agrees_with_the_panicking_form_on_well_formed_input() {
+        for raw in ["0,9,4,0", "0,11,4,5624555", "15,4,0,11965230"] {
+            assert_eq!(Version::try_from_client_exe(raw), Some(Version::from_client_exe(raw)), "input {raw}");
+        }
+    }
+
     #[test]
     fn matches_build_optional_refinement() {
         let no_build = Version::base(15, 4, 0);

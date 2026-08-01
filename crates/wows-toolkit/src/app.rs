@@ -1358,7 +1358,7 @@ impl WowsToolkitApp {
                         }
                         // Rebuild loaded data with the new constants from disk.
                         if wows_data.write().rebuild_with_new_constants() {
-                            for replay in self.tab_state.active_workspace().open_replays() {
+                            for replay in self.tab_state.all_open_replays() {
                                 replay.write().ui_report = None;
                             }
                         }
@@ -1397,7 +1397,7 @@ impl WowsToolkitApp {
                         debug!("Rebuilding build {} with newly fetched versioned constants", build);
                         if data.write().rebuild_with_new_constants() {
                             // Invalidate cached reports so they rebuild with correct constants
-                            for replay in self.tab_state.active_workspace().open_replays() {
+                            for replay in self.tab_state.all_open_replays() {
                                 replay.write().ui_report = None;
                             }
                         }
@@ -2881,7 +2881,7 @@ impl WowsToolkitApp {
 
                     // Invalidate ui_report on all loaded replays so they re-build
                     // with the new constants on next access
-                    for replay in self.tab_state.active_workspace().open_replays() {
+                    for replay in self.tab_state.all_open_replays() {
                         replay.write().ui_report = None;
                     }
 

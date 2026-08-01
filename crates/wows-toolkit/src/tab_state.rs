@@ -790,11 +790,27 @@ impl TabState {
         std::iter::once(&self.live_workspace).chain(self.workspaces.values())
     }
 
+    /// Every replay open in a dock tab of any workspace. What invalidates a
+    /// cached report -- new constants, a locale change -- invalidates it in
+    /// every workspace, and a tab the user has to switch tabs to see is still a
+    /// tab they will look at.
+    pub fn all_open_replays(&self) -> Vec<Arc<RwLock<Replay>>> {
+        self.all_workspaces().flat_map(|workspace| workspace.open_replays()).collect()
+    }
+
     /// The hydrated replay for `path` if any workspace has that file open in a
     /// dock tab. Opening is what hydrates a replay, so a file that is only
     /// listed has none.
     pub fn open_replay_at(&self, path: &Path) -> Option<Arc<RwLock<Replay>>> {
         self.all_workspaces().find_map(|workspace| workspace.hydrated_replay(path))
+    }
+
+    /// Every hydrated replay for `path`, across all workspaces. A directory
+    /// imported as a workspace can be the live replays directory, so the same
+    /// file can be open in more than one dock at once and all of them go stale
+    /// together when it changes on disk.
+    pub fn open_replays_at(&self, path: &Path) -> Vec<Arc<RwLock<Replay>>> {
+        self.all_workspaces().filter_map(|workspace| workspace.hydrated_replay(path)).collect()
     }
 
     /// Replace the focused tab's replay, or open a new tab if none exists.
@@ -953,21 +969,24 @@ impl TabState {
                         ReplaySource::SessionStatsOnly
                     };
 
-                    // The watcher only observes the live replays directory, so a
-                    // change it reports always belongs to the live workspace.
-                    // Only a replay open in one of its tabs is hydrated; a
-                    // merely listed one is re-read from the path below.
-                    let open_replay = self.live_workspace.hydrated_replay(&modified_file);
+                    // The watcher only observes the live replays directory, but
+                    // that directory can also have been imported as a workspace,
+                    // so every dock is asked. Only a replay open in a tab is
+                    // hydrated; a merely listed one is re-read from the path
+                    // below.
+                    let open_replays = self.open_replays_at(&modified_file);
 
-                    if let Some(replay) = open_replay {
-                        // Invalidate cached data so the reload re-parses the file.
-                        let mut replay_inner = replay.write();
-                        replay_inner.battle_report = None;
-                        replay_inner.ui_report = None;
-                        drop(replay_inner);
+                    if !open_replays.is_empty() {
+                        for replay in open_replays {
+                            // Invalidate cached data so the reload re-parses the file.
+                            let mut replay_inner = replay.write();
+                            replay_inner.battle_report = None;
+                            replay_inner.ui_report = None;
+                            drop(replay_inner);
 
-                        if let Some(deps) = self.replay_dependencies() {
-                            update_background_task!(self.background_tasks, deps.load_replay(replay, source));
+                            if let Some(deps) = self.replay_dependencies() {
+                                update_background_task!(self.background_tasks, deps.load_replay(replay, source));
+                            }
                         }
                     } else if let Some(deps) = self.replay_dependencies() {
                         // Nothing is open on this file. Read from the path so the
@@ -1414,6 +1433,87 @@ mod tests {
             state.workspaces.get(&WorkspaceId::LIVE).and_then(|w| w.root.clone()),
             Some(PathBuf::from("decoy")),
             "the decoy map entry itself must be untouched"
+        );
+    }
+
+    /// A minimal hydrated `Replay` opened from `path`, built the way
+    /// `ReplayLoader` builds one: real replay metadata round-tripped through
+    /// `ReplayFile::from_decrypted_parts`.
+    fn open_replay(path: &str) -> Arc<RwLock<Replay>> {
+        let meta = serde_json::json!({
+            "gameMode": 0,
+            "clientVersionFromExe": "0,0,0,0",
+            "mapDisplayName": "",
+            "mapId": 0,
+            "clientVersionFromXml": "",
+            "duration": 0,
+            "name": "",
+            "scenario": "",
+            "playerID": 0,
+            "vehicles": [],
+            "playersPerTeam": 0,
+            "dateTime": "28.07.2026 14:23:05",
+            "mapName": "",
+            "playerName": "",
+            "scenarioConfigId": 0,
+            "teamsCount": 0,
+            "playerVehicle": "",
+        });
+        let replay_file =
+            ReplayFile::from_decrypted_parts(serde_json::to_vec(&meta).expect("the fixture serializes"), Vec::new())
+                .expect("hand-built replay metadata parses");
+        let resource_loader = Arc::new(
+            wowsunpack::game_params::provider::GameMetadataProvider::from_params_no_specs(Vec::new())
+                .expect("an empty param list is always valid"),
+        );
+        let mut replay = Replay::new(replay_file, resource_loader);
+        replay.source_path = Some(PathBuf::from(path));
+        Arc::new(RwLock::new(replay))
+    }
+
+    /// New constants and a locale change invalidate every cached report, and a
+    /// tab in a workspace the user is not currently looking at is still a tab
+    /// they will look at. Both workspaces hold a tab so scoping the sweep to
+    /// the active one is observable in either direction.
+    #[test]
+    fn every_workspaces_tabs_are_reachable_for_invalidation_not_just_the_active_ones() {
+        let mut state = TabState::default();
+        state.live_workspace.open_replay_in_new_tab(open_replay("live.wowsreplay"));
+
+        let other = WorkspaceId(1);
+        let mut workspace = ReplayWorkspace::new(None);
+        workspace.open_replay_in_new_tab(open_replay("other.wowsreplay"));
+        state.workspaces.insert(other, workspace);
+        state.set_active_workspace(other);
+        assert_eq!(state.active_workspace_id(), other, "the non-live workspace must actually be active");
+
+        let paths: Vec<Option<PathBuf>> =
+            state.all_open_replays().iter().map(|replay| replay.read().source_path.clone()).collect();
+
+        assert_eq!(paths.len(), 2, "both workspaces' tabs must be swept");
+        assert!(paths.contains(&Some(PathBuf::from("live.wowsreplay"))), "the inactive workspace's tab is included");
+        assert!(paths.contains(&Some(PathBuf::from("other.wowsreplay"))), "the active workspace's tab is included");
+    }
+
+    /// The watcher only watches the live replays directory, but that directory
+    /// can also have been imported as its own workspace, so one modified file
+    /// can be open in two docks. Refreshing only one leaves the other stale.
+    #[test]
+    fn a_file_open_in_two_workspaces_is_reported_by_both() {
+        let mut state = TabState::default();
+        let path = PathBuf::from("replay.wowsreplay");
+        state.live_workspace.open_replay_in_new_tab(open_replay("replay.wowsreplay"));
+
+        let imported = WorkspaceId(1);
+        let mut workspace = ReplayWorkspace::new(Some(PathBuf::from("live")));
+        workspace.open_replay_in_new_tab(open_replay("replay.wowsreplay"));
+        state.workspaces.insert(imported, workspace);
+
+        assert_eq!(state.open_replays_at(&path).len(), 2, "both docks' copies of the file must be reported");
+        assert!(state.open_replay_at(&path).is_some(), "the single-replay lookup still resolves the file");
+        assert!(
+            state.open_replays_at(Path::new("absent.wowsreplay")).is_empty(),
+            "a file no dock has open reports nothing"
         );
     }
 

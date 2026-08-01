@@ -112,7 +112,7 @@ impl ToolkitTabViewer<'_> {
                                 }
 
                                 // Refresh translated strings on all loaded replays.
-                                for replay in self.tab_state.active_workspace().open_replays() {
+                                for replay in self.tab_state.all_open_replays() {
                                     if let Some(report) = &mut replay.write().ui_report {
                                         report.refresh_translations();
                                     }

@@ -429,11 +429,6 @@ mod tests {
         );
         assert!(ws.hydrated_replays().is_empty(), "nothing has been opened, so nothing may be hydrated");
         assert!(ws.hydrated_replay(Path::new("b.wowsreplay")).is_none());
-        assert_eq!(
-            Arc::strong_count(&resource_loader),
-            pinned_before,
-            "a listed replay must not pin its build's game data"
-        );
 
         ws.open_replay_in_new_tab(test_replay(Some("b.wowsreplay"), Arc::clone(&resource_loader)));
 
@@ -446,12 +441,28 @@ mod tests {
         assert!(ws.hydrated_replay(Path::new("a.wowsreplay")).is_none(), "its neighbours stay unhydrated");
         assert!(
             Arc::strong_count(&resource_loader) > pinned_before,
-            "the opened replay does pin the build's data, which is what makes the count above meaningful"
+            "the opened replay does pin the build's data, which is what makes the count below meaningful"
         );
         assert_eq!(
             ws.replay_files.as_ref().map(HashMap::len),
             Some(3),
             "opening a replay must not disturb what is listed"
+        );
+
+        // Closing the tab is what has to release the build's game data. The file
+        // stays listed either way, so if anything but the dock owned the
+        // hydrated replay the count would not come back down.
+        ws.replay_dock_state = egui_dock::DockState::new(vec![]);
+
+        assert_eq!(
+            ws.replay_files.as_ref().map(HashMap::len),
+            Some(3),
+            "closing a tab must not unlist the file it was showing"
+        );
+        assert_eq!(
+            Arc::strong_count(&resource_loader),
+            pinned_before,
+            "with its only tab closed the still-listed file pins none of its build's game data"
         );
     }
 
@@ -476,6 +487,56 @@ mod tests {
             ws.hydrated_replay(Path::new("a.wowsreplay")).is_none(),
             "the replaced replay is no longer hydrated by any tab"
         );
+    }
+
+    /// A dock with two leaves, the second one focused. In the running app a leaf
+    /// is always focused, so that -- not the first-tab fallback the other tests
+    /// exercise -- is the branch that decides which row the listing highlights
+    /// and which tab an activated row replaces.
+    fn two_leaves_with_the_second_focused() -> ReplayWorkspace {
+        let mut ws = ReplayWorkspace::new(None);
+        ws.open_replay_in_new_tab(test_replay(Some("first.wowsreplay"), empty_metadata_provider()));
+
+        let second = ReplayTab {
+            replay: test_replay(Some("second.wowsreplay"), empty_metadata_provider()),
+            id: 1,
+            path: Some(PathBuf::from("second.wowsreplay")),
+        };
+        ws.next_replay_tab_id = 2;
+        let [_, new_node] =
+            ws.replay_dock_state.main_surface_mut().split_right(egui_dock::NodeIndex::root(), 0.5, vec![second]);
+        ws.replay_dock_state.set_focused_node_and_surface(egui_dock::NodePath {
+            surface: egui_dock::SurfaceIndex::main(),
+            node: new_node,
+        });
+
+        assert_eq!(
+            ws.replay_dock_state.iter_all_tabs().next().and_then(|(_, tab)| tab.path.clone()),
+            Some(PathBuf::from("first.wowsreplay")),
+            "the focused tab must not also be the first tab, or the fallback branch would pass these"
+        );
+        ws
+    }
+
+    #[test]
+    fn the_highlight_follows_the_focused_leaf_not_the_first_tab() {
+        let ws = two_leaves_with_the_second_focused();
+        assert_eq!(ws.focused_replay_path(), Some(PathBuf::from("second.wowsreplay")));
+    }
+
+    #[test]
+    fn opening_into_the_focused_tab_replaces_the_focused_leafs_tab() {
+        let mut ws = two_leaves_with_the_second_focused();
+
+        ws.open_replay_in_focused_tab(test_replay(Some("third.wowsreplay"), empty_metadata_provider()));
+
+        assert!(ws.hydrated_replay(Path::new("third.wowsreplay")).is_some(), "the new replay is open somewhere");
+        assert!(
+            ws.hydrated_replay(Path::new("second.wowsreplay")).is_none(),
+            "the focused leaf's own tab is the one replaced"
+        );
+        assert!(ws.hydrated_replay(Path::new("first.wowsreplay")).is_some(), "the unfocused leaf's tab is left alone");
+        assert_eq!(ws.replay_dock_state.iter_all_tabs().count(), 2, "replacing must not open a third tab");
     }
 
     /// A row's identity and stats come from the index until the file is opened,

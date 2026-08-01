@@ -975,8 +975,10 @@ impl ReplayLoader {
         let input = self.input;
 
         let _join_handle = crate::util::thread::spawn_logged("load-replay", move || {
-            // For a path input, read the file and construct the replay here on
-            // the background thread so the UI never blocks on file I/O.
+            // For a path input, read the file and construct the replay here so
+            // the retry loop that waits out a game still flushing it, and the
+            // build resolution that may lazily load a whole build, stay off the
+            // UI thread.
             let replay = match input {
                 ReplayInput::Built(replay) => replay,
                 ReplayInput::Path(path) => match Self::build_replay_from_path(&deps, path) {
@@ -989,19 +991,17 @@ impl ReplayLoader {
             };
 
             // Determine the replay's build and get version-matched data
-            let replay_version = {
-                let r = replay.read();
-                Version::from_client_exe(&r.replay_file.meta.clientVersionFromExe)
+            let raw_version = replay.read().replay_file.meta.clientVersionFromExe.clone();
+            let Some(replay_version) = Version::try_from_client_exe(&raw_version) else {
+                let _ =
+                    tx.send(Err(rootcause::report!("replay reports an unreadable client version {:?}", raw_version)));
+                return;
             };
-            let build = replay_version.build_number().expect("replay version carries a build");
 
             let Some(wows_data_for_build) = deps.wows_data_map.resolve(&replay_version) else {
-                error!("Failed to load game data for build {}", build);
+                error!("Failed to load game data for version {}", replay_version.to_path());
                 let replay_path = replay.read().source_path.clone();
-                let report: rootcause::Report =
-                    ToolkitError::ReplayBuildUnavailable { build, version: replay_version.to_path(), replay_path }
-                        .into();
-                let _ = tx.send(Err(report.attach("try installing the matching game client version")));
+                let _ = tx.send(Err(missing_build_report(&replay_version, replay_path)));
                 return;
             };
 
@@ -1089,25 +1089,20 @@ impl ReplayLoader {
         replay_file: ReplayFile,
         path: PathBuf,
     ) -> Result<(Arc<RwLock<Replay>>, SharedWoWsData), rootcause::Report> {
-        let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+        let raw_version = &replay_file.meta.clientVersionFromExe;
+        let Some(replay_version) = Version::try_from_client_exe(raw_version) else {
+            return Err(rootcause::report!("replay reports an unreadable client version {raw_version:?}")
+                .attach(format!("path: {}", path.display())));
+        };
 
         let Some(wows_data_for_build) = deps.wows_data_map.resolve(&replay_version) else {
-            let report: rootcause::Report = ToolkitError::ReplayBuildUnavailable {
-                build: replay_version.build_number().expect("replay version carries a build"),
-                version: replay_version.to_path(),
-                replay_path: Some(path),
-            }
-            .into();
-            return Err(report.attach("try installing the matching game client version"));
+            return Err(missing_build_report(&replay_version, Some(path)));
         };
 
         let (game_metadata, game_constants) = {
             let data = wows_data_for_build.read();
             let Some(metadata) = data.game_metadata.clone() else {
-                return Err(rootcause::report!(
-                    "game metadata unavailable for build {}",
-                    replay_version.build_number().expect("replay version carries a build")
-                ));
+                return Err(rootcause::report!("game metadata unavailable for version {}", replay_version.to_path()));
             };
             (metadata, Arc::clone(&data.game_constants))
         };
@@ -1117,6 +1112,24 @@ impl ReplayLoader {
         replay.source_path = Some(path);
         Ok((Arc::new(RwLock::new(replay)), wows_data_for_build))
     }
+}
+
+/// The failure for a replay whose build's game data is not on this machine.
+///
+/// `clientVersionFromExe` carries a `0` build field for the pre-0.10 era, and a
+/// version with no build resolves to no data at all. There is nothing to offer
+/// for download in that case, so it gets a plain report rather than a
+/// [`ToolkitError::ReplayBuildUnavailable`] naming a build that does not exist.
+pub(crate) fn missing_build_report(version: &Version, replay_path: Option<PathBuf>) -> rootcause::Report {
+    let Some(build) = version.build_number() else {
+        return rootcause::report!(
+            "replay reports version {} with no build number, so its game data cannot be resolved",
+            version.to_path()
+        );
+    };
+    let report: rootcause::Report =
+        ToolkitError::ReplayBuildUnavailable { build, version: version.to_path(), replay_path }.into();
+    report.attach("try installing the matching game client version")
 }
 
 /// Read and parse a replay, retrying while the game finishes flushing it.
@@ -1143,6 +1156,48 @@ fn read_replay_file_with_retry(path: &Path) -> Result<ReplayFile, rootcause::Rep
                 attempt += 1;
                 std::thread::sleep(RETRY_DELAY);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A `clientVersionFromExe` whose build field is `0` is what the pre-0.10
+    /// era records, and [`WoWsDataMap::resolve`] returns `None` for any version
+    /// carrying no build. Every one of those replays therefore reaches this
+    /// failure path, which has to describe the failure rather than assume a
+    /// build it can name.
+    #[test]
+    fn a_version_with_no_build_reports_the_version_instead_of_a_build() {
+        let version = Version::from_client_exe("0,9,4,0");
+        assert_eq!(version.build_number(), None, "the fixture must actually carry no build");
+
+        let report = missing_build_report(&version, Some(PathBuf::from("old.wowsreplay")));
+
+        assert!(
+            report.downcast_current_context::<ToolkitError>().is_none(),
+            "there is no build to offer for download, so this must not be a ReplayBuildUnavailable"
+        );
+        assert!(format!("{report:?}").contains("0.9.4"), "the report must name the version it could not resolve");
+    }
+
+    /// The download prompt and the ingest failure tally both downcast to
+    /// `ReplayBuildUnavailable` to learn which build to offer, so a version that
+    /// does carry one must still produce that error.
+    #[test]
+    fn a_version_with_a_build_still_offers_that_build_for_download() {
+        let version = Version::from_client_exe("15,4,0,11965230");
+
+        let report = missing_build_report(&version, None);
+
+        match report.downcast_current_context::<ToolkitError>() {
+            Some(ToolkitError::ReplayBuildUnavailable { build, version, .. }) => {
+                assert_eq!(*build, 11_965_230);
+                assert_eq!(version, "15.4.0");
+            }
+            _ => panic!("a resolvable build must produce ReplayBuildUnavailable: {report:?}"),
         }
     }
 }

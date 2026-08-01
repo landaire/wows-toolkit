@@ -19,6 +19,7 @@ use super::PendingVideoExport;
 use super::RendererAssetCache;
 use super::VideoExportData;
 use crate::data::wows_data::SharedWoWsData;
+use crate::data::wows_data::WoWsDataMap;
 
 /// Execute a pending video export action.
 pub(super) fn execute_video_export(
@@ -213,14 +214,70 @@ pub(super) fn render_video_to_clipboard(
     });
 }
 
-/// Information about a single replay to be rendered in a batch.
-pub struct BatchReplayInfo {
+/// Everything a render needs from one replay file, as read by
+/// [`replay_render_input`].
+pub struct ReplayRenderInput {
     pub raw_meta: Vec<u8>,
     pub packet_data: Vec<u8>,
     pub map_name: String,
     pub replay_name: String,
     pub game_duration: f32,
     pub wows_data: SharedWoWsData,
+}
+
+/// Read one replay off disk and pair it with the game data for the build it was
+/// recorded on. `None` when the file cannot be read, its version string is
+/// unreadable, or the toolkit does not have that build's data.
+///
+/// Reading is decrypt plus inflate of the whole packet stream. A batch runs this
+/// on its render thread, one replay at a time, rather than where the batch is
+/// requested.
+pub fn replay_render_input(path: &std::path::Path, wows_data_map: &WoWsDataMap) -> Option<ReplayRenderInput> {
+    let replay_file = match ReplayFile::from_file(path) {
+        Ok(replay_file) => replay_file,
+        Err(error) => {
+            tracing::warn!("could not read replay {} for rendering: {error:?}", path.display());
+            return None;
+        }
+    };
+    let Some(replay_version) = Version::try_from_client_exe(&replay_file.meta.clientVersionFromExe) else {
+        tracing::warn!(
+            "replay {} reports an unreadable client version {:?} - skipping",
+            path.display(),
+            replay_file.meta.clientVersionFromExe
+        );
+        return None;
+    };
+    let Some(wows_data) = wows_data_map.resolve(&replay_version) else {
+        tracing::warn!("No data for version {} - skipping replay '{}'", replay_version.to_path(), path.display());
+        return None;
+    };
+
+    let map_name = replay_file.meta.mapName.clone();
+    let translated_map = match wows_data.read().game_metadata.as_ref() {
+        Some(metadata) => wowsunpack::game_params::translations::translate_map_name(&map_name, metadata.as_ref()),
+        None => map_name.clone(),
+    };
+    let base = format!("{} - {}", replay_file.meta.playerName, translated_map);
+    let replay_name = match path.file_stem().map(|stem| stem.to_string_lossy().into_owned()) {
+        Some(stem) => format!("{} - {}", base, stem),
+        None => base,
+    };
+
+    Some(ReplayRenderInput {
+        raw_meta: replay_file.raw_meta.clone().into_bytes(),
+        packet_data: replay_file.packet_data,
+        map_name,
+        replay_name,
+        game_duration: replay_file.meta.duration as f32,
+        wows_data,
+    })
+}
+
+/// The frame count a replay of `game_duration` seconds is expected to produce.
+/// An estimate: it drives the progress bar, not the encoder.
+fn estimated_frames(game_duration: f32) -> u64 {
+    (game_duration * 7.0) as u64
 }
 
 /// Encoding/output preferences shared by the batch render entry points.
@@ -232,9 +289,15 @@ pub struct BatchEncodeOptions {
 }
 
 /// Shared helper: render a list of replays sequentially, updating progress.
+///
+/// Each replay is read off disk here, immediately before it is rendered, so the
+/// caller never pays for the reads and only one replay's packet stream is
+/// resident at a time. A replay that cannot be read counts as a failure.
+///
 /// Returns (succeeded_count, failed_count, output_paths).
 fn render_batch(
-    replays: &[BatchReplayInfo],
+    paths: &[std::path::PathBuf],
+    wows_data_map: &WoWsDataMap,
     output_dir: &std::path::Path,
     options: &RenderOptions,
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
@@ -243,20 +306,30 @@ fn render_batch(
 ) -> (usize, usize, Vec<std::path::PathBuf>) {
     let mut succeeded_paths = Vec::new();
     let mut failed = 0usize;
-    let mut completed_frames: u64 = 0;
 
-    for (i, replay) in replays.iter().enumerate() {
+    for (i, path) in paths.iter().enumerate() {
         {
             let mut p = progress.lock();
-            p.completed_frames = completed_frames;
             p.current_index = i;
+            p.current_frames = 0;
+            p.current_total_frames = None;
+            p.current_name = path.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
+        }
+
+        let Some(replay) = replay_render_input(path, wows_data_map) else {
+            failed += 1;
+            continue;
+        };
+
+        {
+            let mut p = progress.lock();
+            p.current_total_frames = Some(estimated_frames(replay.game_duration));
             p.current_name = replay.replay_name.clone();
         }
 
         let output_path = output_dir.join(format!("{}.mp4", replay.replay_name));
         let output_str = output_path.to_string_lossy().to_string();
 
-        let frames_before = completed_frames;
         let per_replay_progress: Arc<Mutex<Option<RenderProgress>>> = Arc::new(Mutex::new(None));
         let stop_flag = Arc::new(AtomicBool::new(false));
 
@@ -268,7 +341,7 @@ fn render_batch(
                 while !stop_flag.load(Ordering::Relaxed) {
                     std::thread::sleep(std::time::Duration::from_millis(50));
                     if let Some(ref p) = *per_replay_progress.lock() {
-                        progress.lock().completed_frames = frames_before + p.current;
+                        progress.lock().current_frames = p.current;
                     }
                 }
             })
@@ -292,9 +365,6 @@ fn render_batch(
             encode.include_pre_battle,
         );
 
-        let estimated_frames = (replay.game_duration * 7.0) as u64;
-        completed_frames += estimated_frames;
-
         stop_flag.store(true, Ordering::Relaxed);
         let _ = progress_thread.join();
 
@@ -314,28 +384,21 @@ fn render_batch(
 /// Returns a `BackgroundTask` to plug into the global status bar.
 pub fn batch_render_to_folder(
     output_dir: std::path::PathBuf,
-    replays: Vec<BatchReplayInfo>,
+    paths: Vec<std::path::PathBuf>,
+    wows_data_map: WoWsDataMap,
     options: RenderOptions,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     toasts: crate::tab_state::SharedToasts,
     encode: BatchEncodeOptions,
 ) -> crate::task::BackgroundTask {
-    let total_frames: u64 = replays.iter().map(|r| (r.game_duration * 7.0) as u64).sum();
-    let total_replays = replays.len();
-    let progress = Arc::new(Mutex::new(crate::task::BatchVideoExportProgress {
-        total_frames,
-        completed_frames: 0,
-        current_index: 0,
-        total_replays,
-        current_name: String::new(),
-    }));
+    let progress = Arc::new(Mutex::new(crate::task::BatchVideoExportProgress::for_batch(paths.len())));
 
     let (tx, rx) = std::sync::mpsc::channel();
 
     let progress_clone = Arc::clone(&progress);
     crate::util::thread::spawn_logged("batch-video-export", move || {
         let (succeeded, failed, _) =
-            render_batch(&replays, &output_dir, &options, &asset_cache, &progress_clone, &encode);
+            render_batch(&paths, &wows_data_map, &output_dir, &options, &asset_cache, &progress_clone, &encode);
 
         if failed == 0 {
             toasts.lock().success(format!("Batch render complete: {} videos saved", succeeded));
@@ -355,21 +418,14 @@ pub fn batch_render_to_folder(
 /// then copies all output files to the clipboard.
 /// Returns a `BackgroundTask` to plug into the global status bar.
 pub fn batch_render_to_clipboard(
-    replays: Vec<BatchReplayInfo>,
+    paths: Vec<std::path::PathBuf>,
+    wows_data_map: WoWsDataMap,
     options: RenderOptions,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     toasts: crate::tab_state::SharedToasts,
     encode: BatchEncodeOptions,
 ) -> crate::task::BackgroundTask {
-    let total_frames: u64 = replays.iter().map(|r| (r.game_duration * 7.0) as u64).sum();
-    let total_replays = replays.len();
-    let progress = Arc::new(Mutex::new(crate::task::BatchVideoExportProgress {
-        total_frames,
-        completed_frames: 0,
-        current_index: 0,
-        total_replays,
-        current_name: String::new(),
-    }));
+    let progress = Arc::new(Mutex::new(crate::task::BatchVideoExportProgress::for_batch(paths.len())));
 
     let (tx, rx) = std::sync::mpsc::channel();
 
@@ -384,13 +440,13 @@ pub fn batch_render_to_clipboard(
             }
         };
 
-        let (succeeded, failed, paths) =
-            render_batch(&replays, temp_dir.path(), &options, &asset_cache, &progress_clone, &encode);
+        let (succeeded, failed, rendered) =
+            render_batch(&paths, &wows_data_map, temp_dir.path(), &options, &asset_cache, &progress_clone, &encode);
 
-        if !paths.is_empty()
+        if !rendered.is_empty()
             && let Ok(mut clipboard) = arboard::Clipboard::new()
         {
-            let refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();
+            let refs: Vec<&std::path::Path> = rendered.iter().map(|p| p.as_path()).collect();
             let _ = clipboard.set().file_list(&refs);
             let _ = temp_dir.keep();
         }

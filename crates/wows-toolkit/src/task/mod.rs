@@ -174,17 +174,48 @@ pub enum BackgroundTaskKind {
 }
 
 /// Progress state for a batch video export, shared between the background thread and the UI.
+///
+/// A batch reads each replay off disk only when it reaches it, so the frame
+/// counts it can report are the current replay's, not the whole batch's.
 pub struct BatchVideoExportProgress {
-    /// Total estimated frames across all replays.
-    pub total_frames: u64,
-    /// Frames completed so far.
-    pub completed_frames: u64,
+    /// Frames rendered so far in the replay currently being rendered.
+    pub current_frames: u64,
+    /// Frames the replay currently being rendered is expected to produce.
+    /// `None` until it has been read off disk and its duration is known.
+    pub current_total_frames: Option<u64>,
     /// Index of the replay currently being rendered (0-based).
     pub current_index: usize,
     /// Total number of replays to render.
     pub total_replays: usize,
     /// Name of the replay currently being rendered.
     pub current_name: String,
+}
+
+impl BatchVideoExportProgress {
+    /// The starting state for a batch of `total_replays` replays.
+    pub fn for_batch(total_replays: usize) -> Self {
+        Self {
+            current_frames: 0,
+            current_total_frames: None,
+            current_index: 0,
+            total_replays,
+            current_name: String::new(),
+        }
+    }
+
+    /// How far the whole batch has got, in `0.0..=1.0`. Every replay is one
+    /// equal slice of the bar, and the one being rendered fills its own slice by
+    /// frame count once its length is known.
+    pub fn fraction(&self) -> f32 {
+        if self.total_replays == 0 {
+            return 0.0;
+        }
+        let within_current = match self.current_total_frames {
+            Some(total) if total > 0 => (self.current_frames as f32 / total as f32).clamp(0.0, 1.0),
+            _ => 0.0,
+        };
+        ((self.current_index as f32 + within_current) / self.total_replays as f32).clamp(0.0, 1.0)
+    }
 }
 
 #[cfg(feature = "mod_manager")]
@@ -354,9 +385,7 @@ impl BackgroundTask {
                     },
                     BackgroundTaskKind::BatchVideoExport { progress } => {
                         let p = progress.lock();
-                        let pct =
-                            if p.total_frames > 0 { p.completed_frames as f32 / p.total_frames as f32 } else { 0.0 };
-                        ui.add(egui::ProgressBar::new(pct).text(t!(
+                        ui.add(egui::ProgressBar::new(p.fraction()).text(t!(
                             "ui.task.batch_render_progress",
                             current = p.current_index + 1,
                             total = p.total_replays,
@@ -537,5 +566,53 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
             }
             Self::NoReceiver => f.debug_struct("NoReceiver").finish(),
         }
+    }
+}
+
+#[cfg(test)]
+mod batch_progress_tests {
+    use super::BatchVideoExportProgress;
+
+    #[test]
+    fn a_batch_that_has_started_nothing_reports_no_progress() {
+        assert_eq!(BatchVideoExportProgress::for_batch(4).fraction(), 0.0);
+    }
+
+    #[test]
+    fn an_empty_batch_does_not_divide_by_zero() {
+        assert_eq!(BatchVideoExportProgress::for_batch(0).fraction(), 0.0);
+    }
+
+    #[test]
+    fn each_replay_is_one_equal_slice_of_the_bar() {
+        let mut progress = BatchVideoExportProgress::for_batch(4);
+        progress.current_index = 2;
+        assert_eq!(progress.fraction(), 0.5, "two of four replays are behind us");
+
+        progress.current_total_frames = Some(100);
+        progress.current_frames = 50;
+        assert_eq!(progress.fraction(), 0.625, "half way through the third of four");
+    }
+
+    /// A replay is only read off disk when the batch reaches it, so its length
+    /// is unknown for as long as that read takes. The bar must sit at that
+    /// replay's own boundary meanwhile, neither stalling behind it nor guessing
+    /// past it.
+    #[test]
+    fn a_replay_whose_length_is_not_known_yet_contributes_only_its_slices_start() {
+        let mut progress = BatchVideoExportProgress::for_batch(2);
+        progress.current_index = 1;
+        progress.current_frames = 999;
+        assert_eq!(progress.fraction(), 0.5);
+    }
+
+    /// The per-replay frame count is an estimate from the replay's duration, so
+    /// a render can overrun it. That must not spill into the next replay's slice.
+    #[test]
+    fn overshooting_the_frame_estimate_stays_inside_the_replays_own_slice() {
+        let mut progress = BatchVideoExportProgress::for_batch(2);
+        progress.current_total_frames = Some(100);
+        progress.current_frames = 400;
+        assert_eq!(progress.fraction(), 0.5, "the first of two replays cannot fill more than half the bar");
     }
 }
