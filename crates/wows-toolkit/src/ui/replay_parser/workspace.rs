@@ -395,8 +395,30 @@ mod tests {
     fn a_very_long_leaf_is_middle_truncated() {
         let long = "a".repeat(60);
         let out = shorten_root(Path::new(&format!("D:/x/{long}")));
-        assert!(out.len() < 60, "expected truncation, got {out:?}");
-        assert!(out.contains(".."), "expected an elision marker, got {out:?}");
+        assert_eq!(out, format!("D:/x/{}..{}", "a".repeat(12), "a".repeat(12)));
+    }
+
+    /// The head and tail keep distinct halves of the leaf rather than the
+    /// same one twice, so a truncated title still discriminates siblings.
+    #[test]
+    fn a_truncated_leaf_keeps_both_ends() {
+        let leaf = format!("{}{}", "h".repeat(20), "t".repeat(20));
+        let out = shorten_root(Path::new(&format!("D:/x/{leaf}")));
+        assert_eq!(out, format!("D:/x/{}..{}", "h".repeat(12), "t".repeat(12)));
+    }
+
+    /// Pins the 24-char threshold from both sides: one under is untouched,
+    /// one over truncates. An off-by-one bound fails exactly one of these.
+    #[test]
+    fn the_leaf_truncation_threshold_is_exact() {
+        let at_limit = "b".repeat(24);
+        assert_eq!(shorten_root(Path::new(&format!("D:/x/{at_limit}"))), format!("D:/x/{at_limit}"));
+
+        let over_limit = "b".repeat(25);
+        assert_eq!(
+            shorten_root(Path::new(&format!("D:/x/{over_limit}"))),
+            format!("D:/x/{}..{}", "b".repeat(12), "b".repeat(12))
+        );
     }
 
     #[test]
