@@ -2169,13 +2169,51 @@ pub struct CrewSkill {
 /// not an input here (only `translated_name`'s two lookup keys are), so a bare
 /// name and version are sufficient.
 pub fn skill_translation_keys_for(name: &CrewSkillName, prefix: &str, version: &Version) -> (String, String) {
-    use convert_case::Case;
-    use convert_case::Casing;
-    let snake = format!("{prefix}_{}", name.as_str().to_case(Case::UpperSnake));
-    let plain = format!("{prefix}_{}", name.as_str().to_uppercase());
+    let stems = skill_key_stems(name.as_str());
+    let snake = format!("{prefix}_{}", stems.upper_snake);
+    let plain = format!("{prefix}_{}", stems.uppercase);
     let rework =
         Version::base(CAPTAIN_SKILL_REWORK_VERSION.0, CAPTAIN_SKILL_REWORK_VERSION.1, CAPTAIN_SKILL_REWORK_VERSION.2);
     if version.is_at_least(&rework) { (snake, plain) } else { (plain, snake) }
+}
+
+/// A skill name's two key spellings, without the prefix. Named rather than a
+/// pair of strings because `skill_translation_keys_for` also handles a
+/// primary/fallback pair of the same shape, and the two orderings differ.
+#[derive(Clone)]
+struct SkillKeyStems {
+    /// The post-rework spelling, e.g. `HE_FIRE_PROBABILITY`.
+    upper_snake: String,
+    /// The pre-rework spelling, e.g. `HEFIREPROBABILITY`.
+    uppercase: String,
+}
+
+/// Both key spellings for a skill's internal name.
+///
+/// Memoized: the conversions are pure functions of the name, but
+/// `convert_case`'s boundary analysis walks the string by grapheme and
+/// allocates as it goes, and a battle report runs it once per skill per player
+/// across a whole grid. Skill names come from the build's params, a fixed table
+/// of a few dozen entries, so the map is bounded by construction and never
+/// needs eviction.
+fn skill_key_stems(name: &str) -> SkillKeyStems {
+    use convert_case::Case;
+    use convert_case::Casing;
+    use std::sync::OnceLock;
+    use std::sync::RwLock;
+
+    static STEMS: OnceLock<RwLock<std::collections::HashMap<String, SkillKeyStems>>> = OnceLock::new();
+    let cache = STEMS.get_or_init(Default::default);
+
+    // A poisoned lock still holds valid entries: the map is only ever inserted
+    // into, so a panic mid-write cannot leave it inconsistent.
+    if let Some(hit) = cache.read().unwrap_or_else(|e| e.into_inner()).get(name) {
+        return hit.clone();
+    }
+
+    let computed = SkillKeyStems { upper_snake: name.to_case(Case::UpperSnake), uppercase: name.to_uppercase() };
+    cache.write().unwrap_or_else(|e| e.into_inner()).insert(name.to_string(), computed.clone());
+    computed
 }
 
 #[cfg(test)]

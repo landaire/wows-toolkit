@@ -450,15 +450,40 @@ impl CrewModifiersCompactParams {
     }
 }
 
-trait UpdateFromReplayArgs {
-    fn update_by_name(&mut self, name: &str, value: &ArgValue<'_>, version: Version, constants: &GameConstants) {
-        // This is far from optimal, but is an easy solution for now
-        let mut dict = HashMap::with_capacity(1);
-        dict.insert(name, value.clone());
-        self.update_from_args(&dict, version, constants);
+/// A property update's arguments: either the decoded `props` map an entity
+/// create carries, or the single named value an entity property packet carries.
+///
+/// The single case exists because it is the overwhelmingly common one: an
+/// `update_from_args` body probes every key it knows about (around fifty for
+/// `VehicleProps`) to find the one that is present. Holding that one value in a
+/// map made each probe hash a string, and getting it into the map cost an
+/// allocation and a deep clone of a value that can be a nested tree. Answering
+/// from the pair directly makes a probe a string comparison against a borrow.
+#[derive(Clone, Copy)]
+enum PropertyArgs<'a, 'argtype> {
+    Map(&'a HashMap<&'argtype str, ArgValue<'argtype>>),
+    Single { name: &'a str, value: &'a ArgValue<'argtype> },
+}
+
+impl<'a, 'argtype> PropertyArgs<'a, 'argtype> {
+    fn get(&self, key: &str) -> Option<&'a ArgValue<'argtype>> {
+        match *self {
+            Self::Map(map) => map.get(key),
+            Self::Single { name, value } => (name == key).then_some(value),
+        }
     }
 
-    fn update_from_args(&mut self, args: &HashMap<&str, ArgValue<'_>>, version: Version, constants: &GameConstants);
+    fn contains_key(&self, key: &str) -> bool {
+        self.get(key).is_some()
+    }
+}
+
+trait UpdateFromReplayArgs {
+    fn update_by_name(&mut self, name: &str, value: &ArgValue<'_>, version: Version, constants: &GameConstants) {
+        self.update_from_args(PropertyArgs::Single { name, value }, version, constants);
+    }
+
+    fn update_from_args(&mut self, args: PropertyArgs<'_, '_>, version: Version, constants: &GameConstants);
 }
 
 macro_rules! set_arg_value {
@@ -568,7 +593,7 @@ macro_rules! arg_value_to_type {
 }
 
 impl UpdateFromReplayArgs for CrewModifiersCompactParams {
-    fn update_from_args(&mut self, args: &HashMap<&str, ArgValue<'_>>, version: Version, _constants: &GameConstants) {
+    fn update_from_args(&mut self, args: PropertyArgs<'_, '_>, version: Version, _constants: &GameConstants) {
         const PARAMS_ID_KEY: &str = "paramsId";
         const IS_IN_ADAPTION_KEY: &str = "isInAdaption";
         const LEARNED_SKILLS_KEY: &str = "learnedSkills";
@@ -1002,7 +1027,7 @@ impl VehicleProps {
         version: Version,
         constants: &GameConstants,
     ) {
-        <Self as UpdateFromReplayArgs>::update_from_args(self, args, version, constants);
+        <Self as UpdateFromReplayArgs>::update_from_args(self, PropertyArgs::Map(args), version, constants);
     }
 
     /// Seed health from max_health when arena state omits a live health value.
@@ -1014,7 +1039,7 @@ impl VehicleProps {
 }
 
 impl UpdateFromReplayArgs for VehicleProps {
-    fn update_from_args(&mut self, args: &HashMap<&str, ArgValue<'_>>, version: Version, constants: &GameConstants) {
+    fn update_from_args(&mut self, args: PropertyArgs<'_, '_>, version: Version, constants: &GameConstants) {
         const IGNORE_MAP_BORDERS_KEY: &str = "ignoreMapBorders";
         const AIR_DEFENSE_DISPERSION_RADIUS_KEY: &str = "airDefenseDispRadius";
         const DEATH_SETTINGS_KEY: &str = "deathSettings";
@@ -1102,7 +1127,7 @@ impl UpdateFromReplayArgs for VehicleProps {
 
         if args.contains_key(CREW_MODIFIERS_COMPACT_PARAMS_KEY) {
             self.crew_modifiers_compact_params.update_from_args(
-                arg_value_to_type!(args, CREW_MODIFIERS_COMPACT_PARAMS_KEY, HashMap<(), ()>),
+                PropertyArgs::Map(arg_value_to_type!(args, CREW_MODIFIERS_COMPACT_PARAMS_KEY, HashMap<(), ()>)),
                 version,
                 constants,
             );
