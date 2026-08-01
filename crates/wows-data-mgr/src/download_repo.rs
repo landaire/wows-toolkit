@@ -310,6 +310,156 @@ fn object_state(
     }
 }
 
+/// Whether the remote publishes data for a requested build.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteAvailability {
+    /// The remote has this exact build.
+    Exact,
+    /// The remote has no exact match; this is the closest published build.
+    /// Downloading it may still not satisfy the replay that asked for it.
+    Nearest { version: String, build: u32 },
+    /// The remote publishes nothing usable for this build.
+    Unpublished,
+}
+
+/// The outcome of resolving one requested build against the remote index.
+#[derive(Debug, Clone)]
+pub struct ResolvedBuild {
+    pub requested_build: u32,
+    pub requested_version: String,
+    pub availability: RemoteAvailability,
+}
+
+/// A deduplicated plan for downloading a selection of builds.
+///
+/// `unique_missing_objects` is the size of the union of every selected build's
+/// referenced hashes, minus what the local CAS already has. It is not a sum
+/// over `resolved`: the CAS is shared, so overlapping builds contribute fewer
+/// new objects than their individual sizes would suggest, and a build that is
+/// a strict subset of another already-selected build adds nothing at all.
+#[derive(Debug, Clone)]
+pub struct DownloadPlan {
+    pub unique_missing_objects: usize,
+    pub resolved: Vec<ResolvedBuild>,
+}
+
+/// Distinct CAS objects that must be fetched for a selection of builds.
+///
+/// The union is taken across the whole selection rather than per build: the
+/// CAS is shared, so adjacent builds overlap heavily and a per-build sum would
+/// overstate the real transfer.
+pub fn plan_objects_to_fetch(per_build_hashes: &[BTreeSet<String>], is_local: impl Fn(&str) -> bool) -> usize {
+    per_build_hashes.iter().flatten().collect::<BTreeSet<_>>().into_iter().filter(|hash| !is_local(hash)).count()
+}
+
+/// Resolve each requested build against the index. `None` means the remote has
+/// no exact or nearest-version match; that request must not abort the plan.
+fn resolve_requests(index: &BuildsIndex, builds: &[(u32, Option<String>)]) -> Vec<Option<(BuildEntry, bool)>> {
+    builds
+        .iter()
+        .map(|(build, version)| index.resolve_build(*build, version.as_deref()).map(|(e, exact)| (e.clone(), exact)))
+        .collect()
+}
+
+/// The distinct build entries resolved requests point at. Two requests can
+/// resolve to the same entry through nearest-version fallback; deduplicating
+/// here means that entry's `metadata.toml` is fetched only once.
+fn distinct_entries(resolutions: &[Option<(BuildEntry, bool)>]) -> Vec<BuildEntry> {
+    let mut seen = BTreeSet::new();
+    let mut entries = Vec::new();
+    for (entry, _) in resolutions.iter().flatten() {
+        if seen.insert(entry.dir.clone()) {
+            entries.push(entry.clone());
+        }
+    }
+    entries
+}
+
+/// Fetch `metadata.toml` for each entry, keyed by directory. A 404 or a parse
+/// failure yields `None` for that directory instead of an error, so one bad
+/// build's metadata does not prevent planning the others.
+async fn fetch_entry_hashes(
+    client: &reqwest::Client,
+    base_url: &str,
+    entries: &[BuildEntry],
+) -> BTreeMap<String, Option<BTreeSet<String>>> {
+    let mut result = BTreeMap::new();
+    for entry in entries {
+        let url = format!("{base_url}/{}/metadata.toml", entry.dir);
+        let hashes = match get_text(client, &url).await {
+            Ok(Some(text)) => match toml::from_str::<BuildMetadata>(&text) {
+                Ok(metadata) => Some(metadata.referenced_hashes().into_iter().collect::<BTreeSet<String>>()),
+                Err(e) => {
+                    tracing::warn!("could not parse remote metadata.toml for {}: {e}", entry.dir);
+                    None
+                }
+            },
+            Ok(None) => {
+                tracing::warn!("remote metadata.toml missing for {}", entry.dir);
+                None
+            }
+            Err(e) => {
+                tracing::warn!("failed to fetch remote metadata.toml for {}: {e}", entry.dir);
+                None
+            }
+        };
+        result.insert(entry.dir.clone(), hashes);
+    }
+    result
+}
+
+/// Assemble the final plan from resolved requests and their fetched hash sets.
+/// Pure: takes the already-fetched (or already-failed) hashes for each distinct
+/// directory, so it can be exercised without touching the network.
+fn build_plan(
+    builds: &[(u32, Option<String>)],
+    resolutions: &[Option<(BuildEntry, bool)>],
+    entry_hashes: &BTreeMap<String, Option<BTreeSet<String>>>,
+    is_local: impl Fn(&str) -> bool,
+) -> DownloadPlan {
+    let per_build_hashes: Vec<BTreeSet<String>> = entry_hashes.values().filter_map(|h| h.clone()).collect();
+    let unique_missing_objects = plan_objects_to_fetch(&per_build_hashes, is_local);
+
+    let resolved = builds
+        .iter()
+        .zip(resolutions.iter())
+        .map(|((build, version), resolution)| {
+            let availability = match resolution {
+                None => RemoteAvailability::Unpublished,
+                Some((entry, exact)) => match entry_hashes.get(&entry.dir) {
+                    Some(Some(_)) if *exact => RemoteAvailability::Exact,
+                    Some(Some(_)) => RemoteAvailability::Nearest { version: entry.version.clone(), build: entry.build },
+                    _ => RemoteAvailability::Unpublished,
+                },
+            };
+            ResolvedBuild {
+                requested_build: *build,
+                requested_version: version.clone().unwrap_or_default(),
+                availability,
+            }
+        })
+        .collect();
+
+    DownloadPlan { unique_missing_objects, resolved }
+}
+
+/// Plan a deduplicated download of a selection of builds: resolve each one
+/// against the remote index, fetch each distinct resolved build's metadata at
+/// most once, and report the union of missing CAS objects across the whole
+/// selection alongside each build's remote availability.
+pub async fn plan_download(
+    client: &reqwest::Client,
+    base_url: &str,
+    cas_root: &Path,
+    builds: &[(u32, Option<String>)],
+) -> Result<DownloadPlan, Report> {
+    let index = fetch_builds_index(client, base_url).await?;
+    let resolutions = resolve_requests(&index, builds);
+    let entries = distinct_entries(&resolutions);
+    let entry_hashes = fetch_entry_hashes(client, base_url, &entries).await;
+    Ok(build_plan(builds, &resolutions, &entry_hashes, |h| cas::object_exists(cas_root, h)))
+}
+
 /// Fetch and parse the remote `builds.toml` index.
 pub async fn fetch_builds_index(client: &reqwest::Client, base_url: &str) -> Result<BuildsIndex, Report> {
     let url = format!("{base_url}/builds.toml");
@@ -559,5 +709,142 @@ mod tests {
             runtime.block_on(check_for_updates(&client, DEFAULT_REPO_BASE_URL, base, Some(&check.tip))).unwrap();
         assert_eq!(cached.tip, check.tip);
         assert!(cached.updates.is_empty());
+    }
+
+    fn hashes(items: &[&str]) -> BTreeSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn plan_shared_objects_between_builds_are_counted_once() {
+        let a = hashes(&["h1", "h2", "h3"]);
+        let b = hashes(&["h2", "h3", "h4"]);
+        // Union is h1..h4 = 4, not 3 + 3 = 6.
+        assert_eq!(plan_objects_to_fetch(&[a, b], |_| false), 4);
+    }
+
+    #[test]
+    fn plan_locally_present_objects_are_excluded() {
+        let a = hashes(&["h1", "h2", "h3"]);
+        assert_eq!(plan_objects_to_fetch(&[a], |h| h == "h2"), 2);
+    }
+
+    #[test]
+    fn plan_a_build_whose_objects_are_all_local_adds_nothing() {
+        let a = hashes(&["h1", "h2"]);
+        let b = hashes(&["h3"]);
+        // Only h3 is missing; h1 and h2 are already in the CAS.
+        assert_eq!(plan_objects_to_fetch(&[a, b], |h| h != "h3"), 1);
+    }
+
+    #[test]
+    fn plan_an_empty_selection_needs_nothing() {
+        assert_eq!(plan_objects_to_fetch(&[], |_| false), 0);
+    }
+
+    #[test]
+    fn plan_a_build_adding_only_shared_objects_adds_nothing_to_the_total() {
+        let a = hashes(&["h1", "h2"]);
+        let b = hashes(&["h1", "h2"]);
+        assert_eq!(plan_objects_to_fetch(&[a.clone()], |_| false), 2);
+        assert_eq!(plan_objects_to_fetch(&[a, b], |_| false), 2);
+    }
+
+    fn entry(version: &str, build: u32, dir: &str) -> BuildEntry {
+        BuildEntry { version: version.into(), build, dir: dir.into(), dumped_at: String::new() }
+    }
+
+    // Two requested builds resolving to the same entry via nearest-version
+    // fallback must yield one distinct entry, so plan_download fetches that
+    // entry's metadata.toml exactly once instead of twice.
+    #[test]
+    fn plan_two_requests_resolving_to_the_same_entry_dedupe_to_one() {
+        let shared = entry("15.2.0", 12100000, "15.2.0_12100000");
+        let resolutions = vec![Some((shared.clone(), false)), Some((shared, true))];
+        let distinct = distinct_entries(&resolutions);
+        assert_eq!(distinct.len(), 1);
+    }
+
+    // Requests resolving to genuinely different entries must not collapse.
+    #[test]
+    fn plan_requests_resolving_to_different_entries_stay_distinct() {
+        let a = entry("15.1.0", 11965230, "15.1.0_11965230");
+        let b = entry("15.2.0", 12100000, "15.2.0_12100000");
+        let resolutions = vec![Some((a, true)), Some((b, true))];
+        assert_eq!(distinct_entries(&resolutions).len(), 2);
+    }
+
+    // A build the index cannot resolve at all must not be present in the
+    // distinct-entries list; it contributes no hashes and no metadata fetch.
+    #[test]
+    fn plan_unresolved_requests_contribute_no_entries() {
+        let a = entry("15.2.0", 12100000, "15.2.0_12100000");
+        let resolutions = vec![Some((a, true)), None];
+        assert_eq!(distinct_entries(&resolutions).len(), 1);
+    }
+
+    // build_plan is the pure tail of plan_download: everything after the
+    // network fetches. Simulating a failed metadata fetch for one build lets
+    // the "one bad build does not sink the plan" rule be checked without a
+    // live network: the failed build's own hashes are excluded, but the
+    // other, healthy build's hashes and resolution are unaffected.
+    #[test]
+    fn plan_a_metadata_fetch_failure_yields_unpublished_without_sinking_other_builds() {
+        let good = entry("15.2.0", 12100000, "15.2.0_12100000");
+        let bad = entry("15.3.0", 12200000, "15.3.0_12200000");
+        let builds = vec![(12100000, Some("15.2.0".to_string())), (12200000, Some("15.3.0".to_string()))];
+        let resolutions = vec![Some((good.clone(), true)), Some((bad.clone(), true))];
+
+        let mut entry_hashes = BTreeMap::new();
+        entry_hashes.insert(good.dir.clone(), Some(hashes(&["h1", "h2"])));
+        // Simulates a 404 or parse failure for `bad`'s metadata.toml.
+        entry_hashes.insert(bad.dir.clone(), None);
+
+        let plan = build_plan(&builds, &resolutions, &entry_hashes, |_| false);
+
+        assert_eq!(plan.unique_missing_objects, 2);
+        assert_eq!(plan.resolved.len(), 2);
+        assert_eq!(plan.resolved[0].availability, RemoteAvailability::Exact);
+        assert_eq!(plan.resolved[1].availability, RemoteAvailability::Unpublished);
+    }
+
+    // An index that cannot resolve a build at all (no exact or nearest match)
+    // must still let the rest of the plan proceed.
+    #[test]
+    fn plan_an_unresolvable_build_is_unpublished_and_contributes_no_hashes() {
+        let good = entry("15.2.0", 12100000, "15.2.0_12100000");
+        let builds = vec![(12100000, Some("15.2.0".to_string())), (99999999, None)];
+        let resolutions = vec![Some((good.clone(), true)), None];
+
+        let mut entry_hashes = BTreeMap::new();
+        entry_hashes.insert(good.dir.clone(), Some(hashes(&["h1"])));
+
+        let plan = build_plan(&builds, &resolutions, &entry_hashes, |_| false);
+
+        assert_eq!(plan.unique_missing_objects, 1);
+        assert_eq!(plan.resolved[0].availability, RemoteAvailability::Exact);
+        assert_eq!(plan.resolved[1].availability, RemoteAvailability::Unpublished);
+    }
+
+    // Two requests that resolve to the same entry must count that entry's
+    // hashes once in the total, matching the deduplication contract of
+    // plan_objects_to_fetch, and both requests report accurate availability.
+    #[test]
+    fn plan_shared_entry_across_two_requests_counts_hashes_once() {
+        let shared = entry("15.2.0", 12100000, "15.2.0_12100000");
+        let builds = vec![(12100500, Some("15.2.0".to_string())), (12100000, Some("15.2.0".to_string()))];
+        let resolutions = vec![Some((shared.clone(), false)), Some((shared.clone(), true))];
+
+        let mut entry_hashes = BTreeMap::new();
+        entry_hashes.insert(shared.dir.clone(), Some(hashes(&["h1", "h2", "h3"])));
+
+        let plan = build_plan(&builds, &resolutions, &entry_hashes, |_| false);
+
+        assert_eq!(plan.unique_missing_objects, 3);
+        assert_eq!(
+            plan.resolved[0].availability,
+            RemoteAvailability::Nearest { version: "15.2.0".into(), build: 12100000 }
+        );
+        assert_eq!(plan.resolved[1].availability, RemoteAvailability::Exact);
     }
 }
