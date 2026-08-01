@@ -1493,12 +1493,50 @@ pub fn start_ingest_directory(
     root: PathBuf,
 ) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
+    let (batch_tx, batch_rx) = mpsc::channel();
 
     crate::util::thread::spawn_logged("ingest-directory", move || {
-        let _ = tx.send(run_ingest_directory(deps, pool, tokio_runtime, workspace, root));
+        let _ = tx.send(run_ingest_directory(deps, pool, tokio_runtime, workspace, root, &batch_tx));
     });
 
-    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::IngestingDirectory { workspace } }
+    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::IngestingDirectory { workspace, rx: batch_rx } }
+}
+
+/// How far a directory walk has got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IngestProgress {
+    /// Files visited, whether they loaded or not.
+    pub done: usize,
+    /// Files the walk found before it started reading any of them.
+    pub total: usize,
+}
+
+/// One slice of a directory walk, delivered while the walk is still running so
+/// the listing fills as replays are read rather than when the last one is done.
+pub struct IngestBatch {
+    /// The listing this slice belongs to. A batch whose workspace has closed is
+    /// dropped: it belongs to nothing else.
+    pub workspace: crate::db::index::rows::WorkspaceId,
+    /// The index source the walk resolved, carried on every batch so the
+    /// listing reads its row summaries against the right source from the first
+    /// replay onwards rather than waiting for the walk to finish.
+    pub source: crate::db::index::rows::SourceId,
+    pub replays: HashMap<PathBuf, Arc<RwLock<Replay>>>,
+    pub progress: IngestProgress,
+}
+
+/// Replays held back before a batch goes to the UI. Sized so a directory of
+/// thousands of files does not wake the UI once per replay.
+const INGEST_BATCH_SIZE: usize = 16;
+
+/// How long a partial batch waits before going out anyway. Reading and indexing
+/// a replay is slow enough that a size-only rule would hold the first rows back
+/// for a noticeable time on a large directory.
+const INGEST_FLUSH_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Whether the replays held back so far should go to the UI now.
+fn should_flush_batch(pending: usize, since_last_flush: Duration) -> bool {
+    pending > 0 && (pending >= INGEST_BATCH_SIZE || since_last_flush >= INGEST_FLUSH_INTERVAL)
 }
 
 /// A game build some replay needed and the toolkit does not have installed.
@@ -1517,6 +1555,11 @@ pub struct MissingBuild {
 pub struct IngestFailures {
     pub missing_builds: BTreeMap<MissingBuild, usize>,
     pub unreadable: usize,
+    /// Replays that loaded and are listed, but whose index rows could not be
+    /// written. Their rows fall back to the not-indexed placeholder, so they
+    /// are worth reporting, but they are not missing from the listing and so
+    /// are counted apart from the replays that never loaded.
+    pub not_indexed: usize,
 }
 
 impl IngestFailures {
@@ -1540,6 +1583,11 @@ impl IngestFailures {
         self.unreadable += 1;
     }
 
+    /// Attribute one replay that is listed but could not be indexed.
+    pub fn record_index_failure(&mut self) {
+        self.not_indexed += 1;
+    }
+
     /// Every replay the directory holds that did not load, for either reason.
     pub fn total(&self) -> usize {
         self.unreadable + self.missing_builds.values().sum::<usize>()
@@ -1552,6 +1600,7 @@ fn run_ingest_directory(
     tokio_runtime: Arc<tokio::runtime::Runtime>,
     workspace: crate::db::index::rows::WorkspaceId,
     root: PathBuf,
+    batch_tx: &mpsc::Sender<IngestBatch>,
 ) -> Result<BackgroundTaskCompletion, Report> {
     let source = tokio_runtime
         .block_on(crate::db::index::query::ensure_source(
@@ -1563,10 +1612,18 @@ fn run_ingest_directory(
         ))
         .map_err(|e| report!("failed to resolve replay index source for {}: {e}", root.display()))?;
 
-    let mut replays = HashMap::new();
-    let mut failures = IngestFailures::default();
+    // The paths this source already has index rows for. Re-opening a directory
+    // then costs a read per replay instead of a re-parse of the whole tree.
+    let indexed_paths: HashSet<String> =
+        tokio_runtime.block_on(crate::db::index::query::record_paths_in_source(&pool, source)).unwrap_or_default();
 
-    for path in walk_replay_files(&root) {
+    let paths = walk_replay_files(&root);
+    let total = paths.len();
+    let mut failures = IngestFailures::default();
+    let mut pending: HashMap<PathBuf, Arc<RwLock<Replay>>> = HashMap::new();
+    let mut last_flush = std::time::Instant::now();
+
+    for (visited, path) in paths.into_iter().enumerate() {
         // One unreadable, malformed or version-orphaned file must cost only
         // itself. An uncaught parser panic would take this thread with it and
         // leave the rest of the directory unread.
@@ -1576,7 +1633,27 @@ fn run_ingest_directory(
 
         match built {
             Ok(Ok(replay)) => {
-                replays.insert(path, replay);
+                if !indexed_paths.contains(path.to_string_lossy().as_ref()) {
+                    // Indexing parses, so it carries the same panic risk the
+                    // read does, and a replay that will not index is still
+                    // worth listing.
+                    let indexed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        index_ingested_replay(&replay, &deps, &pool, &tokio_runtime, source)
+                    }));
+                    match indexed {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            failures.record_index_failure();
+                            warn!("listing replay {} without an index row: {e}", path.display());
+                        }
+                        Err(payload) => {
+                            failures.record_index_failure();
+                            let msg = crate::util::thread::panic_payload_to_string(&payload);
+                            warn!("panic while indexing replay {}, listing it anyway: {msg}", path.display());
+                        }
+                    }
+                }
+                pending.insert(path, replay);
             }
             Ok(Err(e)) => {
                 failures.record(&e);
@@ -1588,6 +1665,22 @@ fn run_ingest_directory(
                 warn!("panic while reading replay {}, skipping it: {msg}", path.display());
             }
         }
+
+        if should_flush_batch(pending.len(), last_flush.elapsed()) {
+            let progress = IngestProgress { done: visited + 1, total };
+            let batch = IngestBatch { workspace, source, replays: std::mem::take(&mut pending), progress };
+            if batch_tx.send(batch).is_err() {
+                // Nothing is listening any more: the workspace closed or the
+                // app is shutting down. The rest of the walk has no reader.
+                return Ok(BackgroundTaskCompletion::DirectoryIngested { workspace, source, failures });
+            }
+            last_flush = std::time::Instant::now();
+        }
+    }
+
+    if !pending.is_empty() {
+        let progress = IngestProgress { done: total, total };
+        let _ = batch_tx.send(IngestBatch { workspace, source, replays: pending, progress });
     }
 
     if failures.total() > 0 {
@@ -1600,8 +1693,46 @@ fn run_ingest_directory(
             failures.missing_builds.len(),
         );
     }
+    if failures.not_indexed > 0 {
+        warn!("ingest of {} listed {} replay(s) it could not index", root.display(), failures.not_indexed);
+    }
 
-    Ok(BackgroundTaskCompletion::DirectoryIngested { workspace, source, replays, failures })
+    Ok(BackgroundTaskCompletion::DirectoryIngested { workspace, source, failures })
+}
+
+/// Parse `replay` and write its index rows, so its listing row carries the same
+/// damage, kills, division and outcome a live-parsed replay's does.
+///
+/// The parsed reports are dropped again once the rows are written: a directory
+/// can hold thousands of replays, and a battle report per listed replay would
+/// hold far more memory than the listing needs. The row data now lives in the
+/// index, which is where the listing reads it from.
+fn index_ingested_replay(
+    replay: &Arc<RwLock<Replay>>,
+    deps: &crate::data::wows_data::ReplayDependencies,
+    pool: &sqlx::SqlitePool,
+    tokio_runtime: &tokio::runtime::Runtime,
+    source: crate::db::index::rows::SourceId,
+) -> Result<(), Report> {
+    let mut guard = replay.write();
+
+    let replay_version = Version::from_client_exe(&guard.replay_file.meta.clientVersionFromExe);
+    let Some(wows_data) = deps.resolve_versioned_deps(&replay_version) else {
+        return Err(report!("no game data for build {}", replay_version.to_path()));
+    };
+    let expected_build = wows_data.read().patch_version.to_string();
+
+    let report = guard.parse(&expected_build)?;
+    guard.battle_report = Some(report);
+    guard.build_ui_report(deps);
+
+    let result =
+        crate::data::replay_index::index_replay_reporting(tokio_runtime, pool, &guard, source, jiff::Timestamp::now());
+
+    guard.battle_report = None;
+    guard.ui_report = None;
+
+    result
 }
 
 #[cfg(test)]
@@ -1813,5 +1944,45 @@ mod tests {
         failures.record(&rootcause::report!("file is truncated"));
         assert_eq!(failures.unreadable, 1);
         assert_eq!(failures.missing_builds.values().sum::<usize>(), 1);
+    }
+
+    /// A replay that reads but does not index is still listed, so it is not one
+    /// of the replays the directory skipped. Counting it in `total()` would
+    /// report it as missing from a listing it is actually in.
+    #[test]
+    fn an_index_failure_is_counted_apart_from_the_replays_that_did_not_load() {
+        let mut failures = IngestFailures::default();
+        failures.record(&rootcause::report!("file is truncated"));
+        failures.record_index_failure();
+        failures.record_index_failure();
+
+        assert_eq!(failures.not_indexed, 2);
+        assert_eq!(failures.unreadable, 1, "an index failure is not an unreadable file");
+        assert!(failures.missing_builds.is_empty());
+        assert_eq!(failures.total(), 1, "only the replays that did not load count as skipped");
+    }
+
+    /// Waking the UI for a batch with nothing in it is the one case that is
+    /// never worth a message, however long the walk has been stuck on one file.
+    #[test]
+    fn an_empty_batch_is_never_flushed() {
+        assert!(!should_flush_batch(0, Duration::ZERO));
+        assert!(!should_flush_batch(0, INGEST_FLUSH_INTERVAL * 10));
+    }
+
+    /// Size is what keeps a fast walk from waking the UI per replay, so a full
+    /// batch goes out without waiting for the interval.
+    #[test]
+    fn a_full_batch_flushes_before_the_interval_elapses() {
+        assert!(should_flush_batch(INGEST_BATCH_SIZE, Duration::ZERO));
+    }
+
+    /// The interval is what keeps a slow walk from holding replays back until
+    /// enough of them accumulate: one replay is enough once it has elapsed, and
+    /// not before.
+    #[test]
+    fn a_partial_batch_waits_for_the_interval() {
+        assert!(!should_flush_batch(1, Duration::ZERO));
+        assert!(should_flush_batch(1, INGEST_FLUSH_INTERVAL));
     }
 }

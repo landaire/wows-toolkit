@@ -991,6 +991,28 @@ impl TabState {
         }
     }
 
+    /// Add one slice of a running directory walk to the listing it names.
+    ///
+    /// Batches are merged, never assigned: every batch after the first lands on
+    /// a listing that already holds the replays before it. A batch whose
+    /// workspace has closed is dropped, which is the whole reason the batch
+    /// carries its own id rather than being applied to whatever is active.
+    pub fn apply_ingest_batch(&mut self, batch: crate::task::replays::IngestBatch) {
+        let Some(workspace) = self.workspace_mut(batch.workspace) else {
+            return;
+        };
+
+        workspace.replay_files.get_or_insert_with(HashMap::new).extend(batch.replays);
+        workspace.ingest_progress = Some(batch.progress);
+
+        if workspace.source != Some(batch.source) {
+            workspace.source = Some(batch.source);
+            // Summaries already loaded were read against a different source.
+            // Drop the stamp so the next frame reads them against this one.
+            workspace.replay_row_summaries_generation = None;
+        }
+    }
+
     pub(crate) fn prevent_changing_wows_dir(&mut self) {
         self.can_change_wows_dir = false;
     }
@@ -1438,6 +1460,96 @@ mod tests {
                 .contains_key(&path),
             "the active (non-live) workspace's entry must be untouched"
         );
+    }
+
+    fn ingest_batch(
+        workspace: WorkspaceId,
+        paths: &[&str],
+        done: usize,
+        total: usize,
+    ) -> crate::task::replays::IngestBatch {
+        crate::task::replays::IngestBatch {
+            workspace,
+            source: crate::db::index::rows::SourceId(3),
+            replays: paths.iter().map(|path| (PathBuf::from(path), test_replay())).collect(),
+            progress: crate::task::replays::IngestProgress { done, total },
+        }
+    }
+
+    /// The listing already holds a replay when the next batch lands, which is
+    /// what every batch after the first sees. An implementation that assigns
+    /// `replay_files` instead of merging drops `a.wowsreplay` here.
+    #[test]
+    fn an_ingest_batch_merges_into_a_listing_that_already_lists_a_replay() {
+        let mut state = TabState::default();
+        let id = WorkspaceId(1);
+        let mut workspace = ReplayWorkspace::new(None);
+        workspace.replay_files = Some(HashMap::from([(PathBuf::from("a.wowsreplay"), test_replay())]));
+        state.workspaces.insert(id, workspace);
+
+        state.apply_ingest_batch(ingest_batch(id, &["b.wowsreplay"], 2, 2));
+
+        let files = state.workspace(id).expect("inserted above").replay_files.as_ref().expect("set above");
+        assert!(files.contains_key(Path::new("a.wowsreplay")), "the replay already listed must survive the batch");
+        assert!(files.contains_key(Path::new("b.wowsreplay")), "the batch's replay must be added");
+    }
+
+    /// The very first batch of a walk arrives before anything is listed, so it
+    /// has to start the listing rather than being dropped for want of one.
+    #[test]
+    fn the_first_ingest_batch_starts_the_listing() {
+        let mut state = TabState::default();
+        let id = WorkspaceId(1);
+        state.workspaces.insert(id, ReplayWorkspace::new(None));
+
+        state.apply_ingest_batch(ingest_batch(id, &["a.wowsreplay"], 1, 4));
+
+        let workspace = state.workspace(id).expect("inserted above");
+        assert_eq!(workspace.replay_files.as_ref().map(|files| files.len()), Some(1));
+        assert_eq!(workspace.source, Some(crate::db::index::rows::SourceId(3)), "the batch's source must be adopted");
+        assert_eq!(
+            workspace.ingest_progress.map(|progress| (progress.done, progress.total)),
+            Some((1, 4)),
+            "the listing needs the walk's progress to report it"
+        );
+    }
+
+    /// Batches are routed by the id they carry, exactly like watcher events are
+    /// routed to the live workspace. Both workspaces are listed so a routing
+    /// mistake is observable in both directions.
+    #[test]
+    fn an_ingest_batch_lands_on_the_workspace_it_names_not_the_active_one() {
+        let mut state = TabState::default();
+        let target = WorkspaceId(1);
+        let active = WorkspaceId(2);
+        state.workspaces.insert(target, ReplayWorkspace::new(None));
+        state.workspaces.insert(active, ReplayWorkspace::new(None));
+        state.set_active_workspace(active);
+        assert_eq!(state.active_workspace_id(), active, "the other workspace must actually be active");
+
+        state.apply_ingest_batch(ingest_batch(target, &["a.wowsreplay"], 1, 1));
+
+        assert_eq!(
+            state.workspace(target).expect("inserted above").replay_files.as_ref().map(|files| files.len()),
+            Some(1),
+            "the named workspace must receive the batch"
+        );
+        assert!(
+            state.workspace(active).expect("inserted above").replay_files.is_none(),
+            "the active workspace must not receive another workspace's batch"
+        );
+    }
+
+    /// Closing a directory tab while its walk runs leaves batches in flight
+    /// with nowhere to land. Dropping them is the intended outcome, and must
+    /// not fall back to the live workspace.
+    #[test]
+    fn an_ingest_batch_for_a_closed_workspace_is_dropped() {
+        let mut state = TabState::default();
+        state.apply_ingest_batch(ingest_batch(WorkspaceId(99), &["a.wowsreplay"], 1, 1));
+
+        assert!(state.live_workspace.replay_files.is_none(), "a departed workspace's batch must not land on live");
+        assert!(state.workspaces.is_empty(), "a departed workspace must not be recreated by its own batch");
     }
 
     #[test]

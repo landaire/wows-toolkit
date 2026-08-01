@@ -3926,10 +3926,40 @@ impl ToolkitTabViewer<'_> {
     fn build_file_listing(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
         let grouping = self.tab_state.persisted.read().settings.replay.grouping;
 
+        self.show_ingest_progress(ui, ws_id);
+
         match grouping {
             ReplayGrouping::None => self.build_file_listing_ungrouped(ui, ws_id),
             ReplayGrouping::Date | ReplayGrouping::Ship => self.build_file_listing_grouped(ui, ws_id, grouping),
         }
+    }
+
+    /// Report the walk filling this listing, above the rows it is filling.
+    ///
+    /// The listing grows a batch at a time while a walk runs, so without this a
+    /// partly-filled listing is indistinguishable from a finished one. Both the
+    /// flag and the counts are cleared when the task finishes, however it
+    /// finishes, so this disappears with it.
+    fn show_ingest_progress(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
+        let Some(workspace) = self.tab_state.workspace(ws_id) else {
+            return;
+        };
+        if !workspace.ingest_in_flight {
+            return;
+        }
+        let progress = workspace.ingest_progress;
+
+        ui.horizontal(|ui| {
+            ui.spinner();
+            match progress {
+                Some(progress) => {
+                    ui.label(t!("ui.replay.listing_reading", done = progress.done, total = progress.total));
+                }
+                None => {
+                    ui.label(t!("ui.messages.reading_replay_directory"));
+                }
+            }
+        });
     }
 
     fn build_file_listing_ungrouped(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {

@@ -154,6 +154,7 @@ replays_already_indexed = "All %{total} replay(s) already indexed"
 loading_row_summaries = "Loading replay details..."
 reading_replay_directory = "Reading replay directory..."
 directory_replays_skipped = "Skipped %{skipped} replay(s) that could not be read"
+directory_replays_not_indexed = "Listed %{count} replay(s) without match details"
 
 # -- Stat names --
 
@@ -284,6 +285,7 @@ monitored_channel = "Monitored Channel (Default to Self)"
 collapse_listing = "Collapse Replay Listing"
 expand_listing = "Expand Replay Listing"
 listing_caption = "Replays"
+listing_reading = "Reading %{done} of %{total}..."
 spectator = "Spectator"
 loading = "Loading..."
 no_selection = "Click a replay to view, or double-click to open in a new tab"

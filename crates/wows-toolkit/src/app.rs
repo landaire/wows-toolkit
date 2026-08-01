@@ -1114,6 +1114,8 @@ impl WowsToolkitApp {
             }
             let mut shown_download_progress = false;
 
+            self.drain_ingest_batches();
+
             for i in 0..self.tab_state.background_tasks.len() {
                 let task = &mut self.tab_state.background_tasks[i];
 
@@ -1223,10 +1225,18 @@ impl WowsToolkitApp {
                             // re-walk record, which would otherwise mark the
                             // next explicit open as automatic and silence its
                             // offer.
-                            BackgroundTaskKind::IngestingDirectory { workspace } => {
+                            BackgroundTaskKind::IngestingDirectory { workspace, rx } => {
                                 let workspace_id = *workspace;
+                                // Whatever the walk sent between the drain above
+                                // and now, before the receiver goes away with the
+                                // task.
+                                let tail: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+                                for batch in tail {
+                                    self.tab_state.apply_ingest_batch(batch);
+                                }
                                 if let Some(target) = self.tab_state.workspace_mut(workspace_id) {
                                     target.ingest_in_flight = false;
+                                    target.ingest_progress = None;
                                 }
                                 let offered = self.finish_directory_reingest(workspace_id);
                                 self.finished_reingest_offer = offered.map(|offered| (workspace_id, offered));
@@ -1286,6 +1296,23 @@ impl WowsToolkitApp {
                 }
             }
         });
+    }
+
+    /// Move whatever every running directory walk has read since the last frame
+    /// into the listings those walks belong to.
+    ///
+    /// Collected before anything is applied so the tasks are done being borrowed
+    /// by the time the workspaces they name are touched.
+    fn drain_ingest_batches(&mut self) {
+        let mut batches = Vec::new();
+        for task in &mut self.tab_state.background_tasks {
+            if let BackgroundTaskKind::IngestingDirectory { rx, .. } = &task.kind {
+                batches.extend(std::iter::from_fn(|| rx.try_recv().ok()));
+            }
+        }
+        for batch in batches {
+            self.tab_state.apply_ingest_batch(batch);
+        }
     }
 
     /// Send all startup network checks to the background networking thread (non-blocking).
@@ -1697,7 +1724,7 @@ impl WowsToolkitApp {
                         self.tab_state.toasts.lock().info(t!("ui.messages.replays_already_indexed", total = total));
                     }
                 }
-                BackgroundTaskCompletion::DirectoryIngested { workspace, source, replays, failures } => {
+                BackgroundTaskCompletion::DirectoryIngested { workspace, source, failures } => {
                     let just_offered = self.take_finished_reingest_offer(workspace);
 
                     // A workspace that is gone was closed while the walk ran,
@@ -1706,7 +1733,10 @@ impl WowsToolkitApp {
                     // whichever listing happens to be showing.
                     if let Some(target) = self.tab_state.workspace_mut(workspace) {
                         target.source = Some(source);
-                        target.replay_files = Some(replays);
+                        // A directory with nothing in it sends no batches, so
+                        // the listing is started here rather than left unset,
+                        // which reads as "not loaded yet".
+                        target.replay_files.get_or_insert_with(std::collections::HashMap::new);
                         // Any summaries already loaded were read against the
                         // live source. Drop the stamp so the next frame reads
                         // them against the source just resolved.
@@ -1743,6 +1773,16 @@ impl WowsToolkitApp {
                                 .toasts
                                 .lock()
                                 .warning(t!("ui.messages.directory_replays_skipped", skipped = skipped));
+                        }
+
+                        // Listed, but with no stats behind their rows, so the
+                        // listing looks half-loaded with no explanation unless
+                        // this is said out loud.
+                        if failures.not_indexed > 0 {
+                            self.tab_state
+                                .toasts
+                                .lock()
+                                .warning(t!("ui.messages.directory_replays_not_indexed", count = failures.not_indexed));
                         }
                     }
                 }

@@ -5,6 +5,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use jiff::Timestamp;
+use rootcause::Report;
+use rootcause::prelude::*;
 use sqlx::SqlitePool;
 use tokio::runtime::Runtime;
 use tracing::warn;
@@ -218,23 +220,36 @@ pub async fn write_index(pool: &SqlitePool, rows: &MappedRows) -> Result<(), Ind
 /// observations. Best-effort: errors are logged and swallowed so indexing
 /// never destabilizes the parser thread.
 pub fn index_replay_blocking(rt: &Runtime, pool: &SqlitePool, replay: &Replay, source_id: SourceId, now: Timestamp) {
+    if let Err(e) = index_replay_reporting(rt, pool, replay, source_id, now) {
+        warn!("failed to index replay: {e}");
+    }
+}
+
+/// [`index_replay_blocking`] with the reason nothing was written returned
+/// rather than logged, for callers that report how many replays did not index.
+pub fn index_replay_reporting(
+    rt: &Runtime,
+    pool: &SqlitePool,
+    replay: &Replay,
+    source_id: SourceId,
+    now: Timestamp,
+) -> Result<(), Report> {
     let Some(mut rows) = map_rows(replay, source_id, now) else {
-        return;
+        return Err(report!("replay carries no parsed report to index"));
     };
 
     let match_ts = rows.objective.timestamp.as_second();
     let window_start = match_ts - SNIPER_WINDOW_BEFORE_SECS;
     let window_end = match_ts + SNIPER_WINDOW_AFTER_SECS;
 
-    if let Err(e) = rt.block_on(async {
+    rt.block_on(async {
         match query::observations_in_window(pool, window_start, window_end).await {
             Ok(observations) => apply_sniper_flags(&mut rows.vehicles, &observations),
             Err(e) => warn!("failed to fetch twitch observations for sniper detection: {e}"),
         }
         write_index(pool, &rows).await
-    }) {
-        warn!("failed to index replay: {e}");
-    }
+    })
+    .map_err(|e| report!("failed to write replay index rows: {e}"))
 }
 
 #[cfg(test)]

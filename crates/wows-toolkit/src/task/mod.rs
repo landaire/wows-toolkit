@@ -164,9 +164,12 @@ pub enum BackgroundTaskKind {
         workspace: crate::db::index::rows::WorkspaceId,
     },
     /// Walking a picked directory and building a `Replay` per file it holds,
-    /// for the workspace that directory was opened as.
+    /// for the workspace that directory was opened as. `rx` carries the
+    /// replays the walk has read so far, so the listing fills as the walk runs
+    /// rather than when it ends.
     IngestingDirectory {
         workspace: crate::db::index::rows::WorkspaceId,
+        rx: mpsc::Receiver<replays::IngestBatch>,
     },
 }
 
@@ -454,17 +457,17 @@ pub enum BackgroundTaskCompletion {
         generation: u64,
         workspace: crate::db::index::rows::WorkspaceId,
     },
-    /// A picked directory finished being walked. `replays` is one entry per
-    /// file that built successfully; `failures` accounts for the files that did
-    /// not, keeping the builds no game data is installed for apart from the
-    /// files nothing can be done about. `workspace` is carried so the result
-    /// lands on the workspace that asked for it even if the inspector has since
-    /// moved on, and is dropped if that workspace was closed while the walk was
+    /// A picked directory finished being walked. The replays themselves arrive
+    /// as [`replays::IngestBatch`]es while the walk runs; this reports what the
+    /// walk could not do, keeping the builds no game data is installed for
+    /// apart from the files nothing can be done about and from the replays that
+    /// are listed but did not index. `workspace` is carried so the result lands
+    /// on the workspace that asked for it even if the inspector has since moved
+    /// on, and is dropped if that workspace was closed while the walk was
     /// running.
     DirectoryIngested {
         workspace: crate::db::index::rows::WorkspaceId,
         source: crate::db::index::rows::SourceId,
-        replays: HashMap<PathBuf, Arc<RwLock<Replay>>>,
         failures: crate::task::replays::IngestFailures,
     },
     #[cfg(feature = "mod_manager")]
@@ -522,11 +525,10 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .field("generation", generation)
                 .field("workspace", workspace)
                 .finish(),
-            Self::DirectoryIngested { workspace, source, replays, failures } => f
+            Self::DirectoryIngested { workspace, source, failures } => f
                 .debug_struct("DirectoryIngested")
                 .field("workspace", workspace)
                 .field("source", source)
-                .field("replays", &replays.len())
                 .field("failures", failures)
                 .finish(),
             #[cfg(feature = "mod_manager")]
