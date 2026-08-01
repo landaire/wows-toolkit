@@ -788,11 +788,6 @@ impl TabState {
         self.active_workspace_mut().open_replay_in_focused_tab(replay);
     }
 
-    /// Open a replay in a new dock tab.
-    pub fn open_replay_in_new_tab(&mut self, replay: Arc<RwLock<Replay>>) {
-        self.active_workspace_mut().open_replay_in_new_tab(replay);
-    }
-
     /// Returns the shared dependencies needed for loading replays, if wows_data is available.
     pub fn replay_dependencies(&self) -> Option<ReplayDependencies> {
         let wows_data_map = self.wows_data_map.as_ref()?;

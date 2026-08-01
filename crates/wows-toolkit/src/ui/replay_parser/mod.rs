@@ -6,6 +6,7 @@ mod workspace;
 
 use workspace::ReplayRequestSlot;
 pub(crate) use workspace::ReplayWorkspace;
+use workspace::alt_perspective_slot_id;
 use workspace::request_slot_id;
 pub(crate) use workspace::shorten_root;
 use workspace::workspace_group_salt;
@@ -2950,12 +2951,36 @@ impl egui_table::TableDelegate for UiReport {
 
 const ROW_HEIGHT: f32 = 28.0;
 
+/// A validated alt-perspective pick, waiting for a frame in which no replay
+/// write guard is held so it can be pushed onto its replay and re-parsed.
+#[derive(Clone)]
+struct PendingAltRequest {
+    /// The workspace whose replay tab raised this. Carried for diagnostics: the
+    /// re-parse itself works through the replay handle below, which any
+    /// workspace showing that replay shares.
+    workspace: WorkspaceId,
+    replay: Weak<RwLock<Replay>>,
+    alt: std::sync::Arc<ReplayFile>,
+}
+
 /// Transient handoff between the in-tab "Load Other Team Perspective"
-/// button and the outer `handle_replay_open_actions` loop that triggers
-/// the re-parse. Wrapped because egui's `Memory::remove_temp` requires
-/// the stored type to be `Default`, and the inner tuple is not.
+/// button and `handle_pending_alt_reparse`, which triggers the re-parse.
+/// Wrapped because egui's `Memory::remove_temp` requires the stored type to
+/// be `Default`, and [`PendingAltRequest`] is not.
 #[derive(Default, Clone)]
-struct PendingAltReparse(Option<(Weak<RwLock<Replay>>, std::sync::Arc<ReplayFile>)>);
+struct PendingAltReparse(Option<PendingAltRequest>);
+
+/// Parks a validated alt-perspective pick for the next frame's consumer.
+fn stash_alt_reparse(ctx: &egui::Context, request: PendingAltRequest) {
+    ctx.data_mut(|data| data.insert_temp(alt_perspective_slot_id(), PendingAltReparse(Some(request))));
+}
+
+/// Takes whatever alt-perspective pick is parked, if any. Every caller consumes
+/// unconditionally: the request names its own replay, so no caller has to match
+/// a workspace against it to know it is theirs to run.
+fn take_alt_reparse(ctx: &egui::Context) -> Option<PendingAltRequest> {
+    ctx.data_mut(|data| data.remove_temp::<PendingAltReparse>(alt_perspective_slot_id())).and_then(|pending| pending.0)
+}
 
 pub struct Replay {
     pub replay_file: ReplayFile,
@@ -3298,6 +3323,7 @@ impl ToolkitTabViewer<'_> {
         replay_weak: &Weak<RwLock<Replay>>,
         ui: &mut egui::Ui,
         metadata_provider: &GameMetadataProvider,
+        ws_id: WorkspaceId,
     ) {
         // little hack because of borrowing issues
         let mut hide_my_stats = false;
@@ -3405,7 +3431,7 @@ impl ToolkitTabViewer<'_> {
                         .on_hover_text(t!("ui.replay.load_alt_perspective_tooltip"))
                         .clicked()
                     {
-                        self.load_alt_perspective_action(ui, replay_file, replay_weak);
+                        self.load_alt_perspective_action(ui, replay_file, replay_weak, ws_id);
                         ui.close_kind(UiKind::Menu);
                     }
 
@@ -4108,10 +4134,16 @@ impl ToolkitTabViewer<'_> {
     /// Opens a file picker for another `.wowsreplay` recording of the same
     /// match and validates it. If valid, the freshly-loaded `ReplayFile`
     /// plus a Weak pointer to the current Replay are stashed in egui's
-    /// transient store for [`handle_replay_open_actions`] to pick up -
+    /// transient store for [`Self::handle_pending_alt_reparse`] to pick up -
     /// that handler takes the write lock, appends to `alt_replays`, and
     /// dispatches the re-parse.
-    fn load_alt_perspective_action(&self, ui: &mut egui::Ui, replay_file: &Replay, replay_weak: &Weak<RwLock<Replay>>) {
+    fn load_alt_perspective_action(
+        &self,
+        ui: &mut egui::Ui,
+        replay_file: &Replay,
+        replay_weak: &Weak<RwLock<Replay>>,
+        ws_id: WorkspaceId,
+    ) {
         let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() else {
             return;
         };
@@ -4155,17 +4187,13 @@ impl ToolkitTabViewer<'_> {
 
         // Hand the alt off to the outer loop: we only hold &Replay here, so
         // we can't push to alt_replays or call `deps.load_replay` without
-        // first releasing the calling write guard. The outer scope retrieves
-        // the alt + Weak, upgrades, takes its own write lock, and re-parses.
+        // first releasing the calling write guard. The next frame's handler
+        // upgrades the Weak, takes its own write lock, and re-parses.
         tracing::info!(player = %alt.meta.playerName, "alt-perspective validated; staging for re-parse");
-        let alt_arc = std::sync::Arc::new(alt);
-        let ws_id = self.tab_state.active_workspace_id();
-        ui.ctx().data_mut(|data| {
-            data.insert_temp(
-                request_slot_id(ws_id, ReplayRequestSlot::AltPerspectivePending),
-                PendingAltReparse(Some((replay_weak.clone(), alt_arc))),
-            );
-        });
+        stash_alt_reparse(
+            ui.ctx(),
+            PendingAltRequest { workspace: ws_id, replay: replay_weak.clone(), alt: std::sync::Arc::new(alt) },
+        );
     }
 
     /// Check for "Open in New Tab" from context menu, then open replays in the appropriate tab.
@@ -4186,58 +4214,71 @@ impl ToolkitTabViewer<'_> {
             *replay_to_open_new = Some(replay);
         }
 
-        // `load_alt_perspective_action` stashes a (Weak, ReplayFile)
-        // here after validating a candidate. The write guard inside
-        // `build_replay_view` is gone by the time we get here, so we can
-        // safely take a fresh write lock to push the alt and then kick off
-        // the background re-parse.
-        let pending = ui
-            .ctx()
-            .data_mut(|data| {
-                data.remove_temp::<PendingAltReparse>(request_slot_id(ws_id, ReplayRequestSlot::AltPerspectivePending))
-            })
-            .and_then(|p| p.0);
-        if let Some((weak, alt_arc)) = pending
-            && let Some(arc) = weak.upgrade()
-        {
-            // Try to unwrap the Arc; if some other handler still holds a
-            // reference, clone the inner instead. Either way, the alt
-            // lands in `alt_replays` as an owned ReplayFile.
-            let alt = std::sync::Arc::try_unwrap(alt_arc).unwrap_or_else(|a| (*a).clone());
-            let player = alt.meta.playerName.clone();
-            let mut guard = arc.write();
-            guard.alt_replays.push(alt);
-            let count = guard.alt_replays.len();
-            // The cached timeline is primary-only; force a re-extract/merge on next open.
-            guard.timeline = TimelineState::NotRequested;
-            drop(guard);
-            tracing::info!(player = %player, alt_count = count, "pushed alt-perspective; triggering re-parse");
-            if let Some(deps) = self.tab_state.replay_dependencies() {
-                update_background_task!(
-                    self.tab_state.background_tasks,
-                    deps.load_replay(arc, ReplaySource::ManualOpen)
-                );
-            } else {
-                tracing::warn!("alt-perspective re-parse: no replay dependencies available");
-            }
-        }
-
-        if let Some(replay) = replay_to_open_new.take() {
-            self.tab_state.open_replay_in_new_tab(replay.clone());
-            if let Some(deps) = self.tab_state.replay_dependencies() {
-                update_background_task!(
-                    self.tab_state.background_tasks,
-                    deps.load_replay(replay, ReplaySource::FileListing)
-                );
-            }
+        // A double-click or context menu in this listing opens into this
+        // listing's own dock, which is why the workspace comes from `ws_id`
+        // rather than from whichever workspace is active.
+        let Some(workspace) = self.tab_state.workspace_mut(ws_id) else {
+            return;
+        };
+        let opened = if let Some(replay) = replay_to_open_new.take() {
+            workspace.open_replay_in_new_tab(Arc::clone(&replay));
+            Some(replay)
         } else if let Some(replay) = replay_to_open.take() {
-            self.tab_state.open_replay_in_focused_tab(replay.clone());
-            if let Some(deps) = self.tab_state.replay_dependencies() {
-                update_background_task!(
-                    self.tab_state.background_tasks,
-                    deps.load_replay(replay, ReplaySource::FileListing)
-                );
-            }
+            workspace.open_replay_in_focused_tab(Arc::clone(&replay));
+            Some(replay)
+        } else {
+            None
+        };
+        if let Some(replay) = opened
+            && let Some(deps) = self.tab_state.replay_dependencies()
+        {
+            update_background_task!(
+                self.tab_state.background_tasks,
+                deps.load_replay(replay, ReplaySource::FileListing)
+            );
+        }
+    }
+
+    /// Picks up an alt-perspective request raised in a previous frame and runs
+    /// it: pushes the alt onto its replay and dispatches the merged re-parse.
+    ///
+    /// Runs from every replay tab, before any of that tab's own content, and
+    /// deliberately not from the listing: the button that raises the request
+    /// lives in the replay dock, which draws whether or not the listing beside
+    /// it does, so a listing-side consumer would miss any request raised while
+    /// the listing is collapsed or empty, leaving a whole `ReplayFile` parked
+    /// in egui's store for the session.
+    fn handle_pending_alt_reparse(&mut self, ctx: &egui::Context) {
+        // The write guard `build_replay_view` holds over the button is long
+        // gone by the time we get here, so taking a fresh one is safe.
+        let Some(request) = take_alt_reparse(ctx) else {
+            return;
+        };
+        let Some(arc) = request.replay.upgrade() else {
+            tracing::warn!(workspace = request.workspace.0, "alt-perspective re-parse: replay was dropped");
+            return;
+        };
+        // Try to unwrap the Arc; if some other handler still holds a
+        // reference, clone the inner instead. Either way, the alt
+        // lands in `alt_replays` as an owned ReplayFile.
+        let alt = std::sync::Arc::try_unwrap(request.alt).unwrap_or_else(|a| (*a).clone());
+        let player = alt.meta.playerName.clone();
+        let mut guard = arc.write();
+        guard.alt_replays.push(alt);
+        let count = guard.alt_replays.len();
+        // The cached timeline is primary-only; force a re-extract/merge on next open.
+        guard.timeline = TimelineState::NotRequested;
+        drop(guard);
+        tracing::info!(
+            player = %player,
+            alt_count = count,
+            workspace = request.workspace.0,
+            "pushed alt-perspective; triggering re-parse"
+        );
+        if let Some(deps) = self.tab_state.replay_dependencies() {
+            update_background_task!(self.tab_state.background_tasks, deps.load_replay(arc, ReplaySource::ManualOpen));
+        } else {
+            tracing::warn!("alt-perspective re-parse: no replay dependencies available");
         }
     }
 
@@ -4865,6 +4906,11 @@ impl ToolkitTabViewer<'_> {
     /// payload of their own) follow whichever replay tab was drawn last.
     pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
         self.tab_state.set_active_workspace(ws_id);
+
+        // Ahead of the workspace check below so a request raised in a workspace
+        // that has since closed still runs: it carries its own replay handle
+        // and needs nothing from the workspace it came from.
+        self.handle_pending_alt_reparse(ui.ctx());
 
         // A tab can outlive its workspace (e.g. a stale split after the
         // workspace's owning tab was closed). Showing a placeholder here
@@ -5796,7 +5842,7 @@ impl egui_dock::TabViewer for ReplayTabViewer<'_> {
         let metadata_provider = viewer.metadata_provider().expect("no metadata provider?");
         let replay_weak = Arc::downgrade(&tab.replay);
         let mut replay = tab.replay.write();
-        viewer.build_replay_view(&mut replay, &replay_weak, ui, metadata_provider.as_ref());
+        viewer.build_replay_view(&mut replay, &replay_weak, ui, metadata_provider.as_ref(), self.workspace);
     }
 
     fn closeable(&mut self, _tab: &mut Self::Tab) -> bool {
@@ -6979,5 +7025,78 @@ mod summary_source_selector_tests {
     fn no_resolved_source_yields_live() {
         let selector = summary_source_selector(None);
         assert_eq!(selector, SourceSelector::Live);
+    }
+}
+
+#[cfg(test)]
+mod alt_perspective_handoff_tests {
+    use super::*;
+
+    /// A minimal `ReplayFile`: a hand-built `ReplayMeta` round-tripped through
+    /// `from_decrypted_parts`, the same entry point the app uses for a loaded
+    /// replay's raw JSON.
+    fn test_replay_file() -> ReplayFile {
+        let meta = wows_replays::ReplayMeta {
+            matchGroup: None,
+            gameMode: 0,
+            gameType: None,
+            clientVersionFromExe: "0,0,0,0".to_string(),
+            scenarioUiCategoryId: None,
+            mapDisplayName: String::new(),
+            mapId: 0,
+            clientVersionFromXml: String::new(),
+            weatherParams: None,
+            duration: 0,
+            gameLogic: None,
+            name: String::new(),
+            scenario: String::new(),
+            playerID: wows_replays::types::AccountId(0),
+            vehicles: Vec::new(),
+            playersPerTeam: 0,
+            dateTime: String::new(),
+            mapName: String::new(),
+            playerName: String::new(),
+            scenarioConfigId: 0,
+            teamsCount: 0,
+            logic: None,
+            playerVehicle: String::new(),
+            battleDuration: None,
+        };
+        let meta_json = serde_json::to_vec(&meta).expect("ReplayMeta serializes");
+        ReplayFile::from_decrypted_parts(meta_json, Vec::new()).expect("a ReplayMeta we just serialized parses back")
+    }
+
+    fn test_replay() -> Arc<RwLock<Replay>> {
+        let resource_loader = Arc::new(
+            wowsunpack::game_params::provider::GameMetadataProvider::from_params_no_specs(Vec::new())
+                .expect("an empty param list is always valid"),
+        );
+        Arc::new(RwLock::new(Replay::new(test_replay_file(), resource_loader)))
+    }
+
+    /// The stash and the take must name one id, and the take must clear it. A
+    /// mismatch costs an unreachable `ReplayFile` held for the session and a
+    /// button that silently does nothing.
+    #[test]
+    fn a_stashed_request_is_delivered_once_and_leaves_nothing_behind() {
+        let ctx = egui::Context::default();
+        let replay = test_replay();
+        let alt = Arc::new(test_replay_file());
+        assert_eq!(Arc::strong_count(&alt), 1);
+
+        stash_alt_reparse(
+            &ctx,
+            PendingAltRequest { workspace: WorkspaceId(4), replay: Arc::downgrade(&replay), alt: Arc::clone(&alt) },
+        );
+        assert_eq!(Arc::strong_count(&alt), 2, "the parked request holds the alt");
+
+        let taken = take_alt_reparse(&ctx).expect("the request we just stashed comes back");
+        assert_eq!(taken.workspace, WorkspaceId(4));
+        assert!(Arc::ptr_eq(&taken.alt, &alt), "the delivered alt is the one that was picked");
+        assert!(taken.replay.upgrade().is_some(), "the delivered request still names its replay");
+
+        drop(taken);
+        assert_eq!(Arc::strong_count(&alt), 1, "the take leaves no copy of the alt in egui's store");
+        assert!(take_alt_reparse(&ctx).is_none(), "a consumed request is not delivered a second time");
     }
 }

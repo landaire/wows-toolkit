@@ -227,7 +227,6 @@ fn shorten_leaf(leaf: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReplayRequestSlot {
     OpenReplayNewTab,
-    AltPerspectivePending,
     ContextMenuRenderReplay,
     BatchRenderReplays,
     BatchRenderClipboard,
@@ -237,7 +236,6 @@ impl ReplayRequestSlot {
     const fn name(self) -> &'static str {
         match self {
             ReplayRequestSlot::OpenReplayNewTab => "open_replay_new_tab",
-            ReplayRequestSlot::AltPerspectivePending => "alt_perspective_pending",
             ReplayRequestSlot::ContextMenuRenderReplay => "context_menu_render_replay",
             ReplayRequestSlot::BatchRenderReplays => "batch_render_replays",
             ReplayRequestSlot::BatchRenderClipboard => "batch_render_clipboard",
@@ -248,6 +246,16 @@ impl ReplayRequestSlot {
 /// The egui id backing a [`ReplayRequestSlot`] in a given workspace.
 pub(crate) fn request_slot_id(workspace: WorkspaceId, slot: ReplayRequestSlot) -> egui::Id {
     workspace_salt(workspace, slot.name())
+}
+
+/// The egui id backing the alt-perspective handoff. Deliberately app-wide
+/// rather than workspace-scoped: the button that raises it draws later in the
+/// frame than the handler that consumes it, so the consumer is whichever
+/// replay tab draws next. A workspace-scoped slot would leave the request --
+/// and the whole `ReplayFile` it owns -- parked under an id nobody reads. The
+/// workspace that raised it travels inside the value instead.
+pub(crate) fn alt_perspective_slot_id() -> egui::Id {
+    egui::Id::new("alt_perspective_pending")
 }
 
 #[cfg(test)]
@@ -438,7 +446,6 @@ mod tests {
     fn every_request_slot_round_trips() {
         let slots = [
             ReplayRequestSlot::OpenReplayNewTab,
-            ReplayRequestSlot::AltPerspectivePending,
             ReplayRequestSlot::ContextMenuRenderReplay,
             ReplayRequestSlot::BatchRenderReplays,
             ReplayRequestSlot::BatchRenderClipboard,
@@ -463,6 +470,27 @@ mod tests {
                         "different slots in the same workspace must not collide"
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn the_alt_perspective_slot_is_stable_and_workspace_independent() {
+        assert_eq!(alt_perspective_slot_id(), alt_perspective_slot_id());
+
+        let scoped = [
+            ReplayRequestSlot::OpenReplayNewTab,
+            ReplayRequestSlot::ContextMenuRenderReplay,
+            ReplayRequestSlot::BatchRenderReplays,
+            ReplayRequestSlot::BatchRenderClipboard,
+        ];
+        for workspace in [WorkspaceId::LIVE, WorkspaceId(1), WorkspaceId(2)] {
+            for &slot in &scoped {
+                assert_ne!(
+                    alt_perspective_slot_id(),
+                    request_slot_id(workspace, slot),
+                    "the app-wide alt slot must not land on a workspace-scoped one"
+                );
             }
         }
     }
