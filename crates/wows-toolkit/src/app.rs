@@ -3102,27 +3102,24 @@ impl WowsToolkitApp {
             return;
         }
 
+        // One match over the three options, so the name of the missing
+        // prerequisite comes from the same evaluation that found it absent.
         let ingest_deps = match (
             self.tab_state.replay_dependencies(),
             self.tab_state.db_pool.as_ref(),
             self.tab_state.tokio_runtime.as_ref(),
         ) {
-            (Some(deps), Some(pool), Some(rt)) => Some((deps, pool.clone(), Arc::clone(rt))),
-            _ => None,
+            (Some(deps), Some(pool), Some(rt)) => Ok((deps, pool.clone(), Arc::clone(rt))),
+            (None, _, _) => Err("game data"),
+            (_, None, _) => Err("database pool"),
+            (_, _, None) => Err("tokio runtime"),
         };
-        let Some((deps, pool, rt)) = ingest_deps else {
-            let missing = match (
-                self.tab_state.replay_dependencies().is_some(),
-                self.tab_state.db_pool.is_some(),
-                self.tab_state.tokio_runtime.is_some(),
-            ) {
-                (false, _, _) => "game data",
-                (true, false, _) => "database pool",
-                (true, true, false) => "tokio runtime",
-                (true, true, true) => unreachable!("all three prerequisites present"),
-            };
-            warn!("cannot ingest replay directory {}: {missing} is not available", root.display());
-            return;
+        let (deps, pool, rt) = match ingest_deps {
+            Ok(resolved) => resolved,
+            Err(missing) => {
+                warn!("cannot ingest replay directory {}: {missing} is not available", root.display());
+                return;
+            }
         };
 
         if let Some(workspace) = self.tab_state.workspace_mut(id) {
