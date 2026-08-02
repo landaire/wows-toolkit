@@ -11336,6 +11336,7 @@ dependencies = [
  "arboard",
  "bytemuck",
  "ciborium",
+ "clap",
  "convert_case 0.11.0",
  "csv",
  "dhat",

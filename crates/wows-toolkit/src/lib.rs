@@ -5,6 +5,7 @@ rust_i18n::i18n!("../wt-translations/translations", fallback = "en", backend = F
 
 mod app;
 mod armor_viewer;
+pub mod cli;
 pub mod collab;
 pub mod data;
 pub(crate) mod db;

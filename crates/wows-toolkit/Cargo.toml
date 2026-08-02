@@ -11,6 +11,7 @@ default-run = "wows_toolkit"
 
 [dependencies]
 # All of these need to be bumped with egui releases
+clap = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true, features = [
     "accesskit",     # Make egui comptaible with screen readers. NOTE: adds a lot of dependencies.
