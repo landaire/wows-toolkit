@@ -110,6 +110,29 @@ where
     }
 }
 
+/// Obtain a writer for the console that launched this process.
+///
+/// Release builds are a windows subsystem binary with no console of their own,
+/// so stdout and stderr go nowhere. `AttachConsole` borrows the parent's
+/// console and `CONOUT$` opens it directly, which avoids depending on whether
+/// the standard handles were inherited.
+#[cfg(windows)]
+pub fn console_writer() -> Option<std::fs::File> {
+    use windows_sys::Win32::System::Console::AttachConsole;
+    use windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS;
+
+    // Fails when the parent has no console, in which case CONOUT$ will not
+    // open either and the caller gets None.
+    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+
+    std::fs::OpenOptions::new().write(true).open("CONOUT$").ok()
+}
+
+#[cfg(not(windows))]
+pub fn console_writer() -> Option<std::fs::File> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,7 +228,7 @@ mod tests {
 
         assert!(matches!(
             resolved,
-            Invocation::FinalizeUpdate { replaced } if replaced == PathBuf::from("C:\\app\\wows_toolkit.exe.old")
+            Invocation::FinalizeUpdate { replaced } if replaced == Path::new("C:\\app\\wows_toolkit.exe.old")
         ));
     }
 
@@ -221,7 +244,7 @@ mod tests {
 
         assert!(matches!(
             resolved,
-            Invocation::FinalizeUpdate { replaced } if replaced == PathBuf::from("C:\\app\\wows_toolkit.exe.old")
+            Invocation::FinalizeUpdate { replaced } if replaced == Path::new("C:\\app\\wows_toolkit.exe.old")
         ));
     }
 
@@ -236,27 +259,4 @@ mod tests {
     fn rejects_unknown_flag() {
         assert!(resolve(args(&["wows_toolkit.exe", "--nonsense"])).is_err());
     }
-}
-
-/// Obtain a writer for the console that launched this process.
-///
-/// Release builds are a windows subsystem binary with no console of their own,
-/// so stdout and stderr go nowhere. `AttachConsole` borrows the parent's
-/// console and `CONOUT$` opens it directly, which avoids depending on whether
-/// the standard handles were inherited.
-#[cfg(windows)]
-pub fn console_writer() -> Option<std::fs::File> {
-    use windows_sys::Win32::System::Console::AttachConsole;
-    use windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS;
-
-    // Fails when the parent has no console, in which case CONOUT$ will not
-    // open either and the caller gets None.
-    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
-
-    std::fs::OpenOptions::new().write(true).open("CONOUT$").ok()
-}
-
-#[cfg(not(windows))]
-pub fn console_writer() -> Option<std::fs::File> {
-    None
 }
