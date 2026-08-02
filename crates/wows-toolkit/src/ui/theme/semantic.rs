@@ -41,7 +41,9 @@ pub struct SemanticColors {
     pub ok: Color32,
     /// Emphasised body text. Replaces bare `Color32::WHITE`.
     pub text_strong: Color32,
-    /// De-emphasised detail text. Replaces bare `Color32::GRAY`.
+    /// De-emphasised detail text. Held to `DIM_CONTRAST_FLOOR`, not
+    /// `CONTRAST_FLOOR`, so it reads as secondary to body text rather than
+    /// level with it.
     pub text_dim: Color32,
     /// Division mates.
     pub division: Color32,
@@ -67,7 +69,7 @@ pub const DARK: SemanticColors = SemanticColors {
     error: Color32::from_rgb(0xF2, 0x72, 0x7C),
     ok: Color32::from_rgb(0x6F, 0xD9, 0x8A),
     text_strong: Color32::from_rgb(0xE8, 0xE5, 0xDC),
-    text_dim: Color32::from_rgb(0x97, 0x97, 0x89),
+    text_dim: Color32::from_rgb(0x7C, 0x7C, 0x6E),
     division: Color32::from_rgb(0xE5, 0xC1, 0x58),
     icon_accent: Color32::from_rgb(0xE5, 0xC1, 0x58),
     abuser: Color32::from_rgb(0xF0, 0x9B, 0xC0),
@@ -99,7 +101,7 @@ pub const LIGHT: SemanticColors = SemanticColors {
     error: Color32::from_rgb(0xA8, 0x1F, 0x2A),
     ok: Color32::from_rgb(0x10, 0x6C, 0x34),
     text_strong: Color32::from_rgb(0x0A, 0x0A, 0x08),
-    text_dim: Color32::from_rgb(0x5C, 0x5A, 0x53),
+    text_dim: Color32::from_rgb(0x78, 0x76, 0x6F),
     division: Color32::from_rgb(0x77, 0x58, 0x00),
     icon_accent: Color32::from_rgb(0x77, 0x58, 0x00),
     abuser: Color32::from_rgb(0xA3, 0x32, 0x70),
@@ -164,7 +166,6 @@ mod tests {
             ("error", sem.error),
             ("ok", sem.ok),
             ("text_strong", sem.text_strong),
-            ("text_dim", sem.text_dim),
             ("division", sem.division),
             ("icon_accent", sem.icon_accent),
             ("abuser", sem.abuser),
@@ -265,6 +266,77 @@ mod tests {
         ] {
             let r = contrast_ratio(panel, accent);
             assert!(r >= CONTRAST_FLOOR, "{theme} inverted active label is {r}");
+        }
+    }
+
+    /// Roles that de-emphasise rather than inform. Held to `DIM_CONTRAST_FLOOR`
+    /// instead of `CONTRAST_FLOOR`: text pinned at the readable-text floor is
+    /// by definition as prominent as body text, which is the opposite of what
+    /// this tier is for.
+    fn dim_roles(sem: &SemanticColors) -> Vec<(&'static str, Color32)> {
+        vec![("text_dim", sem.text_dim)]
+    }
+
+    #[test]
+    fn every_dim_role_clears_the_dim_floor_on_every_surface() {
+        use crate::ui::theme::contrast::DIM_CONTRAST_FLOOR;
+
+        for (theme, sem, surfaces) in [
+            (
+                "dark",
+                &DARK,
+                vec![
+                    ("surface", palette::dark::SURFACE),
+                    ("panel", palette::dark::PANEL),
+                    ("card", palette::dark::CARD),
+                    ("widget", palette::dark::WIDGET),
+                    ("widget_hot", palette::dark::WIDGET_HOT),
+                    ("faint", palette::dark::FAINT),
+                    ("selection", palette::dark::SELECTION),
+                ],
+            ),
+            (
+                "light",
+                &LIGHT,
+                vec![
+                    ("surface", palette::light::SURFACE),
+                    ("panel", palette::light::PANEL),
+                    ("card", palette::light::CARD),
+                    ("widget", palette::light::WIDGET),
+                    ("widget_hot", palette::light::WIDGET_HOT),
+                    ("faint", palette::light::FAINT),
+                    ("selection", palette::light::SELECTION),
+                ],
+            ),
+        ] {
+            for (name, color) in dim_roles(sem) {
+                for (surface_name, surface) in &surfaces {
+                    let r = contrast_ratio(color, *surface);
+                    assert!(
+                        r >= DIM_CONTRAST_FLOOR,
+                        "{theme} {name} on {surface_name} is {r}, needs {DIM_CONTRAST_FLOOR}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The regression guard for the bug this tier exists to fix: `text_dim`
+    /// once held the same value as body text, so every "de-emphasised" label
+    /// in the app rendered at full weight.
+    #[test]
+    fn text_dim_is_strictly_dimmer_than_body_text() {
+        for (theme, sem, body, panel) in [
+            ("dark", &DARK, palette::dark::TEXT_DIM, palette::dark::PANEL),
+            ("light", &LIGHT, palette::light::TEXT_DIM, palette::light::PANEL),
+        ] {
+            let dim = contrast_ratio(sem.text_dim, panel);
+            let full = contrast_ratio(body, panel);
+            assert!(
+                dim < full,
+                "{theme} text_dim reaches {dim} against the panel and body text reaches {full}; \
+                 the de-emphasised tier has collapsed into body text"
+            );
         }
     }
 

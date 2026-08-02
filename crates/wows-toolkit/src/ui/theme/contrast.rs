@@ -6,6 +6,12 @@ use egui::Color32;
 /// Readable-text contrast floor (WCAG 2.1 AA, normal text).
 pub const CONTRAST_FLOOR: f32 = 4.5;
 
+/// Contrast floor for de-emphasised detail text. Below the readable-text
+/// floor deliberately: this tier exists to recede, and anything held at
+/// `CONTRAST_FLOOR` is as prominent as body text. WCAG 2.1 AA for incidental
+/// and large text.
+pub const DIM_CONTRAST_FLOOR: f32 = 3.0;
+
 /// WCAG 2.1 relative luminance.
 pub fn relative_luminance(color: Color32) -> f32 {
     fn channel(c: u8) -> f32 {

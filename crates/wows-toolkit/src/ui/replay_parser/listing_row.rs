@@ -874,6 +874,7 @@ mod tests {
         assert_eq!(last.format.color, sem.text_dim);
         assert!(job.text.ends_with("\nstats"), "line 2 is the last section: {:?}", job.text);
         assert_ne!(sem.text_dim, sem.win, "line 2 must not inherit line 1's tint");
+        assert_ne!(sem.text_dim, visuals.text_color(), "line 2 must not render at body-text weight");
     }
 
     #[test]
