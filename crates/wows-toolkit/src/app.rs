@@ -2722,11 +2722,13 @@ impl WowsToolkitApp {
                     .closable(true);
             }
 
-            if should_arm_wows_dir_error(
-                wows_dir_invalid,
-                self.tab_state.wows_dir_field_focused,
-                &mut self.shown_wows_dir_error,
-            ) {
+            // Queried live rather than cached: a cached "has focus" snapshot can only be
+            // updated while the Settings tab's field actually draws, so it goes stale
+            // forever if the user switches tabs mid-edit. egui's own focus memory
+            // self-heals the moment the field stops rendering, so read it directly.
+            let wows_dir_field_focused =
+                ctx.memory(|m| m.focused() == Some(crate::tab_state::TabState::wows_dir_field_id()));
+            if should_arm_wows_dir_error(wows_dir_invalid, wows_dir_field_focused, &mut self.shown_wows_dir_error) {
                 error!("World of Warships directory is not valid");
                 self.tab_state.toasts.lock().error(t!("ui.messages.wows_dir_invalid")).duration(None).closable(true);
             }

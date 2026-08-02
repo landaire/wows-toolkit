@@ -558,11 +558,6 @@ pub struct TabState {
     /// Cached result of WoWs directory validation. Updated by `revalidate_wows_dir()`
     /// on startup and whenever `settings.wows_dir` changes — NOT every frame.
     pub wows_dir_invalid: bool,
-    /// Whether the Settings tab's WoWs directory `TextEdit` currently holds
-    /// keyboard focus. A path is invalid on every keystroke until it is
-    /// finished, so the sticky error toast waits for focus to leave the
-    /// field rather than arming on each partial edit.
-    pub wows_dir_field_focused: bool,
     /// wgpu render state for 3D viewport rendering (captured at app init).
     pub wgpu_render_state: Option<eframe::egui_wgpu::RenderState>,
     /// State for the Armor Viewer tab.
@@ -671,7 +666,6 @@ impl Default for TabState {
             validating_game_data_cache: false,
             game_data_cache_stats: None,
             wows_dir_invalid: false,
-            wows_dir_field_focused: false,
             wgpu_render_state: None,
             armor_viewer: Default::default(),
             show_replay_controls: false,
@@ -724,6 +718,15 @@ fn build_requests_from_updates(
 }
 
 impl TabState {
+    /// Stable id for the Settings tab's WoWs-directory `TextEdit`. The sticky
+    /// error toast asks egui's own focus memory whether this id is focused,
+    /// rather than caching a snapshot that only settings_tab.rs could update
+    /// and that would go stale once the tab stops drawing (see the arming
+    /// check in app.rs).
+    pub(crate) fn wows_dir_field_id() -> egui::Id {
+        egui::Id::new("settings.wows_dir_field")
+    }
+
     /// Notify the background save task that state has changed and should be
     /// persisted. The save task debounces rapid calls (1 second).
     pub fn request_save(&self) {
@@ -2020,6 +2023,35 @@ mod tests {
             state.active_workspace_id(),
             active_id,
             "closing a workspace that is not active must not disturb the active id"
+        );
+    }
+
+    /// The sticky wows-dir toast asks `ctx.memory(|m| m.focused())` about the
+    /// field's stable id instead of caching a snapshot, precisely so that a
+    /// frame in which the field never draws again cannot leave the gate
+    /// engaged. This drives egui through the same `begin_pass`/closure/`end_pass`
+    /// cycle eframe uses (`run_ui`) to prove the self-heal actually happens,
+    /// rather than trusting the API docs describing it.
+    #[test]
+    fn focus_on_the_wows_dir_field_clears_once_it_stops_drawing() {
+        let ctx = egui::Context::default();
+        let id = TabState::wows_dir_field_id();
+
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let mut text = String::new();
+            let response = ui.add(egui::TextEdit::singleline(&mut text).id(id));
+            response.request_focus();
+        });
+        assert_eq!(ctx.memory(|m| m.focused()), Some(id), "the field must hold focus right after requesting it");
+
+        // A later frame in which the Settings tab (and so this field) never draws,
+        // e.g. because the user clicked another dock tab.
+        let _ = ctx.run_ui(egui::RawInput::default(), |_ui| {});
+
+        assert_eq!(
+            ctx.memory(|m| m.focused()),
+            None,
+            "focus must clear on its own once the field stops drawing, with no help from settings_tab.rs"
         );
     }
 }

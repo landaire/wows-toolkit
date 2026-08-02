@@ -14,6 +14,7 @@ use crate::data::settings::DataSharingMode;
 use crate::data::settings::ThemeChoice;
 use crate::icons;
 use crate::tab_state::GameDataCacheStats;
+use crate::tab_state::TabState;
 use crate::task::DataExportSettings;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::task::ReplayExportFormat;
@@ -194,12 +195,11 @@ impl ToolkitTabViewer<'_> {
                         let response = ui.add_sized(
                             ui.available_size(),
                             egui::TextEdit::singleline(&mut wows_dir)
+                                .id(TabState::wows_dir_field_id())
                                 .interactive(self.tab_state.can_change_wows_dir)
                                 .hint_text(t!("ui.settings.wows.directory_hint"))
                                 .text_color_opt(show_text_error.then_some(ui.sem().error)),
                         );
-
-                        self.tab_state.wows_dir_field_focused = response.has_focus();
 
                         // If someone pastes or types a path, revalidate and reload if valid.
                         if response.changed() {
