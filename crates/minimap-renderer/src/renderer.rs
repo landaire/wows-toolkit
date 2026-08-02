@@ -1506,8 +1506,8 @@ impl<'a> MinimapRenderer<'a> {
             });
 
             // Compute yaw: prefer minimap heading (more accurate for icon rotation)
-            let minimap_yaw = minimap.map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.0.to_radians());
-            let world_yaw = world.map(|t| t.yaw.0);
+            let minimap_yaw = minimap.map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.to_radians().value());
+            let world_yaw = world.map(|t| t.yaw.value());
 
             // On friendlies and self the outline shows when the enemy can see
             // them. On enemies it is only meaningful in merged sessions, where
@@ -1631,8 +1631,8 @@ impl<'a> MinimapRenderer<'a> {
                 // Use last known heading from minimap positions
                 let yaw = minimap_positions
                     .get(entity_id)
-                    .map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.0.to_radians())
-                    .or_else(|| ship_positions.get(entity_id).map(|t| t.yaw.0))
+                    .map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.to_radians().value())
+                    .or_else(|| ship_positions.get(entity_id).map(|t| t.yaw.value()))
                     .unwrap_or(0.0);
                 let relation = self.player_relations.get(entity_id).copied().unwrap_or(Relation::new(2));
                 let player_name =

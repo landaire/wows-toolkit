@@ -26,9 +26,9 @@ pub fn handle_position(pos: &PositionPacket, world: &mut World, clock: GameClock
     let entity = spawn_or_get(world, pos.pid);
     let t = Transform3d {
         pos: WorldPos::new(pos.position.x, pos.position.y, pos.position.z),
-        yaw: Radians(pos.rotation.yaw),
-        pitch: Radians(pos.rotation.pitch),
-        roll: Radians(pos.rotation.roll),
+        yaw: Radians::from(pos.rotation.yaw),
+        pitch: Radians::from(pos.rotation.pitch),
+        roll: Radians::from(pos.rotation.roll),
         last_updated: clock,
     };
     if let Ok(mut e) = world.get_entity_mut(entity) {
@@ -47,9 +47,9 @@ pub fn handle_player_orientation(orient: &PlayerOrientationPacket, world: &mut W
     let entity = spawn_or_get(world, orient.pid);
     let t = Transform3d {
         pos: WorldPos::new(orient.position.x, orient.position.y, orient.position.z),
-        yaw: Radians(orient.rotation.yaw),
-        pitch: Radians(orient.rotation.pitch),
-        roll: Radians(orient.rotation.roll),
+        yaw: Radians::from(orient.rotation.yaw),
+        pitch: Radians::from(orient.rotation.pitch),
+        roll: Radians::from(orient.rotation.roll),
         last_updated: clock,
     };
     if let Ok(mut e) = world.get_entity_mut(entity) {
@@ -87,9 +87,9 @@ pub fn handle_minimap_updates(updates: &[MinimapUpdate], world: &mut World, cloc
                 .get(update.entity_id)
                 .and_then(|e| world.get_entity(e).ok())
                 .and_then(|er| er.get::<MinimapPlacement>().map(|m| (m.pos, m.heading)));
-            prev.unwrap_or((update.position, Degrees(update.heading)))
+            prev.unwrap_or((update.position, Degrees::from(update.heading)))
         } else {
-            (update.position, Degrees(update.heading))
+            (update.position, Degrees::from(update.heading))
         };
 
         // Pull visibility_flags and is_invisible from the vehicle's current VehicleState.

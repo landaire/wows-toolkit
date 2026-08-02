@@ -390,9 +390,9 @@ fn digest_snapshot(filename: &str) -> Digest {
             x: r3(t.pos.x),
             y: r3(t.pos.y),
             z: r3(t.pos.z),
-            yaw: r3(t.yaw.0),
-            pitch: r3(t.pitch.0),
-            roll: r3(t.roll.0),
+            yaw: r3(t.yaw.value()),
+            pitch: r3(t.pitch.value()),
+            roll: r3(t.roll.value()),
         })
         .collect();
     positions.sort_by_key(|e| e.id);
@@ -404,7 +404,7 @@ fn digest_snapshot(filename: &str) -> Digest {
             id: id.raw(),
             x: r3(m.pos.x),
             y: r3(m.pos.y),
-            heading: r3(m.heading.0),
+            heading: r3(m.heading.value()),
             visible: m.visible,
             visibility_flags: m.visibility_flags.map(|f| f.raw()),
             is_invisible: m.is_invisible,

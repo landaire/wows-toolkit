@@ -392,7 +392,7 @@ pub struct PresenceWindow {
 /// while still catching a vehicle that goes quiet and comes back. Erring low
 /// costs samples; erring high certifies a blackout, so the margin sits on the
 /// low side deliberately.
-pub const MAX_UPDATE_SILENCE: Seconds = Seconds(10.0);
+pub const MAX_UPDATE_SILENCE: Seconds = Seconds::new(10.0);
 
 /// Windows during which the recording client observed each vehicle, keyed by
 /// game `EntityId`.
@@ -470,7 +470,7 @@ impl PresenceLog {
             self.last_seen.insert(entity, clock);
             return;
         };
-        if clock - previous > MAX_UPDATE_SILENCE.0 {
+        if clock - previous > MAX_UPDATE_SILENCE.value() {
             self.close_window(entity, previous);
         }
         // Packet clocks are non-decreasing in practice, but a pre-battle packet

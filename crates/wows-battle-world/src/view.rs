@@ -269,13 +269,17 @@ impl<'w> BattleView<'w> {
             .aims
             .iter_manual(self.world)
             .filter(|(_, aim)| !aim.turret_yaws.is_empty())
-            .map(|(gid, aim)| (gid.0, aim.turret_yaws.iter().map(|r| r.0).collect()))
+            .map(|(gid, aim)| (gid.0, aim.turret_yaws.iter().map(|r| r.value()).collect()))
             .collect()
     }
 
     /// World-space gun aim yaw (radians) per entity.
     pub fn target_yaws(&self) -> HashMap<EntityId, f32> {
-        self.cache.aims.iter_manual(self.world).filter_map(|(gid, aim)| aim.target_yaw.map(|r| (gid.0, r.0))).collect()
+        self.cache
+            .aims
+            .iter_manual(self.world)
+            .filter_map(|(gid, aim)| aim.target_yaw.map(|r| (gid.0, r.value())))
+            .collect()
     }
 
     /// Selected artillery ammo param per entity.

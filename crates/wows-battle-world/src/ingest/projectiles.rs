@@ -274,10 +274,10 @@ fn victim_pose(world: &mut World, victim: EntityId) -> Option<VictimPose> {
 
     let yaw = er
         .get::<MinimapPlacement>()
-        .map(|m| std::f32::consts::FRAC_PI_2 - m.heading.0.to_radians())
-        .unwrap_or(transform.yaw.0);
+        .map(|m| std::f32::consts::FRAC_PI_2 - m.heading.to_radians().value())
+        .unwrap_or(transform.yaw.value());
 
-    Some(VictimPose { position: transform.pos, yaw, pitch: transform.pitch.0, roll: transform.roll.0 })
+    Some(VictimPose { position: transform.pos, yaw, pitch: transform.pitch.value(), roll: transform.roll.value() })
 }
 
 /// Drop salvos fired more than 30s before `clock`, mirroring the original's
@@ -332,14 +332,14 @@ mod victim_pose_tests {
                 crate::components::Vehicle,
                 Transform3d {
                     pos: WorldPos::new(120.0, 0.0, -40.0),
-                    yaw: Radians(0.5),
-                    pitch: Radians(0.1),
-                    roll: Radians(0.2),
+                    yaw: Radians::from(0.5),
+                    pitch: Radians::from(0.1),
+                    roll: Radians::from(0.2),
                     last_updated: GameClock(10.0),
                 },
                 MinimapPlacement {
                     pos: NormalizedPos(Vec2::new(0.5, 0.5)),
-                    heading: Degrees(90.0),
+                    heading: Degrees::from(90.0),
                     visible: true,
                     visibility_flags: None,
                     is_invisible: false,

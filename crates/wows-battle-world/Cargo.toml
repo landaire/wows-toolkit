@@ -8,6 +8,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+wows-core = { workspace = true }
 wows_replays = { workspace = true, features = ["arc", "parsing"] }
 wowsunpack = { workspace = true, features = ["arc"] }
 pickled = { workspace = true }

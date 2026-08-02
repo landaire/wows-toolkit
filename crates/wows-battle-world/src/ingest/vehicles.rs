@@ -75,11 +75,11 @@ pub fn handle_vehicle_property(
         if let Ok(mut er) = world.get_entity_mut(ecs_entity) {
             let mut aim = er.get_mut::<Aim>();
             if let Some(ref mut a) = aim {
-                a.target_yaw = Some(Radians(yaw));
+                a.target_yaw = Some(Radians::from(yaw));
             } else {
                 er.insert(Aim {
                     turret_yaws: Vec::new(),
-                    target_yaw: Some(Radians(yaw)),
+                    target_yaw: Some(Radians::from(yaw)),
                     selected_ammo: std::collections::HashMap::new(),
                 });
             }
@@ -100,13 +100,13 @@ pub fn handle_gun_sync(entity_id: EntityId, weapon_type: u32, gun_id: u32, yaw: 
         let mut aim = er.get_mut::<Aim>();
         if let Some(ref mut a) = aim {
             if a.turret_yaws.len() <= idx {
-                a.turret_yaws.resize(idx + 1, Radians(0.0));
+                a.turret_yaws.resize(idx + 1, Radians::from(0.0));
             }
-            a.turret_yaws[idx] = Radians(yaw);
+            a.turret_yaws[idx] = Radians::from(yaw);
         } else {
             let mut turret_yaws = Vec::new();
-            turret_yaws.resize(idx + 1, Radians(0.0));
-            turret_yaws[idx] = Radians(yaw);
+            turret_yaws.resize(idx + 1, Radians::from(0.0));
+            turret_yaws[idx] = Radians::from(yaw);
             er.insert(Aim { turret_yaws, target_yaw: None, selected_ammo: std::collections::HashMap::new() });
         }
     }
