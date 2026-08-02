@@ -370,7 +370,10 @@ pub fn simulate_shell_through_hits(
 
             fuse_arm_velocity = post_pen_velocity;
             let fuse_real_m = post_pen_velocity * fuse_time;
-            fuse_distance_model = Meters::from(fuse_real_m).to_bigworld().value();
+            // Armor meshes are in ship-model space (15 m per unit); converting at
+            // the 30 m BigWorld scale halves fuse travel and detonates shells
+            // short of the citadel (issue #43).
+            fuse_distance_model = Meters::from(fuse_real_m).to_ship_model().value();
             fuse_accumulated = 0.0;
         }
 
@@ -529,6 +532,99 @@ fn describe_sim_outcome(sim: &ShellSimResult, hits: &[TrajectoryHit]) -> &'stati
         return "Stopped";
     }
     "Overpenetration"
+}
+
+#[cfg(test)]
+mod tests {
+    use std::f64::consts::PI;
+
+    use super::*;
+    use crate::armor_viewer::ballistics::ImpactResult;
+    use crate::armor_viewer::ballistics::ShellParams;
+
+    /// Colombo 381mm AP (PIPA045_381MM_50_AP) from GameParams.
+    fn colombo_ap() -> ShellParams {
+        let caliber = 0.381;
+        let mass = 884.8;
+        let cd = 0.2954;
+        let krupp = 2434.0;
+        let r: f64 = caliber / 2.0;
+        ShellParams {
+            caliber,
+            mass,
+            v0: 850.0,
+            krupp,
+            cd,
+            normalization: 6.0_f64.to_radians(),
+            ricochet0: 45.0_f64.to_radians(),
+            ricochet1: 60.0_f64.to_radians(),
+            fuse_time: 0.033,
+            threshold: 64.0,
+            k: 0.5 * cd * r * r * PI / mass,
+            p_ppc: 1e-7 * krupp * mass.powf(0.69) * caliber.powf(-1.07),
+            cap: true,
+        }
+    }
+
+    fn impact_at(velocity: f64) -> ImpactResult {
+        ImpactResult {
+            distance: 8500.0,
+            impact_velocity: velocity,
+            impact_angle_horizontal: 4.3_f64.to_radians(),
+            impact_angle_deck: PI / 2.0 - 4.3_f64.to_radians(),
+            time_to_target: 0.0,
+            raw_pen_mm: 0.0,
+            effective_pen_belt_mm: 0.0,
+            effective_pen_belt_normalized_mm: 0.0,
+            effective_pen_deck_mm: 0.0,
+            effective_pen_deck_normalized_mm: 0.0,
+            launch_angle: 0.0,
+        }
+    }
+
+    fn hit(x: f32, thickness_mm: f32, zone: &str) -> TrajectoryHit {
+        TrajectoryHit {
+            position: Vec3::new(x, 0.0, 0.0),
+            thickness_mm,
+            zone: zone.to_string(),
+            material: String::new(),
+            angle_deg: 24.7,
+            distance_from_start: x,
+        }
+    }
+
+    /// Regression test for issue #43 (Colombo vs Ushakov citadel range).
+    ///
+    /// Armor mesh space is 15 m per unit (ShipModelDistance), not the 30 m
+    /// GameParams BigWorld scale. Converting the fuse travel distance at 30
+    /// halves it in mesh space, detonating shells short of the citadel.
+    ///
+    /// Numbers from the issue screenshot at 8.5 km: v=699 m/s into a 425 mm
+    /// belt at 24.7 deg arms the fuse and exits at ~224 m/s, so the shell
+    /// travels 224 * 0.033 = 7.4 real meters = 0.49 mesh units before
+    /// detonating. A plate 0.42 units (6.3 m) behind the belt must be reached
+    /// and penetrated before the detonation point.
+    #[test]
+    fn fuse_travel_uses_ship_model_scale() {
+        let params = colombo_ap();
+        let impact = impact_at(699.0);
+        let hits = vec![hit(0.0, 425.0, "Hull"), hit(0.42, 40.0, "Citadel"), hit(0.6, 375.0, "Citadel")];
+        let dir = Vec3::new(1.0, 0.0, 0.0);
+
+        let sim = simulate_shell_through_hits(&params, &impact, &hits, &dir, false);
+
+        let det = sim.detonation.as_ref().expect("fuse armed on the belt, shell must detonate");
+        assert!((det.travel_distance - 7.4).abs() < 0.2, "fuse travel {} m, expected ~7.4 m", det.travel_distance);
+        assert_eq!(sim.plates.len(), 2, "shell must reach and penetrate the plate 6.3 m behind the belt");
+        assert_eq!(sim.plates[1].outcome, PlateOutcome::Penetrate);
+        assert_eq!(sim.detonated_at, Some(1), "detonation happens between the second and third plates");
+        let expected_x = det.travel_distance / 15.0;
+        assert!(
+            (det.position.x - expected_x).abs() < 0.02,
+            "detonation at x={}, expected ~{expected_x}",
+            det.position.x
+        );
+    }
 }
 
 /// Compare a shell simulation result against the server's authoritative outcome.

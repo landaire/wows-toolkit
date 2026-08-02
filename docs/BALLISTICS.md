@@ -371,7 +371,7 @@ Our `penetration.rs` implements these for the offline armor viewer simulation:
 - **Normalization**: `angle = max(0, angle_from_normal - normalization_rad)`
 - **Ricochet**: at `always_ricochet_angle` (typically 60°)
 - **Post-penetration velocity**: `v_after = v * (1 - exp(1 - raw_pen / eff_thickness))`
-- **Fuse distance**: `fuse_arm_velocity * fuse_time`, converted to BigWorld units
+- **Fuse distance**: `fuse_arm_velocity * fuse_time`, converted to ship-model units (15 m per unit; the armor meshes' space)
 
 These formulas are consistent with observed in-game behavior and widely used by
 community tools (wows_shell, WoWs Fitting Tool, ShipBuilder). While they cannot
