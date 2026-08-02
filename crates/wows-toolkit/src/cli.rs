@@ -25,13 +25,19 @@ pub enum FinalizeError {
 /// system. The extension check narrows it further: every version that emits
 /// this argument produces `<exe>.old`.
 ///
-/// Every version up to v0.1.40 spawned the replacement using `argv[0]`, which
-/// is relative when the app was launched by name from a shell, while
+/// Versions v0.1.10 through v0.1.40 spawned the replacement using `argv[0]`,
+/// which is relative when the app was launched by name from a shell, while
 /// `current_exe()` is always absolute. Normalizing both sides before the
 /// directory comparison is what makes those old launches still match; without
 /// it, `Some("")` (the relative parent) never equals an absolute directory
 /// and every update from those versions silently fails to finalize.
-pub fn validate_finalize_target(current_exe: &Path, replaced: &Path) -> Result<(), FinalizeError> {
+///
+/// Returns the normalized `replaced` path on success. The caller must delete
+/// that returned path, not the argument it passed in: this makes the "nothing
+/// outside the executable's directory can be deleted" property true by
+/// construction, instead of resting on the raw argument happening to already
+/// be lexically equivalent to what was validated.
+pub fn validate_finalize_target(current_exe: &Path, replaced: &Path) -> Result<PathBuf, FinalizeError> {
     // std::path::absolute is purely lexical (no filesystem access), so falling
     // back to the un-normalized path on error only keeps the comparison
     // stricter and can never widen what this function agrees to delete.
@@ -54,7 +60,7 @@ pub fn validate_finalize_target(current_exe: &Path, replaced: &Path) -> Result<(
     // Windows) unlinks a symlink or junction itself rather than following it,
     // so the directory check above still bounds what actually gets deleted
     // even if `replaced` is a reparse point.
-    Ok(())
+    Ok(replaced)
 }
 
 /// Subcommand names that must not be mistaken for a legacy path argument.
@@ -225,7 +231,7 @@ mod tests {
         let replaced = dir.path().join("wows_toolkit.exe.old");
         File::create(&replaced).expect("create replaced");
 
-        assert_eq!(validate_finalize_target(&current, &replaced), Ok(()));
+        assert_eq!(validate_finalize_target(&current, &replaced), Ok(replaced.clone()));
     }
 
     #[test]
@@ -294,12 +300,44 @@ mod tests {
                 let _ = std::fs::remove_file(&self.0);
             }
         }
+        let expected = replaced_absolute.clone();
         let _cleanup = RemoveOnDrop(replaced_absolute);
 
         let current_exe = cwd.join("wows_toolkit.exe");
         let replaced_relative = PathBuf::from(&name);
 
-        assert_eq!(validate_finalize_target(&current_exe, &replaced_relative), Ok(()));
+        assert_eq!(validate_finalize_target(&current_exe, &replaced_relative), Ok(expected));
+    }
+
+    /// Widening check: a relative `replaced` must still be rejected when it
+    /// normalizes into a directory other than `current_exe`'s, even though
+    /// normalization is what makes the sibling case above pass. Without this
+    /// test only the accepting side of the normalization change is covered.
+    #[test]
+    fn rejects_relative_replaced_that_normalizes_outside_current_exe_directory() {
+        let dir = tempdir().expect("tempdir");
+        let current = dir.path().join("wows_toolkit.exe");
+
+        let cwd = std::env::current_dir().expect("current dir");
+        let name = format!("wows_toolkit_test_{}_outside.exe.old", std::process::id());
+        let replaced_absolute = cwd.join(&name);
+        File::create(&replaced_absolute).expect("create replaced");
+
+        struct RemoveOnDrop(PathBuf);
+        impl Drop for RemoveOnDrop {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let _cleanup = RemoveOnDrop(replaced_absolute.clone());
+
+        let replaced_relative = PathBuf::from(&name);
+        let expected_current = current.clone();
+
+        assert_eq!(
+            validate_finalize_target(&current, &replaced_relative),
+            Err(FinalizeError::DifferentDirectory { replaced: replaced_absolute, current: expected_current })
+        );
     }
 
     fn args(values: &[&str]) -> Vec<OsString> {

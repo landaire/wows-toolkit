@@ -185,13 +185,15 @@ fn finalize_update(replaced: &Path) {
         return;
     };
 
-    if wows_toolkit::cli::validate_finalize_target(&current_exe, replaced).is_err() {
+    let Ok(replaced) = wows_toolkit::cli::validate_finalize_target(&current_exe, replaced) else {
         return;
-    }
+    };
 
     // Give the parent process time to exit before unlinking its image. Racy,
     // but a failed delete only leaves a stale file.
     std::thread::sleep(std::time::Duration::from_secs(1));
+    // Delete the normalized path returned above, not the raw argument: that is
+    // the path validate_finalize_target actually checked.
     let _ = std::fs::remove_file(replaced);
 }
 

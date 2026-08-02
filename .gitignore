@@ -27,3 +27,7 @@ dhat-heap.json
 # Profiler captures (samply writes profile.json.gz into the cwd)
 profile.json.gz
 *.json.gz
+
+# Files the finalize-update cli tests create in the crate's cwd; a Drop guard
+# removes them normally, this is the backstop if a test run is interrupted.
+*.exe.old
