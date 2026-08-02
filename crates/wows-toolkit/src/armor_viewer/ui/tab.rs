@@ -3511,14 +3511,14 @@ fn recompute_trajectory_for_range(
                     &params,
                     impact,
                     &result.hits,
-                    &result.direction,
                     continue_on_ricochet,
                 );
-                if let Some(det) = sim.detonation {
-                    new_detonation_points.push(crate::armor_viewer::penetration::DetonationMarker {
-                        position: det.position,
-                        ship_index: ship_idx,
-                    });
+                if let Some(det) = &sim.detonation
+                    && let Some(position) =
+                        crate::armor_viewer::penetration::detonation_position(&result.hits, det, &result.direction)
+                {
+                    new_detonation_points
+                        .push(crate::armor_viewer::penetration::DetonationMarker { position, ship_index: ship_idx });
                 }
                 // Earliest terminating event: detonation or ricochet/shatter
                 let shell_stop = match (sim.detonated_at, sim.stopped_at) {
@@ -3663,7 +3663,6 @@ fn update_shell_sim_cache(
 
     let range_meters = traj.meta.range.to_meters();
     let hits = &traj.result.hits;
-    let direction = &traj.result.direction;
     let sims: Vec<crate::armor_viewer::state::CachedShellSim> = comparison_ships
         .iter()
         .enumerate()
@@ -3682,7 +3681,6 @@ fn update_shell_sim_cache(
                             params,
                             imp,
                             hits,
-                            direction,
                             continue_on_ricochet,
                         )
                     }),

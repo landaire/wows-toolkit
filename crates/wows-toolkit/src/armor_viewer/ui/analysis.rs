@@ -724,7 +724,7 @@ impl AnalysisPaneViewer<'_> {
                                         &ss.ship_name,
                                         ss.shell.ammo_type.display_name(),
                                         volume_desc,
-                                        det.travel_distance,
+                                        det.travel_distance.value(),
                                         det.armed_at_hit + 1,
                                     ))
                                     .small()

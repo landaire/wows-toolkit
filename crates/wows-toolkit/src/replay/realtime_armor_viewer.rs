@@ -2281,7 +2281,7 @@ impl RealtimeArmorViewer {
                             egui::RichText::new(format!(
                                 "** detonates inside {} — {:.1}m after plate #{}",
                                 zone,
-                                det.travel_distance,
+                                det.travel_distance.value(),
                                 i + 1,
                             ))
                             .small()

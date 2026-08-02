@@ -1,4 +1,6 @@
-pub mod ballistics;
+/// Ballistics and the per-plate penetration chain live in `wowsunpack`;
+/// re-exported so armor-viewer paths keep working.
+pub use wowsunpack::ballistics;
 pub(crate) mod camera_ellipse;
 pub(crate) mod camera_perspective;
 pub mod common;

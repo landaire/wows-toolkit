@@ -13,10 +13,7 @@ use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::ShellInfo;
 use wowsunpack::game_params::types::Species;
 
-/// AP overmatch ratio: a plate is overmatched when `caliber_mm > thickness_mm * OVERMATCH_RATIO`.
-/// This is the community-established value; the real check is engine-side and is not
-/// present in GameParams, so it cannot be data-validated and must be kept in sync by hand.
-pub const OVERMATCH_RATIO: f32 = 14.3;
+pub use wowsunpack::ballistics::OVERMATCH_RATIO;
 
 /// A ship added to the comparison list.
 #[derive(Clone, Debug)]
@@ -179,40 +176,16 @@ pub fn impact_angle_deg(ray_dir: &Vec3, normal: &Vec3) -> f32 {
     cos_angle.acos().to_degrees()
 }
 
-// Per-plate ballistic simulation
+// The per-plate simulation lives in wowsunpack::ballistics; re-exported here
+// so armor-viewer call sites keep their existing paths.
 
 use crate::armor_viewer::ballistics::ImpactResult;
 use crate::armor_viewer::ballistics::ShellParams;
-
-/// Outcome of a shell hitting a single plate.
-#[derive(Clone, Debug, PartialEq)]
-pub enum PlateOutcome {
-    /// Caliber > OVERMATCH_RATIO * thickness: always penetrates, ignores ricochet.
-    Overmatch,
-    /// Shell penetrates (raw_pen >= effective_thickness).
-    Penetrate,
-    /// Angle >= always_ricochet: guaranteed ricochet, shell stopped.
-    Ricochet,
-    /// Shell shatters (raw_pen < effective_thickness).
-    Shatter,
-}
-
-/// Per-plate simulation result.
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-pub struct PlateResult {
-    pub outcome: PlateOutcome,
-    /// Effective thickness after normalization (mm).
-    pub effective_thickness_mm: f32,
-    /// Shell's raw penetration arriving at this plate (mm).
-    pub raw_pen_before_mm: f32,
-    /// Shell velocity arriving at this plate (m/s).
-    pub velocity_before: f32,
-    /// Shell velocity after penetrating this plate (m/s). 0 if stopped.
-    pub velocity_after: f32,
-    /// Whether this plate armed the fuse.
-    pub fuse_armed_here: bool,
-}
+pub use wowsunpack::ballistics::FuseDetonation;
+pub use wowsunpack::ballistics::PlateHit;
+pub use wowsunpack::ballistics::PlateOutcome;
+pub use wowsunpack::ballistics::ShellSimResult;
+pub use wowsunpack::ballistics::simulate_shell_through_plates;
 
 /// A detonation point in 3D space, tagged with which comparison ship produced it.
 #[derive(Clone, Debug)]
@@ -229,189 +202,36 @@ pub struct ShipArc {
     pub ballistic_impact: Option<crate::armor_viewer::ballistics::ImpactResult>,
 }
 
-/// Where the AP shell detonates (fuse activation + travel).
-#[derive(Clone, Debug)]
-pub struct FuseDetonation {
-    /// 3D world position of detonation.
-    pub position: Vec3,
-    /// Which hit index armed the fuse.
-    pub armed_at_hit: usize,
-    /// Distance traveled after arming (in real meters).
-    pub travel_distance: f32,
-}
-
-/// Complete shell simulation through all hit plates.
-#[derive(Clone, Debug)]
-pub struct ShellSimResult {
-    /// Per-plate results, one for each hit the shell actually reached.
-    pub plates: Vec<PlateResult>,
-    /// Where the fuse detonates (None if fuse never armed or HE/SAP).
-    pub detonation: Option<FuseDetonation>,
-    /// Hit index where the shell stopped due to ricochet/shatter/zero velocity (None if not stopped).
-    pub stopped_at: Option<usize>,
-    /// Hit index of the last plate the shell reached before fuse detonation.
-    /// The shell explodes between this hit and the next. Distinct from `stopped_at`.
-    pub detonated_at: Option<usize>,
-}
-
-/// Simulate a shell passing through a sequence of armor plates.
+/// Simulate a shell through ray-cast armor hits.
 ///
-/// Uses formulas from wows_shell (jcw780):
-///   raw_pen = p_ppc * velocity^1.38
-///   normalized_angle = max(0, angle_from_normal - normalization)
-///   effective_thickness = thickness / cos(normalized_angle)
-///   post_pen_velocity = velocity * (1 - exp(1 - raw_pen / effective_thickness))
-///
-/// Fuse detonation is tracked inline: once armed, the shell accumulates travel
-/// distance and stops processing further plates when the fuse distance is exceeded.
+/// Thin adapter over [`simulate_shell_through_plates`]: extracts the scalar
+/// along-ray plate list from the 3D hits. Positions and along-ray distances are
+/// in ship-model units (15 m per unit).
 pub fn simulate_shell_through_hits(
     params: &ShellParams,
     impact: &ImpactResult,
     hits: &[TrajectoryHit],
-    shell_dir: &Vec3,
     continue_on_ricochet: bool,
 ) -> ShellSimResult {
-    use wowsunpack::game_params::types::Meters;
+    let plates: Vec<PlateHit> = hits
+        .iter()
+        .map(|h| PlateHit {
+            thickness_mm: h.thickness_mm,
+            angle_deg: h.angle_deg,
+            distance_along_ray: wowsunpack::game_params::types::ShipModelDistance::from(h.distance_from_start),
+        })
+        .collect();
+    simulate_shell_through_plates(params, impact, &plates, continue_on_ricochet)
+}
 
-    let mut velocity = impact.impact_velocity as f32;
-    let caliber_mm = (params.caliber * 1000.0) as f32;
-    // Uncapped shells (bulletCap == false) receive no normalization.
-    let normalization_rad = if params.cap { params.normalization as f32 } else { 0.0 };
-    let ricochet1_rad = params.ricochet1 as f32;
-    let fuse_threshold_mm = params.threshold as f32;
-    let fuse_time = params.fuse_time as f32;
-    let p_ppc = params.p_ppc as f32;
-
-    let mut plates = Vec::with_capacity(hits.len());
-    let mut stopped_at: Option<usize> = None;
-    let mut detonated_at: Option<usize> = None;
-
-    // Fuse tracking
-    let mut fuse_armed = false;
-    let mut fuse_arm_velocity: f32 = 0.0;
-    let mut fuse_distance_model: f32 = 0.0;
-    let mut fuse_accumulated: f32 = 0.0; // distance traveled since arming (model units)
-    let mut prev_position = Vec3::zeros(); // last hit position (for distance accumulation)
-
-    // Precompute shell direction unit vector for detonation fallback
-    let dir_norm_v = shell_dir / shell_dir.norm().max(1e-9);
-
-    let mut detonation: Option<FuseDetonation> = None;
-
-    for (i, hit) in hits.iter().enumerate() {
-        // If fuse is armed, check if detonation occurs before reaching this plate
-        if fuse_armed && detonation.is_none() {
-            let seg_dist = (hit.position - prev_position).norm();
-            let remaining = fuse_distance_model - fuse_accumulated;
-            if seg_dist >= remaining && remaining > 0.0 {
-                // Shell detonates before reaching this plate
-                let t = remaining / seg_dist.max(1e-9);
-                let det_pos = prev_position.lerp(&hit.position, t);
-                let arm_idx = plates.iter().position(|p: &PlateResult| p.fuse_armed_here).unwrap_or(0);
-                let fuse_real_m = fuse_arm_velocity * fuse_time;
-                detonation =
-                    Some(FuseDetonation { position: det_pos, armed_at_hit: arm_idx, travel_distance: fuse_real_m });
-                detonated_at = Some(i.saturating_sub(1)); // last plate before detonation
-                break;
-            }
-            fuse_accumulated += seg_dist;
-        }
-
-        let raw_pen = p_ppc * velocity.powf(1.38);
-        let angle_from_normal_rad = hit.angle_deg.to_radians();
-        let is_overmatch = caliber_mm > hit.thickness_mm * OVERMATCH_RATIO;
-
-        // Check ricochet (only if not overmatch)
-        if !is_overmatch && angle_from_normal_rad >= ricochet1_rad {
-            plates.push(PlateResult {
-                outcome: PlateOutcome::Ricochet,
-                effective_thickness_mm: hit.thickness_mm / angle_from_normal_rad.cos().max(0.001),
-                raw_pen_before_mm: raw_pen,
-                velocity_before: velocity,
-                velocity_after: if continue_on_ricochet { velocity } else { 0.0 },
-                fuse_armed_here: false,
-            });
-            if !continue_on_ricochet {
-                stopped_at = Some(i);
-                break;
-            }
-            // continue_on_ricochet: plate recorded as ricochet, shell continues with unchanged velocity
-            prev_position = hit.position;
-            continue;
-        }
-
-        // Apply normalization
-        let norm_angle = if is_overmatch { 0.0 } else { (angle_from_normal_rad - normalization_rad).max(0.0) };
-        let effective_thickness = hit.thickness_mm / norm_angle.cos().max(0.001);
-
-        // Check penetration
-        if !is_overmatch && raw_pen < effective_thickness {
-            plates.push(PlateResult {
-                outcome: PlateOutcome::Shatter,
-                effective_thickness_mm: effective_thickness,
-                raw_pen_before_mm: raw_pen,
-                velocity_before: velocity,
-                velocity_after: 0.0,
-                fuse_armed_here: false,
-            });
-            stopped_at = Some(i);
-            break;
-        }
-
-        // Shell penetrates
-        let outcome = if is_overmatch { PlateOutcome::Overmatch } else { PlateOutcome::Penetrate };
-        let pen_ratio = raw_pen / effective_thickness.max(0.001);
-        let post_pen_velocity = velocity * (1.0 - (1.0 - pen_ratio).exp());
-
-        // Check fuse arming
-        let armed_here = !fuse_armed && hit.thickness_mm >= fuse_threshold_mm;
-        if armed_here {
-            fuse_armed = true;
-
-            fuse_arm_velocity = post_pen_velocity;
-            let fuse_real_m = post_pen_velocity * fuse_time;
-            // Armor meshes are in ship-model space (15 m per unit); converting at
-            // the 30 m BigWorld scale halves fuse travel and detonates shells
-            // short of the citadel (issue #43).
-            fuse_distance_model = Meters::from(fuse_real_m).to_ship_model().value();
-            fuse_accumulated = 0.0;
-        }
-
-        plates.push(PlateResult {
-            outcome,
-            effective_thickness_mm: effective_thickness,
-            raw_pen_before_mm: raw_pen,
-            velocity_before: velocity,
-            velocity_after: post_pen_velocity,
-            fuse_armed_here: armed_here,
-        });
-
-        prev_position = hit.position;
-        velocity = post_pen_velocity;
-
-        if velocity < 1.0 {
-            stopped_at = Some(i);
-            break;
-        }
-    }
-
-    // If fuse armed but detonation didn't happen between hits, compute where it detonates.
-    if fuse_armed && detonation.is_none() {
-        let remaining = fuse_distance_model - fuse_accumulated;
-        let det_pos = prev_position + dir_norm_v * remaining.max(0.0);
-        let arm_idx = plates.iter().position(|p| p.fuse_armed_here).unwrap_or(0);
-        let fuse_real_m = fuse_arm_velocity * fuse_time;
-        detonation = Some(FuseDetonation { position: det_pos, armed_at_hit: arm_idx, travel_distance: fuse_real_m });
-
-        if stopped_at.is_some() {
-            // Shell stopped (ricochet/shatter) but fuse was armed; it still detonates.
-            // Mark the stop plate as the detonation plate so the outcome shows as detonation.
-            detonated_at = stopped_at;
-        }
-        // else: shell exited before detonating: overpen with armed fuse (detonated_at stays None)
-    }
-
-    ShellSimResult { plates, detonation, stopped_at, detonated_at }
+/// 3D position of a fuse detonation along the trajectory ray.
+///
+/// `None` when there are no hits (a detonation only exists after a hit armed
+/// the fuse, so this is unreachable in practice).
+pub fn detonation_position(hits: &[TrajectoryHit], det: &FuseDetonation, shell_dir: &Vec3) -> Option<Vec3> {
+    let first = hits.first()?;
+    let dir = shell_dir / shell_dir.norm().max(1e-9);
+    Some(first.position + dir * det.distance_along_ray.value())
 }
 
 /// Metadata for a stored trajectory (non-simulation display data).
@@ -532,99 +352,6 @@ fn describe_sim_outcome(sim: &ShellSimResult, hits: &[TrajectoryHit]) -> &'stati
         return "Stopped";
     }
     "Overpenetration"
-}
-
-#[cfg(test)]
-mod tests {
-    use std::f64::consts::PI;
-
-    use super::*;
-    use crate::armor_viewer::ballistics::ImpactResult;
-    use crate::armor_viewer::ballistics::ShellParams;
-
-    /// Colombo 381mm AP (PIPA045_381MM_50_AP) from GameParams.
-    fn colombo_ap() -> ShellParams {
-        let caliber = 0.381;
-        let mass = 884.8;
-        let cd = 0.2954;
-        let krupp = 2434.0;
-        let r: f64 = caliber / 2.0;
-        ShellParams {
-            caliber,
-            mass,
-            v0: 850.0,
-            krupp,
-            cd,
-            normalization: 6.0_f64.to_radians(),
-            ricochet0: 45.0_f64.to_radians(),
-            ricochet1: 60.0_f64.to_radians(),
-            fuse_time: 0.033,
-            threshold: 64.0,
-            k: 0.5 * cd * r * r * PI / mass,
-            p_ppc: 1e-7 * krupp * mass.powf(0.69) * caliber.powf(-1.07),
-            cap: true,
-        }
-    }
-
-    fn impact_at(velocity: f64) -> ImpactResult {
-        ImpactResult {
-            distance: 8500.0,
-            impact_velocity: velocity,
-            impact_angle_horizontal: 4.3_f64.to_radians(),
-            impact_angle_deck: PI / 2.0 - 4.3_f64.to_radians(),
-            time_to_target: 0.0,
-            raw_pen_mm: 0.0,
-            effective_pen_belt_mm: 0.0,
-            effective_pen_belt_normalized_mm: 0.0,
-            effective_pen_deck_mm: 0.0,
-            effective_pen_deck_normalized_mm: 0.0,
-            launch_angle: 0.0,
-        }
-    }
-
-    fn hit(x: f32, thickness_mm: f32, zone: &str) -> TrajectoryHit {
-        TrajectoryHit {
-            position: Vec3::new(x, 0.0, 0.0),
-            thickness_mm,
-            zone: zone.to_string(),
-            material: String::new(),
-            angle_deg: 24.7,
-            distance_from_start: x,
-        }
-    }
-
-    /// Regression test for issue #43 (Colombo vs Ushakov citadel range).
-    ///
-    /// Armor mesh space is 15 m per unit (ShipModelDistance), not the 30 m
-    /// GameParams BigWorld scale. Converting the fuse travel distance at 30
-    /// halves it in mesh space, detonating shells short of the citadel.
-    ///
-    /// Numbers from the issue screenshot at 8.5 km: v=699 m/s into a 425 mm
-    /// belt at 24.7 deg arms the fuse and exits at ~224 m/s, so the shell
-    /// travels 224 * 0.033 = 7.4 real meters = 0.49 mesh units before
-    /// detonating. A plate 0.42 units (6.3 m) behind the belt must be reached
-    /// and penetrated before the detonation point.
-    #[test]
-    fn fuse_travel_uses_ship_model_scale() {
-        let params = colombo_ap();
-        let impact = impact_at(699.0);
-        let hits = vec![hit(0.0, 425.0, "Hull"), hit(0.42, 40.0, "Citadel"), hit(0.6, 375.0, "Citadel")];
-        let dir = Vec3::new(1.0, 0.0, 0.0);
-
-        let sim = simulate_shell_through_hits(&params, &impact, &hits, &dir, false);
-
-        let det = sim.detonation.as_ref().expect("fuse armed on the belt, shell must detonate");
-        assert!((det.travel_distance - 7.4).abs() < 0.2, "fuse travel {} m, expected ~7.4 m", det.travel_distance);
-        assert_eq!(sim.plates.len(), 2, "shell must reach and penetrate the plate 6.3 m behind the belt");
-        assert_eq!(sim.plates[1].outcome, PlateOutcome::Penetrate);
-        assert_eq!(sim.detonated_at, Some(1), "detonation happens between the second and third plates");
-        let expected_x = det.travel_distance / 15.0;
-        assert!(
-            (det.position.x - expected_x).abs() < 0.02,
-            "detonation at x={}, expected ~{expected_x}",
-            det.position.x
-        );
-    }
 }
 
 /// Compare a shell simulation result against the server's authoritative outcome.

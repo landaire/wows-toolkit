@@ -4,6 +4,10 @@
 #[macro_use]
 mod variant_accessors;
 
+/// Shell ballistics: trajectory simulation, penetration, and the per-plate
+/// armor interaction chain.
+#[cfg(feature = "parsing")]
+pub mod ballistics;
 /// Per-version consumable id -> name tables recovered by static analysis of game scripts.
 #[cfg(feature = "parsing")]
 pub mod consumable_versions;

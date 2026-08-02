@@ -1,7 +1,8 @@
 # Ballistics Reverse Engineering Notes
 
 Findings from reverse engineering `WorldOfWarships64.exe` (Binary Ninja) compared
-against our implementation in `ballistics.rs` and `penetration.rs`.
+against our implementation in `wowsunpack::ballistics` (trajectory, penetration,
+and the per-plate chain) and the armor viewer's `penetration.rs` adapters.
 
 Source path embedded in the binary:
 ```
@@ -28,7 +29,7 @@ Key files: `py_ammo_pitches.h`, `py_ammo_pitches.cpp`, `py_fast_pitches.h`.
 
 ### Our implementation
 
-Single 2D simulation in `ballistics.rs`:
+Single 2D simulation in `wowsunpack::ballistics`:
 - `simulate_trajectory()` — RK4 integration in the (x, y) plane
 - `solve_for_range()` — bisection to find launch angle for a given range
 - `simulate_arc_points()` — produces normalized arc for visualization
@@ -366,7 +367,7 @@ No client-side code was found for:
 All armor interaction is server-authoritative. The client only visualizes
 results received from the server.
 
-Our `penetration.rs` implements these for the offline armor viewer simulation:
+Our `wowsunpack::ballistics` implements these for the offline armor viewer simulation:
 - **Overmatch**: `caliber_mm > thickness_mm * 14.3` — community-confirmed constant
 - **Normalization**: `angle = max(0, angle_from_normal - normalization_rad)`
 - **Ricochet**: at `always_ricochet_angle` (typically 60°)
