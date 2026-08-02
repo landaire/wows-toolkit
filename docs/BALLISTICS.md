@@ -156,13 +156,20 @@ exposed via the `BigWorld` C++ Python module:
 | `BW_TO_SHIP` | 15.0 | `sub_140f66090` | 1 BW unit = 15 ship-model units |
 | `SHIP_TO_BW` | 1/15 | `sub_140f660a0` | 1 ship-model unit = 1/15 BW units |
 
-From these: **1 ship-model unit = 2 meters** (since 30/15 = 2).
+The names suggest "1 BW unit = 15 ship-model units" and hence 1 ship unit =
+2 m, but that is not how the client uses `BW_TO_SHIP`: it multiplies ship-model
+coordinates by 15 to get meters. Measured hull geometry confirms **1 ship-model
+unit = 15 meters**: Yamato's hull mesh spans 17.53 units for a 263 m ship
+(15.0 m/unit) and Iowa's spans 18.04 units for 270.4 m with a 2.20-unit beam
+against 32.97 m (14.99 m/unit both ways). See `wows_core::units` for the full
+evidence chain. Ship meshes sit 1:1 in world coordinates, where map distance is
+30 m per unit, which is why ships render twice as large as map distances imply.
 
-| Space | Scale to BW | Scale to meters | Notes |
-|-------|-------------|-----------------|-------|
-| BigWorld (BW) | 1 | 30 | Entity positions, map coordinates |
-| Ballistic (meters) | 1/30 | 1 | Physics sim, ISA model, drag |
-| Ship-model | 1/15 | 2 | Ship geometry/armor meshes |
+| Space | Scale to meters | Notes |
+|-------|-----------------|-------|
+| BigWorld (BW) map distance | 30 | Entity positions, map coordinates, GameParams ranges |
+| Ballistic (meters) | 1 | Physics sim, ISA model, drag |
+| Ship-model / replay world | 15 | Ship geometry/armor meshes, packet positions |
 
 ### Ballistic scale (30.0 at runtime)
 
