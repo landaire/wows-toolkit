@@ -1,6 +1,9 @@
 #![warn(clippy::all, rust_2018_idioms)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
 #[cfg(all(feature = "dhat-heap", not(target_arch = "wasm32")))]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
@@ -51,28 +54,18 @@ fn main() -> eframe::Result<()> {
     use std::backtrace::Backtrace;
     use std::env;
     use std::io::Write;
-
-    use std::path::Path;
     use std::sync::Once;
 
-    // Check to see if we need to delete the previous application
-    let args: Vec<String> = env::args().collect();
-    if args.len() == 2 {
-        let current_path = Path::new(args[0].as_str());
-        let old_path = Path::new(args[1].as_str());
-        // Sanity check -- ensure that these files are in the same directory
-        if current_path.parent() == old_path.parent()
-            && let Some(name) = old_path.file_name().and_then(|name| name.to_str())
-            && name.contains(".exe")
-            && old_path.exists()
-        {
-            // Sleep for 1 second to give the parent process some time to exit.
-            // This is racy but better than just failing.
-
-            use std::time::Duration;
-            std::thread::sleep(Duration::from_secs(1));
-
-            let _ = std::fs::remove_file(old_path);
+    match wows_toolkit::cli::resolve(env::args_os()) {
+        Ok(wows_toolkit::cli::Invocation::FinalizeUpdate { replaced }) => {
+            finalize_update(&replaced);
+        }
+        Ok(wows_toolkit::cli::Invocation::Run(_)) => {}
+        Err(error) => {
+            if let Some(mut console) = wows_toolkit::cli::console_writer() {
+                let _ = write!(console, "{}", error.render().ansi());
+            }
+            std::process::exit(error.exit_code());
         }
     }
 
@@ -178,6 +171,25 @@ fn main() -> eframe::Result<()> {
             Ok(Box::new(app))
         }),
     )
+}
+
+/// Delete the binary this process replaced. Failures are not worth surfacing:
+/// the update has already succeeded by this point, and the only consequence is
+/// a stale file next to the executable.
+#[cfg(not(target_arch = "wasm32"))]
+fn finalize_update(replaced: &Path) {
+    let Ok(current_exe) = std::env::current_exe() else {
+        return;
+    };
+
+    if wows_toolkit::cli::validate_finalize_target(&current_exe, replaced).is_err() {
+        return;
+    }
+
+    // Give the parent process time to exit before unlinking its image. Racy,
+    // but a failed delete only leaves a stale file.
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let _ = std::fs::remove_file(replaced);
 }
 
 // When compiling to web using trunk:

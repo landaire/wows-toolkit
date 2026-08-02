@@ -1830,6 +1830,8 @@ impl WowsToolkitApp {
                         std::fs::rename(new_exe, &current_process).context("failed to rename new process")?;
 
                         std::process::Command::new(current_process)
+                            .arg("finalize-update")
+                            .arg("--replaced")
                             .arg(current_process_new_path)
                             .spawn()
                             .context("failed to execute updated process")
