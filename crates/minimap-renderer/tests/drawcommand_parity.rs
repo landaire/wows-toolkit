@@ -60,14 +60,13 @@ fn resources_for_build(version: &Version) -> BuildResources {
         return *res;
     }
 
-    let dir = wows_data_mgr::game_dir_for_build(build)
+    let dump = wows_data_mgr::dump_for_build(build)
         .unwrap_or_else(|| panic!("game data for build {} not available", build));
-    let vfs_root = dir.join("vfs");
-    assert!(vfs_root.exists(), "vfs dir not found at {}", vfs_root.display());
-    let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
+    assert!(dump.has_game_files(), "no game files for build {build}");
+    let vfs = dump.vfs();
 
-    let rkyv_path = dir.join("game_params.rkyv");
-    let provider = match wowsunpack::game_params::cache::load(&rkyv_path) {
+    let cached = dump.derived_path("game_params.rkyv").and_then(|path| wowsunpack::game_params::cache::load(&path));
+    let provider = match cached {
         Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs)
             .unwrap_or_else(|e| panic!("failed to build game metadata for build {build}: {e:?}")),
         None => GameMetadataProvider::from_vfs(&vfs)

@@ -19,8 +19,6 @@ use wowsunpack::game_data;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::rpc::entitydefs::EntitySpec;
 use wowsunpack::rpc::entitydefs::parse_scripts;
-use wowsunpack::vfs::VfsPath;
-use wowsunpack::vfs::impls::physical::PhysicalFS;
 
 use wows_battle_world::BattleWorld;
 use wows_battle_world::ids::ShotTracking;
@@ -803,15 +801,16 @@ fn load_metadata_provider_and_constants(
         }
         (None, Some(extracted)) => {
             let dir = resolve_extracted_dir(Path::new(extracted), version)?;
-            let vfs_root = dir.join("vfs");
-            if !vfs_root.exists() {
-                return Err(anyhow!("VFS directory not found: {}", vfs_root.display()));
+            let dump = wows_data_mgr::Dump::open(&dir);
+            if !dump.has_game_files() {
+                return Err(anyhow!("no game files found in {}", dir.display()));
             }
-            let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
+            let vfs = dump.vfs();
 
             // Prefer the prebuilt rkyv cache; fall back to parsing GameParams.data.
-            let rkyv_path = dir.join("game_params.rkyv");
-            let mut provider = match wowsunpack::game_params::cache::load(&rkyv_path) {
+            let cached =
+                dump.derived_path("game_params.rkyv").and_then(|path| wowsunpack::game_params::cache::load(&path));
+            let mut provider = match cached {
                 Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs)
                     .map_err(|e| anyhow!("failed to build game metadata: {e:?}"))?,
                 None => GameMetadataProvider::from_vfs(&vfs)

@@ -3,11 +3,11 @@
 //! `NormalizedBattleReport::from_battle_report`.
 //!
 //! Each entry pairs a real `replay_cache` replay with its game build. Game data
-//! is loaded from a dumped build archive (a dir with `vfs/` + `game_params.rkyv`,
-//! resolved via `wows_data_mgr::game_dir_for_build`), the same loader
-//! `wows-battle-world`'s test support uses. Entries whose build has no local
-//! game data skip with a message, so the suite stays green on machines without
-//! the archives.
+//! is loaded from a dumped build archive via `wows_data_mgr::dump_for_build`,
+//! which serves content-addressed dumps out of the shared `common/` store and
+//! older ones from their `vfs/` tree. Entries whose build has no local game data
+//! skip with a message, so the suite stays green on machines without the
+//! archives.
 //!
 //! For each runnable entry the test builds the report, checks version-invariant
 //! structural properties, then compares the serialized report to a committed
@@ -36,8 +36,6 @@ use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::Species;
-use wowsunpack::vfs::VfsPath;
-use wowsunpack::vfs::impls::physical::PhysicalFS;
 
 struct Entry {
     version_label: &'static str,
@@ -115,15 +113,14 @@ fn try_load(entry: &Entry) -> Option<Loaded> {
     let replay = ReplayFile::from_file(&path).ok()?;
     let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
 
-    let game_dir = wows_data_mgr::game_dir_for_build(entry.build)?;
-    let vfs_root = game_dir.join("vfs");
-    if !vfs_root.exists() {
+    let dump = wows_data_mgr::dump_for_build(entry.build)?;
+    if !dump.has_game_files() {
         return None;
     }
-    let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
+    let vfs = dump.vfs();
 
-    let rkyv_path = game_dir.join("game_params.rkyv");
-    let provider = match wowsunpack::game_params::cache::load(&rkyv_path) {
+    let cached = dump.derived_path("game_params.rkyv").and_then(|path| wowsunpack::game_params::cache::load(&path));
+    let provider = match cached {
         Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs).ok()?,
         None => GameMetadataProvider::from_vfs(&vfs).ok()?,
     };

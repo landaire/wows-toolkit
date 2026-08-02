@@ -96,8 +96,6 @@ use wowsunpack::models::assets_bin::PrototypeDatabase;
 use wowsunpack::models::fire_nodes;
 use wowsunpack::models::fire_nodes::BurnNodeIndex;
 use wowsunpack::models::fire_nodes::FireSectionGeometry;
-use wowsunpack::vfs::VfsPath;
-use wowsunpack::vfs::impls::physical::PhysicalFS;
 
 fn corpus_dir() -> PathBuf {
     std::env::var_os("WOWS_REPLAY_CORPUS").map(PathBuf::from).unwrap_or_else(|| {
@@ -298,14 +296,14 @@ struct BuildData {
 
 fn load_build(build: u32) -> Option<BuildData> {
     let game_dir = wows_data_mgr::game_dir_for_build(build)?;
-    let vfs_root = game_dir.join("vfs");
-    if !vfs_root.exists() {
+    let dump = wows_data_mgr::Dump::open(&game_dir);
+    if !dump.has_game_files() {
         return None;
     }
-    let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
+    let vfs = dump.vfs();
 
-    let rkyv_path = game_dir.join("game_params.rkyv");
-    let provider = match wowsunpack::game_params::cache::load(&rkyv_path) {
+    let cached = dump.derived_path("game_params.rkyv").and_then(|path| wowsunpack::game_params::cache::load(&path));
+    let provider = match cached {
         Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs).ok()?,
         None => GameMetadataProvider::from_vfs(&vfs).ok()?,
     };

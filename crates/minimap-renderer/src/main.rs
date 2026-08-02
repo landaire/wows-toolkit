@@ -740,15 +740,14 @@ fn load_from_extracted(
     use std::io::Read;
     use wowsunpack::data::DataFileWithCallback;
     use wowsunpack::rpc::entitydefs::parse_scripts;
-    use wowsunpack::vfs::impls::physical::PhysicalFS;
 
     info!("Loading from extracted directory: {}", extracted_dir.display());
 
-    let vfs_root = extracted_dir.join("vfs");
-    if !vfs_root.exists() {
-        bail!("VFS directory not found: {}", vfs_root.display());
+    let dump = wows_data_mgr::Dump::open(extracted_dir);
+    if !dump.has_game_files() {
+        bail!("no game files found in {}", extracted_dir.display());
     }
-    let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
+    let vfs = dump.vfs();
 
     // Load entity specs from VFS
     info!("Loading entity specs");

@@ -40,10 +40,12 @@ pub mod dump;
 pub mod manifest;
 pub mod registry;
 
+use std::path::Path;
 use std::path::PathBuf;
 
 use wowsunpack::game_data;
 use wowsunpack::vfs::VfsPath;
+use wowsunpack::vfs::impls::physical::PhysicalFS;
 
 /// Returns the path to the game_data/ directory.
 ///
@@ -79,7 +81,10 @@ pub fn available_builds() -> Vec<u32> {
         return Vec::new();
     };
     let reg = registry::load_registry(&data_dir.join("versions.toml"));
-    reg.available_builds()
+    // A registry entry is a claim, not proof: a build whose directory was moved
+    // or renamed is not available to read, and callers treat this list as data
+    // they can open.
+    reg.available_builds().into_iter().filter(|build| reg.game_dir_for_build(*build, &data_dir).is_some()).collect()
 }
 
 /// Returns the game root path for a specific build.
@@ -92,12 +97,70 @@ pub fn game_dir_for_build(build: u32) -> Option<PathBuf> {
     reg.game_dir_for_build(build, &data_dir)
 }
 
+/// A dump directory resolved for reading, whichever on-disk layout it uses.
+///
+/// A CAS-format dump keeps its bytes in the shared `common/` store and has no
+/// `vfs/` tree at all, so reading one through `PhysicalFS` finds nothing. A
+/// directory with no readable `metadata.toml` (a hand-extracted dump, or one
+/// produced before the content-addressed layout) is served from `vfs/`.
+pub struct Dump {
+    dump_dir: PathBuf,
+    cas: Option<cas_vfs::BuildCas>,
+}
+
+impl Dump {
+    /// Resolve `dump_dir`, parsing its manifest once when it has one.
+    pub fn open(dump_dir: &Path) -> Self {
+        Self { dump_dir: dump_dir.to_path_buf(), cas: cas_vfs::BuildCas::open(dump_dir) }
+    }
+
+    /// A VFS over the dump's game files.
+    pub fn vfs(&self) -> VfsPath {
+        match &self.cas {
+            Some(cas) => cas.vfs(),
+            None => VfsPath::new(PhysicalFS::new(self.dump_dir.join("vfs"))),
+        }
+    }
+
+    /// Path to a derived artifact such as `game_params.rkyv`, or `None` when
+    /// this dump does not carry one.
+    pub fn derived_path(&self, rel: &str) -> Option<PathBuf> {
+        match &self.cas {
+            Some(cas) => cas.derived_path(rel),
+            None => {
+                let path = self.dump_dir.join(rel);
+                path.exists().then_some(path)
+            }
+        }
+    }
+
+    /// Whether this dump has game files to read. Callers that skip when data is
+    /// unavailable test this rather than probing for `vfs/`, which a CAS-format
+    /// dump legitimately lacks.
+    pub fn has_game_files(&self) -> bool {
+        match &self.cas {
+            Some(cas) => cas.metadata().has_file_hashes() || self.dump_dir.join("vfs").is_dir(),
+            None => self.dump_dir.join("vfs").is_dir(),
+        }
+    }
+}
+
+/// Resolves a build number to a readable [`Dump`].
+pub fn dump_for_build(build: u32) -> Option<Dump> {
+    Some(Dump::open(&game_dir_for_build(build)?))
+}
+
 /// Constructs a VFS for a specific build.
 ///
-/// Resolves path via [`game_dir_for_build`], then calls
-/// [`wowsunpack::game_data::build_game_vfs`].
+/// Most registered builds are dumps, which are read through [`Dump`]. A build
+/// that resolves to a real game installation has no dump layout to read, and
+/// falls back to [`wowsunpack::game_data::build_game_vfs`] over its packages.
 pub fn vfs_for_build(build: u32) -> Option<VfsPath> {
     let game_dir = game_dir_for_build(build)?;
+    let dump = Dump::open(&game_dir);
+    if dump.has_game_files() {
+        return Some(dump.vfs());
+    }
     game_data::build_game_vfs(&game_dir).ok()
 }
 
@@ -107,6 +170,97 @@ pub fn latest_build() -> Option<(u32, VfsPath)> {
     let build = *builds.last()?;
     let vfs = vfs_for_build(build)?;
     Some((build, vfs))
+}
+
+#[cfg(test)]
+mod dump_tests {
+    use std::io::Read;
+
+    use super::*;
+    use crate::builds::BuildMetadata;
+
+    /// A CAS-format dump: bytes live in the sibling `common/` store and there
+    /// is no `vfs/` tree.
+    fn cas_dump(base: &Path, files: &[(&str, &[u8])], derived: &[(&str, &[u8])]) -> PathBuf {
+        let cas_root = base.join("common");
+        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        for (rel, bytes) in files {
+            meta.files.insert((*rel).to_string(), cas::store(&cas_root, bytes).unwrap());
+        }
+        for (rel, bytes) in derived {
+            meta.derived.insert((*rel).to_string(), cas::store(&cas_root, bytes).unwrap());
+        }
+        let dump_dir = base.join("1.2.3_100");
+        std::fs::create_dir_all(&dump_dir).unwrap();
+        meta.save(&dump_dir.join("metadata.toml")).unwrap();
+        dump_dir
+    }
+
+    /// A pre-CAS dump: a real `vfs/` tree and no manifest.
+    fn legacy_dump(base: &Path, files: &[(&str, &[u8])]) -> PathBuf {
+        let dump_dir = base.join("legacy");
+        for (rel, bytes) in files {
+            let path = dump_dir.join("vfs").join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+        dump_dir
+    }
+
+    fn read(vfs: &VfsPath, rel: &str) -> Vec<u8> {
+        let mut data = Vec::new();
+        vfs.join(rel).unwrap().open_file().unwrap().read_to_end(&mut data).unwrap();
+        data
+    }
+
+    #[test]
+    fn cas_dump_reads_game_files_without_a_vfs_tree() {
+        let base = tempfile::tempdir().unwrap();
+        let dump_dir = cas_dump(base.path(), &[("content/GameParams.data", b"params")], &[]);
+
+        let dump = Dump::open(&dump_dir);
+
+        assert!(!dump_dir.join("vfs").exists(), "a CAS dump has no vfs tree to read");
+        assert!(dump.has_game_files());
+        assert_eq!(read(&dump.vfs(), "content/GameParams.data"), b"params");
+    }
+
+    #[test]
+    fn cas_dump_resolves_derived_artifacts_into_the_store() {
+        let base = tempfile::tempdir().unwrap();
+        let dump_dir = cas_dump(base.path(), &[], &[("game_params.rkyv", b"rkyv bytes")]);
+
+        let dump = Dump::open(&dump_dir);
+        let path = dump.derived_path("game_params.rkyv").expect("derived artifact");
+
+        assert_eq!(std::fs::read(path).unwrap(), b"rkyv bytes");
+        assert!(dump.derived_path("absent.rkyv").is_none());
+    }
+
+    #[test]
+    fn legacy_dump_still_reads_from_its_vfs_tree() {
+        let base = tempfile::tempdir().unwrap();
+        let dump_dir = legacy_dump(base.path(), &[("content/GameParams.data", b"params")]);
+        std::fs::write(dump_dir.join("game_params.rkyv"), b"rkyv bytes").unwrap();
+
+        let dump = Dump::open(&dump_dir);
+
+        assert!(dump.has_game_files());
+        assert_eq!(read(&dump.vfs(), "content/GameParams.data"), b"params");
+        assert_eq!(std::fs::read(dump.derived_path("game_params.rkyv").unwrap()).unwrap(), b"rkyv bytes");
+    }
+
+    #[test]
+    fn empty_directory_has_no_game_files() {
+        let base = tempfile::tempdir().unwrap();
+        let dump_dir = base.path().join("nothing");
+        std::fs::create_dir_all(&dump_dir).unwrap();
+
+        let dump = Dump::open(&dump_dir);
+
+        assert!(!dump.has_game_files());
+        assert!(dump.derived_path("game_params.rkyv").is_none());
+    }
 }
 
 #[cfg(test)]

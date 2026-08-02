@@ -770,20 +770,17 @@ mod extraction_snapshots {
     use wows_replays::ReplayFile;
     use wows_replays::game_constants::GameConstants;
     use wowsunpack::game_params::provider::GameMetadataProvider;
-    use wowsunpack::vfs::VfsPath;
-    use wowsunpack::vfs::impls::physical::PhysicalFS;
 
     fn fixtures_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("tests").join("fixtures").join("replays")
     }
 
     fn load_build_resources(build: u32) -> (GameMetadataProvider, GameConstants) {
-        let dir = wows_data_mgr::game_dir_for_build(build)
+        let dump = wows_data_mgr::dump_for_build(build)
             .unwrap_or_else(|| panic!("game data for build {} not available", build));
-        let vfs_root = dir.join("vfs");
-        let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
-        let rkyv_path = dir.join("game_params.rkyv");
-        let provider = match wowsunpack::game_params::cache::load(&rkyv_path) {
+        let vfs = dump.vfs();
+        let cached = dump.derived_path("game_params.rkyv").and_then(|path| wowsunpack::game_params::cache::load(&path));
+        let provider = match cached {
             Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs)
                 .unwrap_or_else(|e| panic!("failed to build game metadata for build {build}: {e:?}")),
             None => GameMetadataProvider::from_vfs(&vfs)

@@ -91,7 +91,11 @@ impl LocalRegistry {
     pub fn game_dir_for_build(&self, build: u32, data_dir: &Path) -> Option<PathBuf> {
         // Check explicit registry entry first
         if let Some(entry) = self.get(build) {
-            if let Some(ref path) = entry.path {
+            // A registered path that no longer exists (the directory was moved
+            // or renamed) must not shadow a copy that is actually present.
+            if let Some(ref path) = entry.path
+                && path.exists()
+            {
                 return Some(path.clone());
             }
             // Downloaded build
