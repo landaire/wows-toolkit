@@ -772,6 +772,18 @@ fn arm_sticky_error(problem: bool, already_shown: &mut bool) -> bool {
     emit
 }
 
+/// Gate for the wows-dir sticky toast: a path typed character by character is
+/// invalid on every keystroke, so arming (and its already-shown bookkeeping)
+/// is skipped entirely while the directory field holds keyboard focus, rather
+/// than firing once per keystroke. The flag catches up once focus leaves the
+/// field, using whatever `invalid` reads at that point.
+fn should_arm_wows_dir_error(invalid: bool, field_focused: bool, already_shown: &mut bool) -> bool {
+    if field_focused {
+        return false;
+    }
+    arm_sticky_error(invalid, already_shown)
+}
+
 impl WowsToolkitApp {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -2018,6 +2030,14 @@ impl WowsToolkitApp {
                     if e.downcast_current_context::<ToolkitError>()
                         .is_some_and(|e| matches!(e, ToolkitError::InvalidWowsDirectory(_)))
                     {
+                        // Catches only the case where the persisted `wows_dir` has gone
+                        // away since startup: this revalidates the settings path, not
+                        // whatever path the failing load actually used (a folder picked
+                        // through the settings UI is not persisted until it succeeds,
+                        // so a bad pick here revalidates the old, possibly-fine, path).
+                        // The heuristic in `revalidate_wows_dir` is also weaker than the
+                        // checks that raise `InvalidWowsDirectory` at load time, so it
+                        // can mark a directory valid that the loader would still reject.
                         self.tab_state.revalidate_wows_dir();
                     }
 
@@ -2694,12 +2714,21 @@ impl WowsToolkitApp {
 
             if arm_sticky_error(twitch_token_failed, &mut self.shown_twitch_token_error) {
                 error!("Twitch token is invalid or expired");
-                self.tab_state.toasts.lock().error(t!("ui.messages.twitch_token_invalid")).duration(None);
+                self.tab_state
+                    .toasts
+                    .lock()
+                    .error(t!("ui.messages.twitch_token_invalid"))
+                    .duration(None)
+                    .closable(true);
             }
 
-            if arm_sticky_error(wows_dir_invalid, &mut self.shown_wows_dir_error) {
+            if should_arm_wows_dir_error(
+                wows_dir_invalid,
+                self.tab_state.wows_dir_field_focused,
+                &mut self.shown_wows_dir_error,
+            ) {
                 error!("World of Warships directory is not valid");
-                self.tab_state.toasts.lock().error(t!("ui.messages.wows_dir_invalid")).duration(None);
+                self.tab_state.toasts.lock().error(t!("ui.messages.wows_dir_invalid")).duration(None).closable(true);
             }
 
             self.tab_state.settings_needs_attention = wows_dir_invalid || twitch_token_failed;
@@ -5563,6 +5592,7 @@ mod logging_target_tests {
 #[cfg(test)]
 mod sticky_error_tests {
     use super::arm_sticky_error;
+    use super::should_arm_wows_dir_error;
 
     #[test]
     fn a_fresh_problem_emits_once_and_then_holds() {
@@ -5592,5 +5622,46 @@ mod sticky_error_tests {
     fn an_already_shown_problem_does_not_re_emit() {
         let mut shown = true;
         assert!(!arm_sticky_error(true, &mut shown));
+    }
+
+    #[test]
+    fn a_mid_edit_invalid_path_never_arms_while_focused() {
+        let mut shown = false;
+        for keystroke in 0..10 {
+            assert!(
+                !should_arm_wows_dir_error(true, true, &mut shown),
+                "keystroke {keystroke} must not arm the toast while the field is focused"
+            );
+        }
+        assert!(!shown, "bookkeeping must stay untouched while focused, not just the emit");
+    }
+
+    #[test]
+    fn losing_focus_with_the_path_still_invalid_arms_once() {
+        let mut shown = false;
+        assert!(!should_arm_wows_dir_error(true, true, &mut shown), "still typing, must not arm");
+        assert!(should_arm_wows_dir_error(true, false, &mut shown), "focus left with an invalid path, must arm");
+        assert!(!should_arm_wows_dir_error(true, false, &mut shown), "must not re-arm on the next frame");
+    }
+
+    #[test]
+    fn losing_focus_with_a_valid_path_never_arms() {
+        let mut shown = false;
+        assert!(!should_arm_wows_dir_error(false, true, &mut shown));
+        assert!(!should_arm_wows_dir_error(false, false, &mut shown));
+    }
+
+    #[test]
+    fn refocusing_after_a_shown_error_does_not_rearm_on_its_own() {
+        // Regression guard for a tempting-but-wrong implementation: resetting
+        // already_shown while focused would let the same underlying problem
+        // re-fire every time the user tabs back into the field.
+        let mut shown = false;
+        assert!(should_arm_wows_dir_error(true, false, &mut shown), "first blur with a problem arms");
+        assert!(!should_arm_wows_dir_error(true, true, &mut shown), "refocusing must not clear the bookkeeping");
+        assert!(
+            !should_arm_wows_dir_error(true, false, &mut shown),
+            "blurring again with the same problem must not re-arm"
+        );
     }
 }

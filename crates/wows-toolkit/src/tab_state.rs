@@ -558,6 +558,11 @@ pub struct TabState {
     /// Cached result of WoWs directory validation. Updated by `revalidate_wows_dir()`
     /// on startup and whenever `settings.wows_dir` changes — NOT every frame.
     pub wows_dir_invalid: bool,
+    /// Whether the Settings tab's WoWs directory `TextEdit` currently holds
+    /// keyboard focus. A path is invalid on every keystroke until it is
+    /// finished, so the sticky error toast waits for focus to leave the
+    /// field rather than arming on each partial edit.
+    pub wows_dir_field_focused: bool,
     /// wgpu render state for 3D viewport rendering (captured at app init).
     pub wgpu_render_state: Option<eframe::egui_wgpu::RenderState>,
     /// State for the Armor Viewer tab.
@@ -666,6 +671,7 @@ impl Default for TabState {
             validating_game_data_cache: false,
             game_data_cache_stats: None,
             wows_dir_invalid: false,
+            wows_dir_field_focused: false,
             wgpu_render_state: None,
             armor_viewer: Default::default(),
             show_replay_controls: false,

@@ -874,7 +874,22 @@ mod tests {
         assert_eq!(last.format.color, sem.text_dim);
         assert!(job.text.ends_with("\nstats"), "line 2 is the last section: {:?}", job.text);
         assert_ne!(sem.text_dim, sem.win, "line 2 must not inherit line 1's tint");
-        assert_ne!(sem.text_dim, visuals.text_color(), "line 2 must not render at body-text weight");
+
+        // MatchOutcome::Unknown is the one branch where line 1 renders at
+        // body-text weight (`visuals.text_color()`); every other outcome
+        // tints line 1 with a semantic role instead. This is checked against
+        // the app's own installed style, not stock egui's `Visuals::dark()`:
+        // stock `text_color()` is `Color32::from_gray(140)`, a colour this
+        // app never paints, so comparing against it cannot tell body weight
+        // from de-emphasised weight. The app's real dark body text comes from
+        // `dark_style()`'s `noninteractive.fg_stroke`, which is
+        // `palette::dark::TEXT_DIM` - the actual colour `text_dim` must stay
+        // clear of.
+        let app_visuals = crate::ui::theme::style::dark_style().visuals;
+        let unknown_job =
+            row_layout_job("id", "stats", &row_stats(MatchOutcome::Unknown, false), false, &app_visuals, test_font());
+        assert_eq!(identity_color(&unknown_job), app_visuals.text_color());
+        assert_ne!(sem.text_dim, identity_color(&unknown_job), "line 2 must not render at body-text weight");
     }
 
     #[test]

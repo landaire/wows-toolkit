@@ -190,6 +190,8 @@ impl ToolkitTabViewer<'_> {
                                 .text_color_opt(show_text_error.then_some(ui.sem().error)),
                         );
 
+                        self.tab_state.wows_dir_field_focused = response.has_focus();
+
                         // If someone pastes or types a path, revalidate and reload if valid.
                         if response.changed() {
                             self.tab_state.persisted.write().settings.game.wows_dir = wows_dir.clone();

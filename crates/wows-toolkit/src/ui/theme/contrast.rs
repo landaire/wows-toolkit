@@ -6,10 +6,9 @@ use egui::Color32;
 /// Readable-text contrast floor (WCAG 2.1 AA, normal text).
 pub const CONTRAST_FLOOR: f32 = 4.5;
 
-/// Contrast floor for de-emphasised detail text. Below the readable-text
-/// floor deliberately: this tier exists to recede, and anything held at
-/// `CONTRAST_FLOOR` is as prominent as body text. WCAG 2.1 AA for incidental
-/// and large text.
+/// Contrast floor for de-emphasised detail text: a deliberate relaxation
+/// below `CONTRAST_FLOOR` for this one recessive tier, chosen so
+/// de-emphasised detail reads as secondary rather than at body weight.
 ///
 /// Test-only: nothing at runtime measures against this floor, it only
 /// bounds the `text_dim` constants chosen in `semantic.rs`.
