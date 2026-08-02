@@ -27,16 +27,25 @@ use crate::update_background_task;
 enum TokenState {
     Absent,
     Valid,
+    /// Stored but not yet checked: the startup validation round-trip hasn't
+    /// completed, or the machine is offline. Neither is a rejection.
+    Unvalidated,
     Rejected,
 }
 
-/// `has_token` and `is_valid` come from two separate locks, so a stale
-/// validity flag must never outrank the absence of a token.
-fn token_state(has_token: bool, is_valid: bool) -> TokenState {
-    match (has_token, is_valid) {
-        (false, _) => TokenState::Absent,
-        (true, true) => TokenState::Valid,
-        (true, false) => TokenState::Rejected,
+/// `has_token`, `is_valid`, and `validation_failed` come from two separate
+/// locks, so a stale validity flag must never outrank the absence of a
+/// token. Likewise, only an actual failed validation attempt justifies the
+/// rejected treatment: a token that is merely loaded-but-expired reports
+/// `is_valid == false` with `validation_failed == false`, and reads as
+/// `Unvalidated` until a validation attempt actually fails. That bias is
+/// deliberate -- never accuse a token we have not proven bad.
+fn token_state(has_token: bool, is_valid: bool, validation_failed: bool) -> TokenState {
+    match (has_token, is_valid, validation_failed) {
+        (false, _, _) => TokenState::Absent,
+        (true, _, true) => TokenState::Rejected,
+        (true, true, false) => TokenState::Valid,
+        (true, false, false) => TokenState::Unvalidated,
     }
 }
 
@@ -531,20 +540,29 @@ impl ToolkitTabViewer<'_> {
                 let state = {
                     let has_token = self.tab_state.persisted.read().settings.integrations.twitch_token.is_some();
                     let is_valid = self.tab_state.twitch_state.read().token_is_valid();
-                    token_state(has_token, is_valid)
+                    let validation_failed = self.tab_state.twitch_state.read().token_validation_failed;
+                    token_state(has_token, is_valid, validation_failed)
                 };
 
                 let (label, glyph, tint) = match state {
                     TokenState::Absent => {
-                        (t!("ui.settings.twitch.paste_token_no_token"), icons::WARNING, ui.sem().warn)
+                        (t!("ui.settings.twitch.paste_token_no_token"), Some(icons::WARNING), ui.sem().warn)
                     }
-                    TokenState::Valid => (t!("ui.settings.twitch.paste_token_valid"), icons::CHECK_CIRCLE, ui.sem().ok),
+                    TokenState::Valid => {
+                        (t!("ui.settings.twitch.paste_token_valid"), Some(icons::CHECK_CIRCLE), ui.sem().ok)
+                    }
+                    TokenState::Unvalidated => {
+                        (t!("ui.settings.twitch.paste_token_unvalidated"), None, ui.visuals().text_color())
+                    }
                     TokenState::Rejected => {
-                        (t!("ui.settings.twitch.paste_token_invalid"), icons::X_CIRCLE, ui.sem().error)
+                        (t!("ui.settings.twitch.paste_token_invalid"), Some(icons::X_CIRCLE), ui.sem().error)
                     }
                 };
 
-                let text = format!("{} {} {}", icons::CLIPBOARD_TEXT, label, glyph);
+                let text = match glyph {
+                    Some(glyph) => format!("{} {} {}", icons::CLIPBOARD_TEXT, label, glyph),
+                    None => format!("{} {}", icons::CLIPBOARD_TEXT, label),
+                };
                 let mut button = egui::Button::new(RichText::new(text).color(tint));
                 if state == TokenState::Rejected {
                     button = button.stroke(Stroke::new(1.0, ui.sem().error));
@@ -649,16 +667,36 @@ mod token_state_tests {
 
     #[test]
     fn no_stored_token_is_absent_regardless_of_the_validity_flag() {
-        // The validity flag is a separate read from a separate lock and can
-        // still say `true` from a token that has since been cleared. Absent
-        // has to win, or the button reports a working token with none stored.
-        assert_eq!(token_state(false, false), TokenState::Absent);
-        assert_eq!(token_state(false, true), TokenState::Absent);
+        // The validity flag and the validation-failed flag are separate reads
+        // from a separate lock and can still say `true` from a token that has
+        // since been cleared. Absent has to win, or the button reports a
+        // working (or rejected) token with none stored.
+        assert_eq!(token_state(false, false, false), TokenState::Absent);
+        assert_eq!(token_state(false, true, false), TokenState::Absent);
+        assert_eq!(token_state(false, false, true), TokenState::Absent);
+        assert_eq!(token_state(false, true, true), TokenState::Absent);
     }
 
     #[test]
-    fn a_stored_token_follows_the_validity_flag() {
-        assert_eq!(token_state(true, true), TokenState::Valid);
-        assert_eq!(token_state(true, false), TokenState::Rejected);
+    fn a_validation_failure_is_rejected_even_if_is_valid_says_otherwise() {
+        // A failed validation attempt is the only thing that should ever
+        // paint the button red; it outranks a stale or contradictory
+        // `is_valid` read.
+        assert_eq!(token_state(true, false, true), TokenState::Rejected);
+        assert_eq!(token_state(true, true, true), TokenState::Rejected);
+    }
+
+    #[test]
+    fn a_stored_token_that_has_not_failed_validation_follows_the_validity_flag() {
+        assert_eq!(token_state(true, true, false), TokenState::Valid);
+    }
+
+    #[test]
+    fn unchecked_token_is_unvalidated_not_rejected() {
+        // The startup window (before the background validation round-trip
+        // completes) and the offline case both leave `is_valid == false`
+        // with no validation attempt having failed yet. That must read as
+        // neutral, not as a rejection we have not actually proven.
+        assert_eq!(token_state(true, false, false), TokenState::Unvalidated);
     }
 }

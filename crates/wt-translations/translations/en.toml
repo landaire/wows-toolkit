@@ -281,6 +281,7 @@ get_token = "Get Login Token"
 get_token_tooltip = "We use Chatterino's login page as it provides a token with the necessary permissions (basically a moderator token with chat permissions), and it removes the need for the WoWs Toolkit developer to host their own login page website which would have the same result."
 paste_token_no_token = "Paste Token (No Token Set)"
 paste_token_valid = "Paste Token (Token Valid)"
+paste_token_unvalidated = "Checking token"
 paste_token_invalid = "Paste Token (Token Invalid / Expired)"
 monitored_channel = "Monitored Channel (Default to Self)"
 
