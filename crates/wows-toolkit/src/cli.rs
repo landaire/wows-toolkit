@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -131,6 +132,50 @@ pub fn console_writer() -> Option<std::fs::File> {
 #[cfg(not(windows))]
 pub fn console_writer() -> Option<std::fs::File> {
     None
+}
+
+/// Report a startup-time message (a parse error, `--help`, or `--version`)
+/// through whichever channel the launching context can actually show.
+///
+/// A release build has no console of its own, so a double-click or a
+/// drag-and-drop launch that fails to parse would otherwise exit silently
+/// with nothing visible anywhere: logging only starts once `eframe::run_native`
+/// is reached, which a parse error never gets to. `console_writer` is the
+/// single call site for `AttachConsole`, so routing the fallback through here
+/// keeps that call to at most once per process.
+pub fn report_startup_message(title: &str, message: &str, is_error: bool) {
+    if let Some(mut console) = console_writer() {
+        let _ = write!(console, "{message}");
+        return;
+    }
+
+    #[cfg(windows)]
+    show_message_box(title, message, is_error);
+
+    #[cfg(not(windows))]
+    {
+        let _ = (title, is_error);
+        eprint!("{message}");
+    }
+}
+
+/// Win32 message box fallback for a launch with no console to write to.
+#[cfg(windows)]
+fn show_message_box(title: &str, message: &str, is_error: bool) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONERROR;
+    use windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONINFORMATION;
+    use windows_sys::Win32::UI::WindowsAndMessaging::MB_OK;
+    use windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW;
+
+    // MessageBoxW wants null-terminated UTF-16, not the Rust &str form.
+    let to_wide = |text: &str| -> Vec<u16> { text.encode_utf16().chain(std::iter::once(0)).collect() };
+    let title = to_wide(title);
+    let message = to_wide(message);
+    let icon = if is_error { MB_ICONERROR } else { MB_ICONINFORMATION };
+
+    unsafe {
+        MessageBoxW(std::ptr::null_mut(), message.as_ptr(), title.as_ptr(), MB_OK | icon);
+    }
 }
 
 #[cfg(test)]

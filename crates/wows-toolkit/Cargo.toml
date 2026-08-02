@@ -129,7 +129,7 @@ tracing-subscriber = { workspace = true, features = [
 dhat = { version = "0.3", optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_UI_WindowsAndMessaging"] }
 
 [features]
 default = ["logging"]

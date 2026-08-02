@@ -62,9 +62,11 @@ fn main() -> eframe::Result<()> {
         }
         Ok(wows_toolkit::cli::Invocation::Run(_)) => {}
         Err(error) => {
-            if let Some(mut console) = wows_toolkit::cli::console_writer() {
-                let _ = write!(console, "{}", error.render().ansi());
-            }
+            // exit_code() is 0 for --help/--version, which arrive through this
+            // same arm and are not failures; pick the icon and caption accordingly.
+            let is_error = error.exit_code() != 0;
+            let title = if is_error { "wows_toolkit: argument error" } else { "wows_toolkit" };
+            wows_toolkit::cli::report_startup_message(title, &error.render().to_string(), is_error);
             std::process::exit(error.exit_code());
         }
     }
