@@ -48,15 +48,14 @@ fn time_ship_load() {
     eprintln!("[camo_texture_source + scheme_infos] {:?} ({} schemes, 0 decoded)", t.elapsed(), infos.len());
 }
 
-/// Times a single camo scheme decode and breaks the per-texture cost into its
-/// VFS read / DDS decode / PNG encode / PNG decode stages.
+/// Times one camo scheme decode, then the UI-side work the armor viewer does on
+/// top of it: PNG decode of the camo and the stock albedo, and the per-pixel
+/// composite in `build_active_camo`.
 /// Run: WOWS_DIR=... SHIP=WSD011_Smaland_1955 CAMO=camo_permanent_1 \
 ///   cargo test --release -p wowsunpack --test timing_ship_load -- --ignored --nocapture time_camo_decode
 #[test]
 #[ignore = "requires a World of Warships install; profiling only"]
 fn time_camo_decode() {
-    use wowsunpack::export::texture;
-
     let game_dir =
         std::env::var_os("WOWS_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"E:\WoWs\World_of_Warships"));
     let ship = std::env::var("SHIP").unwrap_or_else(|_| "WSD011_Smaland_1955".to_string());
@@ -77,10 +76,9 @@ fn time_camo_decode() {
     let source = ctx.camo_texture_source().expect("camo source");
     let infos = source.scheme_infos();
 
-    let info = infos
-        .iter()
-        .find(|i| i.display_name == camo)
-        .unwrap_or_else(|| panic!("no scheme named {camo}; have {:?}", infos.iter().map(|i| &i.display_name).take(20).collect::<Vec<_>>()));
+    let info = infos.iter().find(|i| i.display_name == camo).unwrap_or_else(|| {
+        panic!("no scheme named {camo}; have {:?}", infos.iter().map(|i| &i.display_name).take(20).collect::<Vec<_>>())
+    });
 
     let t = Instant::now();
     let textures = source.decode(info.id).expect("decode");
