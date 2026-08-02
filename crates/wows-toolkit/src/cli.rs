@@ -124,9 +124,7 @@ where
 
     let cli = Cli::try_parse_from(&args)?;
     match &cli.command {
-        Some(Command::FinalizeUpdate { replaced }) => {
-            Ok(Invocation::FinalizeUpdate { replaced: replaced.clone() })
-        }
+        Some(Command::FinalizeUpdate { replaced }) => Ok(Invocation::FinalizeUpdate { replaced: replaced.clone() }),
         None => Ok(Invocation::Run(cli)),
     }
 }
@@ -144,8 +142,8 @@ where
 /// leaves `out.txt` empty.
 #[cfg(windows)]
 pub fn console_writer() -> Option<std::fs::File> {
-    use windows_sys::Win32::System::Console::AttachConsole;
     use windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS;
+    use windows_sys::Win32::System::Console::AttachConsole;
 
     // SAFETY: AttachConsole has no preconditions beyond a valid process
     // context; it either attaches to the parent's console or fails, and
@@ -255,10 +253,7 @@ mod tests {
         let replaced = dir.path().join("something.exe");
         File::create(&replaced).expect("create replaced");
 
-        assert_eq!(
-            validate_finalize_target(&current, &replaced),
-            Err(FinalizeError::UnexpectedName { replaced })
-        );
+        assert_eq!(validate_finalize_target(&current, &replaced), Err(FinalizeError::UnexpectedName { replaced }));
     }
 
     #[test]
@@ -267,10 +262,7 @@ mod tests {
         let current = dir.path().join("wows_toolkit.exe");
         let replaced = dir.path().join("wows_toolkit.exe.old");
 
-        assert_eq!(
-            validate_finalize_target(&current, &replaced),
-            Err(FinalizeError::Missing { replaced })
-        );
+        assert_eq!(validate_finalize_target(&current, &replaced), Err(FinalizeError::Missing { replaced }));
     }
 
     /// Regression test for versions up to v0.1.40: they spawned the
@@ -383,13 +375,9 @@ mod tests {
 
     #[test]
     fn resolves_subcommand_form_to_finalize_update() {
-        let resolved = resolve(args(&[
-            "wows_toolkit.exe",
-            "finalize-update",
-            "--replaced",
-            "C:\\app\\wows_toolkit.exe.old",
-        ]))
-        .expect("resolve");
+        let resolved =
+            resolve(args(&["wows_toolkit.exe", "finalize-update", "--replaced", "C:\\app\\wows_toolkit.exe.old"]))
+                .expect("resolve");
 
         assert!(matches!(
             resolved,

@@ -19,8 +19,6 @@ use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::rpc::entitydefs::EntitySpec;
-use wowsunpack::vfs::VfsPath;
-use wowsunpack::vfs::impls::physical::PhysicalFS;
 
 use wows_minimap_renderer::DrawCommand;
 use wows_minimap_renderer::MapInfo;
@@ -60,8 +58,8 @@ fn resources_for_build(version: &Version) -> BuildResources {
         return *res;
     }
 
-    let dump = wows_data_mgr::dump_for_build(build)
-        .unwrap_or_else(|| panic!("game data for build {} not available", build));
+    let dump =
+        wows_data_mgr::dump_for_build(build).unwrap_or_else(|| panic!("game data for build {} not available", build));
     assert!(dump.has_game_files(), "no game files for build {build}");
     let vfs = dump.vfs();
 

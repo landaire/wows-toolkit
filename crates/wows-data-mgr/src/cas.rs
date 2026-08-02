@@ -308,7 +308,6 @@ mod tests {
         std::thread::scope(|scope| {
             for _ in 0..3 {
                 let path = path.clone();
-                let expected_len = expected_len;
                 let (torn, complete, done) = (&torn, &complete, &done);
                 scope.spawn(move || {
                     loop {
