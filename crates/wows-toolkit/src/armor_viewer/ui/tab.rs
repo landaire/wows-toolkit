@@ -24,6 +24,8 @@ use crate::armor_viewer::state::ArmorPane;
 use crate::armor_viewer::state::ArmorTriangleTooltip;
 use crate::armor_viewer::state::ArmorViewerDefaults;
 use crate::armor_viewer::state::ArmorZone;
+use crate::armor_viewer::state::CamoDecodeResult;
+use crate::armor_viewer::state::CamoRequestId;
 use crate::armor_viewer::state::CompareSettings;
 use crate::armor_viewer::state::ExportRequest;
 use crate::armor_viewer::state::HullPopoverResult;
@@ -850,40 +852,26 @@ impl ToolkitTabViewer<'_> {
 
         // Camo change: decode the selected scheme to RGBA and re-upload hull meshes.
         // No ship reload - all camo data is already resident in LoadedShipArmor.
+        // A scheme not yet decoded goes to a worker; the previous camo stays on the
+        // hull until it lands, so only the cache-hit and Stock arms upload here.
         if let Some(pane_id) = camo_change_cell.get()
             && let Some((_, pane)) = state.dock_state.iter_all_tabs_mut().find(|(_, t)| t.id == pane_id)
             && let Some(mut armor) = pane.loaded_armor.take()
         {
-            armor.active_camo.clear();
-            if let Some(id) = pane.selected_camo {
-                let decoded = match pane.camo_texture_cache.get(&id) {
-                    Some(t) => Some(t.clone()),
-                    None => match armor.camo_source.decode(id) {
-                        Ok(t) => {
-                            if t.is_empty() {
-                                tracing::warn!(
-                                    "camo scheme {id:?} decoded to zero textures for this ship; rendering as stock"
-                                );
-                            }
-                            pane.camo_texture_cache.insert(id, t.clone());
-                            Some(t)
-                        }
-                        Err(e) => {
-                            tracing::warn!("failed to decode camo scheme {id:?}: {e}");
-                            None
-                        }
-                    },
-                };
-                if let Some(textures) = decoded {
+            // Any new selection retires a still-outstanding decode for the previous
+            // one; only the cache-miss arm below issues a fresh request past this point.
+            pane.camo_request = pane.camo_request.next();
+            pane.camo_decode_receiver = None;
+
+            match pane.selected_camo {
+                // A scheme decoded earlier this session is already in hand; a worker
+                // round trip would only add latency to work that is done.
+                Some(id) if pane.camo_texture_cache.contains_key(&id) => {
+                    let textures = pane.camo_texture_cache[&id].clone();
                     let info = armor.camo_scheme_infos.iter().find(|i| i.id == id);
                     let (uv, use_color_scheme) = match info {
                         Some(i) => (i.uv_transforms.clone(), i.use_color_scheme),
-                        None => {
-                            tracing::warn!(
-                                "camo scheme {id:?} decoded successfully but has no matching entry in camo_scheme_infos; falling back to identity UVs and no color scheme"
-                            );
-                            (Default::default(), false)
-                        }
+                        None => (Default::default(), false),
                     };
                     armor.active_camo = crate::armor_viewer::common::build_active_camo(
                         &textures,
@@ -891,9 +879,28 @@ impl ToolkitTabViewer<'_> {
                         use_color_scheme,
                         &armor.hull_textures,
                     );
+                    upload_hull_meshes_to_viewport(
+                        pane,
+                        &armor,
+                        &render_state.device,
+                        &render_state.queue,
+                        &gpu_pipeline,
+                    );
+                }
+                // The previously selected camo stays on the hull until the decode lands.
+                // Clearing and re-uploading here would flash the ship back to stock.
+                Some(id) => start_camo_decode(pane, &armor, id),
+                None => {
+                    armor.active_camo.clear();
+                    upload_hull_meshes_to_viewport(
+                        pane,
+                        &armor,
+                        &render_state.device,
+                        &render_state.queue,
+                        &gpu_pipeline,
+                    );
                 }
             }
-            upload_hull_meshes_to_viewport(pane, &armor, &render_state.device, &render_state.queue, &gpu_pipeline);
             pane.loaded_armor = Some(armor);
         }
 
@@ -1189,6 +1196,43 @@ fn poll_pane_loads(
                 }
             }
             pane.upgrade_load_receiver = None;
+        }
+
+        // Poll background camo decode
+        if let Some(rx) = &pane.camo_decode_receiver {
+            match rx.try_recv() {
+                Ok(result) => {
+                    match result {
+                        Ok(data) if camo_result_is_current(pane.camo_request, data.request) => {
+                            if data.textures.is_empty() {
+                                tracing::warn!(
+                                    "camo scheme {:?} decoded to zero textures for this ship; rendering as stock",
+                                    data.scheme
+                                );
+                            }
+                            pane.camo_texture_cache.insert(data.scheme, data.textures);
+                            if let Some(mut armor) = pane.loaded_armor.take() {
+                                armor.active_camo = data.active;
+                                upload_hull_meshes_to_viewport(pane, &armor, device, queue, pipeline);
+                                pane.loaded_armor = Some(armor);
+                            }
+                        }
+                        // Superseded by a later selection; the newer decode is still coming.
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::error!("Failed to decode camo: {e}");
+                        }
+                    }
+                    pane.camo_decode_receiver = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    // The worker ended without sending, most likely a panic inside
+                    // spawn_logged's catch_unwind. Clear so the spinner does not spin forever.
+                    tracing::error!("camo decode worker ended without a result");
+                    pane.camo_decode_receiver = None;
+                }
+            }
         }
     }
 }
@@ -2499,6 +2543,10 @@ fn load_ship_for_pane_with_lod(
     pane.part_visibility.clear();
     pane.selected_camo = None;
     pane.camo_texture_cache.clear();
+    // A decode in flight was built against the outgoing armor; advancing the id
+    // makes its result stale so the drain discards it.
+    pane.camo_request = pane.camo_request.next();
+    pane.camo_decode_receiver = None;
     pane.trajectories.clear();
     pane.splash_mode = false;
     pane.splash_result = None;
@@ -2580,6 +2628,10 @@ pub(crate) fn start_hull_lod_reload(
     lod: usize,
 ) {
     pane.hull_lod = lod;
+    // A decode in flight was built against the outgoing armor; advancing the id
+    // makes its result stale so the drain discards it.
+    pane.camo_request = pane.camo_request.next();
+    pane.camo_decode_receiver = None;
 
     let assets = ship_assets.clone();
     let (tx, rx) = mpsc::channel();
@@ -2654,6 +2706,11 @@ pub(crate) fn apply_hull_reload(
         armor.hull_lod = data.hull_lod;
         armor.hull_lod_count = data.hull_lod_count;
 
+        // hull_textures just changed under any decode that started during this
+        // reload; its active-camo map may have been baked from the outgoing set.
+        pane.camo_request = pane.camo_request.next();
+        pane.camo_decode_receiver = None;
+
         // Update hull visibility map for any new/changed parts
         let hull_default = pane.hull_visibility.values().any(|&v| v);
         pane.hull_visibility.retain(|name, _| armor.hull_part_groups.iter().any(|(_, names)| names.contains(name)));
@@ -2672,6 +2729,47 @@ pub(crate) fn apply_hull_reload(
     }
 }
 
+/// Whether a decode result is the one the pane is still waiting for. A result
+/// issued before the newest request belongs to a camo the user has moved on from.
+fn camo_result_is_current(pane_request: CamoRequestId, result_request: CamoRequestId) -> bool {
+    pane_request == result_request
+}
+
+/// Decode `scheme` and build its active-camo map on a worker.
+/// The caller should poll `pane.camo_decode_receiver` each frame.
+fn start_camo_decode(
+    pane: &mut ArmorPane,
+    armor: &LoadedShipArmor,
+    scheme: wowsunpack::export::camo_textures::CamoSchemeId,
+) {
+    let request = pane.camo_request.next();
+    pane.camo_request = request;
+
+    let source = armor.camo_source.clone();
+    let hull_textures = armor.hull_textures.clone();
+    let info = armor.camo_scheme_infos.iter().find(|i| i.id == scheme);
+    let (uv, use_color_scheme) = match info {
+        Some(i) => (i.uv_transforms.clone(), i.use_color_scheme),
+        None => {
+            tracing::warn!(
+                "camo scheme {scheme:?} has no matching entry in camo_scheme_infos; falling back to identity UVs and no color scheme"
+            );
+            (Default::default(), false)
+        }
+    };
+
+    let (tx, rx) = mpsc::channel();
+    crate::util::thread::spawn_logged("decode-camo", move || {
+        let result = source.decode(scheme).map_err(|e| format!("{e:?}")).map(|textures| {
+            let active =
+                crate::armor_viewer::common::build_active_camo(&textures, &uv, use_color_scheme, &hull_textures);
+            CamoDecodeResult { request, scheme, textures, active }
+        });
+        let _ = tx.send(result);
+    });
+    pane.camo_decode_receiver = Some(rx);
+}
+
 /// Start a background upgrade-only reload: re-exports with the new hull selection,
 /// replacing turret models and turret armor without a full ship reload.
 /// The caller should poll `pane.upgrade_load_receiver` each frame and call `apply_upgrade_reload` when data arrives.
@@ -2680,6 +2778,11 @@ fn start_upgrade_reload(
     ship_assets: &Arc<wowsunpack::export::ship::ShipAssets>,
     param_index: &str,
 ) {
+    // A decode in flight was built against the outgoing armor; advancing the id
+    // makes its result stale so the drain discards it.
+    pane.camo_request = pane.camo_request.next();
+    pane.camo_decode_receiver = None;
+
     let assets = ship_assets.clone();
     let (tx, rx) = mpsc::channel();
     let selected_hull = pane.selected_hull.clone();
@@ -2834,6 +2937,11 @@ fn apply_upgrade_reload(
         armor.hull_textures = data.hull_textures;
         armor.loaded_hull = data.loaded_hull;
         armor.module_alternatives = data.module_alternatives;
+
+        // hull_textures just changed under any decode that started during this
+        // reload; its active-camo map may have been baked from the outgoing set.
+        pane.camo_request = pane.camo_request.next();
+        pane.camo_decode_receiver = None;
 
         // Preserve visibility for parts that still exist, default new parts to visible
         pane.part_visibility
@@ -3313,7 +3421,12 @@ pub(crate) fn draw_hull_visibility_popover(
         use wowsunpack::export::gltf_export::CamoOrigin;
         let none_label = t!("ui.armor.camo_none");
 
-        ui.label(t!("ui.armor.camo").as_ref());
+        ui.horizontal(|ui| {
+            ui.label(t!("ui.armor.camo").as_ref());
+            if pane.camo_decode_receiver.is_some() {
+                ui.add(egui::Spinner::new().size(12.0));
+            }
+        });
 
         // Top-level: Stock (none) + ship-specific camos.
         let none_clicked = ui.selectable_label(pane.selected_camo.is_none(), none_label.as_ref()).clicked();
@@ -5573,5 +5686,45 @@ mod tests {
         assert!((dist_point_segment(pos2(-3.0, 4.0), a, b) - 5.0).abs() < 1e-4);
         // degenerate (zero-length) segment falls back to point distance
         assert!((dist_point_segment(pos2(3.0, 4.0), a, a) - 5.0).abs() < 1e-4);
+    }
+}
+
+#[cfg(test)]
+mod camo_request_tests {
+    use super::camo_result_is_current;
+    use crate::armor_viewer::state::CamoRequestId;
+
+    #[test]
+    fn a_result_from_the_newest_request_is_current() {
+        let issued = CamoRequestId::default().next();
+        assert!(camo_result_is_current(issued, issued));
+    }
+
+    #[test]
+    fn a_result_from_a_superseded_request_is_stale() {
+        let first = CamoRequestId::default().next();
+        let second = first.next();
+        assert!(!camo_result_is_current(second, first), "clicking a second camo must discard the first decode");
+    }
+
+    #[test]
+    fn ids_do_not_repeat_across_successive_requests() {
+        let mut id = CamoRequestId::default();
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..100 {
+            id = id.next();
+            assert!(seen.insert(id), "a repeated id would let a stale result pass as current");
+        }
+    }
+
+    #[test]
+    fn advancing_the_id_invalidates_a_decode_issued_for_the_previous_ship() {
+        let issued = CamoRequestId::default().next();
+        // A ship or hull reload advances the pane's id without issuing a decode.
+        let after_reload = issued.next();
+        assert!(
+            !camo_result_is_current(after_reload, issued),
+            "a decode built against the outgoing armor must not paint the incoming one"
+        );
     }
 }

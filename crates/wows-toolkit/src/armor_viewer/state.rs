@@ -415,6 +415,28 @@ pub struct StoredTrajectory {
     pub created_at_yaw: f32,
 }
 
+/// Identifies one camo decode request, so a result that arrives after the user
+/// has moved on can be told apart from the current one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct CamoRequestId(u64);
+
+impl CamoRequestId {
+    /// The id of the next request, for the pane to store and the worker to echo.
+    pub fn next(self) -> Self {
+        CamoRequestId(self.0 + 1)
+    }
+}
+
+/// A finished camo decode, carrying the id it was issued under so a stale
+/// result can be dropped.
+pub struct CamoDecodeResult {
+    pub request: CamoRequestId,
+    pub scheme: wowsunpack::export::camo_textures::CamoSchemeId,
+    /// Kept so the UI thread can populate `camo_texture_cache` without redoing the decode.
+    pub textures: wowsunpack::export::camo_textures::SchemeTextures,
+    pub active: HashMap<String, crate::armor_viewer::common::ActiveCamo>,
+}
+
 /// State for a single armor viewer pane within the split tree.
 #[allow(dead_code)]
 pub struct ArmorPane {
@@ -442,6 +464,10 @@ pub struct ArmorPane {
     /// Decoded textures per selected scheme, cached so re-selecting is instant.
     pub camo_texture_cache:
         HashMap<wowsunpack::export::camo_textures::CamoSchemeId, wowsunpack::export::camo_textures::SchemeTextures>,
+    /// Newest camo decode request issued for this pane.
+    pub camo_request: CamoRequestId,
+    /// Receiver for a background camo decode. Its presence is the pending state.
+    pub camo_decode_receiver: Option<Receiver<Result<CamoDecodeResult, String>>>,
     /// Maps MeshId -> per-triangle tooltip data for picking.
     pub mesh_triangle_info: Vec<(MeshId, Vec<ArmorTriangleTooltip>)>,
     /// Hover highlight: plate key (zone, material_name, thickness_mm rounded) and its overlay mesh.
@@ -693,6 +719,8 @@ impl ArmorPane {
             hull_opaque: defaults.hull_opaque,
             selected_camo: None,
             camo_texture_cache: HashMap::new(),
+            camo_request: CamoRequestId::default(),
+            camo_decode_receiver: None,
             mesh_triangle_info: Vec::new(),
             hover_highlight: None,
             sidebar_highlight: None,
