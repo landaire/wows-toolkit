@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
 
 use egui_dock::DockState;
 
@@ -12,6 +13,9 @@ use crate::viewport_3d::LightingSettings;
 use crate::viewport_3d::MeshId;
 use crate::viewport_3d::Vec3;
 use crate::viewport_3d::Viewport3D;
+
+/// Decoded hull albedo textures: mfm path -> (width, height, RGBA8 pixels).
+pub type HullTextures = HashMap<String, (u32, u32, Vec<u8>)>;
 
 /// Key identifying a specific plate: (zone, material_name, thickness in tenths of mm).
 /// The thickness discriminator ensures highlights stop at plate boundaries.
@@ -324,7 +328,7 @@ pub struct LoadedShipArmor {
     /// Decoded hull textures: mfm_path -> (width, height, RGBA8 pixels).
     /// Loaded on background thread, uploaded to GPU during `upload_armor_to_viewport`.
     /// Shared so a camo decode worker can read them without owning the armor.
-    pub hull_textures: Arc<HashMap<String, (u32, u32, Vec<u8>)>>,
+    pub hull_textures: Arc<HullTextures>,
     /// Number of LOD levels available for hull meshes.
     pub hull_lod_count: usize,
     /// The LOD level used to load the current hull meshes.
@@ -417,7 +421,7 @@ pub struct StoredTrajectory {
 
 /// Identifies one camo decode request, so a result that arrives after the user
 /// has moved on can be told apart from the current one.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CamoRequestId(u64);
 
 impl CamoRequestId {
@@ -425,6 +429,17 @@ impl CamoRequestId {
     pub fn next(self) -> Self {
         CamoRequestId(self.0 + 1)
     }
+}
+
+/// Everything the worker needs to decode one scheme. The `Arc` snapshots make it
+/// independent of what the pane does next.
+pub struct CamoDecodeRequest {
+    pub request: CamoRequestId,
+    pub scheme: wowsunpack::export::camo_textures::CamoSchemeId,
+    pub source: Arc<wowsunpack::export::camo_textures::CamoTextureSource>,
+    pub hull_textures: Arc<HullTextures>,
+    pub uv: HashMap<String, wowsunpack::export::camouflage::UvTransform>,
+    pub use_color_scheme: bool,
 }
 
 /// A finished camo decode, carrying the id it was issued under so a stale
@@ -435,6 +450,56 @@ pub struct CamoDecodeResult {
     /// Kept so the UI thread can populate `camo_texture_cache` without redoing the decode.
     pub textures: wowsunpack::export::camo_textures::SchemeTextures,
     pub active: HashMap<String, crate::armor_viewer::common::ActiveCamo>,
+}
+
+/// A decode that could not be completed. Carries its id so the pane can tell a
+/// failure of the selection it is waiting on from one it has already moved past.
+pub struct CamoDecodeFailure {
+    pub request: CamoRequestId,
+    pub message: String,
+}
+
+/// Long-lived per-pane camo decode worker. Requests are coalesced: only the
+/// newest queued request is decoded, so rapid selection cannot pile up work.
+pub struct CamoWorker {
+    pub requests: Sender<CamoDecodeRequest>,
+    pub results: Receiver<Result<CamoDecodeResult, CamoDecodeFailure>>,
+}
+
+impl CamoWorker {
+    pub fn spawn() -> Self {
+        let (request_tx, request_rx) = std::sync::mpsc::channel::<CamoDecodeRequest>();
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+
+        crate::util::thread::spawn_logged("decode-camo", move || {
+            while let Ok(mut req) = request_rx.recv() {
+                // Skip straight to what the user actually wants if they clicked
+                // again while this loop was busy.
+                while let Ok(newer) = request_rx.try_recv() {
+                    req = newer;
+                }
+                let CamoDecodeRequest { request, scheme, source, hull_textures, uv, use_color_scheme } = req;
+                let outcome = match source.decode(scheme) {
+                    Ok(textures) => {
+                        let active = crate::armor_viewer::common::build_active_camo(
+                            &textures,
+                            &uv,
+                            use_color_scheme,
+                            &hull_textures,
+                        );
+                        Ok(CamoDecodeResult { request, scheme, textures, active })
+                    }
+                    Err(e) => Err(CamoDecodeFailure { request, message: format!("{e:?}") }),
+                };
+                if result_tx.send(outcome).is_err() {
+                    // The pane is gone; nothing left to decode for.
+                    break;
+                }
+            }
+        });
+
+        Self { requests: request_tx, results: result_rx }
+    }
 }
 
 /// State for a single armor viewer pane within the split tree.
@@ -464,10 +529,16 @@ pub struct ArmorPane {
     /// Decoded textures per selected scheme, cached so re-selecting is instant.
     pub camo_texture_cache:
         HashMap<wowsunpack::export::camo_textures::CamoSchemeId, wowsunpack::export::camo_textures::SchemeTextures>,
-    /// Newest camo decode request issued for this pane.
+    /// Newest camo decode id issued for this pane. Only ever advances, so an id
+    /// retired by an invalidation can never be handed out again.
     pub camo_request: CamoRequestId,
-    /// Receiver for a background camo decode. Its presence is the pending state.
-    pub camo_decode_receiver: Option<Receiver<Result<CamoDecodeResult, String>>>,
+    /// The decode this pane is waiting on, if any. `None` means nothing is
+    /// outstanding, so any result that still arrives belongs to a camo the user
+    /// has moved past.
+    pub camo_pending: Option<CamoRequestId>,
+    /// Decode worker for this pane, started on the first decode so a pane that
+    /// never switches camo never spawns a thread.
+    pub camo_worker: Option<CamoWorker>,
     /// Maps MeshId -> per-triangle tooltip data for picking.
     pub mesh_triangle_info: Vec<(MeshId, Vec<ArmorTriangleTooltip>)>,
     /// Hover highlight: plate key (zone, material_name, thickness_mm rounded) and its overlay mesh.
@@ -677,7 +748,7 @@ impl SyncedPaneSettings {
 pub struct HullReloadData {
     pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
     pub hull_part_groups: Vec<(String, Vec<String>)>,
-    pub hull_textures: Arc<HashMap<String, (u32, u32, Vec<u8>)>>,
+    pub hull_textures: Arc<HullTextures>,
     pub hull_lod: usize,
     pub hull_lod_count: usize,
 }
@@ -693,7 +764,7 @@ pub struct UpgradeReloadData {
     /// New hull visual meshes (hull parts + mounted turrets with new mount transforms).
     pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
     pub hull_part_groups: Vec<(String, Vec<String>)>,
-    pub hull_textures: Arc<HashMap<String, (u32, u32, Vec<u8>)>>,
+    pub hull_textures: Arc<HullTextures>,
     /// Which hull upgrade key was loaded.
     pub loaded_hull: Option<String>,
     /// Updated module alternatives for the new hull upgrade.
@@ -720,7 +791,8 @@ impl ArmorPane {
             selected_camo: None,
             camo_texture_cache: HashMap::new(),
             camo_request: CamoRequestId::default(),
-            camo_decode_receiver: None,
+            camo_pending: None,
+            camo_worker: None,
             mesh_triangle_info: Vec::new(),
             hover_highlight: None,
             sidebar_highlight: None,
