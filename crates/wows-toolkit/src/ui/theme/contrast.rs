@@ -10,6 +10,10 @@ pub const CONTRAST_FLOOR: f32 = 4.5;
 /// floor deliberately: this tier exists to recede, and anything held at
 /// `CONTRAST_FLOOR` is as prominent as body text. WCAG 2.1 AA for incidental
 /// and large text.
+///
+/// Test-only: nothing at runtime measures against this floor, it only
+/// bounds the `text_dim` constants chosen in `semantic.rs`.
+#[cfg(test)]
 pub const DIM_CONTRAST_FLOOR: f32 = 3.0;
 
 /// WCAG 2.1 relative luminance.
