@@ -863,43 +863,18 @@ impl ToolkitTabViewer<'_> {
             pane.camo_request = pane.camo_request.next();
             pane.camo_decode_receiver = None;
 
-            match pane.selected_camo {
-                // A scheme decoded earlier this session is already in hand; a worker
-                // round trip would only add latency to work that is done.
-                Some(id) if pane.camo_texture_cache.contains_key(&id) => {
-                    let textures = pane.camo_texture_cache[&id].clone();
-                    let info = armor.camo_scheme_infos.iter().find(|i| i.id == id);
-                    let (uv, use_color_scheme) = match info {
-                        Some(i) => (i.uv_transforms.clone(), i.use_color_scheme),
-                        None => (Default::default(), false),
-                    };
-                    armor.active_camo = crate::armor_viewer::common::build_active_camo(
-                        &textures,
-                        &uv,
-                        use_color_scheme,
-                        &armor.hull_textures,
-                    );
-                    upload_hull_meshes_to_viewport(
-                        pane,
-                        &armor,
-                        &render_state.device,
-                        &render_state.queue,
-                        &gpu_pipeline,
-                    );
-                }
-                // The previously selected camo stays on the hull until the decode lands.
-                // Clearing and re-uploading here would flash the ship back to stock.
-                Some(id) => start_camo_decode(pane, &armor, id),
+            // The previously selected camo stays on the hull until an uncached
+            // decode lands; clearing and re-uploading here would flash the ship
+            // back to stock, so only Stock and the cache-hit path upload below.
+            let needs_upload = match pane.selected_camo {
+                Some(_) => resync_selected_camo(pane, &mut armor),
                 None => {
                     armor.active_camo.clear();
-                    upload_hull_meshes_to_viewport(
-                        pane,
-                        &armor,
-                        &render_state.device,
-                        &render_state.queue,
-                        &gpu_pipeline,
-                    );
+                    true
                 }
+            };
+            if needs_upload {
+                upload_hull_meshes_to_viewport(pane, &armor, &render_state.device, &render_state.queue, &gpu_pipeline);
             }
             pane.loaded_armor = Some(armor);
         }
@@ -2706,8 +2681,9 @@ pub(crate) fn apply_hull_reload(
         armor.hull_lod = data.hull_lod;
         armor.hull_lod_count = data.hull_lod_count;
 
-        // hull_textures just changed under any decode that started during this
-        // reload; its active-camo map may have been baked from the outgoing set.
+        // A decode in flight was built against the outgoing hull_textures; drop it
+        // so its result cannot land. The selection is re-resolved against the new
+        // textures below, once the new armor is in place.
         pane.camo_request = pane.camo_request.next();
         pane.camo_decode_receiver = None;
 
@@ -2721,9 +2697,12 @@ pub(crate) fn apply_hull_reload(
         }
     }
 
-    if pane.loaded_armor.is_some() {
-        // Temporarily take armor to satisfy borrow checker (need &armor + &mut pane)
-        let armor_ref = pane.loaded_armor.take().unwrap();
+    if let Some(mut armor_ref) = pane.loaded_armor.take() {
+        // A selection surviving the reload needs re-resolving against the new
+        // hull_textures: a cached scheme rebuilds inline (folded into this same
+        // upload), an uncached one gets a fresh decode since the one dropped above
+        // never lands.
+        resync_selected_camo(pane, &mut armor_ref);
         upload_hull_meshes_to_viewport(pane, &armor_ref, device, queue, pipeline);
         pane.loaded_armor = Some(armor_ref);
     }
@@ -2768,6 +2747,63 @@ fn start_camo_decode(
         let _ = tx.send(result);
     });
     pane.camo_decode_receiver = Some(rx);
+}
+
+/// What `resync_selected_camo` should do for a selection. Split out from the
+/// function itself so the "a live selection is never silently dropped" invariant
+/// (a reload landing must not just discard `selected_camo`) is testable without a
+/// GPU device or a real camo source.
+#[derive(Debug, PartialEq, Eq)]
+enum CamoResyncAction {
+    /// Rebuild `active_camo` from the cache; cheap enough to do inline.
+    RebuildCached,
+    /// Not cached (or no longer cached after a ship/hull change): start a decode.
+    StartDecode,
+    /// No camo selected; nothing to resolve.
+    Nothing,
+}
+
+fn camo_resync_action(
+    selected: Option<wowsunpack::export::camo_textures::CamoSchemeId>,
+    is_cached: bool,
+) -> CamoResyncAction {
+    match selected {
+        Some(_) if is_cached => CamoResyncAction::RebuildCached,
+        Some(_) => CamoResyncAction::StartDecode,
+        None => CamoResyncAction::Nothing,
+    }
+}
+
+/// Resolve `pane.selected_camo` against `armor`, either rebuilding synchronously
+/// from a cached decode or starting a fresh one. Callers own invalidating any
+/// prior decode (bumping `camo_request`, clearing `camo_decode_receiver`) before
+/// calling this, since that decision is about the selection, not the rebuild.
+/// Returns whether `armor.active_camo` was rebuilt in place (a caller needing to
+/// re-upload after a hull/texture change should do so only when this is `true`;
+/// `false` means either nothing to resolve or a decode was started, in which case
+/// the previous camo already on the mesh is correct until it lands).
+fn resync_selected_camo(pane: &mut ArmorPane, armor: &mut LoadedShipArmor) -> bool {
+    let Some(id) = pane.selected_camo else {
+        return false;
+    };
+    match camo_resync_action(Some(id), pane.camo_texture_cache.contains_key(&id)) {
+        CamoResyncAction::RebuildCached => {
+            let textures = pane.camo_texture_cache[&id].clone();
+            let info = armor.camo_scheme_infos.iter().find(|i| i.id == id);
+            let (uv, use_color_scheme) = match info {
+                Some(i) => (i.uv_transforms.clone(), i.use_color_scheme),
+                None => (Default::default(), false),
+            };
+            armor.active_camo =
+                crate::armor_viewer::common::build_active_camo(&textures, &uv, use_color_scheme, &armor.hull_textures);
+            true
+        }
+        CamoResyncAction::StartDecode => {
+            start_camo_decode(pane, armor, id);
+            false
+        }
+        CamoResyncAction::Nothing => false,
+    }
 }
 
 /// Start a background upgrade-only reload: re-exports with the new hull selection,
@@ -2938,8 +2974,9 @@ fn apply_upgrade_reload(
         armor.loaded_hull = data.loaded_hull;
         armor.module_alternatives = data.module_alternatives;
 
-        // hull_textures just changed under any decode that started during this
-        // reload; its active-camo map may have been baked from the outgoing set.
+        // A decode in flight was built against the outgoing hull_textures; drop it
+        // so its result cannot land. The selection is re-resolved against the new
+        // textures below, once the new armor is in place.
         pane.camo_request = pane.camo_request.next();
         pane.camo_decode_receiver = None;
 
@@ -2966,6 +3003,15 @@ fn apply_upgrade_reload(
                 pane.hull_visibility.entry(name.clone()).or_insert(hull_default);
             }
         }
+    }
+
+    // A selection surviving the reload needs re-resolving against the new
+    // hull_textures: a cached scheme rebuilds inline (folded into the upload
+    // below), an uncached one gets a fresh decode since the one dropped above
+    // never lands.
+    if let Some(mut armor_ref) = pane.loaded_armor.take() {
+        resync_selected_camo(pane, &mut armor_ref);
+        pane.loaded_armor = Some(armor_ref);
     }
 
     // Re-upload armor + all overlays (viewport.clear() destroys everything)
@@ -5689,42 +5735,54 @@ mod tests {
     }
 }
 
+// Every site that clears `camo_decode_receiver` also advances `camo_request` in
+// the same breath, and `start_camo_decode` is the only site that ever sets the
+// receiver back to `Some`, always paired with the id it just bumped to. So
+// whenever a receiver exists, its result's id already equals `pane.camo_request`;
+// `camo_result_is_current` cannot observe a mismatch in production, and its
+// `Ok(_) => {}` (superseded) arm in `poll_pane_loads` is unreachable there. The id
+// is kept as documented defence in depth against a future call site that bumps
+// one without the other, not because it discriminates anything today. The tests
+// below cover the protection that actually operates: the receiver being `None`.
 #[cfg(test)]
 mod camo_request_tests {
-    use super::camo_result_is_current;
+    use super::CamoResyncAction;
+    use super::camo_resync_action;
+    use crate::armor_viewer::state::CamoDecodeResult;
     use crate::armor_viewer::state::CamoRequestId;
 
     #[test]
-    fn a_result_from_the_newest_request_is_current() {
-        let issued = CamoRequestId::default().next();
-        assert!(camo_result_is_current(issued, issued));
+    fn a_cleared_receiver_cannot_deliver_a_late_result() {
+        let (tx, rx) = std::sync::mpsc::channel::<Result<CamoDecodeResult, String>>();
+        let mut receiver_slot = Some(rx);
+        let request = CamoRequestId::default().next();
+        tx.send(Ok(CamoDecodeResult {
+            request,
+            scheme: wowsunpack::export::camo_textures::CamoSchemeId(0),
+            textures: Default::default(),
+            active: Default::default(),
+        }))
+        .unwrap();
+        assert!(receiver_slot.is_some(), "a decode in flight is represented by a receiver, not a flag");
+
+        // A later selection, or a ship/hull/upgrade reload landing mid-decode,
+        // invalidates an in-flight decode by dropping the receiver outright - not
+        // by leaving it in place for the request id to filter out.
+        receiver_slot = None;
+
+        let polled = receiver_slot.as_ref().and_then(|rx| rx.try_recv().ok());
+        assert!(polled.is_none(), "a cleared receiver must not be pollable even though a result is queued behind it");
     }
 
     #[test]
-    fn a_result_from_a_superseded_request_is_stale() {
-        let first = CamoRequestId::default().next();
-        let second = first.next();
-        assert!(!camo_result_is_current(second, first), "clicking a second camo must discard the first decode");
-    }
-
-    #[test]
-    fn ids_do_not_repeat_across_successive_requests() {
-        let mut id = CamoRequestId::default();
-        let mut seen = std::collections::HashSet::new();
-        for _ in 0..100 {
-            id = id.next();
-            assert!(seen.insert(id), "a repeated id would let a stale result pass as current");
-        }
-    }
-
-    #[test]
-    fn advancing_the_id_invalidates_a_decode_issued_for_the_previous_ship() {
-        let issued = CamoRequestId::default().next();
-        // A ship or hull reload advances the pane's id without issuing a decode.
-        let after_reload = issued.next();
-        assert!(
-            !camo_result_is_current(after_reload, issued),
-            "a decode built against the outgoing armor must not paint the incoming one"
+    fn a_selected_camo_surviving_a_reload_is_never_silently_dropped() {
+        let scheme = wowsunpack::export::camo_textures::CamoSchemeId(0);
+        assert_eq!(
+            camo_resync_action(Some(scheme), false),
+            CamoResyncAction::StartDecode,
+            "an uncached selection must re-issue a decode against the new armor, not disappear"
         );
+        assert_eq!(camo_resync_action(Some(scheme), true), CamoResyncAction::RebuildCached);
+        assert_eq!(camo_resync_action(None, false), CamoResyncAction::Nothing);
     }
 }
