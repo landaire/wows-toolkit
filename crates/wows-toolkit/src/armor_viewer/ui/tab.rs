@@ -860,8 +860,7 @@ impl ToolkitTabViewer<'_> {
         {
             // Any new selection retires a still-outstanding decode for the previous
             // one; only the cache-miss arm below issues a fresh request past this point.
-            pane.camo_request = pane.camo_request.next();
-            pane.camo_decode_receiver = None;
+            invalidate_in_flight_camo_decode(pane);
 
             // The previously selected camo stays on the hull until an uncached
             // decode lands; clearing and re-uploading here would flash the ship
@@ -2518,10 +2517,7 @@ fn load_ship_for_pane_with_lod(
     pane.part_visibility.clear();
     pane.selected_camo = None;
     pane.camo_texture_cache.clear();
-    // A decode in flight was built against the outgoing armor; advancing the id
-    // makes its result stale so the drain discards it.
-    pane.camo_request = pane.camo_request.next();
-    pane.camo_decode_receiver = None;
+    invalidate_in_flight_camo_decode(pane);
     pane.trajectories.clear();
     pane.splash_mode = false;
     pane.splash_result = None;
@@ -2603,10 +2599,7 @@ pub(crate) fn start_hull_lod_reload(
     lod: usize,
 ) {
     pane.hull_lod = lod;
-    // A decode in flight was built against the outgoing armor; advancing the id
-    // makes its result stale so the drain discards it.
-    pane.camo_request = pane.camo_request.next();
-    pane.camo_decode_receiver = None;
+    invalidate_in_flight_camo_decode(pane);
 
     let assets = ship_assets.clone();
     let (tx, rx) = mpsc::channel();
@@ -2674,18 +2667,17 @@ pub(crate) fn apply_hull_reload(
     queue: &wgpu::Queue,
     pipeline: &GpuPipeline,
 ) {
+    // A decode in flight was built against the outgoing hull_textures; drop it
+    // so its result cannot land. The selection is re-resolved against the new
+    // textures below, once the new armor is in place.
+    invalidate_in_flight_camo_decode(pane);
+
     if let Some(armor) = &mut pane.loaded_armor {
         armor.hull_meshes = data.hull_meshes;
         armor.hull_part_groups = data.hull_part_groups;
         armor.hull_textures = data.hull_textures;
         armor.hull_lod = data.hull_lod;
         armor.hull_lod_count = data.hull_lod_count;
-
-        // A decode in flight was built against the outgoing hull_textures; drop it
-        // so its result cannot land. The selection is re-resolved against the new
-        // textures below, once the new armor is in place.
-        pane.camo_request = pane.camo_request.next();
-        pane.camo_decode_receiver = None;
 
         // Update hull visibility map for any new/changed parts
         let hull_default = pane.hull_visibility.values().any(|&v| v);
@@ -2706,6 +2698,16 @@ pub(crate) fn apply_hull_reload(
         upload_hull_meshes_to_viewport(pane, &armor_ref, device, queue, pipeline);
         pane.loaded_armor = Some(armor_ref);
     }
+}
+
+/// Drop any camo decode in flight: the ship, hull, upgrade, or camo selection is
+/// about to change underneath it, so its result (if it ever arrives) must not be
+/// allowed to land. Advancing the id is what a stale `Ok` result is checked
+/// against; clearing the receiver is what actually stops it, since a live decode
+/// is represented by the receiver's presence, not by a flag.
+fn invalidate_in_flight_camo_decode(pane: &mut ArmorPane) {
+    pane.camo_request = pane.camo_request.next();
+    pane.camo_decode_receiver = None;
 }
 
 /// Whether a decode result is the one the pane is still waiting for. A result
@@ -2814,10 +2816,7 @@ fn start_upgrade_reload(
     ship_assets: &Arc<wowsunpack::export::ship::ShipAssets>,
     param_index: &str,
 ) {
-    // A decode in flight was built against the outgoing armor; advancing the id
-    // makes its result stale so the drain discards it.
-    pane.camo_request = pane.camo_request.next();
-    pane.camo_decode_receiver = None;
+    invalidate_in_flight_camo_decode(pane);
 
     let assets = ship_assets.clone();
     let (tx, rx) = mpsc::channel();
@@ -2960,6 +2959,11 @@ fn apply_upgrade_reload(
     comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
     ifhe_enabled: bool,
 ) {
+    // A decode in flight was built against the outgoing hull_textures; drop it
+    // so its result cannot land. The selection is re-resolved against the new
+    // textures below, once the new armor is in place.
+    invalidate_in_flight_camo_decode(pane);
+
     if let Some(armor) = &mut pane.loaded_armor {
         // Update armor mesh data
         armor.meshes = data.armor_meshes;
@@ -2973,12 +2977,6 @@ fn apply_upgrade_reload(
         armor.hull_textures = data.hull_textures;
         armor.loaded_hull = data.loaded_hull;
         armor.module_alternatives = data.module_alternatives;
-
-        // A decode in flight was built against the outgoing hull_textures; drop it
-        // so its result cannot land. The selection is re-resolved against the new
-        // textures below, once the new armor is in place.
-        pane.camo_request = pane.camo_request.next();
-        pane.camo_decode_receiver = None;
 
         // Preserve visibility for parts that still exist, default new parts to visible
         pane.part_visibility
@@ -5746,32 +5744,26 @@ mod tests {
 // below cover the protection that actually operates: the receiver being `None`.
 #[cfg(test)]
 mod camo_request_tests {
+    use super::ArmorPane;
     use super::CamoResyncAction;
     use super::camo_resync_action;
+    use super::invalidate_in_flight_camo_decode;
     use crate::armor_viewer::state::CamoDecodeResult;
-    use crate::armor_viewer::state::CamoRequestId;
 
     #[test]
-    fn a_cleared_receiver_cannot_deliver_a_late_result() {
-        let (tx, rx) = std::sync::mpsc::channel::<Result<CamoDecodeResult, String>>();
-        let mut receiver_slot = Some(rx);
-        let request = CamoRequestId::default().next();
-        tx.send(Ok(CamoDecodeResult {
-            request,
-            scheme: wowsunpack::export::camo_textures::CamoSchemeId(0),
-            textures: Default::default(),
-            active: Default::default(),
-        }))
-        .unwrap();
-        assert!(receiver_slot.is_some(), "a decode in flight is represented by a receiver, not a flag");
+    fn invalidating_clears_the_receiver_and_advances_the_id() {
+        let mut pane = ArmorPane::empty(0);
+        let (_tx, rx) = std::sync::mpsc::channel::<Result<CamoDecodeResult, String>>();
+        pane.camo_decode_receiver = Some(rx);
+        let request_before = pane.camo_request;
 
-        // A later selection, or a ship/hull/upgrade reload landing mid-decode,
-        // invalidates an in-flight decode by dropping the receiver outright - not
-        // by leaving it in place for the request id to filter out.
-        receiver_slot = None;
+        invalidate_in_flight_camo_decode(&mut pane);
 
-        let polled = receiver_slot.as_ref().and_then(|rx| rx.try_recv().ok());
-        assert!(polled.is_none(), "a cleared receiver must not be pollable even though a result is queued behind it");
+        assert!(pane.camo_decode_receiver.is_none(), "a decode in flight must be dropped, not left dangling");
+        assert_ne!(
+            pane.camo_request, request_before,
+            "the id must advance so a late result cannot be mistaken as current"
+        );
     }
 
     #[test]
