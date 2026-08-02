@@ -32,6 +32,9 @@ struct Uniforms {
 
 @group(1) @binding(0) var diffuse_texture: texture_2d<f32>;
 @group(1) @binding(1) var diffuse_sampler: sampler;
+@group(1) @binding(2) var camo_texture: texture_2d<f32>;
+// xy = camo UV scale, zw = camo UV offset.
+@group(1) @binding(3) var<uniform> camo_params: vec4<f32>;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -61,9 +64,12 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
-    // Sample texture and multiply with vertex color.
-    // Non-textured meshes bind a 1x1 white fallback, so this is a passthrough.
-    let tex_color = textureSample(diffuse_texture, diffuse_sampler, in.uv);
+    // A mesh with no camo binds a fully transparent camo, so mix passes the
+    // albedo through. Alpha comes from the albedo; camos are opaque wherever
+    // they cover, and the vertex color carries the hull's see-through alpha.
+    let stock = textureSample(diffuse_texture, diffuse_sampler, in.uv);
+    let camo = textureSample(camo_texture, diffuse_sampler, in.uv * camo_params.xy + camo_params.zw);
+    let tex_color = vec4(mix(stock.rgb, camo.rgb, camo.a), stock.a);
     let base_color = tex_color * in.color;
 
     var color = base_color.rgb;
@@ -101,6 +107,20 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const MSAA_SAMPLE_COUNT: u32 = 4;
 
+/// RGBA8 pixels plus their dimensions, as uploaded to the GPU.
+pub struct TexturePixels<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: &'a [u8],
+}
+
+/// A camo layer sampled over the albedo, with the UV transform it tiles by.
+pub struct CamoLayer<'a> {
+    pub pixels: TexturePixels<'a>,
+    pub uv_scale: [f32; 2],
+    pub uv_offset: [f32; 2],
+}
+
 /// Shared GPU resources (created once, reusable across viewports).
 pub struct GpuPipeline {
     /// Pipeline with depth writes enabled — used for opaque geometry (armor).
@@ -115,10 +135,17 @@ pub struct GpuPipeline {
     default_sampler: wgpu::Sampler,
     /// 1x1 white texture bind group — bound for non-textured meshes.
     fallback_texture_bind_group: wgpu::BindGroup,
+    /// 1x1 transparent camo bound when a mesh carries none: alpha 0 means "no
+    /// camo covers this texel", which is what the shader's mix reads.
+    no_camo_view: wgpu::TextureView,
+    /// Identity camo UV transform, bound alongside `no_camo_view`.
+    identity_camo_buffer: wgpu::Buffer,
 }
 
 impl GpuPipeline {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        use wgpu::util::DeviceExt;
+
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport_3d_shader"),
             source: wgpu::ShaderSource::Wgsl(SHADER_SOURCE.into()),
@@ -155,6 +182,26 @@ impl GpuPipeline {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     count: None,
                 },
             ],
@@ -276,35 +323,21 @@ impl GpuPipeline {
             ..Default::default()
         });
 
-        // Create 1x1 white fallback texture.
-        let fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("viewport_3d_fallback_texture"),
-            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
+        let fallback_view = upload_1x1(device, queue, "viewport_3d_fallback_texture", [255, 255, 255, 255]);
+        let no_camo_view = upload_1x1(device, queue, "viewport_3d_no_camo_texture", [0, 0, 0, 0]);
+        let identity_camo_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("viewport_3d_identity_camo_uv"),
+            contents: bytemuck::cast_slice(&[1.0f32, 1.0, 0.0, 0.0]),
+            usage: wgpu::BufferUsages::UNIFORM,
         });
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &fallback_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &[255u8, 255, 255, 255],
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
-            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
-        );
-        let fallback_view = fallback_texture.create_view(&Default::default());
         let fallback_texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("viewport_3d_fallback_texture_bg"),
             layout: &texture_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&fallback_view) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&default_sampler) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&no_camo_view) },
+                wgpu::BindGroupEntry { binding: 3, resource: identity_camo_buffer.as_entire_binding() },
             ],
         });
 
@@ -316,21 +349,64 @@ impl GpuPipeline {
             texture_bind_group_layout,
             default_sampler,
             fallback_texture_bind_group,
+            no_camo_view,
+            identity_camo_buffer,
         }
     }
 
-    /// Create a texture bind group from RGBA8 pixel data.
+    /// Create a texture bind group from an albedo and an optional camo layer.
+    /// `None` binds the shared transparent camo, so the shader passes the albedo
+    /// through unchanged.
     pub fn create_texture_bind_group(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        rgba_data: &[u8],
-        width: u32,
-        height: u32,
+        albedo: TexturePixels<'_>,
+        camo: Option<CamoLayer<'_>>,
     ) -> wgpu::BindGroup {
+        use wgpu::util::DeviceExt;
+
+        let albedo_view = self.upload_pixels(device, queue, "viewport_3d_hull_texture", &albedo);
+        let camo_view = match &camo {
+            Some(layer) => self.upload_pixels(device, queue, "viewport_3d_camo_texture", &layer.pixels),
+            None => self.no_camo_view.clone(),
+        };
+        let camo_buffer = camo.map(|layer| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("viewport_3d_camo_uv"),
+                contents: bytemuck::cast_slice(&[
+                    layer.uv_scale[0],
+                    layer.uv_scale[1],
+                    layer.uv_offset[0],
+                    layer.uv_offset[1],
+                ]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            })
+        });
+        let camo_binding = camo_buffer.as_ref().unwrap_or(&self.identity_camo_buffer);
+
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport_3d_texture_bg"),
+            layout: &self.texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&albedo_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.default_sampler) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&camo_view) },
+                wgpu::BindGroupEntry { binding: 3, resource: camo_binding.as_entire_binding() },
+            ],
+        })
+    }
+
+    fn upload_pixels(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        label: &str,
+        pixels: &TexturePixels<'_>,
+    ) -> wgpu::TextureView {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("viewport_3d_hull_texture"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            label: Some(label),
+            size: wgpu::Extent3d { width: pixels.width, height: pixels.height, depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -338,7 +414,6 @@ impl GpuPipeline {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
@@ -346,21 +421,43 @@ impl GpuPipeline {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            rgba_data,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * width), rows_per_image: Some(height) },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            pixels.rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * pixels.width),
+                rows_per_image: Some(pixels.height),
+            },
+            wgpu::Extent3d { width: pixels.width, height: pixels.height, depth_or_array_layers: 1 },
         );
-
-        let view = texture.create_view(&Default::default());
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("viewport_3d_texture_bg"),
-            layout: &self.texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.default_sampler) },
-            ],
-        })
+        texture.create_view(&Default::default())
     }
+}
+
+/// Upload a 1x1 RGBA texture and return its view. Used for the bind-group slots
+/// a mesh does not fill: an opaque white albedo, and a transparent camo.
+fn upload_1x1(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, rgba: [u8; 4]) -> wgpu::TextureView {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &rgba,
+        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
+        wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+    );
+    texture.create_view(&Default::default())
 }
 
 /// Render layer constants. Lower values draw first (behind), higher values draw last (on top).

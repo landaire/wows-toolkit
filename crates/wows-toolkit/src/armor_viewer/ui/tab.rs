@@ -43,6 +43,7 @@ use crate::viewport_3d::LAYER_DEFAULT;
 use crate::viewport_3d::LAYER_HULL;
 use crate::viewport_3d::LAYER_OVERLAY;
 use crate::viewport_3d::MeshId;
+use crate::viewport_3d::TexturePixels;
 use crate::viewport_3d::Vec3;
 use crate::viewport_3d::Vertex;
 use rust_i18n::t;
@@ -1478,7 +1479,12 @@ pub(crate) fn upload_hull_meshes_to_viewport(
 
         if !mesh.indices.is_empty() {
             let mid = if let Some((w, h, rgba)) = texture_data.filter(|_| has_uvs) {
-                let tex_bg = pipeline.create_texture_bind_group(device, queue, rgba, *w, *h);
+                let tex_bg = pipeline.create_texture_bind_group(
+                    device,
+                    queue,
+                    TexturePixels { width: *w, height: *h, rgba },
+                    None,
+                );
                 pane.viewport.add_textured_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer, tex_bg)
             } else {
                 pane.viewport.add_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer)
