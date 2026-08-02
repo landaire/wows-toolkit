@@ -911,4 +911,68 @@ mod tests {
         assert!(matches!(camo, ActiveCamo::Replace { .. }));
         assert_eq!(camo.texture().pixels[3], 255);
     }
+
+    /// An albedo that is dark over its left half and bright over its right half.
+    /// The recolor keys off how far a texel's luminance sits from the local
+    /// average, so a flat base would leave that whole blend unexercised.
+    fn split_albedo(size: u32) -> (u32, u32, Vec<u8>) {
+        let mut pixels = Vec::with_capacity((size * size * 4) as usize);
+        for _ in 0..size {
+            for x in 0..size {
+                let v = if x < size / 2 { 40 } else { 255 };
+                pixels.extend_from_slice(&[v, v, v, 255]);
+            }
+        }
+        (size, size, pixels)
+    }
+
+    /// Read the RGBA texel at (`x`, `y`) out of a `width`-wide RGBA8 buffer.
+    fn texel(pixels: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
+        let i = ((y * width + x) * 4) as usize;
+        [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+    }
+
+    /// A tiled camo with a color scheme is recolored over the base on the CPU,
+    /// which bakes the tiling into the result. Pairing that baked result with
+    /// anything but the identity transform tiles it a second time in the shader.
+    #[test]
+    fn a_recolored_tile_bakes_its_tiling_and_reports_identity_uvs() {
+        let textures = HashMap::from([("hull".to_string(), png(8, 8, [200, 40, 40, 255]))]);
+        let stock = HashMap::from([("path/hull.mfm".to_string(), split_albedo(8))]);
+        let uvs = HashMap::from([("hull".to_string(), UvTransform { scale: [4.0, 4.0], offset: [0.25, 0.25] })]);
+
+        let active = build_active_camo(&textures, &uvs, true, &stock);
+
+        let camo = active.get("hull").expect("stem present");
+        assert!(matches!(camo, ActiveCamo::Replace { .. }));
+        assert_eq!(camo.uv().scale, [1.0, 1.0], "tiling is baked in, so the shader must not scale the camo again");
+        assert_eq!(camo.uv().offset, [0.0, 0.0], "tiling is baked in, so the shader must not offset the camo again");
+
+        let tex = camo.texture();
+        // Flat dark base: fully recolored, so the camo color survives intact.
+        assert_eq!(texel(&tex.pixels, tex.width, 1, 1), [200, 40, 40, 255]);
+        // Bright base marking: revealed in its true color on top of the recolor,
+        // which the opaque-replacement branch would have painted over.
+        assert_eq!(texel(&tex.pixels, tex.width, 6, 1), [255, 255, 255, 255]);
+    }
+
+    /// The shader applies a coverage camo's tiling transform now, so the
+    /// transform has to survive to the GPU rather than being baked in here.
+    /// `use_color_scheme` is on to pin the branch order: coverage wins over recolor.
+    #[test]
+    fn a_coverage_camo_hands_its_tiling_to_the_shader() {
+        let textures = HashMap::from([("hull".to_string(), png(4, 4, [10, 20, 30, 0]))]);
+        let stock = HashMap::from([("path/hull.mfm".to_string(), split_albedo(4))]);
+        let uvs = HashMap::from([("hull".to_string(), UvTransform { scale: [3.0, 3.0], offset: [0.5, 0.25] })]);
+
+        let active = build_active_camo(&textures, &uvs, true, &stock);
+
+        let camo = active.get("hull").expect("stem present");
+        assert!(matches!(camo, ActiveCamo::CompositeOverBase { .. }));
+        assert_eq!(camo.uv().scale, [3.0, 3.0], "the shader tiles the camo, so its transform must reach the GPU");
+        assert_eq!(camo.uv().offset, [0.5, 0.25]);
+        let tex = camo.texture();
+        // Raw camo: the base must not have been blended in on the CPU.
+        assert_eq!(texel(&tex.pixels, tex.width, 0, 0), [10, 20, 30, 0]);
+    }
 }
