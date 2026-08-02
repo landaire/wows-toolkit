@@ -37,7 +37,7 @@ pub enum PenResult {
     Penetrates,
     /// Shell does not penetrate.
     Bounces,
-    /// Angle-dependent (AP without overmatch — can't determine at point-blank without angle).
+    /// Angle-dependent (AP without overmatch; can't determine at point-blank without angle).
     AngleDependent,
 }
 
@@ -172,8 +172,8 @@ pub fn enclosing_zone(hits: &[TrajectoryHit], last_plate_idx: usize) -> String {
 }
 
 /// Compute the impact angle between a ray direction and a triangle normal (in degrees).
-/// Returns angle from normal: 0° = head-on (perpendicular to plate), 90° = glancing (parallel).
-/// This matches the WoWs convention where ricochet angles (45°/60°) are from normal.
+/// Returns angle from normal: 0 deg = head-on (perpendicular to plate), 90 deg = glancing (parallel).
+/// This matches the WoWs convention where ricochet angles (45/60 deg) are from normal.
 pub fn impact_angle_deg(ray_dir: &Vec3, normal: &Vec3) -> f32 {
     let cos_angle = ray_dir.dot(normal).abs().min(1.0);
     cos_angle.acos().to_degrees()
@@ -187,11 +187,11 @@ use crate::armor_viewer::ballistics::ShellParams;
 /// Outcome of a shell hitting a single plate.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PlateOutcome {
-    /// Caliber > OVERMATCH_RATIO * thickness — always penetrates, ignores ricochet.
+    /// Caliber > OVERMATCH_RATIO * thickness: always penetrates, ignores ricochet.
     Overmatch,
     /// Shell penetrates (raw_pen >= effective_thickness).
     Penetrate,
-    /// Angle >= always_ricochet — guaranteed ricochet, shell stopped.
+    /// Angle >= always_ricochet: guaranteed ricochet, shell stopped.
     Ricochet,
     /// Shell shatters (raw_pen < effective_thickness).
     Shatter,
@@ -404,11 +404,11 @@ pub fn simulate_shell_through_hits(
         detonation = Some(FuseDetonation { position: det_pos, armed_at_hit: arm_idx, travel_distance: fuse_real_m });
 
         if stopped_at.is_some() {
-            // Shell stopped (ricochet/shatter) but fuse was armed — it still detonates.
+            // Shell stopped (ricochet/shatter) but fuse was armed; it still detonates.
             // Mark the stop plate as the detonation plate so the outcome shows as detonation.
             detonated_at = stopped_at;
         }
-        // else: shell exited before detonating — overpen with armed fuse (detonated_at stays None)
+        // else: shell exited before detonating: overpen with armed fuse (detonated_at stays None)
     }
 
     ShellSimResult { plates, detonation, stopped_at, detonated_at }
@@ -480,7 +480,7 @@ impl ServerOutcome {
 pub enum ComparisonVerdict {
     /// Simulation matches server.
     Match,
-    /// Angle is in the ricochet RNG zone — server's call is valid either way.
+    /// Angle is in the ricochet RNG zone; server's call is valid either way.
     RicochetRngDefer { angle_deg: f32, range_start_deg: f32, range_end_deg: f32 },
     /// Simulation disagrees with server.
     Mismatch { sim_desc: String, server_desc: String },
@@ -629,7 +629,7 @@ mod tests {
 
 /// Compare a shell simulation result against the server's authoritative outcome.
 ///
-/// `first_hit_angle_deg`: impact angle from normal of the first plate (0° = head-on, 90° = parallel).
+/// `first_hit_angle_deg`: impact angle from normal of the first plate (0 deg = head-on, 90 deg = parallel).
 /// `first_hit_thickness_mm`: thickness of the first plate hit.
 pub fn compare_with_server(
     sim: &ShellSimResult,

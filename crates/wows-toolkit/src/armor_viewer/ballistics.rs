@@ -8,11 +8,11 @@ use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_params::types::ShellInfo;
 
 // Physical constants (ISA atmospheric model)
-const G: f64 = 9.8; // gravitational acceleration (m/s²)
+const G: f64 = 9.8; // gravitational acceleration (m/s^2)
 const T0: f64 = 288.15; // sea-level temperature (K)
 const L: f64 = 0.0065; // temperature lapse rate (K/m)
 const P0: f64 = 101325.0; // sea-level pressure (Pa)
-const R_GAS: f64 = 8.31447; // ideal gas constant (J/(mol·K))
+const R_GAS: f64 = 8.31447; // ideal gas constant (J/(mol*K))
 const M_AIR: f64 = 0.0289644; // molar mass of air (kg/mol)
 
 // Derived constant for barometric formula exponent: (g * M) / (R * L)
@@ -45,7 +45,7 @@ pub struct ShellParams {
     pub ricochet1: f64,     // radians
     pub fuse_time: f64,
     pub threshold: f64, // mm
-    /// Combined air drag coefficient: 0.5 * cD * (caliber/2)² * π / mass
+    /// Combined air drag coefficient: 0.5 * cD * (caliber/2)^2 * pi / mass
     pub k: f64,
     /// Combined penetration coefficient: 1e-7 * krupp * mass^0.69 * caliber^(-1.07)
     pub p_ppc: f64,
@@ -57,7 +57,7 @@ impl ShellParams {
     /// Build ballistic parameters from a shell.
     ///
     /// Returns `None` (with a logged reason) when the shell lacks data that has no
-    /// safe default — `normalization` or `fuse_threshold`. Substituting 0.0 for
+    /// safe default: `normalization` or `fuse_threshold`. Substituting 0.0 for
     /// either would silently change penetration outcomes, so we skip the shell
     /// rather than guess. Every real gun shell in GameParams carries both fields.
     pub fn from_shell_info(shell: &ShellInfo) -> Option<Self> {
@@ -230,7 +230,7 @@ fn build_impact_result(
 
     // Impact angle from horizontal (positive = falling, vy is negative when descending)
     let ia_horizontal = (vy / vx).atan().abs();
-    // Impact angle from deck = π/2 - horizontal angle
+    // Impact angle from deck = pi/2 - horizontal angle
     let ia_deck = PI / 2.0 - ia_horizontal;
 
     let raw_pen = params.p_ppc * impact_velocity.powf(VELOCITY_POWER);
@@ -261,7 +261,7 @@ fn build_impact_result(
 /// Find the maximum range of the shell.
 fn max_range(params: &ShellParams) -> Option<f64> {
     let mut best_range = 0.0f64;
-    // Scan from 5° to 60° in 1° steps — high drag shells peak below 30°
+    // Scan from 5 to 60 deg in 1 deg steps; high drag shells peak below 30 deg
     for deg in 5..=60 {
         let angle = (deg as f64).to_radians();
         if let Some((dist, _, _, _)) = simulate_trajectory(params, angle)
@@ -289,9 +289,9 @@ pub fn solve_for_range(params: &ShellParams, range: Meters) -> Option<ImpactResu
         return None;
     }
 
-    // Bisection: find angle in [low, high] where simulated range ≈ target range
-    let mut low: f64 = 0.001_f64.to_radians(); // near 0°
-    let mut high: f64 = 45.0_f64.to_radians(); // up to 45°
+    // Bisection: find angle in [low, high] where simulated range ~= target range
+    let mut low: f64 = 0.001_f64.to_radians(); // near 0 deg
+    let mut high: f64 = 45.0_f64.to_radians(); // up to 45 deg
 
     let mut best_result: Option<(f64, f64, f64, f64, f64)> = None; // (angle, x, vx, vy, t)
 
@@ -311,7 +311,7 @@ pub fn solve_for_range(params: &ShellParams, range: Meters) -> Option<ImpactResu
                 low = mid;
             }
         } else {
-            // Didn't land — reduce angle
+            // Didn't land; reduce angle
             high = mid;
         }
     }
@@ -339,8 +339,8 @@ pub fn compute_range_table(params: &ShellParams, max_range: Meters, step: Meters
 /// Simulate a trajectory and return normalized arc points for visualization.
 ///
 /// Returns `(points, height_ratio)` where:
-/// - `points`: list of `(x_frac, y_norm)` — x goes 0->1, y goes 0->1 at apex
-/// - `height_ratio`: `max_height / total_range` — the real aspect ratio of the arc
+/// - `points`: list of `(x_frac, y_norm)`: x goes 0->1, y goes 0->1 at apex
+/// - `height_ratio`: `max_height / total_range`: the real aspect ratio of the arc
 ///
 /// The caller should scale: `y_model = y_norm * height_ratio * horiz_extent`
 /// to get physically correct proportions, or apply an additional visual multiplier.

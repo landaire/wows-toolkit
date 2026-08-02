@@ -267,7 +267,7 @@ impl AnalysisPaneViewer<'_> {
                             AmmoType::HE => {
                                 let pen = shell.he_pen_mm.unwrap_or(0.0);
                                 format!(
-                                    "  {} {:.0}mm — {:.0}mm pen",
+                                    "  {} {:.0}mm \u{2014} {:.0}mm pen",
                                     shell.ammo_type.display_name(),
                                     shell.caliber.value(),
                                     pen
@@ -276,7 +276,7 @@ impl AnalysisPaneViewer<'_> {
                             AmmoType::SAP => {
                                 let pen = shell.sap_pen_mm.unwrap_or(0.0);
                                 format!(
-                                    "  {} {:.0}mm — {:.0}mm pen",
+                                    "  {} {:.0}mm \u{2014} {:.0}mm pen",
                                     shell.ammo_type.display_name(),
                                     shell.caliber.value(),
                                     pen
@@ -284,7 +284,7 @@ impl AnalysisPaneViewer<'_> {
                             }
                             AmmoType::AP => {
                                 format!(
-                                    "  {} {:.0}mm — {:.0} krupp",
+                                    "  {} {:.0}mm \u{2014} {:.0} krupp",
                                     shell.ammo_type.display_name(),
                                     shell.caliber.value(),
                                     shell.krupp
@@ -303,8 +303,6 @@ impl AnalysisPaneViewer<'_> {
             }
         }
     }
-
-    // ─── Trajectory Tab ──────────────────────────────────────────────────────
 
     fn show_trajectory_tab(&self, ui: &mut egui::Ui) {
         let mut actions = TrajectoryActions::default();
@@ -521,7 +519,7 @@ impl AnalysisPaneViewer<'_> {
                             ui.label(egui::RichText::new("\u{25CF}").color(ship_dot_color));
                             ui.label(egui::RichText::new(icon).color(badge_color));
                             ui.label(
-                                egui::RichText::new(format!("{} — {}", shell_label, outcome_text))
+                                egui::RichText::new(format!("{} \u{2014} {}", shell_label, outcome_text))
                                     .small()
                                     .strong()
                                     .color(badge_color),
@@ -761,8 +759,6 @@ impl AnalysisPaneViewer<'_> {
 
         *self.trajectory_actions.borrow_mut() = actions;
     }
-
-    // ─── Splash Tab ──────────────────────────────────────────────────────────
 
     fn show_splash_tab(&self, ui: &mut egui::Ui) {
         let splash_result = match self.active_pane.and_then(|p| p.splash_result.as_ref()) {
