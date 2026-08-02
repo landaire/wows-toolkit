@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -39,10 +40,33 @@ pub fn validate_finalize_target(current_exe: &Path, replaced: &Path) -> Result<(
     Ok(())
 }
 
+/// Subcommand names that must not be mistaken for a legacy path argument.
+const SUBCOMMAND_NAMES: &[&str] = &["finalize-update", "help"];
+
+/// Recognise the argument form used by every released version:
+/// `wows_toolkit.exe <replaced.exe.old>`.
+///
+/// Those versions cannot be changed, so this form is accepted for as long as
+/// any of them can still update into this binary. Classification is syntactic
+/// only; `validate_finalize_target` decides whether the path may be deleted.
+pub fn legacy_finalize_target(args: &[OsString]) -> Option<PathBuf> {
+    let [_program, single] = args else {
+        return None;
+    };
+
+    let text = single.to_str()?;
+    if text.starts_with('-') || SUBCOMMAND_NAMES.contains(&text) {
+        return None;
+    }
+
+    Some(PathBuf::from(single))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use std::ffi::OsString;
     use std::fs::File;
 
     use tempfile::tempdir;
@@ -94,5 +118,36 @@ mod tests {
             validate_finalize_target(&current, &replaced),
             Err(FinalizeError::Missing { replaced })
         );
+    }
+
+    fn args(values: &[&str]) -> Vec<OsString> {
+        values.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn treats_lone_path_argument_as_legacy_form() {
+        let parsed = legacy_finalize_target(&args(&["wows_toolkit.exe", "C:\\app\\wows_toolkit.exe.old"]));
+
+        assert_eq!(parsed, Some(PathBuf::from("C:\\app\\wows_toolkit.exe.old")));
+    }
+
+    #[test]
+    fn bare_launch_is_not_legacy_form() {
+        assert_eq!(legacy_finalize_target(&args(&["wows_toolkit.exe"])), None);
+    }
+
+    #[test]
+    fn flag_is_not_legacy_form() {
+        assert_eq!(legacy_finalize_target(&args(&["wows_toolkit.exe", "--help"])), None);
+    }
+
+    #[test]
+    fn subcommand_name_is_not_legacy_form() {
+        assert_eq!(legacy_finalize_target(&args(&["wows_toolkit.exe", "finalize-update"])), None);
+    }
+
+    #[test]
+    fn multiple_arguments_are_not_legacy_form() {
+        assert_eq!(legacy_finalize_target(&args(&["wows_toolkit.exe", "a", "b"])), None);
     }
 }
