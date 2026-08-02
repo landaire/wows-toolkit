@@ -25,10 +25,15 @@ extern crate nalgebra as na;
 use na::Rotation3;
 
 use crate::armor_viewer::constants::*;
+use crate::armor_viewer::penetration::ComparisonShipIndex;
 use crate::armor_viewer::penetration::ComparisonVerdict;
 use crate::armor_viewer::penetration::ExitDivergence;
+use crate::armor_viewer::penetration::Ifhe;
+use crate::armor_viewer::penetration::PlateIndex;
 use crate::armor_viewer::penetration::ServerOutcome;
 use crate::armor_viewer::penetration::ServerVsSimComparison;
+use crate::armor_viewer::penetration::he_penetration;
+use crate::armor_viewer::penetration::sap_penetration;
 use crate::armor_viewer::state::ArmorPane;
 use crate::armor_viewer::state::SidebarHighlightKey;
 use crate::armor_viewer::state::StoredTrajectory;
@@ -600,15 +605,15 @@ impl RealtimeArmorViewer {
         let ship_world_pos = pose.position;
         let salvo_shots: Vec<_> = hit.salvo.as_ref().map(|s| s.shots.clone()).unwrap_or_default();
         let impact_pos = hit.hit.position;
-        let matched_shot = salvo_shots.iter().find(|s| s.shot_id == hit.hit.shot_id);
-        let firing_range: Meters = matched_shot.map(|s| s.origin.distance_xz(&impact_pos)).unwrap_or(Meters::new(0.0));
+        let shot = salvo_shots.iter().find(|s| s.shot_id == hit.hit.shot_id)?;
+        let firing_range: Meters = shot.origin.distance_xz(&impact_pos);
 
         let rot = Self::inverse_ship_rotation(ship_yaw, pose.pitch, pose.roll);
 
-        let shot = matched_shot?;
-
         let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell)?;
-        let impact_result = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);
+        // terminalBallisticsInfo.velocity is post-impact, not incoming, so the
+        // arrival state has to come from simulating the shot's own range.
+        let impact = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);
 
         let model_center = self.pane.loaded_armor.as_ref().map(|a| a.center()).unwrap_or(Vec3::zeros());
         let bounds = self.pane.loaded_armor.as_ref().map(|a| a.bounds);
@@ -629,8 +634,8 @@ impl RealtimeArmorViewer {
             return None;
         }
         let horiz_dir = Vec3::new(mesh_dir.x / horiz_len, 0.0, mesh_dir.z / horiz_len);
-        let shell_dir: Vec3 = if let Some(ref imp) = impact_result {
-            let horiz_angle = imp.impact_angle_horizontal as f32;
+        let shell_dir: Vec3 = if let Some(ref imp) = impact {
+            let horiz_angle = imp.impact_angle_horizontal;
             let cos_h = horiz_angle.cos();
             let sin_h = horiz_angle.sin();
             Vec3::new(horiz_dir.x * cos_h, -sin_h, horiz_dir.z * cos_h).normalize()
@@ -650,14 +655,9 @@ impl RealtimeArmorViewer {
         let traj_hits =
             crate::armor_viewer::common::build_traj_hits(&all_hits, &self.pane.mesh_triangle_info, &shell_dir);
 
-        // Build ImpactResult from ballistic simulation.
-        // Note: terminalBallisticsInfo.velocity is post-impact (not incoming), so we
-        // cannot use from_terminal_velocity() here — always simulate from range.
-        let impact = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);
-
         // AP simulation + comparison
         let mut detonation_points = Vec::new();
-        let mut last_visible_hit: Option<usize> = None;
+        let mut last_visible_hit: Option<PlateIndex> = None;
         let mut comparison: Option<ServerVsSimComparison> = None;
 
         if shell.ammo_type == AmmoType::AP
@@ -671,31 +671,25 @@ impl RealtimeArmorViewer {
                 self.pane.continue_on_ricochet,
             );
             if let Some(pos) = ap.detonation_point {
-                detonation_points
-                    .push(crate::armor_viewer::penetration::DetonationMarker { position: pos, ship_index: 0 });
+                detonation_points.push(crate::armor_viewer::penetration::DetonationMarker {
+                    position: pos,
+                    ship: ComparisonShipIndex::ONLY,
+                });
             }
-            if let Some(idx) = ap.last_visible_hit {
-                last_visible_hit = Some(last_visible_hit.map_or(idx, |prev: usize| prev.min(idx)));
+            if let Some(plate) = ap.last_visible_hit {
+                last_visible_hit = crate::armor_viewer::common::earliest_plate(last_visible_hit, plate);
             }
 
-            let first_angle = traj_hits.first().map(|h| h.angle_deg).unwrap_or(0.0);
-            let first_thickness =
-                traj_hits.first().map(|h| Millimeters::new(h.thickness_mm)).unwrap_or(Millimeters::new(0.0));
-            let verdict = crate::armor_viewer::penetration::compare_with_server(
-                &ap.sim,
-                &traj_hits,
-                server_outcome,
-                &params,
-                first_angle,
-                first_thickness,
-            );
-
-            comparison = Some(ServerVsSimComparison {
-                server_outcome: server_outcome.clone(),
-                sim: ap.sim,
-                verdict,
-                exit_divergence: None,
-            });
+            if let Some(verdict) =
+                crate::armor_viewer::penetration::compare_with_server(&ap.sim, &traj_hits, server_outcome, &params)
+            {
+                comparison = Some(ServerVsSimComparison {
+                    server_outcome: server_outcome.clone(),
+                    sim: ap.sim,
+                    verdict,
+                    exit_divergence: None,
+                });
+            }
         }
 
         // Build ballistic arc
@@ -713,13 +707,13 @@ impl RealtimeArmorViewer {
                 model_extent,
             );
             ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
-                ship_index: 0,
+                ship: ComparisonShipIndex::ONLY,
                 arc_points_3d,
                 ballistic_impact: Some(imp.clone()),
             });
         }
 
-        let total_armor: f32 = traj_hits.iter().map(|h| h.thickness_mm).sum();
+        let total_armor: Millimeters = traj_hits.iter().map(|h| h.thickness).sum();
         let traj_id = self.pane.next_trajectory_id;
         self.pane.next_trajectory_id += 1;
 
@@ -727,7 +721,7 @@ impl RealtimeArmorViewer {
             origin: ray_origin,
             direction: shell_dir,
             hits: traj_hits.clone(),
-            total_armor_mm: total_armor,
+            total_armor,
             ship_arcs,
             detonation_points,
         };
@@ -868,7 +862,7 @@ impl RealtimeArmorViewer {
         };
 
         let distance =
-            sim_exit_pos.map(|sim_pos| crate::armor_viewer::penetration::distance_3d(&server_exit_model, &sim_pos));
+            sim_exit_pos.map(|sim_pos| crate::armor_viewer::penetration::model_distance(&server_exit_model, &sim_pos));
 
         Some(ExitDivergence { server_exit_pos: server_exit_model, sim_exit_pos, distance })
     }
@@ -2069,9 +2063,9 @@ impl RealtimeArmorViewer {
             ui.label(
                 egui::RichText::new(format!(
                     "v={:.0} m/s  t={:.1}s  fall={:.1}°",
-                    impact.impact_velocity,
-                    impact.time_to_target,
-                    impact.impact_angle_horizontal.to_degrees(),
+                    impact.impact_velocity.value(),
+                    impact.time_to_target.value(),
+                    impact.impact_angle_horizontal.to_degrees().value(),
                 ))
                 .small(),
             );
@@ -2106,19 +2100,21 @@ impl RealtimeArmorViewer {
                         egui::RichText::new(t!("ui.armor.realtime.sim_agrees").as_ref()).small().color(ui.sem().ok),
                     );
                 }
-                ComparisonVerdict::RicochetRngDefer { angle_deg, range_start_deg, range_end_deg } => {
+                ComparisonVerdict::RicochetRngDefer { angle, ricochet_start, always_ricochet } => {
                     ui.label(
                         egui::RichText::new(format!(
                             "RNG zone ({:.1}° in [{:.1}°–{:.1}°])",
-                            angle_deg, range_start_deg, range_end_deg,
+                            angle.value(),
+                            ricochet_start.value(),
+                            always_ricochet.value(),
                         ))
                         .small()
                         .color(ui.sem().warn),
                     );
                 }
-                ComparisonVerdict::Mismatch { sim_desc, server_desc } => {
+                ComparisonVerdict::Mismatch { sim, server } => {
                     ui.label(
-                        egui::RichText::new(format!("Sim: {} / Server: {}", sim_desc, server_desc))
+                        egui::RichText::new(format!("Sim: {} / Server: {}", sim.display_name(), server.display_name()))
                             .small()
                             .color(ui.sem().error),
                     );
@@ -2127,15 +2123,18 @@ impl RealtimeArmorViewer {
 
             // Exit divergence for overpens
             if let Some(ref exit_div) = cmp.exit_divergence {
-                if let Some(dist) = exit_div.distance {
-                    let div_color = if dist < 0.5 {
+                if let Some(divergence) = exit_div.distance {
+                    let units = divergence.value();
+                    let div_color = if units < 0.5 {
                         ui.sem().ok
-                    } else if dist < 2.0 {
+                    } else if units < 2.0 {
                         ui.sem().warn
                     } else {
                         ui.sem().error
                     };
-                    ui.label(egui::RichText::new(format!("Exit divergence: {dist:.2} units")).small().color(div_color));
+                    ui.label(
+                        egui::RichText::new(format!("Exit divergence: {units:.2} units")).small().color(div_color),
+                    );
                 } else if exit_div.sim_exit_pos.is_none() {
                     ui.label(egui::RichText::new("Exit divergence: sim has no exit").small().color(ui.sem().text_dim));
                 }
@@ -2144,30 +2143,33 @@ impl RealtimeArmorViewer {
             // HE/SAP outcome for non-AP shells
             let he_sap_outcome = group.shell_info.as_ref().and_then(|shell| match shell.ammo_type {
                 AmmoType::HE => {
-                    let pen = shell.he_pen_mm.unwrap_or(0.0);
+                    let pen = he_penetration(shell, Ifhe::NotApplied)?;
                     result.hits.first().map(|hit| {
-                        if pen >= hit.thickness_mm {
+                        if pen >= hit.thickness {
                             (
                                 ui.sem().armor.pen,
-                                format!("HE detonates — {:.0}mm pen vs {:.0}mm", pen, hit.thickness_mm),
+                                format!("HE detonates — {:.0}mm pen vs {:.0}mm", pen.value(), hit.thickness.value()),
                             )
                         } else {
                             (
                                 ui.sem().armor.shatter,
-                                format!("HE shatter — {:.0}mm pen < {:.0}mm", pen, hit.thickness_mm),
+                                format!("HE shatter — {:.0}mm pen < {:.0}mm", pen.value(), hit.thickness.value()),
                             )
                         }
                     })
                 }
                 AmmoType::SAP => {
-                    let pen = shell.sap_pen_mm.unwrap_or(0.0);
+                    let pen = sap_penetration(shell)?;
                     result.hits.first().map(|hit| {
-                        if pen >= hit.thickness_mm {
-                            (ui.sem().armor.pen, format!("SAP pen — {:.0}mm vs {:.0}mm", pen, hit.thickness_mm))
+                        if pen >= hit.thickness {
+                            (
+                                ui.sem().armor.pen,
+                                format!("SAP pen — {:.0}mm vs {:.0}mm", pen.value(), hit.thickness.value()),
+                            )
                         } else {
                             (
                                 ui.sem().armor.shatter,
-                                format!("SAP shatter — {:.0}mm pen < {:.0}mm", pen, hit.thickness_mm),
+                                format!("SAP shatter — {:.0}mm pen < {:.0}mm", pen.value(), hit.thickness.value()),
                             )
                         }
                     })
@@ -2186,11 +2188,12 @@ impl RealtimeArmorViewer {
 
         egui::ScrollArea::vertical().id_salt("plate_detail_scroll").auto_shrink([false; 2]).show(ui, |ui| {
             for (i, hit) in result.hits.iter().enumerate() {
-                let is_post_detonation = last_visible.is_some_and(|lv| i > lv);
+                let plate = PlateIndex::new(i);
+                let is_post_detonation = last_visible.is_some_and(|last| plate > last);
 
                 // Check if detonation happens at this plate
                 let detonation_here =
-                    sim.as_ref().and_then(|s| if s.detonated_at == Some(i) { s.detonation.as_ref() } else { None });
+                    sim.as_ref().and_then(|s| if s.detonated_at == Some(plate) { s.detonation.as_ref() } else { None });
 
                 if is_post_detonation && detonation_here.is_none() {
                     continue;
@@ -2198,9 +2201,9 @@ impl RealtimeArmorViewer {
 
                 let plate_color = if is_post_detonation {
                     ui.sem().text_dim
-                } else if hit.angle_deg < 30.0 {
+                } else if hit.angle_from_normal < SHALLOW_ANGLE {
                     ui.sem().armor.angle_good
-                } else if hit.angle_deg < 45.0 {
+                } else if hit.angle_from_normal < STEEP_ANGLE {
                     ui.sem().armor.angle_mid
                 } else {
                     ui.sem().armor.angle_bad
@@ -2208,11 +2211,18 @@ impl RealtimeArmorViewer {
 
                 // Plate header
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("#{}", i + 1)).small().color(ui.sem().text_dim));
+                    ui.label(egui::RichText::new(format!("#{}", plate.number())).small().color(ui.sem().text_dim));
                     ui.label(
-                        egui::RichText::new(format!("{:.0}mm", hit.thickness_mm)).strong().small().color(plate_color),
+                        egui::RichText::new(format!("{:.0}mm", hit.thickness.value()))
+                            .strong()
+                            .small()
+                            .color(plate_color),
                     );
-                    ui.label(egui::RichText::new(format!("{:.1}°", hit.angle_deg)).small().color(plate_color));
+                    ui.label(
+                        egui::RichText::new(format!("{:.1}°", hit.angle_from_normal.value()))
+                            .small()
+                            .color(plate_color),
+                    );
                     if i == 0
                         && let Some(server_angle) = shell_entry.server_material_angle
                     {
@@ -2230,15 +2240,16 @@ impl RealtimeArmorViewer {
                 // Per-plate penetration outcome (AP)
                 if !is_post_detonation
                     && let Some(sim) = sim
-                    && let Some(plate) = sim.plates.get(i)
+                    && let Some(plate_result) = sim.plates.get(i)
                 {
-                    let (icon, detail_color, detail) = match plate.outcome {
+                    let (icon, detail_color, detail) = match plate_result.outcome {
                         PlateOutcome::Overmatch => (
                             ">>",
                             ui.sem().armor.pen,
                             format!(
                                 "overmatch — {:.0}mm pen, v={:.0} m/s",
-                                plate.raw_pen_before_mm, plate.velocity_before
+                                plate_result.raw_penetration.value(),
+                                plate_result.velocity_before.value()
                             ),
                         ),
                         PlateOutcome::Penetrate => (
@@ -2246,18 +2257,21 @@ impl RealtimeArmorViewer {
                             ui.sem().armor.pen,
                             format!(
                                 "{:.0}/{:.0}mm eff — v={:.0} m/s",
-                                plate.raw_pen_before_mm, plate.effective_thickness_mm, plate.velocity_before
+                                plate_result.raw_penetration.value(),
+                                plate_result.effective_thickness.value(),
+                                plate_result.velocity_before.value()
                             ),
                         ),
                         PlateOutcome::Ricochet => {
-                            ("X", ui.sem().armor.ricochet, format!("ricochet @ {:.1}°", hit.angle_deg))
+                            ("X", ui.sem().armor.ricochet, format!("ricochet @ {:.1}°", hit.angle_from_normal.value()))
                         }
                         PlateOutcome::Shatter => (
                             "X",
                             ui.sem().armor.shatter,
                             format!(
                                 "shatter — {:.0} < {:.0}mm eff",
-                                plate.raw_pen_before_mm, plate.effective_thickness_mm
+                                plate_result.raw_penetration.value(),
+                                plate_result.effective_thickness.value()
                             ),
                         ),
                     };
@@ -2265,7 +2279,7 @@ impl RealtimeArmorViewer {
                         ui.add_space(8.0);
                         ui.label(egui::RichText::new(icon).small().color(detail_color));
                         let mut label = detail;
-                        if plate.fuse_armed_here {
+                        if plate_result.fuse_armed_here {
                             label.push_str(" [fuse armed]");
                         }
                         ui.label(egui::RichText::new(label).small().color(detail_color));
@@ -2274,7 +2288,7 @@ impl RealtimeArmorViewer {
 
                 // Detonation marker
                 if let Some(det) = detonation_here {
-                    let zone = enclosing_zone(&result.hits, i);
+                    let zone = enclosing_zone(&result.hits, plate).unwrap_or("past all armor");
                     ui.horizontal(|ui| {
                         ui.add_space(8.0);
                         ui.label(
@@ -2282,7 +2296,7 @@ impl RealtimeArmorViewer {
                                 "** detonates inside {} — {:.1}m after plate #{}",
                                 zone,
                                 det.travel_distance.value(),
-                                i + 1,
+                                plate.number(),
                             ))
                             .small()
                             .color(ui.sem().armor.pen),

@@ -2,10 +2,15 @@ use crate::viewport_3d::Vec3;
 
 use std::collections::HashMap;
 
+use wowsunpack::ballistics::PlateIndex;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::keys::ComponentType;
+use wowsunpack::game_params::types::Millimeters;
+use wowsunpack::game_params::types::ShipModelDistance;
 use wowsunpack::game_params::types::Vehicle;
 
+use super::constants::ARC_POINT_COUNT;
+use super::constants::MIN_ARC_HEIGHT_RATIO;
 use super::state::ArmorPane;
 use super::state::ArmorZone;
 use super::state::LoadedShipArmor;
@@ -429,14 +434,13 @@ pub(crate) fn build_traj_hits(
             .find(|(id, _)| *id == armor_hit.mesh_id)
             .and_then(|(_, infos)| infos.get(armor_hit.triangle_index));
         if let Some(info) = tooltip {
-            let angle = super::penetration::impact_angle_deg(shell_dir, normal);
             traj_hits.push(super::penetration::TrajectoryHit {
                 position: armor_hit.world_position,
-                thickness_mm: info.thickness_mm,
+                thickness: Millimeters::from(info.thickness_mm),
                 zone: info.zone.clone(),
                 material: info.material_name.clone(),
-                angle_deg: angle,
-                distance_from_start: armor_hit.distance - first_dist,
+                angle_from_normal: super::penetration::impact_angle_from_normal(shell_dir, normal),
+                distance_from_start: ShipModelDistance::from(armor_hit.distance - first_dist),
             });
         }
     }
@@ -446,7 +450,7 @@ pub(crate) fn build_traj_hits(
 /// Result of AP shell simulation through armor hits.
 pub(crate) struct ApSimResult {
     pub detonation_point: Option<Vec3>,
-    pub last_visible_hit: Option<usize>,
+    pub last_visible_hit: Option<PlateIndex>,
     pub sim: super::penetration::ShellSimResult,
 }
 
@@ -462,13 +466,13 @@ pub(crate) fn simulate_ap_shell(
     let sim = super::penetration::simulate_shell_through_hits(params, impact, traj_hits, continue_on_ricochet);
     let detonation_point =
         sim.detonation.as_ref().and_then(|det| super::penetration::detonation_position(traj_hits, det, shell_dir));
-    let shell_stop = match (sim.detonated_at, sim.stopped_at) {
-        (Some(d), Some(s)) => Some(d.min(s)),
-        (Some(d), None) => Some(d),
-        (None, Some(s)) => Some(s),
-        (None, None) => None,
-    };
-    ApSimResult { detonation_point, last_visible_hit: shell_stop, sim }
+    let last_visible_hit = sim.last_reached_plate();
+    ApSimResult { detonation_point, last_visible_hit, sim }
+}
+
+/// Keep whichever plate a shell's run ends at first, across several shells.
+pub(crate) fn earliest_plate(current: Option<PlateIndex>, candidate: PlateIndex) -> Option<PlateIndex> {
+    Some(current.map_or(candidate, |plate| plate.min(candidate)))
 }
 
 /// Build a 3D ballistic arc for visualization.
@@ -484,15 +488,13 @@ pub(crate) fn build_ballistic_arc_3d(
     model_extent: f32,
 ) -> Vec<Vec3> {
     let arc_horiz_extent = model_extent * 2.0;
-    let (arc_2d, height_ratio) = super::ballistics::simulate_arc_points(params, impact.launch_angle, 60);
-    let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
-    arc_2d
+    let arc = super::ballistics::simulate_arc(params, impact.launch_angle, ARC_POINT_COUNT);
+    let arc_height_extent = arc_horiz_extent * arc.height_ratio.max(MIN_ARC_HEIGHT_RATIO);
+    arc.points
         .iter()
-        .map(|(xf, yf)| {
-            let xf = *xf as f32;
-            let yf = *yf as f32;
-            let along = (1.0 - xf) * arc_horiz_extent;
-            first_hit_pos - approach_xz * along + Vec3::new(0.0, yf * arc_height_extent, 0.0)
+        .map(|point| {
+            let along = (1.0 - point.along_range) * arc_horiz_extent;
+            first_hit_pos - approach_xz * along + Vec3::new(0.0, point.height * arc_height_extent, 0.0)
         })
         .collect()
 }

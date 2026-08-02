@@ -11,6 +11,9 @@ use egui_dock::TabViewer;
 
 use crate::app::ToolkitTabViewer;
 use crate::armor_viewer::constants::*;
+use crate::armor_viewer::penetration::ComparisonShipIndex;
+use crate::armor_viewer::penetration::Ifhe;
+use crate::armor_viewer::penetration::PlateIndex;
 use crate::armor_viewer::ship_selector::ShipCatalog;
 use crate::armor_viewer::ship_selector::species_name;
 use crate::armor_viewer::ship_selector::tier_roman;
@@ -44,6 +47,8 @@ use crate::viewport_3d::Vec3;
 use crate::viewport_3d::Vertex;
 use rust_i18n::t;
 use wowsunpack::game_params::types::AmmoType;
+use wowsunpack::game_params::types::Millimeters;
+use wowsunpack::game_params::types::ShipModelDistance;
 
 fn mfm_stem(mfm_path: &str) -> &str {
     crate::armor_viewer::common::mfm_stem(mfm_path)
@@ -1015,7 +1020,7 @@ impl ToolkitTabViewer<'_> {
                                     hit_plates.insert((
                                         hit.zone.clone(),
                                         hit.material.clone(),
-                                        (hit.thickness_mm * 10.0).round() as i32,
+                                        (hit.thickness.value() * 10.0).round() as i32,
                                     ));
                                 }
                             }
@@ -2012,7 +2017,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
 
                             // Step 2: Compute shell direction from ballistic impact angle
                             let shell_dir: Vec3 = if let Some(ref impact) = ballistic_impact {
-                                let horiz_angle = impact.impact_angle_horizontal as f32;
+                                let horiz_angle = impact.impact_angle_horizontal;
                                 let cos_h = horiz_angle.cos();
                                 let sin_h = horiz_angle.sin();
                                 Vec3::new(
@@ -2086,7 +2091,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                             model_extent,
                                         );
                                         ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
-                                            ship_index: ship_idx,
+                                            ship: ComparisonShipIndex::new(ship_idx),
                                             arc_points_3d,
                                             ballistic_impact: Some(impact),
                                         });
@@ -2094,13 +2099,13 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                 }
                             }
 
-                            let total_armor: f32 = traj_hits.iter().map(|h| h.thickness_mm).sum();
+                            let total_armor: Millimeters = traj_hits.iter().map(|h| h.thickness).sum();
 
                             // Compute detonation points and last visible hit for AP shells
                             // Each shell gets its own ballistic solve (different velocity/angle at range)
                             let mut detonation_points: Vec<crate::armor_viewer::penetration::DetonationMarker> =
                                 Vec::new();
-                            let mut last_visible_hit: Option<usize> = None;
+                            let mut last_visible_hit: Option<PlateIndex> = None;
                             for (ship_idx, ship) in comparison_ships.iter().enumerate() {
                                 for shell in ship.shells.iter().filter(|s| s.ammo_type == AmmoType::AP) {
                                     let Some(params) =
@@ -2125,13 +2130,13 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                             detonation_points.push(
                                                 crate::armor_viewer::penetration::DetonationMarker {
                                                     position: pos,
-                                                    ship_index: ship_idx,
+                                                    ship: ComparisonShipIndex::new(ship_idx),
                                                 },
                                             );
                                         }
-                                        if let Some(idx) = ap.last_visible_hit {
+                                        if let Some(plate) = ap.last_visible_hit {
                                             last_visible_hit =
-                                                Some(last_visible_hit.map_or(idx, |prev: usize| prev.min(idx)));
+                                                crate::armor_viewer::common::earliest_plate(last_visible_hit, plate);
                                         }
                                     }
                                 }
@@ -2141,7 +2146,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                 origin: ray_origin,
                                 direction: shell_dir,
                                 hits: traj_hits,
-                                total_armor_mm: total_armor,
+                                total_armor,
                                 ship_arcs,
                                 detonation_points,
                             };
@@ -2813,7 +2818,17 @@ pub(crate) fn show_armor_tooltip(
 ) {
     use crate::armor_viewer::penetration::PenResult;
     use crate::armor_viewer::penetration::check_penetration;
+    use crate::armor_viewer::penetration::he_penetration;
+    use crate::armor_viewer::penetration::sap_penetration;
+    use wowsunpack::ballistics::is_overmatch;
     use wowsunpack::export::gltf_export::thickness_to_color;
+
+    /// Penetration figure for one shell, or `n/a` when the projectile carries none.
+    fn pen_label(penetration: Option<Millimeters>) -> String {
+        penetration.map_or_else(|| "n/a".to_string(), |pen| format!("{:.0}mm", pen.value()))
+    }
+
+    let ifhe = Ifhe::from_enabled(ifhe_enabled);
 
     // Main header: this plate's thickness with color swatch
     ui.horizontal(|ui| {
@@ -2868,7 +2883,8 @@ pub(crate) fn show_armor_tooltip(
                 .strong(),
             );
             for shell in &ship.shells {
-                let result = check_penetration(shell, info.thickness_mm, ifhe_enabled);
+                let thickness = Millimeters::from(info.thickness_mm);
+                let result = check_penetration(shell, thickness, ifhe);
                 let (icon, color) = match result {
                     Some(PenResult::Penetrates) => ("\u{2705}", ui.sem().armor.pen),
                     Some(PenResult::Bounces) => ("\u{274C}", ui.sem().armor.ricochet),
@@ -2876,18 +2892,10 @@ pub(crate) fn show_armor_tooltip(
                     None => ("\u{2753}", ui.sem().text_dim),
                 };
                 let pen_info = match &shell.ammo_type {
-                    AmmoType::HE => {
-                        let pen = if ifhe_enabled {
-                            shell.he_pen_mm.unwrap_or(0.0) * 1.25
-                        } else {
-                            shell.he_pen_mm.unwrap_or(0.0)
-                        };
-                        format!("{:.0}mm pen", pen)
-                    }
-                    AmmoType::SAP => format!("{:.0}mm pen", shell.sap_pen_mm.unwrap_or(0.0)),
+                    AmmoType::HE => format!("{} pen", pen_label(he_penetration(shell, ifhe))),
+                    AmmoType::SAP => format!("{} pen", pen_label(sap_penetration(shell))),
                     AmmoType::AP => {
-                        if shell.caliber.value() > info.thickness_mm * crate::armor_viewer::penetration::OVERMATCH_RATIO
-                        {
+                        if is_overmatch(shell.caliber, thickness) {
                             "overmatch".to_string()
                         } else {
                             "angle-dependent".to_string()
@@ -3451,7 +3459,7 @@ fn recompute_trajectory_for_range(
         && let Some(params) = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell)
         && let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
     {
-        let horiz_angle = impact.impact_angle_horizontal as f32;
+        let horiz_angle = impact.impact_angle_horizontal;
         let cos_h = horiz_angle.cos();
         let sin_h = horiz_angle.sin();
         result.direction = Vec3::new(approach_xz[0] * cos_h, -sin_h, approach_xz[2] * cos_h).normalize();
@@ -3459,7 +3467,6 @@ fn recompute_trajectory_for_range(
 
     // Recompute per-ship arcs
     let model_extent = loaded_armor.map(|a| a.max_extent_xz()).unwrap_or(10.0);
-    let arc_horiz_extent = model_extent * 2.0;
     let first_hit_pos = result.hits.first().map(|h| h.position).unwrap_or(result.origin);
 
     let mut new_ship_arcs: Vec<crate::armor_viewer::penetration::ShipArc> = Vec::new();
@@ -3470,20 +3477,15 @@ fn recompute_trajectory_for_range(
                 && let Some(params) = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell)
                 && let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
             {
-                let (arc_2d, height_ratio) =
-                    crate::armor_viewer::ballistics::simulate_arc_points(&params, impact.launch_angle, 60);
-                let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
-                let arc_points_3d: Vec<Vec3> = arc_2d
-                    .iter()
-                    .map(|(xf, yf)| {
-                        let xf = *xf as f32;
-                        let yf = *yf as f32;
-                        let along = (1.0 - xf) * arc_horiz_extent;
-                        first_hit_pos - approach_xz * along + Vec3::new(0.0, yf * arc_height_extent, 0.0)
-                    })
-                    .collect();
+                let arc_points_3d = crate::armor_viewer::common::build_ballistic_arc_3d(
+                    &params,
+                    &impact,
+                    approach_xz,
+                    first_hit_pos,
+                    model_extent,
+                );
                 new_ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
-                    ship_index: ship_idx,
+                    ship: ComparisonShipIndex::new(ship_idx),
                     arc_points_3d,
                     ballistic_impact: Some(impact),
                 });
@@ -3495,41 +3497,34 @@ fn recompute_trajectory_for_range(
     // Recompute detonation points and last visible hit
     // Each shell gets its own ballistic solve (different velocity/angle at range)
     let mut new_detonation_points: Vec<crate::armor_viewer::penetration::DetonationMarker> = Vec::new();
-    let mut new_last_visible: Option<usize> = None;
+    let mut new_last_visible: Option<PlateIndex> = None;
     for (ship_idx, ship) in comparison_ships.iter().enumerate() {
         for shell in ship.shells.iter().filter(|s| s.ammo_type == AmmoType::AP) {
             let Some(params) = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell) else {
                 continue;
             };
-            let shell_impact = if range_meters.value() > 0.0 {
-                crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
-            } else {
-                None
+            if range_meters.value() <= 0.0 {
+                continue;
+            }
+            let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_meters) else {
+                continue;
             };
-            if let Some(ref impact) = shell_impact {
-                let sim = crate::armor_viewer::penetration::simulate_shell_through_hits(
-                    &params,
-                    impact,
-                    &result.hits,
-                    continue_on_ricochet,
-                );
-                if let Some(det) = &sim.detonation
-                    && let Some(position) =
-                        crate::armor_viewer::penetration::detonation_position(&result.hits, det, &result.direction)
-                {
-                    new_detonation_points
-                        .push(crate::armor_viewer::penetration::DetonationMarker { position, ship_index: ship_idx });
-                }
-                // Earliest terminating event: detonation or ricochet/shatter
-                let shell_stop = match (sim.detonated_at, sim.stopped_at) {
-                    (Some(d), Some(s)) => Some(d.min(s)),
-                    (Some(d), None) => Some(d),
-                    (None, Some(s)) => Some(s),
-                    (None, None) => None,
-                };
-                if let Some(idx) = shell_stop {
-                    new_last_visible = Some(new_last_visible.map_or(idx, |prev: usize| prev.min(idx)));
-                }
+
+            let ap = crate::armor_viewer::common::simulate_ap_shell(
+                &params,
+                &impact,
+                &result.hits,
+                &result.direction,
+                continue_on_ricochet,
+            );
+            if let Some(position) = ap.detonation_point {
+                new_detonation_points.push(crate::armor_viewer::penetration::DetonationMarker {
+                    position,
+                    ship: ComparisonShipIndex::new(ship_idx),
+                });
+            }
+            if let Some(plate) = ap.last_visible_hit {
+                new_last_visible = crate::armor_viewer::common::earliest_plate(new_last_visible, plate);
             }
         }
     }
@@ -3613,25 +3608,25 @@ fn recompute_trajectory_for_roll(
             .and_then(|(_, infos)| infos.get(hit.triangle_index));
 
         if let Some(info) = tooltip {
-            let angle = crate::armor_viewer::penetration::impact_angle_deg(&rotated_dir, normal);
+            let angle = crate::armor_viewer::penetration::impact_angle_from_normal(&rotated_dir, normal);
             traj_hits.push(crate::armor_viewer::penetration::TrajectoryHit {
                 position: hit.world_position,
-                thickness_mm: info.thickness_mm,
+                thickness: Millimeters::from(info.thickness_mm),
                 zone: info.zone.clone(),
                 material: info.material_name.clone(),
-                angle_deg: angle,
-                distance_from_start: hit.distance - first_dist,
+                angle_from_normal: angle,
+                distance_from_start: ShipModelDistance::from(hit.distance - first_dist),
             });
         }
     }
 
-    let total_armor: f32 = traj_hits.iter().map(|h| h.thickness_mm).sum();
+    let total_armor: Millimeters = traj_hits.iter().map(|h| h.thickness).sum();
 
     // Update stored result with new hits and direction
     traj.result.origin = rotated_origin;
     traj.result.direction = rotated_dir;
     traj.result.hits = traj_hits;
-    traj.result.total_armor_mm = total_armor;
+    traj.result.total_armor = total_armor;
     traj.created_at_roll = new_roll;
 
     // Recompute arcs, detonation points, visualization mesh, and shell sim cache
@@ -3688,7 +3683,7 @@ fn update_shell_sim_cache(
                 };
                 crate::armor_viewer::state::CachedShellSim {
                     ship_name: ship.display_name.clone(),
-                    ship_index: si,
+                    ship: ComparisonShipIndex::new(si),
                     shell: shell.clone(),
                     sim,
                 }
@@ -3696,7 +3691,7 @@ fn update_shell_sim_cache(
         })
         .collect();
 
-    let last_visible_hit: Option<usize> = sims
+    let last_visible_hit: Option<PlateIndex> = sims
         .iter()
         .filter_map(|ss| {
             ss.sim.as_ref().and_then(|s| match (s.detonated_at, s.stopped_at) {
@@ -3724,6 +3719,15 @@ fn segment_perps(seg_dir: Vec3) -> (Vec3, Vec3) {
     (p1, p2)
 }
 
+/// Last plate drawn for a trajectory: where the shell's run ended, or the final
+/// plate when it passed through everything.
+fn last_plate_drawn(
+    result: &crate::armor_viewer::penetration::TrajectoryResult,
+    last_visible_hit: Option<PlateIndex>,
+) -> usize {
+    last_visible_hit.map_or_else(|| result.hits.len().saturating_sub(1), PlateIndex::value)
+}
+
 /// Upload a trajectory visualization as colored line segments on the overlay layer.
 /// If arc_points_3d is non-empty, draws a curved arc from firing position to first hit,
 /// then straight segments through subsequent armor plates.
@@ -3733,7 +3737,7 @@ pub(crate) fn upload_trajectory_visualization(
     result: &crate::armor_viewer::penetration::TrajectoryResult,
     device: &wgpu::Device,
     traj_color: [f32; 4],
-    last_visible_hit: Option<usize>,
+    last_visible_hit: Option<PlateIndex>,
     cam_distance: f32,
     marker_opacity: f32,
     line_width_mult: f32,
@@ -3761,7 +3765,7 @@ pub(crate) fn upload_trajectory_visualization(
                 if arc_data.arc_points_3d.len() < 2 {
                     continue;
                 }
-                let sc = SHIP_COLORS[arc_data.ship_index % SHIP_COLORS.len()];
+                let sc = SHIP_COLORS[arc_data.ship.palette_slot(SHIP_COLORS.len())];
                 let arc = &arc_data.arc_points_3d;
                 for i in 0..arc.len() - 1 {
                     let seg_raw = arc[i + 1] - arc[i];
@@ -3801,17 +3805,16 @@ pub(crate) fn upload_trajectory_visualization(
         }
 
         // Hit markers and inter-hit segments — stop at detonation
-        let max_hit = last_visible_hit.unwrap_or(result.hits.len().saturating_sub(1));
-        for i in 0..result.hits.len() {
-            if i > max_hit {
+        let last_plate = last_plate_drawn(result, last_visible_hit);
+        for (i, hit) in result.hits.iter().enumerate() {
+            if i > last_plate {
                 break;
             }
-            let hit = &result.hits[i];
 
             // Angle from normal: 0°=head-on (green), 45°+=ricochet zone (red)
-            let rgb = if hit.angle_deg < SHALLOW_ANGLE_DEG {
+            let rgb = if hit.angle_from_normal < SHALLOW_ANGLE {
                 IMPACT_COLOR_SHALLOW
-            } else if hit.angle_deg < STEEP_ANGLE_DEG {
+            } else if hit.angle_from_normal < STEEP_ANGLE {
                 IMPACT_COLOR_MEDIUM
             } else {
                 IMPACT_COLOR_STEEP
@@ -3829,7 +3832,7 @@ pub(crate) fn upload_trajectory_visualization(
                 perp2,
             );
 
-            if i + 1 < result.hits.len() && i < max_hit {
+            if i + 1 < result.hits.len() && i < last_plate {
                 let next_pos = result.hits[i + 1].position;
                 traj_line_segment(
                     &mut vertices,
@@ -3847,8 +3850,7 @@ pub(crate) fn upload_trajectory_visualization(
         // Trailing segment: show the shell's continued path after the last visible hit.
         // This visualizes overpen exit, ricochet bounce path, or post-detonation trajectory.
         {
-            let last_rendered_idx = last_visible_hit.unwrap_or(result.hits.len().saturating_sub(1));
-            let last_pos = result.hits[last_rendered_idx].position;
+            let last_pos = result.hits[last_plate_drawn(result, last_visible_hit)].position;
             let trail_end = last_pos + dir * 2.0;
             traj_line_segment(
                 &mut vertices,
@@ -3875,7 +3877,7 @@ pub(crate) fn upload_trajectory_visualization(
             };
             let det_pos = det.position + lateral_offset;
             let burst_size = DETONATION_BURST_SIZE_FACTOR * scale_factor;
-            let sc = SHIP_COLORS[det.ship_index % SHIP_COLORS.len()];
+            let sc = SHIP_COLORS[det.ship.palette_slot(SHIP_COLORS.len())];
             let burst_color = [sc[0], sc[1], sc[2], marker_opacity];
 
             // Octahedron diamond: 6 tip points along each axis

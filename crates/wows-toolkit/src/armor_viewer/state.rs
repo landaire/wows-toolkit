@@ -374,7 +374,7 @@ impl LoadedShipArmor {
 /// Avoids recomputing `solve_for_range` + `simulate_shell_through_hits` every frame.
 pub struct CachedShellSim {
     pub ship_name: String,
-    pub ship_index: usize,
+    pub ship: crate::armor_viewer::penetration::ComparisonShipIndex,
     pub shell: wowsunpack::game_params::types::ShellInfo,
     pub sim: Option<crate::armor_viewer::penetration::ShellSimResult>,
 }
@@ -383,8 +383,8 @@ pub struct CachedShellSim {
 #[allow(dead_code)]
 pub struct ShellSimCache {
     pub sims: Vec<CachedShellSim>,
-    /// Last visible hit index derived from the cached sims.
-    pub last_visible_hit: Option<usize>,
+    /// Last visible plate derived from the cached sims.
+    pub last_visible_hit: Option<crate::armor_viewer::penetration::PlateIndex>,
     /// Range at which these sims were computed.
     pub range_km: Km,
     /// Comparison ships version when these sims were computed.
@@ -396,9 +396,9 @@ pub struct StoredTrajectory {
     pub meta: crate::armor_viewer::penetration::TrajectoryMeta,
     pub result: crate::armor_viewer::penetration::TrajectoryResult,
     pub mesh_id: Option<MeshId>,
-    /// Last hit index visible before shell detonation (earliest across all shells).
-    /// `None` means no shell detonates — all hits are visible.
-    pub last_visible_hit: Option<usize>,
+    /// Last plate visible before shell detonation (earliest across all shells).
+    /// `None` means no shell detonates: all hits are visible.
+    pub last_visible_hit: Option<crate::armor_viewer::penetration::PlateIndex>,
     /// Camera distance at the time markers were last uploaded (for scaling).
     pub marker_cam_dist: f32,
     /// Whether this arc's hit plates are isolated in the visibility filter.

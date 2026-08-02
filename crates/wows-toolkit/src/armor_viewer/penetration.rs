@@ -1,19 +1,56 @@
 use crate::viewport_3d::Vec3;
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::AmmoType;
+use wowsunpack::game_params::types::Degrees;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::ShellInfo;
+use wowsunpack::game_params::types::ShipModelDistance;
 use wowsunpack::game_params::types::Species;
 
-pub use wowsunpack::ballistics::OVERMATCH_RATIO;
+use wowsunpack::ballistics::is_overmatch;
+
+/// Penetration bonus Inertia Fuse for HE Shells grants.
+const IFHE_PENETRATION_MULTIPLIER: f32 = 1.25;
+
+/// Whether the captain's Inertia Fuse for HE Shells skill is applied.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ifhe {
+    Applied,
+    NotApplied,
+}
+
+impl Ifhe {
+    pub fn from_enabled(enabled: bool) -> Self {
+        if enabled { Ifhe::Applied } else { Ifhe::NotApplied }
+    }
+}
+
+/// Position of a ship in the penetration comparison list.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ComparisonShipIndex(usize);
+
+impl ComparisonShipIndex {
+    /// The ship a single-ship view (the replay armor viewer) reports against.
+    pub const ONLY: ComparisonShipIndex = ComparisonShipIndex(0);
+
+    pub fn new(index: usize) -> Self {
+        ComparisonShipIndex(index)
+    }
+
+    /// Slot this ship draws from in a fixed-size identity palette.
+    pub fn palette_slot(self, palette_len: usize) -> usize {
+        self.0 % palette_len
+    }
+}
 
 /// A ship added to the comparison list.
 #[derive(Clone, Debug)]
@@ -28,9 +65,9 @@ pub struct ComparisonShip {
 }
 
 /// Check result for a single shell vs a single armor thickness.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PenResult {
-    /// Shell penetrates (HE/SAP pen >= thickness, or AP overmatch).
+    /// Shell penetrates (HE/SAP pen at least the thickness, or AP overmatch).
     Penetrates,
     /// Shell does not penetrate.
     Bounces,
@@ -38,32 +75,47 @@ pub enum PenResult {
     AngleDependent,
 }
 
+/// HE penetration a shell brings to a plate, IFHE included.
+///
+/// `None` when the projectile carries no HE penetration value; there is no safe
+/// numeric default, since 0.0 would read as a shell that penetrates nothing.
+pub fn he_penetration(shell: &ShellInfo, ifhe: Ifhe) -> Option<Millimeters> {
+    let base = Millimeters::from(shell.he_pen_mm?);
+    Some(match ifhe {
+        Ifhe::Applied => base * IFHE_PENETRATION_MULTIPLIER,
+        Ifhe::NotApplied => base,
+    })
+}
+
+/// SAP penetration a shell brings to a plate.
+///
+/// `None` when the projectile carries no SAP penetration value.
+pub fn sap_penetration(shell: &ShellInfo) -> Option<Millimeters> {
+    shell.sap_pen_mm.map(Millimeters::from)
+}
+
 /// Check if a shell penetrates a given armor thickness at point-blank (no angle consideration).
 ///
-/// Returns `None` for unknown ammo types (logged as a warning).
-pub fn check_penetration(shell: &ShellInfo, thickness_mm: f32, ifhe: bool) -> Option<PenResult> {
-    match &shell.ammo_type {
-        AmmoType::HE => {
-            let pen = if ifhe { shell.he_pen_mm.unwrap_or(0.0) * 1.25 } else { shell.he_pen_mm.unwrap_or(0.0) };
-            Some(if pen >= thickness_mm { PenResult::Penetrates } else { PenResult::Bounces })
-        }
-        AmmoType::SAP => {
-            let pen = shell.sap_pen_mm.unwrap_or(0.0);
-            Some(if pen >= thickness_mm { PenResult::Penetrates } else { PenResult::Bounces })
-        }
+/// Returns `None` for unknown ammo types (logged as a warning) and for shells
+/// whose penetration value is missing.
+pub fn check_penetration(shell: &ShellInfo, thickness: Millimeters, ifhe: Ifhe) -> Option<PenResult> {
+    let flat_penetration = match &shell.ammo_type {
+        AmmoType::HE => he_penetration(shell, ifhe)?,
+        AmmoType::SAP => sap_penetration(shell)?,
         AmmoType::AP => {
-            // Overmatch: caliber > armor * OVERMATCH_RATIO
-            Some(if shell.caliber.value() > thickness_mm * OVERMATCH_RATIO {
+            return Some(if is_overmatch(shell.caliber, thickness) {
                 PenResult::Penetrates
             } else {
                 PenResult::AngleDependent
-            })
+            });
         }
         AmmoType::Unknown(t) => {
             tracing::warn!("Unknown ammo type '{}' for shell '{}', cannot check penetration", t, shell.name);
-            None
+            return None;
         }
-    }
+    };
+
+    Some(if flat_penetration >= thickness { PenResult::Penetrates } else { PenResult::Bounces })
 }
 
 /// Resolve all unique shells for a ship by param_index.
@@ -107,15 +159,18 @@ pub fn resolve_ship_shells(metadata: &GameMetadataProvider, param_index: &str) -
 }
 
 /// A single hit along a trajectory ray through the armor model.
+///
+/// Positions and along-ray distances are in ship-model space (15 m per unit).
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub struct TrajectoryHit {
     pub position: Vec3,
-    pub thickness_mm: f32,
+    pub thickness: Millimeters,
     pub zone: String,
     pub material: String,
-    pub angle_deg: f32,
-    pub distance_from_start: f32,
+    /// Strike angle from the plate normal: 0 is head-on, 90 is glancing.
+    pub angle_from_normal: Degrees,
+    pub distance_from_start: ShipModelDistance,
 }
 
 /// Result of casting a trajectory ray through the armor model.
@@ -124,56 +179,40 @@ pub struct TrajectoryResult {
     pub origin: Vec3,
     pub direction: Vec3,
     pub hits: Vec<TrajectoryHit>,
-    pub total_armor_mm: f32,
+    /// Sum of every plate thickness along the ray, ignoring angle.
+    pub total_armor: Millimeters,
     /// Per-ship ballistic arcs (each ship gets its own arc shape + impact data).
     pub ship_arcs: Vec<ShipArc>,
     /// Where AP shells detonate (one per comparison shell that has a fuse event).
     pub detonation_points: Vec<DetonationMarker>,
 }
 
-/// Determine which zone volume the shell is inside after passing through plates `0..=last_plate_idx`.
+/// Which zone volume the shell is inside after crossing plates up to and
+/// including `last_plate`.
 ///
-/// Each plate crossing toggles whether the shell is inside that plate's zone. Zones with an
-/// odd crossing count are "entered". The innermost (most recently entered) zone is returned.
-pub fn enclosing_zone(hits: &[TrajectoryHit], last_plate_idx: usize) -> String {
-    use std::collections::HashMap;
-    let mut zone_crossings: HashMap<&str, usize> = HashMap::new();
-    let mut last_entered = None;
-    for (i, hit) in hits.iter().enumerate() {
-        if i > last_plate_idx {
-            break;
-        }
-        let count = zone_crossings.entry(&hit.zone).or_insert(0);
-        *count += 1;
-        if *count % 2 == 1 {
-            // Odd crossing = just entered this zone
-            last_entered = Some(hit.zone.as_str());
-        }
+/// Each crossing of a zone boundary toggles whether the shell is inside that
+/// zone, so a zone crossed an odd number of times has been entered and not left
+/// again. The innermost such zone is the one the shell sits in. `None` once the
+/// shell is clear of every zone.
+pub fn enclosing_zone(hits: &[TrajectoryHit], last_plate: PlateIndex) -> Option<&str> {
+    let crossed = &hits[..hits.len().min(last_plate.number())];
+
+    let mut crossings: HashMap<&str, usize> = HashMap::new();
+    for hit in crossed {
+        *crossings.entry(hit.zone.as_str()).or_default() += 1;
     }
-    // Return the innermost zone (last one entered with odd count), or fall back
-    if let Some(zone) = last_entered
-        && *zone_crossings.get(zone).unwrap_or(&0) % 2 == 1
-    {
-        return zone.to_string();
-    }
-    // Fallback: any zone with odd crossing count (last one in iteration order)
-    for (i, hit) in hits.iter().enumerate().rev() {
-        if i > last_plate_idx {
-            continue;
-        }
-        if *zone_crossings.get(hit.zone.as_str()).unwrap_or(&0) % 2 == 1 {
-            return hit.zone.clone();
-        }
-    }
-    "past all armor".to_string()
+
+    crossed.iter().rev().map(|hit| hit.zone.as_str()).find(|zone| crossings[zone] % 2 == 1)
 }
 
-/// Compute the impact angle between a ray direction and a triangle normal (in degrees).
-/// Returns angle from normal: 0 deg = head-on (perpendicular to plate), 90 deg = glancing (parallel).
-/// This matches the WoWs convention where ricochet angles (45/60 deg) are from normal.
-pub fn impact_angle_deg(ray_dir: &Vec3, normal: &Vec3) -> f32 {
+/// Strike angle between a ray direction and a triangle normal.
+///
+/// Measured from the normal: 0 is head-on (perpendicular to the plate), 90 is
+/// glancing (parallel to it). This is the convention the game's ricochet angles
+/// (45/60 deg) are stated in.
+pub fn impact_angle_from_normal(ray_dir: &Vec3, normal: &Vec3) -> Degrees {
     let cos_angle = ray_dir.dot(normal).abs().min(1.0);
-    cos_angle.acos().to_degrees()
+    Degrees::from(cos_angle.acos().to_degrees())
 }
 
 // The per-plate simulation lives in wowsunpack::ballistics; re-exported here
@@ -183,6 +222,7 @@ use crate::armor_viewer::ballistics::ImpactResult;
 use crate::armor_viewer::ballistics::ShellParams;
 pub use wowsunpack::ballistics::FuseDetonation;
 pub use wowsunpack::ballistics::PlateHit;
+pub use wowsunpack::ballistics::PlateIndex;
 pub use wowsunpack::ballistics::PlateOutcome;
 pub use wowsunpack::ballistics::ShellSimResult;
 pub use wowsunpack::ballistics::simulate_shell_through_plates;
@@ -191,22 +231,21 @@ pub use wowsunpack::ballistics::simulate_shell_through_plates;
 #[derive(Clone, Debug)]
 pub struct DetonationMarker {
     pub position: Vec3,
-    pub ship_index: usize,
+    pub ship: ComparisonShipIndex,
 }
 
 /// Per-ship ballistic arc data for a trajectory.
 #[derive(Clone, Debug)]
 pub struct ShipArc {
-    pub ship_index: usize,
+    pub ship: ComparisonShipIndex,
     pub arc_points_3d: Vec<Vec3>,
-    pub ballistic_impact: Option<crate::armor_viewer::ballistics::ImpactResult>,
+    pub ballistic_impact: Option<ImpactResult>,
 }
 
 /// Simulate a shell through ray-cast armor hits.
 ///
 /// Thin adapter over [`simulate_shell_through_plates`]: extracts the scalar
-/// along-ray plate list from the 3D hits. Positions and along-ray distances are
-/// in ship-model units (15 m per unit).
+/// along-ray plate list from the 3D hits.
 pub fn simulate_shell_through_hits(
     params: &ShellParams,
     impact: &ImpactResult,
@@ -215,10 +254,10 @@ pub fn simulate_shell_through_hits(
 ) -> ShellSimResult {
     let plates: Vec<PlateHit> = hits
         .iter()
-        .map(|h| PlateHit {
-            thickness_mm: h.thickness_mm,
-            angle_deg: h.angle_deg,
-            distance_along_ray: wowsunpack::game_params::types::ShipModelDistance::from(h.distance_from_start),
+        .map(|hit| PlateHit {
+            thickness: hit.thickness,
+            angle_from_normal: hit.angle_from_normal,
+            distance_along_ray: hit.distance_from_start,
         })
         .collect();
     simulate_shell_through_plates(params, impact, &plates, continue_on_ricochet)
@@ -245,9 +284,9 @@ pub struct TrajectoryMeta {
     pub range: Km,
 }
 
-/// Euclidean distance between two 3D points.
-pub fn distance_3d(a: &Vec3, b: &Vec3) -> f32 {
-    (b - a).norm()
+/// Distance between two points in ship-model space.
+pub fn model_distance(a: &Vec3, b: &Vec3) -> ShipModelDistance {
+    ShipModelDistance::from((b - a).norm())
 }
 
 // Server vs Simulation Comparison
@@ -295,15 +334,64 @@ impl ServerOutcome {
     }
 }
 
+/// What the simulation says became of the shell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SimOutcome {
+    Citadel,
+    Penetration,
+    Overpenetration,
+    Ricochet,
+    Shatter,
+    /// Stopped in the armor without an identified ricochet or shatter.
+    Stopped,
+}
+
+impl SimOutcome {
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Citadel => "Citadel",
+            Self::Penetration => "Penetration",
+            Self::Overpenetration => "Overpenetration",
+            Self::Ricochet => "Ricochet",
+            Self::Shatter => "Shatter",
+            Self::Stopped => "Stopped",
+        }
+    }
+}
+
+/// The simulation's side of a disagreement with the server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SimVerdict {
+    /// The simulation ran to this outcome.
+    Outcome(SimOutcome),
+    /// The plate is overmatched, which rules a ricochet out entirely.
+    OvermatchRulesOutRicochet,
+    /// The strike sits in the band where a ricochet is certain.
+    AlwaysRicochetBand,
+    /// The strike is too shallow for a ricochet to be possible at all.
+    RicochetAngleTooLow,
+}
+
+impl SimVerdict {
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Outcome(outcome) => outcome.display_name(),
+            Self::OvermatchRulesOutRicochet => "Overmatch (can't ricochet)",
+            Self::AlwaysRicochetBand => "Ricochet (always-ricochet zone)",
+            Self::RicochetAngleTooLow => "No ricochet possible (angle too low)",
+        }
+    }
+}
+
 /// How our simulation compares to the server.
 #[derive(Clone, Debug)]
 pub enum ComparisonVerdict {
     /// Simulation matches server.
     Match,
     /// Angle is in the ricochet RNG zone; server's call is valid either way.
-    RicochetRngDefer { angle_deg: f32, range_start_deg: f32, range_end_deg: f32 },
+    RicochetRngDefer { angle: Degrees, ricochet_start: Degrees, always_ricochet: Degrees },
     /// Simulation disagrees with server.
-    Mismatch { sim_desc: String, server_desc: String },
+    Mismatch { sim: SimVerdict, server: ServerOutcome },
 }
 
 /// Overpen exit point comparison.
@@ -314,8 +402,8 @@ pub struct ExitDivergence {
     pub server_exit_pos: Vec3,
     /// Simulated exit position (model space). None if sim didn't produce an exit.
     pub sim_exit_pos: Option<Vec3>,
-    /// Distance between them in model units. None if sim exit unavailable.
-    pub distance: Option<f32>,
+    /// Distance between them. None if sim exit unavailable.
+    pub distance: Option<ShipModelDistance>,
 }
 
 /// Full comparison for one shell.
@@ -327,100 +415,75 @@ pub struct ServerVsSimComparison {
     pub exit_divergence: Option<ExitDivergence>,
 }
 
-/// Describe the simulation outcome in human-readable form.
-fn describe_sim_outcome(sim: &ShellSimResult, hits: &[TrajectoryHit]) -> &'static str {
-    // If fuse was armed and shell detonates, the detonation outcome takes priority
-    // even if the shell shattered/ricocheted on a later plate (the fragments still explode).
+/// Classify the simulation's outcome for the shell.
+pub fn sim_outcome(sim: &ShellSimResult, hits: &[TrajectoryHit]) -> SimOutcome {
+    // A detonation takes priority even if the shell shattered or ricocheted on a
+    // later plate: the fragments still explode.
     if sim.detonation.is_some() {
-        if let Some(det_idx) = sim.detonated_at {
-            let zone = enclosing_zone(hits, det_idx);
-            if zone.to_lowercase().contains("citadel") {
-                return "Citadel";
-            }
-            return "Penetration";
-        }
-        return "Overpenetration";
+        let Some(detonated_at) = sim.detonated_at else {
+            return SimOutcome::Overpenetration;
+        };
+        let inside_citadel =
+            enclosing_zone(hits, detonated_at).is_some_and(|zone| zone.to_lowercase().contains("citadel"));
+        return if inside_citadel { SimOutcome::Citadel } else { SimOutcome::Penetration };
     }
-    if let Some(stop_idx) = sim.stopped_at {
-        if let Some(plate) = sim.plates.get(stop_idx) {
-            return match plate.outcome {
-                PlateOutcome::Ricochet => "Ricochet",
-                PlateOutcome::Shatter => "Shatter",
-                _ => "Stopped",
-            };
-        }
-        return "Stopped";
+
+    let Some(stopped_at) = sim.stopped_at else {
+        return SimOutcome::Overpenetration;
+    };
+    match sim.plates.get(stopped_at.value()).map(|plate| plate.outcome) {
+        Some(PlateOutcome::Ricochet) => SimOutcome::Ricochet,
+        Some(PlateOutcome::Shatter) => SimOutcome::Shatter,
+        _ => SimOutcome::Stopped,
     }
-    "Overpenetration"
 }
 
 /// Compare a shell simulation result against the server's authoritative outcome.
 ///
-/// `first_hit_angle_deg`: impact angle from normal of the first plate (0 deg = head-on, 90 deg = parallel).
-/// `first_hit_thickness_mm`: thickness of the first plate hit.
+/// Ricochet reasoning needs the first plate the shell struck, so this returns
+/// `None` when the ray produced no hits at all.
 pub fn compare_with_server(
     sim: &ShellSimResult,
     hits: &[TrajectoryHit],
     server_outcome: &ServerOutcome,
     params: &ShellParams,
-    first_hit_angle_deg: f32,
-    first_hit_thickness: Millimeters,
-) -> ComparisonVerdict {
-    let caliber = Millimeters::new((params.caliber * 1000.0) as f32);
-    let is_overmatch = caliber > first_hit_thickness * OVERMATCH_RATIO;
-    let ricochet0_deg = params.ricochet0.to_degrees() as f32;
-    let ricochet1_deg = params.ricochet1.to_degrees() as f32;
+) -> Option<ComparisonVerdict> {
+    let first_hit = hits.first()?;
+    let strike_angle = first_hit.angle_from_normal;
+    let overmatched = is_overmatch(params.caliber, first_hit.thickness);
+    let ricochet_start = params.ricochet_angle.to_degrees();
+    let always_ricochet = params.always_ricochet_angle.to_degrees();
 
-    let server_is_ricochet = *server_outcome == ServerOutcome::Ricochet;
+    let mismatch = |sim_verdict| ComparisonVerdict::Mismatch { sim: sim_verdict, server: server_outcome.clone() };
 
-    // Handle ricochet logic first
-    if server_is_ricochet {
-        if is_overmatch {
-            return ComparisonVerdict::Mismatch {
-                sim_desc: "Overmatch (can't ricochet)".into(),
-                server_desc: "Ricochet".into(),
-            };
+    if *server_outcome == ServerOutcome::Ricochet {
+        if overmatched {
+            return Some(mismatch(SimVerdict::OvermatchRulesOutRicochet));
         }
-        if first_hit_angle_deg >= ricochet1_deg {
-            return ComparisonVerdict::Match;
+        if strike_angle >= always_ricochet {
+            return Some(ComparisonVerdict::Match);
         }
-        if first_hit_angle_deg >= ricochet0_deg {
-            return ComparisonVerdict::RicochetRngDefer {
-                angle_deg: first_hit_angle_deg,
-                range_start_deg: ricochet0_deg,
-                range_end_deg: ricochet1_deg,
-            };
+        if strike_angle >= ricochet_start {
+            return Some(ComparisonVerdict::RicochetRngDefer { angle: strike_angle, ricochet_start, always_ricochet });
         }
-        return ComparisonVerdict::Mismatch {
-            sim_desc: "No ricochet possible (angle too low)".into(),
-            server_desc: "Ricochet".into(),
-        };
+        return Some(mismatch(SimVerdict::RicochetAngleTooLow));
     }
 
     // Server didn't ricochet. Check if we think it should have.
-    if !is_overmatch && first_hit_angle_deg >= ricochet1_deg {
-        return ComparisonVerdict::Mismatch {
-            sim_desc: "Ricochet (always-ricochet zone)".into(),
-            server_desc: server_outcome.display_name().into(),
-        };
+    if !overmatched && strike_angle >= always_ricochet {
+        return Some(mismatch(SimVerdict::AlwaysRicochetBand));
     }
 
-    // Compare pen/shatter/overpen outcomes
-    let sim_desc = describe_sim_outcome(sim, hits);
-
-    let matches = match server_outcome {
-        ServerOutcome::Penetration => sim_desc == "Penetration",
-        ServerOutcome::Citadel => sim_desc == "Citadel",
-        ServerOutcome::Shatter => sim_desc == "Shatter",
-        ServerOutcome::Overpenetration => sim_desc == "Overpenetration",
-        ServerOutcome::Underwater => true,
-        ServerOutcome::Unknown(_) => true,
+    let outcome = sim_outcome(sim, hits);
+    let agrees = match server_outcome {
+        ServerOutcome::Penetration => outcome == SimOutcome::Penetration,
+        ServerOutcome::Citadel => outcome == SimOutcome::Citadel,
+        ServerOutcome::Shatter => outcome == SimOutcome::Shatter,
+        ServerOutcome::Overpenetration => outcome == SimOutcome::Overpenetration,
+        // The simulation models neither of these, so it cannot disagree.
+        ServerOutcome::Underwater | ServerOutcome::Unknown(_) => true,
         ServerOutcome::Ricochet => false,
     };
 
-    if matches {
-        ComparisonVerdict::Match
-    } else {
-        ComparisonVerdict::Mismatch { sim_desc: sim_desc.into(), server_desc: server_outcome.display_name().into() }
-    }
+    Some(if agrees { ComparisonVerdict::Match } else { mismatch(SimVerdict::Outcome(outcome)) })
 }

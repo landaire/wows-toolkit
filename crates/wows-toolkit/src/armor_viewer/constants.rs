@@ -1,6 +1,8 @@
 //
 // Extracted from ui/armor_viewer.rs to avoid magic numbers and enable reuse
 // by the realtime armor viewer.
+use wowsunpack::game_params::types::Degrees;
+
 /// Color palette for distinguishing multiple trajectories in the 3D view.
 /// Each color is [R, G, B, A] in 0.0–1.0 range.
 pub const TRAJECTORY_PALETTE: [[f32; 4]; 8] = [
@@ -26,19 +28,19 @@ pub const SHIP_COLORS: [[f32; 3]; 8] = [
     [0.2, 0.9, 0.8], // teal
     [0.8, 0.5, 1.0], // purple
 ];
-/// Impacts shallower than this angle are considered favorable (green).
-pub const SHALLOW_ANGLE_DEG: f32 = 30.0;
+/// Impacts shallower than this angle from the plate normal are favorable (green).
+pub const SHALLOW_ANGLE: Degrees = Degrees::new(30.0);
 
 /// Impacts steeper than this angle are in the ricochet danger zone (red).
-pub const STEEP_ANGLE_DEG: f32 = 45.0;
+pub const STEEP_ANGLE: Degrees = Degrees::new(45.0);
 
-/// Color for favorable-angle impacts (< SHALLOW_ANGLE_DEG). Green.
+/// Color for favorable-angle impacts (< SHALLOW_ANGLE). Green.
 pub const IMPACT_COLOR_SHALLOW: [f32; 3] = [0.3, 0.9, 0.3];
 
 /// Color for medium-angle impacts (SHALLOW..STEEP). Yellow-orange.
 pub const IMPACT_COLOR_MEDIUM: [f32; 3] = [0.9, 0.7, 0.2];
 
-/// Color for steep/ricochet-zone impacts (>= STEEP_ANGLE_DEG). Red.
+/// Color for steep/ricochet-zone impacts (>= STEEP_ANGLE). Red.
 pub const IMPACT_COLOR_STEEP: [f32; 3] = [0.9, 0.3, 0.3];
 /// Half-width of plate boundary edge quads in world-space units.
 pub const PLATE_EDGE_HALF_WIDTH: f32 = 0.003;
@@ -74,3 +76,10 @@ pub const MARKER_SIZE_FACTOR: f32 = 0.15;
 
 /// Detonation burst marker size, multiplied by the camera-distance scale factor.
 pub const DETONATION_BURST_SIZE_FACTOR: f32 = 0.25;
+
+/// Number of points sampled along a drawn ballistic arc.
+pub const ARC_POINT_COUNT: usize = 60;
+
+/// Floor on a drawn arc's aspect ratio, so a nearly flat trajectory still reads
+/// as an arc rather than a straight line.
+pub const MIN_ARC_HEIGHT_RATIO: f32 = 0.02;

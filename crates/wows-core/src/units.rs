@@ -1,4 +1,4 @@
-//! Distance newtypes and their unit conversions.
+//! Distance, angle, mass and time newtypes and their unit conversions.
 //!
 //! The game mixes several distance units: real meters, GameParams BigWorld units
 //! (1 unit = 30 m), replay world units (1 unit = 15 m, what packet positions and
@@ -9,6 +9,10 @@
 //! [`BigWorldDistance`] and [`WorldDistance`] are two different spaces that a
 //! name alone will not keep apart, and they differ by exactly 2. Read each
 //! type's doc before reaching for either.
+//!
+//! [`Degrees`] and [`Radians`] serve the same purpose for angles: GameParams
+//! states ricochet, normalization and impact angles in degrees, while every
+//! trigonometric step wants radians.
 
 use std::fmt;
 use std::ops::Add;
@@ -162,6 +166,31 @@ pub struct Millimeters(f32);
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct MetersPerSecond(f32);
 
+/// An angle in degrees. GameParams states every angle in degrees.
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct Degrees(f32);
+
+/// An angle in radians. Trigonometry is only defined on this type, so a value
+/// in degrees cannot reach `cos`/`sin` without an explicit conversion.
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct Radians(f32);
+
+/// Mass in kilograms.
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct Kilograms(f32);
+
+/// A duration in seconds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct Seconds(f32);
+
 impl From<f32> for Meters {
     fn from(v: f32) -> Self {
         Self(v)
@@ -229,6 +258,30 @@ impl From<i32> for MetersPerSecond {
     }
 }
 
+impl From<f32> for Degrees {
+    fn from(v: f32) -> Self {
+        Self(v)
+    }
+}
+
+impl From<f32> for Radians {
+    fn from(v: f32) -> Self {
+        Self(v)
+    }
+}
+
+impl From<f32> for Kilograms {
+    fn from(v: f32) -> Self {
+        Self(v)
+    }
+}
+
+impl From<f32> for Seconds {
+    fn from(v: f32) -> Self {
+        Self(v)
+    }
+}
+
 impl Meters {
     /// Const constructor for use in static/const contexts.
     pub const fn new(v: f32) -> Self {
@@ -273,8 +326,19 @@ impl BigWorldDistance {
 }
 
 impl ShipModelDistance {
+    pub const ZERO: ShipModelDistance = ShipModelDistance(0.0);
+
+    /// Const constructor for use in static/const contexts.
+    pub const fn new(v: f32) -> Self {
+        Self(v)
+    }
+
     pub fn value(self) -> f32 {
         self.0
+    }
+    /// Clamp to a non-negative distance.
+    pub fn max_zero(self) -> Self {
+        Self(self.0.max(0.0))
     }
     pub fn to_meters(self) -> Meters {
         Meters(self.0 * SHIP_TO_METERS)
@@ -344,6 +408,79 @@ impl MetersPerSecond {
     pub fn value(self) -> f32 {
         self.0
     }
+
+    /// Distance covered at this speed over `duration`.
+    pub fn travel_over(self, duration: Seconds) -> Meters {
+        Meters(self.0 * duration.0)
+    }
+}
+
+impl Degrees {
+    /// Const constructor for use in static/const contexts.
+    pub const fn new(v: f32) -> Self {
+        Self(v)
+    }
+
+    pub fn value(self) -> f32 {
+        self.0
+    }
+    pub fn to_radians(self) -> Radians {
+        Radians(self.0.to_radians())
+    }
+    pub fn abs(self) -> Self {
+        Self(self.0.abs())
+    }
+}
+
+impl Radians {
+    /// Const constructor for use in static/const contexts.
+    pub const fn new(v: f32) -> Self {
+        Self(v)
+    }
+
+    pub fn value(self) -> f32 {
+        self.0
+    }
+    pub fn to_degrees(self) -> Degrees {
+        Degrees(self.0.to_degrees())
+    }
+    pub fn abs(self) -> Self {
+        Self(self.0.abs())
+    }
+    pub fn cos(self) -> f32 {
+        self.0.cos()
+    }
+    pub fn sin(self) -> f32 {
+        self.0.sin()
+    }
+    /// Clamp to a non-negative angle. Angles reduced by a correction (armor
+    /// normalization, for one) must not pass through zero into a negative
+    /// angle whose cosine would climb again.
+    pub fn max_zero(self) -> Self {
+        Self(self.0.max(0.0))
+    }
+}
+
+impl Kilograms {
+    /// Const constructor for use in static/const contexts.
+    pub const fn new(v: f32) -> Self {
+        Self(v)
+    }
+
+    pub fn value(self) -> f32 {
+        self.0
+    }
+}
+
+impl Seconds {
+    /// Const constructor for use in static/const contexts.
+    pub const fn new(v: f32) -> Self {
+        Self(v)
+    }
+
+    pub fn value(self) -> f32 {
+        self.0
+    }
 }
 
 /// Conventional English-port rounding: whole meters.
@@ -371,6 +508,70 @@ impl fmt::Display for Millimeters {
 impl fmt::Display for MetersPerSecond {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:.0} m/s", self.0)
+    }
+}
+
+impl fmt::Display for Degrees {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:.1} deg", self.0)
+    }
+}
+
+impl fmt::Display for Kilograms {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:.0} kg", self.0)
+    }
+}
+
+impl fmt::Display for Seconds {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:.1} s", self.0)
+    }
+}
+
+impl Add for Degrees {
+    type Output = Degrees;
+    fn add(self, rhs: Degrees) -> Degrees {
+        Degrees(self.0 + rhs.0)
+    }
+}
+impl Sub for Degrees {
+    type Output = Degrees;
+    fn sub(self, rhs: Degrees) -> Degrees {
+        Degrees(self.0 - rhs.0)
+    }
+}
+
+impl Add for Radians {
+    type Output = Radians;
+    fn add(self, rhs: Radians) -> Radians {
+        Radians(self.0 + rhs.0)
+    }
+}
+impl Sub for Radians {
+    type Output = Radians;
+    fn sub(self, rhs: Radians) -> Radians {
+        Radians(self.0 - rhs.0)
+    }
+}
+
+impl Add for Seconds {
+    type Output = Seconds;
+    fn add(self, rhs: Seconds) -> Seconds {
+        Seconds(self.0 + rhs.0)
+    }
+}
+impl Sub for Seconds {
+    type Output = Seconds;
+    fn sub(self, rhs: Seconds) -> Seconds {
+        Seconds(self.0 - rhs.0)
+    }
+}
+
+impl Mul<f32> for Seconds {
+    type Output = Seconds;
+    fn mul(self, rhs: f32) -> Seconds {
+        Seconds(self.0 * rhs)
     }
 }
 
@@ -425,6 +626,19 @@ impl Sub for BigWorldDistance {
     type Output = BigWorldDistance;
     fn sub(self, rhs: BigWorldDistance) -> BigWorldDistance {
         BigWorldDistance(self.0 - rhs.0)
+    }
+}
+
+impl Add for ShipModelDistance {
+    type Output = ShipModelDistance;
+    fn add(self, rhs: ShipModelDistance) -> ShipModelDistance {
+        ShipModelDistance(self.0 + rhs.0)
+    }
+}
+impl Sub for ShipModelDistance {
+    type Output = ShipModelDistance;
+    fn sub(self, rhs: ShipModelDistance) -> ShipModelDistance {
+        ShipModelDistance(self.0 - rhs.0)
     }
 }
 
@@ -629,6 +843,21 @@ mod tests {
         let one = 1.0f32;
         assert_eq!(BigWorldDistance::from(one).to_meters().value(), 30.0);
         assert_eq!(WorldDistance::from(one).to_meters().value(), 15.0);
+    }
+
+    /// The two angle units differ by a factor no name will catch, and the
+    /// penetration chain reads normalization in one and plate angles in the other.
+    #[test]
+    fn angles_round_trip_between_units() {
+        assert!((Degrees::from(60.0).to_radians().value() - std::f32::consts::FRAC_PI_3).abs() < 1e-6);
+        assert!((Radians::from(std::f32::consts::FRAC_PI_3).to_degrees().value() - 60.0).abs() < 1e-4);
+    }
+
+    /// A fuse burns for a time; what the armor chain needs is the distance the
+    /// shell covers in it.
+    #[test]
+    fn travel_over_multiplies_speed_by_time() {
+        assert!((MetersPerSecond::from(224.0).travel_over(Seconds::from(0.033)).value() - 7.392).abs() < 1e-3);
     }
 
     /// Hydroacoustic Search `C_4_7` carries `distShip = 133.3333` and detects

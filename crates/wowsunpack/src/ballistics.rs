@@ -12,7 +12,13 @@
 
 use std::f64::consts::PI;
 
+use crate::game_params::types::Degrees;
+use crate::game_params::types::Kilograms;
 use crate::game_params::types::Meters;
+use crate::game_params::types::MetersPerSecond;
+use crate::game_params::types::Millimeters;
+use crate::game_params::types::Radians;
+use crate::game_params::types::Seconds;
 use crate::game_params::types::ShellInfo;
 use crate::game_params::types::ShipModelDistance;
 
@@ -40,26 +46,60 @@ const MAX_TIME: f64 = 200.0; // max simulation time (seconds)
 const BISECT_TOLERANCE_M: f64 = 1.0; // range solver tolerance (meters)
 const BISECT_MAX_ITER: u32 = 60; // max bisection iterations
 
+/// Floor on the cosine of a strike angle, so a plate struck edge-on presents a
+/// large but finite effective thickness instead of an infinite one.
+const MIN_STRIKE_COSINE: f32 = 0.001;
+
+/// Floor on effective thickness when dividing penetration by it.
+const MIN_EFFECTIVE_THICKNESS: Millimeters = Millimeters::new(0.001);
+
+/// Below this the shell has spent itself and stops in the plate it just crossed.
+const MIN_CARRY_VELOCITY: MetersPerSecond = MetersPerSecond::new(1.0);
+
+/// Combined air-drag coefficient `0.5 * air_drag * (caliber / 2)^2 * pi / mass`.
+/// Meaningful only to the trajectory integrator; a distinct type so it cannot be
+/// swapped with [`PenetrationFactor`].
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct DragFactor(f64);
+
+/// Combined penetration coefficient `1e-7 * krupp * mass^0.69 * caliber^-1.07`,
+/// which multiplied by `velocity^VELOCITY_POWER` gives millimeters of armor.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct PenetrationFactor(f64);
+
+impl DragFactor {
+    pub fn value(self) -> f64 {
+        self.0
+    }
+}
+
+impl PenetrationFactor {
+    pub fn value(self) -> f64 {
+        self.0
+    }
+}
+
 /// Preprocessed shell parameters for ballistic simulation.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct ShellParams {
-    pub caliber: f64,
-    pub mass: f64,
-    pub v0: f64,
-    pub krupp: f64,
-    pub cd: f64,
-    pub normalization: f64, // radians
-    pub ricochet0: f64,     // radians
-    pub ricochet1: f64,     // radians
-    pub fuse_time: f64,
-    pub threshold: f64, // mm
-    /// Combined air drag coefficient: 0.5 * cD * (caliber/2)^2 * pi / mass
-    pub k: f64,
-    /// Combined penetration coefficient: 1e-7 * krupp * mass^0.69 * caliber^(-1.07)
-    pub p_ppc: f64,
+    pub caliber: Millimeters,
+    pub mass: Kilograms,
+    pub muzzle_velocity: MetersPerSecond,
+    pub krupp: f32,
+    pub air_drag: f32,
+    /// Angle by which a shell's cap straightens out an angled strike.
+    pub normalization: Radians,
+    /// Strike angle from the plate normal past which a ricochet becomes possible.
+    pub ricochet_angle: Radians,
+    /// Strike angle from the plate normal past which a ricochet is certain.
+    pub always_ricochet_angle: Radians,
+    pub fuse_time: Seconds,
+    /// Plate thickness that arms the fuse.
+    pub fuse_threshold: Millimeters,
+    pub drag_factor: DragFactor,
+    pub penetration_factor: PenetrationFactor,
     /// Whether the shell is capped. Uncapped shells receive no normalization.
-    pub cap: bool,
+    pub capped: bool,
 }
 
 impl ShellParams {
@@ -70,76 +110,142 @@ impl ShellParams {
     /// either would silently change penetration outcomes, so we skip the shell
     /// rather than guess. Every real gun shell in GameParams carries both fields.
     pub fn from_shell_info(shell: &ShellInfo) -> Option<Self> {
-        let caliber = shell.caliber.value() as f64 / 1000.0; // mm -> m
-        let mass = shell.mass_kg as f64;
-        let v0 = shell.muzzle_velocity as f64;
-        let krupp = shell.krupp as f64;
-        let cd = shell.air_drag as f64;
         let Some(normalization_deg) = shell.normalization else {
             tracing::warn!("shell '{}' has no normalization angle; skipping ballistic sim", shell.name);
             return None;
         };
-        let Some(threshold_mm) = shell.fuse_threshold else {
+        let Some(fuse_threshold_mm) = shell.fuse_threshold else {
             tracing::warn!("shell '{}' has no fuse threshold; skipping ballistic sim", shell.name);
             return None;
         };
-        let normalization = (normalization_deg as f64).to_radians();
-        let ricochet0 = (shell.ricochet_angle as f64).to_radians();
-        let ricochet1 = (shell.always_ricochet_angle as f64).to_radians();
-        let fuse_time = shell.fuse_time as f64;
-        let threshold = threshold_mm as f64;
 
-        let r = caliber / 2.0;
-        let k = 0.5 * cd * r * r * PI / mass;
-        let p_ppc = 1e-7 * krupp * mass.powf(0.69) * caliber.powf(-1.07);
+        let caliber_m = f64::from(shell.caliber.to_meters().value());
+        let mass_kg = f64::from(shell.mass_kg);
+        let radius_m = caliber_m / 2.0;
 
         Some(ShellParams {
-            caliber,
-            mass,
-            v0,
-            krupp,
-            cd,
-            normalization,
-            ricochet0,
-            ricochet1,
-            fuse_time,
-            threshold,
-            k,
-            p_ppc,
-            cap: shell.cap,
+            caliber: shell.caliber,
+            mass: Kilograms::from(shell.mass_kg),
+            muzzle_velocity: MetersPerSecond::from(shell.muzzle_velocity),
+            krupp: shell.krupp,
+            air_drag: shell.air_drag,
+            normalization: Degrees::from(normalization_deg).to_radians(),
+            ricochet_angle: Degrees::from(shell.ricochet_angle).to_radians(),
+            always_ricochet_angle: Degrees::from(shell.always_ricochet_angle).to_radians(),
+            fuse_time: Seconds::from(shell.fuse_time),
+            fuse_threshold: Millimeters::from(fuse_threshold_mm),
+            drag_factor: DragFactor(0.5 * f64::from(shell.air_drag) * radius_m * radius_m * PI / mass_kg),
+            penetration_factor: PenetrationFactor(
+                1e-7 * f64::from(shell.krupp) * mass_kg.powf(0.69) * caliber_m.powf(-1.07),
+            ),
+            capped: shell.cap,
         })
+    }
+
+    /// Armor a shell arriving at `velocity` defeats when it strikes head-on.
+    pub fn raw_penetration(&self, velocity: MetersPerSecond) -> Millimeters {
+        let pen = self.penetration_factor.0 * f64::from(velocity.value()).powf(VELOCITY_POWER);
+        Millimeters::from(pen as f32)
+    }
+
+    /// Normalization the shell actually gets: uncapped shells get none.
+    fn effective_normalization(&self) -> Radians {
+        if self.capped { self.normalization } else { Radians::new(0.0) }
     }
 }
 
 /// Result of a trajectory simulation at impact.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct ImpactResult {
-    /// Horizontal range (m)
-    pub distance: f64,
-    /// Impact velocity magnitude (m/s)
-    pub impact_velocity: f64,
-    /// Impact angle from horizontal (radians, positive = falling)
-    pub impact_angle_horizontal: f64,
-    /// Impact angle from deck plane (radians)
-    pub impact_angle_deck: f64,
-    /// Time to target in game seconds (real_time / TIME_MULTIPLIER)
-    pub time_to_target: f64,
-    /// Raw penetration (mm): pPPC * IV^1.38
-    pub raw_pen_mm: f64,
-    /// Effective belt penetration (mm): raw * cos(horizontal_angle)
-    pub effective_pen_belt_mm: f64,
-    /// Effective belt penetration with normalization (mm)
-    pub effective_pen_belt_normalized_mm: f64,
-    /// Effective deck penetration (mm): raw * cos(deck_angle)
-    pub effective_pen_deck_mm: f64,
-    /// Effective deck penetration with normalization (mm)
-    pub effective_pen_deck_normalized_mm: f64,
-    /// Launch angle used (radians)
-    pub launch_angle: f64,
+    /// Horizontal range flown.
+    pub distance: Meters,
+    pub impact_velocity: MetersPerSecond,
+    /// Impact angle from horizontal; positive means falling.
+    pub impact_angle_horizontal: Radians,
+    /// Impact angle from the deck plane.
+    pub impact_angle_deck: Radians,
+    /// Time to target on the in-game clock (real flight time / [`TIME_MULTIPLIER`]).
+    pub time_to_target: Seconds,
+    /// Penetration before any strike angle is accounted for.
+    pub raw_penetration: Millimeters,
+    /// Penetration against a vertical surface.
+    pub effective_penetration_belt: Millimeters,
+    /// Penetration against a vertical surface, after normalization.
+    pub effective_penetration_belt_normalized: Millimeters,
+    /// Penetration against a horizontal surface.
+    pub effective_penetration_deck: Millimeters,
+    /// Penetration against a horizontal surface, after normalization.
+    pub effective_penetration_deck_normalized: Millimeters,
+    pub launch_angle: Radians,
 }
 
-/// Compute air density at a given altitude using ISA atmospheric model.
+/// Planar flight state during integration.
+///
+/// Kept in `f64` and in plain SI units: the integrator runs thousands of steps
+/// and accumulates visible error at `f32`. Only the results that leave this
+/// module carry unit types.
+#[derive(Clone, Copy, Debug)]
+struct FlightState {
+    /// Horizontal distance from the muzzle (m).
+    range: f64,
+    /// Height above the firing plane (m).
+    altitude: f64,
+    /// Horizontal velocity (m/s).
+    velocity_horizontal: f64,
+    /// Vertical velocity (m/s), negative while descending.
+    velocity_vertical: f64,
+    /// Time since firing (s).
+    time: f64,
+}
+
+impl FlightState {
+    fn launch(muzzle_velocity: MetersPerSecond, launch_angle: Radians) -> Self {
+        let speed = f64::from(muzzle_velocity.value());
+        let angle = f64::from(launch_angle.value());
+        FlightState {
+            range: 0.0,
+            altitude: 0.0,
+            velocity_horizontal: speed * angle.cos(),
+            velocity_vertical: speed * angle.sin(),
+            time: 0.0,
+        }
+    }
+
+    fn speed(&self) -> f64 {
+        (self.velocity_horizontal * self.velocity_horizontal + self.velocity_vertical * self.velocity_vertical).sqrt()
+    }
+}
+
+/// Acceleration acting on the shell: gravity plus air drag (m/s^2).
+#[derive(Clone, Copy, Debug)]
+struct Acceleration {
+    horizontal: f64,
+    vertical: f64,
+}
+
+/// Change a single integration step applies to a [`FlightState`].
+#[derive(Clone, Copy, Debug)]
+struct FlightStep {
+    range: f64,
+    altitude: f64,
+    velocity_horizontal: f64,
+    velocity_vertical: f64,
+}
+
+impl FlightStep {
+    /// State reached after `fraction` of this step; 1.0 is the whole step.
+    fn applied_to(&self, state: FlightState, fraction: f64) -> FlightState {
+        FlightState {
+            range: state.range + self.range * fraction,
+            altitude: state.altitude + self.altitude * fraction,
+            velocity_horizontal: state.velocity_horizontal + self.velocity_horizontal * fraction,
+            velocity_vertical: state.velocity_vertical + self.velocity_vertical * fraction,
+            time: state.time + DT * fraction,
+        }
+    }
+}
+
+/// Air density at a given altitude, from the ISA atmospheric model.
 fn air_density(altitude: f64) -> f64 {
     let t = T0 - L * altitude;
     if t <= 0.0 {
@@ -149,353 +255,366 @@ fn air_density(altitude: f64) -> f64 {
     (M_AIR * p) / (R_GAS * t)
 }
 
-/// Compute acceleration components given current state.
-/// Returns (ax, ay) where:
-///   ax = -k * rho * vx * speed
-///   ay = -g - k * rho * vy * speed
-fn acceleration(k: f64, vx: f64, vy: f64, y: f64) -> (f64, f64) {
-    let rho = air_density(y);
-    let speed = (vx * vx + vy * vy).sqrt();
-    let k_rho = k * rho;
-    let ax = -k_rho * vx * speed;
-    let ay = -G - k_rho * vy * speed;
-    (ax, ay)
+fn acceleration(drag: DragFactor, state: FlightState) -> Acceleration {
+    let drag_rho = drag.0 * air_density(state.altitude);
+    let speed = state.speed();
+    Acceleration {
+        horizontal: -drag_rho * state.velocity_horizontal * speed,
+        vertical: -G - drag_rho * state.velocity_vertical * speed,
+    }
 }
 
-/// Simulate a shell trajectory using RK4 integration.
-/// Returns (final_x, final_vx, final_vy, final_time) at the point the shell returns to y=0.
-/// Returns None if the shell never comes back down within MAX_TIME.
-fn simulate_trajectory(params: &ShellParams, launch_angle: f64) -> Option<(f64, f64, f64, f64)> {
-    let mut x: f64 = 0.0;
-    let mut y: f64 = 0.0;
-    let mut vx = params.v0 * launch_angle.cos();
-    let mut vy = params.v0 * launch_angle.sin();
-    let mut t: f64 = 0.0;
+/// Simpson weighting of the four RK4 stage derivatives over one step.
+fn rk4_weighted(k1: f64, k2: f64, k3: f64, k4: f64) -> f64 {
+    (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0 * DT
+}
 
-    let k = params.k;
+/// One RK4 step of the trajectory ODE.
+fn rk4_step(drag: DragFactor, state: FlightState) -> FlightStep {
+    let half = DT * 0.5;
 
-    while t < MAX_TIME {
-        // RK4 integration
-        let (ax1, ay1) = acceleration(k, vx, vy, y);
+    let a1 = acceleration(drag, state);
+    let stage2 = FlightState {
+        altitude: state.altitude + state.velocity_vertical * half,
+        velocity_horizontal: state.velocity_horizontal + a1.horizontal * half,
+        velocity_vertical: state.velocity_vertical + a1.vertical * half,
+        ..state
+    };
 
-        let vx2 = vx + ax1 * DT * 0.5;
-        let vy2 = vy + ay1 * DT * 0.5;
-        let y2 = y + vy * DT * 0.5;
-        let (ax2, ay2) = acceleration(k, vx2, vy2, y2);
+    let a2 = acceleration(drag, stage2);
+    let stage3 = FlightState {
+        altitude: state.altitude + stage2.velocity_vertical * half,
+        velocity_horizontal: state.velocity_horizontal + a2.horizontal * half,
+        velocity_vertical: state.velocity_vertical + a2.vertical * half,
+        ..state
+    };
 
-        let vx3 = vx + ax2 * DT * 0.5;
-        let vy3 = vy + ay2 * DT * 0.5;
-        let y3 = y + vy2 * DT * 0.5;
-        let (ax3, ay3) = acceleration(k, vx3, vy3, y3);
+    let a3 = acceleration(drag, stage3);
+    let stage4 = FlightState {
+        altitude: state.altitude + stage3.velocity_vertical * DT,
+        velocity_horizontal: state.velocity_horizontal + a3.horizontal * DT,
+        velocity_vertical: state.velocity_vertical + a3.vertical * DT,
+        ..state
+    };
 
-        let vx4 = vx + ax3 * DT;
-        let vy4 = vy + ay3 * DT;
-        let y4 = y + vy3 * DT;
-        let (ax4, ay4) = acceleration(k, vx4, vy4, y4);
+    let a4 = acceleration(drag, stage4);
 
-        let dx = (vx + 2.0 * vx2 + 2.0 * vx3 + vx4) / 6.0 * DT;
-        let dy = (vy + 2.0 * vy2 + 2.0 * vy3 + vy4) / 6.0 * DT;
-        let dvx = (ax1 + 2.0 * ax2 + 2.0 * ax3 + ax4) / 6.0 * DT;
-        let dvy = (ay1 + 2.0 * ay2 + 2.0 * ay3 + ay4) / 6.0 * DT;
+    FlightStep {
+        range: rk4_weighted(
+            state.velocity_horizontal,
+            stage2.velocity_horizontal,
+            stage3.velocity_horizontal,
+            stage4.velocity_horizontal,
+        ),
+        altitude: rk4_weighted(
+            state.velocity_vertical,
+            stage2.velocity_vertical,
+            stage3.velocity_vertical,
+            stage4.velocity_vertical,
+        ),
+        velocity_horizontal: rk4_weighted(a1.horizontal, a2.horizontal, a3.horizontal, a4.horizontal),
+        velocity_vertical: rk4_weighted(a1.vertical, a2.vertical, a3.vertical, a4.vertical),
+    }
+}
 
-        let new_y = y + dy;
+/// Integrate a trajectory until the shell returns to the firing plane, and
+/// return the state it lands in. `None` if it is still airborne after
+/// [`MAX_TIME`].
+fn simulate_trajectory(params: &ShellParams, launch_angle: Radians) -> Option<FlightState> {
+    let mut state = FlightState::launch(params.muzzle_velocity, launch_angle);
 
-        // Check for ground crossing (shell descending past y=0)
-        if new_y < 0.0 && t > DT {
-            // Linear interpolation to find exact ground crossing
-            let frac = y / (y - new_y);
-            let final_x = x + dx * frac;
-            let final_vx = vx + dvx * frac;
-            let final_vy = vy + dvy * frac;
-            let final_t = t + DT * frac;
-            return Some((final_x, final_vx, final_vy, final_t));
+    while state.time < MAX_TIME {
+        let step = rk4_step(params.drag_factor, state);
+        let next = step.applied_to(state, 1.0);
+
+        if next.altitude < 0.0 && state.time > DT {
+            // Interpolate linearly back to the exact ground crossing.
+            let fraction = state.altitude / (state.altitude - next.altitude);
+            return Some(step.applied_to(state, fraction));
         }
 
-        x += dx;
-        y = new_y;
-        vx += dvx;
-        vy += dvy;
-        t += DT;
+        state = next;
     }
 
     None
 }
 
-/// Compute the normalization reduction: if |angle| > normalization, reduce by normalization.
-fn calc_normalization(angle: f64, normalization: f64) -> f64 {
-    if angle.abs() > normalization { angle.abs() - normalization } else { 0.0 }
+/// Angle left over after the shell's cap straightens the strike out. Zero once
+/// the strike is shallower than the normalization the cap provides.
+fn normalized_strike_angle(angle: Radians, normalization: Radians) -> Radians {
+    (angle.abs() - normalization).max_zero()
 }
 
-/// Build an ImpactResult from simulation output.
-fn build_impact_result(
-    params: &ShellParams,
-    distance: f64,
-    vx: f64,
-    vy: f64,
-    time: f64,
-    launch_angle: f64,
-) -> ImpactResult {
-    let impact_velocity = (vx * vx + vy * vy).sqrt();
+fn build_impact_result(params: &ShellParams, landing: FlightState, launch_angle: Radians) -> ImpactResult {
+    let impact_velocity = MetersPerSecond::from(landing.speed() as f32);
 
-    // Impact angle from horizontal (positive = falling, vy is negative when descending)
-    let ia_horizontal = (vy / vx).atan().abs();
-    // Impact angle from deck = pi/2 - horizontal angle
-    let ia_deck = PI / 2.0 - ia_horizontal;
+    // Vertical velocity is negative on descent; the fall angle is its magnitude.
+    let from_horizontal = Radians::from((landing.velocity_vertical / landing.velocity_horizontal).atan().abs() as f32);
+    let from_deck = Radians::new(std::f32::consts::FRAC_PI_2) - from_horizontal;
 
-    let raw_pen = params.p_ppc * impact_velocity.powf(VELOCITY_POWER);
-
-    // Belt penetration: shell hitting a vertical surface
-    let eff_belt = raw_pen * ia_horizontal.cos();
-    let eff_belt_norm = raw_pen * calc_normalization(ia_horizontal, params.normalization).cos();
-
-    // Deck penetration: shell hitting a horizontal surface
-    let eff_deck = raw_pen * ia_deck.cos();
-    let eff_deck_norm = raw_pen * calc_normalization(ia_deck, params.normalization).cos();
+    let raw = params.raw_penetration(impact_velocity);
+    let normalization = params.effective_normalization();
 
     ImpactResult {
-        distance,
+        distance: Meters::from(landing.range as f32),
         impact_velocity,
-        impact_angle_horizontal: ia_horizontal,
-        impact_angle_deck: ia_deck,
-        time_to_target: time / TIME_MULTIPLIER,
-        raw_pen_mm: raw_pen,
-        effective_pen_belt_mm: eff_belt,
-        effective_pen_belt_normalized_mm: eff_belt_norm,
-        effective_pen_deck_mm: eff_deck,
-        effective_pen_deck_normalized_mm: eff_deck_norm,
+        impact_angle_horizontal: from_horizontal,
+        impact_angle_deck: from_deck,
+        time_to_target: Seconds::from((landing.time / TIME_MULTIPLIER) as f32),
+        raw_penetration: raw,
+        effective_penetration_belt: raw * from_horizontal.cos(),
+        effective_penetration_belt_normalized: raw * normalized_strike_angle(from_horizontal, normalization).cos(),
+        effective_penetration_deck: raw * from_deck.cos(),
+        effective_penetration_deck_normalized: raw * normalized_strike_angle(from_deck, normalization).cos(),
         launch_angle,
     }
 }
 
-/// Find the maximum range of the shell.
-fn max_range(params: &ShellParams) -> Option<f64> {
-    let mut best_range = 0.0f64;
-    // Scan from 5 to 60 deg in 1 deg steps; high drag shells peak below 30 deg
-    for deg in 5..=60 {
-        let angle = (deg as f64).to_radians();
-        if let Some((dist, _, _, _)) = simulate_trajectory(params, angle)
-            && dist > best_range
+/// Longest range the shell can reach.
+fn max_range(params: &ShellParams) -> Option<Meters> {
+    // Scan from 5 to 60 deg in 1 deg steps; high drag shells peak below 30 deg.
+    let mut best = 0.0f64;
+    for degrees in 5..=60 {
+        if let Some(landing) = simulate_trajectory(params, Degrees::from(degrees as f32).to_radians())
+            && landing.range > best
         {
-            best_range = dist;
+            best = landing.range;
         }
     }
-    if best_range > 0.0 { Some(best_range) } else { None }
+    (best > 0.0).then(|| Meters::from(best as f32))
 }
 
 /// Solve for the launch angle that produces a given horizontal range.
-/// Uses bisection on the low-angle (flat) trajectory.
-/// Returns None if the range exceeds the shell's maximum range.
+/// Bisects the low-angle (flat) branch of the range curve.
+/// Returns `None` if the range exceeds the shell's maximum range.
 pub fn solve_for_range(params: &ShellParams, range: Meters) -> Option<ImpactResult> {
-    let range_m = range.value() as f64;
-    if range_m <= 0.0 {
-        // At zero range, return muzzle velocity impact
-        return Some(build_impact_result(params, 0.0, params.v0, 0.0, 0.0, 0.0));
+    let target_range = f64::from(range.value());
+    if target_range <= 0.0 {
+        // Point blank: the shell arrives at muzzle velocity, flat.
+        let muzzle = FlightState::launch(params.muzzle_velocity, Radians::new(0.0));
+        return Some(build_impact_result(params, muzzle, Radians::new(0.0)));
     }
 
-    // Check max range first
-    let max_r = max_range(params)?;
-    if range_m > max_r {
+    if range > max_range(params)? {
         return None;
     }
 
-    // Bisection: find angle in [low, high] where simulated range ~= target range
-    let mut low: f64 = 0.001_f64.to_radians(); // near 0 deg
-    let mut high: f64 = 45.0_f64.to_radians(); // up to 45 deg
-
-    let mut best_result: Option<(f64, f64, f64, f64, f64)> = None; // (angle, x, vx, vy, t)
+    let mut low = Degrees::from(0.001).to_radians();
+    let mut high = Degrees::from(45.0).to_radians();
+    let mut last_candidate: Option<(Radians, FlightState)> = None;
 
     for _ in 0..BISECT_MAX_ITER {
-        let mid = (low + high) / 2.0;
-        if let Some((dist, vx, vy, t)) = simulate_trajectory(params, mid) {
-            let err = dist - range_m;
-            if err.abs() < BISECT_TOLERANCE_M {
-                return Some(build_impact_result(params, dist, vx, vy, t, mid));
-            }
-            best_result = Some((mid, dist, vx, vy, t));
-            if err > 0.0 {
-                // Overshot: reduce angle
-                high = mid;
-            } else {
-                // Undershot: increase angle
-                low = mid;
-            }
-        } else {
-            // Didn't land; reduce angle
+        let mid = Radians::from((low.value() + high.value()) / 2.0);
+        let Some(landing) = simulate_trajectory(params, mid) else {
+            // Never came down; a shallower angle will.
             high = mid;
+            continue;
+        };
+
+        let error = landing.range - target_range;
+        if error.abs() < BISECT_TOLERANCE_M {
+            return Some(build_impact_result(params, landing, mid));
+        }
+        last_candidate = Some((mid, landing));
+
+        // Overshot means aim flatter, undershot means aim higher.
+        if error > 0.0 {
+            high = mid;
+        } else {
+            low = mid;
         }
     }
 
-    // Return best result if we have one
-    best_result.map(|(angle, dist, vx, vy, t)| build_impact_result(params, dist, vx, vy, t, angle))
+    last_candidate.map(|(launch_angle, landing)| build_impact_result(params, landing, launch_angle))
 }
 
 /// Compute impact data at regular range intervals.
-#[allow(dead_code)]
 pub fn compute_range_table(params: &ShellParams, max_range: Meters, step: Meters) -> Vec<ImpactResult> {
     let mut results = Vec::new();
     let mut range = step;
     while range <= max_range {
-        if let Some(impact) = solve_for_range(params, range) {
-            results.push(impact);
-        } else {
+        let Some(impact) = solve_for_range(params, range) else {
             break; // Exceeded max range
-        }
+        };
+        results.push(impact);
         range = range + step;
     }
     results
 }
 
-/// Simulate a trajectory and return normalized arc points for visualization.
-///
-/// Returns `(points, height_ratio)` where:
-/// - `points`: list of `(x_frac, y_norm)`: x goes 0->1, y goes 0->1 at apex
-/// - `height_ratio`: `max_height / total_range`: the real aspect ratio of the arc
-///
-/// The caller should scale: `y_model = y_norm * height_ratio * horiz_extent`
-/// to get physically correct proportions, or apply an additional visual multiplier.
-pub fn simulate_arc_points(params: &ShellParams, launch_angle: f64, num_points: usize) -> (Vec<(f64, f64)>, f64) {
-    // First pass: collect all raw (x, y) points
-    let mut raw_points: Vec<(f64, f64)> = Vec::new();
-    let mut x: f64 = 0.0;
-    let mut y: f64 = 0.0;
-    let mut vx = params.v0 * launch_angle.cos();
-    let mut vy = params.v0 * launch_angle.sin();
-    let mut t: f64 = 0.0;
-    let k = params.k;
+/// A point on a normalized trajectory arc. Both components run 0 to 1.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ArcPoint {
+    /// Fraction of the total horizontal range covered.
+    pub along_range: f32,
+    /// Height as a fraction of the arc's apex.
+    pub height: f32,
+}
 
-    raw_points.push((0.0, 0.0));
+/// A trajectory arc reduced to its shape, for drawing.
+#[derive(Clone, Debug)]
+pub struct ArcProfile {
+    pub points: Vec<ArcPoint>,
+    /// `apex_height / total_range`: the arc's real aspect ratio. Scale
+    /// [`ArcPoint::height`] by this and by the drawn horizontal extent to keep
+    /// the arc in proportion, or apply an additional visual multiplier.
+    pub height_ratio: f32,
+}
 
-    while t < MAX_TIME {
-        let (ax1, ay1) = acceleration(k, vx, vy, y);
-        let vx2 = vx + ax1 * DT * 0.5;
-        let vy2 = vy + ay1 * DT * 0.5;
-        let y2 = y + vy * DT * 0.5;
-        let (ax2, ay2) = acceleration(k, vx2, vy2, y2);
-        let vx3 = vx + ax2 * DT * 0.5;
-        let vy3 = vy + ay2 * DT * 0.5;
-        let y3 = y + vy2 * DT * 0.5;
-        let (ax3, ay3) = acceleration(k, vx3, vy3, y3);
-        let vx4 = vx + ax3 * DT;
-        let vy4 = vy + ay3 * DT;
-        let (ax4, ay4) = acceleration(k, vx4, vy4, y + vy3 * DT);
+impl ArcProfile {
+    /// A flat two-point arc, for trajectories that never leave the ground.
+    fn flat() -> Self {
+        ArcProfile {
+            points: vec![ArcPoint { along_range: 0.0, height: 0.0 }, ArcPoint { along_range: 1.0, height: 0.0 }],
+            height_ratio: 0.0,
+        }
+    }
+}
 
-        let dx = (vx + 2.0 * vx2 + 2.0 * vx3 + vx4) / 6.0 * DT;
-        let dy = (vy + 2.0 * vy2 + 2.0 * vy3 + vy4) / 6.0 * DT;
-        let dvx = (ax1 + 2.0 * ax2 + 2.0 * ax3 + ax4) / 6.0 * DT;
-        let dvy = (ay1 + 2.0 * ay2 + 2.0 * ay3 + ay4) / 6.0 * DT;
+/// Simulate a trajectory and reduce it to a normalized arc for visualization.
+pub fn simulate_arc(params: &ShellParams, launch_angle: Radians, num_points: usize) -> ArcProfile {
+    let mut state = FlightState::launch(params.muzzle_velocity, launch_angle);
+    let mut path = vec![state];
 
-        let new_y = y + dy;
+    while state.time < MAX_TIME {
+        let step = rk4_step(params.drag_factor, state);
+        let next = step.applied_to(state, 1.0);
 
-        if new_y < 0.0 && t > DT {
-            // Interpolate to ground
-            let frac = y / (y - new_y);
-            raw_points.push((x + dx * frac, 0.0));
+        if next.altitude < 0.0 && state.time > DT {
+            let fraction = state.altitude / (state.altitude - next.altitude);
+            let mut landing = step.applied_to(state, fraction);
+            landing.altitude = 0.0;
+            path.push(landing);
             break;
         }
 
-        x += dx;
-        y = new_y;
-        vx += dvx;
-        vy += dvy;
-        t += DT;
-
-        raw_points.push((x, y));
+        state = next;
+        path.push(state);
     }
 
-    if raw_points.len() < 2 {
-        return (vec![(0.0, 0.0), (1.0, 0.0)], 0.0);
+    let total_range = path.last().map(|s| s.range).unwrap_or(0.0);
+    let apex = path.iter().map(|s| s.altitude).fold(0.0f64, f64::max);
+    if path.len() < 2 || total_range <= 0.0 || apex <= 0.0 {
+        return ArcProfile::flat();
     }
 
-    let total_x = raw_points.last().unwrap().0;
-    if total_x <= 0.0 {
-        return (vec![(0.0, 0.0), (1.0, 0.0)], 0.0);
-    }
+    let height_ratio = (apex / total_range) as f32;
+    let normalized: Vec<ArcPoint> = path
+        .iter()
+        .map(|s| ArcPoint { along_range: (s.range / total_range) as f32, height: (s.altitude / apex) as f32 })
+        .collect();
 
-    let max_y = raw_points.iter().map(|(_, py)| *py).fold(0.0f64, f64::max);
-    let height_ratio = max_y / total_x;
-    if max_y <= 0.0 {
-        return (vec![(0.0, 0.0), (1.0, 0.0)], 0.0);
-    }
-
-    // Normalize: x_frac = x/total_x (0->1), y_norm = y/max_height (0->1 at apex)
-    let normalized: Vec<(f64, f64)> = raw_points.iter().map(|(px, py)| (px / total_x, py / max_y)).collect();
-
-    // Downsample to num_points evenly spaced along x_frac
     if num_points <= 2 || normalized.len() <= num_points {
-        return (normalized, height_ratio);
+        return ArcProfile { points: normalized, height_ratio };
     }
 
-    let mut result = Vec::with_capacity(num_points);
-    result.push(normalized[0]);
-
+    // Resample evenly along the horizontal axis, keeping both end points.
+    let mut points = Vec::with_capacity(num_points);
+    points.push(normalized[0]);
     for i in 1..num_points - 1 {
-        let target_x = i as f64 / (num_points - 1) as f64;
-        // Binary search for the segment containing target_x
-        let idx = normalized.partition_point(|(nx, _)| *nx < target_x).min(normalized.len() - 1).max(1);
-        let (x0, y0) = normalized[idx - 1];
-        let (x1, y1) = normalized[idx];
-        let frac = if (x1 - x0).abs() > 1e-12 { (target_x - x0) / (x1 - x0) } else { 0.0 };
-        result.push((target_x, y0 + frac * (y1 - y0)));
+        let target = i as f32 / (num_points - 1) as f32;
+        let idx = normalized.partition_point(|p| p.along_range < target).clamp(1, normalized.len() - 1);
+        let before = normalized[idx - 1];
+        let after = normalized[idx];
+        let span = after.along_range - before.along_range;
+        let fraction = if span.abs() > f32::EPSILON { (target - before.along_range) / span } else { 0.0 };
+        points
+            .push(ArcPoint { along_range: target, height: before.height + fraction * (after.height - before.height) });
     }
+    points.push(normalized[normalized.len() - 1]);
 
-    result.push(*normalized.last().unwrap());
-    (result, height_ratio)
+    ArcProfile { points, height_ratio }
 }
 
-// Per-plate armor interaction chain
-
-/// AP overmatch ratio: a plate is overmatched when `caliber_mm > thickness_mm * OVERMATCH_RATIO`.
+/// AP overmatch ratio: a plate is overmatched when `caliber > thickness * OVERMATCH_RATIO`.
 /// This is the community-established value; the real check is engine-side and is not
 /// present in GameParams, so it cannot be data-validated and must be kept in sync by hand.
 pub const OVERMATCH_RATIO: f32 = 14.3;
 
+/// Whether a shell this wide defeats a plate this thin regardless of angle.
+pub fn is_overmatch(caliber: Millimeters, thickness: Millimeters) -> bool {
+    caliber > thickness * OVERMATCH_RATIO
+}
+
+/// Thickness a strike at `angle` from the plate normal has to defeat.
+fn effective_thickness(thickness: Millimeters, angle: Radians) -> Millimeters {
+    thickness / angle.cos().max(MIN_STRIKE_COSINE)
+}
+
+/// Position of a plate along a shell's ray, counted in strike order from the
+/// first plate the shell reaches.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PlateIndex(usize);
+
+impl PlateIndex {
+    /// The first plate the shell reaches along its ray.
+    pub const FIRST: PlateIndex = PlateIndex(0);
+
+    pub fn new(index: usize) -> Self {
+        PlateIndex(index)
+    }
+
+    pub fn value(self) -> usize {
+        self.0
+    }
+
+    /// 1-based position, for display alongside a plate list.
+    pub fn number(self) -> usize {
+        self.0 + 1
+    }
+
+    /// The plate struck immediately before this one, if there was one.
+    pub fn previous(self) -> Option<PlateIndex> {
+        self.0.checked_sub(1).map(PlateIndex)
+    }
+}
+
 /// One armor plate along a shell's ray, in strike order.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct PlateHit {
-    pub thickness_mm: f32,
-    /// Impact angle from the plate normal in degrees (0 = head-on, 90 = glancing).
-    pub angle_deg: f32,
+    pub thickness: Millimeters,
+    /// Strike angle from the plate normal: 0 is head-on, 90 is glancing.
+    pub angle_from_normal: Degrees,
     /// Distance from the first hit along the ray.
     pub distance_along_ray: ShipModelDistance,
 }
 
 /// Outcome of a shell hitting a single plate.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlateOutcome {
-    /// Caliber > OVERMATCH_RATIO * thickness: always penetrates, ignores ricochet.
+    /// Caliber beats [`OVERMATCH_RATIO`] times thickness: always penetrates, ignores ricochet.
     Overmatch,
-    /// Shell penetrates (raw_pen >= effective_thickness).
+    /// Shell penetrates (raw penetration at least the effective thickness).
     Penetrate,
-    /// Angle >= always_ricochet: guaranteed ricochet, shell stopped.
+    /// Strike at or past [`ShellParams::always_ricochet_angle`]: guaranteed ricochet.
     Ricochet,
-    /// Shell shatters (raw_pen < effective_thickness).
+    /// Shell shatters (raw penetration below the effective thickness).
     Shatter,
 }
 
 /// Per-plate simulation result.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct PlateResult {
     pub outcome: PlateOutcome,
-    /// Effective thickness after normalization (mm).
-    pub effective_thickness_mm: f32,
-    /// Shell's raw penetration arriving at this plate (mm).
-    pub raw_pen_before_mm: f32,
-    /// Shell velocity arriving at this plate (m/s).
-    pub velocity_before: f32,
-    /// Shell velocity after penetrating this plate (m/s). 0 if stopped.
-    pub velocity_after: f32,
+    /// Thickness this plate presents once the strike angle is accounted for.
+    pub effective_thickness: Millimeters,
+    /// Penetration the shell brings to this plate.
+    pub raw_penetration: Millimeters,
+    pub velocity_before: MetersPerSecond,
+    /// Velocity leaving this plate. `None` when the plate stopped the shell.
+    pub velocity_after: Option<MetersPerSecond>,
     /// Whether this plate armed the fuse.
     pub fuse_armed_here: bool,
 }
 
 /// Where the AP shell detonates (fuse activation + travel).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct FuseDetonation {
     /// Detonation point measured from the first hit along the ray.
     pub distance_along_ray: ShipModelDistance,
-    /// Which hit index armed the fuse.
-    pub armed_at_hit: usize,
-    /// Distance traveled after arming.
+    /// Plate that armed the fuse.
+    pub armed_at: PlateIndex,
+    /// Real-world distance travelled after arming.
     pub travel_distance: Meters,
 }
 
@@ -506,17 +625,52 @@ pub struct ShellSimResult {
     pub plates: Vec<PlateResult>,
     /// Where the fuse detonates (None if fuse never armed or HE/SAP).
     pub detonation: Option<FuseDetonation>,
-    /// Hit index where the shell stopped due to ricochet/shatter/zero velocity (None if not stopped).
-    pub stopped_at: Option<usize>,
-    /// Hit index of the last plate the shell reached before fuse detonation.
-    /// The shell explodes between this hit and the next. Distinct from `stopped_at`.
-    pub detonated_at: Option<usize>,
+    /// Plate where the shell stopped due to ricochet/shatter/spent velocity.
+    pub stopped_at: Option<PlateIndex>,
+    /// Last plate the shell reached before fuse detonation. The shell explodes
+    /// between this plate and the next. Distinct from `stopped_at`.
+    pub detonated_at: Option<PlateIndex>,
+}
+
+impl ShellSimResult {
+    /// Plate the shell's run ends at: whichever of detonation and being stopped
+    /// comes first. `None` when the shell passed through everything intact.
+    pub fn last_reached_plate(&self) -> Option<PlateIndex> {
+        match (self.detonated_at, self.stopped_at) {
+            (Some(detonated), Some(stopped)) => Some(detonated.min(stopped)),
+            (detonated, stopped) => detonated.or(stopped),
+        }
+    }
+}
+
+/// A fuse burning down while the shell works through the plate stack.
+#[derive(Clone, Copy, Debug)]
+struct ArmedFuse {
+    /// Plate that armed it.
+    armed_at: PlateIndex,
+    /// Velocity the shell left the arming plate at, which sets the burn distance.
+    velocity_at_arming: MetersPerSecond,
+    /// How far along the ray the shell may travel before the fuse fires.
+    travel_budget: ShipModelDistance,
+    /// How far along the ray it has travelled since arming.
+    travelled: ShipModelDistance,
+}
+
+impl ArmedFuse {
+    fn remaining(&self) -> ShipModelDistance {
+        self.travel_budget - self.travelled
+    }
+
+    /// Real-world distance the shell covers between arming and detonating.
+    fn travel_distance(&self, fuse_time: Seconds) -> Meters {
+        self.velocity_at_arming.travel_over(fuse_time)
+    }
 }
 
 /// Simulate a shell passing through a sequence of armor plates along one ray.
 ///
 /// Uses formulas from wows_shell (jcw780):
-///   raw_pen = p_ppc * velocity^1.38
+///   raw_pen = penetration_factor * velocity^1.38
 ///   normalized_angle = max(0, angle_from_normal - normalization)
 ///   effective_thickness = thickness / cos(normalized_angle)
 ///   post_pen_velocity = velocity * (1 - exp(1 - raw_pen / effective_thickness))
@@ -529,142 +683,125 @@ pub fn simulate_shell_through_plates(
     hits: &[PlateHit],
     continue_on_ricochet: bool,
 ) -> ShellSimResult {
-    let mut velocity = impact.impact_velocity as f32;
-    let caliber_mm = (params.caliber * 1000.0) as f32;
-    // Uncapped shells (bulletCap == false) receive no normalization.
-    let normalization_rad = if params.cap { params.normalization as f32 } else { 0.0 };
-    let ricochet1_rad = params.ricochet1 as f32;
-    let fuse_threshold_mm = params.threshold as f32;
-    let fuse_time = params.fuse_time as f32;
-    let p_ppc = params.p_ppc as f32;
+    let normalization = params.effective_normalization();
 
-    let mut plates = Vec::with_capacity(hits.len());
-    let mut stopped_at: Option<usize> = None;
-    let mut detonated_at: Option<usize> = None;
-
-    // Fuse tracking. Distances are along the ray in ship-model units.
-    let mut fuse_armed = false;
-    let mut fuse_arm_velocity: f32 = 0.0;
-    let mut fuse_distance_model: f32 = 0.0;
-    let mut fuse_accumulated: f32 = 0.0; // distance traveled since arming
-    let mut prev_dist: f32 = 0.0; // last processed plate's distance_along_ray
-
+    let mut velocity = impact.impact_velocity;
+    let mut plates: Vec<PlateResult> = Vec::with_capacity(hits.len());
+    let mut stopped_at: Option<PlateIndex> = None;
+    let mut detonated_at: Option<PlateIndex> = None;
     let mut detonation: Option<FuseDetonation> = None;
 
-    for (i, hit) in hits.iter().enumerate() {
-        let hit_dist = hit.distance_along_ray.value();
+    let mut fuse: Option<ArmedFuse> = None;
+    // Along-ray position of the last plate the shell actually processed.
+    let mut previous_plate = ShipModelDistance::ZERO;
 
-        // If fuse is armed, check if detonation occurs before reaching this plate
-        if fuse_armed && detonation.is_none() {
-            let seg_dist = hit_dist - prev_dist;
-            let remaining = fuse_distance_model - fuse_accumulated;
-            if seg_dist >= remaining && remaining > 0.0 {
-                let arm_idx = plates.iter().position(|p: &PlateResult| p.fuse_armed_here).unwrap_or(0);
+    for (index, hit) in hits.iter().enumerate() {
+        let index = PlateIndex::new(index);
+
+        // A fuse that burns out before this plate detonates in the gap behind it.
+        if let Some(armed) = fuse.as_mut() {
+            let gap = hit.distance_along_ray - previous_plate;
+            let remaining = armed.remaining();
+            if gap >= remaining && remaining > ShipModelDistance::ZERO {
                 detonation = Some(FuseDetonation {
-                    distance_along_ray: ShipModelDistance::from(prev_dist + remaining),
-                    armed_at_hit: arm_idx,
-                    travel_distance: Meters::from(fuse_arm_velocity * fuse_time),
+                    distance_along_ray: previous_plate + remaining,
+                    armed_at: armed.armed_at,
+                    travel_distance: armed.travel_distance(params.fuse_time),
                 });
-                detonated_at = Some(i.saturating_sub(1)); // last plate before detonation
+                // The fuse armed on an earlier plate, so there is always one before this.
+                detonated_at = index.previous();
                 break;
             }
-            fuse_accumulated += seg_dist;
+            armed.travelled = armed.travelled + gap;
         }
 
-        let raw_pen = p_ppc * velocity.powf(1.38);
-        let angle_from_normal_rad = hit.angle_deg.to_radians();
-        let is_overmatch = caliber_mm > hit.thickness_mm * OVERMATCH_RATIO;
+        let raw_penetration = params.raw_penetration(velocity);
+        let strike_angle = hit.angle_from_normal.to_radians();
+        let overmatched = is_overmatch(params.caliber, hit.thickness);
 
-        // Check ricochet (only if not overmatch)
-        if !is_overmatch && angle_from_normal_rad >= ricochet1_rad {
+        if !overmatched && strike_angle >= params.always_ricochet_angle {
             plates.push(PlateResult {
                 outcome: PlateOutcome::Ricochet,
-                effective_thickness_mm: hit.thickness_mm / angle_from_normal_rad.cos().max(0.001),
-                raw_pen_before_mm: raw_pen,
+                effective_thickness: effective_thickness(hit.thickness, strike_angle),
+                raw_penetration,
                 velocity_before: velocity,
-                velocity_after: if continue_on_ricochet { velocity } else { 0.0 },
+                velocity_after: continue_on_ricochet.then_some(velocity),
                 fuse_armed_here: false,
             });
             if !continue_on_ricochet {
-                stopped_at = Some(i);
+                stopped_at = Some(index);
                 break;
             }
-            // continue_on_ricochet: plate recorded as ricochet, shell continues with unchanged velocity
-            prev_dist = hit_dist;
+            // The plate is recorded, but the shell carries on unslowed.
+            previous_plate = hit.distance_along_ray;
             continue;
         }
 
-        // Apply normalization
-        let norm_angle = if is_overmatch { 0.0 } else { (angle_from_normal_rad - normalization_rad).max(0.0) };
-        let effective_thickness = hit.thickness_mm / norm_angle.cos().max(0.001);
+        // Overmatched plates are defeated head-on, whatever the geometry says.
+        let normalized_angle =
+            if overmatched { Radians::new(0.0) } else { normalized_strike_angle(strike_angle, normalization) };
+        let effective = effective_thickness(hit.thickness, normalized_angle);
 
-        // Check penetration
-        if !is_overmatch && raw_pen < effective_thickness {
+        if !overmatched && raw_penetration < effective {
             plates.push(PlateResult {
                 outcome: PlateOutcome::Shatter,
-                effective_thickness_mm: effective_thickness,
-                raw_pen_before_mm: raw_pen,
+                effective_thickness: effective,
+                raw_penetration,
                 velocity_before: velocity,
-                velocity_after: 0.0,
+                velocity_after: None,
                 fuse_armed_here: false,
             });
-            stopped_at = Some(i);
+            stopped_at = Some(index);
             break;
         }
 
-        // Shell penetrates
-        let outcome = if is_overmatch { PlateOutcome::Overmatch } else { PlateOutcome::Penetrate };
-        let pen_ratio = raw_pen / effective_thickness.max(0.001);
-        let post_pen_velocity = velocity * (1.0 - (1.0 - pen_ratio).exp());
+        let penetration_ratio = raw_penetration.value() / effective.value().max(MIN_EFFECTIVE_THICKNESS.value());
+        let velocity_after = MetersPerSecond::from(velocity.value() * (1.0 - (1.0 - penetration_ratio).exp()));
 
-        // Check fuse arming
-        let armed_here = !fuse_armed && hit.thickness_mm >= fuse_threshold_mm;
+        let armed_here = fuse.is_none() && hit.thickness >= params.fuse_threshold;
         if armed_here {
-            fuse_armed = true;
-
-            fuse_arm_velocity = post_pen_velocity;
-            let fuse_real_m = post_pen_velocity * fuse_time;
             // Armor meshes are in ship-model space (15 m per unit); converting at
             // the 30 m BigWorld scale halves fuse travel and detonates shells
             // short of the citadel (issue #43).
-            fuse_distance_model = Meters::from(fuse_real_m).to_ship_model().value();
-            fuse_accumulated = 0.0;
+            fuse = Some(ArmedFuse {
+                armed_at: index,
+                velocity_at_arming: velocity_after,
+                travel_budget: velocity_after.travel_over(params.fuse_time).to_ship_model(),
+                travelled: ShipModelDistance::ZERO,
+            });
         }
 
         plates.push(PlateResult {
-            outcome,
-            effective_thickness_mm: effective_thickness,
-            raw_pen_before_mm: raw_pen,
+            outcome: if overmatched { PlateOutcome::Overmatch } else { PlateOutcome::Penetrate },
+            effective_thickness: effective,
+            raw_penetration,
             velocity_before: velocity,
-            velocity_after: post_pen_velocity,
+            velocity_after: Some(velocity_after),
             fuse_armed_here: armed_here,
         });
 
-        prev_dist = hit_dist;
-        velocity = post_pen_velocity;
+        previous_plate = hit.distance_along_ray;
+        velocity = velocity_after;
 
-        if velocity < 1.0 {
-            stopped_at = Some(i);
+        if velocity < MIN_CARRY_VELOCITY {
+            stopped_at = Some(index);
             break;
         }
     }
 
-    // If fuse armed but detonation didn't happen between hits, compute where it detonates.
-    if fuse_armed && detonation.is_none() {
-        let remaining = fuse_distance_model - fuse_accumulated;
-        let arm_idx = plates.iter().position(|p| p.fuse_armed_here).unwrap_or(0);
+    // A fuse still burning when the plates ran out fires past the last one.
+    if let Some(armed) = fuse
+        && detonation.is_none()
+    {
         detonation = Some(FuseDetonation {
-            distance_along_ray: ShipModelDistance::from(prev_dist + remaining.max(0.0)),
-            armed_at_hit: arm_idx,
-            travel_distance: Meters::from(fuse_arm_velocity * fuse_time),
+            distance_along_ray: previous_plate + armed.remaining().max_zero(),
+            armed_at: armed.armed_at,
+            travel_distance: armed.travel_distance(params.fuse_time),
         });
-
-        if stopped_at.is_some() {
-            // Shell stopped (ricochet/shatter) but fuse was armed; it still detonates.
-            // Mark the stop plate as the detonation plate so the outcome shows as detonation.
-            detonated_at = stopped_at;
-        }
-        // else: shell exited before detonating, overpen with armed fuse (detonated_at stays None)
+        // A shell stopped by ricochet or shatter still detonates, on the plate
+        // that stopped it. One that simply ran out of ship detonates outside it,
+        // and `detonated_at` stays None.
+        detonated_at = stopped_at;
     }
 
     ShellSimResult { plates, detonation, stopped_at, detonated_at }
@@ -676,46 +813,64 @@ mod tests {
 
     /// Colombo 381mm AP (PIPA045_381MM_50_AP) from GameParams.
     fn colombo_ap() -> ShellParams {
-        let caliber = 0.381;
-        let mass = 884.8;
-        let cd = 0.2954;
+        let caliber = Millimeters::from(381.0);
+        let mass = Kilograms::from(884.8);
+        let air_drag = 0.2954;
         let krupp = 2434.0;
-        let r: f64 = caliber / 2.0;
+
+        let caliber_m = f64::from(caliber.to_meters().value());
+        let mass_kg = f64::from(mass.value());
+        let radius_m = caliber_m / 2.0;
+
         ShellParams {
             caliber,
             mass,
-            v0: 850.0,
+            muzzle_velocity: MetersPerSecond::from(850.0),
             krupp,
-            cd,
-            normalization: 6.0_f64.to_radians(),
-            ricochet0: 45.0_f64.to_radians(),
-            ricochet1: 60.0_f64.to_radians(),
-            fuse_time: 0.033,
-            threshold: 64.0,
-            k: 0.5 * cd * r * r * PI / mass,
-            p_ppc: 1e-7 * krupp * mass.powf(0.69) * caliber.powf(-1.07),
-            cap: true,
+            air_drag,
+            normalization: Degrees::from(6.0).to_radians(),
+            ricochet_angle: Degrees::from(45.0).to_radians(),
+            always_ricochet_angle: Degrees::from(60.0).to_radians(),
+            fuse_time: Seconds::from(0.033),
+            fuse_threshold: Millimeters::from(64.0),
+            drag_factor: DragFactor(0.5 * f64::from(air_drag) * radius_m * radius_m * PI / mass_kg),
+            penetration_factor: PenetrationFactor(1e-7 * f64::from(krupp) * mass_kg.powf(0.69) * caliber_m.powf(-1.07)),
+            capped: true,
         }
     }
 
-    fn impact_at(velocity: f64) -> ImpactResult {
+    fn impact_at(velocity: MetersPerSecond) -> ImpactResult {
+        let fall = Degrees::from(4.3).to_radians();
         ImpactResult {
-            distance: 8500.0,
+            distance: Meters::from(8500.0),
             impact_velocity: velocity,
-            impact_angle_horizontal: 4.3_f64.to_radians(),
-            impact_angle_deck: PI / 2.0 - 4.3_f64.to_radians(),
-            time_to_target: 0.0,
-            raw_pen_mm: 0.0,
-            effective_pen_belt_mm: 0.0,
-            effective_pen_belt_normalized_mm: 0.0,
-            effective_pen_deck_mm: 0.0,
-            effective_pen_deck_normalized_mm: 0.0,
-            launch_angle: 0.0,
+            impact_angle_horizontal: fall,
+            impact_angle_deck: Radians::new(std::f32::consts::FRAC_PI_2) - fall,
+            time_to_target: Seconds::from(0.0),
+            raw_penetration: Millimeters::from(0.0),
+            effective_penetration_belt: Millimeters::from(0.0),
+            effective_penetration_belt_normalized: Millimeters::from(0.0),
+            effective_penetration_deck: Millimeters::from(0.0),
+            effective_penetration_deck_normalized: Millimeters::from(0.0),
+            launch_angle: Radians::new(0.0),
         }
     }
 
-    fn plate(dist: f32, thickness_mm: f32) -> PlateHit {
-        PlateHit { thickness_mm, angle_deg: 24.7, distance_along_ray: ShipModelDistance::from(dist) }
+    /// A plate struck at the 24.7 deg the issue #43 screenshot reports.
+    fn plate(distance: ShipModelDistance, thickness: Millimeters) -> PlateHit {
+        PlateHit { thickness, angle_from_normal: Degrees::from(24.7), distance_along_ray: distance }
+    }
+
+    fn units(value: f32) -> ShipModelDistance {
+        ShipModelDistance::from(value)
+    }
+
+    fn mm(value: f32) -> Millimeters {
+        Millimeters::from(value)
+    }
+
+    fn mps(value: f32) -> MetersPerSecond {
+        MetersPerSecond::from(value)
     }
 
     /// Regression test for issue #43 (Colombo vs Ushakov citadel range).
@@ -732,19 +887,74 @@ mod tests {
     #[test]
     fn fuse_travel_uses_ship_model_scale() {
         let params = colombo_ap();
-        let impact = impact_at(699.0);
-        let hits = vec![plate(0.0, 425.0), plate(0.42, 40.0), plate(0.6, 375.0)];
+        let impact = impact_at(mps(699.0));
+        let hits = vec![plate(units(0.0), mm(425.0)), plate(units(0.42), mm(40.0)), plate(units(0.6), mm(375.0))];
 
         let sim = simulate_shell_through_plates(&params, &impact, &hits, false);
 
-        let det = sim.detonation.as_ref().expect("fuse armed on the belt, shell must detonate");
+        let det = sim.detonation.expect("fuse armed on the belt, shell must detonate");
         let travel_m = det.travel_distance.value();
         assert!((travel_m - 7.4).abs() < 0.2, "fuse travel {travel_m} m, expected ~7.4 m");
         assert_eq!(sim.plates.len(), 2, "shell must reach and penetrate the plate 6.3 m behind the belt");
         assert_eq!(sim.plates[1].outcome, PlateOutcome::Penetrate);
-        assert_eq!(sim.detonated_at, Some(1), "detonation happens between the second and third plates");
+        assert_eq!(
+            sim.detonated_at,
+            Some(PlateIndex::new(1)),
+            "detonation happens between the second and third plates"
+        );
         let expected = det.travel_distance.to_ship_model().value();
         let got = det.distance_along_ray.value();
         assert!((got - expected).abs() < 0.02, "detonation at {got} units along ray, expected ~{expected}");
+    }
+
+    /// The belt arms the fuse, so the detonation is attributed to the plate that
+    /// armed it rather than the plate the shell was crossing when it fired.
+    #[test]
+    fn detonation_names_the_arming_plate() {
+        let params = colombo_ap();
+        let sim = simulate_shell_through_plates(
+            &params,
+            &impact_at(mps(699.0)),
+            &[plate(units(0.0), mm(425.0)), plate(units(0.42), mm(40.0)), plate(units(0.6), mm(375.0))],
+            false,
+        );
+
+        let det = sim.detonation.expect("fuse armed on the belt");
+        assert_eq!(det.armed_at, PlateIndex::FIRST);
+        assert_eq!(det.armed_at.number(), 1);
+    }
+
+    /// An uncapped shell gets no normalization, so the same strike has to defeat
+    /// more armor than a capped shell would.
+    #[test]
+    fn uncapped_shells_lose_normalization() {
+        let capped = colombo_ap();
+        let uncapped = ShellParams { capped: false, ..colombo_ap() };
+        let hits = [plate(units(0.0), mm(425.0))];
+
+        let capped_sim = simulate_shell_through_plates(&capped, &impact_at(mps(699.0)), &hits, false);
+        let uncapped_sim = simulate_shell_through_plates(&uncapped, &impact_at(mps(699.0)), &hits, false);
+
+        assert!(uncapped_sim.plates[0].effective_thickness > capped_sim.plates[0].effective_thickness);
+    }
+
+    /// A shell that shatters is stopped, and a stopped shell reports no exit velocity.
+    #[test]
+    fn a_shattered_plate_reports_no_exit_velocity() {
+        let params = colombo_ap();
+        let sim =
+            simulate_shell_through_plates(&params, &impact_at(mps(200.0)), &[plate(units(0.0), mm(425.0))], false);
+
+        assert_eq!(sim.plates[0].outcome, PlateOutcome::Shatter);
+        assert_eq!(sim.plates[0].velocity_after, None);
+        assert_eq!(sim.stopped_at, Some(PlateIndex::FIRST));
+    }
+
+    /// Overmatch is a caliber-to-thickness ratio, and the ratio is what decides it.
+    #[test]
+    fn overmatch_follows_the_caliber_ratio() {
+        let caliber = mm(457.0);
+        assert!(is_overmatch(caliber, mm(31.0)));
+        assert!(!is_overmatch(caliber, mm(32.0)));
     }
 }
