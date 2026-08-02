@@ -758,7 +758,10 @@ pub fn simulate_shell_through_plates(
         let penetration_ratio = raw_penetration.value() / effective.value().max(MIN_EFFECTIVE_THICKNESS.value());
         let velocity_after = MetersPerSecond::from(velocity.value() * (1.0 - (1.0 - penetration_ratio).exp()));
 
-        let armed_here = fuse.is_none() && hit.thickness >= params.fuse_threshold;
+        // The fuse reads the armor the shell actually had to defeat, not the
+        // plate's nominal thickness: wows_shell fuses at
+        // acos(thickness / threshold) + normalization, which is this comparison.
+        let armed_here = fuse.is_none() && effective >= params.fuse_threshold;
         if armed_here {
             // Armor meshes are in ship-model space (15 m per unit); converting at
             // the 30 m BigWorld scale halves fuse travel and detonates shells
@@ -861,6 +864,41 @@ mod tests {
         PlateHit { thickness, angle_from_normal: Degrees::from(24.7), distance_along_ray: distance }
     }
 
+    /// A plate struck at an arbitrary angle from its normal.
+    fn plate_at(distance: ShipModelDistance, thickness: Millimeters, angle: Degrees) -> PlateHit {
+        PlateHit { thickness, angle_from_normal: angle, distance_along_ray: distance }
+    }
+
+    /// A 120 mm AP shell with the 20 mm fuse threshold from issue #42.
+    /// Not overmatching against 19 mm plate (19 * 14.3 = 271.7 mm > 120 mm), so
+    /// the strike angle governs whether the fuse arms.
+    fn small_caliber_ap_20mm_fuse() -> ShellParams {
+        let caliber = Millimeters::from(120.0);
+        let mass = Kilograms::from(23.5);
+        let air_drag = 0.32;
+        let krupp = 2400.0;
+
+        let caliber_m = f64::from(caliber.to_meters().value());
+        let mass_kg = f64::from(mass.value());
+        let radius_m = caliber_m / 2.0;
+
+        ShellParams {
+            caliber,
+            mass,
+            muzzle_velocity: MetersPerSecond::from(850.0),
+            krupp,
+            air_drag,
+            normalization: Degrees::from(8.5).to_radians(),
+            ricochet_angle: Degrees::from(45.0).to_radians(),
+            always_ricochet_angle: Degrees::from(60.0).to_radians(),
+            fuse_time: Seconds::from(0.01),
+            fuse_threshold: Millimeters::from(20.0),
+            drag_factor: DragFactor(0.5 * f64::from(air_drag) * radius_m * radius_m * PI / mass_kg),
+            penetration_factor: PenetrationFactor(1e-7 * f64::from(krupp) * mass_kg.powf(0.69) * caliber_m.powf(-1.07)),
+            capped: true,
+        }
+    }
+
     fn units(value: f32) -> ShipModelDistance {
         ShipModelDistance::from(value)
     }
@@ -956,5 +994,37 @@ mod tests {
         let caliber = mm(457.0);
         assert!(is_overmatch(caliber, mm(31.0)));
         assert!(!is_overmatch(caliber, mm(32.0)));
+    }
+
+    /// Regression test for issue #42 (fuse arming against effective armor).
+    ///
+    /// A 20 mm threshold against 19 mm plate arms once the angle left after
+    /// normalization passes acos(19/20) = 18.19 deg. With 8.5 deg of
+    /// normalization that is a 26.69 deg strike. At 35 deg the plate presents
+    /// 19 / cos(26.5 deg) = 21.2 mm, which arms the fuse.
+    #[test]
+    fn an_angled_thin_plate_arms_the_fuse() {
+        let params = small_caliber_ap_20mm_fuse();
+        let hits = [plate_at(units(0.0), mm(19.0), Degrees::from(35.0))];
+
+        let sim = simulate_shell_through_plates(&params, &impact_at(mps(700.0)), &hits, false);
+
+        assert_eq!(sim.plates[0].outcome, PlateOutcome::Penetrate);
+        assert!(sim.plates[0].fuse_armed_here, "19 mm at 35 deg presents 21.2 mm to a 20 mm fuse");
+        assert!(sim.detonation.is_some(), "an armed fuse must produce a detonation");
+    }
+
+    /// The same plate struck closer to head-on presents 19 / cos(11.5 deg) =
+    /// 19.4 mm, under the 20 mm threshold, so the shell overpenetrates.
+    #[test]
+    fn a_shallow_strike_on_the_same_plate_does_not_arm_the_fuse() {
+        let params = small_caliber_ap_20mm_fuse();
+        let hits = [plate_at(units(0.0), mm(19.0), Degrees::from(20.0))];
+
+        let sim = simulate_shell_through_plates(&params, &impact_at(mps(700.0)), &hits, false);
+
+        assert_eq!(sim.plates[0].outcome, PlateOutcome::Penetrate);
+        assert!(!sim.plates[0].fuse_armed_here, "19 mm at 20 deg presents 19.4 mm to a 20 mm fuse");
+        assert!(sim.detonation.is_none(), "an unarmed fuse must not detonate");
     }
 }
