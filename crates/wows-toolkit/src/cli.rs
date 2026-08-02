@@ -2,6 +2,8 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::path::PathBuf;
 
+use clap::Parser;
+use clap::Subcommand;
 use thiserror::Error;
 
 /// Why a replaced-binary path was rejected. This gates a delete driven by an
@@ -60,6 +62,52 @@ pub fn legacy_finalize_target(args: &[OsString]) -> Option<PathBuf> {
     }
 
     Some(PathBuf::from(single))
+}
+
+#[derive(Debug, Parser)]
+#[command(name = "wows_toolkit", version, about)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<Command>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Command {
+    /// Delete the binary this process replaced during an update.
+    FinalizeUpdate {
+        #[arg(long)]
+        replaced: PathBuf,
+    },
+}
+
+/// What this process was asked to do.
+pub enum Invocation {
+    FinalizeUpdate { replaced: PathBuf },
+    Run(Cli),
+}
+
+/// Decide what to do with the raw process arguments.
+///
+/// The legacy check runs before clap because a bare filesystem path is
+/// ambiguous with a subcommand name, and resolving that inside clap's grammar
+/// would make the contract harder to see and to test.
+pub fn resolve<I>(args: I) -> Result<Invocation, clap::Error>
+where
+    I: IntoIterator<Item = OsString>,
+{
+    let args: Vec<OsString> = args.into_iter().collect();
+
+    if let Some(replaced) = legacy_finalize_target(&args) {
+        return Ok(Invocation::FinalizeUpdate { replaced });
+    }
+
+    let cli = Cli::try_parse_from(&args)?;
+    match &cli.command {
+        Some(Command::FinalizeUpdate { replaced }) => {
+            Ok(Invocation::FinalizeUpdate { replaced: replaced.clone() })
+        }
+        None => Ok(Invocation::Run(cli)),
+    }
 }
 
 #[cfg(test)]
@@ -149,5 +197,43 @@ mod tests {
     #[test]
     fn multiple_arguments_are_not_legacy_form() {
         assert_eq!(legacy_finalize_target(&args(&["wows_toolkit.exe", "a", "b"])), None);
+    }
+
+    #[test]
+    fn resolves_legacy_form_to_finalize_update() {
+        let resolved = resolve(args(&["wows_toolkit.exe", "C:\\app\\wows_toolkit.exe.old"])).expect("resolve");
+
+        assert!(matches!(
+            resolved,
+            Invocation::FinalizeUpdate { replaced } if replaced == PathBuf::from("C:\\app\\wows_toolkit.exe.old")
+        ));
+    }
+
+    #[test]
+    fn resolves_subcommand_form_to_finalize_update() {
+        let resolved = resolve(args(&[
+            "wows_toolkit.exe",
+            "finalize-update",
+            "--replaced",
+            "C:\\app\\wows_toolkit.exe.old",
+        ]))
+        .expect("resolve");
+
+        assert!(matches!(
+            resolved,
+            Invocation::FinalizeUpdate { replaced } if replaced == PathBuf::from("C:\\app\\wows_toolkit.exe.old")
+        ));
+    }
+
+    #[test]
+    fn resolves_bare_launch_to_run() {
+        let resolved = resolve(args(&["wows_toolkit.exe"])).expect("resolve");
+
+        assert!(matches!(resolved, Invocation::Run(_)));
+    }
+
+    #[test]
+    fn rejects_unknown_flag() {
+        assert!(resolve(args(&["wows_toolkit.exe", "--nonsense"])).is_err());
     }
 }
