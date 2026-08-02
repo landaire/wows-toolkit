@@ -323,7 +323,8 @@ pub struct LoadedShipArmor {
     pub waterline_dy: f32,
     /// Decoded hull textures: mfm_path -> (width, height, RGBA8 pixels).
     /// Loaded on background thread, uploaded to GPU during `upload_armor_to_viewport`.
-    pub hull_textures: HashMap<String, (u32, u32, Vec<u8>)>,
+    /// Shared so a camo decode worker can read them without owning the armor.
+    pub hull_textures: Arc<HashMap<String, (u32, u32, Vec<u8>)>>,
     /// Number of LOD levels available for hull meshes.
     pub hull_lod_count: usize,
     /// The LOD level used to load the current hull meshes.
@@ -340,8 +341,9 @@ pub struct LoadedShipArmor {
     pub camera_trajectories: Vec<(String, wowsunpack::game_params::types::CameraTrajectory)>,
     /// Cheap camo scheme metadata for the picker (no textures decoded).
     pub camo_scheme_infos: Vec<wowsunpack::export::camo_textures::CamoSchemeInfo>,
-    /// Decodes a scheme's textures on demand when it is selected.
-    pub camo_source: wowsunpack::export::camo_textures::CamoTextureSource,
+    /// Decodes a scheme's textures on demand when it is selected. Shared so the
+    /// decode can run on a worker thread.
+    pub camo_source: Arc<wowsunpack::export::camo_textures::CamoTextureSource>,
     /// Active camo per mfm stem: the decoded texture plus how it reaches the GPU.
     /// Empty = Stock. Recomputed on camo change; read by `upload_hull_meshes_to_viewport`.
     pub active_camo: HashMap<String, crate::armor_viewer::common::ActiveCamo>,
@@ -649,7 +651,7 @@ impl SyncedPaneSettings {
 pub struct HullReloadData {
     pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
     pub hull_part_groups: Vec<(String, Vec<String>)>,
-    pub hull_textures: HashMap<String, (u32, u32, Vec<u8>)>,
+    pub hull_textures: Arc<HashMap<String, (u32, u32, Vec<u8>)>>,
     pub hull_lod: usize,
     pub hull_lod_count: usize,
 }
@@ -665,7 +667,7 @@ pub struct UpgradeReloadData {
     /// New hull visual meshes (hull parts + mounted turrets with new mount transforms).
     pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
     pub hull_part_groups: Vec<(String, Vec<String>)>,
-    pub hull_textures: HashMap<String, (u32, u32, Vec<u8>)>,
+    pub hull_textures: Arc<HashMap<String, (u32, u32, Vec<u8>)>>,
     /// Which hull upgrade key was loaded.
     pub loaded_hull: Option<String>,
     /// Updated module alternatives for the new hull upgrade.

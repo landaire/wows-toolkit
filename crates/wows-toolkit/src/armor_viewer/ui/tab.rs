@@ -2625,7 +2625,13 @@ pub(crate) fn start_hull_lod_reload(
                 }
             }
 
-            Ok(HullReloadData { hull_meshes, hull_part_groups, hull_textures, hull_lod: requested_lod, hull_lod_count })
+            Ok(HullReloadData {
+                hull_meshes,
+                hull_part_groups,
+                hull_textures: Arc::new(hull_textures),
+                hull_lod: requested_lod,
+                hull_lod_count,
+            })
         })();
         let _ = tx.send(result);
     });
@@ -2793,7 +2799,7 @@ fn start_upgrade_reload(
                 zone_part_plates,
                 hull_meshes,
                 hull_part_groups,
-                hull_textures,
+                hull_textures: Arc::new(hull_textures),
                 loaded_hull: selected_hull,
                 module_alternatives,
             })

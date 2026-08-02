@@ -1,6 +1,7 @@
 use crate::viewport_3d::Vec3;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use wowsunpack::ballistics::PlateIndex;
 use wowsunpack::export::camouflage::UvTransform;
@@ -303,7 +304,7 @@ pub(crate) fn load_ship_armor(
         splash_box_groups,
         hit_locations,
         waterline_dy: 0.0,
-        hull_textures,
+        hull_textures: Arc::new(hull_textures),
         hull_lod_count,
         hull_lod: options.lod,
         hull_upgrade_names: options.hull_upgrade_names,
@@ -311,7 +312,7 @@ pub(crate) fn load_ship_armor(
         module_alternatives: options.module_alternatives,
         camera_trajectories: options.camera_trajectories,
         camo_scheme_infos,
-        camo_source,
+        camo_source: Arc::new(camo_source),
         active_camo: std::collections::HashMap::new(),
     };
     armor.apply_waterline_offset();
