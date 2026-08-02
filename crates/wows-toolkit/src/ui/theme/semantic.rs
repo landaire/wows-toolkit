@@ -57,6 +57,12 @@ pub struct SemanticColors {
     pub crown_cohost: Color32,
     /// A value worth noticing that is not a warning.
     pub notice: Color32,
+    /// Fill for a control that is engaged, as opposed to merely selected or
+    /// hovered. Inverts to bone rather than tinting, so an engaged mode toggle
+    /// reads across a busy 3D viewport.
+    pub engaged_fill: Color32,
+    /// Label on `engaged_fill`, knocked out to the panel tone.
+    pub engaged_label: Color32,
     pub chat: ChatColors,
     pub armor: ArmorColors,
 }
@@ -76,6 +82,8 @@ pub const DARK: SemanticColors = SemanticColors {
     crown_host: Color32::from_rgb(0xE5, 0xC1, 0x58),
     crown_cohost: Color32::from_rgb(0xF0, 0x9B, 0xC0),
     notice: Color32::from_rgb(0xE5, 0xC1, 0x58),
+    engaged_fill: Color32::from_rgb(0xC7, 0xC3, 0xB8),
+    engaged_label: Color32::from_rgb(0x18, 0x18, 0x16),
     chat: ChatColors {
         division: Color32::from_rgb(0xE5, 0xC1, 0x58),
         global: Color32::from_rgb(0xC9, 0xC6, 0xBE),
@@ -108,6 +116,8 @@ pub const LIGHT: SemanticColors = SemanticColors {
     crown_host: Color32::from_rgb(0x77, 0x58, 0x00),
     crown_cohost: Color32::from_rgb(0xA3, 0x32, 0x70),
     notice: Color32::from_rgb(0x77, 0x58, 0x00),
+    engaged_fill: Color32::from_rgb(0x26, 0x25, 0x1F),
+    engaged_label: Color32::from_rgb(0xF4, 0xF3, 0xEF),
     chat: ChatColors {
         division: Color32::from_rgb(0x77, 0x58, 0x00),
         global: Color32::from_rgb(0x1A, 0x1A, 0x17),
@@ -260,11 +270,8 @@ mod tests {
     #[test]
     fn inverted_active_state_is_legible() {
         // The signature move: bone fill with the panel colour knocked out of it.
-        for (theme, accent, panel) in [
-            ("dark", palette::dark::ACCENT, palette::dark::PANEL),
-            ("light", palette::light::ACCENT, palette::light::PANEL),
-        ] {
-            let r = contrast_ratio(panel, accent);
+        for (theme, sem) in [("dark", &DARK), ("light", &LIGHT)] {
+            let r = contrast_ratio(sem.engaged_label, sem.engaged_fill);
             assert!(r >= CONTRAST_FLOOR, "{theme} inverted active label is {r}");
         }
     }

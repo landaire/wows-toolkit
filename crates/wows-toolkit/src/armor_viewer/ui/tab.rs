@@ -1843,15 +1843,18 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         }
                     }
 
-                    // ── Trajectory mode toggle ──
                     {
                         let traj_label = if pane.trajectory_mode {
                             t!("ui.armor.trajectory_on").to_string()
                         } else {
                             t!("ui.armor.trajectory").to_string()
                         };
-                        let btn = egui::Button::new(traj_label);
-                        let btn = if pane.trajectory_mode { btn.fill(ui.visuals().selection.bg_fill) } else { btn };
+                        let btn = if pane.trajectory_mode {
+                            egui::Button::new(egui::RichText::new(traj_label).color(ui.sem().engaged_label))
+                                .fill(ui.sem().engaged_fill)
+                        } else {
+                            egui::Button::new(traj_label)
+                        };
                         if ui.add(btn).on_hover_text(t!("ui.armor.trajectory_tooltip").as_ref()).clicked() {
                             pane.trajectory_mode = !pane.trajectory_mode;
                             if pane.trajectory_mode {
@@ -1884,7 +1887,6 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         }
                     }
 
-                    // ── Splash mode toggle ──
                     {
                         let has_splash = armor.splash_data.is_some();
                         let has_he_shell = comparison_ships.iter().any(|s| {
@@ -1895,8 +1897,12 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         } else {
                             t!("ui.armor.splash_mode").to_string()
                         };
-                        let btn = egui::Button::new(splash_label);
-                        let btn = if pane.splash_mode { btn.fill(ui.visuals().selection.bg_fill) } else { btn };
+                        let btn = if pane.splash_mode {
+                            egui::Button::new(egui::RichText::new(splash_label).color(ui.sem().engaged_label))
+                                .fill(ui.sem().engaged_fill)
+                        } else {
+                            egui::Button::new(splash_label)
+                        };
                         let enabled = has_splash && has_he_shell;
                         let resp = ui.add_enabled(enabled, btn);
                         let resp = if !has_splash {
