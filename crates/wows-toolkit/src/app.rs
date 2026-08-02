@@ -356,6 +356,11 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     shown_twitch_token_error: bool,
 
+    /// Whether a sticky toast has already been shown for an invalid WoWs
+    /// directory.
+    #[serde(skip)]
+    shown_wows_dir_error: bool,
+
     /// Receiver for results from the background networking thread.
     #[serde(skip)]
     pub(crate) network_result_rx: Option<std::sync::mpsc::Receiver<NetworkResult>>,
@@ -736,6 +741,7 @@ impl Default for WowsToolkitApp {
             constants_version_mismatch: false,
             constants_update_error_shown: false,
             shown_twitch_token_error: false,
+            shown_wows_dir_error: false,
             network_result_rx: None,
             runtime: Arc::new(Runtime::new().expect("failed to create tokio runtime")),
             #[cfg(feature = "logging")]
@@ -753,6 +759,17 @@ impl Default for WowsToolkitApp {
             pending_constants_data: None,
         }
     }
+}
+
+/// Whether a sticky settings-error toast fires this frame. A problem toasts
+/// once per occurrence and re-arms only once it has cleared, so a condition
+/// that holds for minutes does not stack a toast per frame. The flag is taken
+/// by reference rather than returned beside the verdict: two returned bools
+/// would be transposable at the call site.
+fn arm_sticky_error(problem: bool, already_shown: &mut bool) -> bool {
+    let emit = problem && !*already_shown;
+    *already_shown = problem;
+    emit
 }
 
 impl WowsToolkitApp {
@@ -2001,7 +2018,7 @@ impl WowsToolkitApp {
                     if e.downcast_current_context::<ToolkitError>()
                         .is_some_and(|e| matches!(e, ToolkitError::InvalidWowsDirectory(_)))
                     {
-                        self.tab_state.settings_needs_attention = true;
+                        self.tab_state.revalidate_wows_dir();
                     }
 
                     self.tab_state.toasts.lock().error(format!("{e}"));
@@ -2670,20 +2687,22 @@ impl WowsToolkitApp {
 
         self.poll_network_results();
 
-        // Update settings_needs_attention based on cached WoWs directory validity and twitch token state
         {
             let twitch_token_failed = self.tab_state.persisted.read().settings.integrations.twitch_token.is_some()
                 && self.tab_state.twitch_state.read().token_validation_failed;
+            let wows_dir_invalid = self.tab_state.wows_dir_invalid;
 
-            if twitch_token_failed && !self.shown_twitch_token_error {
-                self.shown_twitch_token_error = true;
+            if arm_sticky_error(twitch_token_failed, &mut self.shown_twitch_token_error) {
                 error!("Twitch token is invalid or expired");
-                self.tab_state.toasts.lock().error(t!("ui.messages.twitch_token_invalid"));
-            } else if !twitch_token_failed {
-                self.shown_twitch_token_error = false;
+                self.tab_state.toasts.lock().error(t!("ui.messages.twitch_token_invalid")).duration(None);
             }
 
-            self.tab_state.settings_needs_attention = self.tab_state.wows_dir_invalid || twitch_token_failed;
+            if arm_sticky_error(wows_dir_invalid, &mut self.shown_wows_dir_error) {
+                error!("World of Warships directory is not valid");
+                self.tab_state.toasts.lock().error(t!("ui.messages.wows_dir_invalid")).duration(None);
+            }
+
+            self.tab_state.settings_needs_attention = wows_dir_invalid || twitch_token_failed;
         }
 
         if self.build_consent_window_open {
@@ -5538,5 +5557,40 @@ mod logging_target_tests {
             !targets.would_enable("hyper_util", &tracing::Level::ERROR),
             "the filter must stay an allowlist, not turn into a catch-all"
         );
+    }
+}
+
+#[cfg(test)]
+mod sticky_error_tests {
+    use super::arm_sticky_error;
+
+    #[test]
+    fn a_fresh_problem_emits_once_and_then_holds() {
+        let mut shown = false;
+        assert!(arm_sticky_error(true, &mut shown), "first frame with a problem must emit");
+        for frame in 0..5 {
+            assert!(!arm_sticky_error(true, &mut shown), "frame {frame} must not re-emit");
+        }
+    }
+
+    #[test]
+    fn no_problem_never_emits() {
+        let mut shown = false;
+        assert!(!arm_sticky_error(false, &mut shown));
+        assert!(!shown, "a problem that never occurred must leave the flag disarmed");
+    }
+
+    #[test]
+    fn clearing_the_problem_rearms_it() {
+        let mut shown = false;
+        assert!(arm_sticky_error(true, &mut shown));
+        assert!(!arm_sticky_error(false, &mut shown), "clearing must not itself emit");
+        assert!(arm_sticky_error(true, &mut shown), "a recurrence must emit again");
+    }
+
+    #[test]
+    fn an_already_shown_problem_does_not_re_emit() {
+        let mut shown = true;
+        assert!(!arm_sticky_error(true, &mut shown));
     }
 }
