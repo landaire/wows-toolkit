@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 extern crate nalgebra as na;
 use na::Rotation3;
@@ -479,7 +480,8 @@ struct GpuMesh {
     visible: bool,
     layer: i32,
     /// Optional per-mesh texture bind group. When None, the fallback white texture is used.
-    texture_bind_group: Option<wgpu::BindGroup>,
+    /// Arc'd because many meshes share one bind group per upload call.
+    texture_bind_group: Option<Arc<wgpu::BindGroup>>,
     /// If true, this mesh is in world space and should NOT be affected by model_roll.
     world_space: bool,
     /// If true, this mesh participates in hull lighting (when lighting is enabled).
@@ -616,7 +618,7 @@ impl Viewport3D {
         vertices: &[Vertex],
         indices: &[u32],
         layer: i32,
-        texture_bind_group: wgpu::BindGroup,
+        texture_bind_group: Arc<wgpu::BindGroup>,
     ) -> MeshId {
         use wgpu::util::DeviceExt;
 
@@ -750,7 +752,7 @@ impl Viewport3D {
         vertices: &[Vertex],
         indices: &[u32],
         layer: i32,
-        texture_bind_group: wgpu::BindGroup,
+        texture_bind_group: Arc<wgpu::BindGroup>,
     ) -> MeshId {
         use wgpu::util::DeviceExt;
 
@@ -1183,7 +1185,7 @@ impl Viewport3D {
 
             // Bind per-mesh texture or fallback
             if let Some(ref tex_bg) = mesh.texture_bind_group {
-                pass.set_bind_group(1, tex_bg, &[]);
+                pass.set_bind_group(1, tex_bg.as_ref(), &[]);
                 has_custom_texture = true;
             } else if has_custom_texture {
                 // Rebind fallback after a textured mesh

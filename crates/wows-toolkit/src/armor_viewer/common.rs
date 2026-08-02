@@ -802,11 +802,22 @@ pub(crate) fn build_active_camo(
 
     let mut out: HashMap<String, ActiveCamo> = HashMap::new();
 
+    // The same PNG backs many stems (46 stems over 3 images on Smaland), so
+    // decode each distinct image once.
+    let mut decoded: HashMap<&Vec<u8>, image::RgbaImage> = HashMap::new();
+
     for (stem, png) in textures {
-        let Ok(img) = image::load_from_memory(png) else {
-            continue;
+        let camo = match decoded.get(png) {
+            Some(img) => img.clone(),
+            None => {
+                let Ok(img) = image::load_from_memory(png) else {
+                    continue;
+                };
+                let img = img.to_rgba8();
+                decoded.insert(png, img.clone());
+                img
+            }
         };
-        let camo = img.to_rgba8();
         let (cw, ch) = (camo.width(), camo.height());
         let has_coverage = camo.pixels().any(|p| p.0[3] < 250);
 

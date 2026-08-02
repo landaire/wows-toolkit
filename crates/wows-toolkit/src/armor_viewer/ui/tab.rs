@@ -2,6 +2,7 @@ extern crate nalgebra as na;
 use na::Rotation3;
 use na::Vector3;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc;
 
@@ -1453,6 +1454,9 @@ pub(crate) fn upload_hull_meshes_to_viewport(
 
     let hull_alpha: f32 = if pane.hull_opaque { 1.0 } else { 0.7 };
     let hull_layer = if pane.hull_opaque { LAYER_DEFAULT } else { LAYER_HULL };
+    // Many meshes share one mfm path, and each bind group allocates and uploads a
+    // full texture. Build one per path per upload.
+    let mut bind_groups: HashMap<String, Arc<wgpu::BindGroup>> = HashMap::new();
     for mesh in &armor.hull_meshes {
         let visible = pane.hull_visibility.get(&mesh.name).copied().unwrap_or(false);
         if !visible {
@@ -1517,7 +1521,15 @@ pub(crate) fn upload_hull_meshes_to_viewport(
                     uv_scale: c.uv().scale,
                     uv_offset: c.uv().offset,
                 });
-                let tex_bg = pipeline.create_texture_bind_group(device, queue, albedo, layer);
+                let key = mesh.mfm_path.clone().unwrap_or_default();
+                let tex_bg = match bind_groups.get(&key) {
+                    Some(bg) => bg.clone(),
+                    None => {
+                        let bg = Arc::new(pipeline.create_texture_bind_group(device, queue, albedo, layer));
+                        bind_groups.insert(key, bg.clone());
+                        bg
+                    }
+                };
                 pane.viewport.add_textured_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer, tex_bg)
             } else {
                 pane.viewport.add_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer)
