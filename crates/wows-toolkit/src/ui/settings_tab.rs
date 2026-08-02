@@ -5,6 +5,7 @@ use std::sync::Arc;
 use egui::OpenUrl;
 use egui::RichText;
 use egui::Slider;
+use egui::Stroke;
 use rust_i18n::t;
 
 use crate::app::ToolkitTabViewer;
@@ -19,6 +20,25 @@ use crate::task::ReplayExportFormat;
 use crate::twitch::Token;
 use crate::ui::theme::semantic::SemanticExt;
 use crate::update_background_task;
+
+/// What the stored twitch token is currently worth. `Absent` is not an error:
+/// nothing has been configured yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenState {
+    Absent,
+    Valid,
+    Rejected,
+}
+
+/// `has_token` and `is_valid` come from two separate locks, so a stale
+/// validity flag must never outrank the absence of a token.
+fn token_state(has_token: bool, is_valid: bool) -> TokenState {
+    match (has_token, is_valid) {
+        (false, _) => TokenState::Absent,
+        (true, true) => TokenState::Valid,
+        (true, false) => TokenState::Rejected,
+    }
+}
 
 /// Render a styled section header with an icon, title, and dimmed description.
 fn section_header(ui: &mut egui::Ui, icon: &str, title: &str, description: &str) {
@@ -490,7 +510,6 @@ impl ToolkitTabViewer<'_> {
 
             ui.add_space(12.0);
 
-            // ── Twitch Settings ───────────────────────────────────────
             section_header(
                 ui,
                 icons::BROADCAST,
@@ -507,29 +526,29 @@ impl ToolkitTabViewer<'_> {
                     ui.ctx().open_url(OpenUrl::new_tab("https://chatterino.com/client_login"));
                 }
 
-                let text = if self.tab_state.persisted.read().settings.integrations.twitch_token.is_none() {
-                    format!(
-                        "{} {} {}",
-                        icons::CLIPBOARD_TEXT,
-                        t!("ui.settings.twitch.paste_token_no_token"),
-                        icons::WARNING
-                    )
-                } else if self.tab_state.twitch_state.read().token_is_valid() {
-                    format!(
-                        "{} {} {}",
-                        icons::CLIPBOARD_TEXT,
-                        t!("ui.settings.twitch.paste_token_valid"),
-                        icons::CHECK_CIRCLE
-                    )
-                } else {
-                    format!(
-                        "{} {} {}",
-                        icons::CLIPBOARD_TEXT,
-                        t!("ui.settings.twitch.paste_token_invalid"),
-                        icons::X_CIRCLE
-                    )
+                let state = {
+                    let has_token = self.tab_state.persisted.read().settings.integrations.twitch_token.is_some();
+                    let is_valid = self.tab_state.twitch_state.read().token_is_valid();
+                    token_state(has_token, is_valid)
                 };
-                if ui.button(text).clicked()
+
+                let (label, glyph, tint) = match state {
+                    TokenState::Absent => {
+                        (t!("ui.settings.twitch.paste_token_no_token"), icons::WARNING, ui.sem().warn)
+                    }
+                    TokenState::Valid => (t!("ui.settings.twitch.paste_token_valid"), icons::CHECK_CIRCLE, ui.sem().ok),
+                    TokenState::Rejected => {
+                        (t!("ui.settings.twitch.paste_token_invalid"), icons::X_CIRCLE, ui.sem().error)
+                    }
+                };
+
+                let text = format!("{} {} {}", icons::CLIPBOARD_TEXT, label, glyph);
+                let mut button = egui::Button::new(RichText::new(text).color(tint));
+                if state == TokenState::Rejected {
+                    button = button.stroke(Stroke::new(1.0, ui.sem().error));
+                }
+
+                if ui.add(button).clicked()
                     && let Ok(mut clipboard) = arboard::Clipboard::new()
                     && let Ok(contents) = clipboard.get_text()
                 {
@@ -618,5 +637,26 @@ fn delete_old_dump_versions(dump_base: &std::path::Path) {
         if let Err(e) = std::fs::remove_dir_all(dir) {
             tracing::warn!("Failed to delete old dump {}: {e}", dir.display());
         }
+    }
+}
+
+#[cfg(test)]
+mod token_state_tests {
+    use super::TokenState;
+    use super::token_state;
+
+    #[test]
+    fn no_stored_token_is_absent_regardless_of_the_validity_flag() {
+        // The validity flag is a separate read from a separate lock and can
+        // still say `true` from a token that has since been cleared. Absent
+        // has to win, or the button reports a working token with none stored.
+        assert_eq!(token_state(false, false), TokenState::Absent);
+        assert_eq!(token_state(false, true), TokenState::Absent);
+    }
+
+    #[test]
+    fn a_stored_token_follows_the_validity_flag() {
+        assert_eq!(token_state(true, true), TokenState::Valid);
+        assert_eq!(token_state(true, false), TokenState::Rejected);
     }
 }
