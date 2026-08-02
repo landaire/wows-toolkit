@@ -35,6 +35,7 @@ pub mod renderer;
 pub mod types;
 
 pub use camera::ArcballCamera;
+pub use renderer::CamoLayer;
 pub use renderer::GpuPipeline;
 pub use renderer::LAYER_DEFAULT;
 pub use renderer::LAYER_HULL;

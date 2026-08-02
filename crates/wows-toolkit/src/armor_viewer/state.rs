@@ -342,11 +342,9 @@ pub struct LoadedShipArmor {
     pub camo_scheme_infos: Vec<wowsunpack::export::camo_textures::CamoSchemeInfo>,
     /// Decodes a scheme's textures on demand when it is selected.
     pub camo_source: wowsunpack::export::camo_textures::CamoTextureSource,
-    /// Decoded RGBA for the currently selected camo, keyed by mfm stem. Empty = Stock.
-    /// Recomputed on camo change; read by `upload_hull_meshes_to_viewport`.
-    pub active_camo_textures: HashMap<String, (u32, u32, Vec<u8>)>,
-    /// UV transforms for the currently selected camo, keyed by mfm stem. Empty = identity.
-    pub active_camo_uvs: HashMap<String, wowsunpack::export::camouflage::UvTransform>,
+    /// Active camo per mfm stem: the decoded texture plus how it reaches the GPU.
+    /// Empty = Stock. Recomputed on camo change; read by `upload_hull_meshes_to_viewport`.
+    pub active_camo: HashMap<String, crate::armor_viewer::common::ActiveCamo>,
 }
 
 impl LoadedShipArmor {

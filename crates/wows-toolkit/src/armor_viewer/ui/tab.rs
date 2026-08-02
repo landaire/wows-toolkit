@@ -10,6 +10,7 @@ use egui_dock::DockState;
 use egui_dock::TabViewer;
 
 use crate::app::ToolkitTabViewer;
+use crate::armor_viewer::common::ActiveCamo;
 use crate::armor_viewer::constants::*;
 use crate::armor_viewer::penetration::ComparisonShipIndex;
 use crate::armor_viewer::penetration::Ifhe;
@@ -38,6 +39,7 @@ use crate::armor_viewer::ui::analysis::focus_analysis_tab;
 use crate::armor_viewer::ui::legend::show_armor_legend;
 use crate::icons;
 use crate::ui::theme::semantic::SemanticExt;
+use crate::viewport_3d::CamoLayer;
 use crate::viewport_3d::GpuPipeline;
 use crate::viewport_3d::LAYER_DEFAULT;
 use crate::viewport_3d::LAYER_HULL;
@@ -851,8 +853,7 @@ impl ToolkitTabViewer<'_> {
             && let Some((_, pane)) = state.dock_state.iter_all_tabs_mut().find(|(_, t)| t.id == pane_id)
             && let Some(mut armor) = pane.loaded_armor.take()
         {
-            armor.active_camo_textures.clear();
-            armor.active_camo_uvs.clear();
+            armor.active_camo.clear();
             if let Some(id) = pane.selected_camo {
                 let decoded = match pane.camo_texture_cache.get(&id) {
                     Some(t) => Some(t.clone()),
@@ -883,14 +884,12 @@ impl ToolkitTabViewer<'_> {
                             (Default::default(), false)
                         }
                     };
-                    let (t, u) = crate::armor_viewer::common::build_active_camo(
+                    armor.active_camo = crate::armor_viewer::common::build_active_camo(
                         &textures,
                         &uv,
                         use_color_scheme,
                         &armor.hull_textures,
                     );
-                    armor.active_camo_textures = t;
-                    armor.active_camo_uvs = u;
                 }
             }
             upload_hull_meshes_to_viewport(pane, &armor, &render_state.device, &render_state.queue, &gpu_pipeline);
@@ -1385,6 +1384,59 @@ pub(crate) fn upload_armor_to_viewport(
     pane.viewport.mark_dirty();
 }
 
+/// P95 luminance of what the shader will actually draw, sampled sparsely.
+/// The old CPU path took this over a composited buffer; sampling both layers at
+/// the same stride and blending only the samples gives the same statistic
+/// without materialising the composite.
+fn sampled_p95_luminance(albedo: Option<&(u32, u32, Vec<u8>)>, camo: Option<&ActiveCamo>) -> f32 {
+    const STRIDE: usize = 37;
+    const TARGET_HI: f32 = 0.85;
+    const NO_TEXTURE_BRIGHTNESS: f32 = 3.5;
+
+    let luma = |px: [f32; 3]| (0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2]) / 255.0;
+    let sample_at = |data: &[u8], w: u32, h: u32, u: f32, v: f32| -> [f32; 4] {
+        let x = ((u * w as f32) as u32).min(w.saturating_sub(1));
+        let y = ((v * h as f32) as u32).min(h.saturating_sub(1));
+        let i = (y as usize * w as usize + x as usize) * 4;
+        [data[i] as f32, data[i + 1] as f32, data[i + 2] as f32, data[i + 3] as f32]
+    };
+
+    let mut lumas: Vec<f32> = Vec::new();
+    match camo {
+        Some(camo) => {
+            let tex = camo.texture();
+            let (cw, ch) = (tex.width, tex.height);
+            for idx in (0..(cw as usize * ch as usize)).step_by(STRIDE) {
+                let c = &tex.pixels[idx * 4..idx * 4 + 4];
+                let (u, v) = ((idx % cw as usize) as f32 / cw as f32, (idx / cw as usize) as f32 / ch as f32);
+                let base = match albedo {
+                    Some((sw, sh, srgba)) => sample_at(srgba, *sw, *sh, u, v),
+                    None => [255.0, 255.0, 255.0, 255.0],
+                };
+                let a = c[3] as f32 / 255.0;
+                lumas.push(luma([
+                    base[0] * (1.0 - a) + c[0] as f32 * a,
+                    base[1] * (1.0 - a) + c[1] as f32 * a,
+                    base[2] * (1.0 - a) + c[2] as f32 * a,
+                ]));
+            }
+        }
+        None => {
+            let Some((_, _, rgba)) = albedo else { return NO_TEXTURE_BRIGHTNESS };
+            for px in rgba.chunks_exact(4).step_by(STRIDE) {
+                lumas.push(luma([px[0] as f32, px[1] as f32, px[2] as f32]));
+            }
+        }
+    }
+
+    if lumas.is_empty() {
+        return NO_TEXTURE_BRIGHTNESS;
+    }
+    lumas.sort_by(|a, b| a.total_cmp(b));
+    let p95 = lumas[(lumas.len() * 95 / 100).min(lumas.len() - 1)];
+    (TARGET_HI / p95.max(0.05)).clamp(1.0, 4.0)
+}
+
 /// Upload (or re-upload) hull visual meshes to the viewport, tracking their IDs for later removal.
 /// Removes any previously tracked hull meshes first.
 pub(crate) fn upload_hull_meshes_to_viewport(
@@ -1409,15 +1461,9 @@ pub(crate) fn upload_hull_meshes_to_viewport(
 
         let has_uvs = mesh.uvs.len() == mesh.positions.len();
         let stem = mesh.mfm_path.as_deref().map(mfm_stem);
-        // Active camo texture for this stem takes precedence; otherwise the base albedo.
-        let texture_data = stem
-            .and_then(|s| armor.active_camo_textures.get(s))
-            .or_else(|| mesh.mfm_path.as_ref().and_then(|p| armor.hull_textures.get(p)));
-        // Only apply a tiled UV transform when this stem actually has an active camo
-        // texture; otherwise the mesh falls back to base albedo with its own UVs.
-        let camo_uv =
-            stem.filter(|s| armor.active_camo_textures.contains_key(*s)).and_then(|s| armor.active_camo_uvs.get(s));
-        let has_texture = texture_data.is_some() && has_uvs;
+        let stock = mesh.mfm_path.as_ref().and_then(|p| armor.hull_textures.get(p));
+        let camo = stem.and_then(|s| armor.active_camo.get(s));
+        let has_texture = (stock.is_some() || camo.is_some()) && has_uvs;
 
         // Vertex-color brightness boost for hull meshes. The lighting shader multiplies
         // this base by (flat + key*halfLambert); the boost keeps textured camo vivid.
@@ -1428,22 +1474,7 @@ pub(crate) fn upload_hull_meshes_to_viewport(
         // textures still get boosted. A mean-based factor over-boosts a mostly-dark texture that
         // has bright spots (e.g. Traditions' light stripes); keying off the P95 bright pixels
         // caps the boost by the brightest regions directly.
-        let tex_brightness: f32 = texture_data
-            .map(|(_, _, rgba)| {
-                let mut lumas: Vec<f32> = rgba
-                    .chunks_exact(4)
-                    .step_by(37)
-                    .map(|px| (0.2126 * px[0] as f32 + 0.7152 * px[1] as f32 + 0.0722 * px[2] as f32) / 255.0)
-                    .collect();
-                if lumas.is_empty() {
-                    return 3.5;
-                }
-                lumas.sort_by(|a, b| a.total_cmp(b));
-                let p95 = lumas[(lumas.len() * 95 / 100).min(lumas.len() - 1)];
-                const TARGET_HI: f32 = 0.85;
-                (TARGET_HI / p95.max(0.05)).clamp(1.0, 4.0)
-            })
-            .unwrap_or(3.5);
+        let tex_brightness = sampled_p95_luminance(stock, camo);
         let fallback_color: [f32; 4] =
             [0.6 * hull_brightness, 0.6 * hull_brightness, 0.65 * hull_brightness, hull_alpha];
         let has_baked_colors = mesh.colors.len() == mesh.positions.len();
@@ -1457,15 +1488,7 @@ pub(crate) fn upload_hull_meshes_to_viewport(
                 norm = transform_normal(t, norm);
             }
 
-            let uv = if has_uvs {
-                let base_uv = mesh.uvs[i];
-                match camo_uv {
-                    Some(t) => [base_uv[0] * t.scale[0] + t.offset[0], base_uv[1] * t.scale[1] + t.offset[1]],
-                    None => base_uv,
-                }
-            } else {
-                [0.0, 0.0]
-            };
+            let uv = if has_uvs { mesh.uvs[i] } else { [0.0, 0.0] };
             let color = if has_texture {
                 [tex_brightness, tex_brightness, tex_brightness, hull_alpha]
             } else if has_baked_colors {
@@ -1478,13 +1501,23 @@ pub(crate) fn upload_hull_meshes_to_viewport(
         }
 
         if !mesh.indices.is_empty() {
-            let mid = if let Some((w, h, rgba)) = texture_data.filter(|_| has_uvs) {
-                let tex_bg = pipeline.create_texture_bind_group(
-                    device,
-                    queue,
-                    TexturePixels { width: *w, height: *h, rgba },
-                    None,
-                );
+            let mid = if has_texture {
+                // A camo with no stock albedo binds the shared white fallback as the
+                // albedo; an opaque camo masks it out entirely, and a coverage camo
+                // has already been warned about in `build_active_camo`.
+                let albedo = stock
+                    .map(|(w, h, rgba)| TexturePixels { width: *w, height: *h, rgba })
+                    .unwrap_or(TexturePixels { width: 1, height: 1, rgba: &[255, 255, 255, 255] });
+                let layer = camo.map(|c| CamoLayer {
+                    pixels: TexturePixels {
+                        width: c.texture().width,
+                        height: c.texture().height,
+                        rgba: &c.texture().pixels,
+                    },
+                    uv_scale: c.uv().scale,
+                    uv_offset: c.uv().offset,
+                });
+                let tex_bg = pipeline.create_texture_bind_group(device, queue, albedo, layer);
                 pane.viewport.add_textured_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer, tex_bg)
             } else {
                 pane.viewport.add_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer)

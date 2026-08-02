@@ -117,10 +117,8 @@ fn render_smaland_camos() {
         let textures = armor.camo_source.decode(id).expect("decode scheme");
         let uv = info.uv_transforms.clone();
         let use_color_scheme = info.use_color_scheme;
-        let (active_camo_textures, active_camo_uvs) =
+        armor.active_camo =
             crate::armor_viewer::common::build_active_camo(&textures, &uv, use_color_scheme, &armor.hull_textures);
-        armor.active_camo_textures = active_camo_textures;
-        armor.active_camo_uvs = active_camo_uvs;
 
         // Build a pane with this camo selected and all hull parts visible + opaque.
         let mut pane = ArmorPane::empty(0);
