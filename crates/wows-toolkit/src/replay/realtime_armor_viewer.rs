@@ -1452,7 +1452,12 @@ impl RealtimeArmorViewer {
                     egui::Popup::from_toggle_button_response(&display_btn)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
-                            if crate::armor_viewer::ui::tab::draw_display_settings_popover(ui, &mut self.pane, &armor) {
+                            if crate::armor_viewer::ui::tab::draw_display_settings_popover(
+                                ui,
+                                &mut self.pane,
+                                &armor,
+                                None,
+                            ) {
                                 zone_changed = true;
                             }
                             if !self.pane.trajectories.is_empty() {

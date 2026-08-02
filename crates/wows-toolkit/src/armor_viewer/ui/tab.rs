@@ -74,6 +74,10 @@ struct ArmorPaneViewer<'a> {
     hull_change_signal: &'a std::cell::Cell<Option<u64>>,
     /// Signal: pane_id when user changes the camo selection in a popover.
     camo_change_signal: &'a std::cell::Cell<Option<u64>>,
+    /// Persisted "show the armor thickness legend" flag, read once per frame.
+    show_legend: bool,
+    /// Signal: the new value when the user toggles the legend from a display popover.
+    legend_toggle_signal: &'a std::cell::Cell<Option<bool>>,
 }
 
 impl TabViewer for ArmorPaneViewer<'_> {
@@ -620,6 +624,9 @@ impl ToolkitTabViewer<'_> {
         let hull_change_ref = &hull_change_cell;
         let camo_change_cell: std::cell::Cell<Option<u64>> = std::cell::Cell::new(None);
         let camo_change_ref = &camo_change_cell;
+        let legend_toggle_cell: std::cell::Cell<Option<bool>> = std::cell::Cell::new(None);
+        let legend_toggle_ref = &legend_toggle_cell;
+        let show_legend_snapshot = self.tab_state.persisted.read().armor_viewer_defaults.show_legend;
         let comparison_ships_snapshot = &state.comparison_ships;
         let ifhe_snapshot = state.ifhe_enabled;
         {
@@ -639,6 +646,8 @@ impl ToolkitTabViewer<'_> {
                 hull_lod_signal: hull_lod_ref,
                 hull_change_signal: hull_change_ref,
                 camo_change_signal: camo_change_ref,
+                show_legend: show_legend_snapshot,
+                legend_toggle_signal: legend_toggle_ref,
             };
             let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(content_rect).id_salt("armor_content"));
             DockArea::new(&mut state.dock_state)
@@ -649,6 +658,12 @@ impl ToolkitTabViewer<'_> {
                 .show_leaf_collapse_buttons(false)
                 .show_leaf_close_all_buttons(false)
                 .show_inside(&mut content_ui, &mut viewer);
+        }
+
+        // Applied before the legend window reads defaults below, so a toggle takes
+        // effect the same frame.
+        if let Some(show) = legend_toggle_cell.get() {
+            self.tab_state.persisted.write().armor_viewer_defaults.show_legend = show;
         }
 
         // Global armor thickness legend (shown once, not per-pane)
@@ -1546,6 +1561,8 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
     let hull_lod_signal = ctx.hull_lod_signal;
     let hull_change_signal = ctx.hull_change_signal;
     let camo_change_signal = ctx.camo_change_signal;
+    let show_legend = ctx.show_legend;
+    let legend_toggle_signal = ctx.legend_toggle_signal;
     let pane_id = pane.id;
 
     // Full viewport area (no sidebar)
@@ -1695,7 +1712,8 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                 ui.close();
                             }
                             ui.separator();
-                            if draw_display_settings_popover(ui, pane, &armor) {
+                            let legend = Some(LegendToggle { shown: show_legend, signal: legend_toggle_signal });
+                            if draw_display_settings_popover(ui, pane, &armor, legend) {
                                 zone_changed = true;
                             }
                             if !pane.trajectories.is_empty() {
@@ -1865,7 +1883,8 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                     .default_width(280.0)
                     .show(&ctx, |ui| {
                         egui::ScrollArea::vertical().show(ui, |ui| {
-                            if draw_display_settings_popover(ui, pane, &armor) {
+                            let legend = Some(LegendToggle { shown: show_legend, signal: legend_toggle_signal });
+                            if draw_display_settings_popover(ui, pane, &armor, legend) {
                                 zone_changed = true;
                             }
                             if !pane.trajectories.is_empty() {
@@ -4899,11 +4918,29 @@ pub(crate) fn draw_roll_slider(ui: &mut egui::Ui, viewport: &mut crate::viewport
     changed
 }
 
+/// The armor thickness legend's current state and the channel a change travels
+/// back through. `None` on surfaces that have no legend window.
+pub(crate) struct LegendToggle<'a> {
+    pub shown: bool,
+    pub signal: &'a std::cell::Cell<Option<bool>>,
+}
+
 /// Draw the Display settings popover content (plate edges, waterline, 0mm, opacity).
 /// Returns true if any visibility changed.
-pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorPane, armor: &LoadedShipArmor) -> bool {
+pub(crate) fn draw_display_settings_popover(
+    ui: &mut egui::Ui,
+    pane: &mut ArmorPane,
+    armor: &LoadedShipArmor,
+    legend: Option<LegendToggle<'_>>,
+) -> bool {
     let mut zone_changed = false;
     ui.set_min_width(160.0);
+    if let Some(legend) = legend {
+        let mut shown = legend.shown;
+        if ui.checkbox(&mut shown, t!("ui.armor.show_armor_thickness").as_ref()).changed() {
+            legend.signal.set(Some(shown));
+        }
+    }
     if ui.checkbox(&mut pane.show_plate_edges, t!("ui.armor.plate_edges").as_ref()).changed() {
         zone_changed = true;
     }
