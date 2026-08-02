@@ -24,22 +24,36 @@ pub enum FinalizeError {
 /// The directory check keeps an argument from naming a file elsewhere on the
 /// system. The extension check narrows it further: every version that emits
 /// this argument produces `<exe>.old`.
+///
+/// Every version up to v0.1.40 spawned the replacement using `argv[0]`, which
+/// is relative when the app was launched by name from a shell, while
+/// `current_exe()` is always absolute. Normalizing both sides before the
+/// directory comparison is what makes those old launches still match; without
+/// it, `Some("")` (the relative parent) never equals an absolute directory
+/// and every update from those versions silently fails to finalize.
 pub fn validate_finalize_target(current_exe: &Path, replaced: &Path) -> Result<(), FinalizeError> {
+    // std::path::absolute is purely lexical (no filesystem access), so falling
+    // back to the un-normalized path on error only keeps the comparison
+    // stricter and can never widen what this function agrees to delete.
+    let current_exe = std::path::absolute(current_exe).unwrap_or_else(|_| current_exe.to_path_buf());
+    let replaced = std::path::absolute(replaced).unwrap_or_else(|_| replaced.to_path_buf());
+
     if current_exe.parent() != replaced.parent() {
-        return Err(FinalizeError::DifferentDirectory {
-            replaced: replaced.to_path_buf(),
-            current: current_exe.to_path_buf(),
-        });
+        return Err(FinalizeError::DifferentDirectory { replaced, current: current_exe });
     }
 
     if replaced.extension() != Some("old".as_ref()) {
-        return Err(FinalizeError::UnexpectedName { replaced: replaced.to_path_buf() });
+        return Err(FinalizeError::UnexpectedName { replaced });
     }
 
     if !replaced.exists() {
-        return Err(FinalizeError::Missing { replaced: replaced.to_path_buf() });
+        return Err(FinalizeError::Missing { replaced });
     }
 
+    // remove_file (via CreateFileW with FILE_FLAG_OPEN_REPARSE_POINT on
+    // Windows) unlinks a symlink or junction itself rather than following it,
+    // so the directory check above still bounds what actually gets deleted
+    // even if `replaced` is a reparse point.
     Ok(())
 }
 
@@ -117,11 +131,19 @@ where
 /// so stdout and stderr go nowhere. `AttachConsole` borrows the parent's
 /// console and `CONOUT$` opens it directly, which avoids depending on whether
 /// the standard handles were inherited.
+///
+/// `CONOUT$` writes to the console screen buffer directly, not to this
+/// process's stdout handle, so it bypasses redirection: running
+/// `wows_toolkit.exe --help > out.txt` shows the message in the console and
+/// leaves `out.txt` empty.
 #[cfg(windows)]
 pub fn console_writer() -> Option<std::fs::File> {
     use windows_sys::Win32::System::Console::AttachConsole;
     use windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS;
 
+    // SAFETY: AttachConsole has no preconditions beyond a valid process
+    // context; it either attaches to the parent's console or fails, and
+    // failure is handled below via the CONOUT$ open result.
     // Fails when the parent has no console, in which case CONOUT$ will not
     // open either and the caller gets None.
     unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
@@ -165,6 +187,8 @@ fn show_message_box(title: &str, message: &str, is_error: bool) {
     use windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONERROR;
     use windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONINFORMATION;
     use windows_sys::Win32::UI::WindowsAndMessaging::MB_OK;
+    use windows_sys::Win32::UI::WindowsAndMessaging::MB_SETFOREGROUND;
+    use windows_sys::Win32::UI::WindowsAndMessaging::MB_TOPMOST;
     use windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW;
 
     // MessageBoxW wants null-terminated UTF-16, not the Rust &str form.
@@ -173,8 +197,15 @@ fn show_message_box(title: &str, message: &str, is_error: bool) {
     let message = to_wide(message);
     let icon = if is_error { MB_ICONERROR } else { MB_ICONINFORMATION };
 
+    // SAFETY: `title` and `message` are NUL-terminated UTF-16 buffers that
+    // outlive this synchronous call, and the window handle is null.
     unsafe {
-        MessageBoxW(std::ptr::null_mut(), message.as_ptr(), title.as_ptr(), MB_OK | icon);
+        MessageBoxW(
+            std::ptr::null_mut(),
+            message.as_ptr(),
+            title.as_ptr(),
+            MB_OK | icon | MB_SETFOREGROUND | MB_TOPMOST,
+        );
     }
 }
 
@@ -234,6 +265,41 @@ mod tests {
             validate_finalize_target(&current, &replaced),
             Err(FinalizeError::Missing { replaced })
         );
+    }
+
+    /// Regression test for versions up to v0.1.40: they spawned the
+    /// replacement with a relative `argv[0]` and passed a relative `.old`
+    /// path alongside it. `current_exe()` (always absolute) must still match
+    /// that relative form once both are normalized.
+    ///
+    /// This does not use `std::env::set_current_dir`: unit tests in this
+    /// binary run concurrently on shared threads, and changing the process
+    /// working directory is global state that could affect unrelated tests
+    /// running at the same time elsewhere in this crate. Instead this drops a
+    /// uniquely-named file directly into the real (unmodified) current
+    /// directory and passes it as a bare relative name, which exercises the
+    /// exact same normalization path (`std::path::absolute` resolving a
+    /// relative path against the process's actual cwd) without mutating
+    /// global state.
+    #[test]
+    fn accepts_relative_replaced_against_absolute_current_exe() {
+        let cwd = std::env::current_dir().expect("current dir");
+        let name = format!("wows_toolkit_test_{}.exe.old", std::process::id());
+        let replaced_absolute = cwd.join(&name);
+        File::create(&replaced_absolute).expect("create replaced");
+
+        struct RemoveOnDrop(PathBuf);
+        impl Drop for RemoveOnDrop {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let _cleanup = RemoveOnDrop(replaced_absolute);
+
+        let current_exe = cwd.join("wows_toolkit.exe");
+        let replaced_relative = PathBuf::from(&name);
+
+        assert_eq!(validate_finalize_target(&current_exe, &replaced_relative), Ok(()));
     }
 
     fn args(values: &[&str]) -> Vec<OsString> {
