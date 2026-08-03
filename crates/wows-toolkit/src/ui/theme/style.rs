@@ -250,32 +250,30 @@ fn light_visuals() -> Visuals {
 
 /// Tweaks on top of `egui_dock`'s `Style::from_egui`.
 ///
-/// `from_egui` makes the active tab's fill match `window_fill`, fusing it with
-/// the panel below. Graphite & Bone instead raises the active tab to its own
-/// surface tone with an accent underline, with the tab strip pushed to the
-/// surface tone so it is clearly its own band.
+/// The active tab is filled with the panel tone and the strip's bottom border
+/// is suppressed beneath it, so the tab and the page it introduces read as one
+/// shape. Every other tab is flat against the strip: the only filled shapes in
+/// the row are the active tab and whatever the cursor is over.
 pub fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
-    let (surface, panel, widget_hot, border, accent, text_bright, tab_active, text) = if egui_style.visuals.dark_mode {
+    let (surface, panel, widget, border, accent, text_bright, text_dim) = if egui_style.visuals.dark_mode {
         (
             palette::dark::SURFACE,
             palette::dark::PANEL,
-            palette::dark::WIDGET_HOT,
+            palette::dark::WIDGET,
             palette::dark::BORDER,
             palette::dark::ACCENT,
             palette::dark::TEXT_BRIGHT,
-            palette::dark::TAB_ACTIVE,
-            palette::dark::TEXT,
+            palette::dark::TEXT_DIM,
         )
     } else {
         (
             palette::light::SURFACE,
             palette::light::PANEL,
-            palette::light::WIDGET_HOT,
+            palette::light::WIDGET,
             palette::light::BORDER,
             palette::light::ACCENT,
             palette::light::TEXT_BRIGHT,
-            palette::light::TAB_ACTIVE,
-            palette::light::TEXT,
+            palette::light::TEXT_DIM,
         )
     };
 
@@ -285,17 +283,19 @@ pub fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
     // from_egui adds +2 to the noninteractive corner radius unconditionally and rounds all
     // four corners; top-only rounding matches the tabs sitting on it.
     style.tab_bar.corner_radius = CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 };
-    style.tab.active.bg_fill = tab_active;
-    style.tab.active.text_color = text;
-    style.tab.active.outline_color = accent;
-    style.tab.focused.bg_fill = tab_active;
-    style.tab.focused.text_color = text;
-    style.tab.focused.outline_color = accent;
+    // The panel fill is what merges tab and page: egui_dock overpaints each
+    // tab's bottom stroke with a 2px line of that tab's own fill, so with the
+    // hline below suppressed there is no seam left between the two.
+    style.tab.active.bg_fill = panel;
+    style.tab.active.text_color = text_bright;
+    style.tab.active.outline_color = border;
+    style.tab.focused = style.tab.active.clone();
     style.tab.inactive.bg_fill = surface;
-    style.tab.inactive.outline_color = border;
-    style.tab.hovered.bg_fill = widget_hot;
-    style.tab.hovered.outline_color = border;
+    style.tab.inactive.text_color = text_dim;
+    style.tab.inactive.outline_color = Color32::TRANSPARENT;
+    style.tab.hovered.bg_fill = widget;
     style.tab.hovered.text_color = text_bright;
+    style.tab.hovered.outline_color = Color32::TRANSPARENT;
     // egui_dock swaps to a *_with_kb_focus variant the moment a tab holds
     // keyboard focus. Left underived they lose the raised fill, so mirror
     // each base state and mark keyboard focus with the accent outline.
@@ -303,7 +303,7 @@ pub fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
     style.tab.focused_with_kb_focus = style.tab.focused.clone();
     style.tab.inactive_with_kb_focus = style.tab.inactive.clone();
     style.tab.inactive_with_kb_focus.outline_color = accent;
-    style.tab.hline_below_active_tab_name = true;
+    style.tab.hline_below_active_tab_name = false;
     // Tab and its panel read as one shape; the panel fill provides the boundary.
     style.tab.tab_body.stroke = egui::Stroke::NONE;
     style.tab.tab_body.bg_fill = panel;
@@ -357,30 +357,28 @@ mod tests {
 
     #[test]
     fn dock_style_themes_every_field_it_sets() {
-        for (name, egui_style, surface, panel, widget_hot, border, accent, text_bright, tab_active, text) in [
+        for (name, egui_style, surface, panel, widget, border, accent, text_bright, text_dim) in [
             (
                 "dark",
                 dark_style(),
                 palette::dark::SURFACE,
                 palette::dark::PANEL,
-                palette::dark::WIDGET_HOT,
+                palette::dark::WIDGET,
                 palette::dark::BORDER,
                 palette::dark::ACCENT,
                 palette::dark::TEXT_BRIGHT,
-                palette::dark::TAB_ACTIVE,
-                palette::dark::TEXT,
+                palette::dark::TEXT_DIM,
             ),
             (
                 "light",
                 light_style(),
                 palette::light::SURFACE,
                 palette::light::PANEL,
-                palette::light::WIDGET_HOT,
+                palette::light::WIDGET,
                 palette::light::BORDER,
                 palette::light::ACCENT,
                 palette::light::TEXT_BRIGHT,
-                palette::light::TAB_ACTIVE,
-                palette::light::TEXT,
+                palette::light::TEXT_DIM,
             ),
         ] {
             let s = dock_style(&egui_style);
@@ -388,51 +386,26 @@ mod tests {
             assert_eq!(s.tab_bar.bg_fill, surface, "{name} tab_bar.bg_fill");
             assert_eq!(s.tab_bar.hline_color, border, "{name} tab_bar.hline_color");
             assert_eq!(s.tab_bar.corner_radius, tab_r, "{name} tab_bar");
-            assert_eq!(s.tab.active.bg_fill, tab_active, "{name} tab.active.bg_fill");
-            assert_eq!(s.tab.active.text_color, text, "{name} tab.active.text_color");
-            assert_eq!(s.tab.active.outline_color, accent, "{name} tab.active.outline_color");
-            assert_eq!(s.tab.active.corner_radius, tab_r, "{name} tab.active.corner_radius");
-            assert_eq!(s.tab.focused.bg_fill, tab_active, "{name} tab.focused.bg_fill");
-            assert_eq!(s.tab.focused.text_color, text, "{name} tab.focused.text_color");
-            assert_eq!(s.tab.focused.outline_color, accent, "{name} tab.focused.outline_color");
-            assert_eq!(s.tab.focused.corner_radius, tab_r, "{name} tab.focused.corner_radius");
-            assert_eq!(s.tab.inactive.bg_fill, surface, "{name} tab.inactive.bg_fill");
-            assert_eq!(s.tab.inactive.outline_color, border, "{name} tab.inactive.outline_color");
-            assert_eq!(s.tab.inactive.corner_radius, tab_r, "{name} tab.inactive.corner_radius");
-            assert_eq!(s.tab.hovered.bg_fill, widget_hot, "{name} tab.hovered.bg_fill");
-            assert_eq!(s.tab.hovered.outline_color, border, "{name} tab.hovered.outline_color");
-            assert_eq!(s.tab.hovered.text_color, text_bright, "{name} tab.hovered.text_color");
-            assert_eq!(s.tab.hovered.corner_radius, tab_r, "{name} tab.hovered.corner_radius");
-            assert_eq!(s.tab.active_with_kb_focus.bg_fill, tab_active, "{name} tab.active_with_kb_focus.bg_fill");
-            assert_eq!(s.tab.active_with_kb_focus.text_color, text, "{name} tab.active_with_kb_focus.text_color");
-            assert_eq!(
-                s.tab.active_with_kb_focus.outline_color, accent,
-                "{name} tab.active_with_kb_focus.outline_color"
-            );
-            assert_eq!(
-                s.tab.active_with_kb_focus.corner_radius, tab_r,
-                "{name} tab.active_with_kb_focus.corner_radius"
-            );
-            assert_eq!(s.tab.focused_with_kb_focus.bg_fill, tab_active, "{name} tab.focused_with_kb_focus.bg_fill");
-            assert_eq!(s.tab.focused_with_kb_focus.text_color, text, "{name} tab.focused_with_kb_focus.text_color");
-            assert_eq!(
-                s.tab.focused_with_kb_focus.outline_color, accent,
-                "{name} tab.focused_with_kb_focus.outline_color"
-            );
-            assert_eq!(
-                s.tab.focused_with_kb_focus.corner_radius, tab_r,
-                "{name} tab.focused_with_kb_focus.corner_radius"
-            );
-            assert_eq!(s.tab.inactive_with_kb_focus.bg_fill, surface, "{name} tab.inactive_with_kb_focus.bg_fill");
-            assert_eq!(
-                s.tab.inactive_with_kb_focus.outline_color, accent,
-                "{name} tab.inactive_with_kb_focus.outline_color"
-            );
-            assert_eq!(
-                s.tab.inactive_with_kb_focus.corner_radius, tab_r,
-                "{name} tab.inactive_with_kb_focus.corner_radius"
-            );
-            assert!(s.tab.hline_below_active_tab_name, "{name} hline_below_active_tab_name");
+
+            for (variant, tab, fill, outline, text) in [
+                ("active", &s.tab.active, panel, border, text_bright),
+                ("focused", &s.tab.focused, panel, border, text_bright),
+                ("active_with_kb_focus", &s.tab.active_with_kb_focus, panel, border, text_bright),
+                ("focused_with_kb_focus", &s.tab.focused_with_kb_focus, panel, border, text_bright),
+                ("inactive", &s.tab.inactive, surface, Color32::TRANSPARENT, text_dim),
+                ("inactive_with_kb_focus", &s.tab.inactive_with_kb_focus, surface, accent, text_dim),
+                ("hovered", &s.tab.hovered, widget, Color32::TRANSPARENT, text_bright),
+            ] {
+                assert_eq!(tab.bg_fill, fill, "{name} tab.{variant}.bg_fill");
+                assert_eq!(tab.outline_color, outline, "{name} tab.{variant}.outline_color");
+                assert_eq!(tab.text_color, text, "{name} tab.{variant}.text_color");
+                assert_eq!(tab.corner_radius, tab_r, "{name} tab.{variant}.corner_radius");
+            }
+
+            // The one field that carries the merge: with it set, egui_dock skips
+            // the strip's bottom border under the active tab, so the tab opens
+            // into the page instead of being sealed off from it.
+            assert!(!s.tab.hline_below_active_tab_name, "{name} hline_below_active_tab_name");
             assert_eq!(s.tab.tab_body.stroke, Stroke::NONE, "{name} tab_body.stroke");
             assert_eq!(s.tab.tab_body.bg_fill, panel, "{name} tab_body.bg_fill");
             assert_eq!(s.separator.color_dragged, accent, "{name} separator.color_dragged");

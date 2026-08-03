@@ -20,10 +20,6 @@ pub mod dark {
     pub const TEXT: Color32 = Color32::from_rgb(0xC9, 0xC6, 0xBE);
     pub const TEXT_DIM: Color32 = Color32::from_rgb(0x97, 0x97, 0x89);
     pub const TEXT_BRIGHT: Color32 = Color32::from_rgb(0xE8, 0xE5, 0xDC);
-
-    /// Fill for the active dock tab. A raised surface rather than an inverted
-    /// block; only ever carries the tab label, never dimmed text.
-    pub const TAB_ACTIVE: Color32 = Color32::from_rgb(0x34, 0x34, 0x30);
 }
 
 /// Light theme surfaces and chrome. Same neutrals, inverted value scale.
@@ -44,8 +40,4 @@ pub mod light {
     pub const TEXT: Color32 = Color32::from_rgb(0x1A, 0x1A, 0x17);
     pub const TEXT_DIM: Color32 = Color32::from_rgb(0x5C, 0x5A, 0x53);
     pub const TEXT_BRIGHT: Color32 = Color32::from_rgb(0x0A, 0x0A, 0x08);
-
-    /// Fill for the active dock tab. A raised surface rather than an inverted
-    /// block; only ever carries the tab label, never dimmed text.
-    pub const TAB_ACTIVE: Color32 = Color32::from_rgb(0xDF, 0xDC, 0xD3);
 }
