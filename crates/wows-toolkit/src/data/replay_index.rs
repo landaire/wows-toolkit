@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use jiff::Timestamp;
+use parking_lot::RwLock;
 use rootcause::Report;
 use rootcause::prelude::*;
 use sqlx::SqlitePool;
@@ -19,11 +20,15 @@ use crate::db::index::rows::IndexError;
 use crate::db::index::rows::IndexedVehicleRow;
 use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::ObjectiveMatch;
+use crate::db::index::rows::PrInputs;
+use crate::db::index::rows::PrRepair;
 use crate::db::index::rows::ReplayRecord;
 use crate::db::index::rows::SourceId;
 use crate::db::index::rows::VehicleRelation;
 use crate::ui::replay_parser::PlayerReport;
 use crate::ui::replay_parser::Replay;
+use crate::util::personal_rating::PersonalRatingData;
+use crate::util::personal_rating::ShipBattleStats;
 
 pub fn outcome_from(result: Option<&BattleResult>) -> MatchOutcome {
     match result {
@@ -214,13 +219,70 @@ pub async fn write_index(pool: &SqlitePool, rows: &MappedRows) -> Result<(), Ind
     Ok(())
 }
 
+/// The single-battle rating for one stored row's worth of stats, or `None` when
+/// the expected values carry nothing for that ship.
+///
+/// Mirrors `UiReport::populate_personal_ratings`: one battle, damage and frags
+/// as recorded, and a win counted from the battle's outcome. Keeping the two in
+/// one shape is what stops a repaired row from disagreeing with a freshly
+/// indexed one.
+pub fn single_battle_pr(pr_data: &PersonalRatingData, inputs: &PrInputs) -> Option<f64> {
+    pr_data
+        .calculate_pr(&[ShipBattleStats {
+            ship_id: inputs.ship_id,
+            battles: 1,
+            damage: inputs.damage,
+            wins: u32::from(inputs.is_win),
+            frags: inputs.kills,
+        }])
+        .map(|result| result.pr)
+}
+
+/// Fill the ratings a freshly mapped set of rows is missing, before it is
+/// written. `map_rows` carries whatever the UI report already computed; a
+/// report built while the expected values were still loading carries nothing,
+/// and without this the row would be written NULL and wait for a later repair
+/// against a later set of expected values.
+///
+/// A row that already has a rating is never touched.
+fn fill_missing_pr(rows: &mut MappedRows, pr_data: &PersonalRatingData) {
+    if !pr_data.is_loaded() {
+        return;
+    }
+    let is_win = rows.record.outcome == MatchOutcome::Win;
+    if rows.record.self_pr.is_none()
+        && let Some(ship_id) = rows.record.self_ship_id
+        && let Some(damage) = rows.record.self_damage
+    {
+        let inputs = PrInputs { ship_id, damage, kills: rows.record.self_kills.unwrap_or(0), is_win };
+        rows.record.self_pr = single_battle_pr(pr_data, &inputs);
+    }
+    for vehicle in &mut rows.vehicles {
+        if vehicle.pr.is_some() {
+            continue;
+        }
+        let Some(damage) = vehicle.damage else {
+            continue;
+        };
+        let inputs = PrInputs { ship_id: vehicle.ship_id, damage, kills: vehicle.kills.unwrap_or(0), is_win };
+        vehicle.pr = single_battle_pr(pr_data, &inputs);
+    }
+}
+
 /// Map, enrich with stream-sniper detection, and persist on the current
 /// (background) thread. Shared by both the live indexing path and the
 /// on-demand reindex/backfill path, so both benefit from persisted Twitch
 /// observations. Best-effort: errors are logged and swallowed so indexing
 /// never destabilizes the parser thread.
-pub fn index_replay_blocking(rt: &Runtime, pool: &SqlitePool, replay: &Replay, source_id: SourceId, now: Timestamp) {
-    if let Err(e) = index_replay_reporting(rt, pool, replay, source_id, now) {
+pub fn index_replay_blocking(
+    rt: &Runtime,
+    pool: &SqlitePool,
+    replay: &Replay,
+    source_id: SourceId,
+    now: Timestamp,
+    pr_data: &RwLock<PersonalRatingData>,
+) {
+    if let Err(e) = index_replay_reporting(rt, pool, replay, source_id, now, pr_data) {
         warn!("failed to index replay: {e}");
     }
 }
@@ -233,10 +295,12 @@ pub fn index_replay_reporting(
     replay: &Replay,
     source_id: SourceId,
     now: Timestamp,
+    pr_data: &RwLock<PersonalRatingData>,
 ) -> Result<(), Report> {
     let Some(mut rows) = map_rows(replay, source_id, now) else {
         return Err(report!("replay carries no parsed report to index"));
     };
+    fill_missing_pr(&mut rows, &pr_data.read());
 
     let match_ts = rows.objective.timestamp.as_second();
     let window_start = match_ts - SNIPER_WINDOW_BEFORE_SECS;
@@ -250,6 +314,42 @@ pub fn index_replay_reporting(
         write_index(pool, &rows).await
     })
     .map_err(|e| report!("failed to write replay index rows: {e}"))
+}
+
+/// Give a rating to every stored row that has none, and leave every row that
+/// has one exactly as it is.
+///
+/// A rating is a point-in-time value: expected values drift, so recomputing a
+/// stored one would make the same battle report a different number month to
+/// month and quietly change what a saved `pr < 800` search matches. Only the
+/// rows that never got a number are touched, and those are stamped with
+/// today's expected values because no earlier set survives to stamp them with.
+///
+/// Returns how many rows were filled. The two reads scan `replay_record` and
+/// `indexed_vehicle`, so this belongs on the runtime and not on a frame;
+/// nothing to do costs those two scans and no writes at all.
+pub async fn repair_missing_pr(
+    pool: SqlitePool,
+    pr_data: std::sync::Arc<RwLock<PersonalRatingData>>,
+) -> Result<u64, IndexError> {
+    let gaps = query::pr_gaps(&pool).await?;
+    if gaps.is_empty() {
+        return Ok(0);
+    }
+
+    // The guard is confined to this block: it is not a Send lock and must not
+    // be held across the write below.
+    let repairs: Vec<PrRepair> = {
+        let pr = pr_data.read();
+        if !pr.is_loaded() {
+            return Ok(0);
+        }
+        gaps.iter()
+            .filter_map(|gap| single_battle_pr(&pr, &gap.inputs).map(|pr| PrRepair { target: gap.target, pr }))
+            .collect()
+    };
+
+    query::apply_pr_repairs(&pool, &repairs).await
 }
 
 #[cfg(test)]
@@ -364,5 +464,115 @@ mod tests {
         assert_eq!(relation_from(Relation::new(0)), VehicleRelation::SelfPlayer);
         assert_eq!(relation_from(Relation::new(1)), VehicleRelation::Ally);
         assert_eq!(relation_from(Relation::new(2)), VehicleRelation::Enemy);
+    }
+
+    /// A ship the checked-in expected values carry a real entry for, so a
+    /// rating computed against it is a number rather than `None`.
+    const RATED_SHIP: u64 = 3_374_266_064;
+
+    fn loaded_pr_data() -> PersonalRatingData {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("tests")
+            .join("fixtures")
+            .join("pr_expected_values.json");
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("missing fixture {}: {e}", path.display()));
+        let mut pr = PersonalRatingData::new();
+        pr.load_from_bytes(&bytes).expect("fixture should parse");
+        pr
+    }
+
+    fn mapped_rows(record_pr: Option<f64>, vehicle_pr: Option<f64>) -> MappedRows {
+        let arena_id = ArenaId::new(1);
+        let mut vehicle = vehicle_row(7, "Player1");
+        vehicle.ship_id = GameParamId::from(RATED_SHIP);
+        vehicle.damage = Some(80_000);
+        vehicle.kills = Some(2);
+        vehicle.pr = vehicle_pr;
+        MappedRows {
+            objective: ObjectiveMatch {
+                arena_id,
+                timestamp: Timestamp::from_second(1_700_000_000).unwrap(),
+                map: "spaces/13_OC_new_dawn".into(),
+                game_mode: "Domination".into(),
+                game_type: "pvp".into(),
+                match_group: "pvp".into(),
+                version_build: Some(1234),
+            },
+            vehicles: vec![vehicle],
+            record: ReplayRecord {
+                arena_id,
+                source_id: SourceId(1),
+                replay_path: std::path::PathBuf::from("1.wowsreplay"),
+                file_mtime: Some(42),
+                outcome: MatchOutcome::Win,
+                self_account_id: Some(AccountId(7)),
+                self_ship_id: Some(GameParamId::from(RATED_SHIP)),
+                self_survived: Some(true),
+                self_damage: Some(80_000),
+                self_kills: Some(2),
+                self_pr: record_pr,
+                results_available: true,
+                indexed_at: Timestamp::from_second(1_700_000_100).unwrap(),
+            },
+        }
+    }
+
+    #[test]
+    fn missing_ratings_are_filled_before_the_rows_are_written() {
+        let mut rows = mapped_rows(None, None);
+        fill_missing_pr(&mut rows, &loaded_pr_data());
+        assert!(rows.record.self_pr.is_some(), "the record's rating was computed from its own stored stats");
+        assert!(rows.vehicles[0].pr.is_some(), "the roster row's rating was computed too");
+    }
+
+    #[test]
+    fn a_rating_the_report_already_carried_is_not_recomputed() {
+        let mut rows = mapped_rows(Some(1500.0), Some(1200.0));
+        fill_missing_pr(&mut rows, &loaded_pr_data());
+        assert_eq!(rows.record.self_pr, Some(1500.0));
+        assert_eq!(rows.vehicles[0].pr, Some(1200.0));
+    }
+
+    #[test]
+    fn nothing_is_invented_while_the_expected_values_are_unloaded() {
+        let mut rows = mapped_rows(None, None);
+        fill_missing_pr(&mut rows, &PersonalRatingData::new());
+        assert_eq!(rows.record.self_pr, None);
+        assert_eq!(rows.vehicles[0].pr, None);
+    }
+
+    /// The rating a filled row gets has to come from the battle's own outcome,
+    /// which is the only place a single-battle win rate can come from.
+    #[test]
+    fn a_filled_rating_follows_the_records_outcome() {
+        let pr_data = loaded_pr_data();
+
+        let mut won = mapped_rows(None, None);
+        fill_missing_pr(&mut won, &pr_data);
+
+        let mut lost = mapped_rows(None, None);
+        lost.record.outcome = MatchOutcome::Loss;
+        fill_missing_pr(&mut lost, &pr_data);
+
+        assert!(
+            won.record.self_pr > lost.record.self_pr,
+            "a won battle must rate above the same battle lost ({:?} vs {:?})",
+            won.record.self_pr,
+            lost.record.self_pr
+        );
+        assert!(won.vehicles[0].pr > lost.vehicles[0].pr, "the roster rows follow the same outcome");
+    }
+
+    #[test]
+    fn a_win_and_a_loss_rate_differently() {
+        let pr_data = loaded_pr_data();
+        let inputs = PrInputs { ship_id: GameParamId::from(RATED_SHIP), damage: 80_000, kills: 2, is_win: true };
+        let won = single_battle_pr(&pr_data, &inputs).expect("the fixture rates this ship");
+        let lost = single_battle_pr(&pr_data, &PrInputs { is_win: false, ..inputs }).expect("same ship");
+        assert!(won > lost, "a win must not rate the same as a loss ({won} vs {lost})");
     }
 }

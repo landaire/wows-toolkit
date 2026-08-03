@@ -340,6 +340,13 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     shown_twitch_token_error: bool,
 
+    /// Whether the pass that gives a rating to index rows that never got one
+    /// has been started this run. Expected values can load twice in a session
+    /// (from disk, then from a fetch); one pass covers both, and running again
+    /// would only re-read rows the first pass already filled.
+    #[serde(skip)]
+    pr_repair_started: bool,
+
     /// Whether a sticky toast has already been shown for an invalid WoWs
     /// directory.
     #[serde(skip)]
@@ -725,6 +732,7 @@ impl Default for WowsToolkitApp {
             constants_version_mismatch: false,
             constants_update_error_shown: false,
             shown_twitch_token_error: false,
+            pr_repair_started: false,
             shown_wows_dir_error: false,
             network_result_rx: None,
             runtime: Arc::new(Runtime::new().expect("failed to create tokio runtime")),
@@ -1138,6 +1146,30 @@ impl WowsToolkitApp {
                 tracing::error!("failed to read PR expected values file");
             }
         }
+    }
+
+    /// Start the pass that gives a rating to index rows that were written
+    /// before the expected values were available.
+    ///
+    /// Spawned onto the runtime rather than run here: the read walks every row
+    /// with a NULL rating, which the UI thread must not wait on. Runs at most
+    /// once per session, and does no writes when there is nothing missing.
+    fn start_pr_repair(&mut self) {
+        if self.pr_repair_started {
+            return;
+        }
+        let Some(pool) = self.db_pool.clone() else {
+            return;
+        };
+        self.pr_repair_started = true;
+        let pr_data = Arc::clone(&self.tab_state.personal_rating_data);
+        self.runtime.spawn(async move {
+            match crate::data::replay_index::repair_missing_pr(pool, pr_data).await {
+                Ok(0) => {}
+                Ok(filled) => tracing::info!("filled {filled} index row(s) that had no personal rating"),
+                Err(e) => tracing::warn!("personal rating repair failed: {e}"),
+            }
+        });
     }
 
     /// Initialize the tracing subscriber with file logging.
@@ -1867,6 +1899,7 @@ impl WowsToolkitApp {
                 }
                 BackgroundTaskCompletion::PersonalRatingDataLoaded(pr_data) => {
                     self.tab_state.personal_rating_data.write().load(pr_data);
+                    self.start_pr_repair();
                 }
                 BackgroundTaskCompletion::ReconcileIndexComplete { indexed, total } => {
                     if indexed > 0 {

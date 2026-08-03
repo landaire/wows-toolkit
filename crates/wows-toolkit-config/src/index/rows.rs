@@ -9,6 +9,11 @@ use wows_core::game_types::GameParamId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct SourceId(pub i64);
 
+/// Identifies one row of `replay_record`: a single replay file's perspective on
+/// a match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RecordId(pub i64);
+
 /// Runtime handle for one open replay workspace. `SourceId` is the durable
 /// identity; this is only ever valid within a single run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
@@ -192,6 +197,12 @@ pub struct MatchHit {
     pub outcome: MatchOutcome,
     pub self_account_id: Option<AccountId>,
     pub self_ship_id: Option<GameParamId>,
+    /// The `indexed_vehicle.ship_name` recorded for `self_ship_id` in this
+    /// match, written when the match was indexed with its own build's game data
+    /// loaded. Lets a hit name its ship even when that build's data is no
+    /// longer installed. `None` when the record has no self ship, or when the
+    /// roster carries no row for it.
+    pub self_ship_name: Option<String>,
     pub self_survived: Option<bool>,
     pub self_damage: Option<u64>,
     pub self_kills: Option<i64>,
@@ -199,6 +210,40 @@ pub struct MatchHit {
     pub results_available: bool,
     pub replay_path: PathBuf,
     pub file_mtime: Option<i64>,
+}
+
+/// Which stored PR column a repair targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrTarget {
+    /// `replay_record.self_pr` for one record.
+    Record(RecordId),
+    /// `indexed_vehicle.pr` for one roster row, keyed by that table's primary key.
+    Vehicle { arena_id: ArenaId, account_id: AccountId, ship_id: GameParamId },
+}
+
+/// The stats a single-battle PR calculation reads, as an index row stores them.
+#[derive(Debug, Clone, Copy)]
+pub struct PrInputs {
+    pub ship_id: GameParamId,
+    pub damage: u64,
+    pub kills: i64,
+    pub is_win: bool,
+}
+
+/// A stored row whose PR column is NULL, with everything a single-battle PR
+/// calculation needs. Read out of the index so the calculation can happen in
+/// the crate that owns the expected-values data.
+#[derive(Debug, Clone, Copy)]
+pub struct PrGap {
+    pub target: PrTarget,
+    pub inputs: PrInputs,
+}
+
+/// A computed PR to write back into the row identified by `target`.
+#[derive(Debug, Clone, Copy)]
+pub struct PrRepair {
+    pub target: PrTarget,
+    pub pr: f64,
 }
 
 /// Another player who shared the perspective player's division.

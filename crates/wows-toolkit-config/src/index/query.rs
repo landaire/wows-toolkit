@@ -28,12 +28,33 @@ use super::rows::MatchHit;
 use super::rows::MatchOutcome;
 use super::rows::ObjectiveMatch;
 use super::rows::PlayerFacet;
+use super::rows::PrGap;
+use super::rows::PrInputs;
+use super::rows::PrRepair;
+use super::rows::PrTarget;
+use super::rows::RecordId;
 use super::rows::ReplayRecord;
 use super::rows::RowSummary;
 use super::rows::ShipFacet;
 use super::rows::SourceId;
 use super::rows::SourceKind;
 use super::rows::VehicleRelation;
+
+/// The column list every query mapped by [`row_to_match_hit`] selects, so the
+/// two callers cannot drift apart.
+///
+/// `self_ship_name` is a correlated scalar subquery, not a join. A join against
+/// `indexed_vehicle` could fan one hit out into a row per matching roster row;
+/// a scalar subquery is one value per outer row by construction, so the result
+/// count is unchanged whatever the roster holds. It is keyed on the chosen
+/// record's own `self_ship_id` rather than on `relation = 'self'`: the roster's
+/// relations belong to whichever replay indexed the arena first, which is not
+/// necessarily the record this hit picked.
+const MATCH_HIT_COLUMNS: &str = "m.arena_id, m.timestamp, m.map, m.game_mode, m.game_type, m.match_group, \
+     m.version_build, r.source_id, r.outcome, r.self_account_id, r.self_ship_id, \
+     (SELECT v.ship_name FROM indexed_vehicle v \
+        WHERE v.arena_id = m.arena_id AND v.ship_id = r.self_ship_id LIMIT 1) AS self_ship_name, \
+     r.self_survived, r.self_damage, r.self_kills, r.self_pr, r.results_available, r.replay_path, r.file_mtime";
 
 /// The live source's id, or `None` when the indexer has not created it yet.
 /// Readers must not create the row; that is the indexing path's job. A reader
@@ -315,6 +336,12 @@ pub async fn upsert_match(pool: &SqlitePool, m: &ObjectiveMatch) -> Result<(), I
     Ok(())
 }
 
+/// `pr` is coalesced rather than assigned: a stored rating is a point-in-time
+/// value, and a re-index that ran before the expected values were available
+/// carries `None` for it. Assigning would throw the stored number away and
+/// leave the row waiting on another repair against a later set of expected
+/// values, which is how the same battle ends up reporting two different
+/// ratings.
 pub async fn upsert_vehicles(pool: &SqlitePool, rows: &[IndexedVehicleRow]) -> Result<(), IndexError> {
     let mut tx = pool.begin().await?;
     for v in rows {
@@ -327,8 +354,8 @@ pub async fn upsert_vehicles(pool: &SqlitePool, rows: &[IndexedVehicleRow]) -> R
              ON CONFLICT(arena_id, account_id, ship_id) DO UPDATE SET \
                player_name=?3, clan=?4, realm=?5, ship_index=?7, ship_name=?8, nation=?9, species=?10, \
                tier=?11, relation=?12, division_id=?13, survived=?14, damage=?15, kills=?16, spotting=?17, \
-               potential=?18, received=?19, pr=?20, is_test_ship=?21, disconnected=?22, is_stream_sniper=?23, \
-               sniper_twitch_login=?24",
+               potential=?18, received=?19, pr=COALESCE(?20, pr), is_test_ship=?21, disconnected=?22, \
+               is_stream_sniper=?23, sniper_twitch_login=?24",
         )
         .bind(v.arena_id.raw())
         .bind(v.account_id.raw())
@@ -401,6 +428,8 @@ pub async fn prune_twitch_observations(pool: &SqlitePool, older_than_unix: i64) 
     Ok(result.rows_affected())
 }
 
+/// `self_pr` is coalesced for the same reason as `indexed_vehicle.pr`; see
+/// [`upsert_vehicles`].
 pub async fn upsert_record(pool: &SqlitePool, r: &ReplayRecord) -> Result<(), IndexError> {
     sqlx::query(
         "INSERT INTO replay_record \
@@ -409,7 +438,7 @@ pub async fn upsert_record(pool: &SqlitePool, r: &ReplayRecord) -> Result<(), In
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13) \
          ON CONFLICT(source_id, replay_path) DO UPDATE SET \
            arena_id=?1, file_mtime=?4, outcome=?5, self_account_id=?6, self_ship_id=?7, self_survived=?8, \
-           self_damage=?9, self_kills=?10, self_pr=?11, results_available=?12, indexed_at=?13",
+           self_damage=?9, self_kills=?10, self_pr=COALESCE(?11, self_pr), results_available=?12, indexed_at=?13",
     )
     .bind(r.arena_id.raw())
     .bind(r.source_id.0)
@@ -552,15 +581,13 @@ async fn run_match_query(
     limit: Option<i64>,
 ) -> Result<Vec<MatchHit>, IndexError> {
     // Pick one record per arena: prefer a file that still has an mtime, then newest indexed.
-    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
-        "SELECT m.arena_id, m.timestamp, m.map, m.game_mode, m.game_type, m.match_group, m.version_build, \
-                r.source_id, r.outcome, r.self_account_id, r.self_ship_id, r.self_survived, r.self_damage, \
-                r.self_kills, r.self_pr, r.results_available, r.replay_path, r.file_mtime \
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
+        "SELECT {MATCH_HIT_COLUMNS} \
          FROM indexed_match m \
          JOIN replay_record r ON r.record_id = ( \
             SELECT rr.record_id FROM replay_record rr \
-            WHERE rr.arena_id = m.arena_id",
-    );
+            WHERE rr.arena_id = m.arena_id"
+    ));
     // source scope inside the per-arena record picker
     if let Some(sources) = &filter.source_ids {
         qb.push(" AND rr.source_id IN (");
@@ -630,6 +657,7 @@ fn row_to_match_hit(row: &sqlx::sqlite::SqliteRow) -> Result<MatchHit, IndexErro
         outcome: MatchOutcome::from_db_str(&outcome_str).unwrap_or(MatchOutcome::Unknown),
         self_account_id: self_account.map(AccountId::from),
         self_ship_id: self_ship.map(|s| GameParamId::from(s as u64)),
+        self_ship_name: row.try_get("self_ship_name")?,
         self_survived: row.try_get::<Option<bool>, _>("self_survived")?,
         self_damage: self_damage.map(|d| d as u64),
         self_kills: row.try_get("self_kills")?,
@@ -1012,17 +1040,127 @@ pub async fn search_by_ast(
     ctx: &CompileCtx<'_>,
     limit: i64,
 ) -> Result<Vec<MatchHit>, IndexError> {
-    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
-        "SELECT m.arena_id, m.timestamp, m.map, m.game_mode, m.game_type, m.match_group, m.version_build, \
-                r.source_id, r.outcome, r.self_account_id, r.self_ship_id, r.self_survived, r.self_damage, \
-                r.self_kills, r.self_pr, r.results_available, r.replay_path, r.file_mtime \
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
+        "SELECT {MATCH_HIT_COLUMNS} \
          FROM indexed_match m \
          JOIN replay_record r ON r.record_id = ( \
             SELECT rr.record_id FROM replay_record rr WHERE rr.arena_id = m.arena_id \
-            ORDER BY (rr.file_mtime IS NOT NULL) DESC, rr.indexed_at DESC LIMIT 1 ) WHERE ",
-    );
+            ORDER BY (rr.file_mtime IS NOT NULL) DESC, rr.indexed_at DESC LIMIT 1 ) WHERE "
+    ));
     push_match_expr(&mut qb, expr, ctx);
     qb.push(" ORDER BY m.timestamp DESC LIMIT ").push_bind(limit + 1);
     let rows = qb.build().fetch_all(pool).await?;
     rows.iter().map(row_to_match_hit).collect()
+}
+
+/// Rows whose stored PR is NULL because the expected values had not loaded when
+/// they were written, together with the inputs a single-battle PR calculation
+/// needs. The calculation itself belongs to the crate that owns the
+/// expected-values data, so this only reads.
+///
+/// A row with no damage recorded is not a gap: the indexing path skips those
+/// too, and a rating computed from an absent damage figure would be a fiction.
+/// `is_win` comes from the record's own outcome for a record gap, and from the
+/// arena's chosen record for a roster gap -- the same record the search picker
+/// would pick, so a roster row is rated against the perspective the rest of the
+/// index presents it under.
+pub async fn pr_gaps(pool: &SqlitePool) -> Result<Vec<PrGap>, IndexError> {
+    let mut gaps = Vec::new();
+
+    let record_rows = sqlx::query(
+        "SELECT record_id, self_ship_id, self_damage, self_kills, outcome \
+         FROM replay_record \
+         WHERE self_pr IS NULL AND self_ship_id IS NOT NULL AND self_damage IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await?;
+    for row in &record_rows {
+        let damage: i64 = row.try_get("self_damage")?;
+        let Ok(damage) = u64::try_from(damage) else {
+            continue;
+        };
+        let outcome: String = row.try_get("outcome")?;
+        gaps.push(PrGap {
+            target: PrTarget::Record(RecordId(row.try_get::<i64, _>("record_id")?)),
+            inputs: PrInputs {
+                ship_id: GameParamId::from(row.try_get::<i64, _>("self_ship_id")? as u64),
+                damage,
+                kills: row.try_get::<Option<i64>, _>("self_kills")?.unwrap_or(0),
+                is_win: MatchOutcome::from_db_str(&outcome) == Some(MatchOutcome::Win),
+            },
+        });
+    }
+
+    let vehicle_rows = sqlx::query(
+        "SELECT v.arena_id, v.account_id, v.ship_id, v.damage, v.kills, \
+                (SELECT rr.outcome FROM replay_record rr WHERE rr.arena_id = v.arena_id \
+                   ORDER BY (rr.file_mtime IS NOT NULL) DESC, rr.indexed_at DESC LIMIT 1) AS outcome \
+         FROM indexed_vehicle v \
+         WHERE v.pr IS NULL AND v.damage IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await?;
+    for row in &vehicle_rows {
+        let damage: i64 = row.try_get("damage")?;
+        let Ok(damage) = u64::try_from(damage) else {
+            continue;
+        };
+        let outcome: Option<String> = row.try_get("outcome")?;
+        let ship_id = GameParamId::from(row.try_get::<i64, _>("ship_id")? as u64);
+        gaps.push(PrGap {
+            target: PrTarget::Vehicle {
+                arena_id: ArenaId::new(row.try_get::<i64, _>("arena_id")?),
+                account_id: AccountId::from(row.try_get::<i64, _>("account_id")?),
+                ship_id,
+            },
+            inputs: PrInputs {
+                ship_id,
+                damage,
+                kills: row.try_get::<Option<i64>, _>("kills")?.unwrap_or(0),
+                is_win: outcome.as_deref().and_then(MatchOutcome::from_db_str) == Some(MatchOutcome::Win),
+            },
+        });
+    }
+
+    Ok(gaps)
+}
+
+/// Write computed ratings into the rows they were computed for, returning how
+/// many rows actually changed.
+///
+/// Every statement carries its own `IS NULL` guard, so a row that acquired a
+/// rating between [`pr_gaps`] reading it and this writing is left alone. That
+/// guard is what makes a stored rating permanent: nothing here can replace one.
+pub async fn apply_pr_repairs(pool: &SqlitePool, repairs: &[PrRepair]) -> Result<u64, IndexError> {
+    if repairs.is_empty() {
+        return Ok(0);
+    }
+    let mut tx = pool.begin().await?;
+    let mut changed = 0u64;
+    for repair in repairs {
+        let result = match repair.target {
+            PrTarget::Record(record) => {
+                sqlx::query("UPDATE replay_record SET self_pr = ?1 WHERE record_id = ?2 AND self_pr IS NULL")
+                    .bind(repair.pr)
+                    .bind(record.0)
+                    .execute(&mut *tx)
+                    .await?
+            }
+            PrTarget::Vehicle { arena_id, account_id, ship_id } => {
+                sqlx::query(
+                    "UPDATE indexed_vehicle SET pr = ?1 \
+                 WHERE arena_id = ?2 AND account_id = ?3 AND ship_id = ?4 AND pr IS NULL",
+                )
+                .bind(repair.pr)
+                .bind(arena_id.raw())
+                .bind(account_id.raw())
+                .bind(ship_id.raw() as i64)
+                .execute(&mut *tx)
+                .await?
+            }
+        };
+        changed += result.rows_affected();
+    }
+    tx.commit().await?;
+    Ok(changed)
 }

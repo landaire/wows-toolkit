@@ -13,6 +13,7 @@ use rust_i18n::t;
 use tokio::runtime::Runtime;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
+use wowsunpack::game_params::provider::GameMetadataProvider;
 
 use crate::app::ToolkitTabViewer;
 use crate::db::index::query;
@@ -397,16 +398,28 @@ fn collect_roster_ids(expr: &RosterExpr, ships: &mut Vec<GameParamId>, players: 
     }
 }
 
+/// The display name for a hit's self ship.
+///
+/// The name stored at index time wins: it was written with the match's own
+/// build loaded, and that build's game data is frequently no longer installed
+/// by the time the match is searched. `provider` is the fallback for rows
+/// indexed before the name was carried, and a bracketed id the last resort when
+/// neither can name the ship.
+fn ship_display_name(hit: &MatchHit, provider: Option<&GameMetadataProvider>) -> Option<String> {
+    let ship_id = hit.self_ship_id?;
+    if let Some(stored) = hit.self_ship_name.as_ref().filter(|name| !name.is_empty()) {
+        return Some(stored.clone());
+    }
+    Some(crate::data::session_stats::resolve_ship_name(ship_id, provider))
+}
+
 impl ToolkitTabViewer<'_> {
-    /// Resolve a display name for the match's self ship, using the game data for the
-    /// match's own build when it is loaded. Falls back to a bracketed id when no
-    /// matching build is loaded or the ship id is unknown.
+    /// [`ship_display_name`] against the game data for the match's own build,
+    /// when that build is loaded.
     fn search_ship_display_name(&self, hit: &MatchHit) -> Option<String> {
-        let ship_id = hit.self_ship_id?;
         let data = hit.version_build.and_then(|build| self.tab_state.wows_data_map.as_ref()?.get(build));
         let guard = data.as_ref().map(|d| d.read());
-        let provider = guard.as_ref().and_then(|g| g.game_metadata.as_deref());
-        Some(crate::data::session_stats::resolve_ship_name(ship_id, provider))
+        ship_display_name(hit, guard.as_ref().and_then(|g| g.game_metadata.as_deref()))
     }
 
     pub fn build_search_tab(&mut self, ui: &mut egui::Ui) {
@@ -676,5 +689,57 @@ mod tests {
         let two_words = map_option("New Dawn");
         assert_eq!(two_words.label, "New Dawn");
         assert_eq!(two_words.token, "\"New Dawn\"");
+    }
+
+    fn a_hit(self_ship_id: Option<GameParamId>, self_ship_name: Option<&str>) -> MatchHit {
+        MatchHit {
+            arena_id: wows_replays::types::ArenaId::new(1),
+            timestamp: jiff::Timestamp::UNIX_EPOCH,
+            map: "spaces/13_OC_new_dawn".into(),
+            game_mode: "Domination".into(),
+            game_type: "pvp".into(),
+            match_group: "pvp".into(),
+            version_build: Some(11_189_791),
+            source_id: crate::db::index::rows::SourceId(1),
+            outcome: MatchOutcome::Win,
+            self_account_id: Some(AccountId(7)),
+            self_ship_id,
+            self_ship_name: self_ship_name.map(str::to_owned),
+            self_survived: Some(true),
+            self_damage: Some(80_000),
+            self_kills: Some(2),
+            self_pr: Some(1500.0),
+            results_available: true,
+            replay_path: std::path::PathBuf::from("1.wowsreplay"),
+            file_mtime: Some(42),
+        }
+    }
+
+    /// No provider stands in for the case the bug is about: a January replay
+    /// whose build's game data is no longer installed.
+    #[test]
+    fn a_stored_name_is_shown_when_the_matchs_build_is_not_loaded() {
+        let hit = a_hit(Some(GameParamId::from(4_074_649_424_u64)), Some("Smaland"));
+        assert_eq!(ship_display_name(&hit, None).as_deref(), Some("Smaland"));
+    }
+
+    #[test]
+    fn a_hit_with_no_stored_name_falls_back_to_the_bracketed_id() {
+        let hit = a_hit(Some(GameParamId::from(4_074_649_424_u64)), None);
+        assert_eq!(ship_display_name(&hit, None).as_deref(), Some("[4074649424]"));
+    }
+
+    /// An empty stored name is not a name; showing it would leave the cell blank
+    /// with no way to tell which ship the match was played in.
+    #[test]
+    fn an_empty_stored_name_is_not_treated_as_a_name() {
+        let hit = a_hit(Some(GameParamId::from(4_074_649_424_u64)), Some(""));
+        assert_eq!(ship_display_name(&hit, None).as_deref(), Some("[4074649424]"));
+    }
+
+    #[test]
+    fn a_hit_with_no_self_ship_names_nothing() {
+        let hit = a_hit(None, Some("Smaland"));
+        assert_eq!(ship_display_name(&hit, None), None);
     }
 }

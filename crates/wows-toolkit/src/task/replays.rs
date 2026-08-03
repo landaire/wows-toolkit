@@ -878,6 +878,7 @@ fn parse_replay_data_in_background(
                                 &replay,
                                 source_id,
                                 jiff::Timestamp::now(),
+                                &data.personal_rating_data,
                             );
                         }
 
@@ -1339,6 +1340,7 @@ fn index_one_replay(
         &replay,
         source_id,
         jiff::Timestamp::now(),
+        personal_rating_data,
     );
 
     ParseOutcome::ParsedAndSent
@@ -2078,6 +2080,7 @@ fn index_ingested_replay(
                 replay,
                 source,
                 jiff::Timestamp::now(),
+                &deps.personal_rating_data,
             )
         },
         |replay| {

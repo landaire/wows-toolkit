@@ -26,6 +26,7 @@ use wows_toolkit_config::index::query_ast::Value;
 use wows_toolkit_config::index::query_sql::CompileCtx;
 use wows_toolkit_config::index::query_text::parse_query;
 use wows_toolkit_config::index::rows::IndexedVehicleRow;
+use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::ReplayRecord;
@@ -499,4 +500,59 @@ async fn a_clan_term_matches_the_clan_column_independently_of_the_player_name() 
         "the seeded shape spans both columns"
     );
     assert!(run_text(&pool, "any(clan:nemo)").await.is_empty(), "a player name must not answer a clan term");
+}
+
+/// Full hits rather than just arena ids, for the columns a hit carries beyond
+/// its identity.
+async fn hits(pool: &sqlx::SqlitePool, expr: &MatchExpr) -> Vec<MatchHit> {
+    let maps = MapCatalog::default();
+    let ctx = CompileCtx { maps: &maps };
+    query::search_by_ast(pool, expr, &ctx, 500).await.unwrap()
+}
+
+#[tokio::test]
+async fn a_hit_carries_the_name_stored_for_its_own_ship() {
+    let pool = mem_pool().await;
+    // `a_record`'s self ship is 999, which `a_vehicle` hands to account 99.
+    let mut me = a_vehicle(1, 99, VehicleRelation::SelfPlayer);
+    me.ship_name = "Yamato".into();
+    let mut enemy = a_vehicle(1, 8, VehicleRelation::Enemy);
+    enemy.ship_name = "Shimakaze".into();
+    seed(&pool, 1, vec![me, enemy]).await;
+
+    let hits = hits(&pool, &Expr::All(vec![])).await;
+    assert_eq!(hits.len(), 1);
+    assert_eq!(
+        hits[0].self_ship_name.as_deref(),
+        Some("Yamato"),
+        "the stored name must be the one recorded for the record's own ship"
+    );
+}
+
+#[tokio::test]
+async fn two_roster_rows_in_the_self_ship_still_yield_one_hit() {
+    let pool = mem_pool().await;
+    // Both roster rows match the record's self ship, so a join would return the
+    // match twice. A scalar subquery cannot.
+    let mut me = a_vehicle(1, 99, VehicleRelation::SelfPlayer);
+    me.ship_name = "Yamato".into();
+    let mut twin = a_vehicle(1, 8, VehicleRelation::Enemy);
+    twin.ship_id = GameParamId::from(999u64);
+    twin.ship_name = "Yamato".into();
+    seed(&pool, 1, vec![me, twin]).await;
+
+    let hits = hits(&pool, &Expr::All(vec![])).await;
+    assert_eq!(hits.len(), 1, "the ship-name lookup must not fan a hit out into one row per roster row");
+    assert_eq!(hits[0].self_ship_name.as_deref(), Some("Yamato"));
+}
+
+#[tokio::test]
+async fn a_hit_whose_ship_is_absent_from_the_roster_carries_no_stored_name() {
+    let pool = mem_pool().await;
+    // Account 7's ship is 907; the record's self ship is 999.
+    seed(&pool, 1, vec![a_vehicle(1, 7, VehicleRelation::SelfPlayer)]).await;
+
+    let hits = hits(&pool, &Expr::All(vec![])).await;
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].self_ship_name, None, "no roster row names this ship, so nothing may be invented for it");
 }
