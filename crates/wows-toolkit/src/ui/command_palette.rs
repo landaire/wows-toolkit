@@ -16,19 +16,11 @@ use crate::armor_viewer::ship_selector::ShipCatalog;
 use crate::armor_viewer::ship_selector::ShipEntry;
 use crate::armor_viewer::ship_selector::tier_roman;
 use crate::db::index::query;
-use crate::db::index::query_model::Chip;
-use crate::db::index::query_model::Connector;
-use crate::db::index::query_model::Field;
-use crate::db::index::query_model::Group;
-use crate::db::index::query_model::Op;
-use crate::db::index::query_model::Query;
-use crate::db::index::query_model::StatKind;
-use crate::db::index::query_model::Subject;
-use crate::db::index::query_model::Value;
-use crate::db::index::rows::MatchOutcome;
+use crate::db::index::query_ast::MatchExpr;
 use crate::db::index::rows::PlayerFacet;
 use crate::db::index::rows::ShipFacet;
 use crate::db::index::rows::WorkspaceId;
+use crate::ui::query_bar::seed;
 
 /// What a picked palette entry does. Carried as the `Entry` payload.
 #[derive(Clone)]
@@ -57,7 +49,7 @@ pub enum PaletteAction {
     /// reaches `dispatch_palette_action` (the palette stays open).
     EnterSub(SubKind),
     /// Hand a pre-built query to the Search tab and focus it.
-    OpenSearchWith(Query),
+    OpenSearchWith(MatchExpr),
     /// Switch the app theme.
     SetTheme(crate::data::settings::ThemeChoice),
 }
@@ -125,28 +117,9 @@ impl CommandPalette {
         entries.push(egui_palette::Entry::new("My matches in ship...", PaletteAction::EnterSub(SubKind::MyShips)));
         entries.push(egui_palette::Entry::new("View armor for ship...", PaletteAction::EnterSub(SubKind::ArmorShips)));
 
-        let died_query = Query {
-            groups: vec![Group {
-                chips: vec![
-                    Chip { field: Field::Outcome, op: Op::Is, value: Value::Outcome(MatchOutcome::Loss) },
-                    Chip {
-                        field: Field::Stat { kind: StatKind::Survived, subject: Subject::SelfPlayer },
-                        op: Op::Is,
-                        value: Value::Bool(false),
-                    },
-                ],
-            }],
-            connector: Connector::And,
-        };
-        entries.push(egui_palette::Entry::new("Games I died in", PaletteAction::OpenSearchWith(died_query)));
-
-        let won_query = Query {
-            groups: vec![Group {
-                chips: vec![Chip { field: Field::Outcome, op: Op::Is, value: Value::Outcome(MatchOutcome::Win) }],
-            }],
-            connector: Connector::And,
-        };
-        entries.push(egui_palette::Entry::new("Games I won", PaletteAction::OpenSearchWith(won_query)));
+        entries
+            .push(egui_palette::Entry::new("Games I died in", PaletteAction::OpenSearchWith(seed::games_i_died_in())));
+        entries.push(egui_palette::Entry::new("Games I won", PaletteAction::OpenSearchWith(seed::games_i_won())));
 
         entries.push(egui_palette::Entry::new(rust_i18n::t!("ui.replay.open_manually"), PaletteAction::OpenReplayFile));
         entries.push(egui_palette::Entry::new(
@@ -268,33 +241,20 @@ mod tests {
         assert!(entries.iter().any(|e| matches!(e.data, PaletteAction::IndexAllReplays)));
         assert!(entries.iter().any(|e| matches!(e.data, PaletteAction::OpenReplayFile)));
 
-        let died = entries
-            .iter()
-            .find_map(|e| match &e.data {
-                PaletteAction::OpenSearchWith(q) if e.title == "Games I died in" => Some(q.clone()),
-                _ => None,
-            })
-            .expect("Games I died in entry");
-        assert_eq!(died.groups.len(), 1);
-        assert_eq!(died.groups[0].chips.len(), 2);
-        assert!(
-            died.groups[0]
-                .chips
+        // The trees themselves are pinned by `seed`'s own round-trip test; what
+        // matters here is that the entry carries the one it is titled after.
+        let query_for = |title: &str| {
+            entries
                 .iter()
-                .any(|c| matches!(c.value, Value::Outcome(MatchOutcome::Loss)) && matches!(c.op, Op::Is))
-        );
-        assert!(died.groups[0].chips.iter().any(|c| matches!(c.value, Value::Bool(false))));
-
-        let won = entries
-            .iter()
-            .find_map(|e| match &e.data {
-                PaletteAction::OpenSearchWith(q) if e.title == "Games I won" => Some(q.clone()),
-                _ => None,
-            })
-            .expect("Games I won entry");
-        assert_eq!(won.groups.len(), 1);
-        assert_eq!(won.groups[0].chips.len(), 1);
-        assert!(matches!(won.groups[0].chips[0].value, Value::Outcome(MatchOutcome::Win)));
+                .find_map(|e| match &e.data {
+                    PaletteAction::OpenSearchWith(q) if e.title == title => Some(q.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{title} entry"))
+        };
+        assert_eq!(query_for("Games I died in"), seed::games_i_died_in());
+        assert_eq!(query_for("Games I won"), seed::games_i_won());
+        assert_ne!(seed::games_i_died_in(), seed::games_i_won(), "the two entries must not carry the same query");
     }
 
     #[test]

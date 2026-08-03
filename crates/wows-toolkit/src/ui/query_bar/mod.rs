@@ -7,12 +7,10 @@
 //! lives in `suggest`, because none of those can be reached by a test from
 //! here.
 
-// Wired into the Search tab by the task after this one; no call site yet.
-#![allow(dead_code)]
-
 pub mod label;
 pub mod layout;
 pub mod paint;
+pub mod seed;
 pub mod select;
 pub mod suggest;
 pub mod tokens;

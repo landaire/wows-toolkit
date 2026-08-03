@@ -679,6 +679,7 @@ copied = "Copied %{name}"
 # -- Search --
 
 [ui.search]
+match_count_truncated = "%{count}+ matches"
 outcome_win = "Win"
 outcome_loss = "Loss"
 outcome_draw = "Draw"

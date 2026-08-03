@@ -245,9 +245,9 @@ impl LegacyWowsToolkitApp {
                 suppress_p2p_ip_warning: s.suppress_p2p_ip_warning,
                 disable_auto_open_session_windows: s.disable_auto_open_session_windows,
             },
-            // Not present in the legacy `app.ron` format; the Search tab
-            // keeps its own default single-open-group state.
-            search_query: Default::default(),
+            // Not present in the legacy `app.ron` format; the Search tab opens
+            // with an empty bar.
+            search: Default::default(),
         };
 
         let persisted = PersistedState {

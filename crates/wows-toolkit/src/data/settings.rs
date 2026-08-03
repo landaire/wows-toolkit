@@ -11,7 +11,6 @@ use crate::twitch::Token;
 
 pub use wows_toolkit_config::ReplayGrouping;
 pub use wows_toolkit_config::ReplaySettings;
-pub use wows_toolkit_config::index::query_model::Query as SearchQuery;
 
 pub const fn default_bool<const V: bool>() -> bool {
     V
@@ -190,8 +189,88 @@ pub struct AppSettings {
     pub stats_filters: StatsFilterSettings,
     pub integrations: IntegrationSettings,
     pub collab: CollabSettings,
-    /// The Search tab's chip query, persisted so it survives app restarts.
-    pub search_query: SearchQuery,
+    pub search: SearchSettings,
+}
+
+/// What the Search tab keeps across restarts.
+///
+/// The query is stored as its canonical text rather than as a serialized tree:
+/// it is the same string the user copies to share a search, and it is the form
+/// the grammar is the single authority on. A tree would need a second
+/// serialization to keep in step with it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SearchSettings {
+    /// Canonical query text, the same string the user copies to share.
+    #[serde(default)]
+    pub query: String,
+    #[serde(default)]
+    pub saved: Vec<SavedSearch>,
+    #[serde(default)]
+    pub history: std::collections::VecDeque<String>,
+    #[serde(default = "ResultColumn::default_columns")]
+    pub columns: Vec<ResultColumn>,
+    #[serde(default = "default_result_sort")]
+    pub sort: (ResultColumn, SortDir),
+}
+
+impl Default for SearchSettings {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            saved: Vec::new(),
+            history: std::collections::VecDeque::new(),
+            columns: ResultColumn::default_columns(),
+            sort: default_result_sort(),
+        }
+    }
+}
+
+/// A query the user named and kept.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SavedSearch {
+    pub name: String,
+    /// Canonical query text, the same form `SearchSettings::query` holds.
+    pub query: String,
+}
+
+/// A column of the Search tab's results table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ResultColumn {
+    Date,
+    Map,
+    Mode,
+    Ship,
+    Outcome,
+    Damage,
+    Kills,
+    Pr,
+}
+
+impl ResultColumn {
+    /// The columns a tab shows before the user has chosen any.
+    pub fn default_columns() -> Vec<ResultColumn> {
+        vec![
+            ResultColumn::Date,
+            ResultColumn::Map,
+            ResultColumn::Mode,
+            ResultColumn::Ship,
+            ResultColumn::Outcome,
+            ResultColumn::Damage,
+            ResultColumn::Kills,
+            ResultColumn::Pr,
+        ]
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SortDir {
+    Ascending,
+    Descending,
+}
+
+/// Newest match first, which is the order the index query itself returns.
+fn default_result_sort() -> (ResultColumn, SortDir) {
+    (ResultColumn::Date, SortDir::Descending)
 }
 
 /// General application preferences.

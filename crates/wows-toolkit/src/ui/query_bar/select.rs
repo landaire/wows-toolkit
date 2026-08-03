@@ -475,6 +475,53 @@ fn canonicalise_conjunction(cs: Vec<MatchExpr>, is_or: bool) -> Option<MatchExpr
     }
 }
 
+/// Drops terms that constrain nothing, and canonicalises what is left.
+///
+/// An empty-text `Contains` compiles to `LIKE '%'`, which matches every
+/// non-NULL row, so a term the user has not finished would *widen* the search
+/// rather than narrow it. The Search tab compiles this rather than the tree it
+/// shows, so a half-written term costs nothing until it says something.
+///
+/// This is not a logic-preserving rewrite and does not try to be. `not map:""`
+/// formally matches nothing, because the term it negates matches everything;
+/// here the whole thing is dropped, on the reading that an unfinished term is
+/// one the user has not asked for yet rather than one whose vacuous truth value
+/// should be honoured. `canonicalise` makes the same choice for an emptied
+/// `Any`, for the same reason.
+///
+/// Roster predicates are left alone. A quantifier over an emptied predicate is
+/// a different assertion, not a no-op -- `no(...)` over nothing asks whether the
+/// roster is empty -- so there is no removal here that is safe by inspection.
+pub fn prune_empty(expr: &MatchExpr) -> MatchExpr {
+    let mut out = prune_node(expr).unwrap_or_default();
+    canonicalise(&mut out);
+    out
+}
+
+/// `None` when nothing under this node constrains anything.
+fn prune_node(expr: &MatchExpr) -> Option<MatchExpr> {
+    match expr {
+        Expr::Leaf(term) => (!is_vacuous(term)).then(|| expr.clone()),
+        Expr::Not(inner) => prune_node(inner).map(|kept| Expr::Not(Box::new(kept))),
+        Expr::All(children) => prune_children(children).map(Expr::All),
+        Expr::Any(children) => prune_children(children).map(Expr::Any),
+    }
+}
+
+fn prune_children(children: &[MatchExpr]) -> Option<Vec<MatchExpr>> {
+    let kept: Vec<MatchExpr> = children.iter().filter_map(prune_node).collect();
+    (!kept.is_empty()).then_some(kept)
+}
+
+/// True for a term whose SQL would match every row it is asked about.
+fn is_vacuous(term: &MatchTerm) -> bool {
+    match term {
+        MatchTerm::Field(_, Op::Contains, Value::Text(s)) => s.is_empty(),
+        MatchTerm::FreeText(s) => s.is_empty(),
+        MatchTerm::Field(..) | MatchTerm::Roster { .. } => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -969,5 +1016,79 @@ mod tests {
             let reparsed = parse_query(&printed).unwrap_or_else(|err| panic!("edit {edit} printed {printed:?}: {err}"));
             assert_eq!(reparsed, e, "edit {edit} printed {printed:?}");
         }
+    }
+
+    fn empty_map() -> MatchExpr {
+        Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text(String::new())))
+    }
+    fn map_named(name: &str) -> MatchExpr {
+        Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text(name.to_owned())))
+    }
+
+    #[test]
+    fn pruning_drops_an_empty_contains_and_keeps_the_rest() {
+        let expr = Expr::All(vec![leaf(1), empty_map(), map_named("ocean")]);
+        assert_eq!(prune_empty(&expr), Expr::All(vec![leaf(1), map_named("ocean")]));
+    }
+
+    #[test]
+    fn pruning_drops_an_empty_free_text_but_keeps_a_non_empty_one() {
+        let empty: MatchExpr = Expr::Leaf(MatchTerm::FreeText(String::new()));
+        let typed: MatchExpr = Expr::Leaf(MatchTerm::FreeText("yamato".into()));
+        assert_eq!(prune_empty(&Expr::All(vec![empty.clone(), typed.clone()])), typed);
+        assert_eq!(prune_empty(&empty), MatchExpr::default());
+    }
+
+    /// A non-empty text value is a real filter even when it is only one
+    /// character, and a `Contains` is not the only operator over text: an
+    /// `Equals` against the empty string asks for rows whose column is empty,
+    /// which is a constraint and must survive.
+    #[test]
+    fn pruning_keeps_terms_that_still_say_something() {
+        let one_char = map_named("o");
+        assert_eq!(prune_empty(&one_char), one_char);
+        let equals_empty: MatchExpr =
+            Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Equals, Value::Text(String::new())));
+        assert_eq!(prune_empty(&equals_empty), equals_empty);
+    }
+
+    /// The point of pruning: an empty term must not be able to widen the query
+    /// it sits in. Both branches of an OR going empty leaves nothing, and the
+    /// tree that survives is the one the other terms describe.
+    #[test]
+    fn pruning_never_widens_the_surviving_query() {
+        let expr = Expr::All(vec![leaf(1), Expr::Any(vec![empty_map(), map_named("ocean")])]);
+        assert_eq!(prune_empty(&expr), Expr::All(vec![leaf(1), map_named("ocean")]));
+
+        let both_empty = Expr::All(vec![leaf(1), Expr::Any(vec![empty_map(), empty_map()])]);
+        assert_eq!(prune_empty(&both_empty), leaf(1));
+    }
+
+    /// An unfinished term is one the user has not asked for, so negating it
+    /// does not turn the query unsatisfiable.
+    #[test]
+    fn pruning_removes_a_negated_empty_term_rather_than_matching_nothing() {
+        let expr = Expr::All(vec![leaf(1), Expr::Not(Box::new(empty_map()))]);
+        assert_eq!(prune_empty(&expr), leaf(1));
+        assert_eq!(prune_empty(&Expr::Not(Box::new(empty_map()))), MatchExpr::default());
+    }
+
+    /// A roster predicate's quantifier changes what an emptied predicate
+    /// asserts, so nothing inside one is dropped.
+    #[test]
+    fn pruning_leaves_roster_predicates_alone() {
+        use crate::db::index::query_ast::Quant;
+        use crate::db::index::query_ast::RosterField;
+        use crate::db::index::query_ast::RosterTerm;
+
+        let roster: MatchExpr = Expr::Leaf(MatchTerm::Roster {
+            quant: Quant::None,
+            pred: Expr::Leaf(RosterTerm {
+                field: RosterField::Name,
+                op: Op::Contains,
+                value: Value::Text(String::new()),
+            }),
+        });
+        assert_eq!(prune_empty(&roster), roster);
     }
 }

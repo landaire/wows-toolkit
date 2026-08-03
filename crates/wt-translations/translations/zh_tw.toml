@@ -726,6 +726,7 @@ moderate = "中等"
 weak = "微弱"
 
 [ui.search]
+match_count_truncated = "%{count}+ matches"
 free_text = "contains \"%{text}\""
 quant_any = "any"
 quant_none = "no"

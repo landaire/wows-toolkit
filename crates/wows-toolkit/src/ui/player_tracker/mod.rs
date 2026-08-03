@@ -377,20 +377,7 @@ impl ToolkitTabViewer<'_> {
     /// Queues an advanced search for every match this account appeared in and
     /// focuses the Search tab.
     pub(crate) fn queue_player_search(&mut self, id: AccountId) {
-        use crate::db::index::query_model::Chip;
-        use crate::db::index::query_model::Connector;
-        use crate::db::index::query_model::Field;
-        use crate::db::index::query_model::Group;
-        use crate::db::index::query_model::Op;
-        use crate::db::index::query_model::Query;
-        use crate::db::index::query_model::Value;
-
-        self.tab_state.pending_search_query = Some(Query {
-            groups: vec![Group {
-                chips: vec![Chip { field: Field::PlayerPresent, op: Op::Present, value: Value::Account(id) }],
-            }],
-            connector: Connector::And,
-        });
+        self.tab_state.pending_search_query = Some(crate::ui::query_bar::seed::matches_with_player(id));
         self.tab_state.pending_focus_search = true;
     }
 
@@ -399,24 +386,7 @@ impl ToolkitTabViewer<'_> {
     /// substring match over player name and clan alike: a tag that occurs inside
     /// someone's name matches too.
     pub(crate) fn queue_clan_search(&mut self, clan: &str) {
-        use crate::db::index::query_model::Chip;
-        use crate::db::index::query_model::Connector;
-        use crate::db::index::query_model::Field;
-        use crate::db::index::query_model::Group;
-        use crate::db::index::query_model::Op;
-        use crate::db::index::query_model::Query;
-        use crate::db::index::query_model::Value;
-
-        self.tab_state.pending_search_query = Some(Query {
-            groups: vec![Group {
-                chips: vec![Chip {
-                    field: Field::PlayerNameOrClan,
-                    op: Op::Contains,
-                    value: Value::Text(clan.to_string()),
-                }],
-            }],
-            connector: Connector::And,
-        });
+        self.tab_state.pending_search_query = Some(crate::ui::query_bar::seed::matches_mentioning_clan(clan));
         self.tab_state.pending_focus_search = true;
     }
 }

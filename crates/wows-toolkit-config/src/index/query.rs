@@ -940,6 +940,46 @@ pub async fn search_players(pool: &SqlitePool, needle: &str, limit: i64) -> Resu
         .collect())
 }
 
+/// Bounded, case-insensitive ship search over the whole roster: every ship that
+/// has appeared in an indexed match, whichever side played it, ranked by how
+/// often it appears. Distinct from `search_self_ships`, which is scoped to the
+/// ships the user played and so cannot answer an `enemy.ship:` lookup.
+pub async fn search_ships(pool: &SqlitePool, needle: &str, limit: i64) -> Result<Vec<ShipFacet>, IndexError> {
+    let rows: Vec<(i64, Option<String>, i64)> = sqlx::query_as(
+        "SELECT v.ship_id, MAX(v.ship_name) AS ship_name, COUNT(DISTINCT v.arena_id) AS match_count \
+         FROM indexed_vehicle v \
+         WHERE LOWER(v.ship_name) LIKE '%' || LOWER(?1) || '%' \
+         GROUP BY v.ship_id ORDER BY match_count DESC LIMIT ?2",
+    )
+    .bind(needle)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, name, count)| ShipFacet {
+            ship_id: GameParamId::from(id as u64),
+            ship_name: name.unwrap_or_default(),
+            match_count: count,
+        })
+        .collect())
+}
+
+/// The map names the index has seen, most-played first, capped at `limit`.
+///
+/// `indexed_match.map` holds the localized display name the replay reported, so
+/// these are already the names the user reads.
+pub async fn distinct_maps(pool: &SqlitePool, limit: i64) -> Result<Vec<String>, IndexError> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT map, COUNT(*) AS match_count FROM indexed_match WHERE map <> '' \
+         GROUP BY map ORDER BY match_count DESC LIMIT ?1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|(map, _)| map).collect())
+}
+
 /// Bounded, case-insensitive self-ship search for the cascading palette: ships the
 /// user has played whose name contains `needle`, ranked by match count, capped at `limit`.
 pub async fn search_self_ships(pool: &SqlitePool, needle: &str, limit: i64) -> Result<Vec<ShipFacet>, IndexError> {

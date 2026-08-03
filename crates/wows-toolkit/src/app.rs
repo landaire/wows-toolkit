@@ -118,22 +118,6 @@ fn replay_tab_search_scope(
     }
 }
 
-/// A query selecting every match indexed under `source` and nothing else.
-fn source_scoped_query(source: SourceId) -> crate::db::index::query_model::Query {
-    use crate::db::index::query_model::Chip;
-    use crate::db::index::query_model::Connector;
-    use crate::db::index::query_model::Field;
-    use crate::db::index::query_model::Group;
-    use crate::db::index::query_model::Op;
-    use crate::db::index::query_model::Query;
-    use crate::db::index::query_model::Value;
-
-    Query {
-        groups: vec![Group { chips: vec![Chip { field: Field::Group, op: Op::Is, value: Value::Source(source) }] }],
-        connector: Connector::And,
-    }
-}
-
 /// Draws the replay tab's search entry and returns its response, so both the
 /// caller and a test can see whether it is enabled.
 fn replay_search_menu_entry(ui: &mut Ui, scope: TabSearchScope) -> egui::Response {
@@ -157,7 +141,7 @@ impl ToolkitTabViewer<'_> {
     /// halves matter: the query without the focus leaves the user looking at
     /// the tab they right-clicked.
     fn search_replay_source(&mut self, source: SourceId) {
-        self.tab_state.pending_search_query = Some(source_scoped_query(source));
+        self.tab_state.pending_search_query = Some(crate::ui::query_bar::seed::source_scoped(source));
         self.tab_state.pending_focus_search = true;
     }
 
@@ -4075,14 +4059,8 @@ impl WowsToolkitApp {
 
     /// Dispatch a palette-picked action against app state.
     fn dispatch_palette_action(&mut self, ctx: &egui::Context, action: crate::ui::command_palette::PaletteAction) {
-        use crate::db::index::query_model::Chip;
-        use crate::db::index::query_model::Connector;
-        use crate::db::index::query_model::Field;
-        use crate::db::index::query_model::Group;
-        use crate::db::index::query_model::Op;
-        use crate::db::index::query_model::Query;
-        use crate::db::index::query_model::Value;
         use crate::ui::command_palette::PaletteAction;
+        use crate::ui::query_bar::seed;
 
         match action {
             PaletteAction::ViewArmor { ship_index } => {
@@ -4090,25 +4068,11 @@ impl WowsToolkitApp {
                 self.focus_tab(&Tab::ArmorViewer);
             }
             PaletteAction::MyMatchesInShip { ship_id } => {
-                self.tab_state.pending_search_query = Some(Query {
-                    groups: vec![Group {
-                        chips: vec![Chip { field: Field::SelfShip, op: Op::Is, value: Value::Ship(ship_id) }],
-                    }],
-                    connector: Connector::And,
-                });
+                self.tab_state.pending_search_query = Some(seed::my_matches_in_ship(ship_id));
                 self.focus_tab(&Tab::Search);
             }
             PaletteAction::FindMatchesWithPlayer { account_id } => {
-                self.tab_state.pending_search_query = Some(Query {
-                    groups: vec![Group {
-                        chips: vec![Chip {
-                            field: Field::PlayerPresent,
-                            op: Op::Present,
-                            value: Value::Account(account_id),
-                        }],
-                    }],
-                    connector: Connector::And,
-                });
+                self.tab_state.pending_search_query = Some(seed::matches_with_player(account_id));
                 self.focus_tab(&Tab::Search);
             }
             PaletteAction::OpenSearchTab => self.focus_tab(&Tab::Search),
@@ -4573,10 +4537,6 @@ mod replay_tab_search_tests {
 
     use super::*;
     use crate::db::index::query;
-    use crate::db::index::query_model::Chip;
-    use crate::db::index::query_model::Field;
-    use crate::db::index::query_model::Op;
-    use crate::db::index::query_model::Value;
     use crate::db::index::rows::MatchOutcome;
     use crate::db::index::rows::ObjectiveMatch;
     use crate::db::index::rows::ReplayRecord;
@@ -4664,9 +4624,14 @@ mod replay_tab_search_tests {
 
         let query = tab_state.pending_search_query.take().expect("the Search tab must be handed a query");
         assert_eq!(
-            query.groups.iter().map(|group| group.chips.as_slice()).collect::<Vec<_>>(),
-            vec![[Chip { field: Field::Group, op: Op::Is, value: Value::Source(SourceId(22)) }].as_slice()],
-            "the query must hold exactly one source chip, naming B"
+            query,
+            crate::ui::query_bar::seed::source_scoped(SourceId(22)),
+            "the query must name B's source and nothing else"
+        );
+        assert_ne!(
+            query,
+            crate::ui::query_bar::seed::source_scoped(SourceId(11)),
+            "a query naming A would pass the check above only if it ignored the source"
         );
         assert!(tab_state.pending_focus_search, "the Search tab must also be focused");
     }
@@ -4698,14 +4663,15 @@ mod replay_tab_search_tests {
         viewer.search_replay_source(source);
         let query = tab_state.pending_search_query.take().expect("the Search tab must be handed a query");
 
-        let hits = rt.block_on(query::search_by_query(&pool, &query, 500)).expect("the search runs");
+        let ctx = crate::db::index::query_sql::CompileCtx::default();
+        let hits = rt.block_on(query::search_by_ast(&pool, &query, &ctx, 500)).expect("the search runs");
         let arenas: Vec<i64> = hits.iter().map(|hit| hit.arena_id.raw()).collect();
         assert_eq!(arenas, vec![100], "only the tab's own directory may match");
 
         // The same seed with no scope returns both, so the assertion above is
         // about the scope rather than about the index holding one row.
-        let unscoped = crate::db::index::query_model::Query::default();
-        let all = rt.block_on(query::search_by_query(&pool, &unscoped, 500)).expect("the search runs");
+        let unscoped = crate::db::index::query_ast::MatchExpr::default();
+        let all = rt.block_on(query::search_by_ast(&pool, &unscoped, &ctx, 500)).expect("the search runs");
         assert_eq!(all.len(), 2, "both directories are indexed");
     }
 

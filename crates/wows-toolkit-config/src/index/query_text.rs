@@ -1116,7 +1116,11 @@ fn print_timestamp(t: Timestamp) -> String {
 /// a leading `-` as `not`; `term_text` refuses a bare `and`, `or`, or `not`;
 /// and an empty word has no bare spelling at all. Quoting answers all of them
 /// because `word_end` and `find_unquoted` both treat a quoted run as opaque.
-fn quote_if_needed(s: &str) -> String {
+///
+/// Public because the query bar's value editor builds grammar text of its own:
+/// a picked map name goes into the caret as a literal the parser has to read
+/// back, and restating these rules there would let the two spellings drift.
+pub fn quote_if_needed(s: &str) -> String {
     let boundary = s.chars().any(|c| is_term_boundary(c) || c == '"');
     let operator = OPERATOR_TOKENS.iter().chain(NULLARY_TOKENS.iter()).any(|token| s.contains(token));
     let keyword = matches!(s.to_ascii_lowercase().as_str(), "and" | "or" | "not");

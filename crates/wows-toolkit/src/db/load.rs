@@ -6,6 +6,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+use rootcause::prelude::ResultExt;
 use sqlx::SqlitePool;
 use tracing::error;
 use tracing::info;
@@ -14,6 +15,7 @@ use tracing::warn;
 use crate::data::session_stats::PerGameStat;
 use crate::data::session_stats::SerializableAchievement;
 use crate::data::session_stats::SessionStats;
+use crate::db::index::query_text::parse_query;
 use crate::tab_state::TabState;
 use crate::tab_state::WindowKind;
 use crate::tab_state::WindowSettings;
@@ -139,11 +141,14 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
     if let Some(v) = queries::get_setting(pool, "replay_settings").await {
         s.replay = v;
     }
-    // Nested struct: search_query. Also restored into the Search tab itself
-    // below, once the write guard on `settings` is dropped.
-    let search_query: Option<crate::data::settings::SearchQuery> = queries::get_setting(pool, "search_query").await;
-    if let Some(v) = search_query.clone() {
-        s.search_query = v;
+    // Nested struct: search. Also restored into the Search tab itself below,
+    // once the write guard on `settings` is dropped. A value written by a build
+    // that persisted the superseded chip model does not deserialize into this
+    // shape; `get_setting` logs that and yields `None`, which starts the tab
+    // empty rather than failing the whole load.
+    let search: Option<crate::data::settings::SearchSettings> = queries::get_setting(pool, "search").await;
+    if let Some(v) = search.clone() {
+        s.search = v;
     }
 
     // Fields that moved to PersistedState.
@@ -160,12 +165,13 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
     // Drop the write guard before accessing ts fields directly.
     drop(p);
 
-    // Restore the Search tab's chip query. A missing or empty query keeps the
-    // tab's default single-open-group state (see `SearchTabState::default`).
-    if let Some(v) = search_query
-        && !v.groups.is_empty()
-    {
-        ts.search_tab.restore_query(v);
+    // Restore the Search tab's query. A missing, empty, or unparseable one
+    // leaves the bar empty, which is what a fresh install shows.
+    if let Some(text) = search.map(|v| v.query).filter(|text| !text.trim().is_empty()) {
+        match parse_query(&text).attach("while restoring the persisted search query").attach(text.clone()) {
+            Ok(expr) => ts.search_tab.set_query(expr),
+            Err(report) => warn!("{report:?}"),
+        }
     }
 
     if let Some(v) = queries::get_setting(pool, "replay_sort").await {

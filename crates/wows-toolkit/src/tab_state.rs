@@ -460,7 +460,7 @@ pub struct TabState {
     /// bounded sub-search results.
     pub command_palette: crate::ui::command_palette::CommandPalette,
     /// When set, the Search tab adopts this query on next show (from palette/tracker).
-    pub pending_search_query: Option<crate::db::index::query_model::Query>,
+    pub pending_search_query: Option<crate::db::index::query_ast::MatchExpr>,
     /// When true, the app focuses the Search tab next frame (from palette/tracker).
     pub pending_focus_search: bool,
     /// Cached ship catalog for palette ship entries; built lazily on first palette open.

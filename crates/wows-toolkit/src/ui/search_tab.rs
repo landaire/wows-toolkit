@@ -1,448 +1,364 @@
-//! The dockable Search tab: a chip-based `Query` builder over a results table
-//! backed by the replay index.
+//! The dockable Search tab: a query bar over a results table backed by the
+//! replay index.
 
-use std::collections::HashMap;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
+use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::channel;
+use std::time::Duration;
+use std::time::Instant;
 
 use rust_i18n::t;
+use tokio::runtime::Runtime;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
-use wowsunpack::game_params::types::Species;
 
 use crate::app::ToolkitTabViewer;
-use crate::armor_viewer::ship_selector::SHIP_SPECIES;
-use crate::armor_viewer::ship_selector::ShipCatalog;
-use crate::armor_viewer::ship_selector::species_name;
-use crate::armor_viewer::ship_selector::tier_roman;
 use crate::db::index::query;
-use crate::db::index::query_model::Chip;
-use crate::db::index::query_model::Connector;
-use crate::db::index::query_model::Field;
-use crate::db::index::query_model::Group;
-use crate::db::index::query_model::Op;
-use crate::db::index::query_model::Query;
-use crate::db::index::query_model::StatKind;
-use crate::db::index::query_model::Subject;
-use crate::db::index::query_model::Value;
-use crate::db::index::query_model::ValueKind;
+use crate::db::index::query_ast::Expr;
+use crate::db::index::query_ast::MapCatalog;
+use crate::db::index::query_ast::MatchExpr;
+use crate::db::index::query_ast::MatchTerm;
+use crate::db::index::query_ast::RosterExpr;
+use crate::db::index::query_ast::Value;
+use crate::db::index::query_sql::CompileCtx;
+use crate::db::index::query_text::print_query;
+use crate::db::index::query_text::quote_if_needed;
 use crate::db::index::rows::IndexSource;
 use crate::db::index::rows::MatchHit;
 use crate::db::index::rows::MatchOutcome;
-use crate::db::index::rows::PlayerFacet;
-use crate::db::index::rows::SourceId;
 use crate::icons;
+use crate::ui::query_bar::Deps;
+use crate::ui::query_bar::QueryBar;
+use crate::ui::query_bar::select::prune_empty;
+use crate::ui::query_bar::suggest::ValueOption;
+use crate::ui::query_bar::suggest::ValueRequest;
 
-/// Max width of a single group's body in the horizontally-scrolling group
-/// row, so its chip `horizontal_wrapped` has a finite wrap point instead of
-/// inheriting the enclosing `ScrollArea::horizontal`'s infinite width.
-const GROUP_MAX_WIDTH: f32 = 420.0;
+/// Rows a single search reads. `search_by_ast` fetches one more so the count can
+/// say "at least this many" rather than reporting a truncated total.
+const RESULT_LIMIT: i64 = 500;
+/// Rows a value lookup returns to the dropdown.
+const VALUE_LIMIT: i64 = 50;
+/// How long the caret must sit still before its value lookup is dispatched, so
+/// typing a ship name does not issue one query per keystroke.
+const VALUE_DEBOUNCE: Duration = Duration::from_millis(150);
+/// How often the tab wakes itself while it is waiting on the runtime. egui only
+/// repaints on input, so a reply arriving between frames would otherwise sit in
+/// the channel until the pointer moved.
+const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
-/// Non-stat fields offered by the "Add filter" picker, in display order. The
-/// seven `StatKind`s are appended to this list in the picker (see `StatKind::ALL`).
-const NON_STAT_FIELDS: &[Field] = &[
-    Field::Outcome,
-    Field::Map,
-    Field::Mode,
-    Field::SelfShip,
-    Field::Class,
-    Field::Tier,
-    Field::Date,
-    Field::PlayerPresent,
-    Field::PlayerNameOrClan,
-    Field::EnemyShip,
-    Field::AllyShip,
-    Field::Group,
-    Field::ContainsStreamSniper,
-];
-
-fn field_display_label(field: Field) -> String {
-    match field {
-        Field::Outcome => t!("ui.search.field.outcome").into(),
-        Field::Map => t!("ui.search.field.map").into(),
-        Field::Mode => t!("ui.search.field.mode").into(),
-        Field::SelfShip => t!("ui.search.field.self_ship").into(),
-        Field::Class => t!("ui.search.field.class").into(),
-        Field::Tier => t!("ui.search.field.tier").into(),
-        Field::Date => t!("ui.search.field.date").into(),
-        Field::PlayerPresent => t!("ui.search.field.player_present").into(),
-        Field::PlayerNameOrClan => t!("ui.search.field.player_name_or_clan").into(),
-        Field::EnemyShip => t!("ui.search.field.enemy_ship").into(),
-        Field::AllyShip => t!("ui.search.field.ally_ship").into(),
-        Field::Group => t!("ui.search.field.group").into(),
-        Field::ContainsStreamSniper => t!("ui.search.field.contains_stream_sniper").into(),
-        Field::Stat { kind, .. } => stat_kind_label(kind),
-    }
-}
-
-fn stat_kind_label(kind: StatKind) -> String {
-    match kind {
-        StatKind::Damage => t!("ui.search.field.stat_damage"),
-        StatKind::Kills => t!("ui.search.field.stat_kills"),
-        StatKind::Spotting => t!("ui.search.field.stat_spotting"),
-        StatKind::Potential => t!("ui.search.field.stat_potential"),
-        StatKind::Received => t!("ui.search.field.stat_received"),
-        StatKind::Pr => t!("ui.search.field.stat_pr"),
-        StatKind::Survived => t!("ui.search.field.stat_survived"),
-        StatKind::Disconnected => t!("ui.search.field.stat_disconnected"),
-    }
-    .into()
-}
-
-/// Selector label for a `Subject`: "Me" / "Any player" / the resolved player's
-/// name (or "#<id>" if unresolved). `picking` overrides with the "Specific
-/// player..." prompt while the user has opened the picker but not chosen yet.
-fn subject_combo_label(subject: Subject, picking: bool, resolved_players: &HashMap<AccountId, String>) -> String {
-    if picking {
-        return t!("ui.search.subject_specific").into();
-    }
-    match subject {
-        Subject::SelfPlayer => t!("ui.search.subject_me").into(),
-        Subject::AnyPlayer => t!("ui.search.subject_any").into(),
-        Subject::Player(id) => resolved_players.get(&id).cloned().unwrap_or_else(|| format!("#{}", id.raw())),
-    }
-}
-
-fn op_label(op: Op) -> String {
-    match op {
-        Op::Contains => t!("ui.search.op.contains"),
-        Op::Equals => t!("ui.search.op.equals"),
-        Op::NotEquals => t!("ui.search.op.not_equals"),
-        Op::Eq => t!("ui.search.op.eq"),
-        Op::Ne => t!("ui.search.op.ne"),
-        Op::Gt => t!("ui.search.op.gt"),
-        Op::Ge => t!("ui.search.op.ge"),
-        Op::Lt => t!("ui.search.op.lt"),
-        Op::Le => t!("ui.search.op.le"),
-        Op::Is => t!("ui.search.op.is"),
-        Op::IsNot => t!("ui.search.op.is_not"),
-        Op::Present => t!("ui.search.op.present"),
-        Op::NotPresent => t!("ui.search.op.not_present"),
-    }
-    .into()
-}
-
-fn outcome_label(o: MatchOutcome) -> String {
-    match o {
-        MatchOutcome::Win => t!("ui.search.outcome_win"),
-        MatchOutcome::Loss => t!("ui.search.outcome_loss"),
-        MatchOutcome::Draw => t!("ui.search.outcome_draw"),
-        MatchOutcome::Unknown => t!("ui.search.outcome_unknown"),
-    }
-    .into()
-}
-
-fn bool_label(b: bool) -> String {
-    if b { t!("ui.search.bool_true") } else { t!("ui.search.bool_false") }.into()
-}
-
-/// Renders a prominent "locked in" badge for a committed player selection: a
-/// check icon plus the player's label in an accented frame, with a clear
-/// button. Used by both the `PlayerPresent` value picker and the `Stat`
-/// subject picker so a committed selection is unmistakable, instead of the
-/// only feedback being a subtly-highlighted row in the results list. Returns
-/// true if the clear button was clicked this frame.
-fn player_locked_badge(ui: &mut egui::Ui, label: &str) -> bool {
-    let mut clear = false;
-    egui::Frame::new()
-        .fill(ui.visuals().selection.bg_fill)
-        .stroke(ui.visuals().selection.stroke)
-        .corner_radius(egui::CornerRadius::same(4))
-        .inner_margin(egui::Margin::symmetric(6, 3))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.strong(format!("{} {label}", icons::CHECK));
-                if ui.small_button(icons::X).on_hover_text(t!("ui.search.clear_selection")).clicked() {
-                    clear = true;
-                }
-            });
-        });
-    clear
-}
-
-/// Compact display text for a chip's value. Ship/account ids are resolved
-/// through the search tab's name caches so pills don't just show a bare id.
-fn value_label(
-    value: &Value,
-    resolved_ships: &HashMap<GameParamId, String>,
-    resolved_players: &HashMap<AccountId, String>,
-    sources: &[IndexSource],
-) -> String {
-    match value {
-        Value::Text(s) => s.clone(),
-        Value::Int(n) => n.to_string(),
-        Value::Outcome(o) => outcome_label(*o),
-        Value::Class(s) => s.clone(),
-        Value::Bool(b) => bool_label(*b),
-        Value::Ship(id) => resolved_ships.get(id).cloned().unwrap_or_else(|| format!("#{}", id.raw())),
-        Value::Account(a) => resolved_players.get(a).cloned().unwrap_or_else(|| format!("#{}", a.raw())),
-        Value::Timestamp(t) => t.strftime("%Y-%m-%d").to_string(),
-        Value::Source(s) => {
-            sources.iter().find(|src| src.id == *s).map(|src| src.name.clone()).unwrap_or_else(|| format!("#{}", s.0))
-        }
-    }
-}
-
-/// Full pill text for one chip. Non-`Stat` fields keep the plain
-/// "<field> <op> <value>" form; `Stat` fields are phrased with their subject:
-/// "My <stat> <op> <value>", "Any player <stat> <op> <value>", or
-/// "<name>'s <stat> <op> <value>". Numeric stat values use `separate_number`
-/// (thousands separator) to match the results table.
-fn chip_pill_label(
-    chip: &Chip,
-    resolved_ships: &HashMap<GameParamId, String>,
-    resolved_players: &HashMap<AccountId, String>,
-    sources: &[IndexSource],
-    locale: Option<&str>,
-) -> String {
-    let Field::Stat { kind, subject } = chip.field else {
-        return format!(
-            "{} {} {}",
-            field_display_label(chip.field),
-            op_label(chip.op),
-            value_label(&chip.value, resolved_ships, resolved_players, sources)
-        );
-    };
-    let stat = stat_kind_label(kind);
-    let op = op_label(chip.op);
-    let value = match &chip.value {
-        Value::Int(n) => crate::util::formatting::separate_number(*n, locale),
-        Value::Bool(b) => bool_label(*b),
-        other => value_label(other, resolved_ships, resolved_players, sources),
-    };
-    match subject {
-        Subject::SelfPlayer => format!("{} {stat} {op} {value}", t!("ui.search.pill_my")),
-        Subject::AnyPlayer => format!("{} {stat} {op} {value}", t!("ui.search.pill_any_player")),
-        Subject::Player(id) => {
-            let name = resolved_players.get(&id).cloned().unwrap_or_else(|| format!("#{}", id.raw()));
-            format!("{name}{} {stat} {op} {value}", t!("ui.search.pill_possessive"))
-        }
-    }
-}
-
-/// Draft state for the "Add filter" picker within one group. Detached from the
-/// query itself; only committed into a `Chip` when the user clicks Add.
-#[derive(Clone)]
-struct AddFilterDraft {
-    field: Field,
-    op: Op,
-    text: String,
-    int_val: i64,
-    outcome: MatchOutcome,
-    bool_val: bool,
-    species: Species,
-    ship_search: String,
-    ship_id: Option<GameParamId>,
-    ship_label: String,
-    player_search: String,
-    player_id: Option<AccountId>,
-    player_label: String,
-    player_results: Vec<PlayerFacet>,
-    source_id: Option<SourceId>,
-    date: jiff::civil::Date,
-    /// Subject for a `Field::Stat` chip; irrelevant (but always valid, never a
-    /// sentinel) for non-stat fields. Persists across stat-kind changes.
-    subject: Subject,
-    /// True while the "Specific player..." subject picker is open but no
-    /// player has been chosen yet, so `subject` itself stays at its last
-    /// valid value until a pick commits.
-    subject_picking_player: bool,
-    subject_player_search: String,
-    subject_player_results: Vec<PlayerFacet>,
-}
-
-impl Default for AddFilterDraft {
-    fn default() -> Self {
-        let today = jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::UTC).date();
-        let field = Field::Outcome;
-        Self {
-            field,
-            op: field.allowed_ops()[0],
-            text: String::new(),
-            int_val: 0,
-            outcome: MatchOutcome::Win,
-            bool_val: true,
-            species: Species::Destroyer,
-            ship_search: String::new(),
-            ship_id: None,
-            ship_label: String::new(),
-            player_search: String::new(),
-            player_id: None,
-            player_label: String::new(),
-            player_results: Vec::new(),
-            source_id: None,
-            date: today,
-            subject: Subject::SelfPlayer,
-            subject_picking_player: false,
-            subject_player_search: String::new(),
-            subject_player_results: Vec::new(),
-        }
-    }
-}
-
-impl AddFilterDraft {
-    /// Reset the op (and implicitly, the value editor) when the field changes,
-    /// so a stale op/value from a different `ValueKind` cannot leak through.
-    fn reset_for_field(&mut self, field: Field) {
-        self.field = field;
-        self.op = field.allowed_ops()[0];
-    }
-
-    fn to_value(&self) -> Option<Value> {
-        match self.field.value_kind() {
-            ValueKind::Text => (!self.text.is_empty()).then(|| Value::Text(self.text.clone())),
-            ValueKind::Int => Some(Value::Int(self.int_val)),
-            ValueKind::Outcome => Some(Value::Outcome(self.outcome)),
-            ValueKind::Class => Some(Value::Class(format!("{:?}", self.species))),
-            ValueKind::Bool => Some(Value::Bool(self.bool_val)),
-            ValueKind::Ship => self.ship_id.map(Value::Ship),
-            ValueKind::Account => self.player_id.map(Value::Account),
-            ValueKind::Timestamp => match self.date.to_zoned(jiff::tz::TimeZone::UTC) {
-                Ok(zoned) => Some(Value::Timestamp(zoned.timestamp())),
-                Err(e) => {
-                    tracing::warn!("search: date-to-timestamp conversion failed for {:?}: {e}", self.date);
-                    None
-                }
-            },
-            ValueKind::Source => self.source_id.map(Value::Source),
-        }
-    }
-
-    /// Friendly label for the value being built (only known for pickers), used
-    /// to seed the chip name caches so the pill doesn't show a bare id.
-    fn value_display_label(&self) -> Option<String> {
-        match self.field.value_kind() {
-            ValueKind::Ship if self.ship_id.is_some() => Some(self.ship_label.clone()),
-            ValueKind::Account if self.player_id.is_some() => Some(self.player_label.clone()),
-            _ => None,
-        }
-    }
-
-    /// Build a draft pre-populated from an existing chip, so clicking a chip's edit
-    /// button reopens it in the "Add filter" editor instead of starting fresh.
-    /// Inverse of `to_value`.
-    fn from_chip(
-        chip: &Chip,
-        resolved_ships: &HashMap<GameParamId, String>,
-        resolved_players: &HashMap<AccountId, String>,
-    ) -> AddFilterDraft {
-        let mut draft = AddFilterDraft { field: chip.field, op: chip.op, ..AddFilterDraft::default() };
-        match &chip.value {
-            Value::Text(s) => draft.text = s.clone(),
-            Value::Int(n) => draft.int_val = *n,
-            Value::Outcome(o) => draft.outcome = *o,
-            Value::Bool(b) => draft.bool_val = *b,
-            Value::Class(s) => {
-                draft.species =
-                    SHIP_SPECIES.iter().copied().find(|sp| format!("{sp:?}") == *s).unwrap_or(Species::Destroyer);
-            }
-            Value::Ship(id) => {
-                let label = resolved_ships.get(id).cloned().unwrap_or_default();
-                draft.ship_id = Some(*id);
-                draft.ship_label = label.clone();
-                draft.ship_search = label;
-            }
-            Value::Account(a) => {
-                let label = resolved_players.get(a).cloned().unwrap_or_default();
-                draft.player_id = Some(*a);
-                draft.player_label = label.clone();
-                draft.player_search = label;
-            }
-            Value::Timestamp(ts) => draft.date = ts.to_zoned(jiff::tz::TimeZone::UTC).date(),
-            Value::Source(s) => draft.source_id = Some(*s),
-        }
-        if let Field::Stat { subject, .. } = chip.field {
-            draft.subject = subject;
-            draft.subject_picking_player = false;
-        }
-        draft
-    }
+/// A reply from the tokio runtime. Every database read the tab makes comes back
+/// through one channel, so the UI thread never blocks on the runtime.
+enum SearchMsg {
+    /// `seq` identifies the search that asked, so a slower earlier query cannot
+    /// overwrite the results of a later one.
+    Results {
+        seq: u64,
+        hits: Vec<MatchHit>,
+        truncated: bool,
+    },
+    Values {
+        request: ValueRequest,
+        options: Vec<ValueOption>,
+    },
+    Sources(Vec<IndexSource>),
+    Maps(Vec<String>),
+    Names {
+        ships: Vec<(GameParamId, String)>,
+        players: Vec<(AccountId, String)>,
+    },
 }
 
 pub struct SearchTabState {
-    pub query: Query,
+    pub bar: QueryBar,
     pub results: Vec<MatchHit>,
-    /// True when `query` changed and results must be re-queried.
     pub dirty: bool,
-    /// Per-group "add filter" draft; length kept in sync with `query.groups`.
-    add_drafts: Vec<AddFilterDraft>,
-    /// Per-group: whether the "add filter" draft row is expanded. Rendered
-    /// inline (not in a popover/menu) so the draft's own `ComboBox` popups
-    /// don't register as an outside click and dismiss it.
-    add_draft_open: Vec<bool>,
-    /// Cached replay groups, used by the Group/Source value editor.
-    sources: Vec<IndexSource>,
-    /// Friendly names for ship/account ids picked via the pickers, so chip
-    /// pills show a name instead of a bare numeric id.
-    resolved_ships: HashMap<GameParamId, String>,
-    resolved_players: HashMap<AccountId, String>,
+    /// True when the last query returned `limit + 1` rows.
+    pub truncated: bool,
+    pub sources: Vec<IndexSource>,
+    /// Display-name to raw-space-name resolution for a `map` term.
+    ///
+    /// Empty, and correct empty: `indexed_match.map` already stores the
+    /// localized name the replay reported (see `BattleReport::map_name`), so a
+    /// `map` term compares what the user typed against what the user reads with
+    /// nothing to translate. The catalogue is what `query_sql` consults for a
+    /// column holding raw space names.
+    pub maps: MapCatalog,
+
+    tx: Sender<SearchMsg>,
+    rx: Receiver<SearchMsg>,
+    /// The value lookup waiting out its debounce, and when it was asked for.
+    debounced: Option<(ValueRequest, Instant)>,
+    /// The value lookup whose reply the bar is still waiting for, so a reply to
+    /// a superseded one is discarded rather than shown under the new caret.
+    awaiting_values: Option<ValueRequest>,
+    /// Rises with each dispatched search; a reply carrying an older number is
+    /// stale and dropped.
+    query_seq: u64,
+    /// Replies still outstanding, so the tab only keeps waking itself while
+    /// there is something to wake for.
+    in_flight: usize,
+    /// Map names the index has seen, offered when the caret is typing a `map`
+    /// value. Requested once, when the first `map` term is typed.
+    map_names: Option<Vec<String>>,
+    /// Set once `list_sources` has been asked for, so an index with no groups
+    /// does not re-ask every frame.
+    sources_requested: bool,
 }
 
 impl Default for SearchTabState {
     fn default() -> Self {
-        // One group with its add-filter draft open, so the user can pick a
-        // field/op/value immediately instead of adding a group then a filter.
+        let (tx, rx) = channel();
         Self {
-            query: Query { groups: vec![Group::default()], connector: Connector::And },
+            bar: QueryBar::default(),
             results: Vec::new(),
             dirty: true,
-            add_drafts: vec![AddFilterDraft::default()],
-            add_draft_open: vec![true],
+            truncated: false,
             sources: Vec::new(),
-            resolved_ships: HashMap::new(),
-            resolved_players: HashMap::new(),
+            maps: MapCatalog::default(),
+            tx,
+            rx,
+            debounced: None,
+            awaiting_values: None,
+            query_seq: 0,
+            in_flight: 0,
+            map_names: None,
+            sources_requested: false,
         }
     }
 }
 
 impl SearchTabState {
-    /// Replace the default single-open-group state with a query restored from
-    /// persisted settings. Callers must only pass a non-empty query (an empty
-    /// one should instead leave the default state, so a fresh install and a
-    /// "cleared filters" restart behave the same). Draft vectors are rebuilt
-    /// to match the restored groups, all closed since the restored groups
-    /// already carry their filters; `dirty` is set so the tab re-queries.
-    pub(crate) fn restore_query(&mut self, query: Query) {
-        let group_count = query.groups.len();
-        self.query = query;
-        self.add_drafts = vec![AddFilterDraft::default(); group_count];
-        self.add_draft_open = vec![false; group_count];
+    /// Replaces the query outright, as a seeded search or a restored setting
+    /// does, and re-queries.
+    pub(crate) fn set_query(&mut self, expr: MatchExpr) {
+        self.bar.set_expr(expr);
         self.dirty = true;
+    }
+
+    /// Applies every reply that has arrived since the last frame.
+    fn drain_replies(&mut self) {
+        loop {
+            let msg = match self.rx.try_recv() {
+                Ok(msg) => msg,
+                Err(TryRecvError::Empty) => return,
+                // The tab owns both ends, so the sender outlives every receive.
+                Err(TryRecvError::Disconnected) => return,
+            };
+            self.in_flight = self.in_flight.saturating_sub(1);
+            match msg {
+                SearchMsg::Results { seq, hits, truncated } => {
+                    if seq == self.query_seq {
+                        self.results = hits;
+                        self.truncated = truncated;
+                    }
+                }
+                SearchMsg::Values { request, options } => {
+                    if self.awaiting_values.as_ref() == Some(&request) {
+                        self.bar.value_options = options;
+                        self.awaiting_values = None;
+                    }
+                }
+                SearchMsg::Sources(sources) => {
+                    self.bar.names.sources.clone_from(&sources);
+                    self.sources = sources;
+                }
+                SearchMsg::Maps(maps) => self.map_names = Some(maps),
+                SearchMsg::Names { ships, players } => {
+                    self.bar.names.ships.extend(ships);
+                    self.bar.names.players.extend(players);
+                }
+            }
+        }
+    }
+
+    /// Runs `work` on the runtime and delivers what it produces over the tab's
+    /// own channel.
+    fn spawn<F>(&mut self, rt: &Runtime, work: F)
+    where
+        F: std::future::Future<Output = Option<SearchMsg>> + Send + 'static,
+    {
+        let tx = self.tx.clone();
+        self.in_flight += 1;
+        rt.spawn(async move {
+            if let Some(msg) = work.await {
+                let _ = tx.send(msg);
+            }
+        });
+    }
+
+    fn dispatch_search(&mut self, pool: &sqlx::SqlitePool, rt: &Runtime) {
+        self.dirty = false;
+        self.query_seq += 1;
+        let seq = self.query_seq;
+        // The pruned tree, not the one on screen: an empty-text term compiles to
+        // `LIKE '%'` and would widen the search instead of narrowing it.
+        let expr = prune_empty(&self.bar.expr);
+        let maps = self.maps.clone();
+        let pool = pool.clone();
+        self.spawn(rt, async move {
+            let ctx = CompileCtx { maps: &maps };
+            match query::search_by_ast(&pool, &expr, &ctx, RESULT_LIMIT).await {
+                Ok(mut hits) => {
+                    let truncated = hits.len() as i64 > RESULT_LIMIT;
+                    hits.truncate(RESULT_LIMIT as usize);
+                    Some(SearchMsg::Results { seq, hits, truncated })
+                }
+                Err(e) => {
+                    tracing::warn!("search: query failed: {e}");
+                    None
+                }
+            }
+        });
+    }
+
+    /// Resolves the ids a seeded or restored query carries, so its pills read as
+    /// names rather than as `#<id>`.
+    fn resolve_names(&mut self, pool: &sqlx::SqlitePool, rt: &Runtime) {
+        let (mut ships, mut players) = (Vec::new(), Vec::new());
+        collect_ids(&self.bar.expr, &mut ships, &mut players);
+        ships.retain(|id| !self.bar.names.ships.contains_key(id));
+        players.retain(|id| !self.bar.names.players.contains_key(id));
+        if ships.is_empty() && players.is_empty() {
+            return;
+        }
+        let pool = pool.clone();
+        self.spawn(rt, async move {
+            let mut ship_names = Vec::new();
+            for id in ships {
+                match query::ship_name(&pool, id).await {
+                    Ok(Some(name)) => ship_names.push((id, name)),
+                    Ok(None) => {}
+                    Err(e) => tracing::warn!("search: ship_name lookup failed for {id:?}: {e}"),
+                }
+            }
+            let mut player_names = Vec::new();
+            for id in players {
+                match query::player_name(&pool, id).await {
+                    Ok(Some(name)) => player_names.push((id, name)),
+                    Ok(None) => {}
+                    Err(e) => tracing::warn!("search: player_name lookup failed for {id:?}: {e}"),
+                }
+            }
+            Some(SearchMsg::Names { ships: ship_names, players: player_names })
+        });
+    }
+
+    /// Starts the debounce for a value lookup the bar asked for. A new request
+    /// restarts it, so a lookup only runs once the caret has settled.
+    fn queue_value_request(&mut self, request: ValueRequest) {
+        self.debounced = Some((request, Instant::now()));
+    }
+
+    /// Dispatches the debounced lookup once it has sat still long enough, and
+    /// reports how long is left otherwise so the tab can wake itself in time.
+    fn service_value_request(&mut self, pool: &sqlx::SqlitePool, rt: &Runtime) -> Option<Duration> {
+        let (_, asked_at) = self.debounced.as_ref()?;
+        let waited = asked_at.elapsed();
+        if waited < VALUE_DEBOUNCE {
+            return Some(VALUE_DEBOUNCE - waited);
+        }
+        let (request, _) = self.debounced.take()?;
+        // Answered from what the tab already holds, with no runtime round trip.
+        if let ValueRequest::Sources = request {
+            self.bar.value_options = self.sources.iter().map(source_option).collect();
+            return None;
+        }
+        if let ValueRequest::Maps = request {
+            match &self.map_names {
+                Some(names) => self.bar.value_options = names.iter().map(|name| map_option(name)).collect(),
+                None => {
+                    let pool = pool.clone();
+                    self.spawn(rt, async move {
+                        match query::distinct_maps(&pool, VALUE_LIMIT).await {
+                            Ok(maps) => Some(SearchMsg::Maps(maps)),
+                            Err(e) => {
+                                tracing::warn!("search: distinct_maps failed: {e}");
+                                None
+                            }
+                        }
+                    });
+                    // Re-queued so the rows appear once the names land, rather
+                    // than only after the next keystroke.
+                    self.queue_value_request(ValueRequest::Maps);
+                }
+            }
+            return None;
+        }
+
+        self.awaiting_values = Some(request.clone());
+        let pool = pool.clone();
+        self.spawn(rt, async move {
+            let options = match &request {
+                ValueRequest::Players { needle } => match query::search_players(&pool, needle, VALUE_LIMIT).await {
+                    Ok(rows) => rows.iter().map(player_option).collect(),
+                    Err(e) => {
+                        tracing::warn!("search: search_players failed: {e}");
+                        return None;
+                    }
+                },
+                ValueRequest::Ships { needle } => match query::search_ships(&pool, needle, VALUE_LIMIT).await {
+                    Ok(rows) => rows.iter().map(ship_option).collect(),
+                    Err(e) => {
+                        tracing::warn!("search: search_ships failed: {e}");
+                        return None;
+                    }
+                },
+                // Both are answered above without reaching the runtime.
+                ValueRequest::Sources | ValueRequest::Maps => Vec::new(),
+            };
+            Some(SearchMsg::Values { request, options })
+        });
+        None
     }
 }
 
-/// Resolve any `Value::Account`/`Value::Ship` chip ids in `query` that are not already
-/// in the name caches, by DB lookup. Chips seeded from the command palette or the
-/// player tracker carry only an id, so without this the chip pill falls back to
-/// `#<id>` forever. Errors are logged and swallowed; unknown ids are left unresolved
-/// so the `#<id>` fallback still applies to them.
-fn resolve_seeded_names(
-    query: &Query,
-    resolved_ships: &mut HashMap<GameParamId, String>,
-    resolved_players: &mut HashMap<AccountId, String>,
-    pool: &sqlx::SqlitePool,
-    rt: &tokio::runtime::Runtime,
-) {
-    for group in &query.groups {
-        for chip in &group.chips {
-            match &chip.value {
-                Value::Account(id) if !resolved_players.contains_key(id) => {
-                    match rt.block_on(crate::db::index::query::player_name(pool, *id)) {
-                        Ok(Some(name)) => {
-                            resolved_players.insert(*id, name);
-                        }
-                        Ok(None) => {}
-                        Err(e) => tracing::warn!("search: player_name lookup failed for {id:?}: {e}"),
-                    }
-                }
-                Value::Ship(id) if !resolved_ships.contains_key(id) => {
-                    match rt.block_on(crate::db::index::query::ship_name(pool, *id)) {
-                        Ok(Some(name)) => {
-                            resolved_ships.insert(*id, name);
-                        }
-                        Ok(None) => {}
-                        Err(e) => tracing::warn!("search: ship_name lookup failed for {id:?}: {e}"),
-                    }
-                }
-                _ => {}
+fn player_option(facet: &crate::db::index::rows::PlayerFacet) -> ValueOption {
+    let label = if facet.clan.is_empty() {
+        facet.latest_name.clone()
+    } else {
+        format!("[{}] {}", facet.clan, facet.latest_name)
+    };
+    ValueOption { label, token: facet.account_id.raw().to_string() }
+}
+
+fn ship_option(facet: &crate::db::index::rows::ShipFacet) -> ValueOption {
+    ValueOption { label: facet.ship_name.clone(), token: facet.ship_id.raw().to_string() }
+}
+
+fn source_option(source: &IndexSource) -> ValueOption {
+    ValueOption { label: source.name.clone(), token: source.id.0.to_string() }
+}
+
+fn map_option(name: &str) -> ValueOption {
+    ValueOption { label: name.to_owned(), token: quote_if_needed(name) }
+}
+
+/// The ship and account ids a query names. Only roster terms can carry one: the
+/// match level has no ship or account field, because the perspective player is
+/// the roster row whose relation is `self`.
+fn collect_ids(expr: &MatchExpr, ships: &mut Vec<GameParamId>, players: &mut Vec<AccountId>) {
+    match expr {
+        Expr::Leaf(MatchTerm::Roster { pred, .. }) => collect_roster_ids(pred, ships, players),
+        Expr::Leaf(MatchTerm::Field(..) | MatchTerm::FreeText(_)) => {}
+        other => {
+            for child in other.children() {
+                collect_ids(child, ships, players);
+            }
+        }
+    }
+}
+
+fn collect_roster_ids(expr: &RosterExpr, ships: &mut Vec<GameParamId>, players: &mut Vec<AccountId>) {
+    match expr {
+        Expr::Leaf(term) => match &term.value {
+            Value::Ship(id) => ships.push(*id),
+            Value::Account(id) => players.push(*id),
+            _ => {}
+        },
+        other => {
+            for child in other.children() {
+                collect_roster_ids(child, ships, players);
             }
         }
     }
@@ -463,553 +379,74 @@ impl ToolkitTabViewer<'_> {
     pub fn build_search_tab(&mut self, ui: &mut egui::Ui) {
         let pool = self.tab_state.db_pool.clone();
         let rt = self.tab_state.tokio_runtime.clone();
+        let seeded = self.tab_state.pending_search_query.take();
 
-        if let Some(q) = self.tab_state.pending_search_query.take() {
-            self.tab_state.search_tab.query = q;
-            self.tab_state.search_tab.dirty = true;
-            if let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref()) {
-                let search_tab = &mut self.tab_state.search_tab;
-                resolve_seeded_names(
-                    &search_tab.query,
-                    &mut search_tab.resolved_ships,
-                    &mut search_tab.resolved_players,
-                    pool,
-                    rt,
-                );
-            }
-        }
-
-        // Lazily build the ship catalog (used by the Ship value editor), the
-        // same way the command palette does.
-        if self.tab_state.ship_catalog.is_none()
-            && let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref()
-        {
-            let wd = wows_data.read();
-            if let Some(metadata) = wd.game_metadata.as_ref() {
-                self.tab_state.ship_catalog = Some(ShipCatalog::build(metadata));
-            }
-        }
-
-        // Lazily load the replay-group list (used by the Group/Source value editor).
-        if self.tab_state.search_tab.sources.is_empty()
-            && let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref())
-        {
-            match rt.block_on(query::list_sources(pool)) {
-                Ok(sources) => self.tab_state.search_tab.sources = sources,
-                Err(e) => tracing::warn!("search: list_sources failed: {e}"),
-            }
-        }
-
-        let ship_catalog = self.tab_state.ship_catalog.as_ref();
-        let locale = self.tab_state.persisted.read().settings.app.locale.clone();
-
-        let mut chip_to_remove: Option<(usize, usize)> = None;
-        let mut chip_to_edit: Option<(usize, usize)> = None;
-        let mut new_chip: Option<(usize, Chip, Option<String>)> = None;
-        let mut group_to_remove: Option<usize> = None;
-        let mut want_add_group = false;
-        let mut want_clear = false;
-        let mut changed = false;
+        let (locale, history) = {
+            let persisted = self.tab_state.persisted.read();
+            let search = &persisted.settings.search;
+            (persisted.settings.app.locale.clone(), search.history.iter().cloned().collect::<Vec<_>>())
+        };
 
         let search_tab = &mut self.tab_state.search_tab;
-        while search_tab.add_drafts.len() < search_tab.query.groups.len() {
-            search_tab.add_drafts.push(AddFilterDraft::default());
-        }
-        search_tab.add_drafts.truncate(search_tab.query.groups.len());
-        while search_tab.add_draft_open.len() < search_tab.query.groups.len() {
-            search_tab.add_draft_open.push(false);
-        }
-        search_tab.add_draft_open.truncate(search_tab.query.groups.len());
-
-        let num_groups = search_tab.query.groups.len();
-        if num_groups == 0 {
-            ui.label(t!("ui.search.no_groups"));
+        search_tab.bar.names.locale.clone_from(&locale);
+        search_tab.drain_replies();
+        let seeded_now = seeded.is_some();
+        if let Some(expr) = seeded {
+            search_tab.set_query(expr);
         }
 
-        // The AND/OR connector applies to the whole query, so it is shown once
-        // above the groups rather than repeated between each pair.
-        if num_groups > 1 {
-            ui.horizontal(|ui| {
-                ui.label(t!("ui.search.combine_groups_with"));
-                changed |=
-                    ui.selectable_value(&mut search_tab.query.connector, Connector::And, t!("ui.search.and")).changed();
-                changed |=
-                    ui.selectable_value(&mut search_tab.query.connector, Connector::Or, t!("ui.search.or")).changed();
-            });
+        let output = search_tab.bar.show(ui, &Deps { history: &history });
+        if let Some(request) = output.request {
+            search_tab.queue_value_request(request);
+        }
+        if output.changed {
+            search_tab.dirty = true;
         }
 
-        // Groups render side by side (horizontally scrolling if they don't
-        // fit). Only the arrangement of groups is horizontal; the chips within
-        // a group still wrap vertically as before.
-        egui::ScrollArea::horizontal().id_salt("search_groups_scroll").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                for group_idx in 0..num_groups {
-                    ui.group(|ui| {
-                        // Groups sit in a horizontal row, so `ui.group` inherits a
-                        // LeftToRight layout. Force the body vertical so it stacks
-                        // top-down and `ui.indent` (which requires a vertical layout)
-                        // does not panic.
-                        ui.vertical(|ui| {
-                            ui.set_max_width(GROUP_MAX_WIDTH);
-
-                            ui.horizontal(|ui| {
-                                ui.strong(t!("ui.search.group_label", index = group_idx + 1));
-                                if ui.small_button(icons::TRASH).on_hover_text(t!("ui.search.remove_group")).clicked() {
-                                    group_to_remove = Some(group_idx);
-                                }
-                            });
-
-                            ui.horizontal_wrapped(|ui| {
-                                let chips = search_tab.query.groups[group_idx].chips.clone();
-                                for (chip_idx, chip) in chips.iter().enumerate() {
-                                    egui::Frame::group(ui.style()).show(ui, |ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.label(chip_pill_label(
-                                                chip,
-                                                &search_tab.resolved_ships,
-                                                &search_tab.resolved_players,
-                                                &search_tab.sources,
-                                                locale.as_deref(),
-                                            ));
-                                            if ui
-                                                .small_button(icons::PENCIL_SIMPLE)
-                                                .on_hover_text(t!("ui.search.edit"))
-                                                .clicked()
-                                            {
-                                                chip_to_edit = Some((group_idx, chip_idx));
-                                            }
-                                            if ui.small_button(icons::X).on_hover_text(t!("ui.search.remove")).clicked()
-                                            {
-                                                chip_to_remove = Some((group_idx, chip_idx));
-                                            }
-                                        });
-                                    });
-                                }
-                            });
-
-                            let mut draft = search_tab.add_drafts[group_idx].clone();
-                            let sources_snapshot = search_tab.sources.clone();
-                            let mut draft_open = search_tab.add_draft_open[group_idx];
-
-                            if !draft_open {
-                                if ui
-                                    .button(wt_translations::icon_t(icons::PLUS, &t!("ui.search.add_filter")))
-                                    .clicked()
-                                {
-                                    draft_open = true;
-                                }
-                                search_tab.add_draft_open[group_idx] = draft_open;
-                            } else {
-                                ui.indent(("search_add_draft", group_idx), |ui| {
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.label(t!("ui.search.field_label"));
-                                        let prev_field = draft.field;
-                                        egui::ComboBox::from_id_salt(("search_add_field", group_idx))
-                                            .selected_text(field_display_label(draft.field))
-                                            .show_ui(ui, |ui| {
-                                                for &f in NON_STAT_FIELDS {
-                                                    ui.selectable_value(&mut draft.field, f, field_display_label(f));
-                                                }
-                                                ui.separator();
-                                                for kind in StatKind::ALL {
-                                                    let selected =
-                                                        matches!(draft.field, Field::Stat { kind: k, .. } if k == kind);
-                                                    if ui.selectable_label(selected, stat_kind_label(kind)).clicked() {
-                                                        // Subject is finalized just below once we know whether
-                                                        // the previous field was already a Stat (preserve) or not
-                                                        // (default to Me); this placeholder subject is discarded.
-                                                        draft.field =
-                                                            Field::Stat { kind, subject: Subject::SelfPlayer };
-                                                    }
-                                                }
-                                            });
-                                        if draft.field != prev_field {
-                                            if let Field::Stat { kind, .. } = draft.field {
-                                                let subject = match prev_field {
-                                                    Field::Stat { subject, .. } => subject,
-                                                    _ => Subject::SelfPlayer,
-                                                };
-                                                draft.field = Field::Stat { kind, subject };
-                                                draft.subject = subject;
-                                            } else {
-                                                draft.subject = Subject::SelfPlayer;
-                                                draft.subject_picking_player = false;
-                                            }
-                                            draft.reset_for_field(draft.field);
-                                        }
-
-                                        if let Field::Stat { kind, subject } = draft.field {
-                                            ui.label(t!("ui.search.subject_label"));
-                                            egui::ComboBox::from_id_salt(("search_add_subject", group_idx))
-                                                .selected_text(subject_combo_label(
-                                                    subject,
-                                                    draft.subject_picking_player,
-                                                    &search_tab.resolved_players,
-                                                ))
-                                                .show_ui(ui, |ui| {
-                                                    let me_selected =
-                                                        !draft.subject_picking_player && subject == Subject::SelfPlayer;
-                                                    if ui
-                                                        .selectable_label(me_selected, t!("ui.search.subject_me"))
-                                                        .clicked()
-                                                    {
-                                                        draft.subject = Subject::SelfPlayer;
-                                                        draft.subject_picking_player = false;
-                                                        draft.field =
-                                                            Field::Stat { kind, subject: Subject::SelfPlayer };
-                                                    }
-                                                    let any_selected =
-                                                        !draft.subject_picking_player && subject == Subject::AnyPlayer;
-                                                    if ui
-                                                        .selectable_label(any_selected, t!("ui.search.subject_any"))
-                                                        .clicked()
-                                                    {
-                                                        draft.subject = Subject::AnyPlayer;
-                                                        draft.subject_picking_player = false;
-                                                        draft.field = Field::Stat { kind, subject: Subject::AnyPlayer };
-                                                    }
-                                                    let specific_selected = draft.subject_picking_player
-                                                        || matches!(subject, Subject::Player(_));
-                                                    if ui
-                                                        .selectable_label(
-                                                            specific_selected,
-                                                            t!("ui.search.subject_specific"),
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        draft.subject_picking_player = true;
-                                                    }
-                                                });
-
-                                            if !draft.subject_picking_player
-                                                && let Subject::Player(id) = subject
-                                            {
-                                                let label = search_tab
-                                                    .resolved_players
-                                                    .get(&id)
-                                                    .cloned()
-                                                    .unwrap_or_else(|| format!("#{}", id.raw()));
-                                                if player_locked_badge(ui, &label) {
-                                                    draft.subject_picking_player = true;
-                                                    draft.subject_player_search = String::new();
-                                                    draft.subject_player_results = Vec::new();
-                                                }
-                                            } else if draft.subject_picking_player
-                                                && ui.text_edit_singleline(&mut draft.subject_player_search).changed()
-                                                && let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref())
-                                            {
-                                                match rt.block_on(query::search_players(
-                                                    pool,
-                                                    &draft.subject_player_search,
-                                                    50,
-                                                )) {
-                                                    Ok(results) => draft.subject_player_results = results,
-                                                    Err(e) => {
-                                                        tracing::warn!("search: subject search_players failed: {e}")
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        ui.label(t!("ui.search.op_label"));
-                                        egui::ComboBox::from_id_salt(("search_add_op", group_idx))
-                                            .selected_text(op_label(draft.op))
-                                            .show_ui(ui, |ui| {
-                                                for &o in draft.field.allowed_ops() {
-                                                    ui.selectable_value(&mut draft.op, o, op_label(o));
-                                                }
-                                            });
-
-                                        match draft.field.value_kind() {
-                                            ValueKind::Text => {
-                                                ui.text_edit_singleline(&mut draft.text);
-                                            }
-                                            ValueKind::Int => {
-                                                ui.add(egui::DragValue::new(&mut draft.int_val));
-                                            }
-                                            ValueKind::Outcome => {
-                                                egui::ComboBox::from_id_salt(("search_add_outcome", group_idx))
-                                                    .selected_text(outcome_label(draft.outcome))
-                                                    .show_ui(ui, |ui| {
-                                                        for o in [
-                                                            MatchOutcome::Win,
-                                                            MatchOutcome::Loss,
-                                                            MatchOutcome::Draw,
-                                                            MatchOutcome::Unknown,
-                                                        ] {
-                                                            ui.selectable_value(
-                                                                &mut draft.outcome,
-                                                                o,
-                                                                outcome_label(o),
-                                                            );
-                                                        }
-                                                    });
-                                            }
-                                            ValueKind::Bool => {
-                                                egui::ComboBox::from_id_salt(("search_add_bool", group_idx))
-                                                    .selected_text(bool_label(draft.bool_val))
-                                                    .show_ui(ui, |ui| {
-                                                        ui.selectable_value(
-                                                            &mut draft.bool_val,
-                                                            true,
-                                                            bool_label(true),
-                                                        );
-                                                        ui.selectable_value(
-                                                            &mut draft.bool_val,
-                                                            false,
-                                                            bool_label(false),
-                                                        );
-                                                    });
-                                            }
-                                            ValueKind::Class => {
-                                                egui::ComboBox::from_id_salt(("search_add_class", group_idx))
-                                                    .selected_text(species_name(&draft.species))
-                                                    .show_ui(ui, |ui| {
-                                                        for &s in SHIP_SPECIES {
-                                                            ui.selectable_value(
-                                                                &mut draft.species,
-                                                                s,
-                                                                species_name(&s),
-                                                            );
-                                                        }
-                                                    });
-                                            }
-                                            ValueKind::Ship => {
-                                                ui.text_edit_singleline(&mut draft.ship_search);
-                                            }
-                                            ValueKind::Account => {
-                                                if draft.player_id.is_some() {
-                                                    if player_locked_badge(ui, &draft.player_label) {
-                                                        draft.player_id = None;
-                                                        draft.player_label = String::new();
-                                                        draft.player_search = String::new();
-                                                        draft.player_results = Vec::new();
-                                                    }
-                                                } else if ui.text_edit_singleline(&mut draft.player_search).changed()
-                                                    && let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref())
-                                                {
-                                                    match rt.block_on(query::search_players(
-                                                        pool,
-                                                        &draft.player_search,
-                                                        50,
-                                                    )) {
-                                                        Ok(results) => draft.player_results = results,
-                                                        Err(e) => tracing::warn!("search: search_players failed: {e}"),
-                                                    }
-                                                }
-                                            }
-                                            ValueKind::Timestamp => {
-                                                let date_salt = format!("search_add_date_{group_idx}");
-                                                ui.add(
-                                                    egui_extras::DatePickerButton::new(&mut draft.date)
-                                                        .id_salt(&date_salt),
-                                                );
-                                            }
-                                            ValueKind::Source => {
-                                                let selected_name = draft
-                                                    .source_id
-                                                    .and_then(|id| sources_snapshot.iter().find(|s| s.id == id))
-                                                    .map(|s| s.name.clone())
-                                                    .unwrap_or_else(|| t!("ui.search.source_any").into());
-                                                egui::ComboBox::from_id_salt(("search_add_source", group_idx))
-                                                    .selected_text(selected_name)
-                                                    .show_ui(ui, |ui| {
-                                                        for s in &sources_snapshot {
-                                                            ui.selectable_value(
-                                                                &mut draft.source_id,
-                                                                Some(s.id),
-                                                                s.name.clone(),
-                                                            );
-                                                        }
-                                                    });
-                                            }
-                                        }
-                                    });
-
-                                    if let Field::Stat { kind, subject } = draft.field
-                                        && draft.subject_picking_player
-                                    {
-                                        egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-                                            for p in draft.subject_player_results.clone() {
-                                                let label = if p.clan.is_empty() {
-                                                    p.latest_name.clone()
-                                                } else {
-                                                    format!("[{}] {}", p.clan, p.latest_name)
-                                                };
-                                                let selected =
-                                                    matches!(subject, Subject::Player(id) if id == p.account_id);
-                                                if ui.selectable_label(selected, label.clone()).clicked() {
-                                                    draft.subject = Subject::Player(p.account_id);
-                                                    draft.field =
-                                                        Field::Stat { kind, subject: Subject::Player(p.account_id) };
-                                                    draft.subject_picking_player = false;
-                                                    search_tab.resolved_players.entry(p.account_id).or_insert(label);
-                                                }
-                                            }
-                                        });
-                                    }
-
-                                    match draft.field.value_kind() {
-                                        ValueKind::Ship => match ship_catalog {
-                                            Some(catalog) => {
-                                                egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-                                                    for entry in catalog.search(&draft.ship_search, 30) {
-                                                        let selected = draft.ship_id == Some(entry.ship_id);
-                                                        let label = format!(
-                                                            "{} (T{})",
-                                                            entry.display_name,
-                                                            tier_roman(entry.tier)
-                                                        );
-                                                        if ui.selectable_label(selected, label).clicked() {
-                                                            draft.ship_id = Some(entry.ship_id);
-                                                            draft.ship_label = entry.display_name.clone();
-                                                        }
-                                                    }
-                                                });
-                                            }
-                                            None => {
-                                                ui.label(t!("ui.search.ship_catalog_unavailable"));
-                                            }
-                                        },
-                                        ValueKind::Account if draft.player_id.is_none() => {
-                                            egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-                                                for p in draft.player_results.clone() {
-                                                    let label = if p.clan.is_empty() {
-                                                        p.latest_name.clone()
-                                                    } else {
-                                                        format!("[{}] {}", p.clan, p.latest_name)
-                                                    };
-                                                    let selected = draft.player_id == Some(p.account_id);
-                                                    if ui.selectable_label(selected, label.clone()).clicked() {
-                                                        draft.player_id = Some(p.account_id);
-                                                        draft.player_label = label;
-                                                    }
-                                                }
-                                            });
-                                        }
-                                        _ => {}
-                                    }
-
-                                    ui.horizontal(|ui| {
-                                        let add_disabled =
-                                            matches!(draft.field, Field::Stat { .. }) && draft.subject_picking_player;
-                                        if ui
-                                            .add_enabled(
-                                                !add_disabled,
-                                                egui::Button::new(wt_translations::icon_t(
-                                                    icons::CHECK,
-                                                    &t!("ui.search.add"),
-                                                )),
-                                            )
-                                            .clicked()
-                                            && let Some(value) = draft.to_value()
-                                        {
-                                            let label = draft.value_display_label();
-                                            new_chip = Some((
-                                                group_idx,
-                                                Chip { field: draft.field, op: draft.op, value },
-                                                label,
-                                            ));
-                                            draft = AddFilterDraft::default();
-                                            draft_open = false;
-                                        }
-                                        if ui
-                                            .button(wt_translations::icon_t(icons::X, &t!("ui.buttons.cancel")))
-                                            .clicked()
-                                        {
-                                            draft = AddFilterDraft::default();
-                                            draft_open = false;
-                                        }
-                                    });
-                                });
-                                search_tab.add_draft_open[group_idx] = draft_open;
-                            }
-
-                            search_tab.add_drafts[group_idx] = draft;
-                        });
-                    });
-                }
-
-                if ui.button(wt_translations::icon_t(icons::PLUS, &t!("ui.search.add_group"))).clicked() {
-                    want_add_group = true;
-                }
-            });
-        });
-
-        ui.horizontal(|ui| {
-            if ui.button(wt_translations::icon_t(icons::ERASER, &t!("ui.search.clear_filters"))).clicked() {
-                want_clear = true;
-            }
-        });
-
-        if let Some((group_idx, chip_idx)) = chip_to_remove {
-            self.tab_state.search_tab.query.groups[group_idx].chips.remove(chip_idx);
-            changed = true;
-        }
-        if let Some((group_idx, chip_idx)) = chip_to_edit {
-            let search_tab = &mut self.tab_state.search_tab;
-            let chip = search_tab.query.groups[group_idx].chips[chip_idx].clone();
-            let draft = AddFilterDraft::from_chip(&chip, &search_tab.resolved_ships, &search_tab.resolved_players);
-            search_tab.query.groups[group_idx].chips.remove(chip_idx);
-            search_tab.add_drafts[group_idx] = draft;
-            search_tab.add_draft_open[group_idx] = true;
-            changed = true;
-        }
-        if let Some((group_idx, chip, label)) = new_chip {
-            if let Some(label) = label {
-                match &chip.value {
-                    Value::Ship(id) => {
-                        self.tab_state.search_tab.resolved_ships.insert(*id, label);
+        let mut wake_in = None;
+        if let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref()) {
+            if !search_tab.sources_requested {
+                search_tab.sources_requested = true;
+                let pool = pool.clone();
+                search_tab.spawn(rt, async move {
+                    match query::list_sources(&pool).await {
+                        Ok(sources) => Some(SearchMsg::Sources(sources)),
+                        Err(e) => {
+                            tracing::warn!("search: list_sources failed: {e}");
+                            None
+                        }
                     }
-                    Value::Account(id) => {
-                        self.tab_state.search_tab.resolved_players.insert(*id, label);
-                    }
-                    _ => {}
-                }
+                });
             }
-            self.tab_state.search_tab.query.groups[group_idx].chips.push(chip);
-            changed = true;
+            wake_in = search_tab.service_value_request(pool, rt);
+            if search_tab.dirty {
+                search_tab.resolve_names(pool, rt);
+                search_tab.dispatch_search(pool, rt);
+            }
         }
-        if let Some(group_idx) = group_to_remove {
-            self.tab_state.search_tab.query.groups.remove(group_idx);
-            self.tab_state.search_tab.add_drafts.remove(group_idx);
-            self.tab_state.search_tab.add_draft_open.remove(group_idx);
-            changed = true;
+        if search_tab.in_flight > 0 {
+            wake_in = Some(wake_in.map_or(POLL_INTERVAL, |left| left.min(POLL_INTERVAL)));
         }
-        if want_add_group {
-            self.tab_state.search_tab.query.groups.push(Group::default());
-            changed = true;
-        }
-        if want_clear {
-            self.tab_state.search_tab.query = Query::default();
-            self.tab_state.search_tab.add_drafts.clear();
-            changed = true;
+        if let Some(wake_in) = wake_in {
+            ui.ctx().request_repaint_after(wake_in);
         }
 
-        if changed {
-            self.tab_state.search_tab.dirty = true;
-            // Mirror the query into persisted settings so it survives an app
-            // restart; the background save task picks it up from there.
-            self.tab_state.persisted.write().settings.search_query = self.tab_state.search_tab.query.clone();
+        // Mirror the query into persisted settings so it survives an app
+        // restart; the background save task picks it up from there. A seeded
+        // query counts: the user asked for it as much as a typed one.
+        if output.changed || seeded_now {
+            let text = print_query(&self.tab_state.search_tab.bar.expr);
+            self.tab_state.persisted.write().settings.search.query = text;
         }
 
         ui.separator();
 
-        // Re-query when the query changed and the DB is available.
-        if self.tab_state.search_tab.dirty
-            && let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref())
-        {
-            let query = self.tab_state.search_tab.query.clone();
-            let search_tab = &mut self.tab_state.search_tab;
-            resolve_seeded_names(&query, &mut search_tab.resolved_ships, &mut search_tab.resolved_players, pool, rt);
-            match rt.block_on(crate::db::index::query::search_by_query(pool, &query, 500)) {
-                Ok(hits) => self.tab_state.search_tab.results = hits,
-                Err(e) => tracing::warn!("search query failed: {e}"),
-            }
-            self.tab_state.search_tab.dirty = false;
-        }
-
-        ui.label(t!("ui.search.match_count", count = self.tab_state.search_tab.results.len()));
+        let count = self.tab_state.search_tab.results.len();
+        ui.label(if self.tab_state.search_tab.truncated {
+            t!("ui.search.match_count_truncated", count = count)
+        } else {
+            t!("ui.search.match_count", count = count)
+        });
 
         let mut open_path: Option<std::path::PathBuf> = None;
         egui::ScrollArea::horizontal().id_salt("search_results").show(ui, |ui| {
@@ -1109,5 +546,73 @@ impl ToolkitTabViewer<'_> {
                 deps.parse_replay_from_path(path, crate::task::ReplaySource::ManualOpen)
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::index::query_ast::Quant;
+    use crate::db::index::query_ast::RosterField;
+    use crate::db::index::query_ast::RosterTerm;
+    use crate::db::index::rows::VehicleRelation;
+    use crate::ui::query_bar::seed;
+
+    /// Seeded queries carry bare ids, so the pill reads as `#<id>` until these
+    /// are found and looked up. A walk that stopped at the roster boundary
+    /// would find neither, since every id lives inside a quantifier.
+    #[test]
+    fn id_collection_reaches_inside_roster_predicates() {
+        let ship = GameParamId::from(4_179_530_192_u64);
+        let account = AccountId(1_234_567);
+        let expr = Expr::All(vec![seed::my_matches_in_ship(ship), seed::matches_with_player(account)]);
+
+        let (mut ships, mut players) = (Vec::new(), Vec::new());
+        collect_ids(&expr, &mut ships, &mut players);
+        assert_eq!(ships, vec![ship]);
+        assert_eq!(players, vec![account]);
+    }
+
+    /// A negated term still names an id whose pill has to read as a name.
+    #[test]
+    fn id_collection_descends_through_negation_and_disjunction() {
+        let account = AccountId(42);
+        let expr: MatchExpr = Expr::Any(vec![
+            Expr::Not(Box::new(seed::matches_with_player(account))),
+            Expr::Leaf(MatchTerm::FreeText("ocean".into())),
+        ]);
+
+        let (mut ships, mut players) = (Vec::new(), Vec::new());
+        collect_ids(&expr, &mut ships, &mut players);
+        assert!(ships.is_empty());
+        assert_eq!(players, vec![account]);
+    }
+
+    /// A relation is not an id, and asking the index to resolve one would be a
+    /// query per pill that can never answer.
+    #[test]
+    fn id_collection_ignores_roster_values_that_are_not_ids() {
+        let expr: MatchExpr = Expr::Leaf(MatchTerm::Roster {
+            quant: Quant::Any,
+            pred: Expr::Leaf(RosterTerm {
+                field: RosterField::Relation,
+                op: crate::db::index::query_ast::Op::Is,
+                value: Value::Relation(VehicleRelation::Enemy),
+            }),
+        });
+
+        let (mut ships, mut players) = (Vec::new(), Vec::new());
+        collect_ids(&expr, &mut ships, &mut players);
+        assert!(ships.is_empty() && players.is_empty());
+    }
+
+    /// A picked map name goes back into the caret as grammar text, so one with a
+    /// space in it has to come back quoted or the term ends at the space.
+    #[test]
+    fn a_map_option_quotes_a_name_the_grammar_would_split() {
+        assert_eq!(map_option("Ocean").token, "Ocean");
+        let two_words = map_option("New Dawn");
+        assert_eq!(two_words.label, "New Dawn");
+        assert_eq!(two_words.token, "\"New Dawn\"");
     }
 }

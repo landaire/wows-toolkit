@@ -726,6 +726,7 @@ moderate = "Moderato"
 weak = "Debole"
 
 [ui.search]
+match_count_truncated = "%{count}+ matches"
 free_text = "contains \"%{text}\""
 quant_any = "any"
 quant_none = "no"

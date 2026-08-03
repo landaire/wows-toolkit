@@ -2,10 +2,6 @@
 //! `layout::lay_out`; nothing here decides where anything goes, and every
 //! colour is a theme surface or a semantic role rather than a tuned value.
 
-// Consumed by the bar widget in this module's `mod.rs`; nothing outside the
-// query bar draws these.
-#![allow(dead_code)]
-
 use std::ops::Range;
 use std::sync::Arc;
 
