@@ -195,6 +195,20 @@ pub fn delete(expr: &mut MatchExpr, sel: &Selection) {
 /// query. Bottom-up and idempotent: re-running it on its own output is a
 /// no-op, since every remaining `All`/`Any` already has zero (root only) or at
 /// least two children.
+///
+/// This deliberately does not preserve `Expr`'s own boolean semantics for an
+/// emptied `Any`: per its doc comment, `Any([])` denotes "matches nothing", so
+/// `All([Any([]), x])` is formally "nothing AND x", i.e. "matches nothing" --
+/// yet this function reduces it to `x`, not to the canonical false shape.
+/// That is intentional. In an interactive builder, deleting the last pill out
+/// of an OR-subgroup means "remove this group", not "poison the query to
+/// match zero rows": `win and (map:ocean or map:north)` with both map pills
+/// deleted should read as `win`, not silently become unsatisfiable. The same
+/// reasoning covers the root: a fully emptied tree canonicalises to
+/// `All(vec![])`, which matches everything, because a cleared query bar means
+/// "no filter", not "no results". Because every edit function in this module
+/// calls this afterward, an empty `Any` never reaches `query_sql`, where it
+/// would otherwise compile to the literal `1=0`.
 pub fn canonicalise(expr: &mut MatchExpr) {
     let taken = std::mem::replace(expr, Expr::All(Vec::new()));
     *expr = canonicalise_node(taken).unwrap_or(Expr::All(Vec::new()));
@@ -429,10 +443,16 @@ mod tests {
         use crate::db::index::query_text::parse_query;
         use crate::db::index::query_text::print_query;
         let mut e = Expr::All(vec![leaf(1), leaf(2), leaf(3)]);
-        for edit in 0..3 {
+        // Exercises all four edit functions, and both `negate` branches: edit
+        // 1 flips build=3's `Eq` to its allowed inverse `Ne` (the branch a
+        // group negation never reaches), and edit 4 wraps a group in `Not`.
+        for edit in 0..6 {
             match edit {
                 0 => group(&mut e, &sel(&[&[0], &[1]]), true),
-                1 => negate(&mut e, &vec![0]),
+                1 => negate(&mut e, &vec![1]),
+                2 => ungroup(&mut e, &vec![0]),
+                3 => group(&mut e, &sel(&[&[0], &[1]]), false),
+                4 => negate(&mut e, &vec![0]),
                 _ => delete(&mut e, &sel(&[&[1]])),
             }
             canonicalise(&mut e);
