@@ -3,6 +3,7 @@
 
 pub mod label;
 pub mod layout;
+pub mod paint;
 pub mod select;
 pub mod suggest;
 pub mod tokens;
