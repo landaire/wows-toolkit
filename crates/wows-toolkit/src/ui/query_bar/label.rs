@@ -37,6 +37,10 @@ pub struct NameCache {
     pub ships: HashMap<GameParamId, String>,
     pub players: HashMap<AccountId, String>,
     pub sources: Vec<IndexSource>,
+    /// The app's active locale, same value the Search tab reads from
+    /// `settings.app.locale` and threads into `chip_pill_label`. `None` (the
+    /// default) formats numbers as en-US, matching `separate_number`'s own default.
+    pub locale: Option<String>,
 }
 
 /// Human text for one match-level term.
@@ -100,7 +104,7 @@ fn match_field_label(field: MatchField) -> String {
         MatchField::MatchGroup => t!("ui.search.field.match_group"),
         MatchField::Date => t!("ui.search.field.date"),
         MatchField::Build => t!("ui.search.field.build"),
-        MatchField::Outcome => t!("ui.search.field.match_outcome"),
+        MatchField::Outcome => t!("ui.search.field.outcome"),
         MatchField::Group => t!("ui.search.field.group"),
         MatchField::ResultsAvailable => t!("ui.search.field.results_available"),
     }
@@ -161,7 +165,9 @@ fn op_label(op: Op) -> String {
 fn value_text(value: &Value, cache: &NameCache) -> String {
     match value {
         Value::Text(s) => s.clone(),
-        Value::Int(n) => crate::util::formatting::separate_number(*n, None),
+        Value::Int(n) => crate::util::formatting::separate_number(*n, cache.locale.as_deref()),
+        // Matches the existing PR-formatting convention (`replay_parser/mod.rs`,
+        // `stats_tab.rs`): rounded to a whole number, no thousands grouping.
         Value::Float(f) => format!("{f:.0}"),
         Value::Bool(b) => bool_label(*b),
         Value::Outcome(o) => outcome_label(*o),
@@ -239,7 +245,7 @@ mod tests {
     fn a_match_field_pill_reads_as_field_op_value() {
         let cache = NameCache::default();
         let term = MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win));
-        assert_eq!(pill_text(&term, &cache), "Outcome is Win");
+        assert_eq!(pill_text(&term, &cache), "Result is Win");
     }
 
     #[test]
@@ -277,6 +283,69 @@ mod tests {
     fn free_text_reads_as_a_plain_search() {
         let cache = NameCache::default();
         assert_eq!(pill_text(&MatchTerm::FreeText("yamato".into()), &cache), "contains \"yamato\"");
+    }
+
+    #[test]
+    fn a_roster_quantifier_over_one_leaf_reads_as_quant_then_term() {
+        let cache = NameCache::default();
+        let pred = Expr::Leaf(RosterTerm {
+            field: RosterField::Relation,
+            op: Op::Is,
+            value: Value::Relation(crate::db::index::rows::VehicleRelation::Enemy),
+        });
+        let term = MatchTerm::Roster { quant: Quant::Any, pred };
+        assert_eq!(pill_text(&term, &cache), "any Relation is Enemy");
+    }
+
+    #[test]
+    fn a_roster_quantifier_over_all_joins_leaves_with_and() {
+        let mut cache = NameCache::default();
+        cache.ships.insert(GameParamId::from(1u64), "Yamato".into());
+        let pred = Expr::All(vec![
+            Expr::Leaf(RosterTerm {
+                field: RosterField::Relation,
+                op: Op::Is,
+                value: Value::Relation(crate::db::index::rows::VehicleRelation::Enemy),
+            }),
+            Expr::Leaf(RosterTerm {
+                field: RosterField::Ship,
+                op: Op::Is,
+                value: Value::Ship(GameParamId::from(1u64)),
+            }),
+        ]);
+        let term = MatchTerm::Roster { quant: Quant::Any, pred };
+        assert_eq!(pill_text(&term, &cache), "any Relation is Enemy and Ship is Yamato");
+    }
+
+    #[test]
+    fn a_roster_quantifier_over_any_joins_leaves_with_or() {
+        let cache = NameCache::default();
+        let pred = Expr::Any(vec![
+            Expr::Leaf(RosterTerm {
+                field: RosterField::Relation,
+                op: Op::Is,
+                value: Value::Relation(crate::db::index::rows::VehicleRelation::Enemy),
+            }),
+            Expr::Leaf(RosterTerm {
+                field: RosterField::Relation,
+                op: Op::Is,
+                value: Value::Relation(crate::db::index::rows::VehicleRelation::Ally),
+            }),
+        ]);
+        let term = MatchTerm::Roster { quant: Quant::None, pred };
+        assert_eq!(pill_text(&term, &cache), "no Relation is Enemy or Relation is Ally");
+    }
+
+    #[test]
+    fn a_roster_quantifier_over_a_negation_prefixes_not() {
+        let cache = NameCache::default();
+        let pred = Expr::Not(Box::new(Expr::Leaf(RosterTerm {
+            field: RosterField::Relation,
+            op: Op::Is,
+            value: Value::Relation(crate::db::index::rows::VehicleRelation::Enemy),
+        })));
+        let term = MatchTerm::Roster { quant: Quant::Any, pred };
+        assert_eq!(pill_text(&term, &cache), "any not (Relation is Enemy)");
     }
 
     #[test]
