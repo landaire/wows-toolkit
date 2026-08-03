@@ -356,6 +356,29 @@ pub fn alert_tab_style(global_style: &egui_dock::TabStyle, theme: egui::Theme) -
     style
 }
 
+/// Paints the active dock tab's marker, a bar across the top edge of its button.
+///
+/// `egui_dock` has no style field for it, so `app.rs` paints it from the tab
+/// body, the only hook that runs for the active tab once its strip is already
+/// on the layer. The painter has to come from `Context::layer_painter`, which
+/// clips to the context's content rect: `Painter::with_clip_rect` intersects
+/// with the caller's clip instead of replacing it, and the tab body's clip
+/// excludes the strip entirely, so the bar would be clipped away to nothing.
+///
+/// The bar is inset a point on each side so the tab's own border stays visible
+/// down the sides of the button.
+pub fn paint_active_tab_marker(painter: &egui::Painter, tab_rect: egui::Rect, theme: egui::Theme) {
+    let accent = match theme {
+        egui::Theme::Dark => palette::dark::ACCENT,
+        egui::Theme::Light => palette::light::ACCENT,
+    };
+    let bar = egui::Rect::from_min_max(
+        egui::pos2(tab_rect.left() + 1.0, tab_rect.top()),
+        egui::pos2(tab_rect.right() - 1.0, tab_rect.top() + 2.0),
+    );
+    painter.rect_filled(bar, CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, accent);
+}
+
 #[cfg(test)]
 mod tests {
     use egui::Color32;

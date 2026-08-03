@@ -196,6 +196,14 @@ impl TabViewer for ToolkitTabViewer<'_> {
 
     // Defines the contents of a given `tab`.
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
+        // egui_dock has no style field for the active tab's marker bar, and this
+        // is the only hook that runs for the active tab with its strip already
+        // on the layer. `dock_tab_rects` carries the button rect across.
+        if let Some((_, rect)) = self.tab_state.dock_tab_rects.iter().find(|(t, _)| *t == *tab) {
+            let painter = ui.ctx().layer_painter(ui.layer_id());
+            crate::ui::theme::style::paint_active_tab_marker(&painter, *rect, self.tab_state.active_theme);
+        }
+
         // The Settings tab caches its game-data cache-dir stats. The main dock
         // shows one tab per frame, so clearing here whenever another tab is
         // active makes reopening Settings recompute once instead of per frame.
@@ -212,6 +220,13 @@ impl TabViewer for ToolkitTabViewer<'_> {
             Tab::Stats => self.build_stats_tab(ui),
             Tab::Search => self.build_search_tab(ui),
         }
+    }
+
+    /// Records where each tab button landed. `TabViewer::ui` runs after the
+    /// whole strip is drawn and only for the active tab, so this is what lets
+    /// it paint the active marker over the right button.
+    fn on_tab_button(&mut self, tab: &mut Self::Tab, response: &egui::Response) {
+        self.tab_state.dock_tab_rects.push((tab.clone(), response.rect));
     }
 
     /// Right-clicking a replay tab offers a search over just that tab's own
@@ -4184,6 +4199,7 @@ impl eframe::App for WowsToolkitApp {
         });
 
         self.tab_state.active_theme = ctx.theme();
+        self.tab_state.dock_tab_rects.clear();
 
         egui::CentralPanel::default().show(ui, |ui| {
             DockArea::new(&mut self.dock_state)

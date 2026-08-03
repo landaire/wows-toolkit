@@ -542,6 +542,11 @@ pub struct TabState {
     /// frame before the dock area is built. `TabViewer::tab_style_override`
     /// has no `Context` of its own, so it reads this instead.
     pub active_theme: egui::Theme,
+    /// Screen rects of the dock's tab buttons, refreshed every frame by
+    /// `ToolkitTabViewer::on_tab_button`. `TabViewer::ui` runs only for the
+    /// active tab and is handed no rect of its own, so this is how the active
+    /// tab's marker finds the button that opened it.
+    pub dock_tab_rects: Vec<(crate::app::Tab, egui::Rect)>,
     /// Cached builds found to have newer data upstream by the last update check.
     pub game_data_updates: Vec<wows_data_mgr::download_repo::BuildUpdateStatus>,
     /// Whether a game data update check is currently running.
@@ -660,6 +665,7 @@ impl Default for TabState {
             network_job_tx: None,
             settings_needs_attention: false,
             active_theme: egui::Theme::Dark,
+            dock_tab_rects: Vec::new(),
             game_data_updates: Vec::new(),
             checking_game_data_updates: false,
             game_data_repair: Vec::new(),
