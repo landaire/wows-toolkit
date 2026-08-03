@@ -213,6 +213,9 @@ mod tests {
         let inner = Expr::Any(vec![win(), build_ge(1)]);
         let toks = tokenize(&Expr::All(vec![win(), inner]), &NameCache::default());
         let open = toks.iter().position(|t| matches!(t.kind, TokenKind::GroupOpen { .. })).expect("an open bracket");
+        // `GroupClose` is a unit variant; the `{ .. }` is pinned verbatim from
+        // the task brief's test text, not left in by oversight.
+        #[allow(clippy::unneeded_struct_pattern)]
         let close = toks.iter().rposition(|t| matches!(t.kind, TokenKind::GroupClose { .. })).expect("a close bracket");
         assert!(open < close);
         assert!(toks[open].depth > toks[0].depth, "the group's contents nest deeper than its siblings");
@@ -221,7 +224,11 @@ mod tests {
     #[test]
     fn a_negation_is_marked_and_wraps_its_operand() {
         let toks = tokenize(&Expr::Not(Box::new(win())), &NameCache::default());
-        assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::NotPrefix { .. })), "got {toks:#?}");
+        // `NotPrefix` is a unit variant; the `{ .. }` is pinned verbatim from
+        // the task brief's test text, not left in by oversight.
+        #[allow(clippy::unneeded_struct_pattern)]
+        let has_not_prefix = toks.iter().any(|t| matches!(t.kind, TokenKind::NotPrefix { .. }));
+        assert!(has_not_prefix, "got {toks:#?}");
     }
 
     // `Quant::Any` over a bare `Leaf` is a sugar shape (see
@@ -286,6 +293,24 @@ mod tests {
             }
             assert!(node_at(&expr, &t.path).is_some(), "path {:?} does not resolve", t.path);
         }
+    }
+
+    #[test]
+    fn a_sugar_collapsed_pills_path_resolves_to_the_roster_leaf() {
+        // The sugar branch pushes its `Pill` at the quantifier's own
+        // (unextended) path, so `node_at` must walk straight to the `Roster`
+        // leaf just like the bracketed branch does. Task 6 resolves a clicked
+        // pill through this path, so a regression here would silently act on
+        // the wrong node.
+        let pred = Expr::Leaf(RosterTerm {
+            field: crate::db::index::query_ast::RosterField::Relation,
+            op: Op::Is,
+            value: Value::Relation(crate::db::index::rows::VehicleRelation::Enemy),
+        });
+        let expr: MatchExpr = Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred });
+        let toks = tokenize(&expr, &NameCache::default());
+        assert!(matches!(toks[0].kind, TokenKind::Pill { .. }), "got {toks:#?}");
+        assert_eq!(node_at(&expr, &toks[0].path), Some(&expr), "a sugar-collapsed path resolves to the Roster leaf");
     }
 
     #[test]
