@@ -24,8 +24,6 @@ use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::RenderProgress;
 use wows_minimap_renderer::RenderStage;
-use wows_minimap_renderer::STATS_PANEL_WIDTH;
-use wows_minimap_renderer::TEAM_ROSTER_WIDTH;
 use wows_minimap_renderer::assets;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::ShipConfigFilter;
@@ -1526,16 +1524,6 @@ impl ReplayRendererViewer {
                     });
                 }
 
-                let (show_stats_panel, show_team_rosters) = {
-                    let opts = &shared_state.lock().options;
-                    let loading = status_is_loading;
-                    // Stats panel and team rosters share the same gutter; if a
-                    // legacy settings file has both on, team rosters win.
-                    let team = !loading && opts.show_team_rosters;
-                    let stats = !loading && opts.show_stats_panel && !team;
-                    (stats, team)
-                };
-
                 egui::CentralPanel::default().show(viewport_ui, |ui| {
                     if status_is_loading {
                         ui.centered_and_justified(|ui| {
@@ -1554,29 +1542,57 @@ impl ReplayRendererViewer {
                     // Canvas layout: team rosters reserve a left+right gutter and
                     // replace the self-perspective stats panel. When rosters are
                     // off, the stats panel takes its own right-side strip.
-                    let roster_gutter = if show_team_rosters { TEAM_ROSTER_WIDTH as f32 } else { 0.0 };
-                    let stats_strip = if show_stats_panel && !show_team_rosters {
-                        STATS_PANEL_WIDTH as f32
-                    } else {
-                        0.0
-                    };
-                    let map_x_offset = roster_gutter;
-                    let canvas_w = MINIMAP_SIZE as f32 + roster_gutter * 2.0 + stats_strip;
-                    let logical_canvas = Vec2::new(canvas_w, CANVAS_HEIGHT as f32);
+                    let geom = wt_collab_egui::player::canvas_geometry(&options);
                     let available = ui.available_size();
-                    let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
-                    let map_w = if show_stats_panel || show_team_rosters {
-                        Some(MINIMAP_SIZE as f32)
-                    } else {
-                        None
+
+                    let (trail_hidden_ships, ship_range_overrides) = {
+                        let ann = annotation_arc.lock();
+                        (ann.trail_hidden_ships.clone(), ann.ship_range_overrides.clone())
                     };
-                    // Pass zoom=1.0 so the canvas (and therefore HUD/panels)
-                    // stays fit-scaled regardless of the slider. Map content
-                    // still zooms via the MapTransform's zoom factor below;
-                    // HUD-text overlays (PreBattleCountdown, BattleResultOverlay)
-                    // scale themselves explicitly off transform.zoom.
-                    let layout = compute_canvas_layout(available, logical_canvas, 1.0, response.rect.min, map_w);
-                    let window_scale = layout.window_scale;
+                    let filter = WindowCommandFilter { trail_hidden_ships, ship_range_overrides };
+
+                    let zp = zoom_pan_arc.lock();
+                    let (zoom, pan) = (zp.zoom, zp.pan);
+                    drop(zp);
+
+                    let tex_guard = textures_arc.lock();
+                    let Some(textures) = tex_guard.as_ref() else {
+                        return;
+                    };
+                    let shared_tex = make_shared_textures(textures);
+
+                    // The guard is held across the paint and the build-snapshot read, then
+                    // dropped before the hover interactions below. Cloning the frame's commands
+                    // instead would allocate hundreds of them on every repaint.
+                    let state = shared_state.lock();
+                    let frame_commands: &[DrawCommand] = state.frame.as_ref().map_or(&[], |f| &f.commands);
+
+                    let out = wt_collab_egui::player::MinimapView {
+                        commands: frame_commands,
+                        textures: &shared_tex,
+                        map_texture: textures.map_texture.as_ref().map(|t| t.id()),
+                        options: &options,
+                        show_dead_ships,
+                        zoom,
+                        pan,
+                        filter: &filter,
+                        text_resolver: &LocalizedTextResolver,
+                        grid: Some(&|ws| GridStyle {
+                            grid_color: Color32::from_rgba_unmultiplied(255, 255, 255, 64),
+                            label_color: Color32::from_rgba_unmultiplied(255, 255, 255, 180),
+                            line_width: 1.0,
+                            label_font: game_font(11.0 * ws),
+                        }),
+                        background: Color32::from_rgb(20, 25, 35),
+                    }
+                    .show(ui, available, egui::Sense::click_and_drag());
+
+                    let response = out.response;
+                    let layout = out.layout;
+                    let transform = out.transform;
+                    let canvas_w = geom.canvas_width;
+                    let map_x_offset = geom.map_x_offset;
+                    let map_w = geom.map_width;
 
                     // Zoom/pan input handling
                     let zoom_changed = {
@@ -1586,7 +1602,7 @@ impl ReplayRendererViewer {
                             &response,
                             &mut zp,
                             &layout,
-                            logical_canvas,
+                            Vec2::new(canvas_w, CANVAS_HEIGHT as f32),
                             &ZoomPanConfig {
                                 allow_left_drag_pan: true,
                                 hud_height: HUD_HEIGHT as f32,
@@ -1598,27 +1614,7 @@ impl ReplayRendererViewer {
                             false,
                         )
                     };
-
-                    // Build transform for this frame
-                    let zp = zoom_pan_arc.lock();
-                    // HUD elements like the score bar are emitted in canvas-space
-                    // starting at x=0. When rosters are on, hud_width is the full
-                    // gutter+map+gutter area so the score bar spans across all of it.
-                    // The stats-panel strip (when also on) is excluded.
-                    let hud_w = MINIMAP_SIZE as f32 + roster_gutter * 2.0;
-                    let transform = MapTransform {
-                        origin: layout.origin,
-                        window_scale,
-                        zoom: zp.zoom,
-                        pan: zp.pan,
-                        hud_height: HUD_HEIGHT as f32,
-                        canvas_height: CANVAS_HEIGHT as f32,
-                        canvas_width: canvas_w,
-                        hud_width: hud_w,
-                        map_x_offset,
-                    };
-                    let current_zoom = zp.zoom;
-                    drop(zp);
+                    let current_zoom = zoom_pan_arc.lock().zoom;
 
                     // Cursor icon based on tool / zoom state
                     if response.hovered() {
@@ -1630,19 +1626,14 @@ impl ReplayRendererViewer {
                             } else {
                                 // No annotation cursor — check if hovering over a ship
                                 let near_ship = response.hover_pos().is_some_and(|hp| {
-                                    let state = shared_state.lock();
-                                    if let Some(ref frame) = state.frame {
-                                        frame.commands.iter().any(|cmd| {
-                                            if let DrawCommand::Ship { pos, player_name: Some(_), .. } = cmd {
-                                                let sp = transform.minimap_to_screen(pos);
-                                                hp.distance(sp) < 30.0
-                                            } else {
-                                                false
-                                            }
-                                        })
-                                    } else {
-                                        false
-                                    }
+                                    frame_commands.iter().any(|cmd| {
+                                        if let DrawCommand::Ship { pos, player_name: Some(_), .. } = cmd {
+                                            let sp = transform.minimap_to_screen(pos);
+                                            hp.distance(sp) < 30.0
+                                        } else {
+                                            false
+                                        }
+                                    })
                                 });
                                 if near_ship {
                                     Some(egui::CursorIcon::PointingHand)
@@ -1671,350 +1662,216 @@ impl ReplayRendererViewer {
                         repaint = true;
                     }
 
-                    // Draw dark background
-                    painter.rect_filled(response.rect, CornerRadius::ZERO, Color32::from_rgb(20, 25, 35));
+                    let build_snapshots: Vec<Option<Arc<PlayerBuildDisplay>>> =
+                        out.player_build_regions.iter().map(|r| state.player_builds.get(&r.entity_id).cloned()).collect();
+                    let teams_with_replays = state.teams_with_replays.clone();
+                    let debug_mode = state.is_debug_mode;
 
-                    // Clipped painter for map-region content (below HUD).
-                    // Clip to MINIMAP_SIZE when any side panel is on, so map content
-                    // doesn't bleed into the stats strip or roster gutters.
-                    let map_clip_width = if show_stats_panel || show_team_rosters {
-                        Some(MINIMAP_SIZE as f32)
-                    } else {
-                        None
-                    };
-                    let map_clip = compute_map_clip_rect(&layout, HUD_HEIGHT as f32, map_clip_width, map_x_offset);
-                    let map_painter = painter.with_clip_rect(map_clip);
-
-                    let tex_guard = textures_arc.lock();
-                    if let Some(ref textures) = *tex_guard {
-                        // Draw map background texture
-                        draw_map_background(&map_painter, &transform, textures.map_texture.as_ref().map(|t| t.id()));
-
-                        // Draw grid overlay (A-J / 1-10)
-                        draw_grid(&map_painter, &transform, &GridStyle {
-                            grid_color: Color32::from_rgba_unmultiplied(255, 255, 255, 64),
-                            label_color: Color32::from_rgba_unmultiplied(255, 255, 255, 180),
-                            line_width: 1.0,
-                            label_font: game_font(11.0 * window_scale),
+                    for (idx, region) in out.consumable_hover_regions.iter().enumerate() {
+                        let id = egui::Id::new(("roster_consumable_hover", idx));
+                        let hover_resp = ui.interact(region.rect, id, egui::Sense::hover());
+                        let tex = textures.consumable_icons.get(&region.icon_key);
+                        hover_resp.on_hover_ui(|ui| {
+                            roster_consumable_tooltip(ui, region, tex);
                         });
+                    }
 
-                        // Draw current frame's commands, filtered by UI-local options
-                        let (trail_hidden_ships, ship_range_overrides) = {
-                            let ann = annotation_arc.lock();
-                            (ann.trail_hidden_ships.clone(), ann.ship_range_overrides.clone())
-                        };
-                        let state = shared_state.lock();
-                        if let Some(ref frame) = state.frame {
-                            // Collect alive ship entity IDs for filtering config circles
-                            let alive_ships: HashSet<EntityId> = frame
-                                .commands
-                                .iter()
-                                .filter_map(|cmd| {
-                                    if let DrawCommand::Ship { entity_id, .. } = cmd {
-                                        Some(*entity_id)
+                    for (idx, region) in out.player_build_regions.iter().enumerate() {
+                        // The build popover is gated on having packet-level data from that team:
+                        // own team always, enemy team only via a merged alt replay. Debug mode
+                        // unmasks everything, matching the inspector.
+                        if !debug_mode && !teams_with_replays.contains(&region.team_id) {
+                            continue;
+                        }
+                        let id = egui::Id::new(("roster_player_build", region.entity_id));
+                        let resp = ui.interact(region.rect, id, egui::Sense::click());
+                        let snapshot = build_snapshots[idx].clone();
+                        egui::Popup::from_toggle_button_response(&resp)
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .show(|ui| {
+                                roster_player_build_tooltip(ui, region, snapshot.as_ref(), textures);
+                            });
+                        if !egui::Popup::is_id_open(&ctx, id) {
+                            let snapshot = snapshot.clone();
+                            resp.on_hover_ui(|ui| {
+                                roster_player_build_tooltip(ui, region, snapshot.as_ref(), textures);
+                            });
+                        }
+                    }
+
+                    // Hover tooltip for TeamAdvantage
+                    let ws = transform.window_scale;
+                    // Find ScoreBar to compute advantage label position
+                    let score_bar_info: Option<ScoreBarInfo> = frame_commands.iter().find_map(|cmd| {
+                        if let DrawCommand::ScoreBar { team0, team1, team0_timer, team1_timer, advantage, .. } = cmd {
+                            let adv_team = advantage.as_ref().map(|(_, t)| *t as i32).unwrap_or(-1);
+                            Some(ScoreBarInfo {
+                                team0_score: *team0,
+                                team1_score: *team1,
+                                team0_timer: team0_timer.clone(),
+                                team1_timer: team1_timer.clone(),
+                                adv_team,
+                            })
+                        } else {
+                            None
+                        }
+                    });
+                    for cmd in frame_commands {
+                        if let DrawCommand::TeamAdvantage { level, color, breakdown } = cmd {
+                            let Some(adv_level) = level else {
+                                break;
+                            };
+                            let label = adv_level.label().to_string();
+                            let canvas_w = transform.screen_hud_width();
+                            let bar_height = HUD_HEIGHT as f32 * ws;
+                            let bar_origin = transform.hud_pos(0.0, 0.0);
+
+                            // Recompute cursor positions matching ScoreBar rendering
+                            let score_font = game_font(14.0 * ws);
+                            let timer_font = game_font(12.0 * ws);
+                            let adv_font = game_font(11.0 * ws);
+                            let adv_color = color_from_rgb(*color);
+                            let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label.clone(), adv_font, adv_color));
+                            let text_w = galley.size().x;
+                            let text_h = galley.size().y;
+
+                            let (t0_end_x, t1_start_x) = if let Some(ScoreBarInfo { team0_score: t0_score, team1_score: t1_score, team0_timer: ref t0_timer, team1_timer: ref t1_timer, .. }) = score_bar_info {
+                                let t0_text = format!("{}", t0_score);
+                                let t0g = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text, score_font.clone(), Color32::WHITE));
+                                let mut t0_end = bar_origin.x + 8.0 * ws + t0g.size().x;
+                                if let Some(timer) = t0_timer {
+                                    let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font.clone(), Color32::WHITE));
+                                    t0_end = t0_end + 4.0 * ws + tg.size().x;
+                                }
+                                let t1_text = format!("{}", t1_score);
+                                let t1g = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text, score_font, Color32::WHITE));
+                                let mut t1_start = bar_origin.x + canvas_w - t1g.size().x - 8.0 * ws;
+                                if let Some(timer) = t1_timer {
+                                    let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font, Color32::WHITE));
+                                    t1_start = t1_start - tg.size().x - 4.0 * ws;
+                                }
+                                (t0_end, t1_start)
+                            } else {
+                                let half = canvas_w / 2.0;
+                                (bar_origin.x + half, bar_origin.x + half)
+                            };
+
+                            let adv_team = score_bar_info.as_ref().map(|s| s.adv_team).unwrap_or(-1);
+                            let x = if adv_team == 0 {
+                                t0_end_x + 6.0 * ws
+                            } else {
+                                t1_start_x - text_w - 6.0 * ws
+                            };
+                            let y = bar_origin.y + (bar_height - text_h) / 2.0;
+                            let label_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(text_w, text_h));
+                            let resp = ui.interact(
+                                label_rect,
+                                egui::Id::new("advantage_tooltip"),
+                                egui::Sense::hover(),
+                            );
+                            resp.on_hover_ui(|ui| {
+                                let bd = breakdown;
+                                let fmt_contrib = |val: (f32, f32)| -> String {
+                                    let diff = val.0 - val.1;
+                                    if diff > 0.0 {
+                                        format!("+{:.1}", diff)
+                                    } else if diff < 0.0 {
+                                        format!("{:.1}", diff)
                                     } else {
-                                        None
+                                        "0".to_string()
                                     }
-                                })
-                                .collect();
-
-                            // Separate HUD and map commands so HUD draws on unclipped painter
-                            let mut placed_labels: Vec<Rect> = Vec::new();
-                            for cmd in &frame.commands {
-                                // Stats commands are rendered in the egui SidePanel, not here
-                                if show_stats_panel && cmd.is_stats() {
-                                    continue;
-                                }
-                                if !should_draw_command(cmd, &options, show_dead_ships) {
-                                    continue;
-                                }
-                                // Apply per-ship trail filter
-                                if let DrawCommand::PositionTrail { player_name, .. } = cmd
-                                    && let Some(name) = player_name
-                                        && trail_hidden_ships.contains(name) {
-                                            continue;
-                                        }
-                                // Apply per-ship config circle filter (only show if explicitly enabled via right-click, never for dead ships)
-                                if let DrawCommand::ShipConfigCircle { entity_id, kind, .. } = cmd {
-                                    if !alive_ships.contains(entity_id) {
-                                        continue;
-                                    }
-                                    let enabled = if let Some(filter) = ship_range_overrides.get(entity_id) {
-                                        filter.is_enabled(kind)
-                                    } else {
-                                        false // hidden by default; must enable per-ship via right-click
-                                    };
-                                    if !enabled {
-                                        continue;
-                                    }
-                                }
-                                let is_hud = cmd.is_hud();
-                                let cmd_shapes = draw_command_to_shapes(cmd, &transform, textures, &ctx, &options, &mut placed_labels, &LocalizedTextResolver);
-                                let target_painter = if is_hud { &painter } else { &map_painter };
-                                for shape in cmd_shapes {
-                                    target_painter.add(shape);
-                                }
-                            }
-
-                            // Stats panel + team rosters: both ride on `is_stats()` commands,
-                            // dispatched in a single unzoomed pass aligned to the canvas.
-                            if show_stats_panel || show_team_rosters {
-                                let stats_transform = MapTransform {
-                                    origin: layout.origin,
-                                    window_scale,
-                                    zoom: 1.0,
-                                    pan: Vec2::ZERO,
-                                    hud_height: HUD_HEIGHT as f32,
-                                    canvas_height: CANVAS_HEIGHT as f32,
-                                    canvas_width: canvas_w,
-                                    hud_width: hud_w,
-                                    map_x_offset,
                                 };
-                                let shared_tex = make_shared_textures(textures);
-                                let label_opts = make_label_opts(&options);
-                                let mut stats_placed = Vec::new();
-                                let mut hover_regions: Vec<wt_collab_egui::draw_commands::ConsumableHoverRegion> = Vec::new();
-                                let mut player_build_regions: Vec<wt_collab_egui::draw_commands::PlayerBuildHoverRegion> = Vec::new();
-                                for cmd in &frame.commands {
-                                    if !cmd.is_stats() {
-                                        continue;
-                                    }
-                                    let cmd_shapes = wt_collab_egui::draw_commands::draw_command_to_shapes(
-                                        cmd, &stats_transform, &shared_tex, &ctx, &label_opts,
-                                        Some(&mut stats_placed), &LocalizedTextResolver,
-                                        Some(&mut hover_regions),
-                                        Some(&mut player_build_regions),
-                                    );
-                                    for shape in cmd_shapes {
-                                        painter.add(shape);
-                                    }
-                                }
-                                for (idx, region) in hover_regions.iter().enumerate() {
-                                    let id = egui::Id::new(("roster_consumable_hover", idx));
-                                    let hover_resp = ui.interact(region.rect, id, egui::Sense::hover());
-                                    let tex = textures.consumable_icons.get(&region.icon_key);
-                                    hover_resp.on_hover_ui(|ui| {
-                                        roster_consumable_tooltip(ui, region, tex);
-                                    });
-                                }
-                                // Resolve build snapshots up front: the outer
-                                // `state` lock is still held across this block,
-                                // and parking_lot Mutex isn't reentrant, so we
-                                // can't relock it inside the hover closure.
-                                // Same reason we copy `teams_with_replays` here
-                                // instead of borrowing it inside the loop.
-                                let build_snapshots: Vec<Option<Arc<PlayerBuildDisplay>>> = player_build_regions
-                                    .iter()
-                                    .map(|r| state.player_builds.get(&r.entity_id).cloned())
-                                    .collect();
-                                let teams_with_replays = state.teams_with_replays.clone();
-                                let debug_mode = state.is_debug_mode;
-                                for (idx, region) in player_build_regions.iter().enumerate() {
-                                    // Only attach the build popover when the
-                                    // row's team is represented by one of our
-                                    // replays (always for own team, for the
-                                    // enemy team only when an alt-replay is
-                                    // from someone on that side) — unless
-                                    // debug mode is on, which unmasks
-                                    // everything just like the inspector.
-                                    if !debug_mode && !teams_with_replays.contains(&region.team_id) {
-                                        continue;
-                                    }
-                                    // Stable ID across frames so the pinned
-                                    // popup state survives layout reflows.
-                                    let id = egui::Id::new(("roster_player_build", region.entity_id));
-                                    let resp = ui.interact(region.rect, id, egui::Sense::click());
-                                    let snapshot = build_snapshots[idx].clone();
-                                    // Click toggles a pinned, interactive
-                                    // popup the user can hover inside; the
-                                    // popup closes when the user clicks
-                                    // outside it.
-                                    egui::Popup::from_toggle_button_response(&resp)
-                                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                                        .show(|ui| {
-                                            roster_player_build_tooltip(ui, region, snapshot.as_ref(), textures);
-                                        });
-                                    // While not pinned, fall back to a transient
-                                    // hover tooltip so the build is still
-                                    // discoverable without committing a click.
-                                    if !egui::Popup::is_id_open(&ctx, id) {
-                                        let snapshot = snapshot.clone();
-                                        resp.on_hover_ui(|ui| {
-                                            roster_player_build_tooltip(ui, region, snapshot.as_ref(), textures);
-                                        });
-                                    }
-                                }
-                            }
-
-                            // Hover tooltip for TeamAdvantage
-                            let ws = transform.window_scale;
-                            // Find ScoreBar to compute advantage label position
-                            let score_bar_info: Option<ScoreBarInfo> = frame.commands.iter().find_map(|cmd| {
-                                if let DrawCommand::ScoreBar { team0, team1, team0_timer, team1_timer, advantage, .. } = cmd {
-                                    let adv_team = advantage.as_ref().map(|(_, t)| *t as i32).unwrap_or(-1);
-                                    Some(ScoreBarInfo {
-                                        team0_score: *team0,
-                                        team1_score: *team1,
-                                        team0_timer: team0_timer.clone(),
-                                        team1_timer: team1_timer.clone(),
-                                        adv_team,
-                                    })
+                                let is_nonzero = |val: (f32, f32)| val.0 != 0.0 || val.1 != 0.0;
+                                ui.label(egui::RichText::new(t!("ui.renderer.advantage.breakdown").as_ref()).strong());
+                                ui.separator();
+                                if bd.team_eliminated {
+                                    ui.label(t!("ui.renderer.advantage.team_eliminated"));
                                 } else {
-                                    None
+                                    egui::Grid::new("adv_grid").num_columns(2).show(ui, |ui| {
+                                        if is_nonzero(bd.score_projection) {
+                                            ui.label(t!("ui.renderer.advantage.score_projection"));
+                                            ui.label(fmt_contrib(bd.score_projection));
+                                            ui.end_row();
+                                        }
+                                        if is_nonzero(bd.fleet_power) {
+                                            ui.label(t!("ui.renderer.advantage.fleet_power"));
+                                            ui.label(fmt_contrib(bd.fleet_power));
+                                            ui.end_row();
+                                        }
+                                        if is_nonzero(bd.strategic_threat) {
+                                            ui.label(t!("ui.renderer.advantage.strategic_threat"));
+                                            ui.label(fmt_contrib(bd.strategic_threat));
+                                            ui.end_row();
+                                        }
+                                        ui.separator();
+                                        ui.separator();
+                                        ui.end_row();
+                                        ui.label(egui::RichText::new(t!("ui.renderer.advantage.total").as_ref()).strong());
+                                        ui.label(egui::RichText::new(fmt_contrib(bd.total)).strong());
+                                        ui.end_row();
+                                    });
+                                    if !bd.hp_data_reliable {
+                                        ui.small(t!("ui.renderer.advantage.hp_incomplete"));
+                                    }
                                 }
                             });
-                            for cmd in &frame.commands {
-                                if let DrawCommand::TeamAdvantage { level, color, breakdown } = cmd {
-                                    let Some(adv_level) = level else {
-                                        break;
-                                    };
-                                    let label = adv_level.label().to_string();
-                                    let canvas_w = transform.screen_hud_width();
-                                    let bar_height = HUD_HEIGHT as f32 * ws;
-                                    let bar_origin = transform.hud_pos(0.0, 0.0);
+                            break;
+                        }
+                    }
+                    drop(state);
 
-                                    // Recompute cursor positions matching ScoreBar rendering
-                                    let score_font = game_font(14.0 * ws);
-                                    let timer_font = game_font(12.0 * ws);
-                                    let adv_font = game_font(11.0 * ws);
-                                    let adv_color = color_from_rgb(*color);
-                                    let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label.clone(), adv_font, adv_color));
-                                    let text_w = galley.size().x;
-                                    let text_h = galley.size().y;
+                    // Annotations, remote cursors, and pings are painted through a
+                    // map-clipped painter reconstructed from the widget's layout,
+                    // matching the clip the widget used internally for the frame.
+                    let map_clip = compute_map_clip_rect(&layout, HUD_HEIGHT as f32, map_w, map_x_offset);
+                    let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(response.rect));
+                    let map_painter = painter.with_clip_rect(map_clip);
 
-                                    let (t0_end_x, t1_start_x) = if let Some(ScoreBarInfo { team0_score: t0_score, team1_score: t1_score, team0_timer: ref t0_timer, team1_timer: ref t1_timer, .. }) = score_bar_info {
-                                        let t0_text = format!("{}", t0_score);
-                                        let t0g = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text, score_font.clone(), Color32::WHITE));
-                                        let mut t0_end = bar_origin.x + 8.0 * ws + t0g.size().x;
-                                        if let Some(timer) = t0_timer {
-                                            let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font.clone(), Color32::WHITE));
-                                            t0_end = t0_end + 4.0 * ws + tg.size().x;
-                                        }
-                                        let t1_text = format!("{}", t1_score);
-                                        let t1g = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text, score_font, Color32::WHITE));
-                                        let mut t1_start = bar_origin.x + canvas_w - t1g.size().x - 8.0 * ws;
-                                        if let Some(timer) = t1_timer {
-                                            let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font, Color32::WHITE));
-                                            t1_start = t1_start - tg.size().x - 4.0 * ws;
-                                        }
-                                        (t0_end, t1_start)
-                                    } else {
-                                        let half = canvas_w / 2.0;
-                                        (bar_origin.x + half, bar_origin.x + half)
-                                    };
-
-                                    let adv_team = score_bar_info.as_ref().map(|s| s.adv_team).unwrap_or(-1);
-                                    let x = if adv_team == 0 {
-                                        t0_end_x + 6.0 * ws
-                                    } else {
-                                        t1_start_x - text_w - 6.0 * ws
-                                    };
-                                    let y = bar_origin.y + (bar_height - text_h) / 2.0;
-                                    let label_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(text_w, text_h));
-                                    let resp = ui.interact(
-                                        label_rect,
-                                        egui::Id::new("advantage_tooltip"),
-                                        egui::Sense::hover(),
-                                    );
-                                    resp.on_hover_ui(|ui| {
-                                        let bd = breakdown;
-                                        let fmt_contrib = |val: (f32, f32)| -> String {
-                                            let diff = val.0 - val.1;
-                                            if diff > 0.0 {
-                                                format!("+{:.1}", diff)
-                                            } else if diff < 0.0 {
-                                                format!("{:.1}", diff)
-                                            } else {
-                                                "0".to_string()
-                                            }
-                                        };
-                                        let is_nonzero = |val: (f32, f32)| val.0 != 0.0 || val.1 != 0.0;
-                                        ui.label(egui::RichText::new(t!("ui.renderer.advantage.breakdown").as_ref()).strong());
-                                        ui.separator();
-                                        if bd.team_eliminated {
-                                            ui.label(t!("ui.renderer.advantage.team_eliminated"));
-                                        } else {
-                                            egui::Grid::new("adv_grid").num_columns(2).show(ui, |ui| {
-                                                if is_nonzero(bd.score_projection) {
-                                                    ui.label(t!("ui.renderer.advantage.score_projection"));
-                                                    ui.label(fmt_contrib(bd.score_projection));
-                                                    ui.end_row();
-                                                }
-                                                if is_nonzero(bd.fleet_power) {
-                                                    ui.label(t!("ui.renderer.advantage.fleet_power"));
-                                                    ui.label(fmt_contrib(bd.fleet_power));
-                                                    ui.end_row();
-                                                }
-                                                if is_nonzero(bd.strategic_threat) {
-                                                    ui.label(t!("ui.renderer.advantage.strategic_threat"));
-                                                    ui.label(fmt_contrib(bd.strategic_threat));
-                                                    ui.end_row();
-                                                }
-                                                ui.separator();
-                                                ui.separator();
-                                                ui.end_row();
-                                                ui.label(egui::RichText::new(t!("ui.renderer.advantage.total").as_ref()).strong());
-                                                ui.label(egui::RichText::new(fmt_contrib(bd.total)).strong());
-                                                ui.end_row();
-                                            });
-                                            if !bd.hp_data_reliable {
-                                                ui.small(t!("ui.renderer.advantage.hp_incomplete"));
-                                            }
-                                        }
-                                    });
-                                    break;
-                                }
+                    {
+                        let ann_state = annotation_arc.lock();
+                        let map_space = shared_state.lock().map_space_size;
+                        for ann in &ann_state.annotations {
+                            render_annotation(ann, &transform, textures, &map_painter, map_space);
+                        }
+                        // Draw selection highlight
+                        for &sel in &ann_state.selected_indices {
+                            if sel < ann_state.annotations.len() {
+                                render_selection_highlight(&ann_state.annotations[sel], &transform, &map_painter);
                             }
                         }
-                        drop(state);
-
-                        // ─── Render annotations on map ───────────────────────────
-                        {
-                            let ann_state = annotation_arc.lock();
-                            let map_space = shared_state.lock().map_space_size;
-                            for ann in &ann_state.annotations {
-                                render_annotation(ann, &transform, textures, &map_painter, map_space);
-                            }
-                            // Draw selection highlight
-                            for &sel in &ann_state.selected_indices {
-                                if sel < ann_state.annotations.len() {
-                                    render_selection_highlight(&ann_state.annotations[sel], &transform, &map_painter);
-                                }
-                            }
-                            // Render tool preview (ghost shape at cursor)
-                            if let Some(cursor_pos) = response.hover_pos() {
-                                let minimap_pos = transform.screen_to_minimap(cursor_pos);
-                                render_tool_preview(
-                                    &ann_state.active_tool,
-                                    minimap_pos,
-                                    ann_state.paint_color,
-                                    ann_state.stroke_width,
-                                    &transform,
-                                    textures,
-                                    &map_painter,
-                                    map_space,
-                                );
-                            }
+                        // Render tool preview (ghost shape at cursor)
+                        if let Some(cursor_pos) = response.hover_pos() {
+                            let minimap_pos = transform.screen_to_minimap(cursor_pos);
+                            render_tool_preview(
+                                &ann_state.active_tool,
+                                minimap_pos,
+                                ann_state.paint_color,
+                                ann_state.stroke_width,
+                                &transform,
+                                textures,
+                                &map_painter,
+                                map_space,
+                            );
                         }
+                    }
 
-                        // ─── Render remote cursors (collab session) ──────────
-                        let collab_ss = shared_state.lock().collab_session_state.clone();
-                        if let Some(ref ss_arc) = collab_ss {
-                            let s = ss_arc.lock();
-                            draw_remote_cursors(&s.cursors, s.my_user_id, &map_painter, &transform);
+                    // ─── Render remote cursors (collab session) ──────────
+                    let collab_ss = shared_state.lock().collab_session_state.clone();
+                    if let Some(ref ss_arc) = collab_ss {
+                        let s = ss_arc.lock();
+                        draw_remote_cursors(&s.cursors, s.my_user_id, &map_painter, &transform);
 
-                            // ─── Render map pings (ripple effects) ──────────────
-                            let ping_views: Vec<MapPing> = s.pings.iter().map(|p| MapPing {
-                                pos: p.pos,
-                                color: p.color,
-                                time: p.time,
-                            }).collect();
-                            drop(s);
-                            if draw_pings(&ping_views, &map_painter, &transform) {
-                                repaint = true;
-                                let mut s = ss_arc.lock();
-                                s.pings.retain(|p| p.time.elapsed().as_secs_f32() < PING_DURATION);
-                            }
+                        // ─── Render map pings (ripple effects) ──────────────
+                        let ping_views: Vec<MapPing> = s.pings.iter().map(|p| MapPing {
+                            pos: p.pos,
+                            color: p.color,
+                            time: p.time,
+                        }).collect();
+                        drop(s);
+                        if draw_pings(&ping_views, &map_painter, &transform) {
+                            repaint = true;
+                            let mut s = ss_arc.lock();
+                            s.pings.retain(|p| p.time.elapsed().as_secs_f32() < PING_DURATION);
                         }
                     }
 

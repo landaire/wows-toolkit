@@ -1,16 +1,36 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use egui::Color32;
-use egui::Rect;
-use egui::Shape;
 use egui::Vec2;
 
 use wows_minimap_renderer::draw_command::DrawCommand;
-use wows_minimap_renderer::renderer::RenderOptions;
-use wt_translations::TextResolver;
+use wows_minimap_renderer::draw_command::ShipConfigFilter;
+use wows_replays::types::EntityId;
 
 use super::Annotation;
 use super::MapTransform;
 use super::PaintTool;
 use super::RendererTextures;
+
+/// The renderer window's per-ship overrides, applied on top of `RenderOptions`.
+pub(super) struct WindowCommandFilter {
+    pub trail_hidden_ships: HashSet<String>,
+    pub ship_range_overrides: HashMap<EntityId, ShipConfigFilter>,
+}
+
+impl wt_collab_egui::player::CommandFilter for WindowCommandFilter {
+    fn keep(&self, cmd: &DrawCommand, alive_ships: &HashSet<EntityId>) -> bool {
+        match cmd {
+            DrawCommand::PositionTrail { player_name: Some(name), .. } => !self.trail_hidden_ships.contains(name),
+            DrawCommand::ShipConfigCircle { entity_id, kind, .. } => {
+                alive_ships.contains(entity_id)
+                    && self.ship_range_overrides.get(entity_id).is_some_and(|f| f.is_enabled(kind))
+            }
+            _ => true,
+        }
+    }
+}
 
 // Re-export shared annotation helpers so `use shapes::*` in mod.rs still works.
 pub(super) use crate::replay::minimap_view::shapes::GridStyle;
@@ -19,11 +39,8 @@ pub(super) use crate::replay::minimap_view::shapes::PING_DURATION;
 pub(super) use crate::replay::minimap_view::shapes::ZoomPanConfig;
 pub(super) use crate::replay::minimap_view::shapes::annotation_cursor_icon;
 pub(super) use crate::replay::minimap_view::shapes::annotation_screen_bounds;
-pub(super) use crate::replay::minimap_view::shapes::compute_canvas_layout;
 pub(super) use crate::replay::minimap_view::shapes::compute_map_clip_rect;
 pub(super) use crate::replay::minimap_view::shapes::draw_annotation_edit_popup;
-pub(super) use crate::replay::minimap_view::shapes::draw_grid;
-pub(super) use crate::replay::minimap_view::shapes::draw_map_background;
 pub(super) use crate::replay::minimap_view::shapes::draw_pings;
 pub(super) use crate::replay::minimap_view::shapes::draw_remote_cursors;
 pub(super) use crate::replay::minimap_view::shapes::draw_shortcut_overlay;
@@ -38,7 +55,6 @@ pub(super) use crate::replay::minimap_view::shapes::tool_label;
 
 // Re-export shared draw-command helpers.
 pub(super) use wt_collab_egui::draw_commands::color_from_rgb;
-pub(super) use wt_collab_egui::player::should_draw_command;
 
 /// Render a single annotation onto the map painter.
 /// Thin wrapper around the shared `minimap_view::shapes::render_annotation` that
@@ -101,40 +117,4 @@ pub(super) fn make_shared_textures<'a>(
         powerup_icons: Some(&textures.powerup_icons),
         silhouette_texture: textures.silhouette_texture.as_ref(),
     }
-}
-
-/// Build the shared label options from desktop `RenderOptions`.
-pub(super) fn make_label_opts(opts: &RenderOptions) -> wt_collab_egui::draw_commands::DrawCommandLabelOptions {
-    wt_collab_egui::draw_commands::DrawCommandLabelOptions {
-        show_player_names: opts.show_player_names,
-        show_ship_names: opts.show_ship_names,
-        show_dead_ship_names: opts.show_dead_ship_names,
-        show_armament_color: opts.show_armament,
-    }
-}
-
-/// Convert a single DrawCommand into epaint shapes.
-/// Uses `MapTransform` for all coordinate mapping. `opts` filters name labels.
-pub(super) fn draw_command_to_shapes(
-    cmd: &DrawCommand,
-    transform: &MapTransform,
-    textures: &RendererTextures,
-    ctx: &egui::Context,
-    opts: &RenderOptions,
-    placed_labels: &mut Vec<Rect>,
-    text_resolver: &dyn TextResolver,
-) -> Vec<Shape> {
-    let shared_tex = make_shared_textures(textures);
-    let label_opts = make_label_opts(opts);
-    wt_collab_egui::draw_commands::draw_command_to_shapes(
-        cmd,
-        transform,
-        &shared_tex,
-        ctx,
-        &label_opts,
-        Some(placed_labels),
-        text_resolver,
-        None,
-        None,
-    )
 }
