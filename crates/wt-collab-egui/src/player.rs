@@ -1,7 +1,10 @@
 //! Shared minimap frame painting: which commands a set of render options
 //! allows, how the canvas is laid out, and the widget that paints one frame.
 
+use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::RenderOptions;
+use wows_minimap_renderer::STATS_PANEL_WIDTH;
+use wows_minimap_renderer::TEAM_ROSTER_WIDTH;
 use wows_minimap_renderer::draw_command::DrawCommand;
 
 /// Check whether a DrawCommand should be drawn given the current RenderOptions.
@@ -41,6 +44,40 @@ pub fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_sh
         | DrawCommand::StatsRibbons { .. }
         | DrawCommand::StatsActivityFeed { .. } => opts.show_stats_panel,
         DrawCommand::TeamRoster { .. } => opts.show_team_rosters,
+    }
+}
+
+/// Canvas widths derived from which side panels are enabled.
+///
+/// Team rosters reserve a gutter on each side and replace the self-perspective
+/// stats panel; the stats panel takes a right-hand strip only when rosters are
+/// off. HUD commands are emitted in canvas space starting at x=0, so the score
+/// bar spans the gutters but never the stats strip.
+pub struct CanvasGeometry {
+    pub roster_gutter: f32,
+    pub stats_strip: f32,
+    /// Distance from the canvas origin to the minimap's left edge.
+    pub map_x_offset: f32,
+    pub canvas_width: f32,
+    pub hud_width: f32,
+    /// Width map content is clipped and fill-scaled to, when a panel would
+    /// otherwise let zoomed content bleed into it.
+    pub map_width: Option<f32>,
+}
+
+pub fn canvas_geometry(opts: &RenderOptions) -> CanvasGeometry {
+    let rosters = opts.show_team_rosters;
+    let stats = opts.stats_panel_visible();
+    let roster_gutter = if rosters { TEAM_ROSTER_WIDTH as f32 } else { 0.0 };
+    let stats_strip = if stats { STATS_PANEL_WIDTH as f32 } else { 0.0 };
+    let hud_width = MINIMAP_SIZE as f32 + roster_gutter * 2.0;
+    CanvasGeometry {
+        roster_gutter,
+        stats_strip,
+        map_x_offset: roster_gutter,
+        canvas_width: hud_width + stats_strip,
+        hud_width,
+        map_width: (stats || rosters).then_some(MINIMAP_SIZE as f32),
     }
 }
 
@@ -170,5 +207,59 @@ mod filter_tests {
             name_color: None,
         };
         assert!(should_draw_command(&ship, &RenderOptions::default(), false));
+    }
+}
+
+#[cfg(test)]
+mod geometry_tests {
+    use super::*;
+    use wows_minimap_renderer::MINIMAP_SIZE;
+    use wows_minimap_renderer::STATS_PANEL_WIDTH;
+    use wows_minimap_renderer::TEAM_ROSTER_WIDTH;
+
+    fn opts(stats: bool, rosters: bool) -> RenderOptions {
+        RenderOptions { show_stats_panel: stats, show_team_rosters: rosters, ..RenderOptions::default() }
+    }
+
+    #[test]
+    fn no_panels_leaves_the_canvas_exactly_the_minimap() {
+        let g = canvas_geometry(&opts(false, false));
+        assert_eq!(g.roster_gutter, 0.0);
+        assert_eq!(g.stats_strip, 0.0);
+        assert_eq!(g.map_x_offset, 0.0);
+        assert_eq!(g.canvas_width, MINIMAP_SIZE as f32);
+        assert_eq!(g.hud_width, MINIMAP_SIZE as f32);
+        assert_eq!(g.map_width, None);
+    }
+
+    #[test]
+    fn the_stats_panel_takes_a_right_strip_the_hud_does_not_span() {
+        let g = canvas_geometry(&opts(true, false));
+        assert_eq!(g.roster_gutter, 0.0);
+        assert_eq!(g.stats_strip, STATS_PANEL_WIDTH as f32);
+        assert_eq!(g.map_x_offset, 0.0);
+        assert_eq!(g.canvas_width, MINIMAP_SIZE as f32 + STATS_PANEL_WIDTH as f32);
+        assert_eq!(g.hud_width, MINIMAP_SIZE as f32);
+        assert_eq!(g.map_width, Some(MINIMAP_SIZE as f32));
+    }
+
+    #[test]
+    fn rosters_take_both_gutters_and_the_hud_spans_all_of_them() {
+        let g = canvas_geometry(&opts(false, true));
+        assert_eq!(g.roster_gutter, TEAM_ROSTER_WIDTH as f32);
+        assert_eq!(g.stats_strip, 0.0);
+        assert_eq!(g.map_x_offset, TEAM_ROSTER_WIDTH as f32);
+        assert_eq!(g.canvas_width, MINIMAP_SIZE as f32 + TEAM_ROSTER_WIDTH as f32 * 2.0);
+        assert_eq!(g.hud_width, g.canvas_width);
+        assert_eq!(g.map_width, Some(MINIMAP_SIZE as f32));
+    }
+
+    #[test]
+    fn rosters_win_over_the_stats_panel_when_both_are_set() {
+        let both = canvas_geometry(&opts(true, true));
+        let rosters_only = canvas_geometry(&opts(false, true));
+        assert_eq!(both.stats_strip, 0.0);
+        assert_eq!(both.canvas_width, rosters_only.canvas_width);
+        assert_eq!(both.hud_width, rosters_only.hud_width);
     }
 }
