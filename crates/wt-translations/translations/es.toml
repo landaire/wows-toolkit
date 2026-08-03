@@ -689,6 +689,10 @@ quant_le = "at most %{n}"
 quant_gt = "more than %{n}"
 quant_lt = "fewer than %{n}"
 quant_ne = "not %{n}"
+scope_self = "Self"
+scope_ally = "Ally"
+scope_enemy = "Enemy"
+scope_div = "Div"
 
 [ui.search.field]
 game_type = "Game type"

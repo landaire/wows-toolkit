@@ -187,6 +187,57 @@ fn value_text(value: &Value, cache: &NameCache) -> String {
     }
 }
 
+/// Compact "Enemy ship is Yamato" form for a roster quantifier whose predicate
+/// matches one of the shapes `query_text::try_print_sugar` recognises: `Any`
+/// over a bare `Leaf`, or an `All` of exactly two where the first is a scope
+/// conjunct (self/ally/enemy relation, or division-mine) and the second is a
+/// single `Leaf`. Returns `None` for any other shape; the caller renders those
+/// as a bracketed `QuantOpen`/tokens/`QuantClose` group instead.
+///
+/// Keep this in sync with `wows-toolkit-config`'s `query_text::try_print_sugar`:
+/// any shape that prints as sugar there must render compactly here, or a
+/// bracketed group would show text whose one-line form the user never sees.
+pub fn roster_sugar_pill_text(quant: Quant, pred: &Expr<RosterTerm>, cache: &NameCache) -> Option<String> {
+    if quant != Quant::Any {
+        return None;
+    }
+    match pred {
+        Expr::All(cs) if cs.len() == 2 => {
+            let Expr::Leaf(first) = &cs[0] else { return None };
+            let Expr::Leaf(inner) = &cs[1] else { return None };
+            let scope_label: String = match (first.field, &first.value, first.op) {
+                (RosterField::Relation, Value::Relation(VehicleRelation::SelfPlayer), Op::Is) => {
+                    t!("ui.search.scope_self").into()
+                }
+                (RosterField::Relation, Value::Relation(VehicleRelation::Ally), Op::Is) => {
+                    t!("ui.search.scope_ally").into()
+                }
+                (RosterField::Relation, Value::Relation(VehicleRelation::Enemy), Op::Is) => {
+                    t!("ui.search.scope_enemy").into()
+                }
+                (RosterField::Division, Value::Division(DivisionScope::Mine), Op::Is) => {
+                    t!("ui.search.scope_div").into()
+                }
+                _ => return None,
+            };
+            Some(format!("{scope_label} {}", lowercase_first(&roster_pill_text(inner, cache))))
+        }
+        Expr::Leaf(inner) => Some(format!("{} {}", quant_prefix(Quant::Any), roster_pill_text(inner, cache))),
+        _ => None,
+    }
+}
+
+/// Lowercases the first character so a scope word can lead a compact pill's
+/// sentence while the field name that follows reads as a continuation of it
+/// ("Enemy ship is Yamato"), not as its own capitalized clause.
+fn lowercase_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_lowercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 fn bool_label(b: bool) -> String {
     if b { t!("ui.search.bool_true") } else { t!("ui.search.bool_false") }.into()
 }
@@ -366,6 +417,116 @@ mod tests {
                 assert!(!roster_pill_text(&t, &cache).trim().is_empty(), "{f:?} {op:?} rendered empty");
             }
         }
+    }
+
+    fn scoped_ship_pred(scope: (RosterField, Op, Value)) -> Expr<RosterTerm> {
+        Expr::All(vec![
+            Expr::Leaf(RosterTerm { field: scope.0, op: scope.1, value: scope.2 }),
+            Expr::Leaf(RosterTerm {
+                field: RosterField::Ship,
+                op: Op::Is,
+                value: Value::Ship(GameParamId::from(1u64)),
+            }),
+        ])
+    }
+
+    #[test]
+    fn a_self_scoped_sugar_reads_as_a_compact_pill() {
+        let mut cache = NameCache::default();
+        cache.ships.insert(GameParamId::from(1u64), "Yamato".into());
+        let pred = scoped_ship_pred((
+            RosterField::Relation,
+            Op::Is,
+            Value::Relation(crate::db::index::rows::VehicleRelation::SelfPlayer),
+        ));
+        assert_eq!(roster_sugar_pill_text(Quant::Any, &pred, &cache), Some("Self ship is Yamato".to_string()));
+    }
+
+    #[test]
+    fn an_ally_scoped_sugar_reads_as_a_compact_pill() {
+        let mut cache = NameCache::default();
+        cache.ships.insert(GameParamId::from(1u64), "Yamato".into());
+        let pred = scoped_ship_pred((
+            RosterField::Relation,
+            Op::Is,
+            Value::Relation(crate::db::index::rows::VehicleRelation::Ally),
+        ));
+        assert_eq!(roster_sugar_pill_text(Quant::Any, &pred, &cache), Some("Ally ship is Yamato".to_string()));
+    }
+
+    #[test]
+    fn an_enemy_scoped_sugar_reads_as_a_compact_pill() {
+        let mut cache = NameCache::default();
+        cache.ships.insert(GameParamId::from(1u64), "Yamato".into());
+        let pred = scoped_ship_pred((
+            RosterField::Relation,
+            Op::Is,
+            Value::Relation(crate::db::index::rows::VehicleRelation::Enemy),
+        ));
+        assert_eq!(roster_sugar_pill_text(Quant::Any, &pred, &cache), Some("Enemy ship is Yamato".to_string()));
+    }
+
+    #[test]
+    fn a_division_scoped_sugar_reads_as_a_compact_pill() {
+        let mut cache = NameCache::default();
+        cache.ships.insert(GameParamId::from(1u64), "Yamato".into());
+        let pred = scoped_ship_pred((RosterField::Division, Op::Is, Value::Division(DivisionScope::Mine)));
+        assert_eq!(roster_sugar_pill_text(Quant::Any, &pred, &cache), Some("Div ship is Yamato".to_string()));
+    }
+
+    #[test]
+    fn a_bare_leaf_sugar_reads_like_the_general_quantifier_form() {
+        let cache = NameCache::default();
+        let pred = Expr::Leaf(RosterTerm {
+            field: RosterField::Relation,
+            op: Op::Is,
+            value: Value::Relation(crate::db::index::rows::VehicleRelation::Enemy),
+        });
+        assert_eq!(roster_sugar_pill_text(Quant::Any, &pred, &cache), Some("any Relation is Enemy".to_string()));
+    }
+
+    #[test]
+    fn a_non_any_quantifier_is_never_sugar() {
+        let cache = NameCache::default();
+        let pred = Expr::Leaf(RosterTerm {
+            field: RosterField::Relation,
+            op: Op::Is,
+            value: Value::Relation(crate::db::index::rows::VehicleRelation::Enemy),
+        });
+        assert_eq!(roster_sugar_pill_text(Quant::Count(CmpOp::Ge, 2), &pred, &cache), None);
+        assert_eq!(roster_sugar_pill_text(Quant::None, &pred, &cache), None);
+    }
+
+    #[test]
+    fn a_scope_conjunct_built_with_the_wrong_op_is_not_sugar() {
+        // `try_print_sugar` matches `Op::Is` specifically; `Op::Equals` prints
+        // (and here renders) as the general bracketed form instead.
+        let cache = NameCache::default();
+        let pred = scoped_ship_pred((
+            RosterField::Relation,
+            Op::Equals,
+            Value::Relation(crate::db::index::rows::VehicleRelation::Enemy),
+        ));
+        assert_eq!(roster_sugar_pill_text(Quant::Any, &pred, &cache), None);
+    }
+
+    #[test]
+    fn a_three_way_all_is_not_sugar() {
+        let cache = NameCache::default();
+        let pred = Expr::All(vec![
+            Expr::Leaf(RosterTerm {
+                field: RosterField::Relation,
+                op: Op::Is,
+                value: Value::Relation(crate::db::index::rows::VehicleRelation::Enemy),
+            }),
+            Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) }),
+            Expr::Leaf(RosterTerm {
+                field: RosterField::Ship,
+                op: Op::Is,
+                value: Value::Ship(GameParamId::from(1u64)),
+            }),
+        ]);
+        assert_eq!(roster_sugar_pill_text(Quant::Any, &pred, &cache), None);
     }
 
     fn sample_value(kind: ValueKind) -> Value {
