@@ -5615,7 +5615,7 @@ impl ToolkitTabViewer<'_> {
                     TimelineState::Failed(err) => {
                         ui.label(
                             RichText::new(t!("ui.replay.timeline_failed", error = err.to_string()).as_ref())
-                                .color(Color32::LIGHT_RED),
+                                .color(ui.sem().error),
                         );
                         if ui.button(t!("ui.replay.timeline_retry")).clicked() {
                             retry_requested = true;
