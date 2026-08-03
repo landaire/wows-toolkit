@@ -327,8 +327,11 @@ fn word_end(s: &str) -> usize {
 }
 
 /// What ends a term. `|` is here because it is a spelling of `or`, so it has to
-/// separate its operands the way whitespace does; inside quotes it is ordinary
-/// text and `word_end` never consults this.
+/// separate its operands the way whitespace does.
+///
+/// `word_end` and `find_unquoted_word` treat a quoted run as opaque and consult
+/// this only outside one. `keyword` consults it on raw input, where it answers
+/// whether the word it matched is the whole word.
 fn is_term_boundary(c: char) -> bool {
     c.is_whitespace() || c == '(' || c == ')' || c == '|'
 }
@@ -702,8 +705,11 @@ type SplitTerm = (String, String, String, Range<usize>, Range<usize>);
 /// input has no operator and is therefore a bare word.
 fn split_term(s: &str, base: usize) -> Option<SplitTerm> {
     for token in NULLARY_TOKENS {
-        if let Some(idx) = find_unquoted(s, token) {
+        if let Some(idx) = find_unquoted_word(s, token) {
             let key = s[..idx].trim().to_string();
+            if key.is_empty() {
+                return None;
+            }
             let key_span = base..base + key.len();
             return Some((key, token.to_string(), String::new(), key_span, base..base + s.len()));
         }
@@ -729,6 +735,35 @@ fn split_term(s: &str, base: usize) -> Option<SplitTerm> {
 /// a `map` term whose value happens to contain a `>` rather than a term keyed on
 /// the nonsense `map:"a`. This is what makes quoting a value sufficient to get
 /// it back unchanged, which the printer relies on.
+/// Where `token` starts in `s` as a whole word: outside quotes, at the start of
+/// the term or after a term boundary, and not running on into a longer word.
+///
+/// The nullary operators are the only tokens spelled as words, so they are the
+/// only ones that can be swallowed by one: without this, the `is-set` inside
+/// `map:this-set` splits the term and keys it on the nonsense `map:th`. The
+/// trailing-boundary rule is the one `trailing_nullary_op_len` already applies
+/// when it decides whether such a tail belongs to the term before it.
+fn find_unquoted_word(s: &str, token: &str) -> Option<usize> {
+    let mut in_quotes = false;
+    let mut previous: Option<char> = None;
+    for (i, c) in s.char_indices() {
+        if c == '"' {
+            in_quotes = !in_quotes;
+            previous = Some(c);
+            continue;
+        }
+        if !in_quotes
+            && previous.is_none_or(is_term_boundary)
+            && s[i..].starts_with(token)
+            && word_end(&s[i..]) == token.len()
+        {
+            return Some(i);
+        }
+        previous = Some(c);
+    }
+    None
+}
+
 fn find_unquoted(s: &str, token: &str) -> Option<usize> {
     let mut in_quotes = false;
     for (i, c) in s.char_indices() {
@@ -1181,6 +1216,51 @@ mod tests {
     fn nullary_operators_take_no_value() {
         assert_eq!(one("build is-set"), MatchTerm::Field(MatchField::Build, Op::IsSet, Value::NoOperand));
         assert_eq!(one("build is-not-set"), MatchTerm::Field(MatchField::Build, Op::IsNotSet, Value::NoOperand));
+    }
+
+    /// A nullary operator is a word, so it only splits a term when it stands as
+    /// one. Matching it at any byte offset keys the term on a truncated field
+    /// name and reports an unknown field the user never typed.
+    #[test]
+    fn a_nullary_operator_only_splits_a_term_when_it_stands_alone() {
+        assert_eq!(
+            one("map:this-set"),
+            MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("this-set".into()))
+        );
+        assert_eq!(
+            one("map:that-is-set"),
+            MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("that-is-set".into()))
+        );
+        assert_eq!(
+            one("self.name:kris-setter"),
+            MatchTerm::Roster {
+                quant: Quant::Any,
+                pred: Expr::All(vec![
+                    Expr::Leaf(RosterTerm {
+                        field: RosterField::Relation,
+                        op: Op::Is,
+                        value: Value::Relation(VehicleRelation::SelfPlayer),
+                    }),
+                    Expr::Leaf(RosterTerm {
+                        field: RosterField::Name,
+                        op: Op::Contains,
+                        value: Value::Text("kris-setter".into()),
+                    }),
+                ]),
+            }
+        );
+        // A nullary operator with no field in front of it names nothing, so it
+        // is an ordinary word rather than a term keyed on the empty string.
+        assert_eq!(one("is-set"), MatchTerm::FreeText("is-set".into()));
+        assert_eq!(one("is-not-set"), MatchTerm::FreeText("is-not-set".into()));
+        // A standalone one still splits, even when an earlier word in the same
+        // term contains the token.
+        assert_eq!(one("build is-set"), MatchTerm::Field(MatchField::Build, Op::IsSet, Value::NoOperand));
+        let err = parse_query("map:this-set is-set").unwrap_err();
+        match &err.kind {
+            ParseErrorKind::UnknownField { name, .. } => assert_eq!(name, "map:this-set"),
+            other => panic!("got {other:?}"),
+        }
     }
 
     #[test]
