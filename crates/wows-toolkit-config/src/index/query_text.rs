@@ -333,6 +333,19 @@ fn is_term_boundary(c: char) -> bool {
     c.is_whitespace() || c == '(' || c == ')' || c == '|'
 }
 
+/// The operator tokens a term can be split on, longest first so `>=` is not
+/// read as `>`.
+///
+/// `split_term` consumes this to find the operator and `quote_if_needed` to
+/// decide what has to be quoted. One array rather than two, so adding an
+/// operator cannot leave the printer emitting text the parser then re-splits.
+const OPERATOR_TOKENS: [&str; 7] = [">=", "<=", "!=", ">", "<", "=", ":"];
+
+/// The operators that take no right-hand operand. Spelled as words, so they are
+/// matched before `OPERATOR_TOKENS` and are also what `trailing_nullary_op_len`
+/// looks for at the end of a term.
+const NULLARY_TOKENS: [&str; 2] = ["is-not-set", "is-set"];
+
 /// The length of a `<space> is-set` / `<space> is-not-set` tail, which belongs
 /// to the term before it rather than starting a new one.
 fn trailing_nullary_op_len(rest: &str) -> Option<usize> {
@@ -341,7 +354,7 @@ fn trailing_nullary_op_len(rest: &str) -> Option<usize> {
         return None;
     }
     let after_gap = &rest[gap..];
-    let token = ["is-not-set", "is-set"].into_iter().find(|token| {
+    let token = NULLARY_TOKENS.into_iter().find(|token| {
         after_gap.get(..token.len()).is_some_and(|head| head.eq_ignore_ascii_case(token))
             && word_end(after_gap) == token.len()
     })?;
@@ -688,15 +701,14 @@ type SplitTerm = (String, String, String, Range<usize>, Range<usize>);
 /// Split `key op value` into its parts with absolute spans, or `None` if the
 /// input has no operator and is therefore a bare word.
 fn split_term(s: &str, base: usize) -> Option<SplitTerm> {
-    for token in ["is-not-set", "is-set"] {
+    for token in NULLARY_TOKENS {
         if let Some(idx) = find_unquoted(s, token) {
             let key = s[..idx].trim().to_string();
             let key_span = base..base + key.len();
             return Some((key, token.to_string(), String::new(), key_span, base..base + s.len()));
         }
     }
-    // Longest operators first so ">=" is not read as ">".
-    for token in [">=", "<=", "!=", ">", "<", "=", ":"] {
+    for token in OPERATOR_TOKENS {
         if let Some(idx) = find_unquoted(s, token) {
             let key = s[..idx].trim().to_string();
             if key.is_empty() {
@@ -764,13 +776,18 @@ fn op_from_token(token: &str, kind: ValueKind) -> Option<Op> {
 
 fn parse_value(kind: ValueKind, raw: &str) -> Option<Value> {
     let s = unquote(raw);
-    if s.is_empty() {
+    // Nothing after the operator means the user has typed no value yet. `""` is
+    // an explicit empty string, which a text chip can hold and which therefore
+    // has to read back; every other kind rejects it below anyway.
+    if s.is_empty() && raw.trim() != "\"\"" {
         return None;
     }
     match kind {
         ValueKind::Text => Some(Value::Text(s)),
         ValueKind::Int => parse_int(&s).map(Value::Int),
-        ValueKind::Float => s.parse::<f64>().ok().map(Value::Float),
+        // NaN is never equal to itself, so a NaN value would break
+        // `parse(print(x)) == x`. Infinity compares fine and stays accepted.
+        ValueKind::Float => s.parse::<f64>().ok().filter(|f| !f.is_nan()).map(Value::Float),
         ValueKind::Bool => match s.to_ascii_lowercase().as_str() {
             "true" | "yes" | "1" => Some(Value::Bool(true)),
             "false" | "no" | "0" => Some(Value::Bool(false)),
@@ -836,10 +853,14 @@ fn parse_relative(s: &str) -> Option<Timestamp> {
     Timestamp::from_second(current_now().as_second().checked_sub(ago)?).ok()
 }
 
+/// Strip a surrounding pair of quotes and undo the doubling `quote_if_needed`
+/// applies to an interior one. Doubling rather than a backslash escape because
+/// `word_end` counts quotes to find the end of a term: a doubled pair toggles
+/// off and straight back on, so whitespace after it stays inside the run.
 fn unquote(s: &str) -> String {
     let s = s.trim();
     if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
-        return s[1..s.len() - 1].to_string();
+        return s[1..s.len() - 1].replace("\"\"", "\"");
     }
     s.to_string()
 }
@@ -1054,21 +1075,18 @@ fn print_timestamp(t: Timestamp) -> String {
 /// Quote a value or bare word the parser would not otherwise read back
 /// unchanged.
 ///
-/// The set is taken from the parser: `is_term_boundary` ends a term at
-/// whitespace, `(`, `)`, and `|`; `split_term` splits on the operator tokens;
-/// `unary` reads a leading `-` as `not`; `term_text` refuses a bare `and`,
-/// `or`, or `not`; and an empty word has no bare spelling at all. Quoting
-/// answers all of them because `word_end` and `find_unquoted` both treat a
-/// quoted run as opaque.
-///
-/// The one thing it cannot answer is a `"` alongside whitespace: the grammar
-/// has no escape, so the term would end inside the value.
+/// Every condition is read from the parser rather than restated:
+/// `is_term_boundary` ends a term at whitespace, `(`, `)`, and `|`;
+/// `split_term` splits on `OPERATOR_TOKENS` and `NULLARY_TOKENS`; `unary` reads
+/// a leading `-` as `not`; `term_text` refuses a bare `and`, `or`, or `not`;
+/// and an empty word has no bare spelling at all. Quoting answers all of them
+/// because `word_end` and `find_unquoted` both treat a quoted run as opaque.
 fn quote_if_needed(s: &str) -> String {
-    let boundary = s.chars().any(|c| is_term_boundary(c) || matches!(c, '"' | ':' | '=' | '!' | '<' | '>'));
-    let nullary_op = s.contains("is-set") || s.contains("is-not-set");
+    let boundary = s.chars().any(|c| is_term_boundary(c) || c == '"');
+    let operator = OPERATOR_TOKENS.iter().chain(NULLARY_TOKENS.iter()).any(|token| s.contains(token));
     let keyword = matches!(s.to_ascii_lowercase().as_str(), "and" | "or" | "not");
-    if s.is_empty() || boundary || nullary_op || keyword || s.starts_with('-') {
-        format!("\"{s}\"")
+    if s.is_empty() || boundary || operator || keyword || s.starts_with('-') {
+        format!("\"{}\"", s.replace('"', "\"\""))
     } else {
         s.to_string()
     }
@@ -1738,6 +1756,7 @@ mod tests {
             "any(tier=10 and kills>=3)",
             "self.damage>=100000",
             "self.damage is-set",
+            "ally.tier=10",
             "enemy.tier=10",
             "div.test-ship:true",
             "anyone.pr<800",
@@ -1766,6 +1785,12 @@ mod tests {
             "map:\"a!b\"",
             "map:\"this-set\"",
             "map:\"and\"",
+            "map:\"\"",
+            // A quote can be typed bare in the middle of a value, and the run it
+            // opens then swallows the following space. Both shapes have to come
+            // back as one leaf, not two.
+            "map:a\"b c\"",
+            "map:\"a\"\" b\"",
             "\"a b\"",
             "\"a|b\"",
             "\"a:b\"",
@@ -1777,26 +1802,46 @@ mod tests {
             "\"not\"",
             "\"-foo\"",
             "\"\"",
+            "a\"b c\"",
         ] {
             round_trip(src);
         }
+    }
+
+    /// The quoting rule reads the parser's own token arrays, so an operator
+    /// added to either one is covered here without anybody remembering to.
+    #[test]
+    fn every_operator_token_survives_inside_a_value_and_a_bare_word() {
+        for token in OPERATOR_TOKENS.into_iter().chain(NULLARY_TOKENS) {
+            let text = format!("a{token}b");
+            round_trip_tree(Expr::Leaf(MatchTerm::FreeText(text.clone())));
+            round_trip_tree(Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text(text))));
+        }
+    }
+
+    /// A NaN is not equal to itself, so letting one into the tree would break
+    /// the round-trip property from text a user can type.
+    #[test]
+    fn a_not_a_number_float_is_refused_but_infinity_is_not() {
+        for input in ["anyone.pr<nan", "anyone.pr<NaN", "any(pr>=nan)"] {
+            let err = parse_query(input).unwrap_err();
+            assert!(matches!(err.kind, ParseErrorKind::BadValue { .. }), "{input:?} gave {:?}", err.kind);
+        }
+        round_trip("anyone.pr<inf");
     }
 
     /// A tree the parser refuses to build from text: the widget can still make
     /// one, and the printer is what has to make it representable again.
     #[test]
     fn a_programmatic_tree_with_awkward_text_round_trips() {
-        for word in ["and", "or", "not", "-foo", "", "a b", "a|b", "a:b", "a=b", "is-set", "this-set", "(x)"] {
-            round_trip_tree(Expr::Leaf(MatchTerm::FreeText(word.into())));
+        let awkward = [
+            "and", "or", "not", "-foo", "", "a b", "a|b", "a:b", "a=b", "a!b", "is-set", "this-set", "(x)", "a\"b",
+            "a\" b", "\"", "\"\"", "\" \"", "a\"\"b", " ", "--", "not ", "a\tb",
+        ];
+        for text in awkward {
+            round_trip_tree(Expr::Leaf(MatchTerm::FreeText(text.into())));
+            round_trip_tree(Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text(text.into()))));
         }
-        for value in ["a b", "a|b", "a:b", "a=b", "a>b", "is-set", "-foo", "and"] {
-            round_trip_tree(Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text(value.into()))));
-        }
-        // A double quote survives on its own. It cannot survive next to
-        // whitespace, because the grammar has no escape and `word_end` would end
-        // the term inside the value; see `quote_if_needed`.
-        round_trip_tree(Expr::Leaf(MatchTerm::FreeText("a\"b".into())));
-        round_trip_tree(Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("a\"b".into()))));
     }
 
     /// A quoted run is opaque, so an operator inside it belongs to the value
@@ -1813,12 +1858,38 @@ mod tests {
         assert_eq!(one("map=\"a>b\""), MatchTerm::Field(MatchField::Map, Op::Equals, Value::Text("a>b".into())));
     }
 
+    /// A quote is doubled rather than backslash-escaped, because `word_end`
+    /// finds the end of a term by counting quotes: a doubled pair toggles off
+    /// and straight back on, so whitespace after it stays inside the run.
+    #[test]
+    fn a_doubled_quote_is_one_literal_quote() {
+        let text = |s: &str| MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text(s.into()));
+        assert_eq!(one("map:\"a\"\" b\""), text("a\" b"));
+        assert_eq!(one("map:\"\"\"\""), text("\""));
+        assert_eq!(one("map:\"a\"\"b\""), text("a\"b"));
+        // An explicit empty string is a value a text chip can hold, so it has to
+        // read back. An operator with nothing after it is still an error.
+        assert_eq!(one("map:\"\""), text(""));
+        assert!(parse_query("map:").is_err());
+        assert!(parse_query("build>=").is_err());
+    }
+
     #[test]
     fn scope_sugar_is_printed_back_as_sugar() {
         let parsed = parse_query_at("self.damage>=100000", fixed_now()).unwrap();
         assert_eq!(print_query(&parsed), "self.damage>=100000");
         let parsed = parse_query_at("any(relation:self and damage>=100000)", fixed_now()).unwrap();
         assert_eq!(print_query(&parsed), "self.damage>=100000");
+        // Every scope has to be pinned by an exact string. Losing an arm still
+        // round trips through the general form, so the corpus cannot see it.
+        let parsed = parse_query_at("ally.tier=10", fixed_now()).unwrap();
+        assert_eq!(print_query(&parsed), "ally.tier=10");
+        let parsed = parse_query_at("any(relation:ally and kills>=2)", fixed_now()).unwrap();
+        assert_eq!(print_query(&parsed), "ally.kills>=2");
+        let parsed = parse_query_at("enemy.tier=10", fixed_now()).unwrap();
+        assert_eq!(print_query(&parsed), "enemy.tier=10");
+        let parsed = parse_query_at("any(relation:enemy and damage>100000)", fixed_now()).unwrap();
+        assert_eq!(print_query(&parsed), "enemy.damage>100000");
         let parsed = parse_query_at("div.test-ship:true", fixed_now()).unwrap();
         assert_eq!(print_query(&parsed), "div.test-ship=true");
         let parsed = parse_query_at("anyone.pr<800", fixed_now()).unwrap();
