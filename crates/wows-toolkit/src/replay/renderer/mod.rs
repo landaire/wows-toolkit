@@ -1278,6 +1278,8 @@ pub fn launch_client_renderer(
 
 mod frame_pass;
 
+pub(crate) mod preview;
+
 mod playback;
 use playback::playback_thread;
 
