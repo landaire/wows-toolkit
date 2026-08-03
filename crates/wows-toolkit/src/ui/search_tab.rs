@@ -273,8 +273,25 @@ impl SearchTabState {
 
     /// Starts the debounce for a value lookup the bar asked for. A new request
     /// restarts it, so a lookup only runs once the caret has settled.
+    ///
+    /// Whatever lookup was already in flight is abandoned here as well. It was
+    /// issued for a field the caret has since left, and a reply that still
+    /// matched `awaiting_values` would fill the dropdown with rows from the old
+    /// field: a ship row committed into an account term parses as an integer
+    /// and searches for an account that does not exist.
     fn queue_value_request(&mut self, request: ValueRequest) {
+        self.awaiting_values = None;
         self.debounced = Some((request, Instant::now()));
+    }
+
+    /// The rows for a request the tab can answer from a catalogue it already
+    /// holds, or `None` for one that has to reach the index.
+    fn local_value_options(&self, request: &ValueRequest) -> Option<Vec<ValueOption>> {
+        match request {
+            ValueRequest::Sources => Some(self.sources.iter().map(source_option).collect()),
+            ValueRequest::Maps => Some(self.map_names.iter().map(|name| map_option(name)).collect()),
+            ValueRequest::Players { .. } | ValueRequest::Ships { .. } => None,
+        }
     }
 
     /// Dispatches the debounced lookup once it has sat still long enough, and
@@ -287,23 +304,19 @@ impl SearchTabState {
         }
         let (request, _) = self.debounced.take()?;
         // Both catalogues are already in hand, so these answer with no runtime
-        // round trip and nothing to wait for. Answering locally still has to
-        // abandon whatever lookup was outstanding: a player or ship reply that
-        // arrived afterwards would otherwise still match `awaiting_values` and
-        // replace these rows, leaving the caret typing a source or a map while
-        // the dropdown offered accounts to commit.
-        match request {
-            ValueRequest::Sources => {
-                self.awaiting_values = None;
-                self.bar.value_options = self.sources.iter().map(source_option).collect();
-                return None;
-            }
-            ValueRequest::Maps => {
-                self.awaiting_values = None;
-                self.bar.value_options = self.map_names.iter().map(|name| map_option(name)).collect();
-                return None;
-            }
-            ValueRequest::Players { .. } | ValueRequest::Ships { .. } => {}
+        // round trip. Answering locally still has to abandon whatever lookup was
+        // outstanding: a player or ship reply that arrived afterwards would
+        // otherwise still match `awaiting_values` and replace these rows,
+        // leaving the caret typing a source or a map while the dropdown offered
+        // accounts to commit.
+        //
+        // The rows are filled in after the bar has already drawn this frame, and
+        // nothing is in flight to wake the tab afterwards, so the wake has to be
+        // asked for here or the dropdown stays empty until the next input event.
+        if let Some(options) = self.local_value_options(&request) {
+            self.awaiting_values = None;
+            self.bar.value_options = options;
+            return Some(Duration::ZERO);
         }
 
         self.awaiting_values = Some(request.clone());
@@ -634,6 +647,25 @@ mod tests {
         let (mut ships, mut players) = (Vec::new(), Vec::new());
         collect_ids(&expr, &mut ships, &mut players);
         assert!(ships.is_empty() && players.is_empty());
+    }
+
+    /// A value reply belongs to the field the caret was on when it was asked
+    /// for. Moving to another field inside the debounce window has to abandon
+    /// it: a ships reply that still matched would fill the dropdown while the
+    /// caret typed an account, and the ship id a committed row writes parses
+    /// cleanly as an account number, so nothing downstream would notice.
+    #[test]
+    fn a_reply_to_a_superseded_value_request_never_reaches_the_dropdown() {
+        let mut tab = SearchTabState::default();
+        let ships = ValueRequest::Ships { needle: "yam".into() };
+        tab.awaiting_values = Some(ships.clone());
+
+        tab.queue_value_request(ValueRequest::Players { needle: "x".into() });
+        let options = vec![ValueOption { label: "Yamato".into(), token: "4179530192".into() }];
+        tab.tx.send(Some(SearchMsg::Values { request: ships, options })).expect("the tab owns the receiver");
+        tab.drain_replies();
+
+        assert!(tab.bar.value_options.is_empty(), "got {:?}", tab.bar.value_options);
     }
 
     /// A picked map name goes back into the caret as grammar text, so one with a
