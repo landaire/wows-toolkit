@@ -1,7 +1,10 @@
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+
+use parking_lot::Mutex;
 
 use wows_battle_world::ids::ShotTracking;
 use wows_battle_world::merged::MergedReplays;
@@ -174,6 +177,257 @@ pub(crate) fn bake_preview_track(
         return Err(PreviewError::Cancelled);
     }
     Ok(sink.finish(map_name))
+}
+
+/// Identifies a replay's preview. The mtime is part of the key so a replaced
+/// file gets a fresh bake rather than a stale track.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub(crate) struct PreviewKey {
+    pub path: PathBuf,
+    pub mtime_secs: i64,
+}
+
+pub(crate) enum PreviewEntry {
+    Ready(Arc<PreviewTrack>),
+    Unavailable(PreviewError),
+}
+
+/// What the popup should draw this frame.
+pub(crate) enum PreviewState {
+    Ready(Arc<PreviewTrack>),
+    Baking,
+    Unavailable(PreviewError),
+    Idle,
+}
+
+pub(crate) const PREVIEW_DWELL_SECS: f64 = 0.3;
+/// Tracks held in memory. Small enough that a linear scan with move-to-front
+/// beats taking on an LRU dependency.
+pub(crate) const PREVIEW_CACHE_CAPACITY: usize = 8;
+
+struct InFlightBake {
+    key: PreviewKey,
+    cancel: Arc<AtomicBool>,
+}
+
+#[derive(Default)]
+pub(crate) struct PreviewCache {
+    /// Most recently used first.
+    entries: Vec<(PreviewKey, PreviewEntry)>,
+    in_flight: Option<InFlightBake>,
+    /// The row under the cursor and when it was first seen there.
+    hover: Option<(PreviewKey, f64)>,
+}
+
+impl PreviewCache {
+    /// Record that `key` is hovered at `now`. True once the cursor has rested
+    /// on that one row for `PREVIEW_DWELL_SECS`, so sweeping a list costs
+    /// nothing.
+    pub(crate) fn note_hover(&mut self, key: &PreviewKey, now: f64) -> bool {
+        match self.hover {
+            Some((ref hovered, since)) if hovered == key => now - since >= PREVIEW_DWELL_SECS,
+            _ => {
+                self.hover = Some((key.clone(), now));
+                false
+            }
+        }
+    }
+
+    pub(crate) fn get(&mut self, key: &PreviewKey) -> Option<&PreviewEntry> {
+        let idx = self.entries.iter().position(|(k, _)| k == key)?;
+        let entry = self.entries.remove(idx);
+        self.entries.insert(0, entry);
+        self.entries.first().map(|(_, e)| e)
+    }
+
+    pub(crate) fn insert(&mut self, key: PreviewKey, entry: PreviewEntry) {
+        self.entries.retain(|(k, _)| k != &key);
+        self.entries.insert(0, (key, entry));
+        self.entries.truncate(PREVIEW_CACHE_CAPACITY);
+    }
+
+    /// Claim the single bake slot for `key`, cancelling whatever held it.
+    pub(crate) fn begin_bake(&mut self, key: PreviewKey) -> Arc<AtomicBool> {
+        if let Some(ref prev) = self.in_flight {
+            prev.cancel.store(true, Ordering::Relaxed);
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.in_flight = Some(InFlightBake { key, cancel: Arc::clone(&cancel) });
+        cancel
+    }
+
+    pub(crate) fn is_baking(&self, key: &PreviewKey) -> bool {
+        self.in_flight.as_ref().is_some_and(|b| &b.key == key)
+    }
+
+    /// Store a finished bake, unless it was superseded while running.
+    pub(crate) fn finish_bake(&mut self, key: PreviewKey, entry: PreviewEntry) {
+        if !self.is_baking(&key) {
+            return;
+        }
+        self.in_flight = None;
+        self.insert(key, entry);
+    }
+
+    /// Release the bake slot for `key` without storing a result, unless it
+    /// was already superseded (in which case the slot belongs to a newer
+    /// bake and must be left alone).
+    pub(crate) fn clear_bake(&mut self, key: &PreviewKey) {
+        if self.is_baking(key) {
+            self.in_flight = None;
+        }
+    }
+}
+
+/// Releases the cache's bake slot when a bake finishes, whichever way it
+/// finishes. `entry` is filled in on a normal, non-cancelled completion; a
+/// panic inside the baking closure unwinds through this guard with `entry`
+/// still `None`, which still frees the slot instead of wedging it for every
+/// later hover on that row.
+struct BakeSlotGuard {
+    cache: Arc<Mutex<PreviewCache>>,
+    key: PreviewKey,
+    entry: Option<PreviewEntry>,
+}
+
+impl Drop for BakeSlotGuard {
+    fn drop(&mut self) {
+        let mut guard = self.cache.lock();
+        match self.entry.take() {
+            Some(entry) => guard.finish_bake(self.key.clone(), entry),
+            None => guard.clear_bake(&self.key),
+        }
+    }
+}
+
+/// Resolve what the popup should draw for `key`, starting a bake when the
+/// cursor has dwelled long enough and nothing is cached.
+pub(crate) fn poll_preview(
+    cache: &Arc<Mutex<PreviewCache>>,
+    key: PreviewKey,
+    now: f64,
+    data_map: &WoWsDataMap,
+    asset_cache: &Arc<Mutex<RendererAssetCache>>,
+) -> PreviewState {
+    let mut guard = cache.lock();
+    match guard.get(&key) {
+        Some(PreviewEntry::Ready(track)) => return PreviewState::Ready(Arc::clone(track)),
+        Some(PreviewEntry::Unavailable(err)) => return PreviewState::Unavailable(err.clone()),
+        None => {}
+    }
+    if guard.is_baking(&key) {
+        return PreviewState::Baking;
+    }
+    if !guard.note_hover(&key, now) {
+        return PreviewState::Idle;
+    }
+
+    let cancel = guard.begin_bake(key.clone());
+    drop(guard);
+
+    let cache = Arc::clone(cache);
+    let asset_cache = Arc::clone(asset_cache);
+    let data_map = data_map.clone();
+    crate::util::thread::spawn_logged("replay-preview-bake", move || {
+        let mut slot = BakeSlotGuard { cache, key: key.clone(), entry: None };
+        let result = bake_preview_track(&key.path, &data_map, &asset_cache, &cancel);
+        slot.entry = match result {
+            Ok(track) => Some(PreviewEntry::Ready(Arc::new(track))),
+            // A superseded bake stores nothing: the row it belonged to is no
+            // longer hovered, and caching the cancellation would poison it.
+            Err(PreviewError::Cancelled) => None,
+            Err(err) => Some(PreviewEntry::Unavailable(err)),
+        };
+    });
+
+    PreviewState::Baking
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    fn key(name: &str) -> PreviewKey {
+        PreviewKey { path: PathBuf::from(name), mtime_secs: 1 }
+    }
+
+    fn track() -> Arc<PreviewTrack> {
+        Arc::new(PreviewTrack { frames: vec![Vec::new()], map_name: "spaces/test".to_string() })
+    }
+
+    #[test]
+    fn dwell_is_not_met_until_the_threshold_elapses_on_one_row() {
+        let mut cache = PreviewCache::default();
+        assert!(!cache.note_hover(&key("a"), 0.0));
+        assert!(!cache.note_hover(&key("a"), PREVIEW_DWELL_SECS - 0.05));
+        assert!(cache.note_hover(&key("a"), PREVIEW_DWELL_SECS + 0.01));
+    }
+
+    #[test]
+    fn moving_to_another_row_restarts_the_dwell() {
+        let mut cache = PreviewCache::default();
+        assert!(!cache.note_hover(&key("a"), 0.0));
+        assert!(!cache.note_hover(&key("b"), PREVIEW_DWELL_SECS + 0.01));
+        assert!(cache.note_hover(&key("b"), PREVIEW_DWELL_SECS * 2.0 + 0.02));
+    }
+
+    #[test]
+    fn the_cache_evicts_the_least_recently_used_entry() {
+        let mut cache = PreviewCache::default();
+        for i in 0..PREVIEW_CACHE_CAPACITY {
+            cache.insert(key(&format!("r{i}")), PreviewEntry::Ready(track()));
+        }
+        // Touch the oldest so it is no longer the eviction candidate.
+        assert!(matches!(cache.get(&key("r0")), Some(PreviewEntry::Ready(_))));
+        cache.insert(key("overflow"), PreviewEntry::Ready(track()));
+        assert!(cache.get(&key("r0")).is_some(), "recently used entry was evicted");
+        assert!(cache.get(&key("r1")).is_none(), "least recently used entry survived");
+    }
+
+    #[test]
+    fn a_new_bake_cancels_the_one_in_flight() {
+        let mut cache = PreviewCache::default();
+        let first = cache.begin_bake(key("a"));
+        let second = cache.begin_bake(key("b"));
+        assert!(first.load(Ordering::Relaxed), "superseded bake was not cancelled");
+        assert!(!second.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_cancelled_bakes_result_is_discarded() {
+        let mut cache = PreviewCache::default();
+        let _first = cache.begin_bake(key("a"));
+        let _second = cache.begin_bake(key("b"));
+        cache.finish_bake(key("a"), PreviewEntry::Ready(track()));
+        assert!(cache.get(&key("a")).is_none(), "stale bake result landed in the cache");
+    }
+
+    #[test]
+    fn an_unavailable_entry_is_sticky() {
+        let mut cache = PreviewCache::default();
+        cache.insert(key("a"), PreviewEntry::Unavailable(PreviewError::UnreadableReplay));
+        assert!(matches!(cache.get(&key("a")), Some(PreviewEntry::Unavailable(_))));
+        assert!(matches!(cache.get(&key("a")), Some(PreviewEntry::Unavailable(_))));
+    }
+
+    #[test]
+    fn a_panicking_bake_releases_the_slot_instead_of_wedging_it() {
+        let cache = Arc::new(Mutex::new(PreviewCache::default()));
+        let k = key("a");
+        cache.lock().begin_bake(k.clone());
+
+        let cache_for_thread = Arc::clone(&cache);
+        let key_for_thread = k.clone();
+        let handle = crate::util::thread::spawn_logged("test-panicking-bake", move || {
+            let _slot = BakeSlotGuard { cache: cache_for_thread, key: key_for_thread, entry: None };
+            panic!("simulated bake panic");
+        });
+        // `spawn_logged` catches the panic; joining guarantees the guard's
+        // Drop (which runs during unwind) has already executed.
+        handle.join().expect("test thread itself should not panic");
+
+        assert!(!cache.lock().is_baking(&k), "panicking bake left the slot wedged");
+    }
 }
 
 #[cfg(test)]

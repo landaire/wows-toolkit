@@ -469,6 +469,7 @@ pub struct TabState {
     pub replay_renderers: Mutex<Vec<crate::replay::renderer::ReplayRendererViewer>>,
     pub renderer_asset_cache: Arc<parking_lot::Mutex<crate::replay::renderer::RendererAssetCache>>,
     pub renderer_texture_cache: Arc<parking_lot::Mutex<crate::replay::renderer::RendererTextureCache>>,
+    pub preview_cache: Arc<parking_lot::Mutex<crate::replay::renderer::preview::PreviewCache>>,
     pub tactics_boards: Mutex<Vec<crate::replay::minimap_view::tactics::TacticsBoardViewer>>,
     /// Board IDs we've already auto-opened (prevents re-open after user closes them).
     pub tactics_auto_opened_board_ids: std::collections::HashSet<u64>,
@@ -637,6 +638,7 @@ impl Default for TabState {
             replay_renderers: Default::default(),
             renderer_asset_cache: Default::default(),
             renderer_texture_cache: Default::default(),
+            preview_cache: Default::default(),
             file_watcher: None,
             file_receiver: None,
             background_tasks: Vec::new(),
