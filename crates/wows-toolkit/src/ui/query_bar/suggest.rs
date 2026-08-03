@@ -26,11 +26,20 @@ pub struct Suggestion {
     /// Stable identifier, used for dedup and for tests.
     pub key: &'static str,
     pub label: String,
-    /// Breadcrumb shown after the label. A category tag ("Preset", "Roster"),
-    /// not display text itself: it cannot carry a locale-dependent `t!()`
-    /// result and stay `'static`, so the renderer translates it.
-    pub context: &'static str,
+    /// Breadcrumb shown after the label. Not display text itself: a
+    /// `SuggestionCategory` cannot carry a locale-dependent `t!()` result and
+    /// stay `Copy`/`'static`, so the renderer translates it. Typed rather
+    /// than a bare `&'static str` so the renderer's match is exhaustive: a
+    /// future third category cannot silently render untranslated.
+    pub context: SuggestionCategory,
     pub kind: SuggestionKind,
+}
+
+/// What kind of thing a suggestion's breadcrumb names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuggestionCategory {
+    Preset,
+    Roster,
 }
 
 #[derive(Debug, Clone)]
@@ -291,7 +300,7 @@ pub fn static_suggestions() -> Vec<Suggestion> {
         out.push(Suggestion {
             key: p.key,
             label: t!(preset_translation_key(p.key)).into_owned(),
-            context: "Preset",
+            context: SuggestionCategory::Preset,
             kind: SuggestionKind::Preset(p.key),
         });
     }
@@ -300,7 +309,7 @@ pub fn static_suggestions() -> Vec<Suggestion> {
         out.push(Suggestion {
             key,
             label: t!(label_key).into_owned(),
-            context: "Roster",
+            context: SuggestionCategory::Roster,
             kind: SuggestionKind::RosterField { field, scope: Some(scope) },
         });
     }
@@ -309,7 +318,7 @@ pub fn static_suggestions() -> Vec<Suggestion> {
         out.push(Suggestion {
             key,
             label: composed_label(field, scope),
-            context: "Roster",
+            context: SuggestionCategory::Roster,
             kind: SuggestionKind::RosterField { field, scope: Some(scope) },
         });
     }
@@ -318,7 +327,7 @@ pub fn static_suggestions() -> Vec<Suggestion> {
         out.push(Suggestion {
             key: field.name(),
             label: composed_label(field, Scope::Anyone),
-            context: "Roster",
+            context: SuggestionCategory::Roster,
             kind: SuggestionKind::RosterField { field, scope: Some(Scope::Anyone) },
         });
     }
@@ -399,6 +408,35 @@ mod tests {
         );
     }
 
+    /// Every damage label in the real static set is scope-prefixed ("My
+    /// damage", "Ally damage", ...), so `a_prefix_match_outranks_a_mid_word_match`
+    /// can never see a true tier-0 hit: no label starts with "dam", so its
+    /// disjunct on "starts_with" never fires, and the test degrades to "a
+    /// damage suggestion is first" -- true even if word-boundary and
+    /// substring were scored the wrong way round. This test builds synthetic
+    /// suggestions that each hit exactly one tier for the same needle and
+    /// asserts the full order, so it fails if any two tiers are out of
+    /// order or collapsed together.
+    #[test]
+    fn tiers_rank_prefix_above_word_boundary_above_substring() {
+        let suggestions = vec![
+            synthetic("substring", "Dislocation report"),
+            synthetic("word_boundary", "Ready the catapult"),
+            synthetic("prefix", "Catapult launch"),
+        ];
+        let order = rank("cat", &suggestions);
+        assert_eq!(order, vec![2, 1, 0], "expected prefix, then word-boundary, then substring");
+    }
+
+    fn synthetic(key: &'static str, label: &str) -> Suggestion {
+        Suggestion {
+            key,
+            label: label.to_string(),
+            context: SuggestionCategory::Roster,
+            kind: SuggestionKind::FreeText,
+        }
+    }
+
     #[test]
     fn ranking_is_case_insensitive() {
         let all = static_suggestions();
@@ -454,6 +492,8 @@ mod tests {
     fn no_preset_carries_a_placeholder_value() {
         // A preset is a complete tree. A shortcut that needs the user to pick a
         // value is a RosterField suggestion, so no zero-id stands in for one.
+        // Vacuous today: no shipped preset builds a Value::Ship or
+        // Value::Account. It is a forward guard for the day one does.
         for p in PRESETS {
             assert_no_placeholder_ids(&(p.build)(), p.key);
         }
