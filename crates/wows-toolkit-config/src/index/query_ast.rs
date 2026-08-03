@@ -773,9 +773,9 @@ mod tests {
     fn children_descends_into_a_negation() {
         let leaf: MatchExpr = Expr::Leaf(MatchTerm::FreeText("yamato".into()));
         let negated = Expr::Not(Box::new(leaf.clone()));
-        assert_eq!(negated.children(), &[leaf.clone()]);
+        assert_eq!(negated.children(), std::slice::from_ref(&leaf));
         assert!(leaf.children().is_empty());
-        assert_eq!(Expr::All(vec![negated.clone()]).children(), &[negated]);
+        assert_eq!(Expr::All(vec![negated.clone()]).children(), std::slice::from_ref(&negated));
     }
 
     #[test]

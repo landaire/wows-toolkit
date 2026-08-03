@@ -33,7 +33,13 @@ impl Default for CompileCtx<'_> {
     }
 }
 
-pub fn push_match_expr(qb: &mut QueryBuilder<'_, Sqlite>, expr: &MatchExpr, ctx: &CompileCtx<'_>) {
+/// Renders a leaf. The match level captures its `CompileCtx` here so the tree
+/// walker itself stays generic over what a leaf is.
+type PushLeaf<'a, L> = dyn FnMut(&mut QueryBuilder<'_, Sqlite>, &L) + 'a;
+
+/// Render a boolean tree, delegating leaves to `leaf`. Shared by the match and
+/// the roster level, the same way `print_expr` is shared by the printer.
+fn push_expr<L>(qb: &mut QueryBuilder<'_, Sqlite>, expr: &Expr<L>, leaf: &mut PushLeaf<'_, L>) {
     match expr {
         Expr::All(cs) if cs.is_empty() => {
             qb.push("1=1");
@@ -41,26 +47,30 @@ pub fn push_match_expr(qb: &mut QueryBuilder<'_, Sqlite>, expr: &MatchExpr, ctx:
         Expr::Any(cs) if cs.is_empty() => {
             qb.push("1=0");
         }
-        Expr::All(cs) => push_joined(qb, cs, " AND ", ctx),
-        Expr::Any(cs) => push_joined(qb, cs, " OR ", ctx),
+        Expr::All(cs) => push_joined(qb, cs, " AND ", leaf),
+        Expr::Any(cs) => push_joined(qb, cs, " OR ", leaf),
         Expr::Not(inner) => {
             qb.push("NOT (");
-            push_match_expr(qb, inner, ctx);
+            push_expr(qb, inner, leaf);
             qb.push(")");
         }
-        Expr::Leaf(term) => push_match_term(qb, term, ctx),
+        Expr::Leaf(l) => leaf(qb, l),
     }
 }
 
-fn push_joined(qb: &mut QueryBuilder<'_, Sqlite>, cs: &[MatchExpr], join: &str, ctx: &CompileCtx<'_>) {
+fn push_joined<L>(qb: &mut QueryBuilder<'_, Sqlite>, cs: &[Expr<L>], join: &str, leaf: &mut PushLeaf<'_, L>) {
     qb.push("(");
     for (i, c) in cs.iter().enumerate() {
         if i > 0 {
             qb.push(join);
         }
-        push_match_expr(qb, c, ctx);
+        push_expr(qb, c, leaf);
     }
     qb.push(")");
+}
+
+pub fn push_match_expr(qb: &mut QueryBuilder<'_, Sqlite>, expr: &MatchExpr, ctx: &CompileCtx<'_>) {
+    push_expr(qb, expr, &mut |qb, term| push_match_term(qb, term, ctx));
 }
 
 fn push_match_term(qb: &mut QueryBuilder<'_, Sqlite>, term: &MatchTerm, ctx: &CompileCtx<'_>) {
@@ -220,33 +230,7 @@ fn push_roster(qb: &mut QueryBuilder<'_, Sqlite>, quant: Quant, pred: &RosterExp
 }
 
 pub fn push_roster_expr(qb: &mut QueryBuilder<'_, Sqlite>, expr: &RosterExpr) {
-    match expr {
-        Expr::All(cs) if cs.is_empty() => {
-            qb.push("1=1");
-        }
-        Expr::Any(cs) if cs.is_empty() => {
-            qb.push("1=0");
-        }
-        Expr::All(cs) => push_roster_joined(qb, cs, " AND "),
-        Expr::Any(cs) => push_roster_joined(qb, cs, " OR "),
-        Expr::Not(inner) => {
-            qb.push("NOT (");
-            push_roster_expr(qb, inner);
-            qb.push(")");
-        }
-        Expr::Leaf(term) => push_roster_term(qb, term),
-    }
-}
-
-fn push_roster_joined(qb: &mut QueryBuilder<'_, Sqlite>, cs: &[RosterExpr], join: &str) {
-    qb.push("(");
-    for (i, c) in cs.iter().enumerate() {
-        if i > 0 {
-            qb.push(join);
-        }
-        push_roster_expr(qb, c);
-    }
-    qb.push(")");
+    push_expr(qb, expr, &mut push_roster_term);
 }
 
 /// Dispatch is on `(field.value_kind(), value)`, not on the value alone: a
