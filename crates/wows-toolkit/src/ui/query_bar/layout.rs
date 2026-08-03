@@ -3,10 +3,6 @@
 //! Takes measured widths rather than measuring, so the algorithm is pure and
 //! testable; the egui layer measures with `layout_no_wrap` and passes them in.
 
-// Consumed by later query-bar tasks (painting, hit-testing); no call site in
-// this crate yet.
-#![allow(dead_code)]
-
 use egui::Pos2;
 use egui::Rect;
 

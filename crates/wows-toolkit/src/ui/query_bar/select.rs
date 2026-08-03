@@ -1,10 +1,6 @@
 //! Selection over the token stream's node paths, and the tree edits a selection
 //! authorises. Pure so the boolean-editing rules are testable without egui.
 
-// Consumed by later query-bar tasks (hit-testing, the filter builder); no call
-// site in this crate yet.
-#![allow(dead_code)]
-
 use crate::db::index::query_ast::Expr;
 use crate::db::index::query_ast::MatchExpr;
 use crate::db::index::query_ast::MatchTerm;

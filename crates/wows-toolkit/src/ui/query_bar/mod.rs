@@ -796,7 +796,6 @@ impl QueryBar {
                 self.begin_field(suggest::roster_field_prefix(field, scope.unwrap_or(Scope::Anyone)));
                 false
             }
-            SuggestionKind::FreeText => self.commit_pending(),
         }
     }
 
@@ -924,6 +923,7 @@ fn pill_menu(ui: &mut Ui, expr: &MatchExpr, path: &NodePath, commands: &mut Vec<
 fn category_label(category: SuggestionCategory) -> String {
     match category {
         SuggestionCategory::Preset => t!("ui.search.bar.context_preset"),
+        SuggestionCategory::Match => t!("ui.search.bar.context_match"),
         SuggestionCategory::Roster => t!("ui.search.bar.context_roster"),
     }
     .into_owned()

@@ -1,10 +1,6 @@
 //! Human-readable pill text for one query term: `MatchField::Outcome, Op::Is,
 //! Value::Outcome(Win)` reads as "Outcome is Win", not as grammar.
 
-// Consumed by later query-bar tasks (the pill widget and filter builder); no
-// call site in this crate yet.
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 
 use rust_i18n::t;
@@ -96,7 +92,7 @@ fn roster_expr_text(expr: &Expr<RosterTerm>, cache: &NameCache) -> String {
     }
 }
 
-fn match_field_label(field: MatchField) -> String {
+pub(crate) fn match_field_label(field: MatchField) -> String {
     match field {
         MatchField::Map => t!("ui.search.field.map"),
         MatchField::GameType => t!("ui.search.field.game_type"),

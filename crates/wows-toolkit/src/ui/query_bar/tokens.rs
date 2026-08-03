@@ -2,10 +2,6 @@
 //! selection all work on the stream rather than recursing the tree, so bracket
 //! nesting is expressed by `depth` and by paired open/close tokens.
 
-// Consumed by later query-bar tasks (layout, hit-testing, the filter builder);
-// no call site in this crate yet.
-#![allow(dead_code)]
-
 use crate::db::index::query_ast::Expr;
 use crate::db::index::query_ast::MatchExpr;
 use crate::db::index::query_ast::MatchTerm;

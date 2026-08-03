@@ -1,9 +1,5 @@
 //! Suggestion sourcing and ranking for the query bar's dropdown.
 
-// Consumed by later query-bar tasks (the dropdown widget, the DB-backed value
-// editor); no call site in this crate yet.
-#![allow(dead_code)]
-
 use rust_i18n::t;
 
 use crate::db::index::query_ast::CmpOp;
@@ -20,11 +16,15 @@ use crate::db::index::query_ast::ShipClass;
 use crate::db::index::query_ast::Value;
 use crate::db::index::query_ast::ValueKind;
 use crate::db::index::rows::VehicleRelation;
+use crate::ui::query_bar::label::match_field_label;
 use crate::ui::query_bar::label::roster_field_label;
 
 #[derive(Debug, Clone)]
 pub struct Suggestion {
-    /// Stable identifier, used for dedup and for tests.
+    /// Stable identifier, read by the uniqueness test below. Nothing at runtime
+    /// needs it, so a non-test build sees it as unread; keeping it is what makes
+    /// "no two rows are the same shortcut" checkable at all.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub key: &'static str,
     pub label: String,
     /// Breadcrumb shown after the label. Not display text itself: a
@@ -40,6 +40,8 @@ pub struct Suggestion {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuggestionCategory {
     Preset,
+    /// A fact about the match itself, as opposed to about someone in it.
+    Match,
     Roster,
 }
 
@@ -51,8 +53,6 @@ pub enum SuggestionKind {
     RosterField { field: RosterField, scope: Option<Scope> },
     /// Expand a named shape.
     Preset(&'static str),
-    /// Commit the typed text as a free-text term.
-    FreeText,
 }
 
 /// A scope prefix, matching the grammar's `self.` / `ally.` / `enemy.` / `div.`.
@@ -65,12 +65,11 @@ pub enum Scope {
     Anyone,
 }
 
+/// A named shape the dropdown expands in one pick. The label is not here: a
+/// `static` array cannot hold a runtime translation, so `static_suggestions`
+/// looks one up by `key`.
 pub struct Preset {
     pub key: &'static str,
-    /// English default text. Not what the dropdown shows: `static_suggestions`
-    /// looks up a locale-specific label by `key` instead, since a `static`
-    /// array cannot hold a runtime translation.
-    pub label: &'static str,
     pub build: fn() -> MatchExpr,
 }
 
@@ -170,17 +169,13 @@ fn preset_i_disconnected() -> MatchExpr {
 }
 
 pub static PRESETS: &[Preset] = &[
-    Preset {
-        key: "divmate_test_ship",
-        label: "Someone in my division played a test ship",
-        build: preset_divmate_test_ship,
-    },
-    Preset { key: "no_enemy_cv", label: "No enemy carrier", build: preset_no_enemy_cv },
-    Preset { key: "all_enemies_died", label: "Every enemy died", build: preset_all_enemies_died },
-    Preset { key: "high_damage_enemies", label: "3 or more enemies over 100k", build: preset_high_damage_enemies },
-    Preset { key: "stream_sniper", label: "Contains a stream sniper", build: preset_stream_sniper },
-    Preset { key: "i_survived", label: "I survived", build: preset_i_survived },
-    Preset { key: "i_disconnected", label: "I disconnected", build: preset_i_disconnected },
+    Preset { key: "divmate_test_ship", build: preset_divmate_test_ship },
+    Preset { key: "no_enemy_cv", build: preset_no_enemy_cv },
+    Preset { key: "all_enemies_died", build: preset_all_enemies_died },
+    Preset { key: "high_damage_enemies", build: preset_high_damage_enemies },
+    Preset { key: "stream_sniper", build: preset_stream_sniper },
+    Preset { key: "i_survived", build: preset_i_survived },
+    Preset { key: "i_disconnected", build: preset_i_disconnected },
 ];
 
 fn preset_translation_key(key: &str) -> &'static str {
@@ -294,7 +289,11 @@ fn composed_label(field: RosterField, scope: Scope) -> String {
 /// `Enemy damage` directly; drilling into a category is never required.
 pub fn static_suggestions() -> Vec<Suggestion> {
     let mut out = Vec::with_capacity(
-        PRESETS.len() + EXPLICIT_FIELD_SHORTCUTS.len() + STAT_SHORTCUTS.len() + REMAINING_FIELDS.len(),
+        PRESETS.len()
+            + MatchField::ALL.len()
+            + EXPLICIT_FIELD_SHORTCUTS.len()
+            + STAT_SHORTCUTS.len()
+            + REMAINING_FIELDS.len(),
     );
 
     for p in PRESETS {
@@ -303,6 +302,18 @@ pub fn static_suggestions() -> Vec<Suggestion> {
             label: t!(preset_translation_key(p.key)).into_owned(),
             context: SuggestionCategory::Preset,
             kind: SuggestionKind::Preset(p.key),
+        });
+    }
+
+    // Every match-level field, under its own breadcrumb. Nothing about a match
+    // field needs a scope or a cross product, so the list is `MatchField::ALL`
+    // and a field added there reaches the dropdown without a second edit.
+    for field in MatchField::ALL {
+        out.push(Suggestion {
+            key: field.name(),
+            label: match_field_label(field),
+            context: SuggestionCategory::Match,
+            kind: SuggestionKind::MatchField(field),
         });
     }
 
@@ -577,7 +588,7 @@ mod tests {
             key,
             label: label.to_string(),
             context: SuggestionCategory::Roster,
-            kind: SuggestionKind::FreeText,
+            kind: SuggestionKind::Preset("synthetic"),
         }
     }
 
@@ -591,6 +602,39 @@ mod tests {
     fn a_needle_matching_nothing_returns_nothing() {
         let all = static_suggestions();
         assert!(rank("zzzznotathing", &all).is_empty());
+    }
+
+    /// The dropdown is the only way to discover a field without knowing the
+    /// grammar, so a field missing from the static set is unreachable there.
+    /// Both levels have to be present: an earlier version offered presets and
+    /// roster fields only, which left `map`, `outcome`, and `date` findable
+    /// solely by typing them.
+    #[test]
+    fn every_field_of_both_levels_is_offered() {
+        let all = static_suggestions();
+        for field in MatchField::ALL {
+            assert!(
+                all.iter().any(|s| matches!(s.kind, SuggestionKind::MatchField(f) if f == field)),
+                "match field {field:?} is not offered"
+            );
+        }
+        for field in RosterField::ALL {
+            assert!(
+                all.iter().any(|s| matches!(s.kind, SuggestionKind::RosterField { field: f, .. } if f == field)),
+                "roster field {field:?} is not offered"
+            );
+        }
+    }
+
+    /// A match field is not a roster fact and must not read as one, or every
+    /// breadcrumb in the list says "Roster" and stops distinguishing anything.
+    #[test]
+    fn match_field_rows_carry_the_match_breadcrumb() {
+        for s in static_suggestions() {
+            if matches!(s.kind, SuggestionKind::MatchField(_)) {
+                assert_eq!(s.context, SuggestionCategory::Match, "{} has the wrong breadcrumb", s.key);
+            }
+        }
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! The dockable Search tab: a query bar over a results table backed by the
 //! replay index.
 
+use std::collections::HashSet;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
@@ -98,12 +99,18 @@ pub struct SearchTabState {
     /// Replies still outstanding, so the tab only keeps waking itself while
     /// there is something to wake for.
     in_flight: usize,
+    /// Ids a name lookup has already been issued for, whether or not the index
+    /// knew them.
+    asked_ships: HashSet<GameParamId>,
+    asked_players: HashSet<AccountId>,
     /// Map names the index has seen, offered when the caret is typing a `map`
-    /// value. Requested once, when the first `map` term is typed.
-    map_names: Option<Vec<String>>,
-    /// Set once `list_sources` has been asked for, so an index with no groups
-    /// does not re-ask every frame.
-    sources_requested: bool,
+    /// value.
+    map_names: Vec<String>,
+    /// Set once the source and map lists have been asked for. Both are fetched
+    /// when the tab first draws rather than when a value editor needs them: an
+    /// index with no groups and no maps answers with nothing, and a flag that
+    /// only rose on a non-empty answer would re-ask every frame forever.
+    catalogues_requested: bool,
 }
 
 impl Default for SearchTabState {
@@ -122,8 +129,10 @@ impl Default for SearchTabState {
             awaiting_values: None,
             query_seq: 0,
             in_flight: 0,
-            map_names: None,
-            sources_requested: false,
+            asked_ships: HashSet::new(),
+            asked_players: HashSet::new(),
+            map_names: Vec::new(),
+            catalogues_requested: false,
         }
     }
 }
@@ -163,7 +172,7 @@ impl SearchTabState {
                     self.bar.names.sources.clone_from(&sources);
                     self.sources = sources;
                 }
-                SearchMsg::Maps(maps) => self.map_names = Some(maps),
+                SearchMsg::Maps(maps) => self.map_names = maps,
                 SearchMsg::Names { ships, players } => {
                     self.bar.names.ships.extend(ships);
                     self.bar.names.players.extend(players);
@@ -214,11 +223,16 @@ impl SearchTabState {
 
     /// Resolves the ids a seeded or restored query carries, so its pills read as
     /// names rather than as `#<id>`.
+    ///
+    /// Filtered by what has already been asked rather than by what came back:
+    /// an id the index does not know answers with nothing, so filtering on the
+    /// name cache alone would re-ask for it on every edit for as long as its
+    /// pill was in the bar.
     fn resolve_names(&mut self, pool: &sqlx::SqlitePool, rt: &Runtime) {
         let (mut ships, mut players) = (Vec::new(), Vec::new());
         collect_ids(&self.bar.expr, &mut ships, &mut players);
-        ships.retain(|id| !self.bar.names.ships.contains_key(id));
-        players.retain(|id| !self.bar.names.players.contains_key(id));
+        ships.retain(|id| self.asked_ships.insert(*id));
+        players.retain(|id| self.asked_players.insert(*id));
         if ships.is_empty() && players.is_empty() {
             return;
         }
@@ -259,31 +273,18 @@ impl SearchTabState {
             return Some(VALUE_DEBOUNCE - waited);
         }
         let (request, _) = self.debounced.take()?;
-        // Answered from what the tab already holds, with no runtime round trip.
-        if let ValueRequest::Sources = request {
-            self.bar.value_options = self.sources.iter().map(source_option).collect();
-            return None;
-        }
-        if let ValueRequest::Maps = request {
-            match &self.map_names {
-                Some(names) => self.bar.value_options = names.iter().map(|name| map_option(name)).collect(),
-                None => {
-                    let pool = pool.clone();
-                    self.spawn(rt, async move {
-                        match query::distinct_maps(&pool, VALUE_LIMIT).await {
-                            Ok(maps) => Some(SearchMsg::Maps(maps)),
-                            Err(e) => {
-                                tracing::warn!("search: distinct_maps failed: {e}");
-                                None
-                            }
-                        }
-                    });
-                    // Re-queued so the rows appear once the names land, rather
-                    // than only after the next keystroke.
-                    self.queue_value_request(ValueRequest::Maps);
-                }
+        // Both catalogues are already in hand, so these answer with no runtime
+        // round trip and nothing to wait for.
+        match request {
+            ValueRequest::Sources => {
+                self.bar.value_options = self.sources.iter().map(source_option).collect();
+                return None;
             }
-            return None;
+            ValueRequest::Maps => {
+                self.bar.value_options = self.map_names.iter().map(|name| map_option(name)).collect();
+                return None;
+            }
+            ValueRequest::Players { .. } | ValueRequest::Ships { .. } => {}
         }
 
         self.awaiting_values = Some(request.clone());
@@ -405,14 +406,24 @@ impl ToolkitTabViewer<'_> {
 
         let mut wake_in = None;
         if let (Some(pool), Some(rt)) = (pool.as_ref(), rt.as_ref()) {
-            if !search_tab.sources_requested {
-                search_tab.sources_requested = true;
-                let pool = pool.clone();
+            if !search_tab.catalogues_requested {
+                search_tab.catalogues_requested = true;
+                let sources_pool = pool.clone();
                 search_tab.spawn(rt, async move {
-                    match query::list_sources(&pool).await {
+                    match query::list_sources(&sources_pool).await {
                         Ok(sources) => Some(SearchMsg::Sources(sources)),
                         Err(e) => {
                             tracing::warn!("search: list_sources failed: {e}");
+                            None
+                        }
+                    }
+                });
+                let maps_pool = pool.clone();
+                search_tab.spawn(rt, async move {
+                    match query::distinct_maps(&maps_pool, VALUE_LIMIT).await {
+                        Ok(maps) => Some(SearchMsg::Maps(maps)),
+                        Err(e) => {
+                            tracing::warn!("search: distinct_maps failed: {e}");
                             None
                         }
                     }
