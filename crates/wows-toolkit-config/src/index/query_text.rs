@@ -729,12 +729,6 @@ fn split_term(s: &str, base: usize) -> Option<SplitTerm> {
     None
 }
 
-/// Where `token` starts in `s`, skipping any occurrence inside a quoted run.
-///
-/// A quoted run is opaque, the same way `word_end` treats it, so `map:"a>b"` is
-/// a `map` term whose value happens to contain a `>` rather than a term keyed on
-/// the nonsense `map:"a`. This is what makes quoting a value sufficient to get
-/// it back unchanged, which the printer relies on.
 /// Where `token` starts in `s` as a whole word: outside quotes, at the start of
 /// the term or after a term boundary, and not running on into a longer word.
 ///
@@ -764,6 +758,12 @@ fn find_unquoted_word(s: &str, token: &str) -> Option<usize> {
     None
 }
 
+/// Where `token` starts in `s`, skipping any occurrence inside a quoted run.
+///
+/// A quoted run is opaque, the same way `word_end` treats it, so `map:"a>b"` is
+/// a `map` term whose value happens to contain a `>` rather than a term keyed on
+/// the nonsense `map:"a`. This is what makes quoting a value sufficient to get
+/// it back unchanged, which the printer relies on.
 fn find_unquoted(s: &str, token: &str) -> Option<usize> {
     let mut in_quotes = false;
     for (i, c) in s.char_indices() {

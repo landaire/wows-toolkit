@@ -414,8 +414,7 @@ async fn a_map_equality_does_not_match_a_display_name_that_merely_contains_it() 
         "map=ocean must not match the map whose display name is Ocean Rift"
     );
     assert_eq!(run_text_with(&pool, "map=\"ocean rift\"", &maps).await, vec![ArenaId::new(1)]);
-    // A contains term still spans both, which is the difference between the two
-    // operators the catalogue half was ignoring.
+    // A contains term spans both, which is what separates it from equality.
     assert_eq!(run_text_with(&pool, "map:ocean", &maps).await, vec![ArenaId::new(1)]);
     assert!(run_text_with(&pool, "map!=\"ocean rift\"", &maps).await.is_empty());
     assert_eq!(run_text_with(&pool, "map!=ocean", &maps).await, vec![ArenaId::new(1)]);
