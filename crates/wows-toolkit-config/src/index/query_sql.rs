@@ -61,7 +61,11 @@ fn push_joined(qb: &mut QueryBuilder<'_, Sqlite>, cs: &[MatchExpr], join: &str, 
 
 fn push_match_term(qb: &mut QueryBuilder<'_, Sqlite>, term: &MatchTerm, ctx: &CompileCtx<'_>) {
     match term {
-        MatchTerm::Field(MatchField::Map, op, Value::Text(needle)) => push_map(qb, *op, needle, ctx),
+        // A nullary op (IsSet/IsNotSet) on Map must go through the same
+        // nullary-first ordering as every other field, not the catalogue path.
+        MatchTerm::Field(MatchField::Map, op, Value::Text(needle)) if !op.is_nullary() => {
+            push_map(qb, *op, needle, ctx)
+        }
         MatchTerm::Field(field, op, value) => push_field(qb, *field, *op, value),
         // Task 3 replaces this arm.
         MatchTerm::Roster { .. } => {
@@ -259,6 +263,16 @@ mod tests {
         assert!(sql.contains("m.map IN ("), "got {sql}");
         assert!(sql.contains(" OR "), "got {sql}");
         assert!(sql.contains("LOWER(m.map)"), "got {sql}");
+    }
+
+    #[test]
+    fn map_with_a_nullary_op_narrows_instead_of_rendering_a_text_comparison() {
+        // Map's allowed_ops is TEXT_OPS, so this term is malformed upstream.
+        // It must go through the same nullary-first ordering as every other
+        // field, not the catalogue path, and never render a live comparison
+        // against the stray value.
+        let sql = sql_for(&leaf(MatchField::Map, Op::IsSet, Value::Text("ocean".into())));
+        assert_eq!(sql, "m.map IS NOT NULL");
     }
 
     #[test]
