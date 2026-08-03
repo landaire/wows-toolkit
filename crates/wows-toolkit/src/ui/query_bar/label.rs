@@ -39,20 +39,51 @@ pub struct NameCache {
     pub locale: Option<String>,
 }
 
-/// Human text for one match-level term.
+/// Which part of a term a segment renders. Later tasks give each role its own
+/// click target and autocomplete behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentRole {
+    /// The field, including any scope prefix.
+    Filter,
+    Operator,
+    /// Absent for a nullary operator.
+    Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PillSegment {
+    pub role: SegmentRole,
+    pub text: String,
+}
+
+/// Human text for one match-level term, as a join of its segments.
 pub fn pill_text(term: &MatchTerm, cache: &NameCache) -> String {
+    join_segments(&pill_segments(term, cache))
+}
+
+/// One segment per clickable part of a match-level term.
+pub fn pill_segments(term: &MatchTerm, cache: &NameCache) -> Vec<PillSegment> {
     match term {
-        MatchTerm::Field(field, op, value) => field_op_value_text(match_field_label(*field), *op, value, cache),
-        MatchTerm::Roster { quant, pred } => {
-            format!("{} {}", quant_prefix(*quant), roster_expr_text(pred, cache))
+        MatchTerm::Field(field, op, value) => field_op_value_segments(match_field_label(*field), *op, value, cache),
+        MatchTerm::Roster { quant, pred } => roster_term_segments(*quant, pred, cache),
+        MatchTerm::FreeText(s) => {
+            vec![PillSegment { role: SegmentRole::Value, text: t!("ui.search.free_text", text = s).into() }]
         }
-        MatchTerm::FreeText(s) => t!("ui.search.free_text", text = s).into(),
     }
 }
 
-/// Human text for one roster-level term.
+/// Human text for one roster-level term, as a join of its segments.
 pub fn roster_pill_text(term: &RosterTerm, cache: &NameCache) -> String {
-    field_op_value_text(roster_field_label(term.field), term.op, &term.value, cache)
+    join_segments(&roster_segments(term, cache))
+}
+
+/// One segment per clickable part of a roster-level term.
+pub fn roster_segments(term: &RosterTerm, cache: &NameCache) -> Vec<PillSegment> {
+    field_op_value_segments(roster_field_label(term.field), term.op, &term.value, cache)
+}
+
+fn join_segments(segments: &[PillSegment]) -> String {
+    segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ")
 }
 
 /// English prefix for how many roster rows must satisfy a predicate: "any",
@@ -70,15 +101,56 @@ pub fn quant_prefix(quant: Quant) -> String {
     }
 }
 
-/// "<field> <op> <value>" for a comparison op, or "<field> <op>" alone for a
-/// nullary one (`Op::IsSet` / `Op::IsNotSet`), which has no right-hand side.
-fn field_op_value_text(field_label: String, op: Op, value: &Value, cache: &NameCache) -> String {
-    let op_text = op_label(op);
-    if op.is_nullary() {
-        format!("{field_label} {op_text}")
-    } else {
-        format!("{field_label} {op_text} {}", value_text(value, cache))
+/// Filter, operator segments for a comparison op, plus a value segment unless
+/// the op is nullary (`Op::IsSet` / `Op::IsNotSet`), which has no right-hand
+/// side.
+fn field_op_value_segments(field_label: String, op: Op, value: &Value, cache: &NameCache) -> Vec<PillSegment> {
+    let mut segments = vec![
+        PillSegment { role: SegmentRole::Filter, text: field_label },
+        PillSegment { role: SegmentRole::Operator, text: op_label(op) },
+    ];
+    if !op.is_nullary() {
+        segments.push(PillSegment { role: SegmentRole::Value, text: value_text(value, cache) });
     }
+    segments
+}
+
+/// Segments for a roster quantifier term. A sugar-shaped predicate (see
+/// `sugar_shape`) collapses to one pill: a compound filter segment (scope and
+/// field together, e.g. "Enemy ship") plus the inner term's operator and
+/// value, matching what `roster_sugar_pill_text` renders as a single string.
+/// Any other shape is not reached in practice -- `tokens.rs` renders it as a
+/// bracketed group of per-leaf pills via `roster_segments` instead -- but
+/// still needs a total, non-empty rendering here so `pill_text` keeps working
+/// for it.
+fn roster_term_segments(quant: Quant, pred: &Expr<RosterTerm>, cache: &NameCache) -> Vec<PillSegment> {
+    match sugar_shape(quant, pred) {
+        Some((scope_label, inner)) => {
+            let field_label = roster_field_label(inner.field);
+            let filter_text = match scope_label {
+                Some(scope) => format!("{scope} {}", lowercase_first(&field_label)),
+                None => format!("{} {field_label}", quant_prefix(quant)),
+            };
+            let mut segments = vec![PillSegment { role: SegmentRole::Filter, text: filter_text }];
+            segments.extend(field_op_value_segments_tail(inner.op, &inner.value, cache));
+            segments
+        }
+        None => vec![PillSegment {
+            role: SegmentRole::Filter,
+            text: format!("{} {}", quant_prefix(quant), roster_expr_text(pred, cache)),
+        }],
+    }
+}
+
+/// The operator (and, unless nullary, value) segments of `field_op_value_segments`,
+/// without its filter segment. Used where the filter segment is built
+/// separately, as for a sugar-shaped roster term's compound filter.
+fn field_op_value_segments_tail(op: Op, value: &Value, cache: &NameCache) -> Vec<PillSegment> {
+    let mut segments = vec![PillSegment { role: SegmentRole::Operator, text: op_label(op) }];
+    if !op.is_nullary() {
+        segments.push(PillSegment { role: SegmentRole::Value, text: value_text(value, cache) });
+    }
+    segments
 }
 
 /// A roster predicate tree rendered as English, joining `All`/`Any` children
@@ -156,8 +228,8 @@ pub(crate) fn op_label(op: Op) -> String {
 
 /// Text for one term's right-hand value. Ship/account ids resolve through
 /// `cache`, falling back to `#<raw>` when unresolved. `Value::NoOperand` (the
-/// companion to a nullary op) is never reached: `field_op_value_text` only
-/// calls this when `op.is_nullary()` is false.
+/// companion to a nullary op) is never reached: callers only reach this when
+/// `op.is_nullary()` is false.
 fn value_text(value: &Value, cache: &NameCache) -> String {
     match value {
         Value::Text(s) => s.clone(),
@@ -183,17 +255,18 @@ fn value_text(value: &Value, cache: &NameCache) -> String {
     }
 }
 
-/// Compact "Enemy ship is Yamato" form for a roster quantifier whose predicate
-/// matches one of the shapes `query_text::try_print_sugar` recognises: `Any`
-/// over a bare `Leaf`, or an `All` of exactly two where the first is a scope
-/// conjunct (self/ally/enemy relation, or division-mine) and the second is a
-/// single `Leaf`. Returns `None` for any other shape; the caller renders those
-/// as a bracketed `QuantOpen`/tokens/`QuantClose` group instead.
+/// Recognises the shapes `query_text::try_print_sugar` treats as sugar: `Any`
+/// over a bare `Leaf` (returned as `(None, leaf)`), or an `All` of exactly two
+/// where the first is a scope conjunct (self/ally/enemy relation, or
+/// division-mine, each via `Op::Is`) and the second is a single `Leaf`
+/// (returned as `(Some(scope_label), leaf)`). Returns `None` for any other
+/// shape; callers render those as a bracketed `QuantOpen`/tokens/`QuantClose`
+/// group instead.
 ///
 /// Keep this in sync with `wows-toolkit-config`'s `query_text::try_print_sugar`:
 /// any shape that prints as sugar there must render compactly here, or a
 /// bracketed group would show text whose one-line form the user never sees.
-pub fn roster_sugar_pill_text(quant: Quant, pred: &Expr<RosterTerm>, cache: &NameCache) -> Option<String> {
+fn sugar_shape(quant: Quant, pred: &Expr<RosterTerm>) -> Option<(Option<String>, &RosterTerm)> {
     if quant != Quant::Any {
         return None;
     }
@@ -216,10 +289,22 @@ pub fn roster_sugar_pill_text(quant: Quant, pred: &Expr<RosterTerm>, cache: &Nam
                 }
                 _ => return None,
             };
-            Some(format!("{scope_label} {}", lowercase_first(&roster_pill_text(inner, cache))))
+            Some((Some(scope_label), inner))
         }
-        Expr::Leaf(inner) => Some(format!("{} {}", quant_prefix(Quant::Any), roster_pill_text(inner, cache))),
+        Expr::Leaf(inner) => Some((None, inner)),
         _ => None,
+    }
+}
+
+/// Compact "Enemy ship is Yamato" form for a roster quantifier whose predicate
+/// is sugar-shaped (see `sugar_shape`). Returns `None` for any other shape;
+/// the caller renders those as a bracketed `QuantOpen`/tokens/`QuantClose`
+/// group instead.
+pub fn roster_sugar_pill_text(quant: Quant, pred: &Expr<RosterTerm>, cache: &NameCache) -> Option<String> {
+    let (scope_label, inner) = sugar_shape(quant, pred)?;
+    match scope_label {
+        Some(scope_label) => Some(format!("{scope_label} {}", lowercase_first(&roster_pill_text(inner, cache)))),
+        None => Some(format!("{} {}", quant_prefix(Quant::Any), roster_pill_text(inner, cache))),
     }
 }
 
@@ -346,14 +431,13 @@ mod tests {
 
     #[test]
     fn a_roster_quantifier_over_all_joins_leaves_with_and() {
+        // Neither leaf is a scope conjunct (see `a_self_scoped_sugar_reads_as_a_compact_pill`
+        // and friends for that), so this predicate is not sugar-shaped and
+        // `pill_text` renders it fully expanded, joined with "and".
         let mut cache = NameCache::default();
         cache.ships.insert(GameParamId::from(1u64), "Yamato".into());
         let pred = Expr::All(vec![
-            Expr::Leaf(RosterTerm {
-                field: RosterField::Relation,
-                op: Op::Is,
-                value: Value::Relation(crate::db::index::rows::VehicleRelation::Enemy),
-            }),
+            Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(5) }),
             Expr::Leaf(RosterTerm {
                 field: RosterField::Ship,
                 op: Op::Is,
@@ -361,7 +445,7 @@ mod tests {
             }),
         ]);
         let term = MatchTerm::Roster { quant: Quant::Any, pred };
-        assert_eq!(pill_text(&term, &cache), "any Relation is Enemy and Ship is Yamato");
+        assert_eq!(pill_text(&term, &cache), "any Tier = 5 and Ship is Yamato");
     }
 
     #[test]
@@ -523,6 +607,130 @@ mod tests {
             }),
         ]);
         assert_eq!(roster_sugar_pill_text(Quant::Any, &pred, &cache), None);
+    }
+
+    fn seg(role: SegmentRole, text: &str) -> PillSegment {
+        PillSegment { role, text: text.into() }
+    }
+
+    #[test]
+    fn a_match_field_term_yields_filter_operator_value() {
+        let cache = NameCache::default();
+        let term = MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win));
+        assert_eq!(
+            pill_segments(&term, &cache),
+            vec![seg(SegmentRole::Filter, "Result"), seg(SegmentRole::Operator, "is"), seg(SegmentRole::Value, "Win")]
+        );
+    }
+
+    #[test]
+    fn a_nullary_operator_yields_two_segments_not_three() {
+        let cache = NameCache::default();
+        let term = MatchTerm::Field(MatchField::Build, Op::IsSet, Value::NoOperand);
+        let segs = pill_segments(&term, &cache);
+        assert_eq!(segs.len(), 2, "got {segs:?}");
+        assert!(segs.iter().all(|s| s.role != SegmentRole::Value));
+    }
+
+    #[test]
+    fn joining_the_segments_reproduces_the_old_pill_text() {
+        // pill_text is the public display form and must not change.
+        let cache = NameCache::default();
+        for term in sample_terms() {
+            let joined = pill_segments(&term, &cache).iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
+            assert_eq!(joined, pill_text(&term, &cache), "{term:?}");
+        }
+    }
+
+    #[test]
+    fn a_sugar_shaped_roster_term_keeps_a_compound_filter_segment() {
+        let cache = NameCache::default();
+        let pred = Expr::All(vec![
+            Expr::Leaf(RosterTerm {
+                field: RosterField::Relation,
+                op: Op::Is,
+                value: Value::Relation(VehicleRelation::Enemy),
+            }),
+            Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) }),
+        ]);
+        let term = MatchTerm::Roster { quant: Quant::Any, pred };
+        let segs = pill_segments(&term, &cache);
+        assert_eq!(segs.len(), 3, "sugar stays one pill with three segments: {segs:?}");
+        assert_eq!(segs[0].role, SegmentRole::Filter);
+        assert!(segs[0].text.to_lowercase().contains("enemy"), "got {:?}", segs[0].text);
+    }
+
+    #[test]
+    fn every_field_and_allowed_operator_yields_a_non_empty_segment_each() {
+        // A missing arm must not render an empty segment, which would paint an
+        // unclickable zero-width target.
+        let cache = NameCache::default();
+        for f in MatchField::ALL {
+            for &op in f.allowed_ops() {
+                let value = if op.is_nullary() { Value::NoOperand } else { sample_value(f.value_kind()) };
+                for s in pill_segments(&MatchTerm::Field(f, op, value.clone()), &cache) {
+                    assert!(!s.text.trim().is_empty(), "{f:?} {op:?} {:?} empty", s.role);
+                }
+            }
+        }
+        for f in RosterField::ALL {
+            for &op in f.allowed_ops() {
+                let value = if op.is_nullary() { Value::NoOperand } else { sample_value(f.value_kind()) };
+                let t = RosterTerm { field: f, op, value };
+                for s in roster_segments(&t, &cache) {
+                    assert!(!s.text.trim().is_empty(), "{f:?} {op:?} {:?} empty", s.role);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn free_text_is_a_single_value_segment() {
+        let cache = NameCache::default();
+        let segs = pill_segments(&MatchTerm::FreeText("yamato".into()), &cache);
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].role, SegmentRole::Value);
+    }
+
+    /// One representative `MatchTerm` for each shape `pill_segments` must
+    /// handle: a plain field, a nullary operator, a sugar-shaped roster term,
+    /// a non-sugar roster term, and free text.
+    fn sample_terms() -> Vec<MatchTerm> {
+        vec![
+            MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win)),
+            MatchTerm::Field(MatchField::Build, Op::IsSet, Value::NoOperand),
+            MatchTerm::Roster {
+                quant: Quant::Any,
+                pred: Expr::All(vec![
+                    Expr::Leaf(RosterTerm {
+                        field: RosterField::Relation,
+                        op: Op::Is,
+                        value: Value::Relation(VehicleRelation::Enemy),
+                    }),
+                    Expr::Leaf(RosterTerm {
+                        field: RosterField::Ship,
+                        op: Op::Is,
+                        value: Value::Ship(GameParamId::from(1u64)),
+                    }),
+                ]),
+            },
+            MatchTerm::Roster {
+                quant: Quant::None,
+                pred: Expr::Any(vec![
+                    Expr::Leaf(RosterTerm {
+                        field: RosterField::Relation,
+                        op: Op::Is,
+                        value: Value::Relation(VehicleRelation::Enemy),
+                    }),
+                    Expr::Leaf(RosterTerm {
+                        field: RosterField::Relation,
+                        op: Op::Is,
+                        value: Value::Relation(VehicleRelation::Ally),
+                    }),
+                ]),
+            },
+            MatchTerm::FreeText("yamato".into()),
+        ]
     }
 
     fn sample_value(kind: ValueKind) -> Value {
