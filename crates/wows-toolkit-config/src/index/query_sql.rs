@@ -7,12 +7,16 @@ use sqlx::QueryBuilder;
 use sqlx::Sqlite;
 
 use super::query_ast::CmpOp;
+use super::query_ast::DivisionScope;
 use super::query_ast::Expr;
 use super::query_ast::MapCatalog;
 use super::query_ast::MatchExpr;
 use super::query_ast::MatchField;
 use super::query_ast::MatchTerm;
 use super::query_ast::Op;
+use super::query_ast::Quant;
+use super::query_ast::RosterExpr;
+use super::query_ast::RosterTerm;
 use super::query_ast::Value;
 use super::query_ast::ValueKind;
 
@@ -67,10 +71,7 @@ fn push_match_term(qb: &mut QueryBuilder<'_, Sqlite>, term: &MatchTerm, ctx: &Co
             push_map(qb, *op, needle, ctx)
         }
         MatchTerm::Field(field, op, value) => push_field(qb, *field, *op, value),
-        // Task 3 replaces this arm.
-        MatchTerm::Roster { .. } => {
-            qb.push("1=0");
-        }
+        MatchTerm::Roster { quant, pred } => push_roster(qb, *quant, pred),
         // Task 4 replaces this arm.
         MatchTerm::FreeText(_) => {
             qb.push("1=0");
@@ -175,17 +176,141 @@ fn push_eq_bool(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, b: bool) {
     qb.push(format!("{col} {sql} ")).push_bind(b);
 }
 
+fn push_roster(qb: &mut QueryBuilder<'_, Sqlite>, quant: Quant, pred: &RosterExpr) {
+    match quant {
+        Quant::Any => {
+            qb.push("EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND ");
+            push_roster_expr(qb, pred);
+            qb.push(")");
+        }
+        Quant::None => {
+            qb.push("NOT EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND ");
+            push_roster_expr(qb, pred);
+            qb.push(")");
+        }
+        Quant::Count(op, n) => {
+            qb.push("(SELECT COUNT(*) FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND ");
+            push_roster_expr(qb, pred);
+            qb.push(format!(") {} ", op.as_sql())).push_bind(i64::from(n));
+        }
+    }
+}
+
+pub fn push_roster_expr(qb: &mut QueryBuilder<'_, Sqlite>, expr: &RosterExpr) {
+    match expr {
+        Expr::All(cs) if cs.is_empty() => {
+            qb.push("1=1");
+        }
+        Expr::Any(cs) if cs.is_empty() => {
+            qb.push("1=0");
+        }
+        Expr::All(cs) => push_roster_joined(qb, cs, " AND "),
+        Expr::Any(cs) => push_roster_joined(qb, cs, " OR "),
+        Expr::Not(inner) => {
+            qb.push("NOT (");
+            push_roster_expr(qb, inner);
+            qb.push(")");
+        }
+        Expr::Leaf(term) => push_roster_term(qb, term),
+    }
+}
+
+fn push_roster_joined(qb: &mut QueryBuilder<'_, Sqlite>, cs: &[RosterExpr], join: &str) {
+    qb.push("(");
+    for (i, c) in cs.iter().enumerate() {
+        if i > 0 {
+            qb.push(join);
+        }
+        push_roster_expr(qb, c);
+    }
+    qb.push(")");
+}
+
+/// Dispatch is on `(field.value_kind(), value)`, not on the value alone: a
+/// `RosterField::Tier` term carrying a `Value::Text` must fall through to the
+/// mismatch arm rather than reach the text comparison for an integer column.
+/// Task 2's `push_field` pairs the same way.
+fn push_roster_term(qb: &mut QueryBuilder<'_, Sqlite>, term: &RosterTerm) {
+    let col = format!("v.{}", term.field.column());
+    if term.op.is_nullary() {
+        let sql = if matches!(term.op, Op::IsSet) { "IS NOT NULL" } else { "IS NULL" };
+        qb.push(format!("{col} {sql}"));
+        return;
+    }
+    match (term.field.value_kind(), &term.value) {
+        (ValueKind::Division, Value::Division(scope)) => push_division(qb, term.op, *scope),
+        (ValueKind::Text, Value::Text(s)) => push_text(qb, &col, term.op, s),
+        (ValueKind::Int, Value::Int(n)) => push_num_i64(qb, &col, term.op, *n),
+        (ValueKind::Float, Value::Float(f)) => push_num_f64(qb, &col, term.op, *f),
+        (ValueKind::Bool, Value::Bool(b)) => push_eq_bool(qb, &col, term.op, *b),
+        (ValueKind::Class, Value::Class(c)) => push_eq_str(qb, &col, term.op, c.as_db_str()),
+        (ValueKind::Relation, Value::Relation(r)) => push_eq_str(qb, &col, term.op, r.as_db_str()),
+        (ValueKind::Account, Value::Account(a)) => push_num_i64(qb, &col, term.op, a.raw()),
+        (ValueKind::Ship, Value::Ship(s)) => push_num_i64(qb, &col, term.op, s.raw() as i64),
+        // A value that does not fit the field is a bug upstream. Narrow, do not widen.
+        _ => {
+            qb.push("1=0");
+        }
+    }
+}
+
+/// `Mine` correlates to the perspective player's own division. The
+/// `relation IN ('self', 'ally')` clause assumes nothing about whether
+/// `division_id` (the server's prebattle id) can collide across teams: a
+/// division is always same-team, so the constraint cannot exclude a correct
+/// row. When the self row has a NULL `division_id` (the player was solo) the
+/// equality yields NULL for every row and the quantifier is false, which is
+/// correct.
+fn push_division(qb: &mut QueryBuilder<'_, Sqlite>, op: Op, scope: DivisionScope) {
+    let negated = matches!(op, Op::IsNot | Op::NotEquals | Op::Ne);
+    if negated {
+        qb.push("NOT (");
+    }
+    match scope {
+        DivisionScope::Mine => {
+            qb.push(
+                "(v.division_id IS NOT NULL AND v.relation IN ('self', 'ally') \
+                 AND v.division_id = (SELECT s.division_id FROM indexed_vehicle s \
+                 WHERE s.arena_id = m.arena_id AND s.relation = 'self'))",
+            );
+        }
+        DivisionScope::Any => {
+            qb.push("v.division_id IS NOT NULL");
+        }
+        DivisionScope::None => {
+            qb.push("v.division_id IS NULL");
+        }
+    }
+    if negated {
+        qb.push(")");
+    }
+}
+
+fn push_num_f64(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, n: f64) {
+    qb.push(format!("{col} {} ", num_cmp(op).as_sql())).push_bind(n);
+}
+
 #[cfg(test)]
 mod tests {
     use sqlx::QueryBuilder;
     use sqlx::Sqlite;
 
     use super::*;
+    use crate::index::query_ast::CmpOp;
+    use crate::index::query_ast::DivisionScope;
     use crate::index::query_ast::MatchField;
     use crate::index::query_ast::MatchTerm;
     use crate::index::query_ast::Op;
+    use crate::index::query_ast::Quant;
+    use crate::index::query_ast::RosterExpr;
+    use crate::index::query_ast::RosterField;
+    use crate::index::query_ast::RosterTerm;
+    use crate::index::query_ast::ShipClass;
     use crate::index::query_ast::Value;
     use crate::index::rows::MatchOutcome;
+    use crate::index::rows::VehicleRelation;
+    use wows_core::game_types::AccountId;
+    use wows_core::game_types::GameParamId;
 
     fn sql_for(expr: &MatchExpr) -> String {
         let ctx = CompileCtx::default();
@@ -281,5 +406,111 @@ mod tests {
         // bug, and must not silently widen the result set.
         let sql = sql_for(&leaf(MatchField::Date, Op::Ge, Value::Text("nonsense".into())));
         assert_eq!(sql, "1=0");
+    }
+
+    fn roster(quant: Quant, pred: RosterExpr) -> MatchExpr {
+        Expr::Leaf(MatchTerm::Roster { quant, pred })
+    }
+
+    fn rleaf(field: RosterField, op: Op, value: Value) -> RosterExpr {
+        Expr::Leaf(RosterTerm { field, op, value })
+    }
+
+    #[test]
+    fn any_compiles_to_exists_correlated_on_arena() {
+        let sql = sql_for(&roster(Quant::Any, rleaf(RosterField::Tier, Op::Eq, Value::Int(10))));
+        assert!(
+            sql.starts_with("EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND "),
+            "got {sql}"
+        );
+        assert!(sql.contains("v.tier ="), "got {sql}");
+    }
+
+    #[test]
+    fn none_compiles_to_not_exists() {
+        let sql = sql_for(&roster(Quant::None, rleaf(RosterField::Class, Op::Is, Value::Class(ShipClass::AirCarrier))));
+        assert!(sql.starts_with("NOT EXISTS ("), "got {sql}");
+        assert!(sql.contains("v.species"), "got {sql}");
+    }
+
+    #[test]
+    fn count_compiles_to_a_correlated_aggregate_comparison() {
+        let sql = sql_for(&roster(
+            Quant::Count(CmpOp::Ge, 3),
+            Expr::All(vec![
+                rleaf(RosterField::Relation, Op::Is, Value::Relation(VehicleRelation::Enemy)),
+                rleaf(RosterField::Damage, Op::Gt, Value::Int(100_000)),
+            ]),
+        ));
+        assert!(sql.contains("SELECT COUNT(*) FROM indexed_vehicle v"), "got {sql}");
+        assert!(sql.contains("v.arena_id = m.arena_id"), "got {sql}");
+        assert!(sql.contains(") >= "), "got {sql}");
+        assert!(sql.contains("v.relation"), "got {sql}");
+        assert!(sql.contains("v.damage >"), "got {sql}");
+    }
+
+    #[test]
+    fn division_mine_correlates_to_the_self_rows_division_and_stays_same_team() {
+        let sql =
+            sql_for(&roster(Quant::Any, rleaf(RosterField::Division, Op::Is, Value::Division(DivisionScope::Mine))));
+        assert!(sql.contains("v.division_id IS NOT NULL"), "got {sql}");
+        assert!(sql.contains("v.relation IN ('self', 'ally')"), "got {sql}");
+        assert!(sql.contains("SELECT s.division_id FROM indexed_vehicle s"), "got {sql}");
+        assert!(sql.contains("s.arena_id = m.arena_id"), "got {sql}");
+        assert!(sql.contains("s.relation = 'self'"), "got {sql}");
+    }
+
+    #[test]
+    fn division_any_and_none_are_plain_null_checks() {
+        let any =
+            sql_for(&roster(Quant::Any, rleaf(RosterField::Division, Op::Is, Value::Division(DivisionScope::Any))));
+        assert!(any.contains("v.division_id IS NOT NULL"), "got {any}");
+        assert!(!any.contains("s.division_id"), "Any must not correlate to the self row: {any}");
+
+        let none =
+            sql_for(&roster(Quant::Any, rleaf(RosterField::Division, Op::Is, Value::Division(DivisionScope::None))));
+        assert!(none.contains("v.division_id IS NULL"), "got {none}");
+    }
+
+    #[test]
+    fn roster_predicates_nest_with_and_or_and_not() {
+        let sql = sql_for(&roster(
+            Quant::Any,
+            Expr::All(vec![
+                rleaf(RosterField::Division, Op::Is, Value::Division(DivisionScope::Mine)),
+                Expr::Not(Box::new(rleaf(RosterField::TestShip, Op::Is, Value::Bool(true)))),
+                Expr::Any(vec![
+                    rleaf(RosterField::Tier, Op::Eq, Value::Int(9)),
+                    rleaf(RosterField::Tier, Op::Eq, Value::Int(10)),
+                ]),
+            ]),
+        ));
+        assert!(sql.contains(" AND "), "got {sql}");
+        assert!(sql.contains(" OR "), "got {sql}");
+        assert!(sql.contains("NOT ("), "got {sql}");
+    }
+
+    #[test]
+    fn roster_is_set_needs_no_bind() {
+        let sql = sql_for(&roster(Quant::Any, rleaf(RosterField::Damage, Op::IsSet, Value::NoOperand)));
+        assert!(sql.contains("v.damage IS NOT NULL"), "got {sql}");
+    }
+
+    #[test]
+    fn a_roster_term_whose_value_does_not_match_its_field_compiles_to_a_false_predicate() {
+        // tier is an integer column; a text value is an upstream bug and must
+        // narrow the result set, not reach the text comparison.
+        let sql = sql_for(&roster(Quant::Any, rleaf(RosterField::Tier, Op::Eq, Value::Text("ten".into()))));
+        assert!(sql.contains("1=0"), "got {sql}");
+        assert!(!sql.contains("LOWER(v.tier)"), "got {sql}");
+    }
+
+    #[test]
+    fn account_and_ship_bind_their_newtype_inner_values() {
+        let acct = sql_for(&roster(Quant::Any, rleaf(RosterField::Account, Op::Is, Value::Account(AccountId(7)))));
+        assert!(acct.contains("v.account_id ="), "got {acct}");
+        let ship =
+            sql_for(&roster(Quant::Any, rleaf(RosterField::Ship, Op::Is, Value::Ship(GameParamId::from(999u64)))));
+        assert!(ship.contains("v.ship_id ="), "got {ship}");
     }
 }
