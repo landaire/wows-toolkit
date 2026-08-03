@@ -1,7 +1,23 @@
-use wows_minimap_renderer::draw_command::DrawCommand;
-use wows_replays::types::GameClock;
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
+use wows_battle_world::ids::ShotTracking;
+use wows_battle_world::merged::MergedReplays;
+use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::renderer::MinimapRenderer;
+use wows_minimap_renderer::renderer::RenderOptions;
+use wows_replays::ReplayFile;
+use wows_replays::types::GameClock;
+use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::Version;
+
+use super::RendererAssetCache;
+use super::SNAPSHOTS_PER_SECOND;
 use super::frame_pass::FrameSink;
+use super::frame_pass::build_frame_track;
+use crate::data::wows_data::WoWsDataMap;
 
 /// Wall-clock length of one full preview loop for a replay long enough to
 /// fill the frame budget.
@@ -75,6 +91,89 @@ impl FrameSink for TrackSink {
         }
         self.since_kept += 1;
     }
+}
+
+/// Why a replay has no preview.
+///
+/// Each variant carries what the popup needs to say, so the popup never parses
+/// a formatted message back apart.
+#[derive(Debug, Clone, thiserror::Error)]
+pub(crate) enum PreviewError {
+    // `Version` is not guaranteed to implement `Display`; format it via Debug
+    // rather than adding an impl to `wowsunpack` for one message.
+    #[error("no game data for client version {version:?}")]
+    NoGameDataForVersion { version: Version },
+    #[error("replay could not be read")]
+    UnreadableReplay,
+    #[error("replay reports an unreadable client version {raw:?}")]
+    UnknownClientVersion { raw: String },
+    #[error("no map info for {map_name}")]
+    NoMapInfo { map_name: String },
+    #[error("preview bake was superseded")]
+    Cancelled,
+}
+
+/// Bake a decimated preview track for `path` in a single forward pass.
+///
+/// Mirrors the setup `playback_thread` does before its own forward pass, then
+/// skips everything else that thread does afterward: damage-event gathering,
+/// timeline/shot extraction, salvo flight-time scanning, player-build
+/// snapshotting, the live-session rebuild, silhouette loading,
+/// `commands.scheme.xml` parsing, and the collab announce. That is the entire
+/// reason this finishes cheaply enough to run on hover.
+pub(crate) fn bake_preview_track(
+    path: &Path,
+    data_map: &WoWsDataMap,
+    asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
+    cancel: &AtomicBool,
+) -> Result<PreviewTrack, PreviewError> {
+    let replay_file = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
+    let raw_client_version = replay_file.meta.clientVersionFromExe.clone();
+    let replay_version = Version::try_from_client_exe(&raw_client_version)
+        .ok_or(PreviewError::UnknownClientVersion { raw: raw_client_version })?;
+    let wows_data =
+        data_map.resolve(&replay_version).ok_or(PreviewError::NoGameDataForVersion { version: replay_version })?;
+
+    let map_name = replay_file.meta.mapName.clone();
+    let (vfs, version, game_metadata, game_constants, dump_dir) = {
+        let data = wows_data.read();
+        let gm = data.game_metadata.clone().ok_or(PreviewError::NoGameDataForVersion { version: replay_version })?;
+        (data.vfs.clone(), data.version().copied(), gm, Arc::clone(&data.game_constants), data.dump_dir.clone())
+    };
+
+    let (_map_image, map_info) = asset_cache.lock().get_or_load_map(&map_name, &vfs, version.as_ref());
+    // `draw_frame` returns an empty command list with no map info, so bailing
+    // here is the difference between reporting the gap and silently looping
+    // through a track of blank frames.
+    let map_info = map_info.ok_or(PreviewError::NoMapInfo { map_name: map_name.clone() })?;
+    let game_fonts = asset_cache.lock().get_or_load_game_fonts(&vfs, version.as_ref(), dump_dir.as_deref());
+    drop(vfs);
+
+    let session_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+    // Emit the full command set; the popup filters at paint time, so the
+    // preset can change later without invalidating a cached track.
+    let mut renderer = MinimapRenderer::new(Some(map_info), &game_metadata, session_version, RenderOptions::default());
+    renderer.set_fonts(game_fonts);
+
+    let mut session = MergedReplays::new(
+        game_metadata.entity_specs(),
+        &*game_metadata,
+        &game_constants,
+        session_version,
+        &replay_file,
+        &[],
+    )
+    .map_err(|_| PreviewError::UnreadableReplay)?;
+    session.world_mut().set_shot_tracking(ShotTracking::Untracked);
+
+    let mut sink = TrackSink::new();
+    build_frame_track(&mut session, &mut renderer, 1.0 / SNAPSHOTS_PER_SECOND, cancel, &mut sink);
+    session.finish();
+
+    if cancel.load(Ordering::Relaxed) {
+        return Err(PreviewError::Cancelled);
+    }
+    Ok(sink.finish(map_name))
 }
 
 #[cfg(test)]
