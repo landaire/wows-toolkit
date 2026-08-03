@@ -8,8 +8,12 @@
 use crate::db::index::query_ast::Expr;
 use crate::db::index::query_ast::MatchExpr;
 use crate::db::index::query_ast::MatchTerm;
+use crate::db::index::query_ast::Op;
 use crate::db::index::query_ast::Quant;
+use crate::db::index::query_ast::Value;
 use crate::ui::query_bar::tokens::NodePath;
+use crate::ui::query_bar::tokens::Token;
+use crate::ui::query_bar::tokens::TokenKind;
 
 /// The nodes the user has selected, by path. Order is not significant.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -36,6 +40,218 @@ impl Selection {
 
     pub fn clear(&mut self) {
         self.nodes.clear();
+    }
+
+    /// Discards whatever was selected and selects `path` alone.
+    pub fn set_one(&mut self, path: NodePath) {
+        self.nodes.clear();
+        self.nodes.push(path);
+    }
+
+    /// Discards whatever was selected and selects exactly `paths`.
+    pub fn set_many(&mut self, paths: Vec<NodePath>) {
+        self.nodes = paths;
+    }
+
+    /// Drops selected paths that no longer name a token, which is every path
+    /// below a node an edit removed or reshaped.
+    pub fn retain_present(&mut self, tokens: &[Token]) {
+        self.nodes.retain(|p| tokens.iter().any(|t| t.path == *p));
+    }
+}
+
+/// Every pill's node path, in stream order. Pills are the unit the caret steps
+/// through and the unit the toolbar acts on; a bracket or a connector names the
+/// same node its contents sit under, so including those would offer one node
+/// twice.
+pub fn pill_paths(tokens: &[Token]) -> Vec<NodePath> {
+    tokens.iter().filter(|t| matches!(t.kind, TokenKind::Pill { .. })).map(|t| t.path.clone()).collect()
+}
+
+/// The pill one step from `anchor` in stream order. With no anchor, stepping
+/// back lands on the last pill (the caret sits after it) and stepping forward
+/// goes nowhere, since there is nothing after the caret. `None` when there is
+/// no such pill.
+pub fn step(paths: &[NodePath], anchor: Option<&[usize]>, back: bool) -> Option<NodePath> {
+    let Some(anchor) = anchor else {
+        return if back { paths.last().cloned() } else { None };
+    };
+    let at = paths.iter().position(|p| p.as_slice() == anchor)?;
+    let next = if back { at.checked_sub(1)? } else { at + 1 };
+    paths.get(next).cloned()
+}
+
+/// The inclusive run of pills between `anchor` and `target`, in stream order.
+/// Empty when either path is not a pill in this stream.
+pub fn range(paths: &[NodePath], anchor: &[usize], target: &[usize]) -> Vec<NodePath> {
+    let (Some(a), Some(b)) =
+        (paths.iter().position(|p| p.as_slice() == anchor), paths.iter().position(|p| p.as_slice() == target))
+    else {
+        return Vec::new();
+    };
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+    paths[lo..=hi].to_vec()
+}
+
+/// Adds `node` as a new top-level conjunct. Only an `All` root absorbs it
+/// directly; any other root is first wrapped in a new `All`, since pushing into
+/// an `Any` root would OR the new filter into the query instead of narrowing it.
+pub fn append_top_level(expr: &mut MatchExpr, node: MatchExpr) {
+    match expr {
+        Expr::All(cs) => cs.push(node),
+        other => {
+            let taken = std::mem::replace(other, Expr::All(Vec::new()));
+            *other = Expr::All(vec![taken, node]);
+        }
+    }
+}
+
+/// Adds a freshly parsed query to the tree. An `All` root is spliced rather
+/// than nested: two terms typed into the caret mean two filters, not one
+/// bracketed group.
+pub fn append_query(expr: &mut MatchExpr, parsed: MatchExpr) {
+    match parsed {
+        Expr::All(cs) => {
+            for child in cs {
+                append_top_level(expr, child);
+            }
+        }
+        other => append_top_level(expr, other),
+    }
+}
+
+/// Switches the `All`/`Any` node at `path` to the other connector, keeping its
+/// children in place. A node that is neither is left alone.
+pub fn set_connector(expr: &mut MatchExpr, path: &[usize], is_or: bool) {
+    let Some(node) = node_at_mut(expr, path) else {
+        return;
+    };
+    let children = match node {
+        Expr::All(cs) | Expr::Any(cs) => std::mem::take(cs),
+        _ => return,
+    };
+    *node = if is_or { Expr::Any(children) } else { Expr::All(children) };
+}
+
+/// The operators a pill's term allows, and the one it currently carries.
+/// `None` for a pill that renders more than one term (a sugar-collapsed roster
+/// quantifier) or none at all, neither of which has a single operator to offer.
+pub fn term_op_at(expr: &MatchExpr, path: &[usize]) -> Option<(&'static [Op], Op)> {
+    let (term, rest) = split_at_leaf(expr, path)?;
+    match term {
+        MatchTerm::Field(field, op, _) if rest.is_empty() => Some((field.allowed_ops(), *op)),
+        MatchTerm::Roster { pred, .. } => match expr_at(pred, rest)? {
+            Expr::Leaf(roster) => Some((roster.field.allowed_ops(), roster.op)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Whether `set_op` would take, so an operator menu can disable an entry rather
+/// than offer one that silently does nothing.
+pub fn can_set_op(expr: &MatchExpr, path: &[usize], op: Op) -> bool {
+    let Some((allowed, current)) = term_op_at(expr, path) else {
+        return false;
+    };
+    allowed.contains(&op) && (op.is_nullary() || !current.is_nullary())
+}
+
+/// Replaces the operator of the term at `path`, reporting whether it took.
+///
+/// Refuses an operator the field does not allow: `Op` spells equals three ways
+/// and all three print identically, so an unchecked assignment yields a tree
+/// that reparses into a different one. Also refuses moving from a nullary
+/// operator to one that takes an operand, because the term has no value left to
+/// compare and inventing a placeholder is exactly the sentinel the model avoids.
+pub fn set_op(expr: &mut MatchExpr, path: &[usize], op: Op) -> bool {
+    let Some((term, rest)) = split_at_leaf_mut(expr, path) else {
+        return false;
+    };
+    match term {
+        MatchTerm::Field(field, current, value) if rest.is_empty() => apply_op(field.allowed_ops(), current, value, op),
+        MatchTerm::Roster { pred, .. } => match expr_at_mut(pred, rest) {
+            Some(Expr::Leaf(roster)) => apply_op(roster.field.allowed_ops(), &mut roster.op, &mut roster.value, op),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn apply_op(allowed: &[Op], current: &mut Op, value: &mut Value, op: Op) -> bool {
+    if !allowed.contains(&op) {
+        return false;
+    }
+    if op.is_nullary() {
+        *current = op;
+        *value = Value::NoOperand;
+        return true;
+    }
+    if current.is_nullary() {
+        return false;
+    }
+    *current = op;
+    true
+}
+
+/// Resolves the `MatchExpr` part of a token path down to its leaf term, and
+/// hands back the unconsumed tail, which addresses a node inside that leaf's
+/// roster predicate.
+fn split_at_leaf<'a, 'p>(expr: &'a MatchExpr, path: &'p [usize]) -> Option<(&'a MatchTerm, &'p [usize])> {
+    match expr {
+        Expr::Leaf(term) => Some((term, path)),
+        Expr::All(cs) | Expr::Any(cs) => {
+            let (&i, rest) = path.split_first()?;
+            split_at_leaf(cs.get(i)?, rest)
+        }
+        Expr::Not(inner) => {
+            let (&i, rest) = path.split_first()?;
+            if i != 0 {
+                return None;
+            }
+            split_at_leaf(inner, rest)
+        }
+    }
+}
+
+fn split_at_leaf_mut<'a, 'p>(expr: &'a mut MatchExpr, path: &'p [usize]) -> Option<(&'a mut MatchTerm, &'p [usize])> {
+    match expr {
+        Expr::Leaf(term) => Some((term, path)),
+        Expr::All(cs) | Expr::Any(cs) => {
+            let (&i, rest) = path.split_first()?;
+            split_at_leaf_mut(cs.get_mut(i)?, rest)
+        }
+        Expr::Not(inner) => {
+            let (&i, rest) = path.split_first()?;
+            if i != 0 {
+                return None;
+            }
+            split_at_leaf_mut(inner, rest)
+        }
+    }
+}
+
+/// `tokens::node_at` over either tree level, so a roster predicate resolves the
+/// same way the match level does.
+fn expr_at<'a, L>(expr: &'a Expr<L>, path: &[usize]) -> Option<&'a Expr<L>> {
+    let Some((&i, rest)) = path.split_first() else {
+        return Some(expr);
+    };
+    match expr {
+        Expr::All(cs) | Expr::Any(cs) => cs.get(i).and_then(|c| expr_at(c, rest)),
+        Expr::Not(inner) if i == 0 => expr_at(inner, rest),
+        _ => None,
+    }
+}
+
+fn expr_at_mut<'a, L>(expr: &'a mut Expr<L>, path: &[usize]) -> Option<&'a mut Expr<L>> {
+    let Some((&i, rest)) = path.split_first() else {
+        return Some(expr);
+    };
+    match expr {
+        Expr::All(cs) | Expr::Any(cs) => cs.get_mut(i).and_then(|c| expr_at_mut(c, rest)),
+        Expr::Not(inner) if i == 0 => expr_at_mut(inner, rest),
+        _ => None,
     }
 }
 
@@ -436,6 +652,254 @@ mod tests {
         delete(&mut e, &sel(&[&[0]]));
         canonicalise(&mut e);
         assert!(e.is_empty_all());
+    }
+
+    #[test]
+    fn pill_paths_lists_only_pills_in_stream_order() {
+        use crate::ui::query_bar::label::NameCache;
+        use crate::ui::query_bar::tokens::tokenize;
+        let e = Expr::All(vec![leaf(1), Expr::Any(vec![leaf(2), leaf(3)])]);
+        let toks = tokenize(&e, &NameCache::default());
+        assert_eq!(pill_paths(&toks), vec![vec![0], vec![1, 0], vec![1, 1]]);
+    }
+
+    #[test]
+    fn stepping_back_from_nothing_lands_on_the_last_pill_and_forward_goes_nowhere() {
+        let paths = vec![vec![0], vec![1], vec![2]];
+        assert_eq!(step(&paths, None, true), Some(vec![2]));
+        assert_eq!(step(&paths, None, false), None);
+    }
+
+    #[test]
+    fn stepping_stops_at_each_end_rather_than_wrapping() {
+        let paths = vec![vec![0], vec![1]];
+        assert_eq!(step(&paths, Some(&[0]), true), None);
+        assert_eq!(step(&paths, Some(&[1]), false), None);
+        assert_eq!(step(&paths, Some(&[0]), false), Some(vec![1]));
+        assert_eq!(step(&paths, Some(&[1]), true), Some(vec![0]));
+    }
+
+    #[test]
+    fn stepping_from_a_path_that_is_not_a_pill_goes_nowhere() {
+        let paths = vec![vec![0], vec![1]];
+        assert_eq!(step(&paths, Some(&[7]), true), None);
+    }
+
+    #[test]
+    fn a_range_is_inclusive_and_independent_of_which_end_came_first() {
+        let paths = vec![vec![0], vec![1], vec![2], vec![3]];
+        assert_eq!(range(&paths, &[1], &[3]), vec![vec![1], vec![2], vec![3]]);
+        assert_eq!(range(&paths, &[3], &[1]), vec![vec![1], vec![2], vec![3]]);
+        assert_eq!(range(&paths, &[2], &[2]), vec![vec![2]]);
+        assert!(range(&paths, &[2], &[9]).is_empty());
+    }
+
+    #[test]
+    fn appending_to_an_all_root_pushes_a_sibling() {
+        let mut e = Expr::All(vec![leaf(1)]);
+        append_top_level(&mut e, leaf(2));
+        assert_eq!(e, Expr::All(vec![leaf(1), leaf(2)]));
+    }
+
+    #[test]
+    fn appending_to_an_any_root_wraps_rather_than_widening_the_or() {
+        // Pushing into the `Any` would OR the new filter in, so a query that
+        // was `a or b` would become `a or b or c` instead of `(a or b) and c`.
+        let mut e = Expr::Any(vec![leaf(1), leaf(2)]);
+        append_top_level(&mut e, leaf(3));
+        assert_eq!(e, Expr::All(vec![Expr::Any(vec![leaf(1), leaf(2)]), leaf(3)]));
+    }
+
+    #[test]
+    fn appending_to_a_leaf_root_wraps_both_in_a_conjunction() {
+        let mut e = leaf(1);
+        append_top_level(&mut e, leaf(2));
+        assert_eq!(e, Expr::All(vec![leaf(1), leaf(2)]));
+    }
+
+    #[test]
+    fn appending_a_parsed_conjunction_splices_its_children() {
+        let mut e = Expr::All(vec![leaf(1)]);
+        append_query(&mut e, Expr::All(vec![leaf(2), leaf(3)]));
+        assert_eq!(e, Expr::All(vec![leaf(1), leaf(2), leaf(3)]));
+    }
+
+    #[test]
+    fn appending_a_parsed_disjunction_keeps_it_as_one_group() {
+        let mut e = Expr::All(vec![leaf(1)]);
+        append_query(&mut e, Expr::Any(vec![leaf(2), leaf(3)]));
+        assert_eq!(e, Expr::All(vec![leaf(1), Expr::Any(vec![leaf(2), leaf(3)])]));
+    }
+
+    #[test]
+    fn setting_a_connector_swaps_the_node_kind_and_keeps_its_children() {
+        let mut e = Expr::All(vec![leaf(1), Expr::All(vec![leaf(2), leaf(3)])]);
+        set_connector(&mut e, &[1], true);
+        assert_eq!(e, Expr::All(vec![leaf(1), Expr::Any(vec![leaf(2), leaf(3)])]));
+        set_connector(&mut e, &[1], false);
+        assert_eq!(e, Expr::All(vec![leaf(1), Expr::All(vec![leaf(2), leaf(3)])]));
+    }
+
+    #[test]
+    fn setting_a_connector_on_a_leaf_changes_nothing() {
+        let mut e = Expr::All(vec![leaf(1)]);
+        let before = e.clone();
+        set_connector(&mut e, &[0], true);
+        assert_eq!(e, before);
+    }
+
+    #[test]
+    fn the_operator_menu_offers_only_operators_the_field_allows() {
+        let e = Expr::All(vec![leaf(1)]);
+        let (allowed, current) = term_op_at(&e, &[0]).expect("a field term");
+        assert_eq!(allowed, MatchField::Build.allowed_ops());
+        assert_eq!(current, Op::Eq);
+        assert!(!allowed.contains(&Op::Contains), "Build is numeric");
+    }
+
+    #[test]
+    fn setting_an_operator_the_field_forbids_changes_nothing() {
+        // `Contains` prints as `:` and `Eq` as `=`; accepting it here would
+        // give a tree that reparses into a different one.
+        let mut e = Expr::All(vec![leaf(1)]);
+        let before = e.clone();
+        assert!(!set_op(&mut e, &[0], Op::Contains));
+        assert_eq!(e, before);
+        assert!(!can_set_op(&e, &[0], Op::Contains));
+    }
+
+    #[test]
+    fn setting_an_allowed_operator_replaces_it_in_place() {
+        let mut e = Expr::All(vec![leaf(1)]);
+        assert!(set_op(&mut e, &[0], Op::Ge));
+        assert_eq!(e, Expr::All(vec![Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Ge, Value::Int(1)))]));
+    }
+
+    #[test]
+    fn switching_to_a_nullary_operator_drops_the_operand() {
+        let mut e = Expr::All(vec![leaf(1)]);
+        assert!(set_op(&mut e, &[0], Op::IsSet));
+        assert_eq!(e, Expr::All(vec![Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::IsSet, Value::NoOperand))]));
+    }
+
+    #[test]
+    fn switching_back_off_a_nullary_operator_is_refused() {
+        // There is no operand to compare against and no placeholder is allowed.
+        let mut e = Expr::All(vec![Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::IsSet, Value::NoOperand))]);
+        let before = e.clone();
+        assert!(!can_set_op(&e, &[0], Op::Eq));
+        assert!(!set_op(&mut e, &[0], Op::Eq));
+        assert_eq!(e, before);
+    }
+
+    #[test]
+    fn can_set_op_agrees_with_set_op_for_every_operator() {
+        for start in [
+            Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Eq, Value::Int(1))),
+            Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::IsSet, Value::NoOperand)),
+            Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("x".into()))),
+            Expr::Leaf(MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win))),
+        ] {
+            let e = Expr::All(vec![start.clone()]);
+            let (_, current) = term_op_at(&e, &[0]).expect("a field term");
+            for op in Op::ALL {
+                let predicted = can_set_op(&e, &[0], op);
+                let mut applied = e.clone();
+                assert_eq!(set_op(&mut applied, &[0], op), predicted, "{start:?} to {op:?}");
+                // Re-setting the operator a term already carries takes but is a
+                // no-op, so only a refusal and a genuine change are pinned here.
+                if !predicted {
+                    assert_eq!(applied, e, "{start:?} to {op:?} was refused yet changed the tree");
+                } else if op != current {
+                    assert_ne!(applied, e, "{start:?} to {op:?} took yet changed nothing");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_operator_the_menu_offers_survives_a_print_parse_round_trip() {
+        use crate::db::index::query_text::parse_query;
+        use crate::db::index::query_text::print_query;
+        for field in MatchField::ALL {
+            for &op in field.allowed_ops() {
+                let mut e = Expr::All(vec![
+                    Expr::Leaf(MatchTerm::Field(field, field.allowed_ops()[0], sample_value(field.value_kind()))),
+                    leaf(7),
+                ]);
+                if !set_op(&mut e, &[0], op) {
+                    continue;
+                }
+                let printed = print_query(&e);
+                let reparsed =
+                    parse_query(&printed).unwrap_or_else(|err| panic!("{field:?} {op:?} -> {printed}: {err}"));
+                assert_eq!(reparsed, e, "{field:?} {op:?} printed {printed}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_roster_predicates_own_leaf_is_reachable_by_its_token_path() {
+        use crate::db::index::query_ast::RosterField;
+        use crate::db::index::query_ast::RosterTerm;
+        let pred = Expr::All(vec![
+            Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) }),
+            Expr::Leaf(RosterTerm { field: RosterField::Kills, op: Op::Ge, value: Value::Int(2) }),
+        ]);
+        let mut e: MatchExpr = Expr::All(vec![
+            leaf(1),
+            Expr::Leaf(MatchTerm::Roster { quant: crate::db::index::query_ast::Quant::None, pred }),
+        ]);
+        // The second roster conjunct's token path is the Roster leaf's path
+        // followed by its index inside the predicate.
+        assert!(set_op(&mut e, &[1, 1], Op::Lt));
+        match &e {
+            Expr::All(cs) => match &cs[1] {
+                Expr::Leaf(MatchTerm::Roster { pred, .. }) => match &pred.children()[1] {
+                    Expr::Leaf(term) => assert_eq!(term.op, Op::Lt),
+                    other => panic!("got {other:?}"),
+                },
+                other => panic!("got {other:?}"),
+            },
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_sugar_collapsed_roster_pill_offers_no_operator() {
+        use crate::db::index::query_ast::RosterField;
+        use crate::db::index::query_ast::RosterTerm;
+        use crate::db::index::rows::VehicleRelation;
+        let pred = Expr::All(vec![
+            Expr::Leaf(RosterTerm {
+                field: RosterField::Relation,
+                op: Op::Is,
+                value: Value::Relation(VehicleRelation::Enemy),
+            }),
+            Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) }),
+        ]);
+        // The whole quantifier renders as one pill, so its path names two terms
+        // at once and there is no single operator to offer.
+        let e: MatchExpr = Expr::All(vec![leaf(1), Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred })]);
+        assert_eq!(term_op_at(&e, &[1]), None);
+    }
+
+    fn sample_value(kind: crate::db::index::query_ast::ValueKind) -> Value {
+        use crate::db::index::query_ast::ValueKind;
+        match kind {
+            ValueKind::Text => Value::Text("x".into()),
+            ValueKind::Int => Value::Int(1),
+            ValueKind::Float => Value::Float(1.0),
+            ValueKind::Bool => Value::Bool(true),
+            ValueKind::Outcome => Value::Outcome(MatchOutcome::Win),
+            ValueKind::Relation => Value::Relation(crate::db::index::rows::VehicleRelation::Enemy),
+            ValueKind::Division => Value::Division(crate::db::index::query_ast::DivisionScope::Mine),
+            ValueKind::Class => Value::Class(crate::db::index::query_ast::ShipClass::Destroyer),
+            ValueKind::Ship => Value::Ship(wows_replays::types::GameParamId::from(1u64)),
+            ValueKind::Account => Value::Account(wows_replays::types::AccountId(1)),
+            ValueKind::Source => Value::Source(crate::db::index::rows::SourceId(1)),
+            ValueKind::Timestamp => Value::Timestamp(jiff::Timestamp::from_second(0).unwrap()),
+        }
     }
 
     #[test]

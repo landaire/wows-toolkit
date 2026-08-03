@@ -18,6 +18,7 @@ use crate::db::index::query_ast::RosterField;
 use crate::db::index::query_ast::RosterTerm;
 use crate::db::index::query_ast::ShipClass;
 use crate::db::index::query_ast::Value;
+use crate::db::index::query_ast::ValueKind;
 use crate::db::index::rows::VehicleRelation;
 use crate::ui::query_bar::label::roster_field_label;
 
@@ -383,6 +384,72 @@ pub enum ValueRequest {
     Maps,
 }
 
+/// Characters that end a field name and begin its value in the grammar.
+const OPERATOR_CHARS: [char; 5] = [':', '=', '!', '<', '>'];
+
+/// The value lookup the caret's text calls for, read off its last
+/// whitespace-separated fragment: `enemy.ship:yam` asks for ships matching
+/// `yam`. `None` while the fragment names no field, or names one whose values
+/// do not come from the database, in which case the dropdown keeps showing
+/// static suggestions.
+pub fn value_request_for(pending: &str) -> Option<ValueRequest> {
+    let fragment = pending.split_whitespace().next_back()?;
+    let (key, needle) = split_on_operator(fragment)?;
+    let bare = key.rsplit('.').next()?;
+    if bare.is_empty() {
+        return None;
+    }
+    if let Some(field) = RosterField::from_name(bare) {
+        return request_for_kind(field.value_kind(), needle);
+    }
+    let field = MatchField::from_name(bare)?;
+    // `map` reads as text but its values are display names the caller resolves
+    // against loaded game data, so it has its own request rather than none.
+    if field == MatchField::Map {
+        return Some(ValueRequest::Maps);
+    }
+    request_for_kind(field.value_kind(), needle)
+}
+
+/// Splits `<key><op><value>` at the first operator character. `None` when the
+/// fragment carries no operator, which means the user is still typing a field
+/// name and no value lookup applies yet.
+fn split_on_operator(fragment: &str) -> Option<(&str, &str)> {
+    let at = fragment.char_indices().find(|(_, c)| OPERATOR_CHARS.contains(c))?.0;
+    let (key, rest) = fragment.split_at(at);
+    Some((key, rest.trim_start_matches(OPERATOR_CHARS)))
+}
+
+fn request_for_kind(kind: ValueKind, needle: &str) -> Option<ValueRequest> {
+    match kind {
+        ValueKind::Ship => Some(ValueRequest::Ships { needle: needle.to_owned() }),
+        ValueKind::Account => Some(ValueRequest::Players { needle: needle.to_owned() }),
+        ValueKind::Source => Some(ValueRequest::Sources),
+        ValueKind::Text
+        | ValueKind::Int
+        | ValueKind::Float
+        | ValueKind::Bool
+        | ValueKind::Outcome
+        | ValueKind::Relation
+        | ValueKind::Division
+        | ValueKind::Class
+        | ValueKind::Timestamp => None,
+    }
+}
+
+/// One row of the value editor: a database-resolved choice for the field the
+/// caret is typing a value for. The Search tab supplies both halves because the
+/// grammar takes an id for a ship, an account, or a source while the user needs
+/// to read a name.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValueOption {
+    /// What the row shows.
+    pub label: String,
+    /// The literal appended to the caret's text when the row is picked, already
+    /// quoted if the grammar needs it quoted.
+    pub token: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,6 +563,60 @@ mod tests {
         // Value::Account. It is a forward guard for the day one does.
         for p in PRESETS {
             assert_no_placeholder_ids(&(p.build)(), p.key);
+        }
+    }
+
+    #[test]
+    fn a_scoped_ship_fragment_asks_for_ships_matching_what_follows_the_operator() {
+        assert_eq!(value_request_for("enemy.ship:yam"), Some(ValueRequest::Ships { needle: "yam".into() }));
+        assert_eq!(value_request_for("ship="), Some(ValueRequest::Ships { needle: String::new() }));
+    }
+
+    #[test]
+    fn only_the_last_fragment_decides_the_request() {
+        assert_eq!(value_request_for("outcome:win enemy.ship:yam"), Some(ValueRequest::Ships { needle: "yam".into() }));
+    }
+
+    #[test]
+    fn account_source_and_map_fields_each_have_their_own_request() {
+        assert_eq!(value_request_for("account:12"), Some(ValueRequest::Players { needle: "12".into() }));
+        assert_eq!(value_request_for("group:"), Some(ValueRequest::Sources));
+        assert_eq!(value_request_for("map:oce"), Some(ValueRequest::Maps));
+        // `source` is an alias of `group`, so it must resolve the same way.
+        assert_eq!(value_request_for("source:"), Some(ValueRequest::Sources));
+    }
+
+    #[test]
+    fn a_field_whose_values_are_not_in_the_database_asks_for_nothing() {
+        assert_eq!(value_request_for("tier>=8"), None);
+        assert_eq!(value_request_for("relation:enemy"), None);
+        assert_eq!(value_request_for("name:blah"), None);
+    }
+
+    #[test]
+    fn text_with_no_operator_or_no_field_asks_for_nothing() {
+        assert_eq!(value_request_for(""), None);
+        assert_eq!(value_request_for("win"), None);
+        assert_eq!(value_request_for("enemy.shi"), None);
+        assert_eq!(value_request_for(":"), None);
+        assert_eq!(value_request_for("nonsense:x"), None);
+    }
+
+    #[test]
+    fn a_multi_byte_needle_splits_on_a_character_boundary() {
+        // The bar re-reads this on every keystroke, so a byte-index split would
+        // be a reachable panic rather than a theoretical one.
+        assert_eq!(
+            value_request_for("enemy.ship:\u{e9}\u{4e2d}"),
+            Some(ValueRequest::Ships { needle: "\u{e9}\u{4e2d}".into() })
+        );
+        assert_eq!(value_request_for("\u{e9}\u{4e2d}:x"), None);
+    }
+
+    #[test]
+    fn a_multi_byte_field_name_does_not_panic_on_the_operator_split() {
+        for input in ["\u{e9}", "\u{e9}:", ":\u{e9}", "a\u{4e2d}b>=1", "enemy.\u{e9}:x"] {
+            let _ = value_request_for(input);
         }
     }
 
