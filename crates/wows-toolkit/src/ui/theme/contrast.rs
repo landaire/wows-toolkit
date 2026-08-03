@@ -15,18 +15,31 @@ pub const CONTRAST_FLOOR: f32 = 4.5;
 #[cfg(test)]
 pub const DIM_CONTRAST_FLOOR: f32 = 3.0;
 
-/// Floor for one background surface against another it is drawn on, or that is
-/// drawn on top of it.
+/// Floor for a chrome line -- a border, a divider, a bracket -- against the
+/// surface it is drawn on.
 ///
 /// Far below `CONTRAST_FLOOR`, and deliberately so: that floor asks whether
-/// text can be *read*, while two large adjacent fills only have to be told
-/// apart. WCAG's 3:1 non-text figure is also the wrong measure here, since it
-/// governs the boundary that identifies a component, and for the query bar's
-/// nested groups that boundary is the bracket stroke rather than the fill it
-/// encloses.
+/// text can be *read*, while a line only has to be seen. Not invented for the
+/// query bar: it is the level `widgets.noninteractive.bg_stroke` already sits
+/// at against the surfaces the app draws it on (1.64:1 dark, 1.66:1 light), so
+/// it records where this theme already draws the line rather than setting a new
+/// bar for one widget.
+///
+/// Test-only: nothing at runtime measures against this floor.
+#[cfg(test)]
+pub const CHROME_LINE_FLOOR: f32 = 1.6;
+
+/// Floor for two chrome elements of the same kind that have to be told apart
+/// from each other, rather than seen against a background.
+///
+/// Lower than `CHROME_LINE_FLOOR` because being distinguishable is a weaker
+/// requirement than being visible, and because the elements this governs carry
+/// a second, independent cue. WCAG's 3:1 non-text figure is the wrong measure
+/// for either: it governs whether a boundary identifies a component at all,
+/// which is what `CHROME_LINE_FLOOR` covers.
 ///
 /// Test-only: nothing at runtime measures against this floor, it only bounds
-/// the `BracketColors` tints chosen in `semantic.rs`.
+/// the `BracketColors` tones chosen in `semantic.rs`.
 #[cfg(test)]
 pub const SURFACE_CONTRAST_FLOOR: f32 = 1.3;
 

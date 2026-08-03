@@ -31,21 +31,30 @@ pub struct ArmorColors {
     pub shatter: Color32,
 }
 
-/// Backgrounds for the query bar's nested bracket groups, alternating by
-/// nesting depth so adjacent levels read as distinct.
+/// Outlines for the query bar's nested bracket groups. Nesting is carried by
+/// the bracket's stroke rather than by a background fill: this theme's chrome
+/// band spans only about 1.45:1 end to end, so a fill loud enough to be told
+/// apart from both the bar under it and the pills over it has to leave the
+/// band entirely and reads as a slab. A stroke steps within the band instead,
+/// and dropping the fill also gives a pill the most contrast available against
+/// what is behind it, which is the bar itself.
 ///
-/// These are fills, not text, so they are deliberately absent from the
+/// Both are border tones the theme already draws elsewhere, so a bracket reads
+/// as chrome rather than as a new kind of object.
+///
+/// These are outlines, not text, so they are deliberately absent from the
 /// `roles()` list the contrast tests walk: that list asserts a colour is
 /// readable *as text on* the app's surfaces, which is the wrong question for a
-/// surface. What they must clear instead is
-/// `contrast::SURFACE_CONTRAST_FLOOR` against the bar beneath them and against
-/// every state of a pill drawn on top, which
-/// `query_bar::paint`'s `depth_fill_clears_the_surface_floor` pins.
+/// line. What they must clear instead is `contrast::CHROME_LINE_FLOOR` against
+/// the surface they sit on and `contrast::SURFACE_CONTRAST_FLOOR` against each
+/// other, which `query_bar::paint`'s `depth_stroke_clears_its_floors` pins.
 pub struct BracketColors {
-    /// Depth one, three, and so on: the level drawn directly on the bar, and
-    /// so the one the eye meets most often.
-    pub odd: Color32,
-    pub even: Color32,
+    /// The outermost bracket: drawn directly on the bar, heaviest and
+    /// brightest, so nesting reads as receding from it.
+    pub shallow: Color32,
+    /// Every level below the first. See `paint::depth_stroke` for why the
+    /// ramp stops at two.
+    pub deep: Color32,
 }
 
 /// Every meaning the UI attaches to a colour.
@@ -110,7 +119,7 @@ pub const DARK: SemanticColors = SemanticColors {
         team: Color32::from_rgb(0x6F, 0xD9, 0x8A),
         other: Color32::from_rgb(0xE8, 0xA5, 0x4A),
     },
-    bracket: BracketColors { odd: palette::dark::BRACKET_ODD, even: palette::dark::BRACKET_EVEN },
+    bracket: BracketColors { shallow: palette::dark::BORDER_BRIGHT, deep: palette::dark::BORDER },
     armor: ArmorColors {
         angle_good: Color32::from_rgb(0x64, 0xD9, 0x8A),
         angle_mid: Color32::from_rgb(0xE0, 0xBE, 0x64),
@@ -145,7 +154,7 @@ pub const LIGHT: SemanticColors = SemanticColors {
         team: Color32::from_rgb(0x10, 0x6C, 0x34),
         other: Color32::from_rgb(0x8A, 0x4B, 0x00),
     },
-    bracket: BracketColors { odd: palette::light::BRACKET_ODD, even: palette::light::BRACKET_EVEN },
+    bracket: BracketColors { shallow: palette::light::BORDER_BRIGHT, deep: palette::light::BORDER },
     armor: ArmorColors {
         angle_good: Color32::from_rgb(0x11, 0x6B, 0x34),
         angle_mid: Color32::from_rgb(0x78, 0x58, 0x08),

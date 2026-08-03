@@ -81,15 +81,20 @@ fn pill(ui: &Ui, rect: Rect, galley: Arc<Galley>, state: TokenState) {
     text_run(ui, rect, galley, text);
 }
 
-/// One row-slice of a bracketed group, drawn behind the tokens it holds.
-/// `opens` and `closes` say whether this slice carries the group's leading and
-/// trailing edge, so a group whose contents wrap reads as an open-ended bracket
-/// on every row it touches.
+/// One row-slice of a bracketed group. `opens` and `closes` say whether this
+/// slice carries the group's leading and trailing edge, so a group whose
+/// contents wrap reads as an open-ended bracket on every row it touches.
+///
+/// Outline only: nesting is carried entirely by the stroke, and a group's
+/// interior is the bar's own background. A fill was tried and dropped, because
+/// any tone subtle enough to belong to this theme's chrome takes contrast
+/// *away* from the pills drawn on top of it -- in the light theme an idle pill
+/// on the quietest available fill is 1.02:1, against 1.17:1 on the bar itself.
+/// The fill had nothing left to contribute once the stroke carried depth, so
+/// there is none.
 pub fn group_row(ui: &Ui, rect: Rect, depth: usize, opens: bool, closes: bool) {
-    let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
-    let fill = depth_fill(ui.sem(), depth);
+    let stroke = depth_stroke(ui.sem(), depth);
     let painter = ui.painter();
-    painter.rect_filled(rect, CornerRadius::ZERO, fill);
     painter.line_segment([rect.left_top(), rect.right_top()], stroke);
     painter.line_segment([rect.left_bottom(), rect.right_bottom()], stroke);
     if opens {
@@ -115,21 +120,33 @@ pub fn error_underline(ui: &Ui, galley_pos: Pos2, galley: &Galley, text: &str, s
     ui.painter().line_segment([left, right], Stroke::new(1.5, ui.sem().error));
 }
 
-/// Alternating surface behind each nesting level.
+/// The outline for one nesting level: heavier and brighter at the top,
+/// lighter and dimmer below it, so a nested group reads as receding from the
+/// one that contains it.
 ///
 /// A group's tokens sit one level deeper than the group's own siblings, so the
 /// shallowest bracket the bar ever draws is at depth one, not zero.
 ///
-/// The two tints are their own semantic role rather than reused chrome
-/// surfaces. A group fill is drawn on the bar and has pills drawn on top of
-/// it, and the whole band the rest of the bar's chrome occupies -- the bar's
-/// `extreme_bg_color` through a hovered pill -- spans only about 1.45:1 in the
-/// dark theme and 1.37:1 in the light one, so no tone inside that band can be
-/// told apart from both ends at once. `depth_fill_clears_the_surface_floor`
-/// measures what these actually achieve; it asserts a ratio, which is a
-/// numeric guarantee and not a claim that anyone has looked at the result.
-fn depth_fill(sem: &SemanticColors, depth: usize) -> Color32 {
-    if depth.is_multiple_of(2) { sem.bracket.even } else { sem.bracket.odd }
+/// **The ramp stops at two and clamps.** It stops at two because the theme's
+/// border family spans 1.64:1 to 2.40:1 against the bar in the dark theme,
+/// which is 1.5x of headroom in total: three steps each clearly apart do not
+/// fit inside it, and three nominal steps nobody can tell apart are worth less
+/// than two real ones. It clamps rather than cycling because a cycle would put
+/// the bright, heavy outermost stroke *inside* a dim, light one, which states
+/// the nesting backwards; clamping only stops counting. Depth past the ramp is
+/// still carried by indentation and by containment.
+///
+/// `depth_stroke_clears_its_floors` measures what these achieve. It asserts
+/// ratios, which is a numeric guarantee and not a claim that anyone has looked
+/// at the rendered bar.
+fn depth_stroke(sem: &SemanticColors, depth: usize) -> Stroke {
+    if depth <= 1 {
+        Stroke::new(1.5, sem.bracket.shallow)
+    } else {
+        // The width the rest of the app draws a border at, so the deeper
+        // levels settle into the chrome rather than competing with it.
+        Stroke::new(1.0, sem.bracket.deep)
+    }
 }
 
 fn chrome_color(ui: &Ui, state: TokenState) -> Color32 {
@@ -160,20 +177,18 @@ fn char_index(text: &str, byte: usize) -> usize {
 mod tests {
     use super::*;
 
-    /// The regression guard for a real defect: `depth_fill` returned
-    /// `extreme_bg_color` on odd depths, and that is the bar's own fill, so the
-    /// first level of nesting -- the common single-group case -- painted a
-    /// rectangle identical to the background and no bracket tint was visible
-    /// at all.
+    /// Descended from the guard for a real defect: the bracket tint once
+    /// resolved to `extreme_bg_color`, the bar's own fill, so the first level
+    /// of nesting -- the common single-group case -- was invisible.
     ///
-    /// Inequality alone was too weak to catch the shape of that bug. The first
-    /// repair paired `faint_bg_color` with the pill's
-    /// `widgets.inactive.bg_fill` at 1.02:1 in the light theme: different
-    /// values, indistinguishable surfaces. So this measures a ratio rather than
-    /// asserting `!=`, against the bar beneath a group and against every state
-    /// a pill drawn on top of it can be in.
+    /// Two lessons from that are kept here now that the stroke carries depth.
+    /// Inequality is too weak a test: a later repair paired two tones that
+    /// differed by 1.02:1, which is unequal and indistinguishable. And the
+    /// shallowest bracket is depth *one*, not zero, so a guard that only
+    /// checks depth zero checks a level the bar never draws.
     #[test]
-    fn depth_fill_clears_the_surface_floor() {
+    fn depth_stroke_clears_its_floors() {
+        use crate::ui::theme::contrast::CHROME_LINE_FLOOR;
         use crate::ui::theme::contrast::SURFACE_CONTRAST_FLOOR;
         use crate::ui::theme::contrast::contrast_ratio;
         use crate::ui::theme::semantic::semantic;
@@ -183,25 +198,56 @@ mod tests {
             ("light", crate::ui::theme::style::light_style().visuals),
         ] {
             let sem = semantic(&visuals);
-            // Depth zero is never a bracket, but is covered so a future change
-            // to how `tokenize` assigns depth cannot reintroduce the defect.
-            for depth in 0..=4 {
-                let fill = depth_fill(sem, depth);
-                for (what, against) in [
-                    ("the bar beneath it", visuals.extreme_bg_color),
-                    ("an idle pill on it", visuals.widgets.inactive.bg_fill),
-                    ("a hovered pill on it", visuals.widgets.hovered.bg_fill),
-                    ("a selected pill on it", visuals.selection.bg_fill),
-                    ("the level nested inside it", depth_fill(sem, depth + 1)),
-                ] {
-                    let ratio = contrast_ratio(fill, against);
-                    assert!(
-                        ratio >= SURFACE_CONTRAST_FLOOR,
-                        "{theme} bracket depth {depth} against {what} is {ratio:.3}, \
-                         needs {SURFACE_CONTRAST_FLOOR}"
-                    );
-                }
+            // A group has no fill, so every bracket sits on the bar itself.
+            let ground = visuals.extreme_bg_color;
+            for depth in 0..=5 {
+                let stroke = depth_stroke(sem, depth);
+                let ratio = contrast_ratio(stroke.color, ground);
+                assert!(
+                    ratio >= CHROME_LINE_FLOOR,
+                    "{theme} bracket depth {depth} against the bar is {ratio:.3}, needs {CHROME_LINE_FLOOR}"
+                );
             }
+
+            let outer = depth_stroke(sem, 1);
+            let inner = depth_stroke(sem, 2);
+            let apart = contrast_ratio(outer.color, inner.color);
+            assert!(
+                apart >= SURFACE_CONTRAST_FLOOR,
+                "{theme} the two bracket levels are {apart:.3} apart, needs {SURFACE_CONTRAST_FLOOR}"
+            );
+            assert!(outer.width > inner.width, "{theme} nesting must lighten, not only dim");
+            assert!(
+                contrast_ratio(outer.color, ground) > contrast_ratio(inner.color, ground),
+                "{theme} nesting must recede from the bar, not advance toward it"
+            );
+        }
+    }
+
+    /// The crowding decision, pinned so it is a choice rather than a drift:
+    /// past depth two the ramp clamps to its dimmest step. Cycling would draw
+    /// the bright, heavy outermost stroke inside a dim one and state the
+    /// nesting backwards.
+    #[test]
+    fn nesting_past_the_ramp_clamps_rather_than_cycling() {
+        use crate::ui::theme::semantic::semantic;
+
+        for (theme, visuals) in [
+            ("dark", crate::ui::theme::style::dark_style().visuals),
+            ("light", crate::ui::theme::style::light_style().visuals),
+        ] {
+            let sem = semantic(&visuals);
+            let deepest = depth_stroke(sem, 2);
+            for depth in 3..=8 {
+                let stroke = depth_stroke(sem, depth);
+                assert_eq!(stroke.color, deepest.color, "{theme} depth {depth} should clamp");
+                assert!((stroke.width - deepest.width).abs() < f32::EPSILON, "{theme} depth {depth} should clamp");
+            }
+            assert_ne!(
+                depth_stroke(sem, 3).color,
+                depth_stroke(sem, 1).color,
+                "{theme} a clamp must never return to the outermost stroke, which is what cycling would do"
+            );
         }
     }
 

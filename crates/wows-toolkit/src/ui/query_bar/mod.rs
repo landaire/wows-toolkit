@@ -286,12 +286,14 @@ impl QueryBar {
         // and only a click on the gaps falls through to focusing the caret.
         let background = ui.interact(area, id.with("background"), Sense::click());
 
-        // `lay_out` reports a span when its close bracket lands, so an inner
-        // group arrives before the outer one that contains it. Painting in that
-        // order would fill the outer group's tint straight over the inner one,
-        // so the shallowest is drawn first and the deepest ends up on top.
+        // A nested group's row rect shares its top and bottom edge with the
+        // group containing it, since every token on a row spans the full row
+        // height. Whichever bracket is drawn last owns that shared edge, so the
+        // deepest goes first and the outermost paints over it: the heavier,
+        // brighter stroke is the one that should survive, and the inner group
+        // is still delimited by its own left and right edges.
         let mut spans: Vec<&layout::GroupSpan> = laid.group_spans.iter().collect();
-        spans.sort_by_key(|span| tokens[span.open_index].depth);
+        spans.sort_by_key(|span| std::cmp::Reverse(tokens[span.open_index].depth));
         for span in spans {
             let depth = tokens[span.open_index].depth;
             let last = span.rows.len().saturating_sub(1);
