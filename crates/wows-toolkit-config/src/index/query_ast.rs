@@ -637,11 +637,23 @@ impl MapCatalog {
     }
 
     /// Raw space names whose display name contains `needle`, case-insensitively.
+    /// The catalogue half of a `map:` term, which is a contains.
     pub fn raw_names_matching(&self, needle: &str) -> Vec<&str> {
         let needle = needle.to_ascii_lowercase();
         self.entries
             .iter()
             .filter(|(_, display)| display.to_ascii_lowercase().contains(&needle))
+            .map(|(raw, _)| raw.as_str())
+            .collect()
+    }
+
+    /// Raw space names whose display name is exactly `name`, case-insensitively.
+    /// The catalogue half of a `map=` or `map!=` term: an equality resolved by
+    /// substring would make every mapped name behave like a contains.
+    pub fn raw_names_named(&self, name: &str) -> Vec<&str> {
+        self.entries
+            .iter()
+            .filter(|(_, display)| display.eq_ignore_ascii_case(name))
             .map(|(raw, _)| raw.as_str())
             .collect()
     }
@@ -776,5 +788,17 @@ mod tests {
         assert_eq!(cat.raw_names_matching("NAVAL"), vec!["spaces/28_naval_mission"]);
         assert!(cat.raw_names_matching("nothing").is_empty());
         assert!(MapCatalog::default().raw_names_matching("ocean").is_empty());
+    }
+
+    #[test]
+    fn map_catalogue_lookup_by_exact_name_does_not_match_a_longer_display_name() {
+        let cat = MapCatalog::from_pairs(vec![
+            ("spaces/13_OC_new_dawn".into(), "Ocean".into()),
+            ("spaces/40_okinawa".into(), "Ocean Rift".into()),
+        ]);
+        assert_eq!(cat.raw_names_named("ocean"), vec!["spaces/13_OC_new_dawn"]);
+        assert_eq!(cat.raw_names_named("OCEAN RIFT"), vec!["spaces/40_okinawa"]);
+        assert!(cat.raw_names_named("oce").is_empty());
+        assert_eq!(cat.raw_names_matching("ocean").len(), 2, "a contains still spans both");
     }
 }

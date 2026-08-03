@@ -115,15 +115,27 @@ fn push_field(qb: &mut QueryBuilder<'_, Sqlite>, field: MatchField, op: Op, valu
     }
 }
 
+/// A `map` term compares the raw space name the column holds and, when the
+/// catalogue is loaded, the display names the user actually reads.
+///
+/// Both halves answer the operator that was given. A contains resolves the
+/// catalogue by substring; anything else by an exact display name. A negated
+/// operator joins the halves with AND rather than OR, because the negation of
+/// "the raw name matches or the display name does" is "neither does": an OR
+/// would be satisfied by the raw name alone and turn the term into its opposite.
 fn push_map(qb: &mut QueryBuilder<'_, Sqlite>, op: Op, needle: &str, ctx: &CompileCtx<'_>) {
-    let raws = ctx.maps.raw_names_matching(needle);
+    let raws = match op {
+        Op::Contains => ctx.maps.raw_names_matching(needle),
+        _ => ctx.maps.raw_names_named(needle),
+    };
     if raws.is_empty() {
         push_text(qb, "m.map", op, needle);
         return;
     }
+    let negated = matches!(op, Op::NotEquals | Op::Ne | Op::IsNot);
     qb.push("(");
     push_text(qb, "m.map", op, needle);
-    qb.push(" OR m.map IN (");
+    qb.push(if negated { " AND m.map NOT IN (" } else { " OR m.map IN (" });
     for (i, raw) in raws.iter().enumerate() {
         if i > 0 {
             qb.push(", ");
@@ -389,16 +401,50 @@ mod tests {
         assert!(!sql.contains(" IN ("), "empty catalogue must not emit an IN list: {sql}");
     }
 
+    fn sql_with(expr: &MatchExpr, maps: &MapCatalog) -> String {
+        let ctx = CompileCtx { maps };
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("");
+        push_match_expr(&mut qb, expr, &ctx);
+        qb.sql().to_string()
+    }
+
+    fn two_oceans() -> MapCatalog {
+        MapCatalog::from_pairs(vec![
+            ("spaces/13_OC_new_dawn".into(), "Ocean".into()),
+            ("spaces/40_okinawa".into(), "Ocean Rift".into()),
+        ])
+    }
+
     #[test]
     fn map_with_a_catalogue_unions_an_in_list_with_the_raw_match() {
         let maps = MapCatalog::from_pairs(vec![("spaces/13_OC_new_dawn".into(), "Ocean".into())]);
-        let ctx = CompileCtx { maps: &maps };
-        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("");
-        push_match_expr(&mut qb, &leaf(MatchField::Map, Op::Contains, Value::Text("ocean".into())), &ctx);
-        let sql = qb.sql().to_string();
+        let sql = sql_with(&leaf(MatchField::Map, Op::Contains, Value::Text("ocean".into())), &maps);
         assert!(sql.contains("m.map IN ("), "got {sql}");
         assert!(sql.contains(" OR "), "got {sql}");
         assert!(sql.contains("LOWER(m.map)"), "got {sql}");
+    }
+
+    /// The negation of "the raw name matches or its display name does" is
+    /// "neither does". An OR here is satisfied by the raw name alone, which
+    /// returns exactly the rows the term asked to exclude.
+    #[test]
+    fn a_negated_map_term_intersects_the_catalogue_instead_of_unioning_it() {
+        let maps = MapCatalog::from_pairs(vec![("spaces/13_OC_new_dawn".into(), "Ocean".into())]);
+        let sql = sql_with(&leaf(MatchField::Map, Op::NotEquals, Value::Text("ocean".into())), &maps);
+        assert_eq!(sql, "(LOWER(m.map) <> LOWER(?) AND m.map NOT IN (?))");
+    }
+
+    #[test]
+    fn the_catalogue_half_resolves_by_substring_only_for_contains() {
+        let maps = two_oceans();
+        // Two display names contain "ocean", so a contains term lists both.
+        let contains = sql_with(&leaf(MatchField::Map, Op::Contains, Value::Text("ocean".into())), &maps);
+        assert!(contains.contains("m.map IN (?, ?)"), "got {contains}");
+        // Only one is named "ocean", so an equality lists that one.
+        let equals = sql_with(&leaf(MatchField::Map, Op::Equals, Value::Text("ocean".into())), &maps);
+        assert!(equals.contains("m.map IN (?)"), "got {equals}");
+        let not_equals = sql_with(&leaf(MatchField::Map, Op::NotEquals, Value::Text("ocean".into())), &maps);
+        assert!(not_equals.contains("m.map NOT IN (?)"), "got {not_equals}");
     }
 
     #[test]
