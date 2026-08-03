@@ -188,15 +188,13 @@ pub fn delete(expr: &mut MatchExpr, sel: &Selection) {
 }
 
 /// Enforces the two invariants Plan A's printer requires: no `All`/`Any` with
-/// exactly one child (it would print as a bare term and reparse as `Leaf`),
-/// and no `All`/`Any` with zero children except a root left as the canonical
-/// empty query. Bottom-up.
-///
-/// Not idempotent in general: a node that already has exactly one child when
-/// this runs is collapsed into that child (see `canonicalise_conjunction`), so
-/// re-running it on its own output can collapse further. Every edit function
-/// in this module produces at least two children wherever it introduces a new
-/// `All`/`Any`, so a single call after each edit is enough in practice.
+/// exactly one child (it would print as a bare term and reparse as `Leaf`,
+/// silently losing the group -- this applies at the root too, since the
+/// printer suppresses the root's own brackets the same way), and no
+/// `All`/`Any` with zero children except a root left as the canonical empty
+/// query. Bottom-up and idempotent: re-running it on its own output is a
+/// no-op, since every remaining `All`/`Any` already has zero (root only) or at
+/// least two children.
 pub fn canonicalise(expr: &mut MatchExpr) {
     let taken = std::mem::replace(expr, Expr::All(Vec::new()));
     *expr = canonicalise_node(taken).unwrap_or(Expr::All(Vec::new()));
@@ -215,23 +213,18 @@ fn canonicalise_node(expr: MatchExpr) -> Option<MatchExpr> {
     }
 }
 
-/// A node with exactly one child, before recursing into it, is itself the
-/// spurious wrapper the printer cannot round trip (`All([x])` prints as bare
-/// `x`), so it always collapses to that child's canonicalised form.
-///
-/// A node with two or more children that loses siblings to recursive
-/// canonicalisation (an operand that canonicalised away entirely) keeps its
-/// own wrapper even if only one child survives: it was a genuine multi-operand
-/// group as authored, not the printer's spurious shape, so there is nothing to
-/// fix by unwrapping it. `canonicalise_removes_an_empty_group_but_keeps_an_empty_root`
-/// pins exactly this: `All([Any([]), x])` canonicalises to `All([x])`, not `x`.
+/// Canonicalises every child, drops any that collapsed away entirely, and
+/// then collapses this node itself to its sole surviving child when exactly
+/// one remains -- whether it started that way or was only reduced to it by a
+/// sibling collapsing away. A node with zero surviving children returns
+/// `None` for the caller to drop.
 fn canonicalise_conjunction(cs: Vec<MatchExpr>, is_or: bool) -> Option<MatchExpr> {
-    if cs.len() == 1 {
-        let mut it = cs.into_iter();
-        return canonicalise_node(it.next().expect("len checked above"));
+    let mut out: Vec<MatchExpr> = cs.into_iter().filter_map(canonicalise_node).collect();
+    match out.len() {
+        0 => None,
+        1 => out.pop(),
+        _ => Some(if is_or { Expr::Any(out) } else { Expr::All(out) }),
     }
-    let out: Vec<MatchExpr> = cs.into_iter().filter_map(canonicalise_node).collect();
-    if out.is_empty() { None } else { Some(if is_or { Expr::Any(out) } else { Expr::All(out) }) }
 }
 
 #[cfg(test)]
@@ -399,11 +392,28 @@ mod tests {
     fn canonicalise_removes_an_empty_group_but_keeps_an_empty_root() {
         let mut e = Expr::All(vec![Expr::Any(vec![]), leaf(1)]);
         canonicalise(&mut e);
-        assert_eq!(e, Expr::All(vec![leaf(1)]));
+        assert_eq!(e, leaf(1));
 
         let mut root: MatchExpr = Expr::All(vec![]);
         canonicalise(&mut root);
         assert_eq!(root, Expr::All(vec![]));
+    }
+
+    #[test]
+    fn canonicalise_is_idempotent() {
+        for mut e in [
+            Expr::All(vec![Expr::Any(vec![]), leaf(1)]),
+            Expr::All(vec![Expr::Any(vec![leaf(1)]), leaf(2)]),
+            Expr::All(vec![leaf(1)]),
+            Expr::All(vec![Expr::Any(vec![Expr::All(vec![leaf(1)])])]),
+            Expr::All(vec![leaf(1), leaf(2)]),
+            Expr::All(vec![]),
+        ] {
+            canonicalise(&mut e);
+            let once = e.clone();
+            canonicalise(&mut e);
+            assert_eq!(e, once, "canonicalise changed on a second call");
+        }
     }
 
     #[test]
