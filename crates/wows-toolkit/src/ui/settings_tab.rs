@@ -346,6 +346,13 @@ impl ToolkitTabViewer<'_> {
                     ui.end_row();
                 });
 
+                {
+                    let mut p = self.tab_state.persisted.write();
+                    let rs = &mut p.settings.replay;
+                    ui.checkbox(&mut rs.enable_replay_previews, t!("ui.settings.replay.enable_previews"))
+                        .on_hover_text(t!("ui.settings.replay.enable_previews_tooltip"));
+                }
+
                 ui.add_space(4.0);
                 ui.separator();
                 ui.add_space(4.0);

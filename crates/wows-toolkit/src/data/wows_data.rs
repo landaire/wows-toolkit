@@ -140,6 +140,9 @@ pub struct WoWsDataMap {
     /// has run for each build. Reads as the number of times the full cost of a
     /// lookup was paid.
     resolution_attempts: Arc<RwLock<HashMap<u32, u32>>>,
+    /// One gate per build, so two callers that miss the loaded map together do
+    /// not both pay for the same load. See [`Self::load_gate`].
+    load_gates: Arc<Mutex<HashMap<u32, Arc<Mutex<()>>>>>,
     wows_dir: PathBuf,
     locale: String,
     network_job_tx: Option<mpsc::Sender<NetworkJob>>,
@@ -156,6 +159,7 @@ impl WoWsDataMap {
             builds: Arc::new(RwLock::new(LoadedBuilds::new(NON_MAIN_BUILD_CAPACITY))),
             unresolvable_builds: Arc::new(RwLock::new(HashSet::new())),
             resolution_attempts: Arc::new(RwLock::new(HashMap::new())),
+            load_gates: Arc::new(Mutex::new(HashMap::new())),
             wows_dir,
             locale,
             network_job_tx: None,
@@ -439,6 +443,16 @@ impl WoWsDataMap {
             .unwrap_or_default()
     }
 
+    /// The gate serializing loads of `build`.
+    ///
+    /// Held for the whole loading path, so two callers that miss the loaded map
+    /// at once cost one load rather than two. Keyed per build, so unrelated
+    /// builds still load side by side; a caller waiting here holds no other lock
+    /// of this map.
+    fn load_gate(&self, build: u32) -> Arc<Mutex<()>> {
+        Arc::clone(self.load_gates.lock().entry(build).or_default())
+    }
+
     /// Like [`Self::resolve_build`], but threads the replay's friendly version through
     /// so version-aware constants (consumable id layouts) resolve against the client
     /// that produced the replay rather than the latest layout.
@@ -454,6 +468,20 @@ impl WoWsDataMap {
         // answered from the record until new data arrives for it.
         if self.unresolvable_builds.read().contains(&build) {
             debug!("Build {} was already looked for and is not available", build);
+            return None;
+        }
+
+        let gate = self.load_gate(build);
+        let _loading = gate.lock();
+
+        // Whoever went through the gate first may have finished the load, or
+        // recorded the build as unavailable, while this caller waited. Asking
+        // again is what turns a wait into a reuse instead of a second load.
+        if let Some(data) = self.get(build) {
+            return Some(data);
+        }
+        if self.unresolvable_builds.read().contains(&build) {
+            debug!("Build {} was loaded for by another caller and is not available", build);
             return None;
         }
 
@@ -754,6 +782,48 @@ mod build_resolution_tests {
         let map = test_map_with_no_data();
         assert!(!map.has_data_for(&request(15, 0, 0, 9_999_999)));
         assert_eq!(map.resolution_attempts(9_999_999), 0, "no load may be paid to answer this");
+    }
+
+    /// Two callers that want the same build must share one load. Hovering two
+    /// replays of an unloaded build otherwise starts two full GameParams parses
+    /// at once, each of which peaks near 700 MB.
+    #[test]
+    fn one_gate_serializes_every_caller_asking_for_the_same_build() {
+        let map = test_map_with_no_data();
+        let first = map.load_gate(7_000_000);
+        let again = map.load_gate(7_000_000);
+        assert!(Arc::ptr_eq(&first, &again), "the same build must hand out the same gate");
+    }
+
+    /// Per build, not global: an old replay's build loading must not stall the
+    /// live install's.
+    #[test]
+    fn different_builds_load_through_different_gates() {
+        let map = test_map_with_no_data();
+        let a = map.load_gate(7_000_000);
+        let b = map.load_gate(8_000_000);
+        assert!(!Arc::ptr_eq(&a, &b), "unrelated builds must not serialize against each other");
+    }
+
+    /// The gate is what makes the recheck behind it meaningful: whichever
+    /// caller arrives second finds the answer the first left and pays nothing.
+    #[test]
+    fn concurrent_resolves_of_one_build_run_the_loading_path_once() {
+        let map = test_map_with_no_data();
+        let start = Arc::new(std::sync::Barrier::new(4));
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let map = map.clone();
+            let start = Arc::clone(&start);
+            handles.push(std::thread::spawn(move || {
+                start.wait();
+                map.resolve_build(9_999_999)
+            }));
+        }
+        for handle in handles {
+            assert!(handle.join().expect("resolver thread panicked").is_none());
+        }
+        assert_eq!(map.resolution_attempts(9_999_999), 1, "the loading path ran more than once for one build");
     }
 
     /// A build already resident is available without consulting the disk at all.

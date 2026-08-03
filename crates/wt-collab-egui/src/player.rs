@@ -149,6 +149,25 @@ pub struct MinimapView<'a> {
 /// Builds a grid style for a resolved window scale.
 pub type GridStyleFn<'a> = &'a dyn Fn(f32) -> GridStyle;
 
+/// The mapping [`MinimapView`] paints a frame through.
+///
+/// Exposed so a caller can run its own input handling against the same mapping
+/// on a frame it is not painting, rather than reconstructing the geometry.
+pub fn frame_transform(options: &RenderOptions, layout: &CanvasLayout, zoom: f32, pan: Vec2) -> MapTransform {
+    let geom = canvas_geometry(options);
+    MapTransform {
+        origin: layout.origin,
+        window_scale: layout.window_scale,
+        zoom,
+        pan,
+        hud_height: HUD_HEIGHT as f32,
+        canvas_height: CANVAS_HEIGHT as f32,
+        canvas_width: geom.canvas_width,
+        hud_width: geom.hud_width,
+        map_x_offset: geom.map_x_offset,
+    }
+}
+
 /// What the caller needs to layer its own content on top of a painted frame.
 pub struct MinimapViewOutput {
     pub transform: MapTransform,
@@ -184,17 +203,7 @@ impl MinimapView<'_> {
         let geom = canvas_geometry(self.options);
         let window_scale = layout.window_scale;
 
-        let transform = MapTransform {
-            origin: layout.origin,
-            window_scale,
-            zoom: self.zoom,
-            pan: self.pan,
-            hud_height: HUD_HEIGHT as f32,
-            canvas_height: CANVAS_HEIGHT as f32,
-            canvas_width: geom.canvas_width,
-            hud_width: geom.hud_width,
-            map_x_offset: geom.map_x_offset,
-        };
+        let transform = frame_transform(self.options, layout, self.zoom, self.pan);
 
         painter.rect_filled(response.rect, CornerRadius::ZERO, self.background);
 

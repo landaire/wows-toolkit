@@ -17,6 +17,7 @@ use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 
 use super::RendererAssetCache;
+use super::RgbaAsset;
 use super::SNAPSHOTS_PER_SECOND;
 use super::frame_pass::FrameSink;
 use super::frame_pass::build_frame_track;
@@ -38,11 +39,21 @@ pub(crate) const PREVIEW_MAX_FRAMES: usize = (PREVIEW_LOOP_SECS * PREVIEW_FPS) a
 pub(crate) struct PreviewTrack {
     pub frames: Vec<Vec<DrawCommand>>,
     pub map_name: String,
+    /// The game-data version the track was baked against, which is the replay's
+    /// own build and not necessarily the live install's.
+    pub version: Option<Version>,
+    /// Map art from that same build, carried so the popup paints the map the
+    /// replay was recorded on rather than whatever the live install ships under
+    /// the same name.
+    pub map_image: Option<Arc<RgbaAsset>>,
 }
 
 /// Retains a bounded, evenly spaced subset of the frames it is fed.
 pub(crate) struct TrackSink {
     frames: Vec<Vec<DrawCommand>>,
+    /// The clock each retained frame arrived with. Only the alignment tests
+    /// read these back; the popup plays frames at a fixed display rate.
+    #[cfg(test)]
     clocks: Vec<GameClock>,
     /// Keep one frame in every `stride`. Doubles each time the budget fills.
     stride: usize,
@@ -52,19 +63,32 @@ pub(crate) struct TrackSink {
 
 impl TrackSink {
     pub(crate) fn new() -> Self {
-        Self { frames: Vec::with_capacity(PREVIEW_MAX_FRAMES * 2), clocks: Vec::new(), stride: 1, since_kept: 0 }
+        Self {
+            frames: Vec::with_capacity(PREVIEW_MAX_FRAMES * 2),
+            #[cfg(test)]
+            clocks: Vec::new(),
+            stride: 1,
+            since_kept: 0,
+        }
     }
 
+    #[cfg(test)]
     pub(crate) fn stride(&self) -> usize {
         self.stride
     }
 
+    #[cfg(test)]
     pub(crate) fn kept_clocks(&self) -> &[GameClock] {
         &self.clocks
     }
 
-    pub(crate) fn finish(self, map_name: String) -> PreviewTrack {
-        PreviewTrack { frames: self.frames, map_name }
+    pub(crate) fn finish(
+        self,
+        map_name: String,
+        version: Option<Version>,
+        map_image: Option<Arc<RgbaAsset>>,
+    ) -> PreviewTrack {
+        PreviewTrack { frames: self.frames, map_name, version, map_image }
     }
 
     /// Drop every other retained frame, halving the track in place.
@@ -74,19 +98,27 @@ impl TrackSink {
             keep = !keep;
             keep
         });
-        let mut keep = false;
-        self.clocks.retain(|_| {
-            keep = !keep;
-            keep
-        });
+        #[cfg(test)]
+        {
+            let mut keep = false;
+            self.clocks.retain(|_| {
+                keep = !keep;
+                keep
+            });
+        }
         self.stride *= 2;
     }
 }
 
 impl FrameSink for TrackSink {
     fn push(&mut self, _index: usize, clock: GameClock, commands: Vec<DrawCommand>) {
-        if self.since_kept % self.stride == 0 {
+        // Playback runs at a fixed display rate and never consults the clock;
+        // only the frame/clock alignment tests read it back.
+        #[cfg(not(test))]
+        let _ = clock;
+        if self.since_kept.is_multiple_of(self.stride) {
             self.frames.push(commands);
+            #[cfg(test)]
             self.clocks.push(clock);
             if self.frames.len() > PREVIEW_MAX_FRAMES {
                 self.halve();
@@ -99,7 +131,8 @@ impl FrameSink for TrackSink {
 /// Why a replay has no preview.
 ///
 /// Each variant carries what the popup needs to say, so the popup never parses
-/// a formatted message back apart.
+/// a formatted message back apart. `Display` is the log rendering; what the
+/// user reads comes from [`Self::key`] and the value the variant carries.
 #[derive(Debug, Clone, thiserror::Error)]
 pub(crate) enum PreviewError {
     // `Version` has no `Display` impl; `to_path()` is the same
@@ -117,6 +150,59 @@ pub(crate) enum PreviewError {
     Cancelled,
 }
 
+impl PreviewError {
+    /// Translation key for the message the popup shows.
+    ///
+    /// Every key but `Cancelled`'s takes one `value` argument, filled from the
+    /// field the variant carries. `Cancelled` never reaches the popup: a
+    /// superseded bake stores nothing.
+    pub(crate) const fn key(&self) -> &'static str {
+        match self {
+            Self::NoGameDataForVersion { .. } => "ui.replay.preview_no_game_data",
+            Self::UnreadableReplay => "ui.replay.preview_unreadable",
+            Self::UnknownClientVersion { .. } => "ui.replay.preview_unknown_version",
+            Self::NoMapInfo { .. } => "ui.replay.preview_no_map",
+            Self::Cancelled => "ui.replay.preview_cancelled",
+        }
+    }
+
+    /// The `value` argument [`Self::key`]'s message interpolates, if it takes
+    /// one.
+    pub(crate) fn value(&self) -> Option<String> {
+        match self {
+            Self::NoGameDataForVersion { version } => Some(version.to_path()),
+            Self::UnknownClientVersion { raw } => Some(raw.clone()),
+            Self::NoMapInfo { map_name } => Some(map_name.clone()),
+            Self::UnreadableReplay | Self::Cancelled => None,
+        }
+    }
+}
+
+/// What a preview track is baked with.
+///
+/// Wider than [`preview_options`](crate::ui::replay_parser::preview_popup::preview_options),
+/// the paint-time preset, so turning one of that preset's switches on does not
+/// invalidate cached tracks. It is not everything the renderer can emit: the
+/// panel commands (stats, rosters) carry a full roster per frame and position
+/// trails carry the whole match's position history per ship per frame, so
+/// baking either would cost tens of megabytes for one track. Widening this set
+/// changes what a cached track contains, so a track baked before the change
+/// cannot serve a preset that asks for the new class; the popup's presets are
+/// checked against this set by `paint_preset_asks_for_nothing_unbaked`.
+pub(crate) fn bake_options() -> RenderOptions {
+    RenderOptions {
+        show_kill_feed: true,
+        show_chat: true,
+        show_armament: true,
+        show_stats_panel: false,
+        show_team_rosters: false,
+        show_ship_config: false,
+        show_trails: false,
+        show_speed_trails: false,
+        ..RenderOptions::default()
+    }
+}
+
 /// Bake a decimated preview track for `path` in a single forward pass.
 ///
 /// Mirrors the setup `playback_thread` does before its own forward pass, then
@@ -125,18 +211,35 @@ pub(crate) enum PreviewError {
 /// snapshotting, the live-session rebuild, silhouette loading,
 /// `commands.scheme.xml` parsing, and the collab announce. That is the entire
 /// reason this finishes cheaply enough to run on hover.
+///
+/// Cancellation is cooperative, and the checks before `data_map.resolve` matter
+/// most: resolving an unloaded build is a full game-data load, so a bake that
+/// has already been superseded must not enter one.
 pub(crate) fn bake_preview_track(
     path: &Path,
     data_map: &WoWsDataMap,
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
     cancel: &AtomicBool,
 ) -> Result<PreviewTrack, PreviewError> {
+    let cancelled = || cancel.load(Ordering::Relaxed).then_some(PreviewError::Cancelled);
+
     let replay_file = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
+    if let Some(err) = cancelled() {
+        return Err(err);
+    }
     let raw_client_version = replay_file.meta.clientVersionFromExe.clone();
     let replay_version = Version::try_from_client_exe(&raw_client_version)
         .ok_or(PreviewError::UnknownClientVersion { raw: raw_client_version })?;
+    if let Some(err) = cancelled() {
+        return Err(err);
+    }
+    // Holds no other lock across this call: a build load takes seconds, and the
+    // UI thread needs `asset_cache` and `preview_cache` every frame.
     let wows_data =
         data_map.resolve(&replay_version).ok_or(PreviewError::NoGameDataForVersion { version: replay_version })?;
+    if let Some(err) = cancelled() {
+        return Err(err);
+    }
 
     let map_name = replay_file.meta.mapName.clone();
     let (vfs, version, game_metadata, game_constants, dump_dir) = {
@@ -145,18 +248,16 @@ pub(crate) fn bake_preview_track(
         (data.vfs.clone(), data.version().copied(), gm, Arc::clone(&data.game_constants), data.dump_dir.clone())
     };
 
-    let (_map_image, map_info) = asset_cache.lock().get_or_load_map(&map_name, &vfs, version.as_ref());
+    let (map_image, map_info) = super::load_map_unlocked(asset_cache, &map_name, &vfs, version.as_ref());
     // `draw_frame` returns an empty command list with no map info, so bailing
     // here is the difference between reporting the gap and silently looping
     // through a track of blank frames.
     let map_info = map_info.ok_or(PreviewError::NoMapInfo { map_name: map_name.clone() })?;
-    let game_fonts = asset_cache.lock().get_or_load_game_fonts(&vfs, version.as_ref(), dump_dir.as_deref());
+    let game_fonts = super::load_game_fonts_unlocked(asset_cache, &vfs, version.as_ref(), dump_dir.as_deref());
     drop(vfs);
 
     let session_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-    // Emit the full command set; the popup filters at paint time, so the
-    // preset can change later without invalidating a cached track.
-    let mut renderer = MinimapRenderer::new(Some(map_info), &game_metadata, session_version, RenderOptions::default());
+    let mut renderer = MinimapRenderer::new(Some(map_info), &game_metadata, session_version, bake_options());
     renderer.set_fonts(game_fonts);
 
     let mut session = MergedReplays::new(
@@ -177,10 +278,10 @@ pub(crate) fn bake_preview_track(
     build_frame_track(&mut session, &mut renderer, 1.0 / SNAPSHOTS_PER_SECOND, cancel, &mut sink);
     session.finish();
 
-    if cancel.load(Ordering::Relaxed) {
-        return Err(PreviewError::Cancelled);
+    if let Some(err) = cancelled() {
+        return Err(err);
     }
-    Ok(sink.finish(map_name))
+    Ok(sink.finish(map_name, version, map_image))
 }
 
 /// Identifies a replay's preview. The mtime is part of the key so a replaced
@@ -222,6 +323,10 @@ struct AnimSession {
     key: PreviewKey,
     start: f64,
     last_seen: f64,
+    /// How many frames the track had when the session started. A track that
+    /// lands mid-bake replaces a one-frame placeholder, and continuing that
+    /// session would enter the real loop however many seconds in the bake took.
+    frame_count: usize,
 }
 
 /// Identifies one bake attempt, distinct from every other attempt even for
@@ -326,18 +431,23 @@ impl PreviewCache {
     }
 
     /// Frame index for `key`, restarting from zero whenever the tooltip
-    /// reopens after a gap in being drawn. Only one preview is visible at a
-    /// time, so a single session slot is enough.
+    /// reopens after a gap in being drawn, moves to another row, or the track
+    /// it is playing changes length. Only one preview is visible at a time, so
+    /// a single session slot is enough.
     pub(crate) fn anim_index(&mut self, key: &PreviewKey, now: f64, frame_count: usize) -> usize {
         if frame_count == 0 {
             return 0;
         }
         let restart = match &self.anim_session {
-            Some(session) => &session.key != key || now - session.last_seen > PREVIEW_ANIM_RESTART_GAP_SECS,
+            Some(session) => {
+                &session.key != key
+                    || session.frame_count != frame_count
+                    || now - session.last_seen > PREVIEW_ANIM_RESTART_GAP_SECS
+            }
             None => true,
         };
         if restart {
-            self.anim_session = Some(AnimSession { key: key.clone(), start: now, last_seen: now });
+            self.anim_session = Some(AnimSession { key: key.clone(), start: now, last_seen: now, frame_count });
         } else if let Some(session) = &mut self.anim_session {
             session.last_seen = now;
         }
@@ -426,7 +536,12 @@ mod cache_tests {
     }
 
     fn track() -> Arc<PreviewTrack> {
-        Arc::new(PreviewTrack { frames: vec![Vec::new()], map_name: "spaces/test".to_string() })
+        Arc::new(PreviewTrack {
+            frames: vec![Vec::new()],
+            map_name: "spaces/test".to_string(),
+            version: None,
+            map_image: None,
+        })
     }
 
     #[test]
@@ -578,6 +693,20 @@ mod cache_tests {
         let a = key("a");
         assert_eq!(cache.anim_index(&a, 0.0, 0), 0);
     }
+
+    #[test]
+    fn a_track_landing_mid_bake_starts_the_loop_at_its_beginning() {
+        let mut cache = PreviewCache::default();
+        let a = key("a");
+        // Baking: repeated polls against the one-frame placeholder.
+        let mut t = 0.0;
+        while t < 5.0 {
+            assert_eq!(cache.anim_index(&a, t, 1), 0);
+            t += 0.1;
+        }
+        // The real track lands; the loop must start at its beginning.
+        assert_eq!(cache.anim_index(&a, 5.0, 150), 0);
+    }
 }
 
 #[cfg(test)]
@@ -600,7 +729,7 @@ mod track_tests {
     fn a_short_replay_keeps_every_frame() {
         let mut sink = TrackSink::new();
         feed(&mut sink, 40);
-        let track = sink.finish("spaces/test".to_string());
+        let track = sink.finish("spaces/test".to_string(), None, None);
         assert_eq!(track.frames.len(), 40);
     }
 
@@ -608,7 +737,7 @@ mod track_tests {
     fn a_long_replay_is_decimated_to_the_budget() {
         let mut sink = TrackSink::new();
         feed(&mut sink, 1800);
-        let track = sink.finish("spaces/test".to_string());
+        let track = sink.finish("spaces/test".to_string(), None, None);
         assert!(track.frames.len() <= PREVIEW_MAX_FRAMES, "kept {}", track.frames.len());
         assert!(track.frames.len() > PREVIEW_MAX_FRAMES / 2, "kept too few: {}", track.frames.len());
     }
@@ -625,7 +754,7 @@ mod track_tests {
     #[test]
     fn an_empty_replay_yields_an_empty_track() {
         let sink = TrackSink::new();
-        let track = sink.finish("spaces/test".to_string());
+        let track = sink.finish("spaces/test".to_string(), None, None);
         assert!(track.frames.is_empty());
     }
 
@@ -636,7 +765,7 @@ mod track_tests {
             sink.push(i, GameClock(i as f32), tagged(i));
         }
         let clocks: Vec<GameClock> = sink.kept_clocks().to_vec();
-        let track = sink.finish("spaces/test".to_string());
+        let track = sink.finish("spaces/test".to_string(), None, None);
         assert_eq!(track.frames.len(), clocks.len(), "frames and clocks diverged");
         for (frame, clock) in track.frames.iter().zip(clocks.iter()) {
             let DrawCommand::Timer { time_remaining: Some(index), .. } = frame[0] else {

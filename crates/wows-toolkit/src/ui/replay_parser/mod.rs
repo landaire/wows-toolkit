@@ -4095,11 +4095,17 @@ impl ToolkitTabViewer<'_> {
                                 // reserved height for, overlapping the row below.
                                 .wrap_mode(egui::TextWrapMode::Truncate),
                         );
-                        let label_response = match (preview_deps.as_ref(), preview_popup::preview_key(path, summary)) {
-                            (Some(deps), Some(key)) => label_response.on_hover_ui(|ui| {
+                        // The key is built only once previews are known to be
+                        // wanted: it allocates a `PathBuf` and is asked for on
+                        // every row every frame.
+                        let preview = preview_deps
+                            .as_ref()
+                            .and_then(|deps| Some((deps, preview_popup::preview_key(path, summary)?)));
+                        let label_response = match preview {
+                            Some((deps, key)) => label_response.on_hover_ui(|ui| {
                                 preview_popup::preview_tooltip(ui, deps, key, &listed.map_name, &hover);
                             }),
-                            _ => label_response.on_hover_text(hover),
+                            None => label_response.on_hover_text(hover),
                         };
                         label_response.context_menu(|ui| {
                             show_leaf_context_menu(ui, &path_clone, &wows_dir_clone, ws_id);
@@ -4287,20 +4293,25 @@ impl ToolkitTabViewer<'_> {
                                 font_id.clone(),
                             );
                             let hover = listing_row::hover_text(&identity, &stats, locale.as_deref());
-                            let preview_key = preview_popup::preview_key(path, summary);
-                            let deps = preview_deps.clone();
-                            let map_name = listed.map_name.clone();
+                            // Every leaf of every open group is drawn each
+                            // frame, so the key's `PathBuf` and the map name's
+                            // `String` are only allocated once previews are
+                            // known to be wanted.
+                            let preview = preview_deps.as_ref().and_then(|deps| {
+                                let key = preview_popup::preview_key(path, summary)?;
+                                Some((Arc::clone(deps), key, listed.map_name.clone()))
+                            });
                             let node = egui_ltreeview::NodeBuilder::leaf(id)
                                 .height(leaf_node_height)
                                 .label_ui(move |ui| {
                                     let resp = ui.add(Label::new(label_text.clone()).selectable(false));
-                                    match (deps.as_ref(), preview_key.clone()) {
-                                        (Some(deps), Some(key)) => {
+                                    match preview {
+                                        Some((ref deps, ref key, ref map_name)) => {
                                             resp.on_hover_ui(|ui| {
-                                                preview_popup::preview_tooltip(ui, deps, key, &map_name, &hover);
+                                                preview_popup::preview_tooltip(ui, deps, key.clone(), map_name, &hover);
                                             });
                                         }
-                                        _ => {
+                                        None => {
                                             resp.on_hover_text(hover.clone());
                                         }
                                     }

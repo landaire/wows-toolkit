@@ -27,14 +27,14 @@ use crate::replay::renderer::preview::PreviewKey;
 use crate::replay::renderer::preview::PreviewState;
 use crate::replay::renderer::preview::poll_preview;
 
-use super::listing_row;
-
 /// What a preview draws. At 384x384 the canvas scales to about 0.48x, so ship
 /// names render around 5px tall - readable at a glance but only just. Player
 /// names and the HUD panels stay off to keep the map uncluttered.
 ///
-/// Tracks are baked with the full command set, so this is a paint-time filter
-/// and changing it invalidates nothing.
+/// This is a paint-time filter over what
+/// [`bake_options`](crate::replay::renderer::preview::bake_options) put in the
+/// track, so every switch here may be turned on without invalidating a cached
+/// track. Asking for a class the bake withholds would silently draw nothing.
 pub(crate) fn preview_options() -> RenderOptions {
     RenderOptions {
         show_stats_panel: false,
@@ -51,6 +51,9 @@ pub(crate) fn preview_options() -> RenderOptions {
 }
 
 pub(crate) const PREVIEW_SIZE: f32 = 384.0;
+
+/// How often the popup repaints while it has nothing to animate but a spinner.
+const BAKING_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Everything the popup needs that it cannot reach through a hover closure.
 ///
@@ -91,16 +94,17 @@ fn preview_textures(icons: &IconTextures) -> DrawCommandTextures<'_> {
     }
 }
 
-/// `PreviewKey` for `path`, or `None` when no mtime can be found.
+/// `PreviewKey` for `path`, or `None` when the row carries no indexed mtime.
 ///
-/// Prefers the indexed row's `RowSummary::file_mtime` when one is in hand:
-/// the grouped listing draws every leaf of every open group each frame (not
-/// just the visible ones the way `show_rows` bounds the ungrouped listing),
-/// so a per-row `fs::metadata` call there would mean hundreds of blocking
-/// stats on the UI thread per frame for a large open group. Falls back to a
-/// direct file read only for rows that have no summary yet.
+/// The mtime comes from the index and nowhere else. The grouped listing draws
+/// every leaf of every open group each frame (not just the visible ones the way
+/// `show_rows` bounds the ungrouped listing), so reaching for `fs::metadata`
+/// here would mean hundreds of blocking stats on the UI thread per frame for a
+/// large open group, and every row of a library that has not been indexed yet
+/// would take one. A row with no indexed mtime gets no preview until the index
+/// catches up with it.
 pub(crate) fn preview_key(path: &Path, summary: Option<&RowSummary>) -> Option<PreviewKey> {
-    let mtime_secs = summary.and_then(|s| s.file_mtime).or_else(|| listing_row::file_mtime_secs(path))?;
+    let mtime_secs = summary?.file_mtime?;
     Some(PreviewKey { path: path.to_path_buf(), mtime_secs })
 }
 
@@ -148,16 +152,19 @@ pub(crate) fn preview_tooltip(ui: &mut egui::Ui, deps: &PreviewDeps, key: Previe
     // which looks exactly like it kept playing unattended.
     let index = deps.cache.lock().anim_index(&key, now, frames.len());
 
-    // Once a track exists, its own baked name (read straight from the replay
-    // file) corrects a stale indexed map name; before that, the row's name is
-    // all there is to key the texture lookup with.
-    let map_name = match state {
-        PreviewState::Ready(ref track) => track.map_name.as_str(),
-        _ => map_name,
-    };
+    // Once a track exists it supplies both the map name (read straight from the
+    // replay file, which corrects a stale indexed one) and the art of the build
+    // the replay was recorded on. Before that, the row's name against the live
+    // install is all there is, which is right for a replay of the current build
+    // and best-effort for an older one.
     let map_texture = {
         let mut tex = deps.texture_cache.lock();
-        tex.get_or_upload_map(ui.ctx(), deps.version, map_name, &deps.asset_cache, &deps.vfs)
+        match state {
+            PreviewState::Ready(ref track) => {
+                tex.get_or_upload_map_image(ui.ctx(), track.version, &track.map_name, track.map_image.as_deref())
+            }
+            _ => tex.get_or_upload_map(ui.ctx(), deps.version, map_name, &deps.asset_cache, &deps.vfs),
+        }
     };
 
     let textures = preview_textures(&deps.icons);
@@ -202,12 +209,69 @@ pub(crate) fn preview_tooltip(ui: &mut egui::Ui, deps: &PreviewDeps, key: Previe
             let spinner_rect = egui::Rect::from_center_size(response.rect.center(), egui::Vec2::splat(24.0));
             egui::Spinner::new().paint_at(ui, spinner_rect);
             ui.label(t!("ui.replay.preview_loading"));
-            ui.ctx().request_repaint();
+            // A bake runs for seconds. Repainting the whole app as fast as it
+            // will go for all of that costs far more than the spinner is worth,
+            // and this is still well above the rate the spinner is read at.
+            ui.ctx().request_repaint_after(BAKING_REPAINT_INTERVAL);
         }
         PreviewState::Unavailable(ref err) => {
-            ui.label(err.to_string());
+            ui.label(match err.value() {
+                Some(value) => t!(err.key(), value = value),
+                None => t!(err.key()),
+            });
         }
     }
 
     ui.label(hover);
+}
+
+#[cfg(test)]
+mod preset_tests {
+    use super::*;
+    use crate::replay::renderer::preview::bake_options;
+
+    /// The popup filters a baked track; it cannot add to one. Every class the
+    /// paint preset asks for has to be in the bake, or the preview silently
+    /// draws nothing for it.
+    #[test]
+    fn the_paint_preset_asks_for_nothing_the_bake_withholds() {
+        let paint = preview_options();
+        let bake = bake_options();
+        let asked: [(&str, bool, bool); 22] = [
+            ("show_hp_bars", paint.show_hp_bars, bake.show_hp_bars),
+            ("show_tracers", paint.show_tracers, bake.show_tracers),
+            ("show_torpedoes", paint.show_torpedoes, bake.show_torpedoes),
+            ("show_planes", paint.show_planes, bake.show_planes),
+            ("show_smoke", paint.show_smoke, bake.show_smoke),
+            ("show_score", paint.show_score, bake.show_score),
+            ("show_timer", paint.show_timer, bake.show_timer),
+            ("show_kill_feed", paint.show_kill_feed, bake.show_kill_feed),
+            ("show_capture_points", paint.show_capture_points, bake.show_capture_points),
+            ("show_buildings", paint.show_buildings, bake.show_buildings),
+            ("show_weather", paint.show_weather, bake.show_weather),
+            ("show_camera_direction", paint.show_camera_direction, bake.show_camera_direction),
+            ("show_consumables", paint.show_consumables, bake.show_consumables),
+            ("show_armament", paint.show_armament, bake.show_armament),
+            ("show_trails", paint.show_trails, bake.show_trails),
+            ("show_speed_trails", paint.show_speed_trails, bake.show_speed_trails),
+            ("show_ship_config", paint.show_ship_config, bake.show_ship_config),
+            ("show_battle_result", paint.show_battle_result, bake.show_battle_result),
+            ("show_buffs", paint.show_buffs, bake.show_buffs),
+            ("show_chat", paint.show_chat, bake.show_chat),
+            ("show_advantage", paint.show_advantage, bake.show_advantage),
+            ("show_team_rosters", paint.show_team_rosters, bake.show_team_rosters),
+        ];
+        for (name, painted, baked) in asked {
+            assert!(!painted || baked, "{name} is painted but never baked");
+        }
+    }
+
+    /// The kill feed and the chat overlay are dropped at emit time when the
+    /// stats panel is showing, so a bake that left the panel on would carry
+    /// neither however the popup is configured.
+    #[test]
+    fn the_bake_leaves_the_stats_panel_off_so_the_overlays_survive() {
+        let bake = bake_options();
+        assert!(!bake.stats_panel_visible(), "the stats panel suppresses the kill feed and chat at emit time");
+    }
 }
