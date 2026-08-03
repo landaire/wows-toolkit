@@ -1,11 +1,34 @@
 //! Shared minimap frame painting: which commands a set of render options
 //! allows, how the canvas is laid out, and the widget that paints one frame.
 
+use std::collections::HashSet;
+
+use egui::Color32;
+use egui::CornerRadius;
+use egui::Rect;
+use egui::Vec2;
+use wows_minimap_renderer::CANVAS_HEIGHT;
+use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::STATS_PANEL_WIDTH;
 use wows_minimap_renderer::TEAM_ROSTER_WIDTH;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_replays::types::EntityId;
+use wt_translations::TextResolver;
+
+use crate::draw_commands::ConsumableHoverRegion;
+use crate::draw_commands::DrawCommandLabelOptions;
+use crate::draw_commands::DrawCommandTextures;
+use crate::draw_commands::PlayerBuildHoverRegion;
+use crate::draw_commands::draw_command_to_shapes;
+use crate::rendering::draw_grid;
+use crate::rendering::draw_map_background;
+use crate::transforms::CanvasLayout;
+use crate::transforms::MapTransform;
+use crate::transforms::compute_canvas_layout;
+use crate::transforms::compute_map_clip_rect;
+use crate::types::GridStyle;
 
 /// Check whether a DrawCommand should be drawn given the current RenderOptions.
 pub fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_ships: bool) -> bool {
@@ -78,6 +101,175 @@ pub fn canvas_geometry(opts: &RenderOptions) -> CanvasGeometry {
         canvas_width: hud_width + stats_strip,
         hud_width,
         map_width: (stats || rosters).then_some(MINIMAP_SIZE as f32),
+    }
+}
+
+/// Per-ship overrides the caller layers on top of `RenderOptions`.
+///
+/// The renderer window supplies trail-hidden ships and per-ship range-circle
+/// visibility, both of which are driven by right-click state the widget knows
+/// nothing about. `alive_ships` is passed so an implementation can drop
+/// commands belonging to sunk ships without rescanning the frame.
+pub trait CommandFilter {
+    fn keep(&self, cmd: &DrawCommand, alive_ships: &HashSet<EntityId>) -> bool;
+}
+
+/// Keeps every command `RenderOptions` already allowed.
+pub struct NoCommandFilter;
+
+impl CommandFilter for NoCommandFilter {
+    fn keep(&self, _cmd: &DrawCommand, _alive_ships: &HashSet<EntityId>) -> bool {
+        true
+    }
+}
+
+/// One frame of minimap content, painted into an allocated region.
+///
+/// Owns layout, the map background, the grid, command dispatch, and the
+/// unzoomed stats/roster pass. It deliberately owns no input handling: zoom
+/// and pan arrive as values, and annotations, pings, cursors, tooltips and
+/// controls are the caller's, layered on the returned transform.
+pub struct MinimapView<'a> {
+    pub commands: &'a [DrawCommand],
+    pub textures: &'a DrawCommandTextures<'a>,
+    pub map_texture: Option<egui::TextureId>,
+    pub options: &'a RenderOptions,
+    pub show_dead_ships: bool,
+    pub zoom: f32,
+    pub pan: Vec2,
+    pub filter: &'a dyn CommandFilter,
+    pub text_resolver: &'a dyn TextResolver,
+    /// Builds the grid style once the widget knows its window scale, which the
+    /// grid's label font is sized against. `None` draws no grid.
+    pub grid: Option<GridStyleFn<'a>>,
+    /// Fill behind the map, painted across the whole allocated rect.
+    pub background: Color32,
+}
+
+/// Builds a grid style for a resolved window scale.
+pub type GridStyleFn<'a> = &'a dyn Fn(f32) -> GridStyle;
+
+/// What the caller needs to layer its own content on top of a painted frame.
+pub struct MinimapViewOutput {
+    pub response: egui::Response,
+    pub layout: CanvasLayout,
+    pub transform: MapTransform,
+    pub consumable_hover_regions: Vec<ConsumableHoverRegion>,
+    pub player_build_regions: Vec<PlayerBuildHoverRegion>,
+}
+
+impl MinimapView<'_> {
+    pub fn show(self, ui: &mut egui::Ui, size: Vec2, sense: egui::Sense) -> MinimapViewOutput {
+        let ctx = ui.ctx().clone();
+        let geom = canvas_geometry(self.options);
+        let logical_canvas = Vec2::new(geom.canvas_width, CANVAS_HEIGHT as f32);
+        let (response, painter) = ui.allocate_painter(size, sense);
+        let layout = compute_canvas_layout(size, logical_canvas, 1.0, response.rect.min, geom.map_width);
+        let window_scale = layout.window_scale;
+
+        let transform = MapTransform {
+            origin: layout.origin,
+            window_scale,
+            zoom: self.zoom,
+            pan: self.pan,
+            hud_height: HUD_HEIGHT as f32,
+            canvas_height: CANVAS_HEIGHT as f32,
+            canvas_width: geom.canvas_width,
+            hud_width: geom.hud_width,
+            map_x_offset: geom.map_x_offset,
+        };
+
+        painter.rect_filled(response.rect, CornerRadius::ZERO, self.background);
+
+        let map_clip = compute_map_clip_rect(&layout, HUD_HEIGHT as f32, geom.map_width, geom.map_x_offset);
+        let map_painter = painter.with_clip_rect(map_clip);
+
+        draw_map_background(&map_painter, &transform, self.map_texture);
+        if let Some(grid) = self.grid {
+            draw_grid(&map_painter, &transform, &grid(window_scale));
+        }
+
+        let alive_ships: HashSet<EntityId> = self
+            .commands
+            .iter()
+            .filter_map(|cmd| if let DrawCommand::Ship { entity_id, .. } = cmd { Some(*entity_id) } else { None })
+            .collect();
+
+        let label_opts = DrawCommandLabelOptions {
+            show_player_names: self.options.show_player_names,
+            show_ship_names: self.options.show_ship_names,
+            show_dead_ship_names: self.options.show_dead_ship_names,
+            show_armament_color: self.options.show_armament,
+        };
+
+        let stats_visible = self.options.stats_panel_visible();
+        let mut placed_labels: Vec<Rect> = Vec::new();
+        for cmd in self.commands {
+            // Stats commands ride the separate unzoomed pass below.
+            if stats_visible && cmd.is_stats() {
+                continue;
+            }
+            if !should_draw_command(cmd, self.options, self.show_dead_ships) {
+                continue;
+            }
+            if !self.filter.keep(cmd, &alive_ships) {
+                continue;
+            }
+            let is_hud = cmd.is_hud();
+            let shapes = draw_command_to_shapes(
+                cmd,
+                &transform,
+                self.textures,
+                &ctx,
+                &label_opts,
+                Some(&mut placed_labels),
+                self.text_resolver,
+                None,
+                None,
+            );
+            let target = if is_hud { &painter } else { &map_painter };
+            for shape in shapes {
+                target.add(shape);
+            }
+        }
+
+        let mut consumable_hover_regions = Vec::new();
+        let mut player_build_regions = Vec::new();
+        if stats_visible || self.options.show_team_rosters {
+            let stats_transform = MapTransform {
+                origin: layout.origin,
+                window_scale,
+                zoom: 1.0,
+                pan: Vec2::ZERO,
+                hud_height: HUD_HEIGHT as f32,
+                canvas_height: CANVAS_HEIGHT as f32,
+                canvas_width: geom.canvas_width,
+                hud_width: geom.hud_width,
+                map_x_offset: geom.map_x_offset,
+            };
+            let mut stats_placed = Vec::new();
+            for cmd in self.commands {
+                if !cmd.is_stats() {
+                    continue;
+                }
+                let shapes = draw_command_to_shapes(
+                    cmd,
+                    &stats_transform,
+                    self.textures,
+                    &ctx,
+                    &label_opts,
+                    Some(&mut stats_placed),
+                    self.text_resolver,
+                    Some(&mut consumable_hover_regions),
+                    Some(&mut player_build_regions),
+                );
+                for shape in shapes {
+                    painter.add(shape);
+                }
+            }
+        }
+
+        MinimapViewOutput { response, layout, transform, consumable_hover_regions, player_build_regions }
     }
 }
 
