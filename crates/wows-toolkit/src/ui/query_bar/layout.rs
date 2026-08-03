@@ -71,12 +71,16 @@ pub fn lay_out(tokens: &[Token], widths: &[f32], avail: f32, cfg: &LayoutCfg) ->
     let mut open_brackets: Vec<OpenBracket> = Vec::new();
 
     let mut row = 0usize;
-    let mut at_row_start = true;
+    // True only for the very first token: after that, a wrap is decided by
+    // whether the candidate position fits, not by this flag. It exists solely
+    // to let token 0 skip the wrap check unconditionally, which is the guard
+    // against looping on a token wider than `avail`.
+    let mut is_first_token = true;
     let mut cursor = 0.0f32;
 
     for (i, token) in tokens.iter().enumerate() {
         let width = widths[i];
-        let start_x = if at_row_start {
+        let start_x = if is_first_token {
             token.depth as f32 * cfg.indent
         } else {
             let candidate = cursor + cfg.gap;
@@ -112,7 +116,7 @@ pub fn lay_out(tokens: &[Token], widths: &[f32], avail: f32, cfg: &LayoutCfg) ->
 
         placed.push(Placed { index: i, row, rect });
         cursor = end_x;
-        at_row_start = false;
+        is_first_token = false;
     }
 
     let rows = row + 1;
@@ -209,6 +213,26 @@ mod tests {
         assert!(out.rows > 1);
         let spans: Vec<_> = out.group_spans.iter().filter(|s| s.rows.len() > 1).collect();
         assert!(!spans.is_empty(), "a wrapped group must report one span per row: {out:#?}");
+    }
+
+    // Mirrors `a_group_spanning_a_break_is_reported_as_open_ended_on_each_row`
+    // but with the other bracket-pair kind. Nothing else in the suite puts a
+    // QuantOpen/QuantClose pair through `lay_out`, so without this a later
+    // narrowing of `is_open_bracket`/`is_close_bracket` back to only the
+    // Group variants would silently break Quant-bracket wrapping (a
+    // non-sugar roster filter, e.g. `count(...)`, that wraps a line) with a
+    // green suite. Verified to catch that: see the fix report.
+    #[test]
+    fn a_quant_bracket_spanning_a_break_is_reported_as_open_ended_on_each_row() {
+        let mut toks = vec![tok(TokenKind::QuantOpen { prefix: "at least 2".into() }, 0)];
+        toks.extend((0..4).map(|_| tok(TokenKind::Pill { text: "x".into() }, 1)));
+        toks.push(tok(TokenKind::QuantClose, 0));
+        toks.push(tok(TokenKind::Caret, 0));
+        let widths = vec![8.0, 100.0, 100.0, 100.0, 100.0, 8.0, 10.0];
+        let out = lay_out(&toks, &widths, 250.0, &cfg());
+        assert!(out.rows > 1);
+        let spans: Vec<_> = out.group_spans.iter().filter(|s| s.rows.len() > 1).collect();
+        assert!(!spans.is_empty(), "a wrapped quantifier bracket must report one span per row: {out:#?}");
     }
 
     #[test]
