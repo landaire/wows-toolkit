@@ -205,8 +205,17 @@ pub(crate) const PREVIEW_DWELL_SECS: f64 = 0.3;
 /// beats taking on an LRU dependency.
 pub(crate) const PREVIEW_CACHE_CAPACITY: usize = 8;
 
+/// Identifies one bake attempt, distinct from every other attempt even for
+/// the same [`PreviewKey`]. Slot ownership is decided by this, not by key
+/// equality: a row can be dwelled onto, away from, and back onto again while
+/// an earlier bake for that same row is still winding down after
+/// cancellation, and that stale bake must not be mistaken for the new one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct BakeId(u64);
+
 struct InFlightBake {
     key: PreviewKey,
+    id: BakeId,
     cancel: Arc<AtomicBool>,
 }
 
@@ -217,6 +226,7 @@ pub(crate) struct PreviewCache {
     in_flight: Option<InFlightBake>,
     /// The row under the cursor and when it was first seen there.
     hover: Option<(PreviewKey, f64)>,
+    next_bake_id: u64,
 }
 
 impl PreviewCache {
@@ -246,34 +256,49 @@ impl PreviewCache {
         self.entries.truncate(PREVIEW_CACHE_CAPACITY);
     }
 
-    /// Claim the single bake slot for `key`, cancelling whatever held it.
-    pub(crate) fn begin_bake(&mut self, key: PreviewKey) -> Arc<AtomicBool> {
+    /// Claim the bake slot for `key`, cancelling whatever held it. At most
+    /// one bake owns the slot at a time, but a superseded bake is not
+    /// stopped by this call: cancellation is cooperative, so it keeps
+    /// running until it next checks its `cancel` flag.
+    pub(crate) fn begin_bake(&mut self, key: PreviewKey) -> (BakeId, Arc<AtomicBool>) {
         if let Some(ref prev) = self.in_flight {
             prev.cancel.store(true, Ordering::Relaxed);
         }
+        let id = BakeId(self.next_bake_id);
+        self.next_bake_id += 1;
         let cancel = Arc::new(AtomicBool::new(false));
-        self.in_flight = Some(InFlightBake { key, cancel: Arc::clone(&cancel) });
-        cancel
+        self.in_flight = Some(InFlightBake { key, id, cancel: Arc::clone(&cancel) });
+        (id, cancel)
     }
 
     pub(crate) fn is_baking(&self, key: &PreviewKey) -> bool {
         self.in_flight.as_ref().is_some_and(|b| &b.key == key)
     }
 
-    /// Store a finished bake, unless it was superseded while running.
-    pub(crate) fn finish_bake(&mut self, key: PreviewKey, entry: PreviewEntry) {
-        if !self.is_baking(&key) {
+    fn owns_slot(&self, id: BakeId) -> bool {
+        self.in_flight.as_ref().is_some_and(|b| b.id == id)
+    }
+
+    /// Store a finished bake, unless `id` no longer owns the slot. Keying
+    /// this on the bake's identity rather than `key` matters when the same
+    /// row is dwelled onto twice: the earlier, still-unwinding bake for that
+    /// row must not be confused with the current one.
+    pub(crate) fn finish_bake(&mut self, id: BakeId, key: PreviewKey, entry: PreviewEntry) {
+        if !self.owns_slot(id) {
             return;
         }
         self.in_flight = None;
         self.insert(key, entry);
     }
 
-    /// Release the bake slot for `key` without storing a result, unless it
-    /// was already superseded (in which case the slot belongs to a newer
-    /// bake and must be left alone).
-    pub(crate) fn clear_bake(&mut self, key: &PreviewKey) {
-        if self.is_baking(key) {
+    /// Release the bake slot without storing a result, but only if `id`
+    /// still owns it. A cancelled bake's `id` has usually already been
+    /// replaced by a newer one (same row or not) by the time it notices the
+    /// cancellation, in which case this is a no-op; only a bake that never
+    /// got superseded (for example one that panicked) actually frees
+    /// anything here.
+    pub(crate) fn clear_bake(&mut self, id: BakeId) {
+        if self.owns_slot(id) {
             self.in_flight = None;
         }
     }
@@ -286,6 +311,7 @@ impl PreviewCache {
 /// later hover on that row.
 struct BakeSlotGuard {
     cache: Arc<Mutex<PreviewCache>>,
+    id: BakeId,
     key: PreviewKey,
     entry: Option<PreviewEntry>,
 }
@@ -294,8 +320,8 @@ impl Drop for BakeSlotGuard {
     fn drop(&mut self) {
         let mut guard = self.cache.lock();
         match self.entry.take() {
-            Some(entry) => guard.finish_bake(self.key.clone(), entry),
-            None => guard.clear_bake(&self.key),
+            Some(entry) => guard.finish_bake(self.id, self.key.clone(), entry),
+            None => guard.clear_bake(self.id),
         }
     }
 }
@@ -310,6 +336,12 @@ pub(crate) fn poll_preview(
     asset_cache: &Arc<Mutex<RendererAssetCache>>,
 ) -> PreviewState {
     let mut guard = cache.lock();
+    // Recorded before the cache/in-flight checks below so every poll keeps
+    // `hover` current, even the ones that return early on a cache hit or a
+    // bake already in flight. Otherwise a row that left the cache untouched
+    // (hit or `Baking`) never refreshes `hover`, and returning to it later
+    // reads a stale `since` and skips the dwell entirely.
+    let dwelled = guard.note_hover(&key, now);
     match guard.get(&key) {
         Some(PreviewEntry::Ready(track)) => return PreviewState::Ready(Arc::clone(track)),
         Some(PreviewEntry::Unavailable(err)) => return PreviewState::Unavailable(err.clone()),
@@ -318,18 +350,18 @@ pub(crate) fn poll_preview(
     if guard.is_baking(&key) {
         return PreviewState::Baking;
     }
-    if !guard.note_hover(&key, now) {
+    if !dwelled {
         return PreviewState::Idle;
     }
 
-    let cancel = guard.begin_bake(key.clone());
+    let (id, cancel) = guard.begin_bake(key.clone());
     drop(guard);
 
     let cache = Arc::clone(cache);
     let asset_cache = Arc::clone(asset_cache);
     let data_map = data_map.clone();
     crate::util::thread::spawn_logged("replay-preview-bake", move || {
-        let mut slot = BakeSlotGuard { cache, key: key.clone(), entry: None };
+        let mut slot = BakeSlotGuard { cache, id, key: key.clone(), entry: None };
         let result = bake_preview_track(&key.path, &data_map, &asset_cache, &cancel);
         slot.entry = match result {
             Ok(track) => Some(PreviewEntry::Ready(Arc::new(track))),
@@ -387,19 +419,40 @@ mod cache_tests {
     #[test]
     fn a_new_bake_cancels_the_one_in_flight() {
         let mut cache = PreviewCache::default();
-        let first = cache.begin_bake(key("a"));
-        let second = cache.begin_bake(key("b"));
-        assert!(first.load(Ordering::Relaxed), "superseded bake was not cancelled");
-        assert!(!second.load(Ordering::Relaxed));
+        let (_first_id, first_cancel) = cache.begin_bake(key("a"));
+        let (_second_id, second_cancel) = cache.begin_bake(key("b"));
+        assert!(first_cancel.load(Ordering::Relaxed), "superseded bake was not cancelled");
+        assert!(!second_cancel.load(Ordering::Relaxed));
     }
 
     #[test]
     fn a_cancelled_bakes_result_is_discarded() {
         let mut cache = PreviewCache::default();
-        let _first = cache.begin_bake(key("a"));
-        let _second = cache.begin_bake(key("b"));
-        cache.finish_bake(key("a"), PreviewEntry::Ready(track()));
+        let (first_id, _first_cancel) = cache.begin_bake(key("a"));
+        let (_second_id, _second_cancel) = cache.begin_bake(key("b"));
+        cache.finish_bake(first_id, key("a"), PreviewEntry::Ready(track()));
         assert!(cache.get(&key("a")).is_none(), "stale bake result landed in the cache");
+    }
+
+    #[test]
+    fn a_stale_bake_does_not_free_a_newer_same_key_bakes_slot() {
+        let mut cache = PreviewCache::default();
+        let (first_id, _) = cache.begin_bake(key("a"));
+        let (_second_id, _) = cache.begin_bake(key("b"));
+        let (_third_id, _) = cache.begin_bake(key("a"));
+        cache.clear_bake(first_id);
+        assert!(cache.is_baking(&key("a")), "a stale bake freed the newest bake's slot");
+    }
+
+    #[test]
+    fn a_stale_bakes_result_does_not_land_over_a_newer_same_key_bake() {
+        let mut cache = PreviewCache::default();
+        let (first_id, _) = cache.begin_bake(key("a"));
+        let (_second_id, _) = cache.begin_bake(key("b"));
+        let (_third_id, _) = cache.begin_bake(key("a"));
+        cache.finish_bake(first_id, key("a"), PreviewEntry::Ready(track()));
+        assert!(cache.get(&key("a")).is_none(), "a stale bake's result landed in the cache");
+        assert!(cache.is_baking(&key("a")), "a stale bake's finish cleared the newest bake's slot");
     }
 
     #[test]
@@ -414,12 +467,12 @@ mod cache_tests {
     fn a_panicking_bake_releases_the_slot_instead_of_wedging_it() {
         let cache = Arc::new(Mutex::new(PreviewCache::default()));
         let k = key("a");
-        cache.lock().begin_bake(k.clone());
+        let (id, _cancel) = cache.lock().begin_bake(k.clone());
 
         let cache_for_thread = Arc::clone(&cache);
         let key_for_thread = k.clone();
         let handle = crate::util::thread::spawn_logged("test-panicking-bake", move || {
-            let _slot = BakeSlotGuard { cache: cache_for_thread, key: key_for_thread, entry: None };
+            let _slot = BakeSlotGuard { cache: cache_for_thread, id, key: key_for_thread, entry: None };
             panic!("simulated bake panic");
         });
         // `spawn_logged` catches the panic; joining guarantees the guard's
