@@ -2,5 +2,6 @@
 //! filters render as pills over a `MatchExpr`.
 
 pub mod label;
+pub mod layout;
 pub mod select;
 pub mod tokens;
