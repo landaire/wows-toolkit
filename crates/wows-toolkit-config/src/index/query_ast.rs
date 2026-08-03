@@ -34,10 +34,14 @@ impl<L> Expr<L> {
         matches!(self, Expr::All(cs) if cs.is_empty())
     }
 
+    /// Every direct subexpression, so a tree walker sees the whole tree. A
+    /// `Not` yields its operand: skipping it would make a walk silently miss
+    /// everything under a negation.
     pub fn children(&self) -> &[Expr<L>] {
         match self {
             Expr::All(cs) | Expr::Any(cs) => cs,
-            Expr::Not(_) | Expr::Leaf(_) => &[],
+            Expr::Not(inner) => std::slice::from_ref(&**inner),
+            Expr::Leaf(_) => &[],
         }
     }
 }
@@ -50,6 +54,13 @@ impl<L> Default for Expr<L> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MatchTerm {
+    /// A field comparison. The `Op` must be one of `field.allowed_ops()` and the
+    /// `Value` must match `field.value_kind()`; nothing checks this at compile
+    /// time and the printer does not round trip a term that breaks it.
+    ///
+    /// `Equals`, `Eq`, and `Is` all print as `=`, and the parser picks between
+    /// them from the field's `ValueKind`, so a tree built with the wrong one of
+    /// the three reparses into a different tree.
     Field(MatchField, Op, Value),
     Roster {
         quant: Quant,
@@ -59,6 +70,13 @@ pub enum MatchTerm {
     FreeText(String),
 }
 
+/// One roster field comparison.
+///
+/// As with `MatchTerm::Field`, `op` must come from `field.allowed_ops()` and
+/// `value` must match `field.value_kind()`. On top of the printing hazard the
+/// three `=` spellings carry, `try_print_sugar` matches `Op::Is` specifically:
+/// a sugar-shaped tree whose relation term was built with `Op::Equals` prints
+/// as the general `any(...)` form instead.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RosterTerm {
     pub field: RosterField,
@@ -737,6 +755,15 @@ mod tests {
         let any: MatchExpr = Expr::Any(vec![]);
         assert!(all.is_empty_all());
         assert!(!any.is_empty_all());
+    }
+
+    #[test]
+    fn children_descends_into_a_negation() {
+        let leaf: MatchExpr = Expr::Leaf(MatchTerm::FreeText("yamato".into()));
+        let negated = Expr::Not(Box::new(leaf.clone()));
+        assert_eq!(negated.children(), &[leaf.clone()]);
+        assert!(leaf.children().is_empty());
+        assert_eq!(Expr::All(vec![negated.clone()]).children(), &[negated]);
     }
 
     #[test]
