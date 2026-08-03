@@ -105,8 +105,12 @@ pub fn lay_out(tokens: &[Token], widths: &[f32], avail: f32, cfg: &LayoutCfg) ->
                 _ => bracket.rows.push((row, rect)),
             }
         }
-        if is_close_bracket(&token.kind) {
-            let bracket = open_brackets.pop().expect("close bracket without a matching open");
+        // `tokenize` emits brackets in matched pairs, so there is always an open
+        // waiting here; an unmatched close is dropped rather than taken down to
+        // a panic, since this runs on every keystroke.
+        if is_close_bracket(&token.kind)
+            && let Some(bracket) = open_brackets.pop()
+        {
             group_spans.push(GroupSpan { open_index: bracket.open_index, close_index: i, rows: bracket.rows });
         }
 
@@ -229,6 +233,42 @@ mod tests {
         assert!(out.rows > 1);
         let spans: Vec<_> = out.group_spans.iter().filter(|s| s.rows.len() > 1).collect();
         assert!(!spans.is_empty(), "a wrapped quantifier bracket must report one span per row: {out:#?}");
+    }
+
+    /// What the deepest-first paint order in `mod.rs::rows` rests on: an outer
+    /// bracket may paint over an inner one only because it covers it. Paint
+    /// order itself needs a rendered frame to observe; the containment it
+    /// assumes does not, and is the half that can drift silently.
+    #[test]
+    fn an_outer_group_covers_the_one_inside_it_on_every_row_they_share() {
+        let mut toks = vec![
+            tok(TokenKind::GroupOpen { is_or: false }, 1),
+            tok(TokenKind::Pill { text: "x".into() }, 1),
+            tok(TokenKind::GroupOpen { is_or: true }, 2),
+        ];
+        toks.extend((0..3).map(|_| tok(TokenKind::Pill { text: "x".into() }, 2)));
+        toks.push(tok(TokenKind::GroupClose, 2));
+        toks.push(tok(TokenKind::Pill { text: "x".into() }, 1));
+        toks.push(tok(TokenKind::GroupClose, 1));
+        toks.push(tok(TokenKind::Caret, 0));
+        let widths = vec![8.0, 100.0, 8.0, 100.0, 100.0, 100.0, 8.0, 100.0, 8.0, 10.0];
+        let out = lay_out(&toks, &widths, 250.0, &cfg());
+
+        let outer = out.group_spans.iter().find(|s| s.open_index == 0).expect("the outer span");
+        let inner = out.group_spans.iter().find(|s| s.open_index == 2).expect("the inner span");
+        assert!(inner.rows.len() > 1, "the fixture must wrap, or one row proves nothing: {out:#?}");
+        for (row, inner_rect) in &inner.rows {
+            let outer_rect = outer
+                .rows
+                .iter()
+                .find(|(r, _)| r == row)
+                .map(|(_, rect)| *rect)
+                .unwrap_or_else(|| panic!("the outer group must touch row {row} too: {out:#?}"));
+            assert!(
+                outer_rect.contains_rect(*inner_rect),
+                "row {row}: outer {outer_rect:?} does not cover inner {inner_rect:?}"
+            );
+        }
     }
 
     #[test]

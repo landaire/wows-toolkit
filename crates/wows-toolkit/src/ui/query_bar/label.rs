@@ -18,8 +18,8 @@ use crate::db::index::query_ast::RosterField;
 use crate::db::index::query_ast::RosterTerm;
 use crate::db::index::query_ast::ShipClass;
 use crate::db::index::query_ast::Value;
-// Only used by the test module's `sample_value`, reached through `use super::*`.
-#[allow(unused_imports)]
+// Reached by the test module's `sample_value` through `use super::*`.
+#[cfg(test)]
 use crate::db::index::query_ast::ValueKind;
 use crate::db::index::rows::IndexSource;
 use crate::db::index::rows::MatchOutcome;
@@ -34,7 +34,7 @@ pub struct NameCache {
     pub players: HashMap<AccountId, String>,
     pub sources: Vec<IndexSource>,
     /// The app's active locale, same value the Search tab reads from
-    /// `settings.app.locale` and threads into `chip_pill_label`. `None` (the
+    /// `settings.app.locale` and threads in here every frame. `None` (the
     /// default) formats numbers as en-US, matching `separate_number`'s own default.
     pub locale: Option<String>,
 }

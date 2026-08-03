@@ -36,13 +36,21 @@ enum Wanted {
 ///
 /// The preference list is tried first and the field's own list is the fallback,
 /// so a field whose operator set changes yields something the field accepts
-/// rather than a term that prints one way and reparses another.
+/// rather than a term that prints one way and reparses another. There is no
+/// hand-picked last resort: naming an `Op` here is exactly what this module
+/// exists to stop, and chaining the field's own list already makes the fallback
+/// its first entry.
 fn seed_op(allowed: &'static [Op], wanted: Wanted) -> Op {
     let preferred: &[Op] = match wanted {
         Wanted::Equality => &[Op::Is, Op::Equals, Op::Eq],
         Wanted::Substring => &[Op::Contains],
     };
-    preferred.iter().chain(allowed).copied().find(|op| allowed.contains(op)).unwrap_or(Op::Contains)
+    preferred
+        .iter()
+        .chain(allowed)
+        .copied()
+        .find(|op| allowed.contains(op))
+        .expect("every field allows at least one operator")
 }
 
 fn match_term(field: MatchField, wanted: Wanted, value: Value) -> MatchExpr {
