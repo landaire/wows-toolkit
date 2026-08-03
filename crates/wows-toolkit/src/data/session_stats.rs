@@ -453,15 +453,18 @@ impl PrStats {
     }
 }
 
+/// A ship's localized display name from the provider, or `None` when there is
+/// no provider or it cannot name the ship. Callers that have another source to
+/// fall back on need to tell those two cases apart.
+pub fn try_resolve_ship_name(ship_id: GameParamId, provider: Option<&GameMetadataProvider>) -> Option<String> {
+    let provider = provider?;
+    let param = provider.game_param_by_id(ship_id)?;
+    provider.localized_name_from_param(&param)
+}
+
 /// Resolve a ship's display name from the provider, falling back to ID.
 pub fn resolve_ship_name(ship_id: GameParamId, provider: Option<&GameMetadataProvider>) -> String {
-    if let Some(provider) = provider
-        && let Some(param) = provider.game_param_by_id(ship_id)
-        && let Some(name) = provider.localized_name_from_param(&param)
-    {
-        return name;
-    }
-    format!("[{ship_id}]")
+    try_resolve_ship_name(ship_id, provider).unwrap_or_else(|| format!("[{ship_id}]"))
 }
 
 /// Aggregated session statistics across multiple replays

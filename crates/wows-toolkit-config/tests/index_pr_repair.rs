@@ -238,13 +238,36 @@ async fn a_reindex_that_carries_no_rating_keeps_the_stored_one() {
     assert_eq!(stored_vehicle_pr(&pool, 1, 7).await, Some(1200.0), "the roster row's stored rating survived");
 }
 
+/// A rebuilt report always recomputes its rating against whatever expected
+/// values are loaded today, so every re-index carries a number. If that number
+/// won, one "Index all replays" would restamp the whole database and the same
+/// battle would report a different rating month to month.
 #[tokio::test]
-async fn a_reindex_that_carries_a_rating_writes_it() {
+async fn a_reindex_that_carries_a_rating_does_not_restamp_the_stored_one() {
     let pool = mem_pool().await;
     let src = source(&pool).await;
     query::upsert_match(&pool, &a_match(1)).await.unwrap();
     query::upsert_record(&pool, &a_record(1, src, Some(1500.0))).await.unwrap();
     query::upsert_vehicles(&pool, &[a_vehicle(1, 7, Some(1200.0))]).await.unwrap();
+
+    // Today's expected values would give this battle a different number.
+    query::upsert_record(&pool, &a_record(1, src, Some(1600.0))).await.unwrap();
+    query::upsert_vehicles(&pool, &[a_vehicle(1, 7, Some(1300.0))]).await.unwrap();
+
+    assert_eq!(stored_record_pr(&pool, 1).await, Some(1500.0), "the record kept the rating it was first given");
+    assert_eq!(stored_vehicle_pr(&pool, 1, 7).await, Some(1200.0), "the roster row kept its original rating");
+}
+
+/// Old-wins must not mean nothing is ever written: a row that has no rating
+/// still takes the one a re-index brings, which is the arm `fill_missing_pr`
+/// populates.
+#[tokio::test]
+async fn a_reindex_fills_a_row_that_has_no_rating() {
+    let pool = mem_pool().await;
+    let src = source(&pool).await;
+    query::upsert_match(&pool, &a_match(1)).await.unwrap();
+    query::upsert_record(&pool, &a_record(1, src, None)).await.unwrap();
+    query::upsert_vehicles(&pool, &[a_vehicle(1, 7, None)]).await.unwrap();
 
     query::upsert_record(&pool, &a_record(1, src, Some(1600.0))).await.unwrap();
     query::upsert_vehicles(&pool, &[a_vehicle(1, 7, Some(1300.0))]).await.unwrap();

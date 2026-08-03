@@ -332,6 +332,12 @@ pub async fn repair_missing_pr(
     pool: SqlitePool,
     pr_data: std::sync::Arc<RwLock<PersonalRatingData>>,
 ) -> Result<u64, IndexError> {
+    // Checked before the scans: without expected values every gap would be
+    // read only to compute nothing from it.
+    if !pr_data.read().is_loaded() {
+        return Ok(0);
+    }
+
     let gaps = query::pr_gaps(&pool).await?;
     if gaps.is_empty() {
         return Ok(0);
@@ -341,9 +347,6 @@ pub async fn repair_missing_pr(
     // be held across the write below.
     let repairs: Vec<PrRepair> = {
         let pr = pr_data.read();
-        if !pr.is_loaded() {
-            return Ok(0);
-        }
         gaps.iter()
             .filter_map(|gap| single_battle_pr(&pr, &gap.inputs).map(|pr| PrRepair { target: gap.target, pr }))
             .collect()

@@ -47,9 +47,11 @@ use super::rows::VehicleRelation;
 /// `indexed_vehicle` could fan one hit out into a row per matching roster row;
 /// a scalar subquery is one value per outer row by construction, so the result
 /// count is unchanged whatever the roster holds. It is keyed on the chosen
-/// record's own `self_ship_id` rather than on `relation = 'self'`: the roster's
-/// relations belong to whichever replay indexed the arena first, which is not
-/// necessarily the record this hit picked.
+/// record's own `self_ship_id` rather than on `relation = 'self'`: the roster
+/// holds one relation per player, written by whichever replay indexed the arena
+/// last, which is not necessarily the record this hit picked. Nor is it keyed on
+/// `self_account_id`, which is absent on a spectator recording -- exactly the
+/// kind of row that most needs naming.
 const MATCH_HIT_COLUMNS: &str = "m.arena_id, m.timestamp, m.map, m.game_mode, m.game_type, m.match_group, \
      m.version_build, r.source_id, r.outcome, r.self_account_id, r.self_ship_id, \
      (SELECT v.ship_name FROM indexed_vehicle v \
@@ -336,12 +338,18 @@ pub async fn upsert_match(pool: &SqlitePool, m: &ObjectiveMatch) -> Result<(), I
     Ok(())
 }
 
-/// `pr` is coalesced rather than assigned: a stored rating is a point-in-time
-/// value, and a re-index that ran before the expected values were available
-/// carries `None` for it. Assigning would throw the stored number away and
-/// leave the row waiting on another repair against a later set of expected
-/// values, which is how the same battle ends up reporting two different
-/// ratings.
+/// `pr` is `COALESCE(pr, ?)`, old-wins: a stored rating is a point-in-time
+/// value and re-indexing must not restamp it. A rebuilt report always
+/// recomputes its rating against whatever expected values are loaded today, so
+/// a new-wins assignment would let one "Index all replays" rewrite every rating
+/// in the database, and the same battle would report a different number month
+/// to month. The fallback arm still fills a NULL from a re-index that carries a
+/// number, and the INSERT arm is unaffected.
+///
+/// Cementing a stored value is safe because a rating can only exist where the
+/// parse had server results: without them `actual_damage` is `None` and
+/// `populate_personal_ratings` bails, so no rating computed against an unknown
+/// outcome can be made permanent here.
 pub async fn upsert_vehicles(pool: &SqlitePool, rows: &[IndexedVehicleRow]) -> Result<(), IndexError> {
     let mut tx = pool.begin().await?;
     for v in rows {
@@ -354,7 +362,7 @@ pub async fn upsert_vehicles(pool: &SqlitePool, rows: &[IndexedVehicleRow]) -> R
              ON CONFLICT(arena_id, account_id, ship_id) DO UPDATE SET \
                player_name=?3, clan=?4, realm=?5, ship_index=?7, ship_name=?8, nation=?9, species=?10, \
                tier=?11, relation=?12, division_id=?13, survived=?14, damage=?15, kills=?16, spotting=?17, \
-               potential=?18, received=?19, pr=COALESCE(?20, pr), is_test_ship=?21, disconnected=?22, \
+               potential=?18, received=?19, pr=COALESCE(pr, ?20), is_test_ship=?21, disconnected=?22, \
                is_stream_sniper=?23, sniper_twitch_login=?24",
         )
         .bind(v.arena_id.raw())
@@ -438,7 +446,7 @@ pub async fn upsert_record(pool: &SqlitePool, r: &ReplayRecord) -> Result<(), In
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13) \
          ON CONFLICT(source_id, replay_path) DO UPDATE SET \
            arena_id=?1, file_mtime=?4, outcome=?5, self_account_id=?6, self_ship_id=?7, self_survived=?8, \
-           self_damage=?9, self_kills=?10, self_pr=COALESCE(?11, self_pr), results_available=?12, indexed_at=?13",
+           self_damage=?9, self_kills=?10, self_pr=COALESCE(self_pr, ?11), results_available=?12, indexed_at=?13",
     )
     .bind(r.arena_id.raw())
     .bind(r.source_id.0)
@@ -1060,10 +1068,13 @@ pub async fn search_by_ast(
 ///
 /// A row with no damage recorded is not a gap: the indexing path skips those
 /// too, and a rating computed from an absent damage figure would be a fiction.
-/// `is_win` comes from the record's own outcome for a record gap, and from the
-/// arena's chosen record for a roster gap -- the same record the search picker
-/// would pick, so a roster row is rated against the perspective the rest of the
-/// index presents it under.
+/// `is_win` comes from the record's own outcome for a record gap. A roster row
+/// is per-arena and has no record of its own, so it takes the outcome of the
+/// arena's record under this query's own picker: `file_mtime IS NOT NULL` then
+/// newest indexed, with no source scope. A scoped search applies that scope
+/// inside its picker as well, so the two agree only for an unscoped search --
+/// which is what a repair over the whole index is. A roster row rated under one
+/// perspective and read under another can disagree about which side won.
 pub async fn pr_gaps(pool: &SqlitePool) -> Result<Vec<PrGap>, IndexError> {
     let mut gaps = Vec::new();
 

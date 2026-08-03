@@ -342,8 +342,12 @@ pub struct WowsToolkitApp {
 
     /// Whether the pass that gives a rating to index rows that never got one
     /// has been started this run. Expected values can load twice in a session
-    /// (from disk, then from a fetch); one pass covers both, and running again
-    /// would only re-read rows the first pass already filled.
+    /// (from disk, then from a fetch); the second load has nothing new for the
+    /// pass to do, so one attempt is enough.
+    ///
+    /// A replay indexed between launch and that pass can still miss it and stay
+    /// unrated for the rest of the session. It is picked up by the next
+    /// session's pass, so the gap closes itself rather than persisting.
     #[serde(skip)]
     pr_repair_started: bool,
 

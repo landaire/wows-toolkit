@@ -13,7 +13,6 @@ use rust_i18n::t;
 use tokio::runtime::Runtime;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
-use wowsunpack::game_params::provider::GameMetadataProvider;
 
 use crate::app::ToolkitTabViewer;
 use crate::db::index::query;
@@ -398,28 +397,49 @@ fn collect_roster_ids(expr: &RosterExpr, ships: &mut Vec<GameParamId>, players: 
     }
 }
 
-/// The display name for a hit's self ship.
+/// The name stored on the roster row, when it names anything.
 ///
-/// The name stored at index time wins: it was written with the match's own
-/// build loaded, and that build's game data is frequently no longer installed
-/// by the time the match is searched. `provider` is the fallback for rows
-/// indexed before the name was carried, and a bracketed id the last resort when
-/// neither can name the ship.
-fn ship_display_name(hit: &MatchHit, provider: Option<&GameMetadataProvider>) -> Option<String> {
-    let ship_id = hit.self_ship_id?;
-    if let Some(stored) = hit.self_ship_name.as_ref().filter(|name| !name.is_empty()) {
-        return Some(stored.clone());
+/// Rejected when empty, and when it is the bare id `UiReport::refresh_translations`
+/// writes for a ship its own provider could not name: taking that would render a
+/// naked number in the cell for good, even once a provider that can name the ship
+/// is loaded.
+fn stored_ship_name(hit: &MatchHit, ship_id: GameParamId) -> Option<&str> {
+    let stored = hit.self_ship_name.as_deref()?;
+    if stored.is_empty() || stored == ship_id.to_string() {
+        return None;
     }
-    Some(crate::data::session_stats::resolve_ship_name(ship_id, provider))
+    Some(stored)
+}
+
+/// The display name for a hit's self ship, given whatever name the match's own
+/// build resolves for it (`live`) when that build's game data is loaded.
+///
+/// `live` wins. It is the same source every other surface names ships from, so
+/// preferring it keeps the tab in the app's current locale, while a stored name
+/// is frozen in whatever locale was active when the match was indexed. The
+/// stored name is the fallback for the case the whole fix exists for: a match
+/// whose build's game data is no longer installed. A bracketed id is the last
+/// resort when neither can name the ship.
+fn ship_display_name(hit: &MatchHit, live: Option<String>) -> Option<String> {
+    let ship_id = hit.self_ship_id?;
+    if let Some(live) = live {
+        return Some(live);
+    }
+    if let Some(stored) = stored_ship_name(hit, ship_id) {
+        return Some(stored.to_owned());
+    }
+    Some(format!("[{ship_id}]"))
 }
 
 impl ToolkitTabViewer<'_> {
     /// [`ship_display_name`] against the game data for the match's own build,
     /// when that build is loaded.
     fn search_ship_display_name(&self, hit: &MatchHit) -> Option<String> {
+        let ship_id = hit.self_ship_id?;
         let data = hit.version_build.and_then(|build| self.tab_state.wows_data_map.as_ref()?.get(build));
         let guard = data.as_ref().map(|d| d.read());
-        ship_display_name(hit, guard.as_ref().and_then(|g| g.game_metadata.as_deref()))
+        let provider = guard.as_ref().and_then(|g| g.game_metadata.as_deref());
+        ship_display_name(hit, crate::data::session_stats::try_resolve_ship_name(ship_id, provider))
     }
 
     pub fn build_search_tab(&mut self, ui: &mut egui::Ui) {
@@ -715,12 +735,21 @@ mod tests {
         }
     }
 
-    /// No provider stands in for the case the bug is about: a January replay
+    /// No live name stands in for the case the bug is about: a January replay
     /// whose build's game data is no longer installed.
     #[test]
     fn a_stored_name_is_shown_when_the_matchs_build_is_not_loaded() {
         let hit = a_hit(Some(GameParamId::from(4_074_649_424_u64)), Some("Smaland"));
         assert_eq!(ship_display_name(&hit, None).as_deref(), Some("Smaland"));
+    }
+
+    /// The stored name is frozen in the locale that was active when the match
+    /// was indexed. Every other surface re-localizes, so a loaded build has to
+    /// win or the tab drifts out of step with the rest of the app.
+    #[test]
+    fn a_loaded_build_outranks_the_stored_name() {
+        let hit = a_hit(Some(GameParamId::from(4_074_649_424_u64)), Some("Smaland"));
+        assert_eq!(ship_display_name(&hit, Some("Smolandia".into())).as_deref(), Some("Smolandia"));
     }
 
     #[test]
@@ -734,6 +763,15 @@ mod tests {
     #[test]
     fn an_empty_stored_name_is_not_treated_as_a_name() {
         let hit = a_hit(Some(GameParamId::from(4_074_649_424_u64)), Some(""));
+        assert_eq!(ship_display_name(&hit, None).as_deref(), Some("[4074649424]"));
+    }
+
+    /// `refresh_translations` stores a bare id when its own provider cannot name
+    /// the ship. Taking it would print a naked number that no later provider
+    /// could ever displace.
+    #[test]
+    fn a_stored_bare_id_is_not_treated_as_a_name() {
+        let hit = a_hit(Some(GameParamId::from(4_074_649_424_u64)), Some("4074649424"));
         assert_eq!(ship_display_name(&hit, None).as_deref(), Some("[4074649424]"));
     }
 
