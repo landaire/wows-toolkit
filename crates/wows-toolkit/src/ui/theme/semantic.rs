@@ -57,6 +57,21 @@ pub struct BracketColors {
     pub deep: Color32,
 }
 
+/// Blends `fg` `num`/`den` of the way over `bg`. Lets a derived chrome tone be
+/// written as what it is, a proportion of a role colour over a surface, instead
+/// of a hex literal that silently stops matching when either end is retuned.
+const fn blend(fg: Color32, bg: Color32, num: u16, den: u16) -> Color32 {
+    const fn mix(f: u8, b: u8, num: u16, den: u16) -> u8 {
+        ((f as u16 * num + b as u16 * (den - num) + den / 2) / den) as u8
+    }
+    Color32::from_rgb(mix(fg.r(), bg.r(), num, den), mix(fg.g(), bg.g(), num, den), mix(fg.b(), bg.b(), num, den))
+}
+
+/// `error`, named so `blend` can refer to it before the `SemanticColors`
+/// literal that also assigns it to the `error` field exists.
+const DARK_ERROR: Color32 = Color32::from_rgb(0xF2, 0x72, 0x7C);
+const LIGHT_ERROR: Color32 = Color32::from_rgb(0xA8, 0x1F, 0x2A);
+
 /// Every meaning the UI attaches to a colour.
 pub struct SemanticColors {
     pub win: Color32,
@@ -94,6 +109,18 @@ pub struct SemanticColors {
     pub chat: ChatColors,
     pub armor: ArmorColors,
     pub bracket: BracketColors,
+    /// Fill for a dock tab flagging that it needs attention: `error` blended a
+    /// tenth of the way over `SURFACE`. The tab is tinted rather than filled so
+    /// the active tab keeps the only full-strength fill in the strip.
+    ///
+    /// Like `bracket`, this is chrome rather than text on a surface, so it is
+    /// deliberately absent from the `roles()` list the contrast tests walk:
+    /// that list asserts a colour is readable *as text on* the app's surfaces,
+    /// which is the wrong question for a fill.
+    pub alert_tab_fill: Color32,
+    /// Outline for that tab: the same blend at half strength, which carries the
+    /// mark when the fill alone is too dim to catch the eye.
+    pub alert_tab_outline: Color32,
 }
 
 pub const DARK: SemanticColors = SemanticColors {
@@ -101,7 +128,7 @@ pub const DARK: SemanticColors = SemanticColors {
     loss: Color32::from_rgb(0xEA, 0x70, 0x78),
     draw: Color32::from_rgb(0xCF, 0xC8, 0xB6),
     warn: Color32::from_rgb(0xE8, 0xA5, 0x4A),
-    error: Color32::from_rgb(0xF2, 0x72, 0x7C),
+    error: DARK_ERROR,
     ok: Color32::from_rgb(0x6F, 0xD9, 0x8A),
     text_strong: Color32::from_rgb(0xE8, 0xE5, 0xDC),
     text_dim: Color32::from_rgb(0x7C, 0x7C, 0x6E),
@@ -129,6 +156,8 @@ pub const DARK: SemanticColors = SemanticColors {
         ricochet: Color32::from_rgb(0x7F, 0xB4, 0xE8),
         shatter: Color32::from_rgb(0xA9, 0xA4, 0x9A),
     },
+    alert_tab_fill: blend(DARK_ERROR, palette::dark::SURFACE, 1, 10),
+    alert_tab_outline: blend(DARK_ERROR, palette::dark::SURFACE, 1, 2),
 };
 
 pub const LIGHT: SemanticColors = SemanticColors {
@@ -136,7 +165,7 @@ pub const LIGHT: SemanticColors = SemanticColors {
     loss: Color32::from_rgb(0xB0, 0x1F, 0x2B),
     draw: Color32::from_rgb(0x5F, 0x5C, 0x52),
     warn: Color32::from_rgb(0x8A, 0x4B, 0x00),
-    error: Color32::from_rgb(0xA8, 0x1F, 0x2A),
+    error: LIGHT_ERROR,
     ok: Color32::from_rgb(0x10, 0x6C, 0x34),
     text_strong: Color32::from_rgb(0x0A, 0x0A, 0x08),
     text_dim: Color32::from_rgb(0x78, 0x76, 0x6F),
@@ -164,6 +193,8 @@ pub const LIGHT: SemanticColors = SemanticColors {
         ricochet: Color32::from_rgb(0x1B, 0x5F, 0xA8),
         shatter: Color32::from_rgb(0x5F, 0x5C, 0x52),
     },
+    alert_tab_fill: blend(LIGHT_ERROR, palette::light::SURFACE, 1, 10),
+    alert_tab_outline: blend(LIGHT_ERROR, palette::light::SURFACE, 1, 2),
 };
 
 /// Resolve the semantic set for the active theme.

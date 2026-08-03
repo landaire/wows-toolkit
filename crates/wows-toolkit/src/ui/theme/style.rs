@@ -2,7 +2,12 @@
 //! supplies its own `Visuals`. Corners carry a slight radius graded by how
 //! much a surface floats or responds; structure (panels, tables, separators)
 //! stays square. Active states raise to a hot surface with bright text and an
-//! accent border rather than inverting to a filled block.
+//! accent border rather than inverting to a filled block. That description is
+//! for `Visuals::widgets`; the dock tab strip built here deliberately does not
+//! raise its active state, see `dock_style`. The module also owns
+//! `paint_active_tab_marker`, a painting function rather than a style value:
+//! `egui_dock` has no style field for the marker bar, and `palette` is private
+//! to `theme`, so `app.rs` cannot resolve the colour itself.
 
 use egui::Color32;
 use egui::CornerRadius;
@@ -297,8 +302,10 @@ pub fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
     style.tab.hovered.text_color = text_bright;
     style.tab.hovered.outline_color = Color32::TRANSPARENT;
     // egui_dock swaps to a *_with_kb_focus variant the moment a tab holds
-    // keyboard focus. Left underived they lose the raised fill, so mirror
-    // each base state and mark keyboard focus with the accent outline.
+    // keyboard focus, and from_egui derives those from egui's widget visuals
+    // rather than from the fills set above. Mirror each base state so the swap
+    // is invisible; an inactive tab additionally takes the accent outline,
+    // which is the only marker a keyboard user gets there.
     style.tab.active_with_kb_focus = style.tab.active.clone();
     style.tab.focused_with_kb_focus = style.tab.focused.clone();
     style.tab.inactive_with_kb_focus = style.tab.inactive.clone();
@@ -328,12 +335,18 @@ pub fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
 /// active treatment and carry the mark in the label alone.
 pub fn alert_tab_style(global_style: &egui_dock::TabStyle, theme: egui::Theme) -> egui_dock::TabStyle {
     let (fill, outline, accent, error) = match theme {
-        egui::Theme::Dark => {
-            (palette::dark::TAB_ALERT, palette::dark::TAB_ALERT_BORDER, palette::dark::ACCENT, semantic::DARK.error)
-        }
-        egui::Theme::Light => {
-            (palette::light::TAB_ALERT, palette::light::TAB_ALERT_BORDER, palette::light::ACCENT, semantic::LIGHT.error)
-        }
+        egui::Theme::Dark => (
+            semantic::DARK.alert_tab_fill,
+            semantic::DARK.alert_tab_outline,
+            palette::dark::ACCENT,
+            semantic::DARK.error,
+        ),
+        egui::Theme::Light => (
+            semantic::LIGHT.alert_tab_fill,
+            semantic::LIGHT.alert_tab_outline,
+            palette::light::ACCENT,
+            semantic::LIGHT.error,
+        ),
     };
 
     let mut style = global_style.clone();
@@ -470,6 +483,7 @@ mod tests {
             assert!(!s.tab.hline_below_active_tab_name, "{name} hline_below_active_tab_name");
             assert_eq!(s.tab.tab_body.stroke, Stroke::NONE, "{name} tab_body.stroke");
             assert_eq!(s.tab.tab_body.bg_fill, panel, "{name} tab_body.bg_fill");
+            assert_eq!(s.tab.active.bg_fill, s.tab.tab_body.bg_fill, "{name} active tab merges with its body");
             assert_eq!(s.separator.color_dragged, accent, "{name} separator.color_dragged");
             assert_eq!(
                 s.overlay.selection_color,
@@ -481,16 +495,18 @@ mod tests {
 
     #[test]
     fn alert_tab_style_is_legible_and_never_outranks_the_active_tab() {
+        use crate::ui::theme::contrast::CHROME_LINE_FLOOR;
         use crate::ui::theme::contrast::CONTRAST_FLOOR;
         use crate::ui::theme::contrast::contrast_ratio;
 
-        for (name, egui_style, theme, fill, outline, accent, error) in [
+        for (name, egui_style, theme, surface, fill, outline, accent, error) in [
             (
                 "dark",
                 dark_style(),
                 egui::Theme::Dark,
-                palette::dark::TAB_ALERT,
-                palette::dark::TAB_ALERT_BORDER,
+                palette::dark::SURFACE,
+                semantic::DARK.alert_tab_fill,
+                semantic::DARK.alert_tab_outline,
                 palette::dark::ACCENT,
                 semantic::DARK.error,
             ),
@@ -498,14 +514,21 @@ mod tests {
                 "light",
                 light_style(),
                 egui::Theme::Light,
-                palette::light::TAB_ALERT,
-                palette::light::TAB_ALERT_BORDER,
+                palette::light::SURFACE,
+                semantic::LIGHT.alert_tab_fill,
+                semantic::LIGHT.alert_tab_outline,
                 palette::light::ACCENT,
                 semantic::LIGHT.error,
             ),
         ] {
             let global = dock_style(&egui_style).tab;
             let s = alert_tab_style(&global, theme);
+
+            let outline_ratio = contrast_ratio(outline, surface);
+            assert!(
+                outline_ratio >= CHROME_LINE_FLOOR,
+                "{name} alert outline {outline:?} on surface {surface:?} only reached {outline_ratio}"
+            );
 
             // Hover moves the outline, not the fill: a deeper tint drops the
             // light theme's error label under the contrast floor.
