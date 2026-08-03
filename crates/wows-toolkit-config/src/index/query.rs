@@ -14,6 +14,7 @@ use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
 use wows_core::game_types::GameParamId;
 
+use super::query_ast::MatchExpr;
 use super::query_model::Chip;
 use super::query_model::Connector;
 use super::query_model::Field;
@@ -21,6 +22,8 @@ use super::query_model::Op;
 use super::query_model::Query;
 use super::query_model::Subject;
 use super::query_model::Value;
+use super::query_sql::CompileCtx;
+use super::query_sql::push_match_expr;
 use super::rows::ClanCorrection;
 use super::rows::DivisionMate;
 use super::rows::DivisionMateEncounter;
@@ -979,6 +982,33 @@ pub async fn search_by_query(pool: &SqlitePool, query: &Query, limit: i64) -> Re
     );
     push_query_where(&mut qb, query);
     qb.push(" ORDER BY m.timestamp DESC LIMIT ").push_bind(limit);
+    let rows = qb.build().fetch_all(pool).await?;
+    rows.iter().map(row_to_match_hit).collect()
+}
+
+/// Run a query built from the AST. Mirrors `search_by_query`: the same per-arena
+/// record picker, the same ordering, the same row mapping.
+///
+/// Fetches `limit + 1` rows so the caller can distinguish "exactly `limit`
+/// results" from "at least `limit`" and say so, instead of reporting a
+/// truncated count as a total.
+pub async fn search_by_ast(
+    pool: &SqlitePool,
+    expr: &MatchExpr,
+    ctx: &CompileCtx<'_>,
+    limit: i64,
+) -> Result<Vec<MatchHit>, IndexError> {
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "SELECT m.arena_id, m.timestamp, m.map, m.game_mode, m.game_type, m.match_group, m.version_build, \
+                r.source_id, r.outcome, r.self_account_id, r.self_ship_id, r.self_survived, r.self_damage, \
+                r.self_kills, r.self_pr, r.results_available, r.replay_path, r.file_mtime \
+         FROM indexed_match m \
+         JOIN replay_record r ON r.record_id = ( \
+            SELECT rr.record_id FROM replay_record rr WHERE rr.arena_id = m.arena_id \
+            ORDER BY (rr.file_mtime IS NOT NULL) DESC, rr.indexed_at DESC LIMIT 1 ) WHERE ",
+    );
+    push_match_expr(&mut qb, expr, ctx);
+    qb.push(" ORDER BY m.timestamp DESC LIMIT ").push_bind(limit + 1);
     let rows = qb.build().fetch_all(pool).await?;
     rows.iter().map(row_to_match_hit).collect()
 }
