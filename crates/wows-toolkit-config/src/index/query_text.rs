@@ -96,6 +96,22 @@ impl<I: Stream> ParserError<I> for QueryErr {
     fn into_inner(self) -> Result<Self::Inner, Self> {
         Ok(self)
     }
+
+    /// Union the branches an `alt` tried instead of keeping only the last, so
+    /// the expected-set names every alternative that could have matched here.
+    fn or(mut self, other: Self) -> Self {
+        for label in other.labels {
+            if !self.labels.contains(&label) {
+                self.labels.push(label);
+            }
+        }
+        // A branch that got far enough to diagnose the problem outranks a bare
+        // structural failure from a branch that did not.
+        if self.inner.is_none() {
+            self.inner = other.inner;
+        }
+        self
+    }
 }
 
 impl<I: Stream> AddContext<I, StrContext> for QueryErr {
@@ -110,6 +126,14 @@ impl<I: Stream> AddContext<I, StrContext> for QueryErr {
         self
     }
 }
+
+/// What may start an operand, for failures that carry no label of their own
+/// (a trailing `and`, say, where the parse dies at end-of-input). Phrased the
+/// same way as the `StrContext::Label`s so a message never mixes styles.
+const FALLBACK_EXPECTED: [&str; 3] = [LABEL_TERM, LABEL_GROUP, "not"];
+
+const LABEL_TERM: &str = "a filter term";
+const LABEL_GROUP: &str = "a parenthesised group";
 
 /// Parse a query string into a `MatchExpr`. An empty or whitespace-only input
 /// is the empty conjunction, which matches everything.
@@ -129,7 +153,7 @@ pub fn parse_query(input: &str) -> Result<MatchExpr, QueryParseError> {
             if let Some(unbalanced) = unbalanced_paren(input) {
                 return Err(unbalanced);
             }
-            let expected = if err.labels.is_empty() { vec!["a filter term", "(", "not"] } else { err.labels };
+            let expected = if err.labels.is_empty() { FALLBACK_EXPECTED.to_vec() } else { err.labels };
             Err(QueryParseError::new(offset..input.len(), ParseErrorKind::Unexpected { expected }))
         }
     }
@@ -194,8 +218,8 @@ fn unary(input: &mut Input<'_>) -> ModalResult<MatchExpr, QueryErr> {
 
 fn primary(input: &mut Input<'_>) -> ModalResult<MatchExpr, QueryErr> {
     alt((
-        delimited(('(', ws), or_expr, (ws, ')')).context(StrContext::Label("parenthesised group")),
-        term.context(StrContext::Label("filter term")),
+        delimited(('(', ws), or_expr, (ws, ')')).context(StrContext::Label(LABEL_GROUP)),
+        term.context(StrContext::Label(LABEL_TERM)),
     ))
     .parse_next(input)
 }
@@ -228,7 +252,7 @@ fn term_text<'a>(input: &mut Input<'a>) -> ModalResult<&'a str, QueryErr> {
 }
 
 /// The byte offset at which a term's leading word ends: the first unquoted
-/// whitespace or paren, or the end of input.
+/// terminator, or the end of input.
 fn word_end(s: &str) -> usize {
     let mut in_quotes = false;
     for (i, c) in s.char_indices() {
@@ -236,11 +260,18 @@ fn word_end(s: &str) -> usize {
             in_quotes = !in_quotes;
             continue;
         }
-        if !in_quotes && (c.is_whitespace() || c == '(' || c == ')') {
+        if !in_quotes && is_term_boundary(c) {
             return i;
         }
     }
     s.len()
+}
+
+/// What ends a term. `|` is here because it is a spelling of `or`, so it has to
+/// separate its operands the way whitespace does; inside quotes it is ordinary
+/// text and `word_end` never consults this.
+fn is_term_boundary(c: char) -> bool {
+    c.is_whitespace() || c == '(' || c == ')' || c == '|'
 }
 
 /// The length of a `<space> is-set` / `<space> is-not-set` tail, which belongs
@@ -276,11 +307,7 @@ fn keyword(word: &'static str) -> impl FnMut(&mut Input<'_>) -> ModalResult<(), 
     move |input: &mut Input<'_>| {
         let s: &str = input;
         let matches_prefix = s.get(..word.len()).is_some_and(|head| head.eq_ignore_ascii_case(word));
-        let boundary = s
-            .get(word.len()..)
-            .and_then(|rest| rest.chars().next())
-            .map(|c| c.is_whitespace() || c == '(' || c == ')')
-            .unwrap_or(true);
+        let boundary = s.get(word.len()..).and_then(|rest| rest.chars().next()).map(is_term_boundary).unwrap_or(true);
         if matches_prefix && boundary {
             input.next_slice(word.len());
             Ok(())
@@ -684,6 +711,58 @@ mod tests {
         let word = parse_query("not outcome:win").unwrap();
         assert!(matches!(word, Expr::Not(_)), "got {word:?}");
         assert_eq!(parse_query("-outcome:win").unwrap(), word);
+    }
+
+    /// A flipped precedence would produce `Not(All([a, b]))`, which this shape
+    /// check rejects. `not_binds_tightest_and_accepts_a_dash` cannot see the
+    /// difference because its input has no `and`.
+    #[test]
+    fn not_binds_tighter_than_and() {
+        match parse_query("not outcome:win and map:ocean").unwrap() {
+            Expr::All(cs) => {
+                assert_eq!(cs.len(), 2);
+                assert!(matches!(cs[0], Expr::Not(_)), "not must bind to the first term only, got {:?}", cs[0]);
+                assert!(matches!(cs[1], Expr::Leaf(_)), "got {:?}", cs[1]);
+            }
+            other => panic!("expected All at the top, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_pipe_is_or_at_every_spacing() {
+        let spaced = parse_query("outcome:win or map:ocean").unwrap();
+        for input in
+            ["outcome:win | map:ocean", "outcome:win |map:ocean", "outcome:win| map:ocean", "outcome:win|map:ocean"]
+        {
+            assert_eq!(parse_query(input).unwrap(), spaced, "{input:?} must be a disjunction");
+        }
+    }
+
+    #[test]
+    fn a_pipe_inside_quotes_stays_in_the_value() {
+        assert_eq!(one("map:\"a|b\""), MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("a|b".into())));
+    }
+
+    #[test]
+    fn a_structural_failure_names_every_alternative_it_tried() {
+        // Both `alt` branches in `primary` backtrack here, so both labels must
+        // survive rather than the later one replacing the earlier.
+        let err = parse_query("and").unwrap_err();
+        match &err.kind {
+            ParseErrorKind::Unexpected { expected } => {
+                assert_eq!(*expected, vec!["a parenthesised group", "a filter term"]);
+            }
+            other => panic!("got {other:?}"),
+        }
+
+        // Dying at end-of-input carries no label, so the fallback set is used.
+        let err = parse_query("outcome:win and").unwrap_err();
+        match &err.kind {
+            ParseErrorKind::Unexpected { expected } => {
+                assert_eq!(*expected, vec!["a filter term", "a parenthesised group", "not"]);
+            }
+            other => panic!("got {other:?}"),
+        }
     }
 
     #[test]
