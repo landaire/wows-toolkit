@@ -147,6 +147,8 @@ fn push_text(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, s: &str) {
     }
 }
 
+/// A bare word. `m.map` is on the outer row, so it compares directly; the three
+/// roster columns need their own arena-correlated EXISTS.
 fn push_free_text(qb: &mut QueryBuilder<'_, Sqlite>, needle: &str) {
     qb.push("(");
     push_text(qb, "m.map", Op::Contains, needle);
@@ -526,11 +528,10 @@ mod tests {
     #[test]
     fn free_text_searches_map_player_clan_and_ship_name() {
         let sql = sql_for(&Expr::Leaf(MatchTerm::FreeText("yamato".into())));
-        assert!(sql.contains("LOWER(m.map)"), "got {sql}");
-        assert!(sql.contains("v.player_name"), "got {sql}");
-        assert!(sql.contains("v.clan"), "got {sql}");
-        assert!(sql.contains("v.ship_name"), "got {sql}");
-        assert!(sql.contains("EXISTS ("), "roster columns need their own EXISTS: {sql}");
+        assert_eq!(
+            sql,
+            "(LOWER(m.map) LIKE '%' || LOWER(?) || '%' OR EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND (LOWER(v.player_name) LIKE '%' || LOWER(?) || '%' OR LOWER(v.clan) LIKE '%' || LOWER(?) || '%' OR LOWER(v.ship_name) LIKE '%' || LOWER(?) || '%')))"
+        );
         assert!(!sql.contains("yamato"), "needle was inlined into SQL: {sql}");
     }
 }
