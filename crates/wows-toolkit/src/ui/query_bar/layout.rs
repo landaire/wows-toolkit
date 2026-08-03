@@ -172,7 +172,7 @@ mod tests {
     // place every token exactly once (satisfying the pinned test above) while
     // silently skipping row 0, if it wraps on a too-wide token even when the
     // cursor is already at the row start. Verified to catch that: reinstating
-    // the unconditional wrap check (dropping the `at_row_start` guard on
+    // the unconditional wrap check (dropping the `is_first_token` guard on
     // whether to check at all, while still using it to pick the indent)
     // leaves this failing with `out.placed[0].row == 1` while every pinned
     // test above still passes.

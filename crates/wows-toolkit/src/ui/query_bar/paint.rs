@@ -216,7 +216,7 @@ mod tests {
                 apart >= SURFACE_CONTRAST_FLOOR,
                 "{theme} the two bracket levels are {apart:.3} apart, needs {SURFACE_CONTRAST_FLOOR}"
             );
-            assert!(outer.width > inner.width, "{theme} nesting must lighten, not only dim");
+            assert!(outer.width > inner.width, "{theme} nesting must thin the stroke, not only dim it");
             assert!(
                 contrast_ratio(outer.color, ground) > contrast_ratio(inner.color, ground),
                 "{theme} nesting must recede from the bar, not advance toward it"
