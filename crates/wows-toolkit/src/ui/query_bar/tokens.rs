@@ -302,31 +302,53 @@ mod tests {
         // leaf just like the bracketed branch does. Task 6 resolves a clicked
         // pill through this path, so a regression here would silently act on
         // the wrong node.
+        //
+        // The roster term is nested under a sibling (`Expr::All([win(), ..])`)
+        // rather than placed at the tree's root: at the root, `toks[0].path`
+        // is `[]` and `node_at`'s empty-path base case returns `Some(expr)`
+        // without ever inspecting the tree, so the assertion would hold no
+        // matter what path the sugar branch actually computed.
         let pred = Expr::Leaf(RosterTerm {
             field: crate::db::index::query_ast::RosterField::Relation,
             op: Op::Is,
             value: Value::Relation(crate::db::index::rows::VehicleRelation::Enemy),
         });
-        let expr: MatchExpr = Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred });
+        let roster_leaf: MatchExpr = Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred });
+        let expr = Expr::All(vec![win(), roster_leaf.clone()]);
         let toks = tokenize(&expr, &NameCache::default());
-        assert!(matches!(toks[0].kind, TokenKind::Pill { .. }), "got {toks:#?}");
-        assert_eq!(node_at(&expr, &toks[0].path), Some(&expr), "a sugar-collapsed path resolves to the Roster leaf");
+        let pill = toks
+            .iter()
+            .find(|t| matches!(t.kind, TokenKind::Pill { .. }) && t.path == vec![1])
+            .unwrap_or_else(|| panic!("expected the roster pill at path [1], got {toks:#?}"));
+        assert_eq!(
+            node_at(&expr, &pill.path),
+            Some(&roster_leaf),
+            "a sugar-collapsed path resolves to the Roster leaf"
+        );
     }
 
     #[test]
     fn a_roster_predicate_path_resolves_back_to_the_quantifier_leaf() {
+        // Nested under a sibling for the same reason as the sugar-collapsed
+        // case above: at the tree's root, `node_at`'s `Expr::Leaf(_) =>
+        // Some(expr)` arm fires unconditionally regardless of the path, so a
+        // root-level fixture cannot distinguish a correct path from a wrong one.
         let pred = Expr::Leaf(RosterTerm {
             field: crate::db::index::query_ast::RosterField::Tier,
             op: Op::Eq,
             value: Value::Int(10),
         });
-        let expr: MatchExpr =
+        let roster_leaf: MatchExpr =
             Expr::Leaf(MatchTerm::Roster { quant: Quant::Count(crate::db::index::query_ast::CmpOp::Ge, 2), pred });
+        let expr = Expr::All(vec![win(), roster_leaf.clone()]);
         let toks = tokenize(&expr, &NameCache::default());
-        let roster_pill = toks.iter().find(|t| matches!(t.kind, TokenKind::Pill { .. })).expect("a roster pill token");
+        let roster_pill = toks
+            .iter()
+            .find(|t| matches!(t.kind, TokenKind::Pill { .. }) && t.path.starts_with(&[1]))
+            .expect("a roster pill token");
         assert_eq!(
             node_at(&expr, &roster_pill.path),
-            Some(&expr),
+            Some(&roster_leaf),
             "a roster-internal path resolves to the Roster leaf"
         );
     }
