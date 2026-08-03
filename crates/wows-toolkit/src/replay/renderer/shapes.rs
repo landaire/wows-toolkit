@@ -70,7 +70,7 @@ pub(super) fn render_annotation(
     crate::replay::minimap_view::shapes::render_annotation(
         ann,
         transform,
-        Some(&textures.ship_icons),
+        Some(&textures.icons.ship_icons),
         painter,
         map_space_size,
     );
@@ -96,7 +96,7 @@ pub(super) fn render_tool_preview(
         color,
         stroke_width,
         transform,
-        Some(&textures.ship_icons),
+        Some(&textures.icons.ship_icons),
         painter,
         map_space_size,
     );
@@ -107,15 +107,15 @@ pub(super) fn make_shared_textures<'a>(
     textures: &'a RendererTextures,
 ) -> wt_collab_egui::draw_commands::DrawCommandTextures<'a> {
     wt_collab_egui::draw_commands::DrawCommandTextures {
-        ship_icons: &textures.ship_icons,
-        ship_icon_outlines: Some(&textures.ship_icon_outlines),
-        plane_icons: &textures.plane_icons,
-        building_icons: Some(&textures.building_icons),
-        consumable_icons: Some(&textures.consumable_icons),
-        ribbon_icons: Some(&textures.ribbon_icons),
-        subribbon_icons: Some(&textures.subribbon_icons),
-        death_cause_icons: Some(&textures.death_cause_icons),
-        powerup_icons: Some(&textures.powerup_icons),
+        ship_icons: &textures.icons.ship_icons,
+        ship_icon_outlines: Some(&textures.icons.ship_icon_outlines),
+        plane_icons: &textures.icons.plane_icons,
+        building_icons: Some(&textures.icons.building_icons),
+        consumable_icons: Some(&textures.icons.consumable_icons),
+        ribbon_icons: Some(&textures.icons.ribbon_icons),
+        subribbon_icons: Some(&textures.icons.subribbon_icons),
+        death_cause_icons: Some(&textures.icons.death_cause_icons),
+        powerup_icons: Some(&textures.icons.powerup_icons),
         silhouette_texture: textures.silhouette_texture.as_ref(),
     }
 }

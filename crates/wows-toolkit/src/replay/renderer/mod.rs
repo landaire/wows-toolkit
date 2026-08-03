@@ -689,9 +689,9 @@ pub struct ReplayRendererAssets {
     pub signal_flag_icons: Arc<HashMap<String, RgbaAsset>>,
 }
 
-/// egui TextureHandles created on the UI thread.
-struct RendererTextures {
-    map_texture: Option<TextureHandle>,
+/// Icon textures uploaded once per game-data version and shared by every
+/// replay renderer window and hover preview.
+pub(crate) struct IconTextures {
     ship_icons: HashMap<String, TextureHandle>,
     /// Gold outline textures for detected-teammate highlight, keyed by the same variant keys as ship_icons.
     ship_icon_outlines: HashMap<String, TextureHandle>,
@@ -705,7 +705,63 @@ struct RendererTextures {
     crew_skill_icons: HashMap<String, TextureHandle>,
     modernization_icons: HashMap<String, TextureHandle>,
     signal_flag_icons: HashMap<String, TextureHandle>,
-    silhouette_texture: Option<TextureHandle>,
+}
+
+/// egui TextureHandles created on the UI thread for a single renderer window.
+pub(crate) struct RendererTextures {
+    pub icons: Arc<IconTextures>,
+    pub map_texture: Option<TextureHandle>,
+    pub silhouette_texture: Option<TextureHandle>,
+}
+
+/// GPU textures shared across renderers and previews.
+///
+/// Icons are invariant for a game-data version and maps for a version plus map
+/// name, so every replay renderer and every hover preview shares one upload.
+/// Silhouettes are per-replay and stay on `RendererTextures`.
+#[derive(Default)]
+pub(crate) struct RendererTextureCache {
+    icons: HashMap<Option<Version>, Arc<IconTextures>>,
+    /// `None` records a map with no image, so a missing map is not re-read
+    /// from the VFS on every frame the preview is shown.
+    maps: HashMap<(Option<Version>, String), Option<TextureHandle>>,
+}
+
+impl RendererTextureCache {
+    pub(crate) fn get_or_upload_icons(
+        &mut self,
+        ctx: &egui::Context,
+        version: Option<Version>,
+        assets: &ReplayRendererAssets,
+    ) -> Arc<IconTextures> {
+        self.icons.entry(version).or_insert_with(|| Arc::new(upload_icon_textures(ctx, assets))).clone()
+    }
+
+    /// The map background for `map_name`, uploading it on first request.
+    ///
+    /// The preview needs this before any replay parse: the map name comes off
+    /// the listing row, so the popup can draw the map the instant it opens and
+    /// fill ships in when the bake lands.
+    pub(crate) fn get_or_upload_map(
+        &mut self,
+        ctx: &egui::Context,
+        version: Option<Version>,
+        map_name: &str,
+        asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
+        vfs: &VfsPath,
+    ) -> Option<TextureHandle> {
+        let key = (version, map_name.to_string());
+        if let Some(cached) = self.maps.get(&key) {
+            return cached.clone();
+        }
+        let (image, _info) = asset_cache.lock().get_or_load_map(map_name, vfs, version.as_ref());
+        let handle = image.map(|img| {
+            let color = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.data);
+            ctx.load_texture(format!("preview_map_{map_name}"), color, egui::TextureOptions::LINEAR)
+        });
+        self.maps.insert(key, handle.clone());
+        handle
+    }
 }
 
 /// Status of the background renderer.
@@ -1234,6 +1290,7 @@ mod shapes;
 use shapes::*;
 
 mod textures;
+use textures::upload_icon_textures;
 use textures::upload_textures;
 impl ReplayRendererViewer {
     /// Access the shared renderer state (for polling pending requests, etc.).
@@ -1507,7 +1564,7 @@ impl ReplayRendererViewer {
                             .unwrap_or(false);
                         let mut ann = annotation_arc.lock();
                         let tex_guard = textures_arc.lock();
-                        let ship_icons = tex_guard.as_ref().map(|t| &t.ship_icons);
+                        let ship_icons = tex_guard.as_ref().map(|t| &t.icons.ship_icons);
                         let result = wt_collab_egui::toolbar::draw_annotation_toolbar(
                             ui,
                             &mut ann,
@@ -1676,7 +1733,7 @@ impl ReplayRendererViewer {
                     for (idx, region) in out.consumable_hover_regions.iter().enumerate() {
                         let id = egui::Id::new(("roster_consumable_hover", idx));
                         let hover_resp = ui.interact(region.rect, id, egui::Sense::hover());
-                        let tex = textures.consumable_icons.get(&region.icon_key);
+                        let tex = textures.icons.consumable_icons.get(&region.icon_key);
                         hover_resp.on_hover_ui(|ui| {
                             roster_consumable_tooltip(ui, region, tex);
                         });
@@ -2167,7 +2224,7 @@ impl ReplayRendererViewer {
 
                                         // ── Annotation tools ──
                                         let tex_guard = textures_arc.lock();
-                                        let ship_icons_ref = tex_guard.as_ref().map(|t| &t.ship_icons);
+                                        let ship_icons_ref = tex_guard.as_ref().map(|t| &t.icons.ship_icons);
                                         let menu_result = wt_collab_egui::toolbar::draw_annotation_menu_common(
                                             ui,
                                             &mut ann,
@@ -3294,9 +3351,9 @@ fn roster_player_build_tooltip(
     }
 
     ui.separator();
-    draw_skill_grid(ui, &display.skill_rows, &textures.crew_skill_icons);
-    draw_build_section(ui, "Upgrades", &display.upgrades, &textures.modernization_icons);
-    draw_build_section(ui, "Signals", &display.signals, &textures.signal_flag_icons);
+    draw_skill_grid(ui, &display.skill_rows, &textures.icons.crew_skill_icons);
+    draw_build_section(ui, "Upgrades", &display.upgrades, &textures.icons.modernization_icons);
+    draw_build_section(ui, "Signals", &display.signals, &textures.icons.signal_flag_icons);
 }
 
 /// Render learned captain skills as a tier grid: one row per tier, point

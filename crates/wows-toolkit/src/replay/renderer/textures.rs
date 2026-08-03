@@ -2,6 +2,9 @@ use std::collections::HashMap;
 
 use egui::TextureHandle;
 
+use std::sync::Arc;
+
+use super::IconTextures;
 use super::RendererTextures;
 use super::ReplayRendererAssets;
 
@@ -74,6 +77,17 @@ pub(super) fn upload_textures(
         ctx.load_texture("replay_map", image, egui::TextureOptions::LINEAR)
     });
 
+    let icons = Arc::new(upload_icon_textures(ctx, assets));
+
+    let silhouette_texture = silhouette_raw.map(|(w, h, data)| {
+        let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
+        ctx.load_texture("stats_silhouette", image, egui::TextureOptions::LINEAR)
+    });
+
+    RendererTextures { icons, map_texture, silhouette_texture }
+}
+
+pub(crate) fn upload_icon_textures(ctx: &egui::Context, assets: &ReplayRendererAssets) -> IconTextures {
     let mut ship_icons: HashMap<String, TextureHandle> = HashMap::new();
     let mut ship_icon_outlines: HashMap<String, TextureHandle> = HashMap::new();
     for (key, asset) in assets.ship_icons.iter() {
@@ -205,13 +219,7 @@ pub(super) fn upload_textures(
         })
         .collect();
 
-    let silhouette_texture = silhouette_raw.map(|(w, h, data)| {
-        let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
-        ctx.load_texture("stats_silhouette", image, egui::TextureOptions::LINEAR)
-    });
-
-    RendererTextures {
-        map_texture,
+    IconTextures {
         ship_icons,
         ship_icon_outlines,
         plane_icons,
@@ -224,6 +232,5 @@ pub(super) fn upload_textures(
         crew_skill_icons,
         modernization_icons,
         signal_flag_icons,
-        silhouette_texture,
     }
 }
