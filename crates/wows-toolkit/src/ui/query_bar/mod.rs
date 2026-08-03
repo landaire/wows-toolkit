@@ -193,7 +193,9 @@ impl QueryBar {
         self.refresh_suggestions();
         self.reparse_pending();
 
-        let rows = self.dropdown_rows();
+        // Only a focused bar reads keys, and the rows exist to answer them, so
+        // an unfocused bar skips ranking the whole suggestion set every frame.
+        let rows = if focused { self.dropdown_rows() } else { Vec::new() };
         let nav = if focused { self.consume_navigation(ui) } else { None };
 
         let mut tokens = tokenize(&self.expr, &self.names);
@@ -280,7 +282,13 @@ impl QueryBar {
         // and only a click on the gaps falls through to focusing the caret.
         let background = ui.interact(area, id.with("background"), Sense::click());
 
-        for span in &laid.group_spans {
+        // `lay_out` reports a span when its close bracket lands, so an inner
+        // group arrives before the outer one that contains it. Painting in that
+        // order would fill the outer group's tint straight over the inner one,
+        // so the shallowest is drawn first and the deepest ends up on top.
+        let mut spans: Vec<&layout::GroupSpan> = laid.group_spans.iter().collect();
+        spans.sort_by_key(|span| tokens[span.open_index].depth);
+        for span in spans {
             let depth = tokens[span.open_index].depth;
             let last = span.rows.len().saturating_sub(1);
             for (n, (_, row_rect)) in span.rows.iter().enumerate() {
@@ -441,10 +449,10 @@ impl QueryBar {
 
     /// Step 4 of the dropdown: the suggestion list, anchored under the bar.
     fn dropdown(&mut self, ui: &mut Ui, id: egui::Id, caret_id: egui::Id, bar_rect: Rect) -> bool {
-        let rows = self.dropdown_rows();
         if !self.dropdown_open {
             return false;
         }
+        let rows = self.dropdown_rows();
         // A bar the user has not typed into yet says nothing by staying shut,
         // rather than by reporting that nothing matches an empty needle.
         if rows.is_empty() && self.pending.trim().is_empty() {
