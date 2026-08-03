@@ -15,6 +15,21 @@ pub const CONTRAST_FLOOR: f32 = 4.5;
 #[cfg(test)]
 pub const DIM_CONTRAST_FLOOR: f32 = 3.0;
 
+/// Floor for one background surface against another it is drawn on, or that is
+/// drawn on top of it.
+///
+/// Far below `CONTRAST_FLOOR`, and deliberately so: that floor asks whether
+/// text can be *read*, while two large adjacent fills only have to be told
+/// apart. WCAG's 3:1 non-text figure is also the wrong measure here, since it
+/// governs the boundary that identifies a component, and for the query bar's
+/// nested groups that boundary is the bracket stroke rather than the fill it
+/// encloses.
+///
+/// Test-only: nothing at runtime measures against this floor, it only bounds
+/// the `BracketColors` tints chosen in `semantic.rs`.
+#[cfg(test)]
+pub const SURFACE_CONTRAST_FLOOR: f32 = 1.3;
+
 /// WCAG 2.1 relative luminance.
 pub fn relative_luminance(color: Color32) -> f32 {
     fn channel(c: u8) -> f32 {

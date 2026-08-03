@@ -301,6 +301,10 @@ impl QueryBar {
         }
 
         let mut commands: Vec<Command> = Vec::new();
+        // A click anywhere in the bar puts the caret back in focus, but the
+        // request cannot be made until the caret widget itself has been built.
+        // See the token loop below and the caret call after it.
+        let mut refocus = background.clicked();
         for placed in &laid.placed {
             let token = &tokens[placed.index];
             if matches!(token.kind, TokenKind::Caret) {
@@ -308,13 +312,11 @@ impl QueryBar {
             }
             let rect = placed.rect.translate(origin).shrink2(egui::vec2(0.0, ROW_PAD_Y));
             let response = ui.interact(rect, id.with(placed.index), Sense::click());
-            // egui surrenders focus from any focused widget the pointer is not
-            // over, so without this a click on a pill unfocuses the caret and
-            // the very keys that act on the new selection (Backspace to delete
-            // it, Shift+Arrow to extend it) stop being read at all.
-            if response.clicked() || response.double_clicked() {
-                ui.memory_mut(|m| m.request_focus(caret_id));
-            }
+            // Only recorded here. egui runs its surrender check as each widget
+            // is created, so focus requested at this point is taken straight
+            // back when the caret is built below; the request has to happen
+            // after it.
+            refocus |= response.clicked() || response.double_clicked();
             let state = if self.selection.contains(&token.path) {
                 TokenState::Selected
             } else if response.hovered() {
@@ -327,7 +329,14 @@ impl QueryBar {
         }
 
         let caret = self.caret(ui, caret_id, laid, origin);
-        if background.clicked() {
+        // After the caret, never before: egui surrenders focus from any focused
+        // widget the pointer is not over as that widget is created, so a
+        // request made earlier in the frame is undone by the caret's own
+        // creation and the click reads as unfocused on the very next frame.
+        // That in turn skips `consume_navigation` entirely, which is what makes
+        // Backspace-deletes-the-selection and Shift+Arrow-extends unreachable
+        // from a selection made with the mouse.
+        if refocus {
             ui.memory_mut(|m| m.request_focus(caret_id));
         }
 
@@ -464,9 +473,10 @@ impl QueryBar {
             return false;
         }
         let rows = self.dropdown_rows();
-        // A bar the user has not typed into yet says nothing by staying shut,
-        // rather than by reporting that nothing matches an empty needle.
-        if rows.is_empty() && self.pending.trim().is_empty() {
+        // A bar with nothing typed into its active fragment says nothing by
+        // staying shut, rather than by reporting that nothing matches an empty
+        // needle.
+        if rows.is_empty() && suggest::active_fragment(&self.pending).trim().is_empty() {
             return false;
         }
         // Typing narrows the list under a highlight that was set against the
@@ -529,11 +539,17 @@ impl QueryBar {
     /// The rows the dropdown shows. Value rows displace the static suggestions
     /// entirely: once the caret is typing a value, the field list is no longer
     /// what the user is choosing from.
+    ///
+    /// Ranking is against the active fragment, not the whole caret. `rank`
+    /// matches its needle against suggestion labels, so the whole string stops
+    /// matching anything the moment a second term is typed, and every
+    /// suggestion becomes unreachable part way through a query.
     fn dropdown_rows(&self) -> Vec<Row> {
         if self.active_request.is_some() && !self.value_options.is_empty() {
             return (0..self.value_options.len()).map(Row::Value).collect();
         }
-        rank(&self.pending, &self.suggestions).into_iter().map(Row::Suggestion).collect()
+        let needle = suggest::active_fragment(&self.pending);
+        rank(needle, &self.suggestions).into_iter().map(Row::Suggestion).collect()
     }
 
     /// Steps 1 and 2: read the caret position captured last frame, then take

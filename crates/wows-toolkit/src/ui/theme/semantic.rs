@@ -4,6 +4,8 @@
 
 use egui::Color32;
 
+use crate::ui::theme::palette;
+
 /// Colours for the in-game chat channels.
 pub struct ChatColors {
     pub division: Color32,
@@ -27,6 +29,23 @@ pub struct ArmorColors {
     pub overpen: Color32,
     pub ricochet: Color32,
     pub shatter: Color32,
+}
+
+/// Backgrounds for the query bar's nested bracket groups, alternating by
+/// nesting depth so adjacent levels read as distinct.
+///
+/// These are fills, not text, so they are deliberately absent from the
+/// `roles()` list the contrast tests walk: that list asserts a colour is
+/// readable *as text on* the app's surfaces, which is the wrong question for a
+/// surface. What they must clear instead is
+/// `contrast::SURFACE_CONTRAST_FLOOR` against the bar beneath them and against
+/// every state of a pill drawn on top, which
+/// `query_bar::paint`'s `depth_fill_clears_the_surface_floor` pins.
+pub struct BracketColors {
+    /// Depth one, three, and so on: the level drawn directly on the bar, and
+    /// so the one the eye meets most often.
+    pub odd: Color32,
+    pub even: Color32,
 }
 
 /// Every meaning the UI attaches to a colour.
@@ -65,6 +84,7 @@ pub struct SemanticColors {
     pub engaged_label: Color32,
     pub chat: ChatColors,
     pub armor: ArmorColors,
+    pub bracket: BracketColors,
 }
 
 pub const DARK: SemanticColors = SemanticColors {
@@ -90,6 +110,7 @@ pub const DARK: SemanticColors = SemanticColors {
         team: Color32::from_rgb(0x6F, 0xD9, 0x8A),
         other: Color32::from_rgb(0xE8, 0xA5, 0x4A),
     },
+    bracket: BracketColors { odd: palette::dark::BRACKET_ODD, even: palette::dark::BRACKET_EVEN },
     armor: ArmorColors {
         angle_good: Color32::from_rgb(0x64, 0xD9, 0x8A),
         angle_mid: Color32::from_rgb(0xE0, 0xBE, 0x64),
@@ -124,6 +145,7 @@ pub const LIGHT: SemanticColors = SemanticColors {
         team: Color32::from_rgb(0x10, 0x6C, 0x34),
         other: Color32::from_rgb(0x8A, 0x4B, 0x00),
     },
+    bracket: BracketColors { odd: palette::light::BRACKET_ODD, even: palette::light::BRACKET_EVEN },
     armor: ArmorColors {
         angle_good: Color32::from_rgb(0x11, 0x6B, 0x34),
         angle_mid: Color32::from_rgb(0x78, 0x58, 0x08),

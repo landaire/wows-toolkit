@@ -20,6 +20,7 @@ use egui::Ui;
 use egui::text::CCursor;
 
 use crate::ui::query_bar::tokens::TokenKind;
+use crate::ui::theme::semantic::SemanticColors;
 use crate::ui::theme::semantic::SemanticExt;
 
 /// Corner radius shared by the bar's frame and its pills.
@@ -86,7 +87,7 @@ fn pill(ui: &Ui, rect: Rect, galley: Arc<Galley>, state: TokenState) {
 /// on every row it touches.
 pub fn group_row(ui: &Ui, rect: Rect, depth: usize, opens: bool, closes: bool) {
     let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
-    let fill = depth_fill(ui.visuals(), depth);
+    let fill = depth_fill(ui.sem(), depth);
     let painter = ui.painter();
     painter.rect_filled(rect, CornerRadius::ZERO, fill);
     painter.line_segment([rect.left_top(), rect.right_top()], stroke);
@@ -117,13 +118,18 @@ pub fn error_underline(ui: &Ui, galley_pos: Pos2, galley: &Galley, text: &str, s
 /// Alternating surface behind each nesting level.
 ///
 /// A group's tokens sit one level deeper than the group's own siblings, so the
-/// shallowest bracket the bar ever draws is at depth one, not zero. Neither
-/// surface may be `extreme_bg_color`, which is the bar's own fill, nor
-/// `widgets.inactive.bg_fill`, which is a pill's: a group or a pill painted in
-/// the colour behind it is invisible. `depth_fill_is_visible_against_the_bar`
-/// pins all three properties against the shipped themes.
-fn depth_fill(visuals: &egui::Visuals, depth: usize) -> Color32 {
-    if depth.is_multiple_of(2) { visuals.panel_fill } else { visuals.faint_bg_color }
+/// shallowest bracket the bar ever draws is at depth one, not zero.
+///
+/// The two tints are their own semantic role rather than reused chrome
+/// surfaces. A group fill is drawn on the bar and has pills drawn on top of
+/// it, and the whole band the rest of the bar's chrome occupies -- the bar's
+/// `extreme_bg_color` through a hovered pill -- spans only about 1.45:1 in the
+/// dark theme and 1.37:1 in the light one, so no tone inside that band can be
+/// told apart from both ends at once. `depth_fill_clears_the_surface_floor`
+/// measures what these actually achieve; it asserts a ratio, which is a
+/// numeric guarantee and not a claim that anyone has looked at the result.
+fn depth_fill(sem: &SemanticColors, depth: usize) -> Color32 {
+    if depth.is_multiple_of(2) { sem.bracket.even } else { sem.bracket.odd }
 }
 
 fn chrome_color(ui: &Ui, state: TokenState) -> Color32 {
@@ -159,26 +165,42 @@ mod tests {
     /// first level of nesting -- the common single-group case -- painted a
     /// rectangle identical to the background and no bracket tint was visible
     /// at all.
+    ///
+    /// Inequality alone was too weak to catch the shape of that bug. The first
+    /// repair paired `faint_bg_color` with the pill's
+    /// `widgets.inactive.bg_fill` at 1.02:1 in the light theme: different
+    /// values, indistinguishable surfaces. So this measures a ratio rather than
+    /// asserting `!=`, against the bar beneath a group and against every state
+    /// a pill drawn on top of it can be in.
     #[test]
-    fn depth_fill_is_visible_against_the_bar_and_against_a_pill() {
+    fn depth_fill_clears_the_surface_floor() {
+        use crate::ui::theme::contrast::SURFACE_CONTRAST_FLOOR;
+        use crate::ui::theme::contrast::contrast_ratio;
+        use crate::ui::theme::semantic::semantic;
+
         for (theme, visuals) in [
             ("dark", crate::ui::theme::style::dark_style().visuals),
             ("light", crate::ui::theme::style::light_style().visuals),
         ] {
+            let sem = semantic(&visuals);
             // Depth zero is never a bracket, but is covered so a future change
             // to how `tokenize` assigns depth cannot reintroduce the defect.
             for depth in 0..=4 {
-                let fill = depth_fill(&visuals, depth);
-                assert_ne!(fill, visuals.extreme_bg_color, "{theme} depth {depth} matches the bar's own fill");
-                assert_ne!(
-                    fill, visuals.widgets.inactive.bg_fill,
-                    "{theme} depth {depth} matches a pill, so a pill inside it would vanish"
-                );
-                assert_ne!(
-                    fill,
-                    depth_fill(&visuals, depth + 1),
-                    "{theme} depth {depth} and the level inside it are the same colour"
-                );
+                let fill = depth_fill(sem, depth);
+                for (what, against) in [
+                    ("the bar beneath it", visuals.extreme_bg_color),
+                    ("an idle pill on it", visuals.widgets.inactive.bg_fill),
+                    ("a hovered pill on it", visuals.widgets.hovered.bg_fill),
+                    ("a selected pill on it", visuals.selection.bg_fill),
+                    ("the level nested inside it", depth_fill(sem, depth + 1)),
+                ] {
+                    let ratio = contrast_ratio(fill, against);
+                    assert!(
+                        ratio >= SURFACE_CONTRAST_FLOOR,
+                        "{theme} bracket depth {depth} against {what} is {ratio:.3}, \
+                         needs {SURFACE_CONTRAST_FLOOR}"
+                    );
+                }
             }
         }
     }

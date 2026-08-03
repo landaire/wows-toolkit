@@ -24,6 +24,14 @@ pub mod dark {
     /// Fill for the active dock tab. A raised surface rather than an inverted
     /// block; only ever carries the tab label, never dimmed text.
     pub const TAB_ACTIVE: Color32 = Color32::from_rgb(0x34, 0x34, 0x30);
+
+    /// Backgrounds for the query bar's nested bracket groups, alternating by
+    /// depth. Deliberately outside the `EXTREME`..`WIDGET_HOT` band the rest of
+    /// the chrome lives in: a group fill is drawn on the bar and has pills
+    /// drawn on top of it, and that band spans only about 1.45:1, so no tone
+    /// inside it can be told apart from both at once.
+    pub const BRACKET_ODD: Color32 = Color32::from_rgb(0x41, 0x41, 0x3C);
+    pub const BRACKET_EVEN: Color32 = Color32::from_rgb(0x52, 0x52, 0x4D);
 }
 
 /// Light theme surfaces and chrome. Same neutrals, inverted value scale.
@@ -48,4 +56,10 @@ pub mod light {
     /// Fill for the active dock tab. A raised surface rather than an inverted
     /// block; only ever carries the tab label, never dimmed text.
     pub const TAB_ACTIVE: Color32 = Color32::from_rgb(0xDF, 0xDC, 0xD3);
+
+    /// Backgrounds for the query bar's nested bracket groups. See the dark
+    /// theme's pair: the same reasoning inverts, and the band is tighter still
+    /// here at about 1.37:1, since `EXTREME` and `CARD` are both pure white.
+    pub const BRACKET_ODD: Color32 = Color32::from_rgb(0xBE, 0xBE, 0xB4);
+    pub const BRACKET_EVEN: Color32 = Color32::from_rgb(0xA6, 0xA6, 0x9C);
 }

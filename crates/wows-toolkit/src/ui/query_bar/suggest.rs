@@ -393,8 +393,7 @@ const OPERATOR_CHARS: [char; 5] = [':', '=', '!', '<', '>'];
 /// do not come from the database, in which case the dropdown keeps showing
 /// static suggestions.
 pub fn value_request_for(pending: &str) -> Option<ValueRequest> {
-    let fragment = pending.split_whitespace().next_back()?;
-    let (key, needle) = split_on_operator(fragment)?;
+    let (key, needle) = split_on_operator(active_fragment(pending))?;
     let bare = key.rsplit('.').next()?;
     if bare.is_empty() {
         return None;
@@ -421,11 +420,22 @@ fn split_on_operator(fragment: &str) -> Option<(&str, &str)> {
 }
 
 /// Where the caret's active fragment begins: just past the last whitespace, or
-/// the start of the text when there is none. The one place that decides what
-/// "the thing the user is currently typing" means, so `value_request_for` and
-/// both replacements agree on it by construction.
+/// the start of the text when there is none.
 fn active_fragment_start(pending: &str) -> usize {
     pending.char_indices().rev().find(|(_, c)| c.is_whitespace()).map_or(0, |(i, c)| i + c.len_utf8())
+}
+
+/// The part of the caret's text the user is currently typing: everything after
+/// the last whitespace, which is empty when the caret sits just past a space
+/// and a new term is about to begin.
+///
+/// The one place that decides what "currently typing" means. Everything that
+/// asks the question goes through it -- which value to look up, which
+/// suggestions to rank, and what a committed row replaces -- so the four cannot
+/// disagree about where the term under the caret starts.
+pub fn active_fragment(pending: &str) -> &str {
+    let (_, fragment) = pending.split_at(active_fragment_start(pending));
+    fragment
 }
 
 /// The caret's text with the *value* of its active fragment replaced.
@@ -651,6 +661,30 @@ mod tests {
         assert_eq!(value_request_for("map:oce"), Some(ValueRequest::Maps));
         // `source` is an alias of `group`, so it must resolve the same way.
         assert_eq!(value_request_for("source:"), Some(ValueRequest::Sources));
+    }
+
+    #[test]
+    fn a_finished_fragment_stops_asking_once_a_space_follows_it() {
+        // The user has moved on to a new term, so ship rows for the previous
+        // one are stale. This is what makes `value_request_for` agree with the
+        // replacements and with what the dropdown ranks: all four read the
+        // active fragment, which a trailing space makes empty.
+        assert_eq!(active_fragment("enemy.ship:1234 "), "");
+        assert_eq!(value_request_for("enemy.ship:1234 "), None);
+        assert_eq!(value_request_for("enemy.ship:1234"), Some(ValueRequest::Ships { needle: "1234".into() }));
+    }
+
+    #[test]
+    fn the_active_fragment_is_what_every_caller_reads() {
+        for (pending, expected) in
+            [("", ""), ("ene", "ene"), ("outcome:win ene", "ene"), ("outcome:win ", ""), ("\u{4e2d}\u{e9} ou", "ou")]
+        {
+            let fragment = active_fragment(pending);
+            assert_eq!(fragment, expected, "{pending:?}");
+            // The replacements are defined in terms of the same split, so
+            // swapping the fragment for itself is the identity.
+            assert_eq!(replace_active_fragment(pending, fragment), pending, "{pending:?}");
+        }
     }
 
     #[test]
