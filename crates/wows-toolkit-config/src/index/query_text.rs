@@ -7,6 +7,20 @@
 use std::ops::Range;
 
 use jiff::Timestamp;
+use winnow::LocatingSlice;
+use winnow::ModalResult;
+use winnow::Parser;
+use winnow::combinator::alt;
+use winnow::combinator::delimited;
+use winnow::combinator::opt;
+use winnow::combinator::preceded;
+use winnow::combinator::repeat;
+use winnow::error::AddContext;
+use winnow::error::ErrMode;
+use winnow::error::ParserError;
+use winnow::error::StrContext;
+use winnow::stream::Stream;
+use winnow::token::take_while;
 
 use super::query_ast::Expr;
 use super::query_ast::MatchExpr;
@@ -49,13 +63,231 @@ impl QueryParseError {
     }
 }
 
+type Input<'a> = LocatingSlice<&'a str>;
+
+/// winnow's error for this grammar. Carries a finished `QueryParseError` when a
+/// leaf production already diagnosed the problem precisely; `None` means a
+/// purely structural failure, which the top level turns into `Unexpected` using
+/// winnow's own reported offset.
+#[derive(Debug, Clone, PartialEq)]
+struct QueryErr {
+    inner: Option<QueryParseError>,
+    labels: Vec<&'static str>,
+}
+
+impl QueryErr {
+    fn structural() -> Self {
+        QueryErr { inner: None, labels: Vec::new() }
+    }
+
+    /// Wrap an already-diagnosed failure so the top level can return it verbatim.
+    fn diagnosed(e: QueryParseError) -> ErrMode<Self> {
+        ErrMode::Cut(QueryErr { inner: Some(e), labels: Vec::new() })
+    }
+}
+
+impl<I: Stream> ParserError<I> for QueryErr {
+    type Inner = Self;
+
+    fn from_input(_input: &I) -> Self {
+        QueryErr::structural()
+    }
+
+    fn into_inner(self) -> Result<Self::Inner, Self> {
+        Ok(self)
+    }
+}
+
+impl<I: Stream> AddContext<I, StrContext> for QueryErr {
+    fn add_context(mut self, _input: &I, _token_start: &I::Checkpoint, ctx: StrContext) -> Self {
+        // Only labels are useful in the expected-set; the other StrContext
+        // variants describe character classes the user never typed a name for.
+        if let StrContext::Label(l) = ctx
+            && !self.labels.contains(&l)
+        {
+            self.labels.push(l);
+        }
+        self
+    }
+}
+
 /// Parse a query string into a `MatchExpr`. An empty or whitespace-only input
 /// is the empty conjunction, which matches everything.
 pub fn parse_query(input: &str) -> Result<MatchExpr, QueryParseError> {
     if input.trim().is_empty() {
         return Ok(Expr::All(vec![]));
     }
-    parse_term_at(input, 0)
+    let stream = LocatingSlice::new(input);
+    match delimited(ws, or_expr, ws).parse(stream) {
+        Ok(expr) => Ok(expr),
+        Err(parse_err) => {
+            let offset = parse_err.offset();
+            let err = parse_err.into_inner();
+            if let Some(diagnosed) = err.inner {
+                return Err(diagnosed);
+            }
+            if let Some(unbalanced) = unbalanced_paren(input) {
+                return Err(unbalanced);
+            }
+            let expected = if err.labels.is_empty() { vec!["a filter term", "(", "not"] } else { err.labels };
+            Err(QueryParseError::new(offset..input.len(), ParseErrorKind::Unexpected { expected }))
+        }
+    }
+}
+
+/// Report the position of the paren that has no partner, if any. Checked before
+/// the generic `Unexpected` because "you forgot a bracket" is a far more useful
+/// message than "unexpected input at byte 16".
+fn unbalanced_paren(input: &str) -> Option<QueryParseError> {
+    let mut opens: Vec<usize> = Vec::new();
+    let mut in_quotes = false;
+    for (i, c) in input.char_indices() {
+        match c {
+            '"' => in_quotes = !in_quotes,
+            '(' if !in_quotes => opens.push(i),
+            ')' if !in_quotes => {
+                if opens.pop().is_none() {
+                    return Some(QueryParseError::new(i..i + 1, ParseErrorKind::Unbalanced));
+                }
+            }
+            _ => {}
+        }
+    }
+    opens.last().map(|&at| QueryParseError::new(at..at + 1, ParseErrorKind::Unbalanced))
+}
+
+fn ws(input: &mut Input<'_>) -> ModalResult<(), QueryErr> {
+    take_while(0.., |c: char| c.is_whitespace()).void().parse_next(input)
+}
+
+fn or_expr(input: &mut Input<'_>) -> ModalResult<MatchExpr, QueryErr> {
+    let first = and_expr.parse_next(input)?;
+    let rest: Vec<MatchExpr> = repeat(0.., preceded((ws, keyword_or, ws), and_expr)).parse_next(input)?;
+    Ok(if rest.is_empty() {
+        first
+    } else {
+        let mut cs = vec![first];
+        cs.extend(rest);
+        Expr::Any(cs)
+    })
+}
+
+fn and_expr(input: &mut Input<'_>) -> ModalResult<MatchExpr, QueryErr> {
+    let first = unary.parse_next(input)?;
+    // The `and` keyword is optional: juxtaposition binds the same way.
+    let rest: Vec<MatchExpr> = repeat(0.., preceded((ws, opt(keyword_and), ws), unary)).parse_next(input)?;
+    Ok(if rest.is_empty() {
+        first
+    } else {
+        let mut cs = vec![first];
+        cs.extend(rest);
+        Expr::All(cs)
+    })
+}
+
+fn unary(input: &mut Input<'_>) -> ModalResult<MatchExpr, QueryErr> {
+    let negated = opt(alt((keyword_not, '-'.void()))).parse_next(input)?.is_some();
+    ws.parse_next(input)?;
+    let inner = primary.parse_next(input)?;
+    Ok(if negated { Expr::Not(Box::new(inner)) } else { inner })
+}
+
+fn primary(input: &mut Input<'_>) -> ModalResult<MatchExpr, QueryErr> {
+    alt((
+        delimited(('(', ws), or_expr, (ws, ')')).context(StrContext::Label("parenthesised group")),
+        term.context(StrContext::Label("filter term")),
+    ))
+    .parse_next(input)
+}
+
+/// One `key op value` term or bare word, delegating to the Task 6 term parser
+/// once the extent of the term is known. A diagnosed failure is a `Cut`, not a
+/// `Backtrack`: once the text is unambiguously a term, trying another
+/// alternative would only lose the precise error.
+fn term(input: &mut Input<'_>) -> ModalResult<MatchExpr, QueryErr> {
+    let (raw, span) = term_text.with_span().parse_next(input)?;
+    parse_term_at(raw, span.start).map_err(QueryErr::diagnosed)
+}
+
+/// The text of one term: everything up to whitespace or a paren, with quoted
+/// runs kept whole so `map:"new dawn"` is a single term, plus a trailing
+/// nullary operator so `build is-set` is one term rather than two.
+///
+/// A leading `and` / `or` / `not` is refused so a dangling keyword fails the
+/// parse instead of becoming a `FreeText` leaf.
+fn term_text<'a>(input: &mut Input<'a>) -> ModalResult<&'a str, QueryErr> {
+    let s: &str = input;
+    let mut end = word_end(s);
+    if end == 0 || matches!(s[..end].to_ascii_lowercase().as_str(), "and" | "or" | "not") {
+        return Err(ErrMode::Backtrack(QueryErr::structural()));
+    }
+    if let Some(len) = trailing_nullary_op_len(&s[end..]) {
+        end += len;
+    }
+    Ok(input.next_slice(end))
+}
+
+/// The byte offset at which a term's leading word ends: the first unquoted
+/// whitespace or paren, or the end of input.
+fn word_end(s: &str) -> usize {
+    let mut in_quotes = false;
+    for (i, c) in s.char_indices() {
+        if c == '"' {
+            in_quotes = !in_quotes;
+            continue;
+        }
+        if !in_quotes && (c.is_whitespace() || c == '(' || c == ')') {
+            return i;
+        }
+    }
+    s.len()
+}
+
+/// The length of a `<space> is-set` / `<space> is-not-set` tail, which belongs
+/// to the term before it rather than starting a new one.
+fn trailing_nullary_op_len(rest: &str) -> Option<usize> {
+    let gap = rest.len() - rest.trim_start().len();
+    if gap == 0 {
+        return None;
+    }
+    let after_gap = &rest[gap..];
+    let token = ["is-not-set", "is-set"].into_iter().find(|token| {
+        after_gap.get(..token.len()).is_some_and(|head| head.eq_ignore_ascii_case(token))
+            && word_end(after_gap) == token.len()
+    })?;
+    Some(gap + token.len())
+}
+
+fn keyword_and(input: &mut Input<'_>) -> ModalResult<(), QueryErr> {
+    keyword("and").parse_next(input)
+}
+
+fn keyword_or(input: &mut Input<'_>) -> ModalResult<(), QueryErr> {
+    alt((keyword("or"), '|'.void())).parse_next(input)
+}
+
+fn keyword_not(input: &mut Input<'_>) -> ModalResult<(), QueryErr> {
+    keyword("not").parse_next(input)
+}
+
+/// A case-insensitive keyword that must not be a prefix of a longer word, so
+/// `android` does not tokenize as `and` followed by `roid`.
+fn keyword(word: &'static str) -> impl FnMut(&mut Input<'_>) -> ModalResult<(), QueryErr> {
+    move |input: &mut Input<'_>| {
+        let s: &str = input;
+        let matches_prefix = s.get(..word.len()).is_some_and(|head| head.eq_ignore_ascii_case(word));
+        let boundary = s
+            .get(word.len()..)
+            .and_then(|rest| rest.chars().next())
+            .map(|c| c.is_whitespace() || c == '(' || c == ')')
+            .unwrap_or(true);
+        if matches_prefix && boundary {
+            input.next_slice(word.len());
+            Ok(())
+        } else {
+            Err(ErrMode::Backtrack(QueryErr::structural()))
+        }
+    }
 }
 
 /// Parse exactly one `key op value` term, or a bare word, starting at byte
@@ -405,5 +637,145 @@ mod tests {
     fn an_empty_query_is_the_empty_conjunction() {
         assert_eq!(parse_query("").unwrap(), Expr::All(vec![]));
         assert_eq!(parse_query("   ").unwrap(), Expr::All(vec![]));
+    }
+
+    #[test]
+    fn juxtaposition_binds_as_and() {
+        let q = parse_query("outcome:win map:ocean").unwrap();
+        match q {
+            Expr::All(cs) => assert_eq!(cs.len(), 2),
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn explicit_and_matches_juxtaposition() {
+        assert_eq!(parse_query("outcome:win and map:ocean").unwrap(), parse_query("outcome:win map:ocean").unwrap());
+    }
+
+    #[test]
+    fn or_binds_looser_than_and() {
+        // a AND b OR c parses as (a AND b) OR c
+        let q = parse_query("outcome:win map:ocean or build>1000").unwrap();
+        match q {
+            Expr::Any(cs) => {
+                assert_eq!(cs.len(), 2);
+                assert!(matches!(cs[0], Expr::All(ref inner) if inner.len() == 2), "got {:?}", cs[0]);
+                assert!(matches!(cs[1], Expr::Leaf(_)), "got {:?}", cs[1]);
+            }
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parentheses_override_precedence() {
+        let q = parse_query("outcome:win and (map:ocean or map:north)").unwrap();
+        match q {
+            Expr::All(cs) => {
+                assert_eq!(cs.len(), 2);
+                assert!(matches!(cs[1], Expr::Any(ref inner) if inner.len() == 2), "got {:?}", cs[1]);
+            }
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn not_binds_tightest_and_accepts_a_dash() {
+        let word = parse_query("not outcome:win").unwrap();
+        assert!(matches!(word, Expr::Not(_)), "got {word:?}");
+        assert_eq!(parse_query("-outcome:win").unwrap(), word);
+    }
+
+    #[test]
+    fn not_applies_to_a_parenthesised_group() {
+        let q = parse_query("not (map:ocean or map:north)").unwrap();
+        match q {
+            Expr::Not(inner) => assert!(matches!(*inner, Expr::Any(_)), "got {inner:?}"),
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn keywords_are_case_insensitive() {
+        assert_eq!(
+            parse_query("outcome:win AND map:ocean").unwrap(),
+            parse_query("outcome:win and map:ocean").unwrap()
+        );
+        assert_eq!(parse_query("outcome:win OR map:ocean").unwrap(), parse_query("outcome:win or map:ocean").unwrap());
+    }
+
+    #[test]
+    fn a_single_term_is_not_wrapped_in_a_one_element_all() {
+        assert!(matches!(parse_query("outcome:win").unwrap(), Expr::Leaf(_)));
+    }
+
+    #[test]
+    fn an_unbalanced_parenthesis_reports_its_span() {
+        let err = parse_query("outcome:win and (map:ocean").unwrap_err();
+        assert!(matches!(err.kind, ParseErrorKind::Unbalanced), "got {:?}", err.kind);
+        assert_eq!(err.span.start, 16, "span must point at the unclosed paren");
+    }
+
+    #[test]
+    fn a_free_text_word_composes_with_operators() {
+        let q = parse_query("yamato and outcome:win").unwrap();
+        match q {
+            Expr::All(cs) => {
+                assert_eq!(cs[0], Expr::Leaf(MatchTerm::FreeText("yamato".into())));
+                assert!(matches!(cs[1], Expr::Leaf(MatchTerm::Field(..))));
+            }
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn and_or_and_not_are_not_mistaken_for_free_text() {
+        // A bare "and" with nothing to join is an error, not a FreeText("and").
+        assert!(parse_query("and").is_err());
+        assert!(parse_query("outcome:win and").is_err());
+    }
+
+    /// Keyword and operator lookahead slices by the keyword's byte length, so a
+    /// multi-byte character straddling that length must not split a `char`.
+    #[test]
+    fn a_multi_byte_word_does_not_split_a_char_boundary() {
+        let q = parse_query("outcome:win aa\u{e9}b").unwrap();
+        match q {
+            Expr::All(cs) => assert_eq!(cs[1], Expr::Leaf(MatchTerm::FreeText("aa\u{e9}b".into()))),
+            other => panic!("got {other:?}"),
+        }
+        // The nullary-operator lookahead slices by `is-set`'s six bytes.
+        let q = parse_query("build a\u{e9}\u{e9}\u{e9}").unwrap();
+        match q {
+            Expr::All(cs) => assert_eq!(cs[1], Expr::Leaf(MatchTerm::FreeText("a\u{e9}\u{e9}\u{e9}".into()))),
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn whitespace_around_a_query_is_ignored() {
+        let bare = parse_query("outcome:win and map:ocean").unwrap();
+        assert_eq!(parse_query("  outcome:win and map:ocean  ").unwrap(), bare);
+        assert_eq!(parse_query("outcome:win\tand\nmap:ocean\n").unwrap(), bare);
+    }
+
+    /// The offset of a term within the whole query has to be threaded into
+    /// `parse_term_at`, so a failure in anything but the first term still
+    /// underlines the right substring.
+    #[test]
+    fn a_span_from_a_later_term_is_absolute_not_relative() {
+        let err = parse_query("map:ocean outcom:win").unwrap_err();
+        match &err.kind {
+            ParseErrorKind::UnknownField { name, .. } => assert_eq!(name, "outcom"),
+            other => panic!("got {other:?}"),
+        }
+        assert_eq!(err.span, 10..16, "span must cover the bad field name where it sits in the whole query");
+
+        let err = parse_query("map:ocean and outcome:banana").unwrap_err();
+        match &err.kind {
+            ParseErrorKind::BadValue { field, .. } => assert_eq!(*field, "outcome"),
+            other => panic!("got {other:?}"),
+        }
+        assert_eq!(err.span, 22..28, "span must cover the bad value where it sits in the whole query");
     }
 }
