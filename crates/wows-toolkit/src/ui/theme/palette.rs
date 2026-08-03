@@ -20,6 +20,15 @@ pub mod dark {
     pub const TEXT: Color32 = Color32::from_rgb(0xC9, 0xC6, 0xBE);
     pub const TEXT_DIM: Color32 = Color32::from_rgb(0x97, 0x97, 0x89);
     pub const TEXT_BRIGHT: Color32 = Color32::from_rgb(0xE8, 0xE5, 0xDC);
+
+    /// Fill for a dock tab flagging that it needs attention: semantic `error`
+    /// blended a tenth of the way over `SURFACE`. The tab is tinted rather than
+    /// filled so the active tab keeps the only full-strength fill in the strip.
+    pub const TAB_ALERT: Color32 = Color32::from_rgb(0x27, 0x1A, 0x1B);
+
+    /// Outline for that tab: the same blend at half strength, which carries the
+    /// mark when the fill alone is too dim to catch the eye.
+    pub const TAB_ALERT_BORDER: Color32 = Color32::from_rgb(0x81, 0x41, 0x46);
 }
 
 /// Light theme surfaces and chrome. Same neutrals, inverted value scale.
@@ -40,4 +49,13 @@ pub mod light {
     pub const TEXT: Color32 = Color32::from_rgb(0x1A, 0x1A, 0x17);
     pub const TEXT_DIM: Color32 = Color32::from_rgb(0x5C, 0x5A, 0x53);
     pub const TEXT_BRIGHT: Color32 = Color32::from_rgb(0x0A, 0x0A, 0x08);
+
+    /// Fill for a dock tab flagging that it needs attention: semantic `error`
+    /// blended a tenth of the way over `SURFACE`. The tab is tinted rather than
+    /// filled so the active tab keeps the only full-strength fill in the strip.
+    pub const TAB_ALERT: Color32 = Color32::from_rgb(0xE0, 0xD1, 0xCE);
+
+    /// Outline for that tab: the same blend at half strength, which carries the
+    /// mark when the fill alone is too dim to catch the eye.
+    pub const TAB_ALERT_BORDER: Color32 = Color32::from_rgb(0xC7, 0x82, 0x85);
 }

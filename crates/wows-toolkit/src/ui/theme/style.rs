@@ -317,6 +317,45 @@ pub fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
     style
 }
 
+/// Style for a dock tab flagging that it needs attention.
+///
+/// The tab is tinted rather than filled. The active tab holds the only
+/// full-strength fill in the strip, and an alert loud enough to beat it hides
+/// which tab is open. Hover moves the outline to full-strength `error` and
+/// leaves the fill alone, because a deeper tint drops the light theme's `error`
+/// label under `contrast::CONTRAST_FLOOR`. Once the flagged tab is the active
+/// one the alert has served its purpose, so the active states keep the ordinary
+/// active treatment and carry the mark in the label alone.
+pub fn alert_tab_style(global_style: &egui_dock::TabStyle, theme: egui::Theme) -> egui_dock::TabStyle {
+    let (fill, outline, accent, error) = match theme {
+        egui::Theme::Dark => {
+            (palette::dark::TAB_ALERT, palette::dark::TAB_ALERT_BORDER, palette::dark::ACCENT, semantic::DARK.error)
+        }
+        egui::Theme::Light => {
+            (palette::light::TAB_ALERT, palette::light::TAB_ALERT_BORDER, palette::light::ACCENT, semantic::LIGHT.error)
+        }
+    };
+
+    let mut style = global_style.clone();
+    style.inactive.bg_fill = fill;
+    style.inactive.outline_color = outline;
+    style.inactive.text_color = error;
+    // Keeps the accent outline the global style uses for keyboard focus: losing
+    // it on this one tab would be a hole in the only affordance a keyboard user
+    // has for where focus sits.
+    style.inactive_with_kb_focus.bg_fill = fill;
+    style.inactive_with_kb_focus.outline_color = accent;
+    style.inactive_with_kb_focus.text_color = error;
+    style.hovered.bg_fill = fill;
+    style.hovered.outline_color = error;
+    style.hovered.text_color = error;
+    style.active.text_color = error;
+    style.focused.text_color = error;
+    style.active_with_kb_focus.text_color = error;
+    style.focused_with_kb_focus.text_color = error;
+    style
+}
+
 #[cfg(test)]
 mod tests {
     use egui::Color32;
@@ -414,6 +453,66 @@ mod tests {
                 Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 96),
                 "{name} overlay.selection_color"
             );
+        }
+    }
+
+    #[test]
+    fn alert_tab_style_is_legible_and_never_outranks_the_active_tab() {
+        use crate::ui::theme::contrast::CONTRAST_FLOOR;
+        use crate::ui::theme::contrast::contrast_ratio;
+
+        for (name, egui_style, theme, fill, outline, accent, error) in [
+            (
+                "dark",
+                dark_style(),
+                egui::Theme::Dark,
+                palette::dark::TAB_ALERT,
+                palette::dark::TAB_ALERT_BORDER,
+                palette::dark::ACCENT,
+                semantic::DARK.error,
+            ),
+            (
+                "light",
+                light_style(),
+                egui::Theme::Light,
+                palette::light::TAB_ALERT,
+                palette::light::TAB_ALERT_BORDER,
+                palette::light::ACCENT,
+                semantic::LIGHT.error,
+            ),
+        ] {
+            let global = dock_style(&egui_style).tab;
+            let s = alert_tab_style(&global, theme);
+
+            // Hover moves the outline, not the fill: a deeper tint drops the
+            // light theme's error label under the contrast floor.
+            for (variant, tab, want_outline) in [
+                ("inactive", &s.inactive, outline),
+                ("inactive_with_kb_focus", &s.inactive_with_kb_focus, accent),
+                ("hovered", &s.hovered, error),
+            ] {
+                assert_eq!(tab.bg_fill, fill, "{name} alert.{variant}.bg_fill");
+                assert_eq!(tab.outline_color, want_outline, "{name} alert.{variant}.outline_color");
+                assert_eq!(tab.text_color, error, "{name} alert.{variant}.text_color");
+                let ratio = contrast_ratio(tab.text_color, tab.bg_fill);
+                assert!(
+                    ratio >= CONTRAST_FLOOR,
+                    "{name} alert.{variant}: error {error:?} on {fill:?} only reached {ratio}"
+                );
+            }
+
+            // Once the tab is the active one the alert has done its job, so it
+            // keeps the ordinary active fill and carries the mark in the label.
+            for (variant, tab, global_tab) in [
+                ("active", &s.active, &global.active),
+                ("focused", &s.focused, &global.focused),
+                ("active_with_kb_focus", &s.active_with_kb_focus, &global.active_with_kb_focus),
+                ("focused_with_kb_focus", &s.focused_with_kb_focus, &global.focused_with_kb_focus),
+            ] {
+                assert_eq!(tab.bg_fill, global_tab.bg_fill, "{name} alert.{variant}.bg_fill");
+                assert_eq!(tab.outline_color, global_tab.outline_color, "{name} alert.{variant}.outline_color");
+                assert_eq!(tab.text_color, error, "{name} alert.{variant}.text_color");
+            }
         }
     }
 

@@ -255,31 +255,8 @@ impl TabViewer for ToolkitTabViewer<'_> {
     }
 
     fn tab_style_override(&self, tab: &Self::Tab, global_style: &TabStyle) -> Option<TabStyle> {
-        if matches!(tab, Tab::Settings) && self.tab_state.settings_needs_attention {
-            let mut style = global_style.clone();
-            let error = match self.tab_state.active_theme {
-                egui::Theme::Dark => crate::ui::theme::semantic::DARK.error,
-                egui::Theme::Light => crate::ui::theme::semantic::LIGHT.error,
-            };
-            let label = crate::ui::theme::contrast::label_on(error);
-            style.active.bg_fill = error;
-            style.active.text_color = label;
-            style.inactive.bg_fill = error;
-            style.inactive.text_color = label;
-            style.focused.bg_fill = error;
-            style.focused.text_color = label;
-            style.hovered.bg_fill = error;
-            style.hovered.text_color = label;
-            style.active_with_kb_focus.bg_fill = error;
-            style.active_with_kb_focus.text_color = label;
-            style.inactive_with_kb_focus.bg_fill = error;
-            style.inactive_with_kb_focus.text_color = label;
-            style.focused_with_kb_focus.bg_fill = error;
-            style.focused_with_kb_focus.text_color = label;
-            Some(style)
-        } else {
-            None
-        }
+        (matches!(tab, Tab::Settings) && self.tab_state.settings_needs_attention)
+            .then(|| crate::ui::theme::style::alert_tab_style(global_style, self.tab_state.active_theme))
     }
 
     fn scroll_bars(&self, _tab: &Self::Tab) -> [bool; 2] {
