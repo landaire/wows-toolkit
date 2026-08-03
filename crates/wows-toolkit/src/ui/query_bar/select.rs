@@ -324,10 +324,14 @@ pub fn group(expr: &mut MatchExpr, sel: &Selection, is_or: bool) {
     indices.sort_unstable();
     indices.dedup();
 
+    // The first path had a parent, so at least one index survived; taking it as
+    // an option rather than by subscript keeps that reasoning off a panic path.
+    let Some(&insert_at) = indices.first() else {
+        return;
+    };
     let Some(children) = children_mut(expr, parent_path) else {
         return;
     };
-    let insert_at = indices[0];
     let mut taken = Vec::with_capacity(indices.len());
     for &i in indices.iter().rev() {
         taken.push(children.remove(i));
@@ -338,38 +342,50 @@ pub fn group(expr: &mut MatchExpr, sel: &Selection, is_or: bool) {
 }
 
 /// Splices the children of the `All`/`Any` node at `path` into its parent, in
-/// place of that node.
-pub fn ungroup(expr: &mut MatchExpr, path: &NodePath) {
+/// place of that node. Reports whether it took, so a caller does not report an
+/// edit that did not happen.
+///
+/// The root is refused: it has no parent to splice into, and the printer
+/// already suppresses its brackets, so there is no group there to dissolve.
+/// A node whose parent is a `Not` is refused for the same reason in reverse --
+/// a `Not` holds exactly one operand and cannot absorb several.
+pub fn ungroup(expr: &mut MatchExpr, path: &NodePath) -> bool {
     let Some((parent_path, index)) = parent_and_index(path) else {
-        return;
+        return false;
     };
+    // Checked before the children are taken, so a parent that cannot absorb
+    // them leaves the group exactly as it was rather than emptied.
+    if children_mut(expr, parent_path).is_none() {
+        return false;
+    }
     let Some(node) = node_at_mut(expr, path) else {
-        return;
+        return false;
     };
     let taken = match node {
         Expr::All(cs) | Expr::Any(cs) => std::mem::take(cs),
-        _ => return,
+        _ => return false,
     };
     let Some(children) = children_mut(expr, parent_path) else {
-        return;
+        return false;
     };
     children.remove(index);
     for (offset, child) in taken.into_iter().enumerate() {
         children.insert(index + offset, child);
     }
+    true
 }
 
 /// Negates the node at `path` in place: flips a leaf's operator or quantifier
 /// when an inverse exists that the field still allows, unwraps an existing
 /// `Not`, and otherwise wraps the node in `Not`.
+///
+/// Resolved through `node_at_mut` rather than through the parent's children,
+/// because every branch here rewrites the node itself and needs no sibling.
+/// That is also what lets the root be negated: a canonical one-pill query is a
+/// bare `Leaf` whose path is empty, and a query that is only a `Not` gives its
+/// pill the path `[0]`, neither of which names a child of an `All`/`Any`.
 pub fn negate(expr: &mut MatchExpr, path: &NodePath) {
-    let Some((parent_path, index)) = parent_and_index(path) else {
-        return;
-    };
-    let Some(children) = children_mut(expr, parent_path) else {
-        return;
-    };
-    let Some(node) = children.get_mut(index) else {
+    let Some(node) = node_at_mut(expr, path) else {
         return;
     };
 
@@ -401,19 +417,41 @@ pub fn negate(expr: &mut MatchExpr, path: &NodePath) {
 
 /// Removes every selected node. Removes in descending path order (deepest,
 /// highest index first) so earlier removals never shift the index of a later
-/// one still to be removed.
+/// one still to be removed. The root sorts last under that order, so a
+/// selection that names it takes effect after the rest and leaves the same
+/// empty query either way.
 pub fn delete(expr: &mut MatchExpr, sel: &Selection) {
     let mut paths = sel.nodes.clone();
     paths.sort_by(|a, b| b.cmp(a));
     for path in paths {
-        let Some((parent_path, index)) = parent_and_index(&path) else {
-            continue;
-        };
-        if let Some(children) = children_mut(expr, parent_path)
-            && index < children.len()
-        {
-            children.remove(index);
+        remove_node(expr, &path);
+    }
+}
+
+/// Detaches the node at `path` from whatever holds it.
+///
+/// The root is held by nothing, so removing it leaves the canonical empty
+/// query. A `Not`'s only operand cannot simply be dropped, since that would
+/// leave a negation of nothing; it becomes an empty conjunction, which
+/// `canonicalise` then drops along with the `Not` above it. Both matter for a
+/// canonical tree: a one-pill query is a bare `Leaf` at the root, and
+/// `-outcome:win` puts its only pill under a root `Not`.
+fn remove_node(expr: &mut MatchExpr, path: &[usize]) {
+    let Some((parent_path, index)) = parent_and_index(path) else {
+        *expr = Expr::All(Vec::new());
+        return;
+    };
+    let Some(parent) = node_at_mut(expr, parent_path) else {
+        return;
+    };
+    match parent {
+        Expr::All(cs) | Expr::Any(cs) => {
+            if index < cs.len() {
+                cs.remove(index);
+            }
         }
+        Expr::Not(inner) if index == 0 => **inner = Expr::All(Vec::new()),
+        Expr::Not(_) | Expr::Leaf(_) => {}
     }
 }
 
@@ -528,8 +566,11 @@ mod tests {
     use crate::db::index::query_ast::Value;
     use crate::db::index::rows::MatchOutcome;
 
+    fn leaf_term(n: i64) -> MatchTerm {
+        MatchTerm::Field(MatchField::Build, Op::Eq, Value::Int(n))
+    }
     fn leaf(n: i64) -> MatchExpr {
-        Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Eq, Value::Int(n)))
+        Expr::Leaf(leaf_term(n))
     }
     fn sel(paths: &[&[usize]]) -> Selection {
         Selection { nodes: paths.iter().map(|p| p.to_vec()).collect() }
@@ -586,7 +627,7 @@ mod tests {
     #[test]
     fn ungrouping_splices_children_into_the_parent_in_place() {
         let mut e = Expr::All(vec![leaf(1), Expr::Any(vec![leaf(2), leaf(3)]), leaf(4)]);
-        ungroup(&mut e, &vec![1]);
+        assert!(ungroup(&mut e, &vec![1]));
         match &e {
             Expr::All(cs) => {
                 assert_eq!(cs.len(), 4);
@@ -707,12 +748,86 @@ mod tests {
         }
     }
 
+    /// The shape the bar actually holds a one-pill query in. `canonicalise`
+    /// collapses a single-child root, so `All([x])` is a tree the widget never
+    /// has and a fixture built from one cannot exercise the path the toolbar,
+    /// the right-click menu, and Backspace all take.
     #[test]
-    fn deleting_the_last_child_leaves_the_canonical_empty_query() {
-        let mut e = Expr::All(vec![leaf(1)]);
+    fn deleting_the_only_pill_leaves_the_canonical_empty_query() {
+        let mut e = Expr::Leaf(leaf_term(1));
+        delete(&mut e, &sel(&[&[]]));
+        canonicalise(&mut e);
+        assert!(e.is_empty_all(), "got {e:?}");
+    }
+
+    /// `-outcome:win` canonicalises to a root `Not`, whose only pill is at
+    /// `[0]`. That path has a parent, but the parent is a `Not` and holds no
+    /// children vector to remove from.
+    #[test]
+    fn deleting_the_only_pill_under_a_root_not_leaves_the_canonical_empty_query() {
+        let mut e: MatchExpr = Expr::Not(Box::new(Expr::Leaf(leaf_term(1))));
         delete(&mut e, &sel(&[&[0]]));
         canonicalise(&mut e);
-        assert!(e.is_empty_all());
+        assert!(e.is_empty_all(), "got {e:?}");
+    }
+
+    /// A negation nested inside a query loses only its own operand, not the
+    /// siblings around it.
+    #[test]
+    fn deleting_a_nested_negations_operand_keeps_its_siblings() {
+        let mut e = Expr::All(vec![leaf(1), Expr::Not(Box::new(leaf(2)))]);
+        delete(&mut e, &sel(&[&[1, 0]]));
+        canonicalise(&mut e);
+        assert_eq!(e, leaf(1));
+    }
+
+    #[test]
+    fn negating_the_root_leaf_flips_its_operator_in_place() {
+        let mut e = Expr::Leaf(leaf_term(1));
+        negate(&mut e, &vec![]);
+        assert_eq!(e, Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Ne, Value::Int(1))));
+        negate(&mut e, &vec![]);
+        assert_eq!(e, Expr::Leaf(leaf_term(1)), "negating twice returns the original");
+    }
+
+    #[test]
+    fn negating_the_root_group_wraps_and_unwraps_it_in_place() {
+        let before: MatchExpr = Expr::Any(vec![leaf(1), leaf(2)]);
+        let mut e = before.clone();
+        negate(&mut e, &vec![]);
+        assert_eq!(e, Expr::Not(Box::new(before.clone())));
+        negate(&mut e, &vec![]);
+        assert_eq!(e, before);
+    }
+
+    /// The pill of `-outcome:win` sits at `[0]`, under a root that is a `Not`
+    /// rather than an `All`.
+    #[test]
+    fn negating_the_only_pill_under_a_root_not_flips_it() {
+        let mut e: MatchExpr = Expr::Not(Box::new(Expr::Leaf(leaf_term(1))));
+        negate(&mut e, &vec![0]);
+        assert_eq!(e, Expr::Not(Box::new(Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Ne, Value::Int(1))))));
+    }
+
+    /// The root has no parent to splice into and the printer already suppresses
+    /// its brackets, so there is nothing there to dissolve. Refusing has to be
+    /// reported, or the bar re-queries and drops the selection as if it acted.
+    #[test]
+    fn ungrouping_the_root_is_refused_and_says_so() {
+        let mut e = Expr::All(vec![leaf(1), leaf(2)]);
+        let before = e.clone();
+        assert!(!ungroup(&mut e, &vec![]));
+        assert_eq!(e, before);
+    }
+
+    /// A `Not` holds exactly one operand and cannot absorb a group's children,
+    /// so the group has to survive the refusal intact rather than be emptied.
+    #[test]
+    fn ungrouping_a_group_under_a_negation_is_refused_without_losing_its_children() {
+        let mut e: MatchExpr = Expr::Not(Box::new(Expr::Any(vec![leaf(1), leaf(2)])));
+        let before = e.clone();
+        assert!(!ungroup(&mut e, &vec![0]));
+        assert_eq!(e, before);
     }
 
     #[test]
@@ -1002,7 +1117,7 @@ mod tests {
             match edit {
                 0 => group(&mut e, &sel(&[&[0], &[1]]), true),
                 1 => negate(&mut e, &vec![1]),
-                2 => ungroup(&mut e, &vec![0]),
+                2 => assert!(ungroup(&mut e, &vec![0]), "edit 2 should have ungrouped"),
                 3 => group(&mut e, &sel(&[&[0], &[1]]), false),
                 4 => negate(&mut e, &vec![0]),
                 _ => delete(&mut e, &sel(&[&[1]])),

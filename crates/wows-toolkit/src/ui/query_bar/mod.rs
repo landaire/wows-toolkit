@@ -398,6 +398,14 @@ impl QueryBar {
                 let expr = &self.expr;
                 let path = &token.path;
                 response.context_menu(|ui| pill_menu(ui, expr, path, commands));
+                // A pill inside a roster predicate draws inside its
+                // quantifier's bracket but names no match-level node, so
+                // selecting it would offer a toolbar whose edits cannot
+                // address it. The keyboard already steps past those pills
+                // (`selectable_paths`); the pointer has to agree.
+                if !select::addresses_match_node(expr, path) {
+                    return;
+                }
                 if response.double_clicked() {
                     commands.push(Command::EditAsText(token.path.clone()));
                 } else if response.clicked() {
@@ -728,10 +736,7 @@ impl QueryBar {
                 select::set_connector(&mut self.expr, &path, is_or);
                 true
             }
-            Command::Ungroup(path) => {
-                select::ungroup(&mut self.expr, &path);
-                true
-            }
+            Command::Ungroup(path) => select::ungroup(&mut self.expr, &path),
         }
     }
 
@@ -889,6 +894,10 @@ impl QueryBar {
 
 /// The right-click menu for one pill: the operators its field allows, then the
 /// edits that need no operator.
+///
+/// A pill inside a roster predicate keeps its operator list, which `set_op`
+/// does reach, and loses the rest: negate, delete, and edit-as-text all address
+/// a match-level node the path does not name.
 fn pill_menu(ui: &mut Ui, expr: &MatchExpr, path: &NodePath, commands: &mut Vec<Command>) {
     if let Some((allowed, current)) = select::term_op_at(expr, path) {
         ui.label(t!("ui.search.bar.operator_menu").into_owned());
@@ -903,6 +912,9 @@ fn pill_menu(ui: &mut Ui, expr: &MatchExpr, path: &NodePath, commands: &mut Vec<
             }
         }
         ui.separator();
+    }
+    if !select::addresses_match_node(expr, path) {
+        return;
     }
     if ui.button(t!("ui.search.bar.edit_as_text").into_owned()).clicked() {
         commands.push(Command::EditAsText(path.clone()));
@@ -962,5 +974,71 @@ fn token_width(token: &Token, galley: &Galley) -> f32 {
         | TokenKind::GroupClose
         | TokenKind::QuantOpen { .. }
         | TokenKind::QuantClose => galley.size().x + 2.0 * paint::PAD_X,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::index::query_ast::Expr;
+    use crate::db::index::query_ast::MatchField;
+    use crate::db::index::query_ast::MatchTerm;
+    use crate::db::index::query_ast::Value;
+    use crate::db::index::rows::MatchOutcome;
+
+    fn win() -> MatchExpr {
+        Expr::Leaf(MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win)))
+    }
+
+    /// Double-clicking a pill lifts it into the caret so its value can be
+    /// retyped, which means the tree and the caret must not both hold it. A
+    /// removal that quietly did nothing would leave the term in place while
+    /// its text sat in the caret, and the next Enter would add a second copy
+    /// of it -- to the query, to the settings file, and to whatever text the
+    /// user shares.
+    #[test]
+    fn editing_the_only_pill_as_text_takes_it_out_of_the_tree() {
+        let mut bar = QueryBar::default();
+        bar.set_expr(win());
+        assert!(bar.edit_as_text(&vec![]));
+        select::canonicalise(&mut bar.expr);
+        assert!(bar.expr.is_empty_all(), "the pill must leave the tree: got {:?}", bar.expr);
+        assert!(!bar.pending.trim().is_empty(), "the pill's text must land in the caret");
+
+        assert!(bar.commit_pending());
+        select::canonicalise(&mut bar.expr);
+        assert_eq!(bar.expr, win(), "retyping the pill gives one term back, not two");
+    }
+
+    /// `-outcome:win` canonicalises to a root `Not`, whose only pill is at
+    /// `[0]` rather than under any conjunction.
+    #[test]
+    fn editing_the_only_pill_of_a_negated_query_as_text_takes_it_out_of_the_tree() {
+        let mut bar = QueryBar::default();
+        bar.set_expr(Expr::Not(Box::new(win())));
+        assert!(bar.edit_as_text(&vec![0]));
+        select::canonicalise(&mut bar.expr);
+        assert!(bar.expr.is_empty_all(), "the pill must leave the tree: got {:?}", bar.expr);
+    }
+
+    /// A pill inside a roster predicate prints as its whole quantifier while
+    /// the removal would address a node the match tree does not have, so the
+    /// caret must not be given text for a term that stays behind.
+    #[test]
+    fn editing_a_roster_internal_pill_as_text_is_refused() {
+        use crate::db::index::query_ast::Op;
+        use crate::db::index::query_ast::Quant;
+        use crate::db::index::query_ast::RosterField;
+        use crate::db::index::query_ast::RosterTerm;
+        let pred = Expr::All(vec![
+            Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) }),
+            Expr::Leaf(RosterTerm { field: RosterField::Kills, op: Op::Ge, value: Value::Int(2) }),
+        ]);
+        let mut bar = QueryBar::default();
+        bar.set_expr(Expr::All(vec![win(), Expr::Leaf(MatchTerm::Roster { quant: Quant::None, pred })]));
+        let before = bar.expr.clone();
+        assert!(!bar.edit_as_text(&vec![1, 0]));
+        assert!(bar.pending.is_empty());
+        assert_eq!(bar.expr, before);
     }
 }
