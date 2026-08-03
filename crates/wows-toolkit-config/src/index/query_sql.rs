@@ -72,10 +72,7 @@ fn push_match_term(qb: &mut QueryBuilder<'_, Sqlite>, term: &MatchTerm, ctx: &Co
         }
         MatchTerm::Field(field, op, value) => push_field(qb, *field, *op, value),
         MatchTerm::Roster { quant, pred } => push_roster(qb, *quant, pred),
-        // Task 4 replaces this arm.
-        MatchTerm::FreeText(_) => {
-            qb.push("1=0");
-        }
+        MatchTerm::FreeText(needle) => push_free_text(qb, needle),
     }
 }
 
@@ -148,6 +145,18 @@ fn push_text(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, s: &str) {
             qb.push(format!("LOWER({col}) = LOWER(")).push_bind(s.to_string()).push(")");
         }
     }
+}
+
+fn push_free_text(qb: &mut QueryBuilder<'_, Sqlite>, needle: &str) {
+    qb.push("(");
+    push_text(qb, "m.map", Op::Contains, needle);
+    qb.push(" OR EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND (");
+    push_text(qb, "v.player_name", Op::Contains, needle);
+    qb.push(" OR ");
+    push_text(qb, "v.clan", Op::Contains, needle);
+    qb.push(" OR ");
+    push_text(qb, "v.ship_name", Op::Contains, needle);
+    qb.push(")))");
 }
 
 /// The comparison an `Op` makes when applied to a numeric column.
@@ -512,5 +521,16 @@ mod tests {
         let ship =
             sql_for(&roster(Quant::Any, rleaf(RosterField::Ship, Op::Is, Value::Ship(GameParamId::from(999u64)))));
         assert!(ship.contains("v.ship_id ="), "got {ship}");
+    }
+
+    #[test]
+    fn free_text_searches_map_player_clan_and_ship_name() {
+        let sql = sql_for(&Expr::Leaf(MatchTerm::FreeText("yamato".into())));
+        assert!(sql.contains("LOWER(m.map)"), "got {sql}");
+        assert!(sql.contains("v.player_name"), "got {sql}");
+        assert!(sql.contains("v.clan"), "got {sql}");
+        assert!(sql.contains("v.ship_name"), "got {sql}");
+        assert!(sql.contains("EXISTS ("), "roster columns need their own EXISTS: {sql}");
+        assert!(!sql.contains("yamato"), "needle was inlined into SQL: {sql}");
     }
 }
