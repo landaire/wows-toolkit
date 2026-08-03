@@ -142,10 +142,9 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
         s.replay = v;
     }
     // Nested struct: search. Also restored into the Search tab itself below,
-    // once the write guard on `settings` is dropped. A value written by a build
-    // that persisted the superseded chip model does not deserialize into this
-    // shape; `get_setting` logs that and yields `None`, which starts the tab
-    // empty rather than failing the whole load.
+    // once the write guard on `settings` is dropped. A stored value that does
+    // not deserialize is logged by `get_setting` and read as `None`, which
+    // leaves the defaults in place rather than failing the whole load.
     let search: Option<crate::data::settings::SearchSettings> = queries::get_setting(pool, "search").await;
     if let Some(v) = search.clone() {
         s.search = v;

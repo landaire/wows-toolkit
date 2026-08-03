@@ -86,8 +86,10 @@ pub struct SearchTabState {
     /// column holding raw space names.
     pub maps: MapCatalog,
 
-    tx: Sender<SearchMsg>,
-    rx: Receiver<SearchMsg>,
+    /// Every spawned task sends exactly once, `None` when it produced nothing,
+    /// so `in_flight` balances however the task ended.
+    tx: Sender<Option<SearchMsg>>,
+    rx: Receiver<Option<SearchMsg>>,
     /// The value lookup waiting out its debounce, and when it was asked for.
     debounced: Option<(ValueRequest, Instant)>,
     /// The value lookup whose reply the bar is still waiting for, so a reply to
@@ -148,13 +150,18 @@ impl SearchTabState {
     /// Applies every reply that has arrived since the last frame.
     fn drain_replies(&mut self) {
         loop {
-            let msg = match self.rx.try_recv() {
-                Ok(msg) => msg,
+            let reply = match self.rx.try_recv() {
+                Ok(reply) => reply,
                 Err(TryRecvError::Empty) => return,
                 // The tab owns both ends, so the sender outlives every receive.
                 Err(TryRecvError::Disconnected) => return,
             };
+            // Counted before the payload is examined, because a task that failed
+            // still sends: the count is of tasks, not of results.
             self.in_flight = self.in_flight.saturating_sub(1);
+            let Some(msg) = reply else {
+                continue;
+            };
             match msg {
                 SearchMsg::Results { seq, hits, truncated } => {
                     if seq == self.query_seq {
@@ -183,6 +190,14 @@ impl SearchTabState {
 
     /// Runs `work` on the runtime and delivers what it produces over the tab's
     /// own channel.
+    ///
+    /// The send is unconditional and carries the `Option` itself. `in_flight`
+    /// is what keeps the tab waking itself until every reply is in hand, so a
+    /// task that produced nothing still has to say it finished; a work future
+    /// that returned without sending would leave the count above zero for the
+    /// life of the tab and repaint at `POLL_INTERVAL` forever. Putting the send
+    /// here rather than in each future is what stops a later error path from
+    /// reintroducing that.
     fn spawn<F>(&mut self, rt: &Runtime, work: F)
     where
         F: std::future::Future<Output = Option<SearchMsg>> + Send + 'static,
@@ -190,9 +205,7 @@ impl SearchTabState {
         let tx = self.tx.clone();
         self.in_flight += 1;
         rt.spawn(async move {
-            if let Some(msg) = work.await {
-                let _ = tx.send(msg);
-            }
+            let _ = tx.send(work.await);
         });
     }
 
@@ -274,13 +287,19 @@ impl SearchTabState {
         }
         let (request, _) = self.debounced.take()?;
         // Both catalogues are already in hand, so these answer with no runtime
-        // round trip and nothing to wait for.
+        // round trip and nothing to wait for. Answering locally still has to
+        // abandon whatever lookup was outstanding: a player or ship reply that
+        // arrived afterwards would otherwise still match `awaiting_values` and
+        // replace these rows, leaving the caret typing a source or a map while
+        // the dropdown offered accounts to commit.
         match request {
             ValueRequest::Sources => {
+                self.awaiting_values = None;
                 self.bar.value_options = self.sources.iter().map(source_option).collect();
                 return None;
             }
             ValueRequest::Maps => {
+                self.awaiting_values = None;
                 self.bar.value_options = self.map_names.iter().map(|name| map_option(name)).collect();
                 return None;
             }

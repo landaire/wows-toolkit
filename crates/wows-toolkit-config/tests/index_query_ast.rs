@@ -419,3 +419,84 @@ async fn a_map_equality_does_not_match_a_display_name_that_merely_contains_it() 
     assert!(run_text_with(&pool, "map!=\"ocean rift\"", &maps).await.is_empty());
     assert_eq!(run_text_with(&pool, "map!=ocean", &maps).await, vec![ArenaId::new(1)]);
 }
+
+/// `is_stream_sniper` is NULL for every roster row the fuzzy matcher never
+/// ran over, and NULL is neither true nor false in SQL. A compiler that read
+/// `stream-sniper=false` as "not true" would sweep in every un-computed row,
+/// which is nearly the whole index. The `stream_sniper` preset builds a term
+/// over this field, so it is a live path.
+#[tokio::test]
+async fn a_stream_sniper_term_treats_an_uncomputed_row_as_neither_true_nor_false() {
+    let pool = mem_pool().await;
+
+    let mut flagged = a_vehicle(1, 7, VehicleRelation::SelfPlayer);
+    flagged.is_stream_sniper = Some(true);
+    // A second row in the same arena that was never computed, so the arena
+    // matching cannot be explained by every one of its rows being explicit.
+    let unknown_beside_it = a_vehicle(1, 8, VehicleRelation::Enemy);
+    seed(&pool, 1, vec![flagged, unknown_beside_it]).await;
+
+    let mut cleared = a_vehicle(2, 7, VehicleRelation::SelfPlayer);
+    cleared.is_stream_sniper = Some(false);
+    seed(&pool, 2, vec![cleared]).await;
+
+    // An arena whose every row is NULL: it must answer neither direction.
+    seed(&pool, 3, vec![a_vehicle(3, 7, VehicleRelation::SelfPlayer)]).await;
+
+    assert_eq!(
+        run_text(&pool, "any(stream-sniper=true)").await,
+        vec![ArenaId::new(1)],
+        "only the arena with an explicit is_stream_sniper=1 row may match"
+    );
+    assert_eq!(
+        run_text(&pool, "any(stream-sniper=false)").await,
+        vec![ArenaId::new(2)],
+        "a NULL row must not answer `false`; only the explicit 0 may"
+    );
+    // The nullary operators are the way to ask about the NULL itself, and they
+    // have to partition the same three arenas.
+    assert_eq!(run_text(&pool, "any(stream-sniper is-set)").await, vec![ArenaId::new(2), ArenaId::new(1)]);
+    assert_eq!(
+        run_text(&pool, "none(stream-sniper is-set)").await,
+        vec![ArenaId::new(3)],
+        "the arena whose rows were never computed is the one with nothing set"
+    );
+}
+
+/// `seed::matches_mentioning_clan` builds `any(clan~tag or name~tag)`, so the
+/// clan half has to reach the column rather than only the name half carrying
+/// the query. Both halves are checked against rows that can only match through
+/// one of them.
+#[tokio::test]
+async fn a_clan_term_matches_the_clan_column_independently_of_the_player_name() {
+    let pool = mem_pool().await;
+
+    let mut in_clan = a_vehicle(1, 7, VehicleRelation::SelfPlayer);
+    in_clan.clan = "PANDA".into();
+    in_clan.player_name = "Nemo".into();
+    seed(&pool, 1, vec![in_clan]).await;
+
+    // The tag appears in the name and not in the clan, which is the case the
+    // disjunction exists for and the one a clan-only match must not claim.
+    let mut named_for_it = a_vehicle(2, 8, VehicleRelation::SelfPlayer);
+    named_for_it.clan = "OTHER".into();
+    named_for_it.player_name = "PANDAfan".into();
+    seed(&pool, 2, vec![named_for_it]).await;
+
+    assert_eq!(
+        run_text(&pool, "any(clan:panda)").await,
+        vec![ArenaId::new(1)],
+        "the clan column is matched on its own"
+    );
+    assert_eq!(
+        run_text(&pool, "any(name:panda)").await,
+        vec![ArenaId::new(2)],
+        "the name column is matched on its own"
+    );
+    assert_eq!(
+        run_text(&pool, "any(clan:panda or name:panda)").await,
+        vec![ArenaId::new(2), ArenaId::new(1)],
+        "the seeded shape spans both columns"
+    );
+    assert!(run_text(&pool, "any(clan:nemo)").await.is_empty(), "a player name must not answer a clan term");
+}
