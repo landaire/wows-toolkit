@@ -39,12 +39,14 @@ pub enum TokenState {
 
 /// The bar's own background and border. A focused bar takes the accent stroke
 /// so it reads as the active control the way a plain `TextEdit` would.
-pub fn bar_frame(ui: &Ui, rect: Rect, focused: bool) {
+pub fn bar_frame(ui: &Ui, focused: bool) -> egui::Frame {
     let visuals = ui.visuals();
     let stroke = if focused { visuals.selection.stroke } else { visuals.widgets.inactive.bg_stroke };
-    let painter = ui.painter();
-    painter.rect_filled(rect, CornerRadius::same(RADIUS), visuals.extreme_bg_color);
-    painter.rect_stroke(rect, CornerRadius::same(RADIUS), stroke, StrokeKind::Inside);
+    egui::Frame::new()
+        .fill(visuals.extreme_bg_color)
+        .stroke(stroke)
+        .corner_radius(CornerRadius::same(RADIUS))
+        .inner_margin(4)
 }
 
 /// Draws one token. Exhaustive over `TokenKind` so a new kind cannot slip

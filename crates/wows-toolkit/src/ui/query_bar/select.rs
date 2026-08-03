@@ -68,6 +68,24 @@ pub fn pill_paths(tokens: &[Token]) -> Vec<NodePath> {
     tokens.iter().filter(|t| matches!(t.kind, TokenKind::Pill { .. })).map(|t| t.path.clone()).collect()
 }
 
+/// The pills the selection may act on: those whose path names a node of the
+/// match tree. A pill inside a roster predicate draws inside its quantifier's
+/// bracket but has no match-level node to group, negate, or delete, so letting
+/// the caret step onto it would offer edits that quietly do nothing.
+pub fn selectable_paths(expr: &MatchExpr, tokens: &[Token]) -> Vec<NodePath> {
+    pill_paths(tokens).into_iter().filter(|p| addresses_match_node(expr, p)).collect()
+}
+
+/// True when `path` names a node of the `MatchExpr` itself. A path that
+/// continues past a leaf into a roster predicate does not: that predicate is a
+/// separate tree, and no match-level edit can address anything inside it.
+pub fn addresses_match_node(expr: &MatchExpr, path: &[usize]) -> bool {
+    match split_at_leaf(expr, path) {
+        Some((_, rest)) => rest.is_empty(),
+        None => expr_at(expr, path).is_some(),
+    }
+}
+
 /// The pill one step from `anchor` in stream order. With no anchor, stepping
 /// back lands on the last pill (the caret sits after it) and stepping forward
 /// goes nowhere, since there is nothing after the caret. `None` when there is
@@ -661,6 +679,33 @@ mod tests {
         let e = Expr::All(vec![leaf(1), Expr::Any(vec![leaf(2), leaf(3)])]);
         let toks = tokenize(&e, &NameCache::default());
         assert_eq!(pill_paths(&toks), vec![vec![0], vec![1, 0], vec![1, 1]]);
+    }
+
+    #[test]
+    fn a_roster_internal_pill_is_drawn_but_not_selectable() {
+        use crate::db::index::query_ast::RosterField;
+        use crate::db::index::query_ast::RosterTerm;
+        use crate::ui::query_bar::label::NameCache;
+        use crate::ui::query_bar::tokens::tokenize;
+        let pred = Expr::All(vec![
+            Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) }),
+            Expr::Leaf(RosterTerm { field: RosterField::Kills, op: Op::Ge, value: Value::Int(2) }),
+        ]);
+        let e: MatchExpr = Expr::All(vec![leaf(1), Expr::Leaf(MatchTerm::Roster { quant: Quant::None, pred })]);
+        let toks = tokenize(&e, &NameCache::default());
+        assert_eq!(pill_paths(&toks), vec![vec![0], vec![1, 0], vec![1, 1]], "both roster conjuncts draw as pills");
+        assert_eq!(selectable_paths(&e, &toks), vec![vec![0]], "only the match-level pill can be selected");
+        assert!(addresses_match_node(&e, &[1]), "the quantifier leaf itself is a match node");
+        assert!(!addresses_match_node(&e, &[1, 0]));
+    }
+
+    #[test]
+    fn an_interior_group_node_addresses_a_match_node() {
+        let e = Expr::All(vec![leaf(1), Expr::Any(vec![leaf(2), leaf(3)])]);
+        assert!(addresses_match_node(&e, &[]));
+        assert!(addresses_match_node(&e, &[1]));
+        assert!(addresses_match_node(&e, &[1, 0]));
+        assert!(!addresses_match_node(&e, &[9]));
     }
 
     #[test]

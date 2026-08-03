@@ -139,7 +139,7 @@ pub(crate) fn roster_field_label(field: RosterField) -> String {
     .into()
 }
 
-fn op_label(op: Op) -> String {
+pub(crate) fn op_label(op: Op) -> String {
     match op {
         Op::Contains => t!("ui.search.op.contains"),
         Op::Equals => t!("ui.search.op.equals"),
