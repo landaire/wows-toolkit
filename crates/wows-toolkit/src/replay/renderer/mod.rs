@@ -53,7 +53,7 @@ use crate::icons;
 use crate::util::controls::CommandGroup;
 /// Approximate number of frame snapshots per second of game time.
 /// Controls the granularity of seeking in the replay.
-const SNAPSHOTS_PER_SECOND: f32 = 1.5;
+pub(crate) const SNAPSHOTS_PER_SECOND: f32 = 1.5;
 const PLAYBACK_SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
 use crate::replay::minimap_view::Annotation;
 use crate::replay::minimap_view::AnnotationState;
@@ -1275,6 +1275,8 @@ pub fn launch_client_renderer(
         save_notify,
     }
 }
+
+mod frame_pass;
 
 mod playback;
 use playback::playback_thread;

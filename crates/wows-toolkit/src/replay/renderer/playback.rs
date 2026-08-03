@@ -34,6 +34,8 @@ use super::ReplayPlayerInfo;
 use super::ReplayRendererAssets;
 use super::SNAPSHOTS_PER_SECOND;
 use super::SharedRendererState;
+use super::frame_pass::FrameSink;
+use super::frame_pass::build_frame_track;
 use crate::replay::timeline::ShipShotTimeline;
 use crate::replay::timeline::extract_timeline_and_shots;
 use crate::util::controls::parse_commands_scheme;
@@ -245,81 +247,43 @@ pub(super) fn playback_thread(
     let frame_duration = 1.0 / SNAPSHOTS_PER_SECOND;
     let estimated_frames = (game_duration * SNAPSHOTS_PER_SECOND) as usize + 1;
 
-    // Frame snapshots: clock per rendered frame. Unlike single-replay's
-    // (packet_offset, clock) seek hints, merged sessions seek by rebuilding
-    // from scratch and stepping to the target clock, so we only need the
-    // clock value here.
-    let mut frame_snapshots: Vec<FrameSnapshot> = Vec::with_capacity(estimated_frames);
-    let mut last_rendered_frame: i64 = -1;
-    let mut prev_clock = GameClock(0.0);
+    struct FirstFrameSink<'a> {
+        shared_state: &'a Arc<Mutex<SharedRendererState>>,
+        estimated_frames: usize,
+        game_duration: f32,
+    }
 
-    loop {
-        let step = match session.step() {
-            Ok(Some(c)) => c,
-            Ok(None) => break,
-            Err(e) => {
-                tracing::error!("merge step failed during initial parse: {e}");
-                break;
+    impl FrameSink for FirstFrameSink<'_> {
+        fn push(&mut self, index: usize, clock: GameClock, commands: Vec<DrawCommand>) {
+            if index != 0 {
+                return;
             }
-        };
-        if step.0 > prev_clock.0 {
-            {
-                let view = session.world_mut().view();
-                renderer.populate_players(&view);
-                renderer.update_squadron_info(&view);
-                renderer.update_ship_abilities(&view);
+            let mut s = self.shared_state.lock();
+            if let Some(ref tx) = s.session_frame_tx {
+                let replay_id = s.collab_replay_id.unwrap_or(0);
+                let _ = tx.try_send(FrameBroadcast {
+                    replay_id,
+                    clock: clock.0,
+                    frame_index: 0,
+                    total_frames: self.estimated_frames as u32,
+                    game_duration: self.game_duration,
+                    commands: commands.clone(),
+                });
             }
-
-            let target_frame = (prev_clock.seconds() / frame_duration) as i64;
-            while last_rendered_frame < target_frame {
-                last_rendered_frame += 1;
-                let view = session.world_mut().view();
-                let commands = renderer.draw_frame(&view);
-                frame_snapshots.push(FrameSnapshot { clock: prev_clock });
-
-                // Store the first frame immediately (and broadcast if session is active).
-                if frame_snapshots.len() == 1 {
-                    let mut s = shared_state.lock();
-                    if let Some(ref tx) = s.session_frame_tx {
-                        let replay_id = s.collab_replay_id.unwrap_or(0);
-                        tracing::debug!("First frame: broadcasting via session_frame_tx (replay_id={replay_id})");
-                        let _ = tx.try_send(FrameBroadcast {
-                            replay_id,
-                            clock: prev_clock.0,
-                            frame_index: 0,
-                            total_frames: estimated_frames as u32,
-                            game_duration,
-                            commands: commands.clone(),
-                        });
-                    } else {
-                        tracing::debug!("First frame: session_frame_tx not wired yet, stored locally only");
-                    }
-                    s.frame = Some(PlaybackFrame {
-                        replay_id: 0,
-                        commands,
-                        clock: prev_clock,
-                        frame_index: 0,
-                        total_frames: estimated_frames,
-                        game_duration,
-                    });
-                }
-            }
-            prev_clock = step;
+            s.frame = Some(PlaybackFrame {
+                replay_id: 0,
+                commands,
+                clock,
+                frame_index: 0,
+                total_frames: self.estimated_frames,
+                game_duration: self.game_duration,
+            });
         }
     }
 
-    // Final tick
-    if prev_clock.seconds() > 0.0 {
-        let view = session.world_mut().view();
-        renderer.populate_players(&view);
-        renderer.update_squadron_info(&view);
-        renderer.update_ship_abilities(&view);
-        let target_frame = (prev_clock.seconds() / frame_duration) as i64;
-        while last_rendered_frame < target_frame {
-            last_rendered_frame += 1;
-            frame_snapshots.push(FrameSnapshot { clock: prev_clock });
-        }
-    }
+    let never_cancelled = AtomicBool::new(false);
+    let mut sink = FirstFrameSink { shared_state: &shared_state, estimated_frames, game_duration };
+    let frame_snapshots = build_frame_track(&mut session, &mut renderer, frame_duration, &never_cancelled, &mut sink);
     let vehicle_facts = session.vehicle_facts().clone();
     let damage_events = {
         let mut all = vec![&replay_file];
@@ -1092,10 +1056,6 @@ pub(super) fn playback_thread(
         // slower when paused.
         std::thread::sleep(std::time::Duration::from_millis(if playing { 33 } else { 16 }));
     }
-}
-
-struct FrameSnapshot {
-    clock: GameClock,
 }
 
 /// Translate a `ResolvedBuild` into the display struct the hover popover
