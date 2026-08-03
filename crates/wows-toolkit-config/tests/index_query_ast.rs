@@ -14,6 +14,7 @@ use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query_ast::CmpOp;
 use wows_toolkit_config::index::query_ast::DivisionScope;
 use wows_toolkit_config::index::query_ast::Expr;
+use wows_toolkit_config::index::query_ast::MapCatalog;
 use wows_toolkit_config::index::query_ast::MatchExpr;
 use wows_toolkit_config::index::query_ast::MatchTerm;
 use wows_toolkit_config::index::query_ast::Op;
@@ -23,6 +24,7 @@ use wows_toolkit_config::index::query_ast::RosterField;
 use wows_toolkit_config::index::query_ast::RosterTerm;
 use wows_toolkit_config::index::query_ast::Value;
 use wows_toolkit_config::index::query_sql::CompileCtx;
+use wows_toolkit_config::index::query_text::parse_query;
 use wows_toolkit_config::index::rows::IndexedVehicleRow;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::ObjectiveMatch;
@@ -36,11 +38,16 @@ async fn mem_pool() -> sqlx::SqlitePool {
     pool
 }
 
+/// The raw space name every seeded match uses unless the test picks another.
+/// Its display name is "Ocean", which the raw name does not contain, so a `map`
+/// term typed as the display name only matches through a `MapCatalog`.
+const DEFAULT_MAP: &str = "spaces/13_OC_new_dawn";
+
 fn a_match(arena: i64) -> ObjectiveMatch {
     ObjectiveMatch {
         arena_id: ArenaId::new(arena),
         timestamp: Timestamp::from_second(1_700_000_000 + arena).unwrap(),
-        map: "spaces/13_OC_new_dawn".into(),
+        map: DEFAULT_MAP.into(),
         game_mode: "Domination".into(),
         game_type: "pvp".into(),
         match_group: "pvp".into(),
@@ -99,17 +106,40 @@ fn a_vehicle(arena: i64, account: i64, relation: VehicleRelation) -> IndexedVehi
 }
 
 async fn seed(pool: &sqlx::SqlitePool, arena: i64, vehicles: Vec<IndexedVehicleRow>) -> SourceId {
+    seed_on_map(pool, arena, DEFAULT_MAP, vehicles).await
+}
+
+async fn seed_on_map(pool: &sqlx::SqlitePool, arena: i64, map: &str, vehicles: Vec<IndexedVehicleRow>) -> SourceId {
     let now = Timestamp::from_second(1_700_000_000).unwrap();
     let src = query::ensure_default_source(pool, Path::new("C:/wows/replays"), now).await.unwrap();
-    query::upsert_match(pool, &a_match(arena)).await.unwrap();
+    let mut m = a_match(arena);
+    m.map = map.into();
+    query::upsert_match(pool, &m).await.unwrap();
     query::upsert_vehicles(pool, &vehicles).await.unwrap();
     query::upsert_record(pool, &a_record(arena, src)).await.unwrap();
     src
 }
 
 async fn run(pool: &sqlx::SqlitePool, expr: &MatchExpr) -> Vec<ArenaId> {
-    let ctx = CompileCtx::default();
+    run_with(pool, expr, &MapCatalog::default()).await
+}
+
+async fn run_with(pool: &sqlx::SqlitePool, expr: &MatchExpr, maps: &MapCatalog) -> Vec<ArenaId> {
+    let ctx = CompileCtx { maps };
     query::search_by_ast(pool, expr, &ctx, 500).await.unwrap().into_iter().map(|h| h.arena_id).collect()
+}
+
+/// Text to rows, the way the query bar will run it. The per-stage tests cover
+/// text to AST, AST to SQL shape, and AST to rows separately; only this
+/// composition can see a compiler that is right about a shape and wrong about
+/// what it means.
+async fn run_text(pool: &sqlx::SqlitePool, src: &str) -> Vec<ArenaId> {
+    run_text_with(pool, src, &MapCatalog::default()).await
+}
+
+async fn run_text_with(pool: &sqlx::SqlitePool, src: &str, maps: &MapCatalog) -> Vec<ArenaId> {
+    let expr = parse_query(src).unwrap_or_else(|e| panic!("{src:?} did not parse: {e}"));
+    run_with(pool, &expr, maps).await
 }
 
 fn roster(quant: Quant, pred: RosterExpr) -> MatchExpr {
@@ -257,6 +287,23 @@ async fn a_null_stat_fails_comparisons_but_is_reachable_via_is_not_set() {
     assert_eq!(run(&pool, &unset).await, vec![ArenaId::new(1)]);
 }
 
+/// The NULL case cannot see a swapped `Le` and `Ge`, because three-valued logic
+/// makes both directions fail. A recorded stat pins the direction.
+#[tokio::test]
+async fn le_and_ge_compare_a_recorded_stat_in_the_right_direction() {
+    let pool = mem_pool().await;
+    // The default row has damage = Some(50_000).
+    seed(&pool, 1, vec![a_vehicle(1, 7, VehicleRelation::SelfPlayer)]).await;
+
+    let damage = |op, n| roster(Quant::Any, rleaf(RosterField::Damage, op, Value::Int(n)));
+    assert_eq!(run(&pool, &damage(Op::Le, 50_000)).await, vec![ArenaId::new(1)]);
+    assert_eq!(run(&pool, &damage(Op::Le, 60_000)).await, vec![ArenaId::new(1)]);
+    assert!(run(&pool, &damage(Op::Le, 49_999)).await.is_empty());
+    assert_eq!(run(&pool, &damage(Op::Ge, 50_000)).await, vec![ArenaId::new(1)]);
+    assert_eq!(run(&pool, &damage(Op::Ge, 40_000)).await, vec![ArenaId::new(1)]);
+    assert!(run(&pool, &damage(Op::Ge, 50_001)).await.is_empty());
+}
+
 #[tokio::test]
 async fn not_negates_a_whole_subtree() {
     let pool = mem_pool().await;
@@ -291,4 +338,85 @@ async fn limit_plus_one_lets_the_caller_detect_truncation() {
     let ctx = CompileCtx::default();
     let hits = query::search_by_ast(&pool, &Expr::All(vec![]), &ctx, 3).await.unwrap();
     assert_eq!(hits.len(), 4, "must fetch limit + 1 so the caller can detect more");
+}
+
+#[tokio::test]
+async fn typed_text_reaches_rows_through_a_quantifier() {
+    let pool = mem_pool().await;
+    let me = a_vehicle(1, 7, VehicleRelation::SelfPlayer);
+    let mut e1 = a_vehicle(1, 8, VehicleRelation::Enemy);
+    e1.damage = Some(150_000);
+    let mut e2 = a_vehicle(1, 9, VehicleRelation::Enemy);
+    e2.damage = Some(120_000);
+    seed(&pool, 1, vec![me, e1, e2]).await;
+
+    let hit = vec![ArenaId::new(1)];
+    assert_eq!(run_text(&pool, "any(relation:enemy and damage>100k)").await, hit);
+    assert!(run_text(&pool, "none(relation:enemy and damage>100k)").await.is_empty());
+    assert_eq!(run_text(&pool, "count(relation:enemy and damage>100k)>=2").await, hit);
+    assert!(run_text(&pool, "count(relation:enemy and damage>100k)>=3").await.is_empty());
+    assert_eq!(run_text(&pool, "none(class:cv)").await, hit);
+    // Scope sugar has to mean the same thing all the way to the rows.
+    assert_eq!(run_text(&pool, "self.damage=50000").await, hit);
+    assert!(run_text(&pool, "self.damage>100k").await.is_empty());
+    assert_eq!(run_text(&pool, "enemy.damage>100k").await, hit);
+}
+
+#[tokio::test]
+async fn typed_text_reaches_rows_through_and_or_and_not() {
+    let pool = mem_pool().await;
+    seed(&pool, 1, vec![a_vehicle(1, 7, VehicleRelation::SelfPlayer)]).await;
+
+    let hit = vec![ArenaId::new(1)];
+    assert_eq!(run_text(&pool, "outcome:win and map:new_dawn").await, hit);
+    assert!(run_text(&pool, "outcome:win and map:nowhere").await.is_empty());
+    assert_eq!(run_text(&pool, "outcome:loss or map:new_dawn").await, hit);
+    assert!(run_text(&pool, "outcome:loss or map:nowhere").await.is_empty());
+    assert!(run_text(&pool, "not outcome:win").await.is_empty());
+    assert_eq!(run_text(&pool, "not outcome:loss").await, hit);
+    assert_eq!(run_text(&pool, "build>=1234 and (outcome:win or outcome:draw)").await, hit);
+    assert!(run_text(&pool, "build>=1235 and (outcome:win or outcome:draw)").await.is_empty());
+    assert_eq!(run_text(&pool, "build is-set and any(tier=10) and not any(class:cv)").await, hit);
+    // A bare word is free text over map, player, clan, and ship name.
+    assert_eq!(run_text(&pool, "harugumo").await, hit);
+    assert!(run_text(&pool, "yamato").await.is_empty());
+}
+
+/// The catalogue half of a `map` term has to honour the operator it was given.
+/// Unioning it in with OR turns a negated term into its own opposite: the raw
+/// name is not the display name the user typed, so the first half is true and
+/// the row comes back from a query that asked to exclude it.
+#[tokio::test]
+async fn a_negated_map_term_excludes_the_catalogue_display_name() {
+    let pool = mem_pool().await;
+    seed(&pool, 1, vec![a_vehicle(1, 7, VehicleRelation::SelfPlayer)]).await;
+    let maps = MapCatalog::from_pairs(vec![(DEFAULT_MAP.into(), "Ocean".into())]);
+
+    assert_eq!(run_text_with(&pool, "map=ocean", &maps).await, vec![ArenaId::new(1)]);
+    assert!(run_text_with(&pool, "map!=ocean", &maps).await.is_empty(), "map!=ocean must not return the Ocean match");
+    assert_eq!(run_text_with(&pool, "map!=nowhere", &maps).await, vec![ArenaId::new(1)]);
+}
+
+/// `map=ocean` is an equality, so the catalogue half must compare display names
+/// exactly. Resolving it by substring, the way `map:ocean` does, quietly turns
+/// every equality on a mapped name into a contains.
+#[tokio::test]
+async fn a_map_equality_does_not_match_a_display_name_that_merely_contains_it() {
+    let pool = mem_pool().await;
+    seed_on_map(&pool, 1, "spaces/40_okinawa", vec![a_vehicle(1, 7, VehicleRelation::SelfPlayer)]).await;
+    let maps = MapCatalog::from_pairs(vec![
+        ("spaces/13_OC_new_dawn".into(), "Ocean".into()),
+        ("spaces/40_okinawa".into(), "Ocean Rift".into()),
+    ]);
+
+    assert!(
+        run_text_with(&pool, "map=ocean", &maps).await.is_empty(),
+        "map=ocean must not match the map whose display name is Ocean Rift"
+    );
+    assert_eq!(run_text_with(&pool, "map=\"ocean rift\"", &maps).await, vec![ArenaId::new(1)]);
+    // A contains term still spans both, which is the difference between the two
+    // operators the catalogue half was ignoring.
+    assert_eq!(run_text_with(&pool, "map:ocean", &maps).await, vec![ArenaId::new(1)]);
+    assert!(run_text_with(&pool, "map!=\"ocean rift\"", &maps).await.is_empty());
+    assert_eq!(run_text_with(&pool, "map!=ocean", &maps).await, vec![ArenaId::new(1)]);
 }
