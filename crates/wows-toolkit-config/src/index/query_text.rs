@@ -41,6 +41,7 @@ use super::query_ast::ShipClass;
 use super::query_ast::Value;
 use super::query_ast::ValueKind;
 use super::rows::MatchOutcome;
+use super::rows::SourceId;
 use super::rows::VehicleRelation;
 
 /// A parse failure, carrying the byte range of the offending input so the query
@@ -688,7 +689,7 @@ type SplitTerm = (String, String, String, Range<usize>, Range<usize>);
 /// input has no operator and is therefore a bare word.
 fn split_term(s: &str, base: usize) -> Option<SplitTerm> {
     for token in ["is-not-set", "is-set"] {
-        if let Some(idx) = s.find(token) {
+        if let Some(idx) = find_unquoted(s, token) {
             let key = s[..idx].trim().to_string();
             let key_span = base..base + key.len();
             return Some((key, token.to_string(), String::new(), key_span, base..base + s.len()));
@@ -696,7 +697,7 @@ fn split_term(s: &str, base: usize) -> Option<SplitTerm> {
     }
     // Longest operators first so ">=" is not read as ">".
     for token in [">=", "<=", "!=", ">", "<", "=", ":"] {
-        if let Some(idx) = s.find(token) {
+        if let Some(idx) = find_unquoted(s, token) {
             let key = s[..idx].trim().to_string();
             if key.is_empty() {
                 return None;
@@ -705,6 +706,26 @@ fn split_term(s: &str, base: usize) -> Option<SplitTerm> {
             let key_span = base..base + key.len();
             let value_span = base + value_start..base + s.len();
             return Some((key, token.to_string(), s[value_start..].trim().to_string(), key_span, value_span));
+        }
+    }
+    None
+}
+
+/// Where `token` starts in `s`, skipping any occurrence inside a quoted run.
+///
+/// A quoted run is opaque, the same way `word_end` treats it, so `map:"a>b"` is
+/// a `map` term whose value happens to contain a `>` rather than a term keyed on
+/// the nonsense `map:"a`. This is what makes quoting a value sufficient to get
+/// it back unchanged, which the printer relies on.
+fn find_unquoted(s: &str, token: &str) -> Option<usize> {
+    let mut in_quotes = false;
+    for (i, c) in s.char_indices() {
+        if c == '"' {
+            in_quotes = !in_quotes;
+            continue;
+        }
+        if !in_quotes && s[i..].starts_with(token) {
+            return Some(i);
         }
     }
     None
@@ -757,9 +778,11 @@ fn parse_value(kind: ValueKind, raw: &str) -> Option<Value> {
         },
         ValueKind::Outcome => MatchOutcome::from_db_str(&s.to_ascii_lowercase()).map(Value::Outcome),
         ValueKind::Timestamp => parse_date(&s).or_else(|| parse_relative(&s)).map(Value::Timestamp),
+        // A source is picked in the widget rather than typed, but the printed
+        // form is the persistence format, so the id it prints has to read back.
+        ValueKind::Source => s.parse::<i64>().ok().map(|n| Value::Source(SourceId(n))),
         // Relation, Division, Class, Ship, and Account are roster-only kinds,
-        // handled by `parse_roster_value`. Source arrives from the widget's
-        // picker as an id and has no text form.
+        // handled by `parse_roster_value`.
         _ => None,
     }
 }
@@ -781,10 +804,13 @@ fn parse_int(s: &str) -> Option<i64> {
     digits.parse::<f64>().ok().map(|v| (v * mult as f64).round() as i64)
 }
 
-/// `YYYY-MM-DD`, interpreted as midnight UTC.
+/// `YYYY-MM-DD`, interpreted as midnight UTC, or the full RFC 3339 instant that
+/// `print_timestamp` writes when a timestamp does not land on midnight.
 fn parse_date(s: &str) -> Option<Timestamp> {
-    let date: jiff::civil::Date = s.parse().ok()?;
-    date.to_zoned(jiff::tz::TimeZone::UTC).ok().map(|z| z.timestamp())
+    if let Ok(date) = s.parse::<jiff::civil::Date>() {
+        return date.to_zoned(jiff::tz::TimeZone::UTC).ok().map(|z| z.timestamp());
+    }
+    s.parse::<Timestamp>().ok()
 }
 
 /// A negative offset from the parse-time "now": `-30d`, `-6h`, `-1y`.
@@ -871,6 +897,181 @@ fn within_one_edit(a: &str, b: &str) -> bool {
         j += 1;
     }
     edits + (long.len() - j) <= 1
+}
+
+/// Render an expression as query text. The output is both the persistence
+/// format and the share format, so it must reparse to an identical tree; see
+/// `every_supported_shape_round_trips`.
+pub fn print_query(expr: &MatchExpr) -> String {
+    if expr.is_empty_all() {
+        return String::new();
+    }
+    print_expr(expr, Prec::Top, &print_match_term)
+}
+
+/// Where an expression sits relative to its parent, so parentheses are added
+/// only where dropping them would change the tree.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Prec {
+    Top,
+    InOr,
+    InAnd,
+    InNot,
+}
+
+/// Render a boolean tree, delegating leaves to `leaf`. Shared by the match and
+/// the roster level because the two differ only in what a leaf is.
+///
+/// A nested `All` inside an `All` (and likewise for `Any`) keeps its brackets:
+/// the parser builds those levels flat, so printing `a and (b and c)` without
+/// them would read back as a single three-child `All`.
+fn print_expr<L>(expr: &Expr<L>, prec: Prec, leaf: &dyn Fn(&L) -> String) -> String {
+    match expr {
+        // The grammar has no spelling for a tree that constrains nothing except
+        // at the top level, which `print_query` returns early for, and none at
+        // all for one that matches nothing. Neither shape is reachable from a
+        // parse, so these two are a placeholder rather than a round trip.
+        Expr::All(cs) if cs.is_empty() => "()".to_string(),
+        Expr::Any(cs) if cs.is_empty() => "not ()".to_string(),
+        Expr::All(cs) => {
+            let body = cs.iter().map(|c| print_expr(c, Prec::InAnd, leaf)).collect::<Vec<_>>().join(" and ");
+            parenthesise(body, matches!(prec, Prec::InAnd | Prec::InNot))
+        }
+        Expr::Any(cs) => {
+            let body = cs.iter().map(|c| print_expr(c, Prec::InOr, leaf)).collect::<Vec<_>>().join(" or ");
+            parenthesise(body, !matches!(prec, Prec::Top))
+        }
+        Expr::Not(inner) => {
+            let body = format!("not {}", print_expr(inner, Prec::InNot, leaf));
+            // `not not x` is not a sentence the grammar accepts: `term_text`
+            // refuses a bare keyword, so the inner `not` needs brackets.
+            parenthesise(body, matches!(prec, Prec::InNot))
+        }
+        Expr::Leaf(l) => leaf(l),
+    }
+}
+
+fn parenthesise(body: String, needed: bool) -> String {
+    if needed { format!("({body})") } else { body }
+}
+
+fn print_match_term(term: &MatchTerm) -> String {
+    match term {
+        MatchTerm::FreeText(s) => quote_if_needed(s),
+        MatchTerm::Field(field, op, value) => print_field(field.name(), *op, value),
+        MatchTerm::Roster { quant, pred } => print_roster(*quant, pred),
+    }
+}
+
+fn print_roster_term(term: &RosterTerm) -> String {
+    print_field(term.field.name(), term.op, &term.value)
+}
+
+fn print_field(name: &str, op: Op, value: &Value) -> String {
+    if op.is_nullary() {
+        // The space is what `trailing_nullary_op_len` reads the tail back by.
+        return format!("{name} {}", op.as_token());
+    }
+    format!("{name}{}{}", op.as_token(), print_value(value))
+}
+
+fn print_roster(quant: Quant, pred: &RosterExpr) -> String {
+    if let Some(sugar) = try_print_sugar(quant, pred) {
+        return sugar;
+    }
+    let body = print_expr(pred, Prec::Top, &print_roster_term);
+    match quant {
+        Quant::Any => format!("any({body})"),
+        Quant::None => format!("none({body})"),
+        Quant::Count(op, n) => format!("count({body}){}{n}", cmp_token_str(op)),
+    }
+}
+
+/// Recognise the shapes `scope_prefix` expands to and print them back as sugar,
+/// so `self.damage>=100000` does not round trip into
+/// `any(relation=self and damage>=100000)`.
+fn try_print_sugar(quant: Quant, pred: &RosterExpr) -> Option<String> {
+    if quant != Quant::Any {
+        return None;
+    }
+    let (scope, inner) = match pred {
+        Expr::All(cs) if cs.len() == 2 => {
+            let Expr::Leaf(first) = &cs[0] else { return None };
+            let Expr::Leaf(inner) = &cs[1] else { return None };
+            let scope = match (first.field, &first.value, first.op) {
+                (RosterField::Relation, Value::Relation(VehicleRelation::SelfPlayer), Op::Is) => "self",
+                (RosterField::Relation, Value::Relation(VehicleRelation::Ally), Op::Is) => "ally",
+                (RosterField::Relation, Value::Relation(VehicleRelation::Enemy), Op::Is) => "enemy",
+                (RosterField::Division, Value::Division(DivisionScope::Mine), Op::Is) => "div",
+                _ => return None,
+            };
+            (scope, inner)
+        }
+        Expr::Leaf(inner) => ("anyone", inner),
+        _ => return None,
+    };
+    Some(format!("{scope}.{}", print_roster_term(inner)))
+}
+
+fn cmp_token_str(op: CmpOp) -> &'static str {
+    match op {
+        CmpOp::Eq => "=",
+        CmpOp::Ne => "!=",
+        CmpOp::Gt => ">",
+        CmpOp::Ge => ">=",
+        CmpOp::Lt => "<",
+        CmpOp::Le => "<=",
+    }
+}
+
+fn print_value(value: &Value) -> String {
+    match value {
+        Value::Text(s) => quote_if_needed(s),
+        Value::Int(n) => n.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Bool(b) => if *b { "true" } else { "false" }.to_string(),
+        Value::Outcome(o) => o.as_db_str().to_string(),
+        Value::Relation(r) => r.as_db_str().to_string(),
+        Value::Division(d) => d.as_token().to_string(),
+        Value::Class(c) => c.as_db_str().to_ascii_lowercase(),
+        Value::Ship(s) => s.raw().to_string(),
+        Value::Account(a) => a.raw().to_string(),
+        Value::Source(s) => s.0.to_string(),
+        Value::Timestamp(t) => print_timestamp(*t),
+        Value::NoOperand => String::new(),
+    }
+}
+
+/// A timestamp prints as a bare date when it lands exactly on midnight UTC,
+/// which is both what `date>=2026-01-01` means and what a person would type.
+/// A relative date resolves to whatever second the parse happened at, so
+/// anything else prints the full RFC 3339 instant; `parse_date` reads both.
+fn print_timestamp(t: Timestamp) -> String {
+    let zoned = t.to_zoned(jiff::tz::TimeZone::UTC);
+    if zoned.time() == jiff::civil::Time::midnight() { zoned.date().to_string() } else { t.to_string() }
+}
+
+/// Quote a value or bare word the parser would not otherwise read back
+/// unchanged.
+///
+/// The set is taken from the parser: `is_term_boundary` ends a term at
+/// whitespace, `(`, `)`, and `|`; `split_term` splits on the operator tokens;
+/// `unary` reads a leading `-` as `not`; `term_text` refuses a bare `and`,
+/// `or`, or `not`; and an empty word has no bare spelling at all. Quoting
+/// answers all of them because `word_end` and `find_unquoted` both treat a
+/// quoted run as opaque.
+///
+/// The one thing it cannot answer is a `"` alongside whitespace: the grammar
+/// has no escape, so the term would end inside the value.
+fn quote_if_needed(s: &str) -> String {
+    let boundary = s.chars().any(|c| is_term_boundary(c) || matches!(c, '"' | ':' | '=' | '!' | '<' | '>'));
+    let nullary_op = s.contains("is-set") || s.contains("is-not-set");
+    let keyword = matches!(s.to_ascii_lowercase().as_str(), "and" | "or" | "not");
+    if s.is_empty() || boundary || nullary_op || keyword || s.starts_with('-') {
+        format!("\"{s}\"")
+    } else {
+        s.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -1472,5 +1673,213 @@ mod tests {
             }
             assert_eq!(err.span, 0..14, "{input:?} must underline the count(...) that lacks its comparison");
         }
+    }
+
+    fn fixed_now() -> Timestamp {
+        Timestamp::from_second(1_800_000_000).unwrap()
+    }
+
+    fn round_trip(src: &str) {
+        let parsed = parse_query_at(src, fixed_now()).unwrap_or_else(|e| panic!("{src:?} did not parse: {e}"));
+        let printed = print_query(&parsed);
+        let reparsed = parse_query_at(&printed, fixed_now())
+            .unwrap_or_else(|e| panic!("printed form did not reparse\n  src: {src}\n  printed: {printed}\n  err: {e}"));
+        assert_eq!(parsed, reparsed, "round trip changed the tree\n  src: {src}\n  printed: {printed}");
+    }
+
+    /// The other half of the property. The widget builds trees the parser has no
+    /// way to produce, so those have to survive printing too.
+    fn round_trip_tree(expr: MatchExpr) {
+        let printed = print_query(&expr);
+        let reparsed = parse_query_at(&printed, fixed_now())
+            .unwrap_or_else(|e| panic!("printed form did not reparse\n  printed: {printed}\n  err: {e}"));
+        assert_eq!(expr, reparsed, "round trip changed the tree\n  printed: {printed}");
+    }
+
+    #[test]
+    fn every_supported_shape_round_trips() {
+        for src in [
+            "",
+            "outcome:win",
+            "map:ocean",
+            "map:\"new dawn\"",
+            "map:th\u{e9}",
+            "build>=1234",
+            "build>=-5",
+            "build is-set",
+            "build is-not-set",
+            "date>=2026-01-01",
+            "date>=-30d",
+            "group=5",
+            "results-available:true",
+            "yamato",
+            "outcome:win map:ocean",
+            "outcome:win and map:ocean",
+            "outcome:win or map:ocean",
+            "outcome:win and (map:ocean or map:north)",
+            "outcome:win and (map:ocean and map:north)",
+            "outcome:win or (map:ocean or map:north)",
+            "(outcome:win or map:ocean) and (build>1000 or build<500)",
+            "not outcome:win",
+            "not (map:ocean or map:north)",
+            "not (not outcome:win)",
+            "any(tier=10)",
+            "none(class:cv)",
+            "none(division:none)",
+            "any(not class:cv)",
+            "any(damage is-set)",
+            "any(account=12345)",
+            "any(ship=4288851920)",
+            "count(relation:enemy and damage>100000)>=3",
+            "count(tier=10)!=0",
+            "any(relation:enemy and (tier=9 or tier=10))",
+            "none(relation:enemy and (tier=9 or tier=10))",
+            "any(division:mine and test-ship:true)",
+            "any(tier=10 and kills>=3)",
+            "self.damage>=100000",
+            "self.damage is-set",
+            "enemy.tier=10",
+            "div.test-ship:true",
+            "anyone.pr<800",
+            "anyone.pr>=-1.5",
+            "anyone.survived:no",
+            "anyone.name:\"new player\"",
+            "outcome:win and any(division:mine and test-ship:true) and not none(class:cv)",
+        ] {
+            round_trip(src);
+        }
+    }
+
+    /// Every character the grammar gives a meaning to has to survive inside a
+    /// value or a bare word, which is what the quoting rule is for.
+    #[test]
+    fn metacharacters_round_trip_inside_a_value_and_a_bare_word() {
+        for src in [
+            "map:\"a b\"",
+            "map:\"a|b\"",
+            "map:\"a(b\"",
+            "map:\"a)b\"",
+            "map:\"a:b\"",
+            "map:\"a=b\"",
+            "map:\"a>b\"",
+            "map:\"a<b\"",
+            "map:\"a!b\"",
+            "map:\"this-set\"",
+            "map:\"and\"",
+            "\"a b\"",
+            "\"a|b\"",
+            "\"a:b\"",
+            "\"a=b\"",
+            "\"a>b\"",
+            "\"this-set\"",
+            "\"and\"",
+            "\"or\"",
+            "\"not\"",
+            "\"-foo\"",
+            "\"\"",
+        ] {
+            round_trip(src);
+        }
+    }
+
+    /// A tree the parser refuses to build from text: the widget can still make
+    /// one, and the printer is what has to make it representable again.
+    #[test]
+    fn a_programmatic_tree_with_awkward_text_round_trips() {
+        for word in ["and", "or", "not", "-foo", "", "a b", "a|b", "a:b", "a=b", "is-set", "this-set", "(x)"] {
+            round_trip_tree(Expr::Leaf(MatchTerm::FreeText(word.into())));
+        }
+        for value in ["a b", "a|b", "a:b", "a=b", "a>b", "is-set", "-foo", "and"] {
+            round_trip_tree(Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text(value.into()))));
+        }
+        // A double quote survives on its own. It cannot survive next to
+        // whitespace, because the grammar has no escape and `word_end` would end
+        // the term inside the value; see `quote_if_needed`.
+        round_trip_tree(Expr::Leaf(MatchTerm::FreeText("a\"b".into())));
+        round_trip_tree(Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("a\"b".into()))));
+    }
+
+    /// A quoted run is opaque, so an operator inside it belongs to the value
+    /// rather than splitting the term.
+    #[test]
+    fn an_operator_inside_quotes_belongs_to_the_value() {
+        assert_eq!(one("map:\"a>b\""), MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("a>b".into())));
+        assert_eq!(one("map:\"a=b\""), MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("a=b".into())));
+        assert_eq!(
+            one("map:\"this-set\""),
+            MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("this-set".into()))
+        );
+        // The operator that does the splitting is still found outside the quotes.
+        assert_eq!(one("map=\"a>b\""), MatchTerm::Field(MatchField::Map, Op::Equals, Value::Text("a>b".into())));
+    }
+
+    #[test]
+    fn scope_sugar_is_printed_back_as_sugar() {
+        let parsed = parse_query_at("self.damage>=100000", fixed_now()).unwrap();
+        assert_eq!(print_query(&parsed), "self.damage>=100000");
+        let parsed = parse_query_at("any(relation:self and damage>=100000)", fixed_now()).unwrap();
+        assert_eq!(print_query(&parsed), "self.damage>=100000");
+        let parsed = parse_query_at("div.test-ship:true", fixed_now()).unwrap();
+        assert_eq!(print_query(&parsed), "div.test-ship=true");
+        let parsed = parse_query_at("anyone.pr<800", fixed_now()).unwrap();
+        assert_eq!(print_query(&parsed), "anyone.pr<800");
+        let parsed = parse_query_at("self.damage is-set", fixed_now()).unwrap();
+        assert_eq!(print_query(&parsed), "self.damage is-set");
+    }
+
+    #[test]
+    fn a_general_roster_form_that_is_not_sugar_prints_in_full() {
+        let parsed = parse_query_at("any(tier=10 and kills>=3)", fixed_now()).unwrap();
+        let printed = print_query(&parsed);
+        assert_eq!(printed, "any(tier=10 and kills>=3)");
+        round_trip(&printed);
+
+        let parsed = parse_query_at("count(relation:enemy and damage>100k)>=3", fixed_now()).unwrap();
+        assert_eq!(print_query(&parsed), "count(relation=enemy and damage>100000)>=3");
+
+        let parsed = parse_query_at("none(class:cv)", fixed_now()).unwrap();
+        assert_eq!(print_query(&parsed), "none(class=aircarrier)");
+    }
+
+    /// Precedence is only half of it: a nested group of the same operator has to
+    /// keep its parentheses, or the tree flattens and stops matching.
+    #[test]
+    fn nested_groups_keep_the_parentheses_that_preserve_the_tree() {
+        for (src, expected) in [
+            ("outcome:win and (map:ocean and map:north)", "outcome=win and (map:ocean and map:north)"),
+            ("outcome:win or (map:ocean or map:north)", "outcome=win or (map:ocean or map:north)"),
+            ("outcome:win and (map:ocean or map:north)", "outcome=win and (map:ocean or map:north)"),
+            ("outcome:win or map:ocean and map:north", "outcome=win or map:ocean and map:north"),
+            ("not (map:ocean and map:north)", "not (map:ocean and map:north)"),
+            ("not (not outcome:win)", "not (not outcome=win)"),
+        ] {
+            assert_eq!(print_query(&parse_query_at(src, fixed_now()).unwrap()), expected, "{src:?}");
+        }
+    }
+
+    #[test]
+    fn a_relative_date_prints_as_an_absolute_one() {
+        let parsed = parse_query_at("date>=-30d", fixed_now()).unwrap();
+        let printed = print_query(&parsed);
+        assert!(!printed.contains("-30d"), "relative dates must not survive printing: {printed}");
+        // Reparsing with a different "now" must give the same tree.
+        let later = Timestamp::from_second(1_900_000_000).unwrap();
+        assert_eq!(parse_query_at(&printed, later).unwrap(), parsed);
+    }
+
+    /// A relative date lands on whatever second the parse happened at, so the
+    /// bare `YYYY-MM-DD` form would silently truncate it.
+    #[test]
+    fn a_timestamp_off_midnight_prints_its_time_of_day() {
+        let parsed = parse_query_at("date>=-6h", fixed_now()).unwrap();
+        let printed = print_query(&parsed);
+        assert!(printed.ends_with("T02:00:00Z"), "got {printed}");
+        assert_eq!(print_query(&parse_query_at("date>=2026-01-01", fixed_now()).unwrap()), "date>=2026-01-01");
+    }
+
+    #[test]
+    fn values_needing_quotes_are_quoted() {
+        let parsed = parse_query_at("map:\"new dawn\"", fixed_now()).unwrap();
+        assert_eq!(print_query(&parsed), "map:\"new dawn\"");
     }
 }
