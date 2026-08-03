@@ -176,9 +176,13 @@ struct Body {
 
 impl QueryBar {
     /// Replaces the query outright, as a seeded search or a restored setting
-    /// does. Clears everything that described the old tree.
+    /// does. Clears everything that described the old tree, and canonicalises
+    /// on the way in: a seeded tree that carries a one-condition group would
+    /// otherwise print as a bare term and reparse without it, and nothing else
+    /// would notice until the first edit.
     pub fn set_expr(&mut self, expr: MatchExpr) {
         self.expr = expr;
+        select::canonicalise(&mut self.expr);
         self.selection.clear();
         self.anchor = None;
         self.focus = None;
@@ -304,6 +308,13 @@ impl QueryBar {
             }
             let rect = placed.rect.translate(origin).shrink2(egui::vec2(0.0, ROW_PAD_Y));
             let response = ui.interact(rect, id.with(placed.index), Sense::click());
+            // egui surrenders focus from any focused widget the pointer is not
+            // over, so without this a click on a pill unfocuses the caret and
+            // the very keys that act on the new selection (Backspace to delete
+            // it, Shift+Arrow to extend it) stop being read at all.
+            if response.clicked() || response.double_clicked() {
+                ui.memory_mut(|m| m.request_focus(caret_id));
+            }
             let state = if self.selection.contains(&token.path) {
                 TokenState::Selected
             } else if response.hovered() {
@@ -734,7 +745,9 @@ impl QueryBar {
                 let Some(token) = self.value_options.get(index).map(|option| option.token.clone()) else {
                     return false;
                 };
-                self.pending.push_str(&token);
+                // Replaces the half-typed value the row was picked against;
+                // appending would give `enemy.ship:yamYamato`.
+                self.pending = suggest::replace_active_value(&self.pending, &token);
                 self.commit_pending()
             }
             Row::Suggestion(index) => {
@@ -757,30 +770,28 @@ impl QueryBar {
                 true
             }
             SuggestionKind::MatchField(field) => {
-                self.begin_field(None, field.name(), field.allowed_ops());
+                self.begin_field(suggest::match_field_prefix(field));
                 false
             }
             SuggestionKind::RosterField { field, scope } => {
                 // A roster field name is only reachable through a scope prefix
                 // or a quantifier, so an unscoped one takes the widest scope
-                // rather than printing text the grammar cannot read back.
-                self.begin_field(Some(scope.unwrap_or(Scope::Anyone)), field.name(), field.allowed_ops());
+                // rather than emitting text the grammar cannot read back.
+                self.begin_field(suggest::roster_field_prefix(field, scope.unwrap_or(Scope::Anyone)));
                 false
             }
             SuggestionKind::FreeText => self.commit_pending(),
         }
     }
 
-    /// Replaces the caret's text with a field's grammar prefix and leaves the
-    /// user on the value. The operator comes from `allowed_ops`: three `Op`
-    /// variants print as `=` and a hand-picked one reparses into a different
-    /// term.
-    fn begin_field(&mut self, scope: Option<Scope>, name: &str, allowed: &[Op]) {
-        let Some(op) = allowed.iter().copied().find(|op| !op.is_nullary()).or_else(|| allowed.first().copied()) else {
+    /// Puts a field's grammar prefix in the caret and leaves the user on the
+    /// value. Only the fragment being typed is replaced, so committing a
+    /// suggestion part way through a query keeps the terms already there.
+    fn begin_field(&mut self, prefix: Option<String>) {
+        let Some(prefix) = prefix else {
             return;
         };
-        let prefix = scope.map(scope_token).unwrap_or_default();
-        self.pending = format!("{prefix}{name}{}", op.as_token());
+        self.pending = suggest::replace_active_fragment(&self.pending, &prefix);
         self.parsed_text.clear();
         self.dropdown_open = true;
         self.highlighted = None;
@@ -892,17 +903,6 @@ fn pill_menu(ui: &mut Ui, expr: &MatchExpr, path: &NodePath, commands: &mut Vec<
     }
 }
 
-/// The grammar's scope prefix for a suggestion's scope.
-fn scope_token(scope: Scope) -> &'static str {
-    match scope {
-        Scope::SelfPlayer => "self.",
-        Scope::Ally => "ally.",
-        Scope::Enemy => "enemy.",
-        Scope::Division => "div.",
-        Scope::Anyone => "anyone.",
-    }
-}
-
 /// The breadcrumb a suggestion's category reads as. Matched exhaustively so a
 /// new category cannot render untranslated.
 fn category_label(category: SuggestionCategory) -> String {
@@ -937,8 +937,14 @@ fn token_text(token: &Token) -> String {
 }
 
 fn token_width(token: &Token, galley: &Galley) -> f32 {
-    match token.kind {
+    match &token.kind {
         TokenKind::Caret => MIN_CARET_WIDTH,
-        _ => galley.size().x + 2.0 * paint::PAD_X,
+        TokenKind::Pill { .. }
+        | TokenKind::Connector { .. }
+        | TokenKind::NotPrefix
+        | TokenKind::GroupOpen { .. }
+        | TokenKind::GroupClose
+        | TokenKind::QuantOpen { .. }
+        | TokenKind::QuantClose => galley.size().x + 2.0 * paint::PAD_X,
     }
 }

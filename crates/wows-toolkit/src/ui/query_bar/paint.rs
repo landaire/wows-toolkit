@@ -86,8 +86,9 @@ fn pill(ui: &Ui, rect: Rect, galley: Arc<Galley>, state: TokenState) {
 /// on every row it touches.
 pub fn group_row(ui: &Ui, rect: Rect, depth: usize, opens: bool, closes: bool) {
     let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+    let fill = depth_fill(ui.visuals(), depth);
     let painter = ui.painter();
-    painter.rect_filled(rect, CornerRadius::ZERO, depth_fill(ui, depth));
+    painter.rect_filled(rect, CornerRadius::ZERO, fill);
     painter.line_segment([rect.left_top(), rect.right_top()], stroke);
     painter.line_segment([rect.left_bottom(), rect.right_bottom()], stroke);
     if opens {
@@ -113,10 +114,16 @@ pub fn error_underline(ui: &Ui, galley_pos: Pos2, galley: &Galley, text: &str, s
     ui.painter().line_segment([left, right], Stroke::new(1.5, ui.sem().error));
 }
 
-/// Alternating surface behind each nesting level, so adjacent depths read as
-/// distinct without either becoming a pill-coloured or panel-coloured block.
-fn depth_fill(ui: &Ui, depth: usize) -> Color32 {
-    if depth.is_multiple_of(2) { ui.visuals().faint_bg_color } else { ui.visuals().extreme_bg_color }
+/// Alternating surface behind each nesting level.
+///
+/// A group's tokens sit one level deeper than the group's own siblings, so the
+/// shallowest bracket the bar ever draws is at depth one, not zero. Neither
+/// surface may be `extreme_bg_color`, which is the bar's own fill, nor
+/// `widgets.inactive.bg_fill`, which is a pill's: a group or a pill painted in
+/// the colour behind it is invisible. `depth_fill_is_visible_against_the_bar`
+/// pins all three properties against the shipped themes.
+fn depth_fill(visuals: &egui::Visuals, depth: usize) -> Color32 {
+    if depth.is_multiple_of(2) { visuals.panel_fill } else { visuals.faint_bg_color }
 }
 
 fn chrome_color(ui: &Ui, state: TokenState) -> Color32 {
@@ -146,6 +153,35 @@ fn char_index(text: &str, byte: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The regression guard for a real defect: `depth_fill` returned
+    /// `extreme_bg_color` on odd depths, and that is the bar's own fill, so the
+    /// first level of nesting -- the common single-group case -- painted a
+    /// rectangle identical to the background and no bracket tint was visible
+    /// at all.
+    #[test]
+    fn depth_fill_is_visible_against_the_bar_and_against_a_pill() {
+        for (theme, visuals) in [
+            ("dark", crate::ui::theme::style::dark_style().visuals),
+            ("light", crate::ui::theme::style::light_style().visuals),
+        ] {
+            // Depth zero is never a bracket, but is covered so a future change
+            // to how `tokenize` assigns depth cannot reintroduce the defect.
+            for depth in 0..=4 {
+                let fill = depth_fill(&visuals, depth);
+                assert_ne!(fill, visuals.extreme_bg_color, "{theme} depth {depth} matches the bar's own fill");
+                assert_ne!(
+                    fill, visuals.widgets.inactive.bg_fill,
+                    "{theme} depth {depth} matches a pill, so a pill inside it would vanish"
+                );
+                assert_ne!(
+                    fill,
+                    depth_fill(&visuals, depth + 1),
+                    "{theme} depth {depth} and the level inside it are the same colour"
+                );
+            }
+        }
+    }
 
     #[test]
     fn a_byte_span_converts_to_a_character_index_without_slicing() {

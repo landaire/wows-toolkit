@@ -420,6 +420,73 @@ fn split_on_operator(fragment: &str) -> Option<(&str, &str)> {
     Some((key, rest.trim_start_matches(OPERATOR_CHARS)))
 }
 
+/// Where the caret's active fragment begins: just past the last whitespace, or
+/// the start of the text when there is none. The one place that decides what
+/// "the thing the user is currently typing" means, so `value_request_for` and
+/// both replacements agree on it by construction.
+fn active_fragment_start(pending: &str) -> usize {
+    pending.char_indices().rev().find(|(_, c)| c.is_whitespace()).map_or(0, |(i, c)| i + c.len_utf8())
+}
+
+/// The caret's text with the *value* of its active fragment replaced.
+/// `outcome:win enemy.ship:yam` plus `1234` gives
+/// `outcome:win enemy.ship:1234`: the earlier fragments and the field's own
+/// key and operator survive, and the half-typed value does not. A fragment
+/// with no operator yet is replaced whole, which is what a bare word wants.
+pub fn replace_active_value(pending: &str, value: &str) -> String {
+    let start = active_fragment_start(pending);
+    let (head, fragment) = pending.split_at(start);
+    // `split_on_operator` yields the value as a suffix of the fragment, so the
+    // difference in length is exactly the key plus its operator run.
+    let keep = match split_on_operator(fragment) {
+        Some((_, existing)) => fragment.len() - existing.len(),
+        None => 0,
+    };
+    let (prefix, _) = fragment.split_at(keep);
+    format!("{head}{prefix}{value}")
+}
+
+/// The caret's text with its active fragment replaced outright. Committing a
+/// field suggestion part way through a query must not discard what the user
+/// already typed before it.
+pub fn replace_active_fragment(pending: &str, replacement: &str) -> String {
+    let (head, _) = pending.split_at(active_fragment_start(pending));
+    format!("{head}{replacement}")
+}
+
+/// The grammar text a match-level field suggestion puts in the caret, ready
+/// for a value to be typed after it.
+pub fn match_field_prefix(field: MatchField) -> Option<String> {
+    Some(format!("{}{}", field.name(), leading_op(field.allowed_ops())?.as_token()))
+}
+
+/// The grammar text a roster-field suggestion puts in the caret. A roster
+/// field name is only reachable through a scope prefix or a quantifier, so the
+/// scope is not optional here.
+pub fn roster_field_prefix(field: RosterField, scope: Scope) -> Option<String> {
+    Some(format!("{}{}{}", scope_token(scope), field.name(), leading_op(field.allowed_ops())?.as_token()))
+}
+
+/// The operator a field suggestion commits with. Taken from `allowed_ops` and
+/// never hand-picked: three `Op` variants print as `=` and the wrong one
+/// yields text that reparses into a different term. A nullary operator is
+/// skipped because the caret is about to be handed a value to type.
+fn leading_op(allowed: &[Op]) -> Option<Op> {
+    allowed.iter().copied().find(|op| !op.is_nullary()).or_else(|| allowed.first().copied())
+}
+
+/// The grammar's prefix for a scope. Lives beside `Scope` so the two cannot
+/// drift apart.
+pub fn scope_token(scope: Scope) -> &'static str {
+    match scope {
+        Scope::SelfPlayer => "self.",
+        Scope::Ally => "ally.",
+        Scope::Enemy => "enemy.",
+        Scope::Division => "div.",
+        Scope::Anyone => "anyone.",
+    }
+}
+
 fn request_for_kind(kind: ValueKind, needle: &str) -> Option<ValueRequest> {
     match kind {
         ValueKind::Ship => Some(ValueRequest::Ships { needle: needle.to_owned() }),
@@ -617,6 +684,164 @@ mod tests {
     fn a_multi_byte_field_name_does_not_panic_on_the_operator_split() {
         for input in ["\u{e9}", "\u{e9}:", ":\u{e9}", "a\u{4e2d}b>=1", "enemy.\u{e9}:x"] {
             let _ = value_request_for(input);
+        }
+    }
+
+    use crate::db::index::query_text::parse_query;
+
+    const SCOPES: [Scope; 5] = [Scope::SelfPlayer, Scope::Ally, Scope::Enemy, Scope::Division, Scope::Anyone];
+
+    /// A literal the grammar reads for each value kind, so an emitted field
+    /// prefix can be completed into a term and parsed.
+    fn sample_literal(kind: ValueKind) -> &'static str {
+        match kind {
+            ValueKind::Text => "x",
+            ValueKind::Int => "1",
+            ValueKind::Float => "1.5",
+            ValueKind::Bool => "true",
+            ValueKind::Outcome => "win",
+            ValueKind::Relation => "enemy",
+            ValueKind::Division => "mine",
+            ValueKind::Class => "dd",
+            ValueKind::Ship | ValueKind::Account | ValueKind::Source => "1",
+            ValueKind::Timestamp => "2024-01-01",
+        }
+    }
+
+    #[test]
+    fn replacing_a_value_keeps_the_field_and_drops_the_half_typed_value() {
+        assert_eq!(replace_active_value("enemy.ship:yam", "1234"), "enemy.ship:1234");
+        assert_eq!(replace_active_value("enemy.ship:", "1234"), "enemy.ship:1234");
+        assert_eq!(replace_active_value("tier>=8", "10"), "tier>=10");
+        assert_eq!(replace_active_value("", "1234"), "1234");
+    }
+
+    #[test]
+    fn replacing_a_value_keeps_every_earlier_fragment() {
+        // The defect this pins: appending to the whole caret string produced
+        // `enemy.ship:yamYamato`, which does not parse.
+        assert_eq!(replace_active_value("outcome:win enemy.ship:yam", "1234"), "outcome:win enemy.ship:1234");
+    }
+
+    #[test]
+    fn a_replaced_value_leaves_text_the_grammar_reads_back() {
+        for (pending, value) in [
+            ("enemy.ship:yam", "1234"),
+            ("outcome:win enemy.ship:yam", "1234"),
+            ("group:", "3"),
+            // A roster field carries its scope prefix at the match level;
+            // that is the form `roster_field_prefix` emits.
+            ("outcome:win anyone.account:9", "12345"),
+        ] {
+            let text = replace_active_value(pending, value);
+            parse_query(&text).unwrap_or_else(|err| panic!("{pending:?} + {value:?} gave {text:?}: {err}"));
+        }
+    }
+
+    #[test]
+    fn a_replaced_value_yields_the_tree_the_caller_meant() {
+        let text = replace_active_value("outcome:win enemy.ship:yam", "1234");
+        let parsed = parse_query(&text).expect("the completed text parses");
+        let expected = parse_query("outcome:win enemy.ship:1234").expect("the reference text parses");
+        assert_eq!(parsed, expected, "got {text:?}");
+    }
+
+    #[test]
+    fn replacing_a_fragment_keeps_every_earlier_fragment() {
+        // The defect this pins: assigning the prefix over the whole caret
+        // string threw away `outcome:win`.
+        assert_eq!(replace_active_fragment("outcome:win ene", "enemy.ship:"), "outcome:win enemy.ship:");
+        assert_eq!(replace_active_fragment("", "outcome="), "outcome=");
+        assert_eq!(replace_active_fragment("dam", "self.damage>="), "self.damage>=");
+    }
+
+    #[test]
+    fn a_multi_byte_fragment_is_replaced_on_a_character_boundary() {
+        // The bar rewrites this on a keystroke, so a byte-index split would be
+        // a reachable panic rather than a theoretical one.
+        assert_eq!(replace_active_value("enemy.ship:\u{e9}\u{4e2d}", "1234"), "enemy.ship:1234");
+        assert_eq!(replace_active_value("map:\u{e9} enemy.ship:\u{4e2d}", "1"), "map:\u{e9} enemy.ship:1");
+        assert_eq!(replace_active_fragment("\u{4e2d}\u{e9} ou", "outcome="), "\u{4e2d}\u{e9} outcome=");
+    }
+
+    #[test]
+    fn every_match_field_prefix_completes_into_the_term_it_names() {
+        for field in MatchField::ALL {
+            let prefix = match_field_prefix(field).expect("every field has an operator");
+            let expected_op = leading_op(field.allowed_ops()).expect("every field has an operator");
+            let text = format!("{prefix}{}", sample_literal(field.value_kind()));
+            let parsed = parse_query(&text).unwrap_or_else(|err| panic!("{field:?} emitted {text:?}: {err}"));
+            match &parsed {
+                Expr::Leaf(MatchTerm::Field(got_field, got_op, _)) => {
+                    assert_eq!(*got_field, field, "{text:?}");
+                    assert_eq!(*got_op, expected_op, "{text:?} reparsed with a different operator");
+                }
+                other => panic!("{field:?} emitted {text:?}, which parsed as {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn every_roster_field_prefix_completes_into_the_term_it_names_under_every_scope() {
+        for field in RosterField::ALL {
+            for scope in SCOPES {
+                let prefix = roster_field_prefix(field, scope).expect("every field has an operator");
+                let expected_op = leading_op(field.allowed_ops()).expect("every field has an operator");
+                let text = format!("{prefix}{}", sample_literal(field.value_kind()));
+                let parsed =
+                    parse_query(&text).unwrap_or_else(|err| panic!("{field:?} under {scope:?} gave {text:?}: {err}"));
+                let Expr::Leaf(MatchTerm::Roster { quant, pred }) = &parsed else {
+                    panic!("{field:?} under {scope:?} emitted {text:?}, which parsed as {parsed:?}");
+                };
+                assert_eq!(*quant, Quant::Any, "a scope prefix is an existential: {text:?}");
+                let term = sole_roster_term(pred)
+                    .unwrap_or_else(|| panic!("{field:?} under {scope:?} gave {text:?}, pred {pred:?}"));
+                assert_eq!(term.field, field, "{text:?}");
+                assert_eq!(term.op, expected_op, "{text:?} reparsed with a different operator");
+            }
+        }
+    }
+
+    /// The field term inside a scoped predicate, whether the scope contributed
+    /// a conjunct (`self.` and friends) or not (`anyone.`).
+    fn sole_roster_term(pred: &RosterExpr) -> Option<&RosterTerm> {
+        match pred {
+            Expr::Leaf(term) => Some(term),
+            Expr::All(cs) if cs.len() == 2 => match &cs[1] {
+                Expr::Leaf(term) => Some(term),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn every_emitted_prefix_round_trips_once_completed() {
+        use crate::db::index::query_text::print_query;
+        for field in MatchField::ALL {
+            let text =
+                format!("{}{}", match_field_prefix(field).expect("an operator"), sample_literal(field.value_kind()));
+            let parsed = parse_query(&text).expect("the completed text parses");
+            assert_eq!(parse_query(&print_query(&parsed)).ok().as_ref(), Some(&parsed), "{text:?}");
+        }
+        for field in RosterField::ALL {
+            for scope in SCOPES {
+                let text = format!(
+                    "{}{}",
+                    roster_field_prefix(field, scope).expect("an operator"),
+                    sample_literal(field.value_kind())
+                );
+                let parsed = parse_query(&text).expect("the completed text parses");
+                assert_eq!(parse_query(&print_query(&parsed)).ok().as_ref(), Some(&parsed), "{text:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_scope_token_is_one_the_grammar_recognises() {
+        for scope in SCOPES {
+            let text = format!("{}tier=10", scope_token(scope));
+            parse_query(&text).unwrap_or_else(|err| panic!("{scope:?} emits {text:?}, which does not parse: {err}"));
         }
     }
 
