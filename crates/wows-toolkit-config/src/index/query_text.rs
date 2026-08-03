@@ -11,6 +11,7 @@ use winnow::LocatingSlice;
 use winnow::ModalResult;
 use winnow::Parser;
 use winnow::combinator::alt;
+use winnow::combinator::cut_err;
 use winnow::combinator::delimited;
 use winnow::combinator::opt;
 use winnow::combinator::preceded;
@@ -383,8 +384,8 @@ enum QuantKind {
 
 /// `any(...)`, `none(...)`, or `count(...) <cmp> N`.
 ///
-/// The keyword alone is not enough to commit: without a predicate body this
-/// backtracks so `any` stays usable as a free-text word.
+/// The keyword alone is not enough to commit: without an open paren after it
+/// this backtracks, so `any` stays usable as a free-text word.
 fn quantified(input: &mut Input<'_>) -> ModalResult<MatchExpr, QueryErr> {
     let head_start = input.current_token_start();
     let which = alt((
@@ -393,7 +394,14 @@ fn quantified(input: &mut Input<'_>) -> ModalResult<MatchExpr, QueryErr> {
         keyword("count").value(QuantKind::Count),
     ))
     .parse_next(input)?;
-    let pred = delimited((ws, '(', ws), roster_or_expr, (ws, ')')).parse_next(input)?;
+    (ws, '(', ws).void().parse_next(input)?;
+    // Past the open paren the text can only be a quantifier body, so the rest
+    // of it is a cut. Backtracking would let `term` read the keyword as free
+    // text and re-read the body as a match-level group, which answers a
+    // half-typed `any(tier=10` with a bogus unknown-field error instead of the
+    // bracket the user has yet to close.
+    let pred = cut_err(roster_or_expr).parse_next(input)?;
+    (ws, cut_err(')')).void().parse_next(input)?;
     let head = head_start..input.previous_token_end();
     let quant = match which {
         QuantKind::Any => Quant::Any,
@@ -615,11 +623,12 @@ fn parse_term_at(input: &str, base: usize) -> Result<MatchExpr, QueryParseError>
     };
 
     if let Some((constraint, field_name)) = scope_prefix(&key) {
-        // The scope prefix is stripped off the key, so the remainder's own
-        // offsets no longer line up with the input. Anchoring to the whole term
-        // is the smallest range that is certainly correct.
-        let whole = key_span.start..value_span.end;
-        let inner = roster_term_from_parts(field_name, &op_str, &value_str, whole.clone(), whole)?;
+        // `split_term` ran on the real term at its real offset, so the value
+        // span is already absolute. Only the key span needs adjusting, past the
+        // scope prefix and its dot, to underline the field name alone. A
+        // sugared term then reports exactly what the general form would.
+        let field_span = key_span.start + (key.len() - field_name.len())..key_span.end;
+        let inner = roster_term_from_parts(field_name, &op_str, &value_str, field_span, value_span)?;
         // Expanding to the same shape the general form parses to keeps the
         // sugar a pure abbreviation, which is what lets Task 9 print one form.
         let pred = match constraint {
@@ -1368,11 +1377,16 @@ mod tests {
     }
 
     #[test]
-    fn the_parse_time_now_does_not_leak_between_parses() {
+    fn the_parse_time_now_is_cleared_when_the_parse_ends() {
         let long_ago = Timestamp::from_second(1_000_000_000).unwrap();
         assert!(parse_query_at("date>=-1d", long_ago).is_ok());
-        // With the thread local cleared, the bare entry point falls back to the
-        // real clock rather than reusing the previous parse's instant.
+        assert!(NOW.with(|cell| cell.get()).is_none(), "the guard must clear the thread local on success");
+        assert!(parse_query_at("date>=-1d outcom:win", long_ago).is_err());
+        assert!(NOW.with(|cell| cell.get()).is_none(), "the guard must clear it on the error path too");
+    }
+
+    #[test]
+    fn the_bare_entry_point_resolves_relative_dates_against_the_real_clock() {
         match parse_query("date>=-1d").unwrap() {
             Expr::Leaf(MatchTerm::Field(_, _, Value::Timestamp(t))) => {
                 let expected = Timestamp::now().as_second() - 86_400;
@@ -1392,11 +1406,11 @@ mod tests {
         assert_eq!(err.span, 4..11, "span must be absolute, not relative to the quantifier body");
     }
 
-    /// The scope prefix is stripped before the remainder is read as a roster
-    /// term, so the remainder's own offsets no longer line up with the input.
-    /// Any error must be re-anchored to the whole term.
+    /// A sugared term must underline exactly what the general form underlines:
+    /// the field name alone, or the value alone. The scope prefix shifts the
+    /// field name along, and nothing shifts the value.
     #[test]
-    fn a_scope_sugar_error_is_anchored_to_the_whole_term() {
+    fn a_scope_sugar_error_underlines_the_field_or_the_value_alone() {
         let err = parse_query("map:ocean self.daamage>1").unwrap_err();
         match &err.kind {
             ParseErrorKind::UnknownField { name, suggestion } => {
@@ -1405,7 +1419,7 @@ mod tests {
             }
             other => panic!("got {other:?}"),
         }
-        assert_eq!(err.span, 10..24, "span must cover the whole sugared term");
+        assert_eq!(err.span, 15..22, "span must cover the field name, past the scope prefix");
 
         let err = parse_query("enemy.class:banana").unwrap_err();
         match &err.kind {
@@ -1416,7 +1430,31 @@ mod tests {
             }
             other => panic!("got {other:?}"),
         }
-        assert_eq!(err.span, 0..18);
+        assert_eq!(err.span, 12..18, "span must cover the bad value alone");
+
+        // The operator error reports the key, which for a sugared term is the
+        // field name rather than the whole `scope.field`.
+        let err = parse_query("self.tier is-set").unwrap_err();
+        match &err.kind {
+            ParseErrorKind::BadOperator { field, .. } => assert_eq!(*field, "tier"),
+            other => panic!("got {other:?}"),
+        }
+        assert_eq!(err.span, 5..9);
+    }
+
+    /// A quantifier the user is halfway through typing must report the bracket
+    /// it is missing, not a bogus unknown-field error from the body being
+    /// re-read as a match-level group.
+    #[test]
+    fn a_half_typed_quantifier_reports_the_unclosed_bracket() {
+        for (input, at) in [("any(", 3), ("any(tier=10", 3), ("none(class:cv", 4), ("count(tier=10", 5)] {
+            let err = parse_query(input).unwrap_err();
+            assert!(matches!(err.kind, ParseErrorKind::Unbalanced), "{input:?} gave {:?}", err.kind);
+            assert_eq!(err.span, at..at + 1, "{input:?} must point at the unclosed paren");
+        }
+        // A closed body still diagnoses what is wrong inside it.
+        let err = parse_query("any(daamage>100)").unwrap_err();
+        assert!(matches!(err.kind, ParseErrorKind::UnknownField { .. }), "got {:?}", err.kind);
     }
 
     /// `count(<roster predicate>)` is unambiguously a quantifier, so a missing
