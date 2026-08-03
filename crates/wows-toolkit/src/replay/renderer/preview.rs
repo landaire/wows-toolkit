@@ -3,19 +3,31 @@ use wows_replays::types::GameClock;
 
 use super::frame_pass::FrameSink;
 
+/// Wall-clock length of one full preview loop for a replay long enough to
+/// fill the frame budget.
 pub(crate) const PREVIEW_LOOP_SECS: f32 = 10.0;
+/// Display rate the popup advances the track at.
 pub(crate) const PREVIEW_FPS: f32 = 15.0;
+/// Frames retained per track. Battles shorter than
+/// `PREVIEW_MAX_FRAMES / SNAPSHOTS_PER_SECOND` seconds keep fewer and loop
+/// proportionally sooner, which is correct: a one-minute battle should not be
+/// stretched to ten seconds.
 pub(crate) const PREVIEW_MAX_FRAMES: usize = (PREVIEW_LOOP_SECS * PREVIEW_FPS) as usize;
 
+/// A decimated command track for one replay, played on loop by the inspector
+/// hover popup.
 pub(crate) struct PreviewTrack {
     pub frames: Vec<Vec<DrawCommand>>,
     pub map_name: String,
 }
 
+/// Retains a bounded, evenly spaced subset of the frames it is fed.
 pub(crate) struct TrackSink {
     frames: Vec<Vec<DrawCommand>>,
     clocks: Vec<GameClock>,
+    /// Keep one frame in every `stride`. Doubles each time the budget fills.
     stride: usize,
+    /// Source frames seen since the last frame was retained.
     since_kept: usize,
 }
 
@@ -36,6 +48,7 @@ impl TrackSink {
         PreviewTrack { frames: self.frames, map_name }
     }
 
+    /// Drop every other retained frame, halving the track in place.
     fn halve(&mut self) {
         let mut keep = false;
         self.frames.retain(|_| {
@@ -67,11 +80,17 @@ impl FrameSink for TrackSink {
 #[cfg(test)]
 mod track_tests {
     use super::*;
+    use wows_minimap_renderer::draw_command::DrawCommand;
+    use wows_replays::types::ElapsedClock;
 
     fn feed(sink: &mut TrackSink, count: usize) {
         for i in 0..count {
             sink.push(i, GameClock(i as f32), Vec::new());
         }
+    }
+
+    fn tagged(index: usize) -> Vec<DrawCommand> {
+        vec![DrawCommand::Timer { time_remaining: Some(index as i64), elapsed: ElapsedClock(index as f32) }]
     }
 
     #[test]
@@ -105,5 +124,22 @@ mod track_tests {
         let sink = TrackSink::new();
         let track = sink.finish("spaces/test".to_string());
         assert!(track.frames.is_empty());
+    }
+
+    #[test]
+    fn every_retained_frame_keeps_the_clock_it_arrived_with() {
+        let mut sink = TrackSink::new();
+        for i in 0..1800 {
+            sink.push(i, GameClock(i as f32), tagged(i));
+        }
+        let clocks: Vec<GameClock> = sink.kept_clocks().to_vec();
+        let track = sink.finish("spaces/test".to_string());
+        assert_eq!(track.frames.len(), clocks.len(), "frames and clocks diverged");
+        for (frame, clock) in track.frames.iter().zip(clocks.iter()) {
+            let DrawCommand::Timer { time_remaining: Some(index), .. } = frame[0] else {
+                panic!("expected a tagged Timer frame");
+            };
+            assert_eq!(index as f32, clock.0, "frame {index} was paired with clock {}", clock.0);
+        }
     }
 }
