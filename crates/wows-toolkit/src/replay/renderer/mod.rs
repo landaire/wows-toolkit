@@ -55,6 +55,9 @@ use crate::util::controls::CommandGroup;
 /// Controls the granularity of seeking in the replay.
 pub(crate) const SNAPSHOTS_PER_SECOND: f32 = 1.5;
 const PLAYBACK_SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
+/// Fill behind the map, shared by the renderer window and the hover preview
+/// so the two minimap surfaces cannot drift apart.
+pub(crate) const MINIMAP_BACKGROUND: Color32 = Color32::from_rgb(20, 25, 35);
 use crate::replay::minimap_view::Annotation;
 use crate::replay::minimap_view::AnnotationState;
 use crate::replay::minimap_view::MapTransform;
@@ -689,19 +692,21 @@ pub struct ReplayRendererAssets {
     pub signal_flag_icons: Arc<HashMap<String, RgbaAsset>>,
 }
 
-/// Icon textures uploaded once per game-data version and shared by every
-/// replay renderer window and hover preview.
+/// Icon textures uploaded once per game-data version. The renderer window
+/// uploads and reads its own copy via `RendererTextures::icons`; the
+/// inspector hover preview instead shares one set per version through
+/// `RendererTextureCache`.
 pub(crate) struct IconTextures {
-    ship_icons: HashMap<String, TextureHandle>,
+    pub(crate) ship_icons: HashMap<String, TextureHandle>,
     /// Gold outline textures for detected-teammate highlight, keyed by the same variant keys as ship_icons.
-    ship_icon_outlines: HashMap<String, TextureHandle>,
-    plane_icons: HashMap<String, TextureHandle>,
-    building_icons: HashMap<String, TextureHandle>,
-    consumable_icons: HashMap<String, TextureHandle>,
-    ribbon_icons: HashMap<String, TextureHandle>,
-    subribbon_icons: HashMap<String, TextureHandle>,
-    death_cause_icons: HashMap<String, TextureHandle>,
-    powerup_icons: HashMap<String, TextureHandle>,
+    pub(crate) ship_icon_outlines: HashMap<String, TextureHandle>,
+    pub(crate) plane_icons: HashMap<String, TextureHandle>,
+    pub(crate) building_icons: HashMap<String, TextureHandle>,
+    pub(crate) consumable_icons: HashMap<String, TextureHandle>,
+    pub(crate) ribbon_icons: HashMap<String, TextureHandle>,
+    pub(crate) subribbon_icons: HashMap<String, TextureHandle>,
+    pub(crate) death_cause_icons: HashMap<String, TextureHandle>,
+    pub(crate) powerup_icons: HashMap<String, TextureHandle>,
     crew_skill_icons: HashMap<String, TextureHandle>,
     modernization_icons: HashMap<String, TextureHandle>,
     signal_flag_icons: HashMap<String, TextureHandle>,
@@ -714,11 +719,12 @@ pub(crate) struct RendererTextures {
     pub silhouette_texture: Option<TextureHandle>,
 }
 
-/// GPU textures shared across renderers and previews.
+/// GPU textures shared across every open hover preview.
 ///
 /// Icons are invariant for a game-data version and maps for a version plus map
-/// name, so every replay renderer and every hover preview shares one upload.
-/// Silhouettes are per-replay and stay on `RendererTextures`.
+/// name, so every preview reuses the same upload instead of paying for it per
+/// row. The renderer window does not go through this cache; it uploads and
+/// holds its own copy via `RendererTextures`.
 #[derive(Default)]
 pub(crate) struct RendererTextureCache {
     icons: HashMap<Option<Version>, Arc<IconTextures>>,
@@ -1677,7 +1683,7 @@ impl ReplayRendererViewer {
                             line_width: 1.0,
                             label_font: game_font(11.0 * ws),
                         }),
-                        background: Color32::from_rgb(20, 25, 35),
+                        background: MINIMAP_BACKGROUND,
                     }
                     .show_in(&ctx, &response, &painter, &layout);
 

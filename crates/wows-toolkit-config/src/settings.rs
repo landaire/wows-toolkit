@@ -79,6 +79,10 @@ pub struct ReplaySettings {
     /// Whether the replay listing panel is collapsed to its rail.
     #[serde(default)]
     pub listing_collapsed: bool,
+    /// Hovering a replay row parses that replay in the background to build a
+    /// looping preview. Off is for machines where that read is expensive.
+    #[serde(default = "default_bool::<true>")]
+    pub enable_replay_previews: bool,
 }
 
 impl Default for ReplaySettings {
@@ -95,6 +99,7 @@ impl Default for ReplaySettings {
             auto_export_format: ReplayExportFormat::default(),
             grouping: ReplayGrouping::default(),
             listing_collapsed: false,
+            enable_replay_previews: true,
         }
     }
 }
@@ -114,5 +119,13 @@ mod tests {
         let parsed: ReplaySettings = serde_json::from_str(legacy).expect("legacy settings should parse");
         assert!(!parsed.listing_collapsed);
         assert!(!ReplaySettings::default().listing_collapsed);
+    }
+
+    #[test]
+    fn enable_replay_previews_defaults_on_and_survives_a_missing_field() {
+        let legacy = r#"{"show_entity_id":false,"show_observed_damage":false}"#;
+        let parsed: ReplaySettings = serde_json::from_str(legacy).expect("legacy settings should parse");
+        assert!(parsed.enable_replay_previews);
+        assert!(ReplaySettings::default().enable_replay_previews);
     }
 }

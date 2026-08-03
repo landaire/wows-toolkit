@@ -102,9 +102,10 @@ impl FrameSink for TrackSink {
 /// a formatted message back apart.
 #[derive(Debug, Clone, thiserror::Error)]
 pub(crate) enum PreviewError {
-    // `Version` is not guaranteed to implement `Display`; format it via Debug
-    // rather than adding an impl to `wowsunpack` for one message.
-    #[error("no game data for client version {version:?}")]
+    // `Version` has no `Display` impl; `to_path()` is the same
+    // "major.minor.patch" rendering used everywhere else in the app that
+    // shows a version to a user (see `wows_data.rs`, `video_export.rs`).
+    #[error("no game data for client version {}", version.to_path())]
     NoGameDataForVersion { version: Version },
     #[error("replay could not be read")]
     UnreadableReplay,
@@ -167,7 +168,10 @@ pub(crate) fn bake_preview_track(
         &[],
     )
     .map_err(|_| PreviewError::UnreadableReplay)?;
-    session.world_mut().set_shot_tracking(ShotTracking::Untracked);
+    // Tracked, not Untracked: `draw_frame` only emits `ShotTracer` commands
+    // from `active_shots()`, which stays empty unless shot recording is on.
+    // This costs the bake shot and hit recording it would otherwise skip.
+    session.world_mut().set_shot_tracking(ShotTracking::Tracked);
 
     let mut sink = TrackSink::new();
     build_frame_track(&mut session, &mut renderer, 1.0 / SNAPSHOTS_PER_SECOND, cancel, &mut sink);
@@ -205,6 +209,21 @@ pub(crate) const PREVIEW_DWELL_SECS: f64 = 0.3;
 /// beats taking on an LRU dependency.
 pub(crate) const PREVIEW_CACHE_CAPACITY: usize = 8;
 
+/// How long a preview can go undrawn before its next draw is treated as a
+/// fresh open rather than a continuation. Must comfortably exceed the
+/// `Ready`-state repaint interval (`1.0 / PREVIEW_FPS`, about 67ms) so two
+/// consecutive repaints of the same open tooltip never look like a gap; only
+/// an actual close-and-reopen (the cursor left and came back) crosses it.
+pub(crate) const PREVIEW_ANIM_RESTART_GAP_SECS: f64 = 0.25;
+
+/// One tooltip's play position: which key it is animating and where in wall
+/// time its loop started.
+struct AnimSession {
+    key: PreviewKey,
+    start: f64,
+    last_seen: f64,
+}
+
 /// Identifies one bake attempt, distinct from every other attempt even for
 /// the same [`PreviewKey`]. Slot ownership is decided by this, not by key
 /// equality: a row can be dwelled onto, away from, and back onto again while
@@ -227,6 +246,9 @@ pub(crate) struct PreviewCache {
     /// The row under the cursor and when it was first seen there.
     hover: Option<(PreviewKey, f64)>,
     next_bake_id: u64,
+    /// The single visible tooltip's play position, if any. Only one preview
+    /// is ever drawn at a time, so one slot is enough.
+    anim_session: Option<AnimSession>,
 }
 
 impl PreviewCache {
@@ -301,6 +323,26 @@ impl PreviewCache {
         if self.owns_slot(id) {
             self.in_flight = None;
         }
+    }
+
+    /// Frame index for `key`, restarting from zero whenever the tooltip
+    /// reopens after a gap in being drawn. Only one preview is visible at a
+    /// time, so a single session slot is enough.
+    pub(crate) fn anim_index(&mut self, key: &PreviewKey, now: f64, frame_count: usize) -> usize {
+        if frame_count == 0 {
+            return 0;
+        }
+        let restart = match &self.anim_session {
+            Some(session) => &session.key != key || now - session.last_seen > PREVIEW_ANIM_RESTART_GAP_SECS,
+            None => true,
+        };
+        if restart {
+            self.anim_session = Some(AnimSession { key: key.clone(), start: now, last_seen: now });
+        } else if let Some(session) = &mut self.anim_session {
+            session.last_seen = now;
+        }
+        let start = self.anim_session.as_ref().map_or(now, |session| session.start);
+        (((now - start) * PREVIEW_FPS as f64) as usize) % frame_count
     }
 }
 
@@ -480,6 +522,61 @@ mod cache_tests {
         handle.join().expect("test thread itself should not panic");
 
         assert!(!cache.lock().is_baking(&k), "panicking bake left the slot wedged");
+    }
+
+    #[test]
+    fn a_continuous_sequence_of_polls_keeps_advancing_without_restarting() {
+        let mut cache = PreviewCache::default();
+        let a = key("a");
+        assert_eq!(cache.anim_index(&a, 0.0, 10), 0);
+        // Small forward steps, each well under the restart gap: the session
+        // keeps its original start, so the index keeps climbing with time
+        // rather than resetting on every poll.
+        assert_eq!(cache.anim_index(&a, 0.1, 10), 1);
+        assert_eq!(cache.anim_index(&a, 0.2, 10), 3);
+    }
+
+    #[test]
+    fn a_gap_larger_than_the_threshold_restarts_at_zero() {
+        let mut cache = PreviewCache::default();
+        let a = key("a");
+        assert_eq!(cache.anim_index(&a, 5.0, 10), 0);
+        cache.anim_index(&a, 5.1, 10);
+        let after_gap = 5.1 + PREVIEW_ANIM_RESTART_GAP_SECS + 0.01;
+        assert_eq!(cache.anim_index(&a, after_gap, 10), 0, "a gap past the threshold should restart the loop");
+    }
+
+    #[test]
+    fn switching_keys_restarts_at_zero() {
+        let mut cache = PreviewCache::default();
+        let a = key("a");
+        let b = key("b");
+        assert_eq!(cache.anim_index(&a, 5.0, 10), 0);
+        cache.anim_index(&a, 5.1, 10);
+        assert_eq!(cache.anim_index(&b, 5.15, 10), 0, "a different key must not continue the previous session");
+    }
+
+    #[test]
+    fn the_index_wraps_at_frame_count() {
+        let mut cache = PreviewCache::default();
+        let a = key("a");
+        assert_eq!(cache.anim_index(&a, 0.0, 4), 0);
+        // Steady small steps, each well under the restart gap, keep this one
+        // continuous session so the elapsed time (not a fresh start) drives
+        // the index past `frame_count`.
+        for now in [0.2, 0.4, 0.6, 0.8] {
+            cache.anim_index(&a, now, 4);
+        }
+        // By t=1.03s, frame 15 has elapsed (15.45 truncates to 15); wrapped
+        // against a 4-frame track that is 15 % 4 == 3, not 15.
+        assert_eq!(cache.anim_index(&a, 1.03, 4), 3);
+    }
+
+    #[test]
+    fn zero_frame_count_returns_zero_without_dividing() {
+        let mut cache = PreviewCache::default();
+        let a = key("a");
+        assert_eq!(cache.anim_index(&a, 0.0, 0), 0);
     }
 }
 

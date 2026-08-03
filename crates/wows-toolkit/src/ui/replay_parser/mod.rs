@@ -1,6 +1,7 @@
 mod damage_types;
 mod listing_row;
 mod models;
+mod preview_popup;
 mod sorting;
 mod workspace;
 
@@ -3971,6 +3972,55 @@ impl ToolkitTabViewer<'_> {
         }
     }
 
+    /// Build the preview dependencies for this listing, or `None` when previews
+    /// are off, game data is not loaded, or the pointer is not over the
+    /// listing at all.
+    ///
+    /// `pointer_over_listing` is computed by the caller rather than by asking
+    /// this `ui` directly: `Ui::ui_contains_pointer` tests `min_rect`, which
+    /// for both listings' actual row-drawing `ui` is either a pre-expanded
+    /// rect that covers far more than the rows (the ungrouped panel content
+    /// ui) or a zero-size seed that a pointer test can never satisfy (the
+    /// grouped listing's `ScrollArea` content ui, which only ever receives
+    /// `set_clip_rect`, never `set_min_size`). See the call sites for the
+    /// rect each one actually tests against.
+    ///
+    /// The pointer check matters: this does the icon-set load plus a GPU
+    /// upload, and without it every listing draw would pay that cost on its
+    /// first frame whether or not anyone ever hovers a row. Map backgrounds
+    /// are not resolved here at all -- `preview_tooltip` fetches the hovered
+    /// row's map lazily, so opening a large listing never uploads every map
+    /// it contains.
+    fn preview_deps(&self, ui: &egui::Ui, pointer_over_listing: bool) -> Option<Arc<preview_popup::PreviewDeps>> {
+        if !pointer_over_listing {
+            return None;
+        }
+        if !self.tab_state.persisted.read().settings.replay.enable_replay_previews {
+            return None;
+        }
+        let wows_data = self.tab_state.world_of_warships_data.as_ref()?;
+        let data_map = self.tab_state.wows_data_map.clone()?;
+        let (vfs, version, dump_dir) = {
+            let data = wows_data.read();
+            (data.vfs.clone(), data.version().copied(), data.dump_dir.clone())
+        };
+        let asset_cache = Arc::clone(&self.tab_state.renderer_asset_cache);
+        let assets = preview_popup::build_preview_assets(&asset_cache, &vfs, version.as_ref(), dump_dir.as_deref());
+
+        let texture_cache = Arc::clone(&self.tab_state.renderer_texture_cache);
+        let icons = texture_cache.lock().get_or_upload_icons(ui.ctx(), version, &assets);
+
+        Some(Arc::new(preview_popup::PreviewDeps {
+            cache: Arc::clone(&self.tab_state.preview_cache),
+            asset_cache,
+            texture_cache,
+            data_map,
+            icons,
+            vfs,
+            version,
+        }))
+    }
+
     fn build_file_listing_ungrouped(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
         let mut replay_to_open: Option<PathBuf> = None;
         let mut replay_to_open_new: Option<PathBuf> = None;
@@ -3993,6 +4043,15 @@ impl ToolkitTabViewer<'_> {
             let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
             let row_summaries = &workspace.replay_row_summaries;
             let font_id = egui::TextStyle::Body.resolve(ui.style());
+
+            // `available_rect_before_wrap` is built from `max_rect`, which this
+            // panel content ui already has set to the full listing column
+            // regardless of how much of `min_rect` widgets have claimed so
+            // far, so it is a positive rect covering the rows about to be
+            // drawn below (whatever `show_ingest_progress` already consumed
+            // above them is excluded, which is correct: nothing draws there).
+            let pointer_over_listing = ui.rect_contains_pointer(ui.available_rect_before_wrap());
+            let preview_deps = self.preview_deps(ui, pointer_over_listing);
 
             // `show_rows` takes the height without spacing and adds `item_spacing.y` itself,
             // so this is just the two-line galley.
@@ -4026,18 +4085,22 @@ impl ToolkitTabViewer<'_> {
 
                         let path_clone = path.clone();
                         let wows_dir_clone = wows_dir.clone();
-                        let label_response = ui
-                            .add(
-                                Label::new(label_text)
-                                    .selectable(false)
-                                    .sense(Sense::click())
-                                    // The scroll area hands rows its full visible width, so a
-                                    // panel dragged narrower than the auto-sized width would
-                                    // otherwise wrap to a third line that `show_rows` has not
-                                    // reserved height for, overlapping the row below.
-                                    .wrap_mode(egui::TextWrapMode::Truncate),
-                            )
-                            .on_hover_text(hover);
+                        let label_response = ui.add(
+                            Label::new(label_text)
+                                .selectable(false)
+                                .sense(Sense::click())
+                                // The scroll area hands rows its full visible width, so a
+                                // panel dragged narrower than the auto-sized width would
+                                // otherwise wrap to a third line that `show_rows` has not
+                                // reserved height for, overlapping the row below.
+                                .wrap_mode(egui::TextWrapMode::Truncate),
+                        );
+                        let label_response = match (preview_deps.as_ref(), preview_popup::preview_key(path, summary)) {
+                            (Some(deps), Some(key)) => label_response.on_hover_ui(|ui| {
+                                preview_popup::preview_tooltip(ui, deps, key, &listed.map_name, &hover);
+                            }),
+                            _ => label_response.on_hover_text(hover),
+                        };
                         label_response.context_menu(|ui| {
                             show_leaf_context_menu(ui, &path_clone, &wows_dir_clone, ws_id);
                         });
@@ -4069,6 +4132,16 @@ impl ToolkitTabViewer<'_> {
         files.sort_by(|a, b| b.0.cmp(&a.0));
         let files_len = files.len();
         let metadata_provider = self.metadata_provider().unwrap();
+
+        // Computed on this outer ui -- the same panel content ui
+        // `build_file_listing_ungrouped` tests -- and not on the `ScrollArea`
+        // content ui the closure below receives: that inner ui is handed a
+        // `set_clip_rect` but never a `set_min_size`, so its `min_rect` stays
+        // the zero-size seed rect, and even a `max_rect`-based rect on it
+        // would be testing a ui that has not yet learned the tree's real
+        // bounds. Testing here, before `ScrollArea::show` hands out that
+        // fresh ui, covers the actual rows.
+        let pointer_over_listing = ui.rect_contains_pointer(ui.available_rect_before_wrap());
 
         egui::ScrollArea::both().id_salt(workspace_salt(ws_id, "replay_listing_scroll_area")).show(ui, |ui| {
             // Build groups based on grouping mode
@@ -4130,6 +4203,8 @@ impl ToolkitTabViewer<'_> {
             let visuals = ui.visuals().clone();
             let font_id = egui::TextStyle::Body.resolve(ui.style());
             let locale = self.tab_state.persisted.read().settings.app.locale.clone();
+
+            let preview_deps = self.preview_deps(ui, pointer_over_listing);
 
             // Unlike `ScrollArea::show_rows`, `egui_ltreeview`'s `ui.set_height` call
             // (node.rs) clamps the node's layout rect directly to the height we pass,
@@ -4212,11 +4287,23 @@ impl ToolkitTabViewer<'_> {
                                 font_id.clone(),
                             );
                             let hover = listing_row::hover_text(&identity, &stats, locale.as_deref());
+                            let preview_key = preview_popup::preview_key(path, summary);
+                            let deps = preview_deps.clone();
+                            let map_name = listed.map_name.clone();
                             let node = egui_ltreeview::NodeBuilder::leaf(id)
                                 .height(leaf_node_height)
                                 .label_ui(move |ui| {
-                                    ui.add(Label::new(label_text.clone()).selectable(false))
-                                        .on_hover_text(hover.clone());
+                                    let resp = ui.add(Label::new(label_text.clone()).selectable(false));
+                                    match (deps.as_ref(), preview_key.clone()) {
+                                        (Some(deps), Some(key)) => {
+                                            resp.on_hover_ui(|ui| {
+                                                preview_popup::preview_tooltip(ui, deps, key, &map_name, &hover);
+                                            });
+                                        }
+                                        _ => {
+                                            resp.on_hover_text(hover.clone());
+                                        }
+                                    }
                                 })
                                 .context_menu(move |ui| {
                                     show_leaf_context_menu(ui, &path_clone, &wows_dir, ws_id);
