@@ -111,7 +111,7 @@ fn match_field_label(field: MatchField) -> String {
     .into()
 }
 
-fn roster_field_label(field: RosterField) -> String {
+pub(crate) fn roster_field_label(field: RosterField) -> String {
     match field {
         RosterField::Relation => t!("ui.search.field.relation"),
         RosterField::Division => t!("ui.search.field.division"),
