@@ -38,47 +38,7 @@ pub(super) use crate::replay::minimap_view::shapes::tool_label;
 
 // Re-export shared draw-command helpers.
 pub(super) use wt_collab_egui::draw_commands::color_from_rgb;
-
-/// Check whether a DrawCommand should be drawn given the current RenderOptions.
-/// This runs on the UI thread so option changes are instant (no cross-thread round-trip).
-pub(super) fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_ships: bool) -> bool {
-    match cmd {
-        DrawCommand::ShotTracer { .. } => opts.show_tracers,
-        DrawCommand::ShotTracerTip { .. } => opts.show_tracers,
-        DrawCommand::SecondaryShotTracer { .. } => opts.show_tracers,
-        DrawCommand::SecondaryShotTracerTip { .. } => opts.show_tracers,
-        DrawCommand::Torpedo { .. } => opts.show_torpedoes,
-        DrawCommand::Smoke { .. } => opts.show_smoke,
-        DrawCommand::Ship { .. } => true, // ships always drawn; name visibility handled below
-        DrawCommand::HealthBar { .. } => opts.show_hp_bars,
-        DrawCommand::DeadShip { .. } => show_dead_ships,
-        DrawCommand::Plane { .. } => opts.show_planes,
-        DrawCommand::ScoreBar { .. } => opts.show_score,
-        DrawCommand::Timer { .. } => opts.show_timer,
-        DrawCommand::PreBattleCountdown { .. } => opts.show_timer,
-        DrawCommand::KillFeed { .. } => opts.show_kill_feed && !opts.stats_panel_visible(),
-        DrawCommand::CapturePoint { .. } => opts.show_capture_points,
-        DrawCommand::Building { .. } => opts.show_buildings,
-        DrawCommand::CameraDirection { .. } => opts.show_camera_direction,
-        DrawCommand::ConsumableRadius { .. } => opts.show_consumables,
-        DrawCommand::PatrolRadius { .. } => opts.show_planes,
-        DrawCommand::ConsumableIcons { .. } => opts.show_consumables,
-        DrawCommand::PositionTrail { .. } => opts.show_trails || opts.show_speed_trails,
-        DrawCommand::ShipConfigCircle { .. } => opts.show_ship_config,
-        DrawCommand::BuffZone { .. } => opts.show_capture_points,
-        DrawCommand::TeamBuffs { .. } => opts.show_buffs,
-        DrawCommand::BattleResultOverlay { .. } => opts.show_battle_result,
-        DrawCommand::ChatOverlay { .. } => opts.show_chat && !opts.stats_panel_visible(),
-        DrawCommand::TeamAdvantage { .. } => opts.show_advantage,
-        DrawCommand::WeatherZone { .. } => opts.show_weather,
-        DrawCommand::StatsPanel { .. }
-        | DrawCommand::StatsSilhouette { .. }
-        | DrawCommand::StatsDamage { .. }
-        | DrawCommand::StatsRibbons { .. }
-        | DrawCommand::StatsActivityFeed { .. } => opts.show_stats_panel,
-        DrawCommand::TeamRoster { .. } => opts.show_team_rosters,
-    }
-}
+pub(super) use wt_collab_egui::player::should_draw_command;
 
 /// Render a single annotation onto the map painter.
 /// Thin wrapper around the shared `minimap_view::shapes::render_annotation` that

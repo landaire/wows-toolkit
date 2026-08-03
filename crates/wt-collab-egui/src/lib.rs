@@ -6,6 +6,7 @@
 
 pub mod draw_commands;
 pub mod interaction;
+pub mod player;
 pub mod rendering;
 pub mod toolbar;
 pub mod transforms;
