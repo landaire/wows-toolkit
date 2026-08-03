@@ -608,6 +608,12 @@ pub struct MapCatalog {
 }
 
 impl MapCatalog {
+    /// A catalogue with no entries, usable in a `const` context so
+    /// `CompileCtx::default` needs no allocation or `OnceLock`.
+    pub const fn const_empty() -> Self {
+        MapCatalog { entries: Vec::new() }
+    }
+
     pub fn from_pairs(entries: Vec<(String, String)>) -> Self {
         Self { entries }
     }
