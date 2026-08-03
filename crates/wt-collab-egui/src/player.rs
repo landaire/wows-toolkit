@@ -151,20 +151,37 @@ pub type GridStyleFn<'a> = &'a dyn Fn(f32) -> GridStyle;
 
 /// What the caller needs to layer its own content on top of a painted frame.
 pub struct MinimapViewOutput {
-    pub response: egui::Response,
-    pub layout: CanvasLayout,
     pub transform: MapTransform,
     pub consumable_hover_regions: Vec<ConsumableHoverRegion>,
     pub player_build_regions: Vec<PlayerBuildHoverRegion>,
 }
 
 impl MinimapView<'_> {
-    pub fn show(self, ui: &mut egui::Ui, size: Vec2, sense: egui::Sense) -> MinimapViewOutput {
+    /// Allocate space, lay out, and paint. For callers with no input to interleave
+    /// between layout and paint.
+    pub fn show(self, ui: &mut egui::Ui, size: Vec2, sense: egui::Sense) -> (egui::Response, MinimapViewOutput) {
         let ctx = ui.ctx().clone();
         let geom = canvas_geometry(self.options);
         let logical_canvas = Vec2::new(geom.canvas_width, CANVAS_HEIGHT as f32);
         let (response, painter) = ui.allocate_painter(size, sense);
         let layout = compute_canvas_layout(size, logical_canvas, 1.0, response.rect.min, geom.map_width);
+        let out = self.show_in(&ctx, &response, &painter, &layout);
+        (response, out)
+    }
+
+    /// Paint into an already-allocated region.
+    ///
+    /// The caller allocates and computes the layout so it can run input handling
+    /// against `response` and `layout` before painting; the frame then paints with
+    /// this frame's input.
+    pub fn show_in(
+        self,
+        ctx: &egui::Context,
+        response: &egui::Response,
+        painter: &egui::Painter,
+        layout: &CanvasLayout,
+    ) -> MinimapViewOutput {
+        let geom = canvas_geometry(self.options);
         let window_scale = layout.window_scale;
 
         let transform = MapTransform {
@@ -181,7 +198,7 @@ impl MinimapView<'_> {
 
         painter.rect_filled(response.rect, CornerRadius::ZERO, self.background);
 
-        let map_clip = compute_map_clip_rect(&layout, HUD_HEIGHT as f32, geom.map_width, geom.map_x_offset);
+        let map_clip = compute_map_clip_rect(layout, HUD_HEIGHT as f32, geom.map_width, geom.map_x_offset);
         let map_painter = painter.with_clip_rect(map_clip);
 
         draw_map_background(&map_painter, &transform, self.map_texture);
@@ -220,14 +237,14 @@ impl MinimapView<'_> {
                 cmd,
                 &transform,
                 self.textures,
-                &ctx,
+                ctx,
                 &label_opts,
                 Some(&mut placed_labels),
                 self.text_resolver,
                 None,
                 None,
             );
-            let target = if is_hud { &painter } else { &map_painter };
+            let target = if is_hud { painter } else { &map_painter };
             for shape in shapes {
                 target.add(shape);
             }
@@ -256,7 +273,7 @@ impl MinimapView<'_> {
                     cmd,
                     &stats_transform,
                     self.textures,
-                    &ctx,
+                    ctx,
                     &label_opts,
                     Some(&mut stats_placed),
                     self.text_resolver,
@@ -269,7 +286,7 @@ impl MinimapView<'_> {
             }
         }
 
-        MinimapViewOutput { response, layout, transform, consumable_hover_regions, player_build_regions }
+        MinimapViewOutput { transform, consumable_hover_regions, player_build_regions }
     }
 }
 

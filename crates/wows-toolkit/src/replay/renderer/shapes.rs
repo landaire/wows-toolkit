@@ -39,6 +39,7 @@ pub(super) use crate::replay::minimap_view::shapes::PING_DURATION;
 pub(super) use crate::replay::minimap_view::shapes::ZoomPanConfig;
 pub(super) use crate::replay::minimap_view::shapes::annotation_cursor_icon;
 pub(super) use crate::replay::minimap_view::shapes::annotation_screen_bounds;
+pub(super) use crate::replay::minimap_view::shapes::compute_canvas_layout;
 pub(super) use crate::replay::minimap_view::shapes::compute_map_clip_rect;
 pub(super) use crate::replay::minimap_view::shapes::draw_annotation_edit_popup;
 pub(super) use crate::replay::minimap_view::shapes::draw_pings;

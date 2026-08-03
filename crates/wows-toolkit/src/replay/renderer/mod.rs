@@ -1542,8 +1542,41 @@ impl ReplayRendererViewer {
                     // Canvas layout: team rosters reserve a left+right gutter and
                     // replace the self-perspective stats panel. When rosters are
                     // off, the stats panel takes its own right-side strip.
-                    let geom = wt_collab_egui::player::canvas_geometry(&options);
                     let available = ui.available_size();
+                    let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
+                    let geom = wt_collab_egui::player::canvas_geometry(&options);
+                    let logical_canvas = Vec2::new(geom.canvas_width, CANVAS_HEIGHT as f32);
+                    let layout = compute_canvas_layout(available, logical_canvas, 1.0, response.rect.min, geom.map_width);
+                    let map_x_offset = geom.map_x_offset;
+                    let map_w = geom.map_width;
+
+                    // Zoom/pan input handling runs against this frame's freshly allocated
+                    // `response`/`layout`, before painting, so a scroll or drag this frame is
+                    // reflected in this frame's paint rather than the next one.
+                    let zoom_changed = {
+                        let mut zp = zoom_pan_arc.lock();
+                        handle_viewport_zoom_pan(
+                            &ctx,
+                            &response,
+                            &mut zp,
+                            &layout,
+                            logical_canvas,
+                            &ZoomPanConfig {
+                                allow_left_drag_pan: true,
+                                hud_height: HUD_HEIGHT as f32,
+                                handle_tool_yaw: true,
+                                map_width: map_w,
+                                map_x_offset,
+                            },
+                            Some(&mut annotation_arc.lock()),
+                            false,
+                        )
+                    };
+
+                    let zp = zoom_pan_arc.lock();
+                    let (zoom, pan) = (zp.zoom, zp.pan);
+                    let current_zoom = zp.zoom;
+                    drop(zp);
 
                     let (trail_hidden_ships, ship_range_overrides) = {
                         let ann = annotation_arc.lock();
@@ -1551,19 +1584,19 @@ impl ReplayRendererViewer {
                     };
                     let filter = WindowCommandFilter { trail_hidden_ships, ship_range_overrides };
 
-                    let zp = zoom_pan_arc.lock();
-                    let (zoom, pan) = (zp.zoom, zp.pan);
-                    drop(zp);
-
                     let tex_guard = textures_arc.lock();
                     let Some(textures) = tex_guard.as_ref() else {
                         return;
                     };
                     let shared_tex = make_shared_textures(textures);
 
-                    // The guard is held across the paint and the build-snapshot read, then
-                    // dropped before the hover interactions below. Cloning the frame's commands
-                    // instead would allocate hundreds of them on every repaint.
+                    // The guard is held through the paint call below, the roster hover
+                    // interactions, and the TeamAdvantage tooltip, all of which read
+                    // `frame_commands` or other `state` fields, and is dropped once none of
+                    // them need it any more. Do not relock `shared_state` inside any of the
+                    // closures between here and the `drop(state)` below - the lock is not
+                    // reentrant. Cloning the frame's commands instead of borrowing them would
+                    // allocate hundreds of `DrawCommand`s on every repaint.
                     let state = shared_state.lock();
                     let frame_commands: &[DrawCommand] = state.frame.as_ref().map_or(&[], |f| &f.commands);
 
@@ -1585,36 +1618,9 @@ impl ReplayRendererViewer {
                         }),
                         background: Color32::from_rgb(20, 25, 35),
                     }
-                    .show(ui, available, egui::Sense::click_and_drag());
+                    .show_in(&ctx, &response, &painter, &layout);
 
-                    let response = out.response;
-                    let layout = out.layout;
                     let transform = out.transform;
-                    let canvas_w = geom.canvas_width;
-                    let map_x_offset = geom.map_x_offset;
-                    let map_w = geom.map_width;
-
-                    // Zoom/pan input handling
-                    let zoom_changed = {
-                        let mut zp = zoom_pan_arc.lock();
-                        handle_viewport_zoom_pan(
-                            &ctx,
-                            &response,
-                            &mut zp,
-                            &layout,
-                            Vec2::new(canvas_w, CANVAS_HEIGHT as f32),
-                            &ZoomPanConfig {
-                                allow_left_drag_pan: true,
-                                hud_height: HUD_HEIGHT as f32,
-                                handle_tool_yaw: true,
-                                map_width: map_w,
-                                map_x_offset,
-                            },
-                            Some(&mut annotation_arc.lock()),
-                            false,
-                        )
-                    };
-                    let current_zoom = zoom_pan_arc.lock().zoom;
 
                     // Cursor icon based on tool / zoom state
                     if response.hovered() {
@@ -1820,11 +1826,9 @@ impl ReplayRendererViewer {
                     }
                     drop(state);
 
-                    // Annotations, remote cursors, and pings are painted through a
-                    // map-clipped painter reconstructed from the widget's layout,
-                    // matching the clip the widget used internally for the frame.
+                    // Annotations, remote cursors, and pings paint through the same
+                    // clipped map region the widget painted the frame into.
                     let map_clip = compute_map_clip_rect(&layout, HUD_HEIGHT as f32, map_w, map_x_offset);
-                    let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(response.rect));
                     let map_painter = painter.with_clip_rect(map_clip);
 
                     {
