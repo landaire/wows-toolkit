@@ -200,8 +200,19 @@ impl TabViewer for ToolkitTabViewer<'_> {
         // is the only hook that runs for the active tab with its strip already
         // on the layer. `dock_tab_rects` carries the button rect across.
         if let Some((_, rect)) = self.tab_state.dock_tab_rects.iter().find(|(t, _)| *t == *tab) {
+            let active_rect = *rect;
+            let rects: Vec<egui::Rect> = self.tab_state.dock_tab_rects.iter().map(|(_, r)| *r).collect();
+            // A flagged Settings tab draws its own outline, so it suppresses the
+            // dividers beside it exactly as the active tab does.
+            let mut outlined = vec![active_rect];
+            if self.tab_state.settings_needs_attention
+                && let Some((_, r)) = self.tab_state.dock_tab_rects.iter().find(|(t, _)| matches!(t, Tab::Settings))
+            {
+                outlined.push(*r);
+            }
             let painter = ui.ctx().layer_painter(ui.layer_id());
-            crate::ui::theme::style::paint_active_tab_marker(&painter, *rect, self.tab_state.active_theme);
+            crate::ui::theme::style::paint_tab_dividers(&painter, &rects, &outlined, self.tab_state.active_theme);
+            crate::ui::theme::style::paint_active_tab_marker(&painter, active_rect, self.tab_state.active_theme);
         }
 
         // The Settings tab caches its game-data cache-dir stats. The main dock

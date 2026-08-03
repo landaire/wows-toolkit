@@ -392,6 +392,50 @@ pub fn paint_active_tab_marker(painter: &egui::Painter, tab_rect: egui::Rect, th
     painter.rect_filled(bar, CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, accent);
 }
 
+/// Paints a rule in the gap between each pair of neighbouring dock tabs.
+///
+/// Inactive tabs carry no fill or outline of their own, which is what keeps the
+/// strip quiet, but it also leaves a run of them reading as one block. A short
+/// rule centred in the gap divides them without giving each tab an edge back.
+///
+/// `BORDER_BRIGHT` rather than `BORDER`: this is a line that has to be seen, and
+/// `BORDER` on the light theme's strip falls under `contrast::CHROME_LINE_FLOOR`.
+/// It is the same tone the query bar's outermost bracket uses, for the same
+/// reason.
+///
+/// Gaps flanking a rect in `outlined` are skipped: a tab drawing its own border
+/// already separates itself from its neighbours, and a rule beside it lands hard
+/// against that border and reads as a doubled edge. Pairs that do not share a
+/// row, or that sit too far apart to be neighbours, belong to different leaves
+/// and are skipped too.
+pub fn paint_tab_dividers(
+    painter: &egui::Painter,
+    tab_rects: &[egui::Rect],
+    outlined: &[egui::Rect],
+    theme: egui::Theme,
+) {
+    let divider = match theme {
+        egui::Theme::Dark => palette::dark::BORDER_BRIGHT,
+        egui::Theme::Light => palette::light::BORDER_BRIGHT,
+    };
+    for pair in tab_rects.windows(2) {
+        let (left, right) = (pair[0], pair[1]);
+        let gap = right.left() - left.right();
+        if (left.top() - right.top()).abs() > 0.5 || !(0.0..=12.0).contains(&gap) {
+            continue;
+        }
+        if outlined.contains(&left) || outlined.contains(&right) {
+            continue;
+        }
+        let inset = (left.height() * 0.28).round();
+        painter.vline(
+            (left.right() + right.left()) / 2.0,
+            (left.top() + inset)..=(left.bottom() - inset),
+            Stroke::new(1.0, divider),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use egui::Color32;
@@ -559,6 +603,23 @@ mod tests {
                 assert_eq!(tab.outline_color, global_tab.outline_color, "{name} alert.{variant}.outline_color");
                 assert_eq!(tab.text_color, error, "{name} alert.{variant}.text_color");
             }
+        }
+    }
+
+    #[test]
+    fn the_tab_divider_reads_against_the_strip() {
+        use crate::ui::theme::contrast::CHROME_LINE_FLOOR;
+        use crate::ui::theme::contrast::contrast_ratio;
+
+        // The divider is the only thing separating one inactive tab from the
+        // next, so it has to clear the floor on the strip it sits on. Plain
+        // BORDER does not, on the light theme.
+        for (name, divider, surface) in [
+            ("dark", palette::dark::BORDER_BRIGHT, palette::dark::SURFACE),
+            ("light", palette::light::BORDER_BRIGHT, palette::light::SURFACE),
+        ] {
+            let ratio = contrast_ratio(divider, surface);
+            assert!(ratio >= CHROME_LINE_FLOOR, "{name} tab divider on the strip only reached {ratio}");
         }
     }
 
