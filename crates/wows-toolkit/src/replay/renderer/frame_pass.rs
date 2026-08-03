@@ -25,7 +25,10 @@ pub(crate) trait FrameSink {
 /// game time and handing each to `sink`.
 ///
 /// Returns the clock of every frame drawn. Bails early when `cancel` is set,
-/// leaving the snapshots collected so far.
+/// leaving the snapshots collected so far. Checked before every `step()`,
+/// before every `draw_frame()` inside the catch-up burst a single `step()`
+/// can trigger, and inside the trailing final-tick drain, so a cancel lands
+/// within one frame no matter which of those a single call is stalled in.
 pub(crate) fn build_frame_track<G: ResourceLoader>(
     session: &mut MergedReplays<'_, '_, '_, G>,
     renderer: &mut MinimapRenderer<'_>,
@@ -59,6 +62,9 @@ pub(crate) fn build_frame_track<G: ResourceLoader>(
 
             let target_frame = (prev_clock.seconds() / frame_duration) as i64;
             while last_rendered_frame < target_frame {
+                if cancel.load(Ordering::Relaxed) {
+                    return snapshots;
+                }
                 last_rendered_frame += 1;
                 let view = session.world_mut().view();
                 let commands = renderer.draw_frame(&view);
@@ -79,6 +85,9 @@ pub(crate) fn build_frame_track<G: ResourceLoader>(
         renderer.update_ship_abilities(&view);
         let target_frame = (prev_clock.seconds() / frame_duration) as i64;
         while last_rendered_frame < target_frame {
+            if cancel.load(Ordering::Relaxed) {
+                return snapshots;
+            }
             last_rendered_frame += 1;
             snapshots.push(FrameSnapshot { clock: prev_clock });
         }

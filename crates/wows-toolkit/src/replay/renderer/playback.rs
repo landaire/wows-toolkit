@@ -261,6 +261,7 @@ pub(super) fn playback_thread(
             let mut s = self.shared_state.lock();
             if let Some(ref tx) = s.session_frame_tx {
                 let replay_id = s.collab_replay_id.unwrap_or(0);
+                tracing::debug!("First frame: broadcasting via session_frame_tx (replay_id={replay_id})");
                 let _ = tx.try_send(FrameBroadcast {
                     replay_id,
                     clock: clock.0,
@@ -269,6 +270,8 @@ pub(super) fn playback_thread(
                     game_duration: self.game_duration,
                     commands: commands.clone(),
                 });
+            } else {
+                tracing::debug!("First frame: session_frame_tx not wired yet, stored locally only");
             }
             s.frame = Some(PlaybackFrame {
                 replay_id: 0,
