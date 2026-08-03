@@ -15,6 +15,7 @@ home = "0.5"
 wows-core = { path = "../wows-core", features = ["serde"] }
 thiserror = { workspace = true }
 jiff = { workspace = true, features = ["serde"] }
+winnow = { workspace = true }
 
 [dev-dependencies]
 tokio = { version = "1.51", features = ["rt", "macros"] }

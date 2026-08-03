@@ -11261,6 +11261,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tracing",
+ "winnow 1.0.4",
  "wows-core",
 ]
 

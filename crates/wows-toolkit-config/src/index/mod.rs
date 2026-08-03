@@ -5,4 +5,5 @@ pub mod query;
 pub mod query_ast;
 pub mod query_model;
 pub mod query_sql;
+pub mod query_text;
 pub mod rows;
