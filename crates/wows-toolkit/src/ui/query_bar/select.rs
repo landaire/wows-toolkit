@@ -1152,8 +1152,11 @@ mod tests {
         assert_eq!(e, before);
     }
 
+    /// `term_op_at` is what feeds the operator segment's dropdown and what
+    /// `can_set_op` greys its rows with, so this is the source the offered set
+    /// is read from.
     #[test]
-    fn the_operator_menu_offers_only_operators_the_field_allows() {
+    fn a_terms_offered_operators_are_only_the_ones_its_field_allows() {
         let e = Expr::All(vec![leaf(1)]);
         let (allowed, current) = term_op_at(&e, &[0]).expect("a field term");
         assert_eq!(allowed, MatchField::Build.allowed_ops());
@@ -1487,6 +1490,8 @@ mod tests {
         }
     }
 
+    /// The sibling assertion alone holds against a `set_field` that does
+    /// nothing at all, so the target's own change is asserted with it.
     #[test]
     fn changing_the_field_of_a_nested_pill_leaves_its_siblings_alone() {
         let mut e = Expr::All(vec![
@@ -1494,7 +1499,12 @@ mod tests {
             Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Ge, Value::Int(1234))),
         ]);
         let before = e.children()[1].clone();
-        set_field(&mut e, &vec![0], TermField::Match(MatchField::Outcome));
+        assert!(set_field(&mut e, &vec![0], TermField::Match(MatchField::Outcome)), "the path addresses a field term");
+        assert_eq!(
+            term_at(&e, &[0]).expect("the retargeted term").0,
+            TermField::Match(MatchField::Outcome),
+            "the target must actually move"
+        );
         assert_eq!(e.children()[1], before);
     }
 
@@ -1637,10 +1647,17 @@ mod tests {
     /// conjunct sitting beside the term it scopes. *Introducing or removing*
     /// one is therefore a tree-shape change no `set_field` can express, and
     /// there is no segment edit for it to converge with. *Retargeting* an
-    /// existing one is expressible and is covered: it is a `set_value` on the
-    /// relation conjunct, which is exactly what clicking the value segment of
-    /// the relation pill on a bracketed roster term does, and it is the only
-    /// case here that exercises the sugar printer's scope round trip.
+    /// existing one is expressible, and both halves of it are covered.
+    ///
+    /// The scope conjunct is at `[0]` and the term it scopes at `[1]`, and the
+    /// two are reached by different clicks. On a bracketed roster both draw
+    /// their own pill, so `[0]` is what clicking the relation pill's value
+    /// segment edits. On the sugar-collapsed pill there is one pill for the
+    /// pair and `segment_path` sends it to `[1]`, so that is the only path a
+    /// click on *this* shape can reach. The `[0]` case is kept because it is
+    /// the only one exercising the sugar printer's scope round trip, and the
+    /// `[1]` case is here because it is the one a click on the collapsed pill
+    /// actually produces -- neither stands in for the other.
     fn convergence_cases() -> Vec<(&'static str, MatchExpr, NodePath, Edit)> {
         use crate::db::index::query_ast::Quant;
         use crate::db::index::query_ast::RosterField;
@@ -1693,6 +1710,13 @@ mod tests {
                 scoped(VehicleRelation::Enemy),
                 vec![0],
                 Edit::Literal(Value::Relation(VehicleRelation::Ally)),
+            ),
+            ("enemy.tier=20", scoped(VehicleRelation::Enemy), vec![1], Edit::Literal(Value::Int(20))),
+            (
+                "enemy.damage=10",
+                scoped(VehicleRelation::Enemy),
+                vec![1],
+                Edit::Field(TermField::Roster(RosterField::Damage)),
             ),
         ]
     }

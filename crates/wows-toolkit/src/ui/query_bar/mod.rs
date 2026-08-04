@@ -225,10 +225,14 @@ struct Body {
     edited: bool,
     caret_changed: bool,
     caret_gained_focus: bool,
-    /// A click landed somewhere in the bar this frame. The caret is only
-    /// granted focus on the frame after, so this is what tells `show` the bar
-    /// is engaged before `has_focus` agrees.
+    /// A click landed somewhere in the bar this frame, the caret included. The
+    /// caret is only granted focus on the frame after, so this is what tells
+    /// `show` the bar is engaged before `has_focus` agrees.
     clicked_inside: bool,
+    /// A click landed on a token: a pill, its chrome, or the background between
+    /// them. The caret is deliberately not one, since a click there is a click
+    /// inside whatever is being edited rather than away from it.
+    clicked_token: bool,
     /// That click was on a pill segment, which is the one case that must not
     /// close the segment editor it just opened.
     clicked_segment: bool,
@@ -299,10 +303,13 @@ impl QueryBar {
         // Reading `focused` alone there would close a dropdown that same click
         // had just opened.
         if focused || body.clicked_inside {
-            // Any click that is not on a segment leaves whatever segment was
-            // being edited: the pointer has moved on to the pill, the
-            // background, or the caret.
-            if body.clicked_inside && !body.clicked_segment {
+            // A click on a pill or on the background leaves whatever segment
+            // was being edited: the pointer has moved on. A click in the caret
+            // has not moved on -- for a plain value editor the caret *is* the
+            // editor, holding the literal it was seeded with, and for the other
+            // two it holds the needle -- so clicking into that text to correct
+            // it must not throw it away.
+            if body.clicked_token && !body.clicked_segment {
                 self.end_segment_edit();
             }
             if body.clicked_inside || body.caret_changed || body.caret_gained_focus || self.editing.is_some() {
@@ -398,6 +405,7 @@ impl QueryBar {
         // request cannot be made until the caret widget itself has been built.
         // See the token loop below and the caret call after it.
         let mut refocus = background.clicked();
+        let mut clicked_token = false;
         let mut clicked_segment = false;
         let mut anchor = None;
         for placed in &laid.placed {
@@ -411,7 +419,9 @@ impl QueryBar {
             // is created, so focus requested at this point is taken straight
             // back when the caret is built below; the request has to happen
             // after it.
-            refocus |= response.clicked() || response.double_clicked();
+            let hit = response.clicked() || response.double_clicked();
+            refocus |= hit;
+            clicked_token |= hit;
             let state = if self.selection.contains(&token.path) {
                 TokenState::Selected
             } else if response.hovered() {
@@ -433,6 +443,7 @@ impl QueryBar {
                 &mut commands,
             );
             refocus |= hit.clicked;
+            clicked_token |= hit.clicked;
             clicked_segment |= hit.clicked;
             anchor = anchor.or(hit.anchor);
             paint::token(ui, rect, &galleys[placed.index], &token.kind, state, cfg);
@@ -452,6 +463,20 @@ impl QueryBar {
             ui.memory_mut(|m| m.request_focus(ids.caret_id));
         }
 
+        // The background is registered over the whole bar, the caret included,
+        // so a click in the caret reaches it too and `background.clicked()`
+        // alone cannot tell a click on the gaps from a click on the text being
+        // edited. The pointer position can, and that distinction is what keeps
+        // clicking into a seeded value from discarding it.
+        //
+        // Measured against the caret's laid-out cell rather than the
+        // `TextEdit`'s own response rect: the widget sizes itself to its
+        // content and can be shorter than the row it sits in, which would leave
+        // part of the caret reading as background.
+        let cell = caret_rect(laid, origin);
+        let on_caret = background.interact_pointer_pos().is_some_and(|pos| cell.x_range().contains(pos.x));
+        clicked_token |= background.clicked() && !on_caret;
+
         let mut edited = false;
         for command in commands {
             edited |= self.apply_command(command, tokens, ui, ids.caret_id);
@@ -461,6 +486,7 @@ impl QueryBar {
             caret_changed: caret.response.response.changed(),
             caret_gained_focus: caret.response.response.gained_focus(),
             clicked_inside: refocus || caret.response.response.clicked(),
+            clicked_token,
             clicked_segment,
         }
     }
@@ -514,10 +540,7 @@ impl QueryBar {
         laid: &LaidOut,
         origin: egui::Vec2,
     ) -> egui::text_edit::TextEditOutput {
-        // `tokenize` always emits the caret last, and `lay_out` places tokens
-        // in order.
-        let placed = laid.placed.last().expect("lay_out places every token, and the caret is always one of them");
-        let rect = placed.rect.translate(origin).shrink2(egui::vec2(0.0, ROW_PAD_Y));
+        let rect = caret_rect(laid, origin);
         let width = rect.width();
         // The hint describes an empty bar; beside committed pills it would read
         // as another filter rather than as placeholder text.
@@ -1099,24 +1122,32 @@ impl QueryBar {
     /// Retargets the pill being edited at another field.
     ///
     /// `set_field` reports that the path addressed a field term, not that
-    /// anything changed, so the `value_kind` comparison is what says the old
-    /// value did not survive and was replaced by an arbitrary in-kind
-    /// placeholder. That placeholder is not a choice the user made, so the
-    /// value editor opens on it here rather than leaving it as something that
-    /// could be committed unseen -- for `Ship` and `Account` it is a zero id
-    /// that would render as an unresolvable pill.
+    /// anything changed, so something else has to say whether the old value
+    /// survived. That something is the value itself, before and after: a value
+    /// the new field cannot carry is replaced by an arbitrary in-kind
+    /// placeholder, which is not a choice the user made, so the value editor
+    /// opens on it here rather than leaving it to be committed unseen -- for
+    /// `Ship` and `Account` it is a zero id that renders as an unresolvable
+    /// pill.
+    ///
+    /// Comparing the two fields' declared `value_kind`s instead would miss the
+    /// case that has nothing to do with kinds: a nullary operator carries
+    /// `Value::NoOperand`, which belongs to no kind at all, so retargeting
+    /// `realm is set` at `name` -- both `Text` -- still mints `Text("")` and
+    /// still needs the editor.
     fn commit_field_change(&mut self, field: TermField, ui: &Ui, caret_id: egui::Id) -> bool {
         let Some(edit) = self.editing.clone() else {
             return false;
         };
-        let Some((current, _, _)) = select::term_at(&self.expr, &edit.path) else {
+        let Some((_, _, current)) = select::term_at(&self.expr, &edit.path) else {
             return false;
         };
-        let previous_kind = current.value_kind();
+        let previous = current.clone();
         if !select::set_field(&mut self.expr, &edit.path, field) {
             return false;
         }
-        if field.value_kind() != previous_kind && self.begin_segment_edit(edit.path, SegmentRole::Value, ui, caret_id) {
+        let kept = select::term_at(&self.expr, &edit.path).is_some_and(|(_, _, value)| *value == previous);
+        if !kept && self.begin_segment_edit(edit.path, SegmentRole::Value, ui, caret_id) {
             return true;
         }
         self.end_segment_edit();
@@ -1396,6 +1427,18 @@ fn bad_value(field: TermField, literal: &str) -> QueryParseError {
     }
 }
 
+/// The cell the caret is laid out in. `tokenize` always emits the caret last
+/// and `lay_out` places tokens in order, so it is the final placement.
+///
+/// One derivation, read both by the widget that fills the cell and by the
+/// hit test that asks whether a click landed in it: the `TextEdit` sizes
+/// itself to its content and can be shorter than the cell, so the two are not
+/// interchangeable.
+fn caret_rect(laid: &LaidOut, origin: egui::Vec2) -> Rect {
+    let placed = laid.placed.last().expect("lay_out places every token, and the caret is always one of them");
+    placed.rect.translate(origin).shrink2(egui::vec2(0.0, ROW_PAD_Y))
+}
+
 /// Parks the caret at `cursor`, a character index. egui otherwise keeps
 /// whatever offset the widget had, which after a programmatic replacement of
 /// the text is arbitrary.
@@ -1520,6 +1563,21 @@ mod tests {
 
     fn roster_pill(field: RosterField, op: Op, value: Value) -> MatchExpr {
         Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred: Expr::Leaf(RosterTerm { field, op, value }) })
+    }
+
+    /// Runs `f` against a real `Ui` and the caret id derived from it, for the
+    /// routing that stores caret state through `TextEditState` and so cannot be
+    /// driven without a `Context`.
+    fn with_ui<R>(f: impl FnOnce(&mut Ui, egui::Id) -> R) -> R {
+        let mut once = Some(f);
+        let mut out = None;
+        egui::__run_test_ui(|ui| {
+            if let Some(f) = once.take() {
+                let caret_id = ui.id().with("query_bar").with("caret");
+                out = Some(f(ui, caret_id));
+            }
+        });
+        out.expect("the test ui runs its contents exactly once")
     }
 
     #[test]
@@ -1675,37 +1733,79 @@ mod tests {
     }
 
     /// The obligation `select::placeholder_value` names: a field change that
-    /// alters the value kind replaces the value with an arbitrary in-kind
-    /// placeholder, which for `Ship` and `Account` is a zero id that renders as
-    /// an unresolvable pill. The editor has to open on it, so zero is never a
-    /// state the user can rest on.
+    /// loses the old value replaces it with an arbitrary in-kind placeholder,
+    /// which for `Ship` and `Account` is a zero id that renders as an
+    /// unresolvable pill. The editor has to open on it, so the placeholder is
+    /// never something the user can commit without seeing.
+    ///
+    /// Driven through `commit_field_change` itself, not through `set_field`
+    /// with the editor state set by hand: the decision under test lives in that
+    /// function and a fixture that sets `editing` for it cannot exercise it.
+    ///
+    /// The last three pairs are the ones a declared-kind comparison misses. Both
+    /// fields have the same `ValueKind` in each, and the value is replaced
+    /// anyway, because the old operator was nullary and `Value::NoOperand`
+    /// belongs to no kind at all.
     #[test]
-    fn a_field_change_that_resets_the_value_opens_the_value_editor() {
-        let mut bar = bar_editing(roster_pill(RosterField::Tier, Op::Eq, Value::Int(10)), SegmentRole::Filter);
-        let previous = bar.expr.clone();
-        assert!(select::set_field(&mut bar.expr, &vec![], TermField::Roster(RosterField::Ship)));
-        assert_ne!(bar.expr, previous);
-        // What the routing does with that, minus the egui half: the kind moved,
-        // so the value segment is what must be open next.
-        assert_eq!(TermField::Roster(RosterField::Ship).value_kind(), crate::db::index::query_ast::ValueKind::Ship);
-        assert_ne!(
-            TermField::Roster(RosterField::Tier).value_kind(),
-            TermField::Roster(RosterField::Ship).value_kind()
-        );
+    fn a_field_change_that_replaces_the_value_opens_the_value_editor() {
+        let cases = [
+            (RosterField::Tier, Op::Eq, Value::Int(10), RosterField::Ship),
+            (RosterField::Realm, Op::IsSet, Value::NoOperand, RosterField::Name),
+            (RosterField::Damage, Op::IsSet, Value::NoOperand, RosterField::Tier),
+            (RosterField::Survived, Op::IsSet, Value::NoOperand, RosterField::TestShip),
+        ];
+        for (from, op, value, to) in cases {
+            let mut bar = bar_editing(roster_pill(from, op, value.clone()), SegmentRole::Filter);
+            let committed = with_ui(|ui, caret_id| bar.commit_field_change(TermField::Roster(to), ui, caret_id));
+            assert!(committed, "{} -> {} must report the retarget", from.name(), to.name());
 
-        bar.editing = Some(SegmentEdit { path: vec![], role: SegmentRole::Value });
+            let (landed_field, _, landed) = select::term_at(&bar.expr, &[]).expect("the retargeted term");
+            assert_eq!(landed_field, TermField::Roster(to));
+            assert_ne!(*landed, value, "{} -> {} must actually lose its value", from.name(), to.name());
+            assert_eq!(
+                bar.editing.as_ref().map(|edit| edit.role),
+                Some(SegmentRole::Value),
+                "{} -> {} committed a value the user never chose",
+                from.name(),
+                to.name()
+            );
+        }
+    }
+
+    /// The `Ship` case's whole point: the editor that opens is the one that can
+    /// resolve the zero id into a real ship.
+    #[test]
+    fn the_forced_editor_is_the_one_that_can_replace_the_placeholder() {
+        let mut bar = bar_editing(roster_pill(RosterField::Tier, Op::Eq, Value::Int(10)), SegmentRole::Filter);
+        assert!(with_ui(|ui, caret_id| bar.commit_field_change(TermField::Roster(RosterField::Ship), ui, caret_id)));
         assert_eq!(bar.segment_request(), Some(ValueRequest::Ships { needle: String::new() }));
     }
 
-    /// A field change that keeps the value kind has nothing to re-choose, so
-    /// the value editor must not be forced open on a value the user still has.
+    /// A field change the value survives has nothing to re-choose, so the value
+    /// editor must not be forced open on a value the user still has.
     #[test]
-    fn a_field_change_that_keeps_the_value_kind_leaves_the_value_alone() {
-        let mut expr = roster_pill(RosterField::Tier, Op::Eq, Value::Int(10));
-        assert!(select::set_field(&mut expr, &vec![], TermField::Roster(RosterField::Kills)));
-        let (field, _, value) = select::term_at(&expr, &[]).expect("the retargeted term");
+    fn a_field_change_the_value_survives_leaves_the_editor_closed() {
+        let mut bar = bar_editing(roster_pill(RosterField::Tier, Op::Eq, Value::Int(10)), SegmentRole::Filter);
+        assert!(with_ui(|ui, caret_id| bar.commit_field_change(TermField::Roster(RosterField::Kills), ui, caret_id)));
+        let (field, _, value) = select::term_at(&bar.expr, &[]).expect("the retargeted term");
         assert_eq!(field, TermField::Roster(RosterField::Kills));
         assert_eq!(*value, Value::Int(10), "a value the new field can carry is kept");
+        assert!(bar.editing.is_none(), "nothing was replaced, so nothing needs re-choosing");
+    }
+
+    /// The retarget reaches the tree through the row the dropdown actually
+    /// offers, not only through `commit_field_change` called directly.
+    #[test]
+    fn picking_a_field_row_retargets_the_pill() {
+        let mut bar = bar_editing(win(), SegmentRole::Filter);
+        let row = bar
+            .dropdown_rows()
+            .into_iter()
+            .find(|row| matches!(row, Row::Field(option) if option.field == TermField::Match(MatchField::Build)))
+            .expect("Build is offered on a match pill");
+        assert!(with_ui(|ui, caret_id| bar.commit_row(row, ui, caret_id)));
+        let (field, _, _) = select::term_at(&bar.expr, &[]).expect("the retargeted term");
+        assert_eq!(field, TermField::Match(MatchField::Build));
     }
 
     /// A `build is set` pill: `Build` allows the six comparisons plus the two
@@ -1899,5 +1999,103 @@ mod tests {
         // mark alone rather than erasing it before it is ever drawn.
         bar.reparse_pending();
         assert!(bar.pending_error.is_some(), "a frame with no keystroke must not clear the mark");
+    }
+
+    /// Opening a plain value editor seeds the caret with the literal already on
+    /// the term, so a date is corrected rather than retyped from nothing.
+    #[test]
+    fn opening_a_plain_value_editor_seeds_the_caret_with_the_current_literal() {
+        let mut bar = QueryBar::default();
+        bar.set_expr(Expr::Leaf(MatchTerm::Field(
+            MatchField::Date,
+            Op::Ge,
+            Value::Timestamp(jiff::Timestamp::from_second(0).expect("the epoch")),
+        )));
+        let opened = with_ui(|ui, caret_id| bar.begin_segment_edit(vec![], SegmentRole::Value, ui, caret_id));
+        assert!(opened);
+        assert_eq!(bar.pending, "1970-01-01", "the caret opens holding the value already on the term");
+        assert_eq!(bar.editing.as_ref().map(|edit| edit.role), Some(SegmentRole::Value));
+    }
+
+    /// A nullary operator draws no value segment, so there is nothing for a
+    /// value editor to open on and it must refuse rather than open on nothing.
+    #[test]
+    fn a_value_editor_refuses_to_open_where_the_pill_draws_no_value() {
+        let mut bar = QueryBar::default();
+        bar.set_expr(Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::IsSet, Value::NoOperand)));
+        let opened = with_ui(|ui, caret_id| bar.begin_segment_edit(vec![], SegmentRole::Value, ui, caret_id));
+        assert!(!opened);
+        assert!(bar.editing.is_none());
+    }
+
+    fn frame_input() -> egui::RawInput {
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0))),
+            ..Default::default()
+        }
+    }
+
+    fn click_input(pos: Pos2) -> egui::RawInput {
+        let mut input = frame_input();
+        input.events.push(egui::Event::PointerMoved(pos));
+        for pressed in [true, false] {
+            input.events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+        }
+        input
+    }
+
+    /// A click inside the caret is not "the pointer moved on to something
+    /// else": for a plain value editor the caret **is** the editor, holding the
+    /// literal `begin_segment_edit` seeded it with, and for the other two it
+    /// holds the needle. Clicking into that text to correct it must not throw
+    /// it away and close the editor.
+    ///
+    /// Driven through real frames rather than by calling the handshake's
+    /// pieces, because the question is whether egui's own `TextEdit` reports a
+    /// click for a press inside it -- which is exactly what no unit-level
+    /// fixture can answer.
+    #[test]
+    fn clicking_inside_the_caret_keeps_the_segment_editor_open() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(egui::FontDefinitions::empty());
+        let mut bar = QueryBar::default();
+        bar.set_expr(Expr::Leaf(MatchTerm::Field(
+            MatchField::Date,
+            Op::Ge,
+            Value::Timestamp(jiff::Timestamp::from_second(0).expect("the epoch")),
+        )));
+        let deps = Deps { history: &[] };
+
+        // One frame to lay the bar out, which is what gives the caret a rect to
+        // aim at and an id to focus.
+        let mut caret_id = None;
+        let _ = ctx.run_ui(frame_input(), |ui| {
+            caret_id = Some(ui.id().with("query_bar").with("caret"));
+            bar.show(ui, &deps);
+        });
+        let caret_id = caret_id.expect("the frame ran");
+        let caret_rect = ctx.read_response(caret_id).expect("the caret was built").rect;
+
+        // Open the value editor the way a segment click would, and give the
+        // caret the focus that click would have handed it.
+        let opened = with_ui(|ui, _| bar.begin_segment_edit(vec![], SegmentRole::Value, ui, caret_id));
+        assert!(opened);
+        ctx.memory_mut(|m| m.request_focus(caret_id));
+        let _ = ctx.run_ui(frame_input(), |ui| {
+            bar.show(ui, &deps);
+        });
+        assert!(bar.editing.is_some(), "a quiet frame must not close the editor");
+        assert_eq!(bar.pending, "1970-01-01");
+
+        let _ = ctx.run_ui(click_input(caret_rect.center()), |ui| {
+            bar.show(ui, &deps);
+        });
+        assert_eq!(bar.pending, "1970-01-01", "the literal being edited must survive a click into it");
+        assert!(bar.editing.is_some(), "clicking into the caret must not close the editor it belongs to");
     }
 }
