@@ -220,10 +220,13 @@ fn apply_op(allowed: &[Op], current: &mut Op, value: &mut Value, op: Op) -> bool
 }
 
 /// Changes the field of the term at `path`, re-deriving its operator and
-/// value so the term stays legal for the new field. Reports whether the field
-/// actually changed: `false` both when `path` does not address a field term
-/// and when it does but `field`'s kind (`Match` vs `Roster`) does not match
-/// what is there, so a caller does not report an edit that did not happen.
+/// value so the term stays legal for the new field. Reports whether `path`
+/// addressed a field term of the kind `field` names: `false` both when
+/// `path` addresses no field term at all and when it addresses one whose
+/// kind (`Match` vs `Roster`) does not match `field`'s. This is `true` even
+/// when the new field is the same as the old one (nothing to re-derive), so
+/// a caller does not report an edit that did not happen -- it is not a
+/// report that anything changed.
 ///
 /// The operator is kept when the new field still allows it; otherwise it is
 /// replaced by that field's own equality spelling, chosen by class through
@@ -324,10 +327,13 @@ fn value_kind_of(value: &Value) -> Option<ValueKind> {
 /// a preset's `Value::Ship`/`Value::Account`: no zero id there. The two do
 /// not contradict. A preset is a complete, shipped tree, so a zero id in one
 /// would be a resting bug the user could commit unchanged. A `Ship` or
-/// `Account` placeholder minted here exists only inside a live edit: changing
-/// to an entity-kind field always changes `value_kind()`, which is Task 7's
-/// signal to open the value editor immediately, so the zero id is never a
-/// resting state a query can be committed or saved with.
+/// `Account` placeholder minted here exists only inside a live edit, where
+/// changing to an entity-kind field always changes `value_kind()` -- but that
+/// only keeps the zero id out of a resting state if the caller treats the
+/// `value_kind()` change as a requirement to open the value editor before the
+/// term can be committed. No production caller yet: the segmented pill UI
+/// that wires this up is a later task, and it is on that task to honour this,
+/// not something already guaranteed here.
 #[cfg_attr(not(test), allow(dead_code))]
 fn placeholder_value(kind: ValueKind) -> Value {
     match kind {
@@ -1271,21 +1277,29 @@ mod tests {
         // a term that prints and reparses into something else.
         use crate::db::index::query_text::parse_query;
         use crate::db::index::query_text::print_query;
+        // Seeded from every operator `from` allows, not just its first: index 0
+        // is always the equality-flavoured spelling for every op set, so
+        // seeding from it alone would never exercise `reconcile_term`'s
+        // "keep the operator" branch with a comparison or negation operator.
         for from in MatchField::ALL {
-            for to in MatchField::ALL {
-                let op = from.allowed_ops()[0];
-                let value = if op.is_nullary() { Value::NoOperand } else { sample_value(from.value_kind()) };
-                let mut e: MatchExpr = Expr::Leaf(MatchTerm::Field(from, op, value));
-                assert!(set_field(&mut e, &vec![], TermField::Match(to)), "{from:?} -> {to:?} did not report a change");
-                match &e {
-                    Expr::Leaf(MatchTerm::Field(f, op, _)) => {
-                        assert_eq!(*f, to, "{from:?} -> {to:?} did not change the field");
-                        assert!(f.allowed_ops().contains(op), "{from:?} -> {to:?} gave illegal {op:?}");
+            for &op in from.allowed_ops() {
+                for to in MatchField::ALL {
+                    let value = if op.is_nullary() { Value::NoOperand } else { sample_value(from.value_kind()) };
+                    let mut e: MatchExpr = Expr::Leaf(MatchTerm::Field(from, op, value));
+                    assert!(
+                        set_field(&mut e, &vec![], TermField::Match(to)),
+                        "{from:?}/{op:?} -> {to:?} was not addressed as a field term"
+                    );
+                    match &e {
+                        Expr::Leaf(MatchTerm::Field(f, op, _)) => {
+                            assert_eq!(*f, to, "{from:?}/{op:?} -> {to:?} did not change the field");
+                            assert!(f.allowed_ops().contains(op), "{from:?}/{op:?} -> {to:?} gave illegal {op:?}");
+                        }
+                        other => panic!("{from:?}/{op:?} -> {to:?} gave {other:?}"),
                     }
-                    other => panic!("{from:?} -> {to:?} gave {other:?}"),
+                    let printed = print_query(&e);
+                    assert_eq!(parse_query(&printed).unwrap(), e, "{from:?}/{op:?} -> {to:?} printed {printed:?}");
                 }
-                let printed = print_query(&e);
-                assert_eq!(parse_query(&printed).unwrap(), e, "{from:?} -> {to:?} printed {printed:?}");
             }
         }
     }
@@ -1305,64 +1319,85 @@ mod tests {
         use crate::db::index::query_text::parse_query;
         use crate::db::index::query_text::print_query;
 
+        // Seeded from every operator `from` allows, not just its first, for
+        // the same reason as the match-level test above.
         for from in RosterField::ALL {
-            for to in RosterField::ALL {
-                let op = from.allowed_ops()[0];
-                let value = if op.is_nullary() { Value::NoOperand } else { sample_value(from.value_kind()) };
+            for &op in from.allowed_ops() {
+                for to in RosterField::ALL {
+                    let value = if op.is_nullary() { Value::NoOperand } else { sample_value(from.value_kind()) };
 
-                let mut root: MatchExpr = Expr::Leaf(MatchTerm::Roster {
-                    quant: Quant::Any,
-                    pred: Expr::Leaf(RosterTerm { field: from, op, value: value.clone() }),
-                });
-                assert!(
-                    set_field(&mut root, &vec![], TermField::Roster(to)),
-                    "{from:?} -> {to:?} at the root did not report a change"
-                );
-                match &root {
-                    Expr::Leaf(MatchTerm::Roster { pred: Expr::Leaf(term), .. }) => {
-                        assert_eq!(term.field, to, "{from:?} -> {to:?} at the root did not change the field");
-                        assert!(
-                            term.field.allowed_ops().contains(&term.op),
-                            "{from:?} -> {to:?} at the root gave illegal {:?}",
-                            term.op
-                        );
-                    }
-                    other => panic!("{from:?} -> {to:?} at the root gave {other:?}"),
-                }
-                let printed = print_query(&root);
-                assert_eq!(parse_query(&printed).unwrap(), root, "{from:?} -> {to:?} at the root printed {printed:?}");
-
-                let sibling = RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) };
-                let mut nested: MatchExpr = Expr::Leaf(MatchTerm::Roster {
-                    quant: Quant::Any,
-                    pred: Expr::All(vec![
-                        Expr::Leaf(sibling.clone()),
-                        Expr::Leaf(RosterTerm { field: from, op, value }),
-                    ]),
-                });
-                assert!(
-                    set_field(&mut nested, &vec![1], TermField::Roster(to)),
-                    "{from:?} -> {to:?} nested did not report a change"
-                );
-                match &nested {
-                    Expr::Leaf(MatchTerm::Roster { pred: Expr::All(cs), .. }) => {
-                        assert_eq!(cs[0], Expr::Leaf(sibling), "{from:?} -> {to:?} nested changed its sibling");
-                        match &cs[1] {
-                            Expr::Leaf(term) => {
-                                assert_eq!(term.field, to, "{from:?} -> {to:?} nested did not change the field");
-                                assert!(
-                                    term.field.allowed_ops().contains(&term.op),
-                                    "{from:?} -> {to:?} nested gave illegal {:?}",
-                                    term.op
-                                );
-                            }
-                            other => panic!("{from:?} -> {to:?} nested gave {other:?}"),
+                    let mut root: MatchExpr = Expr::Leaf(MatchTerm::Roster {
+                        quant: Quant::Any,
+                        pred: Expr::Leaf(RosterTerm { field: from, op, value: value.clone() }),
+                    });
+                    assert!(
+                        set_field(&mut root, &vec![], TermField::Roster(to)),
+                        "{from:?}/{op:?} -> {to:?} at the root was not addressed as a field term"
+                    );
+                    match &root {
+                        Expr::Leaf(MatchTerm::Roster { pred: Expr::Leaf(term), .. }) => {
+                            assert_eq!(
+                                term.field, to,
+                                "{from:?}/{op:?} -> {to:?} at the root did not change the field"
+                            );
+                            assert!(
+                                term.field.allowed_ops().contains(&term.op),
+                                "{from:?}/{op:?} -> {to:?} at the root gave illegal {:?}",
+                                term.op
+                            );
                         }
+                        other => panic!("{from:?}/{op:?} -> {to:?} at the root gave {other:?}"),
                     }
-                    other => panic!("{from:?} -> {to:?} nested gave {other:?}"),
+                    let printed = print_query(&root);
+                    assert_eq!(
+                        parse_query(&printed).unwrap(),
+                        root,
+                        "{from:?}/{op:?} -> {to:?} at the root printed {printed:?}"
+                    );
+
+                    let sibling = RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) };
+                    let mut nested: MatchExpr = Expr::Leaf(MatchTerm::Roster {
+                        quant: Quant::Any,
+                        pred: Expr::All(vec![
+                            Expr::Leaf(sibling.clone()),
+                            Expr::Leaf(RosterTerm { field: from, op, value }),
+                        ]),
+                    });
+                    assert!(
+                        set_field(&mut nested, &vec![1], TermField::Roster(to)),
+                        "{from:?}/{op:?} -> {to:?} nested was not addressed as a field term"
+                    );
+                    match &nested {
+                        Expr::Leaf(MatchTerm::Roster { pred: Expr::All(cs), .. }) => {
+                            assert_eq!(
+                                cs[0],
+                                Expr::Leaf(sibling),
+                                "{from:?}/{op:?} -> {to:?} nested changed its sibling"
+                            );
+                            match &cs[1] {
+                                Expr::Leaf(term) => {
+                                    assert_eq!(
+                                        term.field, to,
+                                        "{from:?}/{op:?} -> {to:?} nested did not change the field"
+                                    );
+                                    assert!(
+                                        term.field.allowed_ops().contains(&term.op),
+                                        "{from:?}/{op:?} -> {to:?} nested gave illegal {:?}",
+                                        term.op
+                                    );
+                                }
+                                other => panic!("{from:?}/{op:?} -> {to:?} nested gave {other:?}"),
+                            }
+                        }
+                        other => panic!("{from:?}/{op:?} -> {to:?} nested gave {other:?}"),
+                    }
+                    let printed = print_query(&nested);
+                    assert_eq!(
+                        parse_query(&printed).unwrap(),
+                        nested,
+                        "{from:?}/{op:?} -> {to:?} nested printed {printed:?}"
+                    );
                 }
-                let printed = print_query(&nested);
-                assert_eq!(parse_query(&printed).unwrap(), nested, "{from:?} -> {to:?} nested printed {printed:?}");
             }
         }
     }
@@ -1376,7 +1411,10 @@ mod tests {
         // nullary implies NoOperand, non-nullary must not carry it.
         for to in MatchField::ALL {
             let mut e: MatchExpr = Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::IsSet, Value::NoOperand));
-            assert!(set_field(&mut e, &vec![], TermField::Match(to)), "Build -> {to:?} did not report a change");
+            assert!(
+                set_field(&mut e, &vec![], TermField::Match(to)),
+                "Build -> {to:?} was not addressed as a field term"
+            );
             match &e {
                 Expr::Leaf(MatchTerm::Field(f, op, v)) => {
                     assert_eq!(*f, to);
