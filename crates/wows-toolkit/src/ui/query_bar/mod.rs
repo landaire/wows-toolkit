@@ -200,23 +200,28 @@ struct InlineValue {
     seed: MatchExpr,
     /// The remainder of the term path, inside the seed's roster predicate.
     tail: NodePath,
+    /// The text the box opened holding, so a placeholder nobody chose can be
+    /// told from one the user has typed over.
+    opened_with: String,
 }
 
 impl SegmentEdit {
     /// Opens on the segment `role` of the term at `path`, inside the pill at
-    /// `pill`. A value edit captures the leaf it opened over; the other two
-    /// roles commit through their own list and capture nothing.
+    /// `pill`, with the caret already holding `opened_with`. A value edit
+    /// captures the leaf it opened over; the other two roles commit through
+    /// their own list and capture nothing.
     fn open(
         expr: &MatchExpr,
         pill: NodePath,
         path: NodePath,
         role: SegmentRole,
         restore: Option<Restore>,
+        opened_with: &str,
     ) -> SegmentEdit {
         let inline = (role == SegmentRole::Value)
             .then(|| select::leaf_seed(expr, &path))
             .flatten()
-            .map(|(leaf, seed, tail)| InlineValue { leaf, seed, tail });
+            .map(|(leaf, seed, tail)| InlineValue { leaf, seed, tail, opened_with: opened_with.to_owned() });
         SegmentEdit { pill, path, role, restore, inline }
     }
 }
@@ -319,9 +324,19 @@ struct Measured<'a> {
     galleys: &'a [Vec<Arc<Galley>>],
     laid: &'a LaidOut,
     cfg: &'a LayoutCfg,
-    /// The segment of the pill the caret is standing in that the inline box
-    /// occupies. `None` while the caret is the trailing one.
-    boxed: Option<usize>,
+    /// The pill the caret is standing inside. `None` while the caret is the
+    /// trailing one.
+    slot: Option<Slot<'a>>,
+}
+
+/// The pill an inline box is being typed into. It has left the drawn stream, so
+/// everything a pill normally gets from the token loop -- its click target, its
+/// segments', its menu -- is registered against this instead.
+#[derive(Clone, Copy)]
+struct Slot<'a> {
+    pill: &'a Token,
+    /// Which of the pill's segments the box occupies.
+    segment: usize,
 }
 
 impl QueryBar {
@@ -472,18 +487,18 @@ impl QueryBar {
         // segment it is typing into measured from the text in it. That makes the
         // cell exactly as wide as the pill needs, so the query neither shifts on
         // open nor shifts back on commit, and it grows with what is typed.
-        let boxed = replaced.and_then(boxed_segment);
+        let slot = replaced.and_then(|pill| boxed_segment(pill).map(|segment| Slot { pill, segment }));
         let galleys: Vec<Vec<Arc<Galley>>> = tokens
             .iter()
-            .map(|token| match (&token.kind, replaced.zip(boxed)) {
-                (TokenKind::Caret, Some((pill, boxed))) => inline_galleys(ui, pill, &font, boxed, &self.pending),
+            .map(|token| match (&token.kind, slot) {
+                (TokenKind::Caret, Some(slot)) => inline_galleys(ui, slot.pill, &font, slot.segment, &self.pending),
                 _ => token_galleys(ui, token, &font),
             })
             .collect();
         let widths: Vec<f32> = tokens
             .iter()
             .zip(&galleys)
-            .map(|(token, runs)| match (&token.kind, boxed) {
+            .map(|(token, runs)| match (&token.kind, slot) {
                 (TokenKind::Caret, Some(_)) => layout::pill_width(&paint::segment_widths(runs), &cfg),
                 _ => token_width(token, runs, &cfg),
             })
@@ -496,7 +511,7 @@ impl QueryBar {
         }
 
         let ids = BarIds { id, caret_id };
-        let measured = Measured { galleys: &galleys, laid: &laid, cfg: &cfg, boxed };
+        let measured = Measured { galleys: &galleys, laid: &laid, cfg: &cfg, slot };
         if laid.needs_scroll {
             egui::ScrollArea::vertical()
                 .id_salt(id.with("scroll"))
@@ -510,7 +525,7 @@ impl QueryBar {
     }
 
     fn rows(&mut self, ui: &mut Ui, ids: &BarIds, tokens: &[Token], measured: &Measured<'_>) -> Body {
-        let Measured { galleys, laid, cfg, boxed } = *measured;
+        let Measured { galleys, laid, cfg, slot } = *measured;
         let (_, area) = ui.allocate_space(egui::vec2(ui.available_width(), laid.height));
         let origin = area.min.to_vec2();
 
@@ -574,6 +589,7 @@ impl QueryBar {
                 ids.id.with("segment").with(placed.index),
                 token,
                 &seg_rects,
+                None,
                 &mut commands,
             );
             refocus |= hit.clicked;
@@ -586,21 +602,47 @@ impl QueryBar {
         let caret_cell = caret_rect(tokens, laid, origin);
         // The cell holds the whole pill while a value is being typed into it, so
         // the box is the sub-rect of the segment it stands in and the rest of the
-        // pill is painted around it.
-        let caret_box = match boxed {
-            Some(boxed) => {
+        // pill is drawn and hit-tested around it.
+        let caret_box = match slot {
+            Some(slot) => {
                 let index = caret_index(tokens, laid);
-                paint::inline_pill(ui, caret_cell, &galleys[index], boxed, cfg);
-                paint::segment_rects(caret_cell, &paint::segment_widths(&galleys[index]), cfg)
-                    .get(boxed)
-                    .copied()
-                    .unwrap_or(caret_cell)
+                let rects = paint::segment_rects(caret_cell, &paint::segment_widths(&galleys[index]), cfg);
+                // Every target the token loop would have registered for this
+                // pill, registered here because the pill is no longer in the
+                // stream it walks. Without them the segments beside the box are
+                // painted, washed on hover, and dead: a click on one falls
+                // through to the bar's background and opens the caret's own
+                // list rather than that segment's.
+                let response = ui.interact(paint::pill_surface(caret_cell, &rects), ids.id.with(index), Sense::click());
+                let state = if self.selection.contains(&slot.pill.path) {
+                    TokenState::Selected
+                } else if response.hovered() {
+                    TokenState::Hovered
+                } else {
+                    TokenState::Idle
+                };
+                let hit = self.segment_interaction(
+                    ui,
+                    ids.id.with("segment").with(index),
+                    slot.pill,
+                    &rects,
+                    Some(slot.segment),
+                    &mut commands,
+                );
+                refocus |= hit.clicked || response.clicked();
+                clicked_token |= hit.clicked || response.clicked();
+                clicked_segment |= hit.clicked;
+                paint::inline_pill(ui, caret_cell, &galleys[index], slot.segment, state, cfg);
+                self.token_interaction(&response, slot.pill, &mut commands);
+                let boxed = rects.get(slot.segment).copied().unwrap_or(caret_cell);
+                paint::inline_box(ui, boxed);
+                boxed
             }
             None => caret_cell,
         };
         // The pill holding the box is out of the stream, so no segment of it
         // reported an anchor above; the box is what the list hangs under.
-        self.popup_anchor = anchor.or(boxed.map(|_| caret_box));
+        self.popup_anchor = anchor.or(slot.map(|_| caret_box));
 
         let caret = self.caret(ui, ids.caret_id, caret_box);
         // After the caret, never before: egui surrenders focus from any focused
@@ -658,12 +700,17 @@ impl QueryBar {
     /// free text carries no field or operator, and a roster quantifier too
     /// complex to collapse carries several. A click on one of those reaches the
     /// pill and selects it, rather than landing on a target that could not act.
+    ///
+    /// `boxed` names the segment an inline box has taken over, which registers
+    /// nothing: the `TextEdit` filling it is the target there, and a second one
+    /// under it would be a click on the text reading as a click on the pill.
     fn segment_interaction(
         &self,
         ui: &Ui,
         id: egui::Id,
         token: &Token,
         rects: &[Rect],
+        boxed: Option<usize>,
         commands: &mut Vec<Command>,
     ) -> SegmentHit {
         let mut hit = SegmentHit { clicked: false, anchor: None };
@@ -674,6 +721,9 @@ impl QueryBar {
             return hit;
         };
         for (i, (rect, segment)) in rects.iter().zip(segments).enumerate() {
+            if boxed == Some(i) {
+                continue;
+            }
             let response = ui.interact(*rect, id.with(i), Sense::click());
             // Also on the segment, not only on the pill: the segment sits on
             // top of it, so a right-click never reaches the pill's own menu.
@@ -1187,11 +1237,17 @@ impl QueryBar {
     fn apply_command(&mut self, command: Command, ui: &Ui, caret_id: egui::Id) -> bool {
         match command {
             Command::EditSegment(pill, role) => {
+                // Moving from a value box to another segment of the same pill is
+                // still moving on, so the box commits first, for the same reason
+                // a click on the bar's background does. Swapping one value for
+                // another moves no path, so the click's own pill is still where
+                // it was resolved.
+                let committed = self.commit_open_box();
                 let dismissed = self.end_segment_edit();
                 if dismissed.withdrew.as_deref() != Some(pill.as_slice()) {
                     self.open_clicked_segment(&pill, role, &dismissed, ui, caret_id);
                 }
-                dismissed.restored
+                committed || dismissed.restored
             }
             Command::SelectOnly(path) => {
                 self.select_single(path);
@@ -1343,11 +1399,12 @@ impl QueryBar {
             _ => String::new(),
         };
         self.parsed_text.clone_from(&self.pending);
-        self.editing = Some(SegmentEdit::open(&self.expr, pill, path, role, restore));
+        let opened_with = self.pending.clone();
+        self.editing = Some(SegmentEdit::open(&self.expr, pill, path, role, restore, &opened_with));
         self.dropdown_open = true;
         let request = self.segment_request();
         self.refresh_request(request);
-        park_caret(ui, caret_id, self.pending.chars().count());
+        park_caret(ui.ctx(), caret_id, self.pending.chars().count());
         true
     }
 
@@ -1381,15 +1438,23 @@ impl QueryBar {
     /// purpose, and the pointer moving on is not a reason to throw it away.
     /// Escape is the one dismissal that is not a commit.
     ///
-    /// Only a box the user opened themselves, and only a plain one. A box a
-    /// minted placeholder forced open holds a value nobody chose, which is
-    /// exactly what the snapshot it carries exists to take back, and an enum or
-    /// lookup box holds a needle for its list rather than a literal.
+    /// Only a plain box, whose caret holds a literal. An enum or lookup box
+    /// holds a needle for its list, which is not a value and cannot be
+    /// committed as one.
+    ///
+    /// A box a minted placeholder forced open commits only once its text has
+    /// moved off that placeholder. Untouched, the snapshot it carries is right:
+    /// the user picked a field, never chose a value, and the pill is withdrawn
+    /// rather than left as a filter nobody set. Typed into, the snapshot is
+    /// wrong, because the literal in the box is a choice -- and Enter already
+    /// commits it, so refusing here would make the same keystrokes mean two
+    /// different things depending on how the user left the box.
     fn commit_open_box(&mut self) -> bool {
-        let Some((edit, _)) = self.inline_edit() else {
+        let Some((edit, inline)) = self.inline_edit() else {
             return false;
         };
-        if edit.restore.is_some() || self.plain_value_field().is_none() {
+        let untouched = edit.restore.is_some() && self.pending == inline.opened_with;
+        if untouched || self.plain_value_field().is_none() {
             return false;
         }
         let literal = self.pending.clone();
@@ -1467,7 +1532,7 @@ impl QueryBar {
         }
         self.commit_segment_edit();
         self.dropdown_open = true;
-        park_caret(ui, caret_id, 0);
+        park_caret(ui.ctx(), caret_id, 0);
         true
     }
 
@@ -1569,7 +1634,7 @@ impl QueryBar {
                 // next one, and the caret parks at the end of a now-empty
                 // buffer rather than keeping an offset into the text it had.
                 self.dropdown_open = true;
-                park_caret(ui, caret_id, 0);
+                park_caret(ui.ctx(), caret_id, 0);
                 true
             }
             SuggestionKind::MatchField(field) => self.mint_term(TermField::Match(field), None, ui, caret_id),
@@ -1625,7 +1690,7 @@ impl QueryBar {
         self.expr = before;
         self.clear_pending();
         self.dropdown_open = true;
-        park_caret(ui, caret_id, 0);
+        park_caret(ui.ctx(), caret_id, 0);
         typed
     }
 
@@ -1639,7 +1704,7 @@ impl QueryBar {
         self.parsed_text.clear();
         self.dropdown_open = true;
         self.highlighted = None;
-        park_caret(ui, caret_id, cursor);
+        park_caret(ui.ctx(), caret_id, cursor);
         self.commit_pending(ui, caret_id)
     }
 
@@ -1656,7 +1721,7 @@ impl QueryBar {
                 // Adding two filters in a row is the common case, so a
                 // committed term leaves the full list showing.
                 self.dropdown_open = true;
-                park_caret(ui, caret_id, 0);
+                park_caret(ui.ctx(), caret_id, 0);
                 true
             }
             Ok(_) => false,
@@ -1856,10 +1921,10 @@ fn inline_galleys(ui: &Ui, pill: &Token, font: &egui::FontId, boxed: usize, text
 /// Parks the caret at `cursor`, a character index. egui otherwise keeps
 /// whatever offset the widget had, which after a programmatic replacement of
 /// the text is arbitrary.
-fn park_caret(ui: &Ui, caret_id: egui::Id, cursor: usize) {
-    let mut state = TextEditState::load(ui.ctx(), caret_id).unwrap_or_default();
+fn park_caret(ctx: &egui::Context, caret_id: egui::Id, cursor: usize) {
+    let mut state = TextEditState::load(ctx, caret_id).unwrap_or_default();
     state.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(cursor))));
-    state.store(ui.ctx(), caret_id);
+    state.store(ctx, caret_id);
 }
 
 /// The right-click menu for one pill: the whole-term edits, which have no
@@ -1980,7 +2045,7 @@ mod tests {
         let mut bar = QueryBar::default();
         bar.set_expr(expr);
         let path = select::segment_path(&bar.expr, &vec![]).expect("the fixture pill addresses a term");
-        bar.editing = Some(SegmentEdit::open(&bar.expr, vec![], path, role, None));
+        bar.editing = Some(SegmentEdit::open(&bar.expr, vec![], path, role, None, ""));
         bar
     }
 
@@ -2647,6 +2712,10 @@ mod tests {
         let path = select::segment_path(&bar.expr, &pill).expect("the fixture pill addresses a term");
         let opened = with_ui(|ui, _| bar.begin_segment_edit(pill, path, SegmentRole::Value, ui, caret_id));
         assert!(opened);
+        // Parked here for the reason `mint_forced_box` gives: `begin_edit` put
+        // the cursor in `with_ui`'s context, which is not the one under test.
+        let cursor = harness.bar.pending.chars().count();
+        park_caret(&harness.ctx, caret_id, cursor);
         harness.ctx.memory_mut(|m| m.request_focus(caret_id));
         harness.settle();
         assert_eq!(harness.width, width, "the fixture must drive the harness at the width it was built with");
@@ -2755,7 +2824,8 @@ mod tests {
         let mut harness = Harness::new(win(), WIDTH);
         harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
 
-        harness.bar.editing = Some(SegmentEdit::open(&harness.bar.expr, vec![], vec![], SegmentRole::Operator, None));
+        harness.bar.editing =
+            Some(SegmentEdit::open(&harness.bar.expr, vec![], vec![], SegmentRole::Operator, None, ""));
         harness.bar.dropdown_open = true;
         harness.frame(frame_input(WIDTH));
         harness.frame(frame_input(WIDTH));
@@ -2786,7 +2856,7 @@ mod tests {
         const WIDTH: f32 = 800.0;
         let mut harness = Harness::new(roster_pill(RosterField::Ship, Op::Is, Value::Ship(1u64.into())), WIDTH);
         let path = select::segment_path(&harness.bar.expr, &vec![]).expect("the fixture pill addresses a term");
-        harness.bar.editing = Some(SegmentEdit::open(&harness.bar.expr, vec![], path, SegmentRole::Value, None));
+        harness.bar.editing = Some(SegmentEdit::open(&harness.bar.expr, vec![], path, SegmentRole::Value, None, ""));
         harness.bar.dropdown_open = true;
         harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
 
@@ -2842,7 +2912,8 @@ mod tests {
         ]);
         let mut harness = Harness::new(pills, WIDTH);
         let path = select::segment_path(&harness.bar.expr, &vec![1]).expect("the fixture's second pill");
-        harness.bar.editing = Some(SegmentEdit::open(&harness.bar.expr, vec![1], path, SegmentRole::Operator, None));
+        harness.bar.editing =
+            Some(SegmentEdit::open(&harness.bar.expr, vec![1], path, SegmentRole::Operator, None, ""));
         harness.bar.dropdown_open = true;
         harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
         harness.frame(frame_input(WIDTH));
@@ -3404,7 +3475,7 @@ mod tests {
         let mut bar = QueryBar::default();
         bar.set_expr(win());
         let restore = Restore { before: bar.expr.clone(), minted: None };
-        bar.editing = Some(SegmentEdit::open(&bar.expr, vec![], vec![], SegmentRole::Value, Some(restore)));
+        bar.editing = Some(SegmentEdit::open(&bar.expr, vec![], vec![], SegmentRole::Value, Some(restore), ""));
 
         let dismissed = bar.end_segment_edit();
 
@@ -3436,8 +3507,18 @@ mod tests {
         }
 
         /// The index of the pill at `path` in that stream, and its segments.
+        ///
+        /// A pill holding an inline box has left the stream, replaced in place
+        /// by the caret, so its index -- and with it the ids its segment targets
+        /// are salted with -- is the caret's.
         fn pill(&self, path: &NodePath) -> (usize, Vec<label::PillSegment>) {
-            let tokens = self.tokens();
+            let (tokens, replaced) = self.bar.stream();
+            if let Some(TokenKind::Pill { segments }) = replaced.filter(|pill| pill.path == *path).map(|pill| pill.kind)
+            {
+                let index =
+                    tokens.iter().position(|t| matches!(t.kind, TokenKind::Caret)).expect("the stream keeps a caret");
+                return (index, segments);
+            }
             tokens
                 .iter()
                 .enumerate()
@@ -3500,6 +3581,23 @@ mod tests {
 
         fn caret_rect(&self) -> Rect {
             self.rect_of(self.caret_id())
+        }
+
+        /// How wide the mark under an open box was painted this frame, if it
+        /// was painted at all. Identified by the accent colour on a horizontal
+        /// run, which nothing else in the bar draws: the separator and the
+        /// bracket strokes carry their own colours, and the bar's own focus
+        /// stroke is a frame rather than a line.
+        fn box_rule_width(&self) -> Option<f32> {
+            let accent = self.ctx.options(|options| options.dark_style.visuals.selection.stroke.color);
+            self.shapes.iter().find_map(|clipped| match &clipped.shape {
+                egui::Shape::LineSegment { points: [a, b], stroke }
+                    if stroke.color == accent && (a.y - b.y).abs() < 0.5 =>
+                {
+                    Some((b.x - a.x).abs())
+                }
+                _ => None,
+            })
         }
 
         fn caret_text(&self) -> String {
@@ -3628,13 +3726,183 @@ mod tests {
         assert_eq!(h.query(), parse_query("not anyone.tier>=10").expect("parse"));
     }
 
+    /// Only the value segment gains an inline box; the other two keep opening
+    /// their own list.
+    ///
+    /// The list has to be identified by the rows in it, not by the dropdown
+    /// merely being open. The caret's own suggestion list is sixty-five rows and
+    /// is open on almost every frame, so "a dropdown appeared" is satisfied by a
+    /// click that opened no editor at all -- which is exactly what a segment
+    /// whose target went missing would do.
     #[test]
     fn the_operator_and_filter_segments_still_open_their_lists() {
-        // Only the value segment gains an inline box.
+        for role in [SegmentRole::Filter, SegmentRole::Operator] {
+            let mut h = bar_with("anyone.tier>=8");
+            h.click(h.segment_rect(&vec![], role).center());
+
+            assert_eq!(
+                h.bar.editing.as_ref().map(|edit| edit.role),
+                Some(role),
+                "clicking the {role:?} segment opened no editor of its own"
+            );
+            assert!(!h.inline_edit_open(), "the {role:?} segment opened a text box");
+            assert!(h.dropdown_open(), "the {role:?} list did not open");
+
+            let rows = h.bar.dropdown_rows();
+            let own = rows.iter().all(|row| match role {
+                SegmentRole::Filter => matches!(row, Row::Field(_)),
+                SegmentRole::Operator => matches!(row, Row::Operator(_)),
+                SegmentRole::Value => false,
+            });
+            assert!(own, "the {role:?} segment offered the caret's own list rather than its own: {rows:?}");
+        }
+    }
+
+    /// The complaint the whole change answers, stated as geometry. Value entry
+    /// used to seed the caret at the end of the bar -- some 340px from the pill
+    /// on a wide window -- which is why the feature read as a query language
+    /// rather than as pills, however correct its commit semantics were.
+    ///
+    /// Containment, not just a shared left edge: the box has to be *in* the
+    /// pill, and a caret that merely started at the same x while running to the
+    /// bar's right edge would satisfy an alignment check on its own.
+    #[test]
+    fn the_box_is_inside_the_pill_rather_than_at_the_end_of_the_bar() {
         let mut h = bar_with("anyone.tier>=8");
+        let pill = h.rect_of(h.id.with(h.pill(&vec![]).0));
+        let bar = h.rect_of(h.id.with("background"));
+        assert!(
+            bar.right() - pill.right() > 200.0,
+            "the fixture must leave the end of the bar far from the pill: {pill:?} in {bar:?}"
+        );
+
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+
+        let caret = h.caret_rect();
+        assert!(pill.contains(caret.center()), "the box is not inside the pill: {caret:?} against {pill:?}");
+        assert!(
+            caret.right() <= pill.right() + 1.0,
+            "the box runs past the pill it belongs to: {caret:?} against {pill:?}"
+        );
+    }
+
+    /// The mark that says a segment is open for typing has to reach the screen,
+    /// not merely exist as a function: without it the box is the pill's own fill
+    /// with a cursor on it -- `(FIELD|OP|text)` -- which is the state the user
+    /// said was not what they asked for.
+    #[test]
+    fn an_open_box_is_marked_and_a_settled_pill_is_not() {
+        let mut h = bar_with("anyone.tier>=8");
+        assert!(h.box_rule_width().is_none(), "nothing is being typed into, so nothing must be marked");
+
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+
+        let rule = h.box_rule_width().expect("an open box must be marked");
+        let width = h.caret_rect().width();
+        assert!(rule >= width - 0.5, "the mark is {rule} wide against a {width}-wide box");
+    }
+
+    /// A segment beside the box is painted and washed on hover, so it advertises
+    /// a click. Clicking it has to open that segment's own editor -- the pill is
+    /// out of the drawn stream while the box is open, so nothing registers those
+    /// targets unless the box's own paint pass does, and the click falls through
+    /// to the bar's background and opens the caret's sixty-five-row field list
+    /// instead.
+    #[test]
+    fn a_segment_beside_the_box_still_opens_its_own_list() {
+        let mut h = bar_with("anyone.tier>=8");
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+        assert!(h.inline_edit_open(), "the fixture must start with the box open");
+
         h.click(h.segment_rect(&vec![], SegmentRole::Operator).center());
-        assert!(!h.inline_edit_open(), "the operator segment opened a text box");
-        assert!(h.dropdown_open(), "the operator list did not open");
+
+        assert_eq!(
+            h.bar.editing.as_ref().map(|edit| edit.role),
+            Some(SegmentRole::Operator),
+            "the operator segment beside the box opened no editor"
+        );
+        assert!(h.bar.dropdown_rows().iter().all(|row| matches!(row, Row::Operator(_))), "not the operator's list");
+    }
+
+    /// Moving from the box to another segment of the same pill is still moving
+    /// on, so it commits for the same reason a click on the background does.
+    #[test]
+    fn moving_from_the_box_to_another_segment_commits_what_was_typed() {
+        let mut h = bar_with("anyone.tier>=8");
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+        h.type_text("10");
+        h.click(h.segment_rect(&vec![], SegmentRole::Operator).center());
+        assert_eq!(h.query(), parse_query("anyone.tier>=10").expect("parse"));
+    }
+
+    /// Mints a term the way picking a field from the caret's list does, leaving
+    /// its value box forced open on `new_term`'s placeholder.
+    ///
+    /// The mint itself runs off-frame, since it is state rather than geometry;
+    /// everything the test then measures or clicks goes through real frames.
+    fn mint_forced_box(harness: &mut Harness, field: TermField) {
+        let caret_id = harness.caret_id();
+        let bar = &mut harness.bar;
+        assert!(with_ui(|ui, _| bar.mint_term(field, None, ui, caret_id)), "the fixture must mint a term");
+        assert!(
+            bar.editing.as_ref().is_some_and(|edit| edit.restore.is_some()),
+            "the fixture must leave a forced box, which is the case under test"
+        );
+        // `mint_term` parked the caret in `with_ui`'s throwaway context, not in
+        // this one, so the box would open with its cursor at the front and text
+        // typed into it would land before the placeholder rather than after it.
+        let cursor = harness.bar.pending.chars().count();
+        park_caret(&harness.ctx, caret_id, cursor);
+        harness.ctx.memory_mut(|m| m.request_focus(caret_id));
+        harness.settle();
+        assert!(harness.bar.inline_edit().is_some(), "a quiet frame must not close the box");
+    }
+
+    /// The value in a minted pill's box is a real choice once it has been typed,
+    /// so leaving the box by clicking away must keep it -- Enter in the same
+    /// state already does, and the two cannot disagree about the same
+    /// keystrokes.
+    ///
+    /// The snapshot a forced box carries exists to withdraw a pill the user
+    /// picked and never filled in; it is not licence to destroy one they did.
+    #[test]
+    fn a_click_away_from_a_typed_minted_box_keeps_the_pill_and_the_value() {
+        let mut h = bar_with("outcome:win");
+        mint_forced_box(&mut h, TermField::Match(MatchField::Build));
+        h.type_text("1234");
+
+        let bar = h.rect_of(h.id.with("background"));
+        let box_rect = h.caret_rect();
+        let away = Pos2::new(bar.right() - 1.0, box_rect.center().y);
+        assert!(!box_rect.contains(away), "the click must land off the box: {away:?} in {box_rect:?}");
+        h.click(away);
+
+        let Expr::All(terms) = h.query() else {
+            panic!("the minted pill was withdrawn along with what was typed into it: {:?}", h.query());
+        };
+        assert_eq!(terms.len(), 2, "the minted pill must survive: {terms:?}");
+        assert_eq!(terms[0], win(), "the term that was already there must be untouched");
+        assert_eq!(
+            select::term_at(&h.query(), &[1]).map(|(field, _, value)| (field, value.clone())),
+            Some((TermField::Match(MatchField::Build), Value::Int(1234))),
+            "the typed literal must be what the minted pill carries"
+        );
+    }
+
+    /// The other half of that rule, and the reason the exclusion existed: a box
+    /// still holding the placeholder is a field the user picked and never filled
+    /// in, so leaving it withdraws the pill rather than committing a filter
+    /// nobody chose.
+    #[test]
+    fn a_click_away_from_an_untouched_minted_box_still_withdraws_the_pill() {
+        let mut h = bar_with("outcome:win");
+        mint_forced_box(&mut h, TermField::Match(MatchField::Build));
+
+        let bar = h.rect_of(h.id.with("background"));
+        let box_rect = h.caret_rect();
+        h.click(Pos2::new(bar.right() - 1.0, box_rect.center().y));
+
+        assert_eq!(h.query(), win(), "an untouched placeholder must not be left behind as a filter");
     }
 
     /// The other half of the same rule Escape states: a click that moves on

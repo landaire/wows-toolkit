@@ -37,6 +37,14 @@ pub const PAD_X: f32 = 6.0;
 /// repeat that state.
 const SEGMENT_HOVER_ALPHA: f32 = 0.14;
 
+/// How thick the line dividing two settled segments of one pill is drawn.
+const SEGMENT_SEPARATOR_WIDTH: f32 = 1.0;
+
+/// How thick the rule under an inline box is drawn. Derived from the separator
+/// rather than stated beside it, so the segment being typed into cannot end up
+/// reading as merely divided from its neighbour.
+const INLINE_BOX_RULE_WIDTH: f32 = 2.0 * SEGMENT_SEPARATOR_WIDTH;
+
 /// How a token reads under the pointer and the current selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenState {
@@ -100,10 +108,7 @@ fn pill(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], state: TokenState, cfg: &L
         TokenState::Selected => (visuals.selection.bg_fill, visuals.strong_text_color()),
     };
     let segments = segment_rects(rect, &segment_widths(galleys), cfg);
-    // The cell a caret stands in can be wider than the segments inside it --
-    // `lay_out` gives a trailing caret the rest of its row -- so the surface is
-    // painted over what the segments actually occupy rather than over the cell.
-    let surface = segments.last().map_or(rect, |last| rect.with_max_x(last.right()));
+    let surface = pill_surface(rect, &segments);
     let painter = ui.painter();
     painter.rect_filled(surface, CornerRadius::same(RADIUS), fill);
     if state == TokenState::Selected {
@@ -111,7 +116,7 @@ fn pill(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], state: TokenState, cfg: &L
     }
 
     let hover_fill = ui.sem().text_strong.gamma_multiply(SEGMENT_HOVER_ALPHA);
-    let separator = Stroke::new(1.0, ui.sem().pill_separator);
+    let separator = Stroke::new(SEGMENT_SEPARATOR_WIDTH, ui.sem().pill_separator);
     let last = segments.len().saturating_sub(1);
 
     for (i, (seg_rect, galley)) in segments.iter().zip(galleys).enumerate() {
@@ -135,8 +140,48 @@ fn pill(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], state: TokenState, cfg: &L
 /// committed pill draws, minus the one the inline box occupies. `galleys`
 /// carries that pill's runs with the boxed segment measured from the text being
 /// typed, so the pill is exactly as wide as the box currently needs.
-pub fn inline_pill(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], boxed: usize, cfg: &LayoutCfg) {
-    pill(ui, rect, galleys, TokenState::Idle, cfg, Some(boxed));
+pub fn inline_pill(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], boxed: usize, state: TokenState, cfg: &LayoutCfg) {
+    pill(ui, rect, galleys, state, cfg, Some(boxed));
+}
+
+/// The surface a pill paints over: the cell it was handed, trimmed to what its
+/// segments occupy. `lay_out` gives a trailing caret the rest of its row, and a
+/// caret standing in the last pill's slot is a trailing caret, so the cell can
+/// be far wider than the pill has segments to fill.
+pub fn pill_surface(cell: Rect, segments: &[Rect]) -> Rect {
+    segments.last().map_or(cell, |last| cell.with_max_x(last.right()))
+}
+
+/// The mark that says one segment of a pill is open for typing: the accent rule
+/// a focused control carries, under the segment the box occupies.
+///
+/// Without it the box is the pill's own fill with a cursor blinking on it, which
+/// reads as the committed value rather than as a field -- `(FIELD|OP|text)`
+/// where the whole point of the gesture is `(FIELD|OP|[text])`.
+///
+/// A rule rather than a fill, and that is not a stylistic preference. The three
+/// fills a pill can carry span most of the tonal room the theme has for a
+/// surface, in both directions in the light theme, so no single flat tone clears
+/// `SURFACE_CONTRAST_FLOOR` against all of them -- the closest candidate reaches
+/// 1.273 against an idle pill in the dark theme and 1.172 in the light. A fill
+/// nobody can tell from the pill it sits in is no affordance at all, and a
+/// chrome line has room the fill does not:
+/// `the_inline_box_rule_clears_every_pill_fill` measures it.
+///
+/// Heavier than `pill_separator`, which divides two settled segments; this one
+/// marks the segment being typed into and has to win against it.
+pub fn inline_box(ui: &Ui, rect: Rect) {
+    let stroke = Stroke::new(INLINE_BOX_RULE_WIDTH, inline_box_rule(ui.visuals()));
+    // Inset by the stroke's own width so the rule sits inside the segment rather
+    // than straddling the pill's lower edge, where the corner radius clips it.
+    let y = rect.bottom() - INLINE_BOX_RULE_WIDTH;
+    ui.painter().line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], stroke);
+}
+
+/// The rule's colour: the same accent a focused bar takes for its own border, so
+/// "this is the control being typed into" is stated one way throughout.
+fn inline_box_rule(visuals: &egui::Visuals) -> Color32 {
+    visuals.selection.stroke.color
 }
 
 /// The hover wash's corners: rounded only where a segment sits on the pill's
@@ -384,6 +429,71 @@ mod tests {
                 assert!(
                     ratio >= SURFACE_CONTRAST_FLOOR,
                     "{theme} hover wash on {fill_name} pill fill is {ratio:.3}, needs {SURFACE_CONTRAST_FLOOR}"
+                );
+            }
+        }
+    }
+
+    /// The mark that says a segment is open for typing is drawn on the pill's
+    /// own fill, so like `pill_separator` it has to clear every fill a pill can
+    /// carry. Without it the box was the pill's fill with a cursor on it, which
+    /// is the state the review found and the state the user complained about.
+    ///
+    /// It also has to out-read the separator beside it, or the segment being
+    /// typed into looks exactly like the boundary between two settled ones.
+    #[test]
+    fn the_inline_box_rule_clears_every_pill_fill() {
+        use crate::ui::theme::contrast::CHROME_LINE_FLOOR;
+        use crate::ui::theme::contrast::contrast_ratio;
+
+        for (theme, visuals) in [
+            ("dark", crate::ui::theme::style::dark_style().visuals),
+            ("light", crate::ui::theme::style::light_style().visuals),
+        ] {
+            let rule = inline_box_rule(&visuals);
+            for (fill_name, fill) in [
+                ("inactive", visuals.widgets.inactive.bg_fill),
+                ("hovered", visuals.widgets.hovered.bg_fill),
+                ("selected", visuals.selection.bg_fill),
+            ] {
+                let ratio = contrast_ratio(rule, fill);
+                assert!(
+                    ratio >= CHROME_LINE_FLOOR,
+                    "{theme} inline box rule on {fill_name} pill fill is {ratio:.3}, needs {CHROME_LINE_FLOOR}"
+                );
+                assert!(
+                    ratio > contrast_ratio(visuals.sem().pill_separator, fill),
+                    "{theme} the rule must out-read the separator on {fill_name} pill fill"
+                );
+            }
+        }
+    }
+
+    /// Why the mark is a rule and not a fill, recorded as a measurement rather
+    /// than as a claim: a pill's three fills span so much of the theme's tonal
+    /// room -- in both directions in the light theme -- that no flat tone the
+    /// palette offers is tellable from all of them. This walks the candidates
+    /// and asserts the conclusion, so a later attempt to "just fill it" finds
+    /// the reason already stated.
+    #[test]
+    fn no_flat_palette_tone_is_tellable_from_every_pill_fill() {
+        use crate::ui::theme::contrast::SURFACE_CONTRAST_FLOOR;
+        use crate::ui::theme::contrast::contrast_ratio;
+
+        for (theme, visuals) in [
+            ("dark", crate::ui::theme::style::dark_style().visuals),
+            ("light", crate::ui::theme::style::light_style().visuals),
+        ] {
+            let fills = [visuals.widgets.inactive.bg_fill, visuals.widgets.hovered.bg_fill, visuals.selection.bg_fill];
+            // Surfaces only. A chrome line's tone can sit clear of every fill --
+            // `pill_separator` does -- but a line colour used as a surface is a
+            // different mistake, not a way out of this one.
+            for candidate in [visuals.extreme_bg_color, visuals.faint_bg_color, visuals.panel_fill, visuals.window_fill]
+            {
+                let worst = fills.iter().map(|fill| contrast_ratio(candidate, *fill)).fold(f32::INFINITY, f32::min);
+                assert!(
+                    worst < SURFACE_CONTRAST_FLOOR,
+                    "{theme} {candidate:?} clears every pill fill at {worst:.3}; a fill is viable after all"
                 );
             }
         }
