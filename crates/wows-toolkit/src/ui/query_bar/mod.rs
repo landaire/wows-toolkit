@@ -176,18 +176,6 @@ struct SegmentEdit {
     role: SegmentRole,
 }
 
-/// Text a dropdown row puts into the caret, and how it ends.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Completion {
-    /// A field's grammar prefix. No trailing space, because a value comes next
-    /// and the caret has to stay inside the fragment it just started.
-    Filter(String),
-    /// A value literal, which finishes the term. The trailing space leaves
-    /// `active_fragment` empty so the full list returns, and makes
-    /// `value_request_for` yield `None` so no stale lookup fires.
-    Value(String),
-}
-
 /// A navigation key, read before the caret's `TextEdit` renders and applied
 /// after. Splitting the two is what makes the ordering possible at all: once
 /// the `TextEdit` has run it has already eaten the key.
@@ -1121,10 +1109,7 @@ impl QueryBar {
                 if self.editing.is_some() {
                     return self.commit_value_literal(&token);
                 }
-                // Replaces the half-typed value the row was picked against;
-                // appending would give `enemy.ship:yamYamato`.
-                self.complete(Completion::Value(token), ui, caret_id);
-                false
+                self.commit_caret_value(&token, ui, caret_id)
             }
             Row::Suggestion(index) => {
                 let Some(kind) = self.suggestions.get(index).map(|s| s.kind.clone()) else {
@@ -1264,38 +1249,63 @@ impl QueryBar {
                 park_caret(ui, caret_id, 0);
                 true
             }
-            SuggestionKind::MatchField(field) => {
-                self.begin_field(suggest::match_field_prefix(field), ui, caret_id);
-                false
-            }
+            SuggestionKind::MatchField(field) => self.mint_term(TermField::Match(field), None, ui, caret_id),
             SuggestionKind::RosterField { field, scope } => {
                 // A roster field name is only reachable through a scope prefix
                 // or a quantifier, so an unscoped one takes the widest scope
-                // rather than emitting text the grammar cannot read back.
-                self.begin_field(suggest::roster_field_prefix(field, scope.unwrap_or(Scope::Anyone)), ui, caret_id);
-                false
+                // rather than building a term the grammar cannot read back.
+                self.mint_term(TermField::Roster(field), Some(scope.unwrap_or(Scope::Anyone)), ui, caret_id)
             }
         }
     }
 
-    /// Puts a field's grammar prefix in the caret and leaves the user on the
-    /// value. Only the fragment being typed is replaced, so committing a
-    /// suggestion part way through a query keeps the terms already there.
-    fn begin_field(&mut self, prefix: Option<String>, ui: &Ui, caret_id: egui::Id) {
-        let Some(prefix) = prefix else {
-            return;
+    /// Appends a term for a field picked from the caret's list and opens its
+    /// value editor, so a picked row builds a pill rather than leaving grammar
+    /// text in the caret for Enter to finish.
+    ///
+    /// The term arrives carrying `select::new_term`'s placeholder, which is an
+    /// arbitrary in-kind value rather than one the user chose, so the editor has
+    /// to open on it for the same reason `commit_field_change` opens one.
+    ///
+    /// Whole terms typed ahead of the fragment the row was picked against are
+    /// committed rather than discarded. A head that does not parse cannot become
+    /// a term, and the editor that opens next takes the caret, the way opening
+    /// any other segment editor does.
+    fn mint_term(&mut self, field: TermField, scope: Option<Scope>, ui: &Ui, caret_id: egui::Id) -> bool {
+        let Some(node) = select::new_term(field, scope) else {
+            return false;
         };
-        self.complete(Completion::Filter(prefix), ui, caret_id);
+        self.pending = suggest::replace_active_fragment(&self.pending, "");
+        self.parsed_text.clear();
+        self.commit_pending(ui, caret_id);
+
+        select::append_top_level(&mut self.expr, node);
+        select::canonicalise(&mut self.expr);
+        let path = select::last_appended_path(&self.expr);
+        let opened = select::segment_path(&self.expr, &path)
+            .is_some_and(|segment| self.begin_segment_edit(segment, SegmentRole::Value, ui, caret_id));
+        if !opened {
+            // A term whose operator takes no right-hand side has no value to
+            // choose, so the caret returns to plain typing on an empty buffer.
+            self.clear_pending();
+            self.dropdown_open = true;
+            park_caret(ui, caret_id, 0);
+        }
+        true
     }
 
-    /// Writes a completion into the caret and parks the cursor after it.
-    fn complete(&mut self, completion: Completion, ui: &Ui, caret_id: egui::Id) {
-        let (text, cursor) = completed_text(&self.pending, &completion);
+    /// Applies a value row picked from the caret's own list. The row finishes
+    /// the term the caret was typing, so that term is committed here rather than
+    /// left as text waiting for Enter; text that does not parse stays in the
+    /// caret with its span marked, which is what Enter leaves too.
+    fn commit_caret_value(&mut self, literal: &str, ui: &Ui, caret_id: egui::Id) -> bool {
+        let (text, cursor) = value_completed_text(&self.pending, literal);
         self.pending = text;
         self.parsed_text.clear();
         self.dropdown_open = true;
         self.highlighted = None;
         park_caret(ui, caret_id, cursor);
+        self.commit_pending(ui, caret_id)
     }
 
     /// Parses the caret's text and adds it to the tree. Blank text commits
@@ -1407,17 +1417,19 @@ impl QueryBar {
     }
 }
 
-/// The caret text a completion produces, and the character index the caret
-/// parks at.
+/// The caret text a picked value row produces, and the character index the
+/// caret parks at when that text stays there.
+///
+/// The literal replaces the half-typed value the row was picked against;
+/// appending would give `enemy.ship:yamYamato`. The trailing space closes the
+/// term, which leaves `active_fragment` empty so the full list returns and makes
+/// `value_request_for` yield `None` so no stale lookup fires.
 ///
 /// A character index, never a byte offset: `CCursor::index` is a `CharIndex`,
 /// and the text counted here is arbitrary user input that a byte length would
 /// misplace the caret in the moment it contains anything outside ASCII.
-fn completed_text(pending: &str, completion: &Completion) -> (String, usize) {
-    let text = match completion {
-        Completion::Filter(prefix) => suggest::replace_active_fragment(pending, prefix),
-        Completion::Value(literal) => format!("{} ", suggest::replace_active_value(pending, literal)),
-    };
+fn value_completed_text(pending: &str, literal: &str) -> (String, usize) {
+    let text = format!("{} ", suggest::replace_active_value(pending, literal));
     let cursor = text.chars().count();
     (text, cursor)
 }
@@ -1553,6 +1565,8 @@ fn token_width(token: &Token, galleys: &[Arc<Galley>], cfg: &LayoutCfg) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use wows_replays::types::GameParamId;
+
     use super::*;
     use crate::db::index::query_ast::Expr;
     use crate::db::index::query_ast::MatchField;
@@ -1581,6 +1595,65 @@ mod tests {
         Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred: Expr::Leaf(RosterTerm { field, op, value }) })
     }
 
+    /// A bar in the state the caret is in with nothing committed. The
+    /// suggestion list is what `show` refreshes every frame and a default bar
+    /// has not run one, so its rows would otherwise be empty.
+    fn caret_bar() -> QueryBar {
+        let mut bar = QueryBar::default();
+        bar.refresh_suggestions();
+        bar
+    }
+
+    /// The first caret row that names a field rather than a preset, with the
+    /// field it names.
+    fn first_field_row(bar: &QueryBar) -> (usize, TermField) {
+        bar.dropdown_rows()
+            .iter()
+            .enumerate()
+            .find_map(|(index, row)| match row {
+                Row::Suggestion(i) => match bar.suggestions.get(*i)?.kind {
+                    SuggestionKind::MatchField(field) => Some((index, TermField::Match(field))),
+                    SuggestionKind::RosterField { field, .. } => Some((index, TermField::Roster(field))),
+                    SuggestionKind::Preset(_) => None,
+                },
+                _ => None,
+            })
+            .expect("the caret offers a field row")
+    }
+
+    /// The text one pill renders, joined the way `label::pill_text` joins it.
+    fn pill_text_at(bar: &QueryBar, path: &NodePath) -> String {
+        tokenize(&bar.expr, &bar.names)
+            .into_iter()
+            .find_map(|token| match token.kind {
+                TokenKind::Pill { segments } if token.path == *path => {
+                    Some(segments.iter().map(|segment| segment.text.as_str()).collect::<Vec<_>>().join(" "))
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no pill at {path:?} in {:?}", bar.expr))
+    }
+
+    /// The caret part way through a ship filter, holding the rows the Search
+    /// tab answered its lookup with. Hands back the row for `ship`.
+    ///
+    /// The caret text is the field's own grammar prefix, so this is the state a
+    /// picked field suggestion used to leave behind rather than a hand-built one.
+    fn seed_ship_value_editor(bar: &mut QueryBar, ship: GameParamId) -> Row {
+        bar.pending = suggest::roster_field_prefix(RosterField::Ship, Scope::Enemy).expect("ship has a grammar prefix");
+        bar.parsed_text.clone_from(&bar.pending);
+        assert_eq!(
+            value_request_for(&bar.pending),
+            Some(ValueRequest::Ships { needle: String::new() }),
+            "the fixture must be a caret that really would have fetched ships"
+        );
+        bar.active_request = value_request_for(&bar.pending);
+        bar.value_options = vec![ValueOption { label: "Yamato".to_owned(), token: ship.raw().to_string() }];
+        let rows = bar.dropdown_rows();
+        assert_eq!(rows, vec![Row::Value(0)], "the caret must be offering the fetched ships");
+        rows[0].clone()
+    }
+
     /// Runs `f` against a real `Ui` and the caret id derived from it, for the
     /// routing that stores caret state through `TextEditState` and so cannot be
     /// driven without a `Context`.
@@ -1597,29 +1670,21 @@ mod tests {
     }
 
     #[test]
-    fn a_filter_completion_leaves_the_caret_tight_after_the_prefix() {
-        let (text, cursor) = completed_text("outcome:win bui", &Completion::Filter("build:".to_owned()));
-        assert_eq!(text, "outcome:win build:");
-        assert!(!text.ends_with(' '), "a value comes next, so the term must not be closed: {text:?}");
-        assert_eq!(cursor, text.chars().count());
-    }
-
-    #[test]
     fn a_value_completion_closes_the_term_and_puts_the_caret_after_the_space() {
-        let (text, cursor) = completed_text("outcome:wi", &Completion::Value("win".to_owned()));
+        let (text, cursor) = value_completed_text("outcome:wi", "win");
         assert_eq!(text, "outcome:win ");
         assert_eq!(cursor, text.chars().count());
         assert!(suggest::active_fragment(&text).is_empty(), "the next fragment must start empty: {text:?}");
         assert!(value_request_for(&text).is_none(), "a closed term must not leave a value lookup pending");
     }
 
-    /// The brief's own case, arranged so the multi-byte characters survive into
-    /// the completed text. `CCursor::index` is a character index, so a caret
-    /// derived from `str::len` overshoots the end of the string here.
+    /// Multi-byte text ahead of the fragment being completed. `CCursor::index`
+    /// is a character index, so a caret derived from `str::len` overshoots the
+    /// end of the string here.
     #[test]
     fn a_completion_over_multi_byte_text_places_the_caret_by_character() {
-        let (text, cursor) = completed_text("map:caf\u{e9} aa\u{e9}b", &Completion::Filter("build:".to_owned()));
-        assert_eq!(text, "map:caf\u{e9} build:");
+        let (text, cursor) = value_completed_text("map:caf\u{e9} outcome:wi", "win");
+        assert_eq!(text, "map:caf\u{e9} outcome:win ");
         assert_eq!(cursor, text.chars().count());
         assert!(cursor < text.len(), "a byte offset would overshoot: {cursor} against {} bytes", text.len());
     }
@@ -1628,7 +1693,7 @@ mod tests {
     /// overshoots even when everything before it is ASCII.
     #[test]
     fn a_multi_byte_completion_value_places_the_caret_by_character() {
-        let (text, cursor) = completed_text("map:oc", &Completion::Value("\"nord\u{e9}\"".to_owned()));
+        let (text, cursor) = value_completed_text("map:oc", "\"nord\u{e9}\"");
         assert_eq!(text, "map:\"nord\u{e9}\" ");
         assert_eq!(cursor, text.chars().count());
         assert!(cursor < text.len(), "a byte offset would overshoot: {cursor} against {} bytes", text.len());
@@ -2263,5 +2328,175 @@ mod tests {
         harness.frame(frame_input(WIDTH));
         let narrow = harness.popup_width().expect("the dropdown is still built");
         assert!(narrow >= wide, "a narrow list must not shrink the dropdown: {narrow} against {wide} (bar is {bar})");
+    }
+
+    /// The report this change answers: a picked row builds the filter, rather
+    /// than spelling it into the caret for Enter to finish. The segment path
+    /// already mutated the tree at once, so the two paths only looked alike.
+    #[test]
+    fn picking_a_field_from_the_caret_appends_a_pill_rather_than_text() {
+        let mut bar = caret_bar();
+        let (index, field) = first_field_row(&bar);
+        bar.highlighted = Some(index);
+        let row = bar.dropdown_rows()[index].clone();
+
+        assert!(with_ui(|ui, caret_id| bar.commit_row(row, ui, caret_id)), "picking a field must change the query");
+        assert!(bar.pending.is_empty(), "the caret must not be left holding grammar text: {:?}", bar.pending);
+        assert!(!bar.expr.is_empty_all(), "no term was appended");
+
+        let path = select::segment_path(&bar.expr, &vec![]).expect("the new pill addresses a term");
+        let (landed, op, _) = select::term_at(&bar.expr, &path).expect("the minted term");
+        assert_eq!(landed, field, "the pill must carry the field that was picked");
+        assert!(field.allowed_ops().contains(&op), "{op:?} is not one {field:?} allows");
+    }
+
+    /// The minted value is a placeholder, not a choice. If the editor does not
+    /// open, the user commits a value they never picked.
+    #[test]
+    fn picking_a_field_opens_the_value_editor_on_the_new_pill() {
+        let mut bar = caret_bar();
+        let (index, _) = first_field_row(&bar);
+        let row = bar.dropdown_rows()[index].clone();
+        with_ui(|ui, caret_id| bar.commit_row(row, ui, caret_id));
+
+        let edit = bar.editing.as_ref().expect("no value editor opened");
+        assert_eq!(edit.role, SegmentRole::Value);
+        assert!(select::term_at(&bar.expr, &edit.path).is_some(), "the editor must address the term just appended");
+    }
+
+    /// The caret path wrote `enemy.ship=1234` and waited. A pill resolves the
+    /// name, which is the whole difference the user sees.
+    #[test]
+    fn picking_a_ship_shows_its_name_rather_than_its_id() {
+        let mut bar = caret_bar();
+        bar.names.ships.insert(GameParamId::from(1234u64), "Yamato".to_owned());
+        let row = seed_ship_value_editor(&mut bar, GameParamId::from(1234u64));
+
+        assert!(with_ui(|ui, caret_id| bar.commit_row(row, ui, caret_id)), "picking a ship must change the query");
+        assert!(bar.pending.is_empty(), "the caret must not be left holding the term's text: {:?}", bar.pending);
+        bar.finish_edit();
+
+        let text = pill_text_at(&bar, &vec![]);
+        assert!(text.contains("Yamato"), "got {text:?}");
+        assert!(!text.contains("1234"), "raw id leaked into the pill: {text:?}");
+    }
+
+    /// The typed path is the share format and must not regress: text is still
+    /// parsed and committed on Enter, and only what a picked row does changed.
+    #[test]
+    fn typing_a_whole_term_and_pressing_enter_still_commits_it() {
+        let mut bar = caret_bar();
+        bar.pending = "outcome:win".to_owned();
+        let rows = bar.dropdown_rows();
+
+        assert!(with_ui(|ui, caret_id| bar.commit_typed(&rows, ui, caret_id)), "Enter must commit the typed term");
+        // `show` canonicalises after every edit that took; a one-term query is
+        // a bare leaf only once it has.
+        bar.finish_edit();
+
+        assert_eq!(bar.expr, parse_query("outcome:win").expect("parse"));
+        assert!(bar.pending.is_empty(), "a committed term leaves the caret empty");
+        assert!(bar.editing.is_none(), "typing a whole term opens no editor");
+    }
+
+    /// Picking a field part way through a typed query must not throw away the
+    /// terms already in the caret, which the text path kept by replacing only
+    /// the active fragment.
+    #[test]
+    fn picking_a_field_keeps_the_terms_already_typed() {
+        let mut bar = caret_bar();
+        bar.pending = "outcome:win ma".to_owned();
+        let rows = bar.dropdown_rows();
+        let index = rows
+            .iter()
+            .position(|row| match row {
+                Row::Suggestion(i) => {
+                    matches!(bar.suggestions[*i].kind, SuggestionKind::MatchField(MatchField::Map))
+                }
+                _ => false,
+            })
+            .expect("Map ranks against `ma`");
+
+        assert!(with_ui(|ui, caret_id| bar.commit_row(rows[index].clone(), ui, caret_id)));
+        bar.finish_edit();
+
+        let Expr::All(children) = &bar.expr else {
+            panic!("the typed term was dropped instead of committed: {:?}", bar.expr);
+        };
+        assert_eq!(children.len(), 2, "{:?}", bar.expr);
+        assert_eq!(
+            select::term_at(&bar.expr, &[0]).map(|(field, _, _)| field),
+            Some(TermField::Match(MatchField::Outcome)),
+            "the term typed ahead of the pick must survive as its own pill"
+        );
+        assert_eq!(
+            select::term_at(&bar.expr, &[1]).map(|(field, _, _)| field),
+            Some(TermField::Match(MatchField::Map))
+        );
+    }
+
+    /// A scope is a relation constraint standing beside the term rather than a
+    /// part of it, so a mint that dropped it would silently widen the filter to
+    /// the whole roster. Pinned against the same term typed by hand, which is
+    /// the only statement of the expansion that cannot drift from the parser.
+    #[test]
+    fn a_scoped_field_mints_the_scopes_own_constraint() {
+        let minted = select::new_term(TermField::Roster(RosterField::Ship), Some(Scope::Enemy)).expect("a ship term");
+        assert_eq!(minted, parse_query("enemy.ship=0").expect("the same term typed by hand"));
+
+        let anyone = select::new_term(TermField::Roster(RosterField::Ship), Some(Scope::Anyone)).expect("a ship term");
+        assert_ne!(anyone, minted, "the widest scope must not carry a relation constraint");
+        assert_eq!(anyone, parse_query("anyone.ship=0").expect("the same term typed by hand"));
+    }
+
+    /// Every field the caret offers has to mint a term the grammar reads back
+    /// as itself. The mint goes through the grammar's own text, so a field whose
+    /// placeholder does not print as a literal that field accepts would fail
+    /// here rather than in the app, where the row would be offered and picking
+    /// it would do nothing at all.
+    #[test]
+    fn every_field_the_caret_offers_mints_a_term_the_grammar_reads_back() {
+        for suggestion in filter_options() {
+            let (field, scope) = match suggestion.kind {
+                SuggestionKind::MatchField(field) => (TermField::Match(field), None),
+                SuggestionKind::RosterField { field, scope } => {
+                    (TermField::Roster(field), Some(scope.unwrap_or(Scope::Anyone)))
+                }
+                SuggestionKind::Preset(_) => continue,
+            };
+            let label = &suggestion.label;
+            let minted = select::new_term(field, scope).unwrap_or_else(|| panic!("{label} mints nothing"));
+
+            let path = select::segment_path(&minted, &vec![])
+                .unwrap_or_else(|| panic!("{label} mints a pill with no editable segment"));
+            let (landed, op, _) =
+                select::term_at(&minted, &path).unwrap_or_else(|| panic!("{label} mints no term at {path:?}"));
+            assert_eq!(landed, field, "{label} minted the wrong field");
+            assert!(field.allowed_ops().contains(&op), "{label} minted {op:?}, which its field refuses");
+
+            let printed = query_text::print_query(&minted);
+            let reparsed = parse_query(&printed).unwrap_or_else(|e| panic!("{label} printed {printed:?}: {e}"));
+            assert_eq!(reparsed, minted, "{label} printed {printed:?}");
+        }
+    }
+
+    /// The path a picked row lands on, which decides which term the value
+    /// editor opens. Appending to an empty query must not build a one-condition
+    /// group, and appending to a query that already has terms must address the
+    /// new one rather than the first.
+    #[test]
+    fn the_appended_path_names_the_term_that_was_just_added() {
+        let mut expr = MatchExpr::default();
+        select::append_top_level(&mut expr, win());
+        select::canonicalise(&mut expr);
+        assert_eq!(select::last_appended_path(&expr), Vec::<usize>::new(), "{expr:?}");
+
+        select::append_top_level(&mut expr, roster_pill(RosterField::Tier, Op::Eq, Value::Int(10)));
+        select::canonicalise(&mut expr);
+        assert_eq!(select::last_appended_path(&expr), vec![1], "{expr:?}");
+        assert_eq!(
+            select::term_at(&expr, &select::last_appended_path(&expr)).map(|(field, _, _)| field),
+            Some(TermField::Roster(RosterField::Tier))
+        );
     }
 }

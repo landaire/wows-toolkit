@@ -15,11 +15,14 @@ use crate::db::index::query_ast::Quant;
 use crate::db::index::query_ast::ShipClass;
 use crate::db::index::query_ast::Value;
 use crate::db::index::query_ast::ValueKind;
+use crate::db::index::query_text;
 use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::SourceId;
 use crate::db::index::rows::VehicleRelation;
 use crate::ui::query_bar::label;
 use crate::ui::query_bar::seed;
+use crate::ui::query_bar::suggest;
+use crate::ui::query_bar::suggest::Scope;
 use crate::ui::query_bar::suggest::TermField;
 use crate::ui::query_bar::tokens::NodePath;
 use crate::ui::query_bar::tokens::Token;
@@ -132,6 +135,44 @@ pub fn append_top_level(expr: &mut MatchExpr, node: MatchExpr) {
             *other = Expr::All(vec![taken, node]);
         }
     }
+}
+
+/// The path of the node `append_top_level` last added, read after
+/// `canonicalise` has run over the tree.
+///
+/// `append_top_level` always leaves an `All` root and pushes onto its end, and
+/// canonicalising a conjunction only drops children that collapsed away and
+/// replaces a one-child node with that child. So the appended node is either the
+/// whole tree, when it was the only survivor, or still the last child of the
+/// root.
+pub fn last_appended_path(expr: &MatchExpr) -> NodePath {
+    match expr {
+        Expr::All(cs) | Expr::Any(cs) if !cs.is_empty() => vec![cs.len() - 1],
+        _ => Vec::new(),
+    }
+}
+
+/// A fresh term for `field`, ready to be appended: the field's leading allowed
+/// operator and an in-kind placeholder value, under `scope` when the field is a
+/// roster one. `None` for a field with no grammar spelling, which is the same
+/// refusal the two prefix functions already make.
+///
+/// Built by parsing the grammar text that spells the term, so a term minted by
+/// picking a field and one typed by hand cannot differ. That is also what keeps
+/// a scope's expansion -- `enemy.` is a relation constraint standing beside the
+/// term, not a part of it -- in the parser alone rather than restated here.
+///
+/// The value is `placeholder_value`'s arbitrary in-kind value, so the caller
+/// carries the obligation that function names: open the value editor on the new
+/// term, because nothing about the placeholder is a choice the user made.
+pub fn new_term(field: TermField, scope: Option<Scope>) -> Option<MatchExpr> {
+    let prefix = match (field, scope) {
+        (TermField::Match(f), _) => suggest::match_field_prefix(f),
+        (TermField::Roster(f), Some(scope)) => suggest::roster_field_prefix(f, scope),
+        (TermField::Roster(_), None) => None,
+    }?;
+    let literal = query_text::print_value(&placeholder_value(field.value_kind()));
+    query_text::parse_query(&format!("{prefix}{literal}")).ok().filter(|parsed| !parsed.is_empty_all())
 }
 
 /// Adds a freshly parsed query to the tree. An `All` root is spliced rather
