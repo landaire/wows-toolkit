@@ -56,12 +56,11 @@ pub struct PillSegment {
     pub text: String,
 }
 
-/// Human text for one match-level term, as a join of its segments. `tokens.rs`
-/// carries `pill_segments` through the token stream directly rather than
-/// calling this, so a non-test build sees it as unread; it stays the pinned
-/// reference `joining_the_segments_reproduces_the_old_pill_text` checks
-/// `pill_segments` against.
-#[cfg_attr(not(test), allow(dead_code))]
+/// Human text for one match-level term, as a join of its segments.
+/// `tokens.rs` carries `pill_segments` through the token stream directly
+/// rather than calling this, so it has no production caller; kept for the
+/// tests in this module that pin real display strings against it.
+#[cfg(test)]
 pub fn pill_text(term: &MatchTerm, cache: &NameCache) -> String {
     join_segments(&pill_segments(term, cache))
 }
@@ -638,12 +637,24 @@ mod tests {
     }
 
     #[test]
-    fn joining_the_segments_reproduces_the_old_pill_text() {
-        // pill_text is the public display form and must not change.
+    fn joining_segments_reproduces_each_sample_terms_literal_text() {
+        // One pinned literal per `sample_terms()` entry, in the order that
+        // function returns them: plain field, nullary operator, sugar-shaped
+        // roster, non-sugar roster, free text. Asserting the join against
+        // `pill_text` (which is `join_segments(pill_segments(..))`) would
+        // exercise the same code on both sides and could never catch a
+        // separator or wording drift; only real strings pin the display form.
         let cache = NameCache::default();
-        for term in sample_terms() {
+        let expected = [
+            "Result is Win",
+            "Build is set",
+            "Enemy ship is #1",
+            "no Relation is Enemy or Relation is Ally",
+            "contains \"yamato\"",
+        ];
+        for (term, want) in sample_terms().into_iter().zip(expected) {
             let joined = pill_segments(&term, &cache).iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
-            assert_eq!(joined, pill_text(&term, &cache), "{term:?}");
+            assert_eq!(joined, want, "{term:?}");
         }
     }
 
