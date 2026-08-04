@@ -1057,17 +1057,166 @@ pub async fn search_self_ships(pool: &SqlitePool, needle: &str, limit: i64) -> R
         .collect())
 }
 
-/// Run a query built from the AST. Uses the same per-arena record picker, the
-/// same ordering, and the same row mapping as `run_match_query`.
+/// A results-table column a search can be ordered by.
 ///
-/// Fetches `limit + 1` rows so the caller can distinguish "exactly `limit`
-/// results" from "at least `limit`" and say so, instead of reporting a
-/// truncated count as a total.
+/// Every variant names a stored column, or a `CASE` over one, so an ordering
+/// built from it runs inside the query. A displayed column the table composes
+/// in Rust has no variant here, because no expression over this schema
+/// reproduces the order its cells read in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SortColumn {
+    Date,
+    Map,
+    Mode,
+    Outcome,
+    Damage,
+    Kills,
+    Pr,
+}
+
+impl SortColumn {
+    /// Every column a header may offer.
+    pub const ALL: [SortColumn; 7] = [
+        SortColumn::Date,
+        SortColumn::Map,
+        SortColumn::Mode,
+        SortColumn::Outcome,
+        SortColumn::Damage,
+        SortColumn::Kills,
+        SortColumn::Pr,
+    ];
+
+    /// The expression the rows are ordered on, qualified by the aliases the
+    /// search query uses (`m` for `indexed_match`, `r` for `replay_record`).
+    /// Picked by a closed match on the enum, never built from user text.
+    fn order_key(self) -> &'static str {
+        match self {
+            SortColumn::Date => "m.timestamp",
+            SortColumn::Map => "m.map",
+            SortColumn::Mode => "m.game_type",
+            // `outcome` stores a word, so ordering the column itself would run
+            // draw, loss, unknown, win. Ranking it makes descending read
+            // best-first, the direction damage and PR already read in.
+            SortColumn::Outcome => "CASE r.outcome WHEN 'win' THEN 3 WHEN 'draw' THEN 2 WHEN 'loss' THEN 1 ELSE 0 END",
+            SortColumn::Damage => "r.self_damage",
+            SortColumn::Kills => "r.self_kills",
+            SortColumn::Pr => "r.self_pr",
+        }
+    }
+
+    /// Whether the underlying column is nullable, so the ordering has to say
+    /// where a NULL goes rather than take SQLite's default.
+    fn is_nullable(self) -> bool {
+        match self {
+            SortColumn::Damage | SortColumn::Kills | SortColumn::Pr => true,
+            SortColumn::Date | SortColumn::Map | SortColumn::Mode | SortColumn::Outcome => false,
+        }
+    }
+
+    /// Which way a first click on this column sorts. Text reads A to Z; a
+    /// date, a count, or a rating reads newest or largest first, which is what
+    /// someone clicking "Damage" is looking for.
+    pub fn default_direction(self) -> SortDirection {
+        match self {
+            SortColumn::Map | SortColumn::Mode => SortDirection::Ascending,
+            SortColumn::Date | SortColumn::Outcome | SortColumn::Damage | SortColumn::Kills | SortColumn::Pr => {
+                SortDirection::Descending
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
+
+impl SortDirection {
+    pub fn reversed(self) -> Self {
+        match self {
+            SortDirection::Ascending => SortDirection::Descending,
+            SortDirection::Descending => SortDirection::Ascending,
+        }
+    }
+
+    fn keyword(self) -> &'static str {
+        match self {
+            SortDirection::Ascending => "ASC",
+            SortDirection::Descending => "DESC",
+        }
+    }
+}
+
+/// The order a search returns its rows in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SortSpec {
+    pub column: SortColumn,
+    pub direction: SortDirection,
+}
+
+/// Newest match first, which is what the results table opens on.
+impl Default for SortSpec {
+    fn default() -> Self {
+        SortSpec { column: SortColumn::Date, direction: SortDirection::Descending }
+    }
+}
+
+impl SortSpec {
+    /// The sort a click on `column`'s header produces: a click on the column
+    /// already sorted reverses it, a click on any other starts that column at
+    /// its own natural direction.
+    pub fn after_click(self, column: SortColumn) -> Self {
+        if self.column == column {
+            SortSpec { column, direction: self.direction.reversed() }
+        } else {
+            SortSpec { column, direction: column.default_direction() }
+        }
+    }
+}
+
+/// The `ORDER BY` clause a search appends, leading space included.
+///
+/// A NULL sorts last whichever way the user sorted: an unrecorded damage or
+/// rating is not the best result ascending and the worst descending, it is
+/// simply absent, and a leaderboard that put it at the top would be read as the
+/// answer to the question. That is spelled out as a leading `IS NULL` key
+/// rather than with a `NULLS LAST` keyword so the clause does not depend on the
+/// bundled SQLite being 3.30 or newer.
+///
+/// `m.arena_id` closes every ordering, so rows tied on the chosen key keep one
+/// fixed order between two runs of the same query instead of shuffling.
+pub fn sql_for_sort(column: SortColumn, direction: SortDirection) -> String {
+    let key = column.order_key();
+    let mut sql = String::from(" ORDER BY ");
+    if column.is_nullable() {
+        sql.push_str(&format!("({key} IS NULL) ASC, "));
+    }
+    sql.push_str(key);
+    sql.push(' ');
+    sql.push_str(direction.keyword());
+    if column != SortColumn::Date {
+        sql.push_str(", m.timestamp DESC");
+    }
+    sql.push_str(", m.arena_id DESC");
+    sql
+}
+
+/// Run a query built from the AST. Uses the same per-arena record picker and
+/// the same row mapping as `run_match_query`.
+///
+/// `sort` is applied as the query's own `ORDER BY`, not to the rows that came
+/// back. The two are not the same answer: this fetches `limit + 1` rows so the
+/// caller can distinguish "exactly `limit` results" from "at least `limit`",
+/// and re-ordering that page would give the first `limit` rows by the query's
+/// order re-arranged, rather than the first `limit` by the column the user
+/// picked.
 pub async fn search_by_ast(
     pool: &SqlitePool,
     expr: &MatchExpr,
     ctx: &CompileCtx<'_>,
     limit: i64,
+    sort: SortSpec,
 ) -> Result<Vec<MatchHit>, IndexError> {
     let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
         "SELECT {MATCH_HIT_COLUMNS} \
@@ -1077,7 +1226,8 @@ pub async fn search_by_ast(
             ORDER BY (rr.file_mtime IS NOT NULL) DESC, rr.indexed_at DESC LIMIT 1 ) WHERE "
     ));
     push_match_expr(&mut qb, expr, ctx);
-    qb.push(" ORDER BY m.timestamp DESC LIMIT ").push_bind(limit + 1);
+    qb.push(sql_for_sort(sort.column, sort.direction));
+    qb.push(" LIMIT ").push_bind(limit + 1);
     let rows = qb.build().fetch_all(pool).await?;
     rows.iter().map(row_to_match_hit).collect()
 }

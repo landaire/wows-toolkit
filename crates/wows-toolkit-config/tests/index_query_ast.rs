@@ -11,6 +11,7 @@ use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
 use wows_core::game_types::GameParamId;
 use wows_toolkit_config::index::query;
+use wows_toolkit_config::index::query::SortSpec;
 use wows_toolkit_config::index::query_ast::CmpOp;
 use wows_toolkit_config::index::query_ast::DivisionScope;
 use wows_toolkit_config::index::query_ast::Expr;
@@ -128,7 +129,12 @@ async fn run(pool: &sqlx::SqlitePool, expr: &MatchExpr) -> Vec<ArenaId> {
 
 async fn run_with(pool: &sqlx::SqlitePool, expr: &MatchExpr, maps: &MapCatalog) -> Vec<ArenaId> {
     let ctx = CompileCtx { maps };
-    query::search_by_ast(pool, expr, &ctx, 500).await.unwrap().into_iter().map(|h| h.arena_id).collect()
+    query::search_by_ast(pool, expr, &ctx, 500, SortSpec::default())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|h| h.arena_id)
+        .collect()
 }
 
 /// Text to rows, the way the query bar will run it. The per-stage tests cover
@@ -338,7 +344,7 @@ async fn limit_plus_one_lets_the_caller_detect_truncation() {
         query::upsert_record(&pool, &a_record(arena, src)).await.unwrap();
     }
     let ctx = CompileCtx::default();
-    let hits = query::search_by_ast(&pool, &Expr::All(vec![]), &ctx, 3).await.unwrap();
+    let hits = query::search_by_ast(&pool, &Expr::All(vec![]), &ctx, 3, SortSpec::default()).await.unwrap();
     assert_eq!(hits.len(), 4, "must fetch limit + 1 so the caller can detect more");
 }
 
@@ -508,7 +514,7 @@ async fn a_clan_term_matches_the_clan_column_independently_of_the_player_name() 
 async fn hits(pool: &sqlx::SqlitePool, expr: &MatchExpr) -> Vec<MatchHit> {
     let maps = MapCatalog::default();
     let ctx = CompileCtx { maps: &maps };
-    query::search_by_ast(pool, expr, &ctx, 500).await.unwrap()
+    query::search_by_ast(pool, expr, &ctx, 500, SortSpec::default()).await.unwrap()
 }
 
 #[tokio::test]

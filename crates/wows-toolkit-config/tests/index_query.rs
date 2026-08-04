@@ -7,6 +7,12 @@ use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
 use wows_core::game_types::GameParamId;
 use wows_toolkit_config::index::query;
+use wows_toolkit_config::index::query::SortColumn;
+use wows_toolkit_config::index::query::SortDirection;
+use wows_toolkit_config::index::query::SortSpec;
+use wows_toolkit_config::index::query::sql_for_sort;
+use wows_toolkit_config::index::query_ast::Expr;
+use wows_toolkit_config::index::query_sql::CompileCtx;
 use wows_toolkit_config::index::rows::IndexedVehicleRow;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::ObjectiveMatch;
@@ -717,4 +723,129 @@ async fn division_mate_encounters_is_empty_when_the_self_player_had_no_division(
 
     let mates = query::division_mate_encounters(&pool, &MatchFilter::default()).await.unwrap();
     assert!(mates.is_empty(), "a solo self player has no division mates");
+}
+
+/// One record per arena, each with its own damage and rating, seeded in the
+/// order given so a sort that merely returned insertion order would be caught.
+/// Timestamps ascend with the arena id, so the default newest-first ordering is
+/// a different sequence again.
+async fn seeded_db(rows: &[(u64, Option<f64>)]) -> sqlx::SqlitePool {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+    for (i, (damage, pr)) in rows.iter().enumerate() {
+        let arena = i as i64 + 1;
+        let mut m = sample_match(arena);
+        m.timestamp = Timestamp::from_second(1_700_000_000 + arena).unwrap();
+        query::upsert_match(&pool, &m).await.unwrap();
+        let mut record = sample_record(arena, src, &format!("{arena}.wowsreplay"));
+        record.self_damage = Some(*damage);
+        record.self_pr = *pr;
+        query::upsert_record(&pool, &record).await.unwrap();
+    }
+    pool
+}
+
+async fn test_db_with_damages(damages: &[u64]) -> sqlx::SqlitePool {
+    let rows: Vec<(u64, Option<f64>)> = damages.iter().map(|damage| (*damage, Some(1000.0))).collect();
+    seeded_db(&rows).await
+}
+
+async fn test_db_with_prs(prs: &[Option<f64>]) -> sqlx::SqlitePool {
+    let rows: Vec<(u64, Option<f64>)> = prs.iter().map(|pr| (50_000, *pr)).collect();
+    seeded_db(&rows).await
+}
+
+/// A hit reduced to the columns these tests order on, plus the identity that
+/// says which seeded row it is.
+struct SortedHit {
+    arena: i64,
+    damage: u64,
+    pr: Option<f64>,
+}
+
+async fn search_sorted(pool: &sqlx::SqlitePool, column: SortColumn, direction: SortDirection) -> Vec<SortedHit> {
+    let ctx = CompileCtx::default();
+    query::search_by_ast(pool, &Expr::All(vec![]), &ctx, 100, SortSpec { column, direction })
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|hit| SortedHit {
+            arena: hit.arena_id.raw(),
+            damage: hit.self_damage.expect("every seeded row records a damage"),
+            pr: hit.self_pr,
+        })
+        .collect()
+}
+
+#[test]
+fn a_sort_column_reaches_the_query_rather_than_reordering_the_page() {
+    // Sorting the returned page would sort the wrong rows entirely: the page
+    // is the first N by the query's own order, not the first N by the
+    // column the user picked.
+    let sql = sql_for_sort(SortColumn::Damage, SortDirection::Descending);
+    assert!(sql.contains("ORDER BY"), "got {sql}");
+    assert!(sql.to_uppercase().contains("DESC"), "got {sql}");
+}
+
+#[test]
+fn every_offered_sort_column_produces_valid_sql() {
+    // A column offered in the header must be one the query can order by.
+    for column in SortColumn::ALL {
+        for direction in [SortDirection::Ascending, SortDirection::Descending] {
+            let sql = sql_for_sort(column, direction);
+            assert!(sql.contains("ORDER BY"), "{column:?} {direction:?}: {sql}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn sorting_by_damage_returns_the_highest_first() {
+    let db = test_db_with_damages(&[100, 900, 500]).await;
+    let hits = search_sorted(&db, SortColumn::Damage, SortDirection::Descending).await;
+    assert_eq!(hits.iter().map(|h| h.damage).collect::<Vec<_>>(), vec![900, 500, 100]);
+}
+
+#[tokio::test]
+async fn reversing_the_direction_reverses_the_order() {
+    let db = test_db_with_damages(&[100, 900, 500]).await;
+    let hits = search_sorted(&db, SortColumn::Damage, SortDirection::Ascending).await;
+    assert_eq!(hits.iter().map(|h| h.damage).collect::<Vec<_>>(), vec![100, 500, 900]);
+}
+
+#[tokio::test]
+async fn a_null_sorts_last_in_both_directions() {
+    // PR and damage are nullable. A NULL must not masquerade as the best or
+    // the worst result depending on which way the user sorted.
+    let db = test_db_with_prs(&[Some(1500.0), None, Some(900.0)]).await;
+    let desc = search_sorted(&db, SortColumn::Pr, SortDirection::Descending).await;
+    let asc = search_sorted(&db, SortColumn::Pr, SortDirection::Ascending).await;
+    assert_eq!(desc.last().map(|h| h.pr), Some(None), "a NULL sorted above a real PR");
+    assert_eq!(asc.last().map(|h| h.pr), Some(None), "a NULL sorted below a real PR");
+}
+
+/// Every sortable column must actually run against the schema, not merely
+/// render. A key naming a column that does not exist, or an alias the outer
+/// query does not define, only fails when SQLite parses it.
+#[tokio::test]
+async fn every_offered_sort_column_runs_against_the_schema() {
+    let db = test_db_with_damages(&[100, 900, 500]).await;
+    let ctx = CompileCtx::default();
+    for column in SortColumn::ALL {
+        for direction in [SortDirection::Ascending, SortDirection::Descending] {
+            let spec = SortSpec { column, direction };
+            let hits = query::search_by_ast(&db, &Expr::All(vec![]), &ctx, 100, spec).await;
+            assert!(hits.is_ok(), "{column:?} {direction:?}: {:?}", hits.err());
+        }
+    }
+}
+
+/// The ordering has to be a total one. Rows tied on the chosen column fall
+/// back to newest first, so the table does not appear to shuffle rows that
+/// compare equal.
+#[tokio::test]
+async fn rows_tied_on_the_sorted_column_fall_back_to_newest_first() {
+    let db = test_db_with_damages(&[500, 500, 500]).await;
+    let hits = search_sorted(&db, SortColumn::Damage, SortDirection::Descending).await;
+    assert_eq!(hits.iter().map(|h| h.arena).collect::<Vec<_>>(), vec![3, 2, 1], "seeded timestamps ascend with arena");
 }

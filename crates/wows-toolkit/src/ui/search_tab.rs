@@ -15,7 +15,11 @@ use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
 
 use crate::app::ToolkitTabViewer;
+use crate::data::settings::ResultColumn;
 use crate::db::index::query;
+use crate::db::index::query::SortColumn;
+use crate::db::index::query::SortDirection;
+use crate::db::index::query::SortSpec;
 use crate::db::index::query_ast::Expr;
 use crate::db::index::query_ast::MapCatalog;
 use crate::db::index::query_ast::MatchExpr;
@@ -240,7 +244,12 @@ impl SearchTabState {
         });
     }
 
-    fn dispatch_search(&mut self, pool: &sqlx::SqlitePool, rt: &Runtime) {
+    /// `sort` becomes the query's own `ORDER BY`. It cannot be applied to the
+    /// rows this brings back: the query fetches `RESULT_LIMIT + 1` rows and the
+    /// tab keeps the first `RESULT_LIMIT`, so re-ordering them would show the
+    /// first 500 matches by date rearranged rather than the 500 highest by the
+    /// column the user clicked.
+    fn dispatch_search(&mut self, pool: &sqlx::SqlitePool, rt: &Runtime, sort: SortSpec) {
         self.dirty = false;
         self.query_seq += 1;
         let seq = self.query_seq;
@@ -251,7 +260,7 @@ impl SearchTabState {
         let search_pool = pool.clone();
         self.spawn(rt, async move {
             let ctx = CompileCtx { maps: &maps };
-            match query::search_by_ast(&search_pool, &expr, &ctx, RESULT_LIMIT).await {
+            match query::search_by_ast(&search_pool, &expr, &ctx, RESULT_LIMIT, sort).await {
                 Ok(mut hits) => {
                     let truncated = hits.len() as i64 > RESULT_LIMIT;
                     hits.truncate(RESULT_LIMIT as usize);
@@ -463,6 +472,68 @@ fn game_mode_gap_hint_text(missing_count: i64) -> std::borrow::Cow<'static, str>
     }
 }
 
+/// The results table's columns, left to right. Mirrors the order the body rows
+/// are emitted in below; the action button at the far right is not one of them,
+/// since it shows no data and has no header.
+const RESULT_COLUMNS: [ResultColumn; 8] = [
+    ResultColumn::Date,
+    ResultColumn::Map,
+    ResultColumn::Mode,
+    ResultColumn::Ship,
+    ResultColumn::Outcome,
+    ResultColumn::Damage,
+    ResultColumn::Kills,
+    ResultColumn::Pr,
+];
+
+const fn column_label_key(column: ResultColumn) -> &'static str {
+    match column {
+        ResultColumn::Date => "ui.search.column.date",
+        ResultColumn::Map => "ui.search.column.map",
+        ResultColumn::Mode => "ui.search.column.mode",
+        ResultColumn::Ship => "ui.search.column.ship",
+        ResultColumn::Outcome => "ui.search.column.result",
+        ResultColumn::Damage => "ui.search.column.damage",
+        ResultColumn::Kills => "ui.search.column.kills",
+        ResultColumn::Pr => "ui.search.column.pr",
+    }
+}
+
+const fn direction_icon(direction: SortDirection) -> &'static str {
+    match direction {
+        SortDirection::Ascending => icons::SORT_ASCENDING,
+        SortDirection::Descending => icons::SORT_DESCENDING,
+    }
+}
+
+/// Draws one header cell, returning the column a click asked to sort by.
+///
+/// A column the index can order by senses clicks, so egui tints it on hover and
+/// gives it the pointing-hand cursor, and it carries the current direction's
+/// arrow while it is the sorted one. A column the index cannot order by is
+/// drawn as a plain label: no explicit sense, so the text keeps its resting
+/// colour under the pointer and the cursor stays the text caret. Nothing about
+/// it reads as an offer, which is the point -- a header that looks clickable
+/// and then sorts by something adjacent, or by nothing, is worse than one that
+/// never offered.
+fn header_cell(ui: &mut egui::Ui, column: ResultColumn, sort: SortSpec) -> Option<SortColumn> {
+    let label = t!(column_label_key(column));
+    let Some(sortable) = column.sort_column() else {
+        ui.strong(label);
+        return None;
+    };
+    let text = if sort.column == sortable {
+        format!("{label} {}", direction_icon(sort.direction))
+    } else {
+        label.into_owned()
+    };
+    let clicked = ui
+        .add(egui::Label::new(egui::RichText::new(text).strong()).sense(egui::Sense::click()))
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked();
+    clicked.then_some(sortable)
+}
+
 fn collect_roster_ids(expr: &RosterExpr, ships: &mut Vec<GameParamId>, players: &mut Vec<AccountId>) {
     match expr {
         Expr::Leaf(term) => match &term.value {
@@ -528,10 +599,17 @@ impl ToolkitTabViewer<'_> {
         let rt = self.tab_state.tokio_runtime.clone();
         let seeded = self.tab_state.pending_search_query.take();
 
-        let (locale, history) = {
+        // The persisted settings are the sort's only home, read fresh each
+        // frame and written back on a header click, so the choice survives a
+        // restart without a separate restore step to keep in step with it.
+        let (locale, history, sort) = {
             let persisted = self.tab_state.persisted.read();
             let search = &persisted.settings.search;
-            (persisted.settings.app.locale.clone(), search.history.iter().cloned().collect::<Vec<_>>())
+            (
+                persisted.settings.app.locale.clone(),
+                search.history.iter().cloned().collect::<Vec<_>>(),
+                search.sort_spec(),
+            )
         };
 
         let search_tab = &mut self.tab_state.search_tab;
@@ -578,7 +656,7 @@ impl ToolkitTabViewer<'_> {
             wake_in = search_tab.service_value_request(pool, rt);
             if search_tab.dirty {
                 search_tab.resolve_names(pool, rt);
-                search_tab.dispatch_search(pool, rt);
+                search_tab.dispatch_search(pool, rt, sort);
             }
         }
         if search_tab.in_flight > 0 {
@@ -615,6 +693,7 @@ impl ToolkitTabViewer<'_> {
         });
 
         let mut open_path: Option<std::path::PathBuf> = None;
+        let mut sort_clicked: Option<SortColumn> = None;
         egui::ScrollArea::horizontal().id_salt("search_results").show(ui, |ui| {
             use egui_extras::Column;
             use egui_extras::TableBuilder;
@@ -631,18 +710,11 @@ impl ToolkitTabViewer<'_> {
                 .column(Column::initial(60.0)) // pr
                 .column(Column::remainder()) // open
                 .header(20.0, |mut h| {
-                    for label in [
-                        t!("ui.search.column.date"),
-                        t!("ui.search.column.map"),
-                        t!("ui.search.column.mode"),
-                        t!("ui.search.column.ship"),
-                        t!("ui.search.column.result"),
-                        t!("ui.search.column.damage"),
-                        t!("ui.search.column.kills"),
-                        t!("ui.search.column.pr"),
-                    ] {
+                    for column in RESULT_COLUMNS {
                         h.col(|ui| {
-                            ui.strong(label);
+                            if let Some(clicked) = header_cell(ui, column, sort) {
+                                sort_clicked = Some(clicked);
+                            }
                         });
                     }
                     h.col(|_ui| {});
@@ -703,6 +775,13 @@ impl ToolkitTabViewer<'_> {
                     }
                 });
         });
+
+        // The re-query happens next frame, since this frame's search was
+        // already dispatched under the old sort before the header drew.
+        if let Some(column) = sort_clicked {
+            self.tab_state.persisted.write().settings.search.set_sort_spec(sort.after_click(column));
+            self.tab_state.search_tab.dirty = true;
+        }
 
         if let Some(path) = open_path
             && let Some(deps) = self.tab_state.replay_dependencies()
@@ -1001,7 +1080,7 @@ mod tests {
 
         let mut tab = SearchTabState::default();
         assert_eq!(tab.game_mode_gap, None, "unfetched until a search has actually returned one");
-        tab.dispatch_search(&pool, &rt);
+        tab.dispatch_search(&pool, &rt, SortSpec::default());
 
         // Mirrors how the UI thread waits: poll drain_replies until the
         // background task's reply lands, or give up rather than hang.
@@ -1032,5 +1111,209 @@ mod tests {
         let mut tab = SearchTabState { dirty: false, ..Default::default() };
         tab.note_reindex_completed(0);
         assert!(!tab.dirty);
+    }
+
+    /// Every column the index can order by has to be reachable from a header,
+    /// and every header that offers a sort has to name one the index knows. A
+    /// variant added on one side and forgotten on the other is either an
+    /// ordering nothing can ask for or a header offering one that does not
+    /// exist.
+    #[test]
+    fn the_header_offers_exactly_the_columns_the_index_can_order_by() {
+        let offered: Vec<SortColumn> = RESULT_COLUMNS.iter().filter_map(|c| c.sort_column()).collect();
+        for column in SortColumn::ALL {
+            assert!(offered.contains(&column), "{column:?} can be ordered by but no header offers it");
+        }
+        assert_eq!(offered.len(), SortColumn::ALL.len(), "a header offers a column twice: {offered:?}");
+    }
+
+    /// The one displayed column with no ordering behind it. Its cell is
+    /// composed on the UI thread from whichever build's game data is loaded,
+    /// and the index holds only the name frozen at index time, so an ORDER BY
+    /// over that column would put rows in an order the names on screen do not
+    /// read in.
+    #[test]
+    fn the_ship_column_offers_no_sort() {
+        assert_eq!(ResultColumn::Ship.sort_column(), None);
+    }
+
+    /// Clicking the sorted column reverses it; clicking any other starts that
+    /// column at its own natural direction, so a first click on Damage reads
+    /// highest-first rather than lowest-first.
+    #[test]
+    fn a_click_reverses_the_sorted_column_and_starts_any_other_at_its_own_direction() {
+        let date_desc = SortSpec::default();
+        assert_eq!(
+            date_desc.after_click(SortColumn::Date),
+            SortSpec { column: SortColumn::Date, direction: SortDirection::Ascending }
+        );
+        assert_eq!(
+            date_desc.after_click(SortColumn::Damage),
+            SortSpec { column: SortColumn::Damage, direction: SortDirection::Descending }
+        );
+        assert_eq!(
+            date_desc.after_click(SortColumn::Map),
+            SortSpec { column: SortColumn::Map, direction: SortDirection::Ascending }
+        );
+    }
+
+    fn frame_input() -> egui::RawInput {
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 400.0))),
+            ..Default::default()
+        }
+    }
+
+    fn click_input(pos: egui::Pos2) -> egui::RawInput {
+        let mut input = frame_input();
+        input.events.push(egui::Event::PointerMoved(pos));
+        for pressed in [true, false] {
+            input.events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        input
+    }
+
+    /// The header row driven through real frames.
+    ///
+    /// Fonts are left at egui's defaults rather than emptied, and the geometry
+    /// comes back from a real pass rather than from `__run_test_ui`: an empty
+    /// font set lays every galley out at zero size, and a click point derived
+    /// from a zero-size rect lands outside the cell it is meant to be inside,
+    /// so the test would pass for the wrong reason.
+    struct HeaderHarness {
+        ctx: egui::Context,
+        sort: SortSpec,
+        cells: Vec<(ResultColumn, egui::Rect)>,
+        clicked: Option<SortColumn>,
+    }
+
+    impl HeaderHarness {
+        fn new(sort: SortSpec) -> Self {
+            let mut harness = Self { ctx: egui::Context::default(), sort, cells: Vec::new(), clicked: None };
+            // Two quiet passes first: an input is applied at the end of the
+            // pass carrying it, and egui swaps `this_pass` with `prev_pass`
+            // rather than clearing it, so a rect read straight after the first
+            // pass is not yet the one the row settles at.
+            harness.frame(frame_input());
+            harness.frame(frame_input());
+            harness
+        }
+
+        fn frame(&mut self, input: egui::RawInput) {
+            let sort = self.sort;
+            let mut cells = Vec::new();
+            let mut clicked = None;
+            let _ = self.ctx.run_ui(input, |ui| {
+                ui.horizontal(|ui| {
+                    for column in RESULT_COLUMNS {
+                        let cell = ui.scope(|ui| header_cell(ui, column, sort));
+                        cells.push((column, cell.response.rect));
+                        if let Some(picked) = cell.inner {
+                            clicked = Some(picked);
+                        }
+                    }
+                });
+            });
+            self.cells = cells;
+            self.clicked = clicked;
+        }
+
+        /// What a click in the middle of `column`'s header asked to sort by.
+        fn click(&mut self, column: ResultColumn) -> Option<SortColumn> {
+            let rect = self
+                .cells
+                .iter()
+                .find(|(c, _)| *c == column)
+                .map(|(_, rect)| *rect)
+                .unwrap_or_else(|| panic!("{column:?} drew no header"));
+            assert!(
+                rect.width() > 1.0 && rect.height() > 1.0,
+                "{column:?} laid out at {rect:?}; a click derived from that rect proves nothing"
+            );
+            self.frame(click_input(rect.center()));
+            self.clicked
+        }
+    }
+
+    /// Driven through real frames rather than by calling the pieces: the
+    /// property is that the cell actually senses a pointer press where it is
+    /// drawn, which nothing short of egui's own hit testing can answer.
+    #[test]
+    fn clicking_a_sortable_header_asks_the_index_to_order_by_it() {
+        let mut harness = HeaderHarness::new(SortSpec::default());
+        assert_eq!(harness.click(ResultColumn::Damage), Some(SortColumn::Damage));
+        assert_eq!(harness.click(ResultColumn::Pr), Some(SortColumn::Pr));
+    }
+
+    /// The affordance the whole exclusion is about: the Ship header must not
+    /// answer a click at all, rather than answer it by sorting on something
+    /// the cell does not display.
+    #[test]
+    fn clicking_the_ship_header_asks_for_nothing() {
+        let mut harness = HeaderHarness::new(SortSpec::default());
+        assert_eq!(harness.click(ResultColumn::Ship), None, "the ship header must not be a click target");
+    }
+
+    /// A quiet frame must not look like a click, or the sort would cycle on
+    /// its own every time the tab repainted.
+    #[test]
+    fn a_frame_with_no_pointer_press_asks_for_nothing() {
+        let mut harness = HeaderHarness::new(SortSpec::default());
+        harness.frame(frame_input());
+        assert_eq!(harness.clicked, None);
+    }
+
+    /// What the header row actually paints, read back off the frame rather
+    /// than rebuilt from the same expressions the code under test uses.
+    fn painted_header_texts(sort: SortSpec) -> Vec<String> {
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(frame_input(), |ui| {
+            ui.horizontal(|ui| {
+                for column in RESULT_COLUMNS {
+                    header_cell(ui, column, sort);
+                }
+            });
+        });
+        output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Only the sorted column carries an arrow, or every header would claim to
+    /// be the one in force.
+    #[test]
+    fn only_the_sorted_columns_header_carries_a_direction_arrow() {
+        let sort = SortSpec { column: SortColumn::Damage, direction: SortDirection::Ascending };
+        let painted = painted_header_texts(sort);
+        assert_eq!(painted.len(), RESULT_COLUMNS.len(), "every header draws exactly once: {painted:?}");
+
+        let arrowed: Vec<&String> = painted
+            .iter()
+            .filter(|text| text.contains(icons::SORT_ASCENDING) || text.contains(icons::SORT_DESCENDING))
+            .collect();
+        assert_eq!(arrowed.len(), 1, "exactly one header may claim the sort: {painted:?}");
+        assert!(arrowed[0].starts_with("Damage"), "the arrow belongs to the sorted column: {:?}", arrowed[0]);
+        assert!(arrowed[0].contains(icons::SORT_ASCENDING), "the arrow must read the way it sorts: {:?}", arrowed[0]);
+    }
+
+    /// The arrow is the only thing that says which way it sorts, so reversing
+    /// the direction has to reverse it.
+    #[test]
+    fn the_arrow_follows_the_direction() {
+        let descending =
+            painted_header_texts(SortSpec { column: SortColumn::Damage, direction: SortDirection::Descending });
+        let damage = descending.iter().find(|text| text.starts_with("Damage")).expect("the damage header draws");
+        assert!(damage.contains(icons::SORT_DESCENDING), "got {damage:?}");
+        assert!(!damage.contains(icons::SORT_ASCENDING), "got {damage:?}");
     }
 }

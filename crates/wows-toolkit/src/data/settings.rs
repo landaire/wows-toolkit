@@ -5,6 +5,9 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use wows_minimap_renderer::ShipConfigFilter;
+use wows_toolkit_config::index::query::SortColumn;
+use wows_toolkit_config::index::query::SortDirection;
+use wows_toolkit_config::index::query::SortSpec;
 
 use crate::data::session_stats::DivisionFilter;
 use crate::twitch::Token;
@@ -260,12 +263,85 @@ impl ResultColumn {
             ResultColumn::Pr,
         ]
     }
+
+    /// The index column whose ordering reproduces what this column displays, or
+    /// `None` for a column the index cannot order by.
+    ///
+    /// `Ship` is the one exclusion. Its cell is composed on the UI thread from
+    /// whichever build's game data is loaded, falling back to the name frozen
+    /// at index time and then to a bracketed id (see `ship_display_name`). The
+    /// index holds only that frozen name, so an `ORDER BY` over it would put
+    /// rows in an order the names on screen do not read in.
+    pub fn sort_column(self) -> Option<SortColumn> {
+        match self {
+            ResultColumn::Date => Some(SortColumn::Date),
+            ResultColumn::Map => Some(SortColumn::Map),
+            ResultColumn::Mode => Some(SortColumn::Mode),
+            ResultColumn::Outcome => Some(SortColumn::Outcome),
+            ResultColumn::Damage => Some(SortColumn::Damage),
+            ResultColumn::Kills => Some(SortColumn::Kills),
+            ResultColumn::Pr => Some(SortColumn::Pr),
+            ResultColumn::Ship => None,
+        }
+    }
+}
+
+impl From<SortColumn> for ResultColumn {
+    fn from(column: SortColumn) -> Self {
+        match column {
+            SortColumn::Date => ResultColumn::Date,
+            SortColumn::Map => ResultColumn::Map,
+            SortColumn::Mode => ResultColumn::Mode,
+            SortColumn::Outcome => ResultColumn::Outcome,
+            SortColumn::Damage => ResultColumn::Damage,
+            SortColumn::Kills => ResultColumn::Kills,
+            SortColumn::Pr => ResultColumn::Pr,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SortDir {
     Ascending,
     Descending,
+}
+
+impl From<SortDir> for SortDirection {
+    fn from(dir: SortDir) -> Self {
+        match dir {
+            SortDir::Ascending => SortDirection::Ascending,
+            SortDir::Descending => SortDirection::Descending,
+        }
+    }
+}
+
+impl From<SortDirection> for SortDir {
+    fn from(direction: SortDirection) -> Self {
+        match direction {
+            SortDirection::Ascending => SortDir::Ascending,
+            SortDirection::Descending => SortDir::Descending,
+        }
+    }
+}
+
+impl SearchSettings {
+    /// The stored sort as the index understands it.
+    ///
+    /// A stored column the index cannot order by falls back to the default
+    /// rather than being ordered by something adjacent. Nothing in the app
+    /// writes one, but a config carried forward from a build whose columns
+    /// differed, or edited by hand, can hold one.
+    pub fn sort_spec(&self) -> SortSpec {
+        let (column, direction) = self.sort;
+        match column.sort_column() {
+            Some(column) => SortSpec { column, direction: direction.into() },
+            None => SortSpec::default(),
+        }
+    }
+
+    pub fn set_sort_spec(&mut self, spec: SortSpec) {
+        self.sort = (spec.column.into(), spec.direction.into());
+    }
 }
 
 /// Newest match first, which is the order the index query itself returns.
@@ -504,5 +580,47 @@ mod theme_choice_tests {
         assert_eq!(egui::ThemePreference::from(ThemeChoice::System), egui::ThemePreference::System);
         assert_eq!(egui::ThemePreference::from(ThemeChoice::Dark), egui::ThemePreference::Dark);
         assert_eq!(egui::ThemePreference::from(ThemeChoice::Light), egui::ThemePreference::Light);
+    }
+}
+
+#[cfg(test)]
+mod search_sort_tests {
+    use super::*;
+
+    /// The whole point of persisting it: the sort the user clicked is what the
+    /// next launch reads back.
+    #[test]
+    fn a_chosen_sort_round_trips_through_the_persisted_settings() {
+        for column in SortColumn::ALL {
+            for direction in [SortDirection::Ascending, SortDirection::Descending] {
+                let spec = SortSpec { column, direction };
+                let mut settings = SearchSettings::default();
+                settings.set_sort_spec(spec);
+
+                let encoded = serde_json::to_string(&settings).expect("serialises");
+                let decoded: SearchSettings = serde_json::from_str(&encoded).expect("deserialises");
+                assert_eq!(decoded.sort_spec(), spec);
+            }
+        }
+    }
+
+    /// The stored pair is what shipped builds already wrote, so the two names
+    /// have to keep deserialising or a launch would lose every search setting
+    /// at once, not just the sort.
+    #[test]
+    fn the_shipped_stored_form_still_reads_back() {
+        let settings: SearchSettings =
+            serde_json::from_str(r#"{"query":"","saved":[],"history":[],"sort":["Date","Descending"]}"#)
+                .expect("the form already on disk must still deserialise");
+        assert_eq!(settings.sort_spec(), SortSpec::default());
+    }
+
+    /// A column the index cannot order by must not be honoured as though it
+    /// could. Ordering by something adjacent would be the failure the whole
+    /// exclusion exists to avoid, only now invisible.
+    #[test]
+    fn a_stored_column_the_index_cannot_order_by_falls_back_to_the_default() {
+        let settings = SearchSettings { sort: (ResultColumn::Ship, SortDir::Ascending), ..Default::default() };
+        assert_eq!(settings.sort_spec(), SortSpec::default());
     }
 }

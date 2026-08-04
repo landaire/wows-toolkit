@@ -4583,6 +4583,7 @@ mod replay_tab_search_tests {
 
     use super::*;
     use crate::db::index::query;
+    use crate::db::index::query::SortSpec;
     use crate::db::index::rows::MatchOutcome;
     use crate::db::index::rows::ObjectiveMatch;
     use crate::db::index::rows::ReplayRecord;
@@ -4711,14 +4712,17 @@ mod replay_tab_search_tests {
         let query = tab_state.pending_search_query.take().expect("the Search tab must be handed a query");
 
         let ctx = crate::db::index::query_sql::CompileCtx::default();
-        let hits = rt.block_on(query::search_by_ast(&pool, &query, &ctx, 500)).expect("the search runs");
+        let hits =
+            rt.block_on(query::search_by_ast(&pool, &query, &ctx, 500, SortSpec::default())).expect("the search runs");
         let arenas: Vec<i64> = hits.iter().map(|hit| hit.arena_id.raw()).collect();
         assert_eq!(arenas, vec![100], "only the tab's own directory may match");
 
         // The same seed with no scope returns both, so the assertion above is
         // about the scope rather than about the index holding one row.
         let unscoped = crate::db::index::query_ast::MatchExpr::default();
-        let all = rt.block_on(query::search_by_ast(&pool, &unscoped, &ctx, 500)).expect("the search runs");
+        let all = rt
+            .block_on(query::search_by_ast(&pool, &unscoped, &ctx, 500, SortSpec::default()))
+            .expect("the search runs");
         assert_eq!(all.len(), 2, "both directories are indexed");
     }
 
