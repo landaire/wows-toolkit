@@ -2466,7 +2466,7 @@ impl GameMode {
         match self {
             GameMode::Invalid => "invalid",
             GameMode::Test => "test",
-            GameMode::Standart => "standart",
+            GameMode::Standart => "standard",
             GameMode::Singlebase => "singlebase",
             GameMode::Domination => "domination",
             GameMode::Tutorial => "tutorial",
@@ -3313,12 +3313,14 @@ mod tests {
     }
 
     #[test]
-    fn all_lists_every_variant() {
-        // ALL is what the query grammar enumerates, so a variant missing from it
-        // is a filter value the user can never pick.
-        assert_eq!(GameMode::ALL.len(), 29);
-        for mode in GameMode::ALL {
-            assert!(GameMode::ALL.contains(&mode));
-        }
+    fn all_carries_exactly_the_games_id_table() {
+        // Transcribed from GAME_MODE in the deobfuscated shared_constants. The
+        // gaps at 3..=6 are the game's. A changed or swapped id fails here.
+        let expected: [i32; 29] = [
+            -1, 0, 1, 2, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+            31,
+        ];
+        let actual: Vec<i32> = GameMode::ALL.iter().map(|m| m.id()).collect();
+        assert_eq!(actual, expected.to_vec());
     }
 }
