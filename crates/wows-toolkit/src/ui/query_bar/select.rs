@@ -1967,4 +1967,38 @@ mod tests {
         assert!(!set_value(&mut e, &[], Value::Int(3)));
         assert_eq!(e, before);
     }
+
+    #[test]
+    fn replace_node_writes_only_while_the_expected_node_is_still_there() {
+        let mut e = Expr::All(vec![leaf(1), leaf(2), leaf(3)]);
+        assert!(replace_node(&mut e, &[1], &leaf(2), leaf(99)));
+        assert_eq!(e, Expr::All(vec![leaf(1), leaf(99), leaf(3)]));
+    }
+
+    /// The gate a caller depends on to write a value back safely: a numeric path
+    /// names a position, not a node, so a rewrite between reading the path and
+    /// writing through it can move a different node there. The write must land
+    /// on the node the caller started from, or on nothing.
+    #[test]
+    fn replace_node_refuses_a_path_whose_node_moved_since_it_was_taken() {
+        let mut e = Expr::All(vec![leaf(1), leaf(2), leaf(3), leaf(4)]);
+        let seed = leaf(3);
+        assert_eq!(node_at(&e, &[2]), Some(&seed), "the fixture must start with the seed at the path under test");
+
+        // A different node is deleted ahead of the path, sliding every term
+        // after it up one: the path still resolves, but to a term the caller
+        // never saw.
+        delete(&mut e, &sel(&[&[0]]));
+        assert_eq!(node_at(&e, &[2]), Some(&leaf(4)), "the fixture must leave a different node under the path");
+
+        assert!(!replace_node(&mut e, &[2], &seed, leaf(99)), "the write landed on a node it never opened");
+        assert_eq!(e, Expr::All(vec![leaf(2), leaf(3), leaf(4)]));
+    }
+
+    #[test]
+    fn replace_node_can_replace_the_whole_tree_at_the_root() {
+        let mut e = leaf(1);
+        assert!(replace_node(&mut e, &[], &leaf(1), leaf(2)));
+        assert_eq!(e, leaf(2));
+    }
 }

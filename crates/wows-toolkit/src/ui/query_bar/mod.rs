@@ -64,7 +64,6 @@ use crate::ui::query_bar::suggest::value_request_for;
 use crate::ui::query_bar::tokens::NodePath;
 use crate::ui::query_bar::tokens::Token;
 use crate::ui::query_bar::tokens::TokenKind;
-use crate::ui::query_bar::tokens::move_caret_to;
 use crate::ui::query_bar::tokens::tokenize;
 use crate::ui::theme::semantic::SemanticExt;
 
@@ -111,10 +110,6 @@ pub struct QueryBar {
     /// that editor -- a needle for its list, or the literal for a plain value --
     /// and is not a query fragment.
     editing: Option<SegmentEdit>,
-    /// The whole term the caret is editing as text, when a double-click opened
-    /// one. Mutually exclusive with `editing`: opening either ends the other, so
-    /// the caret's buffer belongs to exactly one editor, or to plain typing.
-    text_edit: Option<TextEdit>,
     /// Where the popup anchors, refreshed while painting: the rect of the
     /// segment being edited, or the start of the fragment being typed.
     popup_anchor: Option<Rect>,
@@ -186,22 +181,6 @@ struct SegmentEdit {
     restore: Option<Restore>,
 }
 
-/// One whole term opened as text by a double-click on its pill.
-///
-/// `path` is the pill's own node, not the term inside it, so the text is exactly
-/// what that node prints and the commit replaces exactly that node. Everything
-/// above it -- a `not`, the group it sits in, the connector beside it -- is
-/// outside both the text and the write, so no edit made here can lose it.
-#[derive(Debug, Clone, PartialEq)]
-struct TextEdit {
-    path: NodePath,
-    /// The node as it stood when the editor opened. The commit writes back only
-    /// while this is still what `path` names, so a rewrite that moved another
-    /// node into that position cannot be overwritten by an edit aimed at this
-    /// one.
-    seed: MatchExpr,
-}
-
 /// The undo a forced editor carries. Dismissing it puts `before` back, because
 /// the placeholder it was opened on is a value nothing chose: for `outcome` it
 /// is `win`, which reads as a filter the user set on purpose and silently
@@ -254,9 +233,6 @@ enum Command {
     /// `segment_path`-resolved one, because the command is applied after a
     /// dismissal that can rewrite the tree the resolution has to hold against.
     EditSegment(NodePath, SegmentRole),
-    /// Open the whole term at this pill as editable text. Carries the pill's own
-    /// path, for the reason `EditSegment` does.
-    EditText(NodePath),
     Negate(NodePath),
     Delete(NodePath),
     SetConnector(NodePath, bool),
@@ -279,10 +255,6 @@ struct Body {
     /// That click was on a pill segment, which is the one case that must not
     /// close the segment editor it just opened.
     clicked_segment: bool,
-    /// A double-click opened a text editor this frame. The same click also reads
-    /// as a click on a token, which would otherwise commit and close the editor
-    /// it had just opened.
-    opened_text_edit: bool,
 }
 
 /// What a pass over one pill's segments found.
@@ -356,19 +328,13 @@ impl QueryBar {
             // editor, holding the literal it was seeded with, and for the other
             // two it holds the needle -- so clicking into that text to correct
             // it must not throw it away.
-            //
-            // A double-click that just opened a text editor reads as a click on
-            // a token too, so the editor it opened is exempt from the same rule.
-            if body.clicked_token && !body.clicked_segment && !body.opened_text_edit {
-                edited |= self.commit_text_edit();
+            if body.clicked_token && !body.clicked_segment {
                 edited |= self.end_segment_edit().restored;
             }
             if body.clicked_inside || body.caret_changed || body.caret_gained_focus || self.editing.is_some() {
                 self.dropdown_open = true;
             }
         } else {
-            // Focus leaving the bar is the blur a text edit commits on.
-            edited |= self.commit_text_edit();
             edited |= self.end_segment_edit().restored;
             self.dropdown_open = false;
             self.highlighted = None;
@@ -383,20 +349,16 @@ impl QueryBar {
         QueryBarOutput { changed: edited, request: self.pending_request.take() }
     }
 
-    /// The token stream as it is drawn: the committed tree, with the caret moved
-    /// into the slot of a pill being edited as text so the term is typed where it
-    /// sits.
+    /// The token stream as it is drawn: the committed tree, tokenized.
     fn stream(&self) -> (Vec<Token>, Option<Token>) {
-        let mut tokens = tokenize(&self.expr, &self.names);
-        let replaced = self.text_edit_path().and_then(|path| move_caret_to(&mut tokens, path));
-        (tokens, replaced)
+        (tokenize(&self.expr, &self.names), None)
     }
 
     /// Every pill the selection can address, over the full stream rather than
-    /// the drawn one. A term open in a text editor is still part of the query,
-    /// and its pill is missing from what is painted, so a range taken off the
-    /// drawn stream would silently omit a term the user highlighted and leave a
-    /// later group or delete acting on fewer than they chose.
+    /// the drawn one. A pill the caret is standing in for is still part of the
+    /// query and missing from what is painted, so a range taken off the drawn
+    /// stream would silently omit a term the user highlighted and leave a later
+    /// group or delete acting on fewer than they chose.
     fn selectable_paths(&self) -> Vec<NodePath> {
         select::selectable_paths(&self.expr, &tokenize(&self.expr, &self.names))
     }
@@ -428,7 +390,7 @@ impl QueryBar {
         // holds, so that term stays readable where its pill was. The trailing
         // caret takes the rest of its row whatever it measures, so it is left at
         // the floor it has always had.
-        let caret_text = if self.text_edit.is_some() { self.pending.as_str() } else { "" };
+        let caret_text = if replaced.is_some() { self.pending.as_str() } else { "" };
         let galleys: Vec<Vec<Arc<Galley>>> =
             tokens.iter().map(|token| token_galleys(ui, token, &font, caret_text)).collect();
         let mut widths: Vec<f32> = tokens.iter().zip(&galleys).map(|(t, g)| token_width(t, g, &cfg)).collect();
@@ -583,11 +545,8 @@ impl QueryBar {
         clicked_token |= background.clicked() && !on_caret;
 
         let mut edited = false;
-        let mut opened_text_edit = false;
         for command in commands {
-            let opens_text = matches!(command, Command::EditText(_));
             edited |= self.apply_command(command, ui, ids.caret_id);
-            opened_text_edit |= opens_text && self.text_edit.is_some();
         }
         Body {
             edited,
@@ -596,7 +555,6 @@ impl QueryBar {
             clicked_inside: refocus || caret.response.response.clicked(),
             clicked_token,
             clicked_segment,
-            opened_text_edit,
         }
     }
 
@@ -629,14 +587,7 @@ impl QueryBar {
             let expr = &self.expr;
             let pill_path = &token.path;
             response.context_menu(|ui| pill_menu(ui, expr, pill_path, commands));
-            // A segment covers most of its pill, so the double-click gesture has
-            // to be read here as well as on the pill itself, or it would only be
-            // reachable in the gaps between segments. egui reports exactly one of
-            // the two per frame.
-            if response.double_clicked() {
-                hit.clicked = true;
-                commands.push(Command::EditText(token.path.clone()));
-            } else if response.clicked() {
+            if response.clicked() {
                 hit.clicked = true;
                 commands.push(Command::EditSegment(token.path.clone(), segment.role));
             }
@@ -712,14 +663,6 @@ impl QueryBar {
                 if !select::addresses_match_node(expr, path) {
                     return;
                 }
-                // The gaps between segments, and every pill that registers no
-                // segments at all -- free text, a quantifier too complex to
-                // collapse -- reach the gesture here rather than through
-                // `segment_interaction`.
-                if response.double_clicked() {
-                    commands.push(Command::EditText(token.path.clone()));
-                    return;
-                }
                 if response.clicked() {
                     let modifiers = response.ctx.input(|i| i.modifiers);
                     commands.push(if modifiers.shift {
@@ -789,7 +732,7 @@ impl QueryBar {
     /// Step 4 of the dropdown: the suggestion list, anchored under whatever is
     /// being edited.
     fn dropdown(&mut self, ui: &mut Ui, id: egui::Id, caret_id: egui::Id, bar_rect: Rect) -> bool {
-        if !self.dropdown_open || self.text_edit.is_some() {
+        if !self.dropdown_open {
             return false;
         }
         let rows = self.dropdown_rows();
@@ -947,15 +890,7 @@ impl QueryBar {
 
     /// The rows the dropdown shows: the open segment's own source, or the
     /// caret's.
-    ///
-    /// A text edit offers none. Every row commits by adding to the tree, which
-    /// beside a term already sitting in it would leave that term duplicated;
-    /// empty here rather than only hidden, so the keyboard cannot reach a row the
-    /// pointer is not being offered.
     fn dropdown_rows(&self) -> Vec<Row> {
-        if self.text_edit.is_some() {
-            return Vec::new();
-        }
         match &self.editing {
             Some(edit) => self.segment_rows(edit),
             None => self.caret_rows(),
@@ -1024,7 +959,7 @@ impl QueryBar {
         // While an editor is open the caret is that editor's buffer, so the keys
         // that navigate the pill stream instead -- history, selection, and
         // stepping off the ends -- would act on a query the user is not typing.
-        let editing = self.editing.is_some() || self.text_edit.is_some();
+        let editing = self.editing.is_some();
 
         if take(Modifiers::NONE, Key::Escape) {
             return Some(if self.dropdown_open { Nav::CloseDropdown } else { Nav::ReleaseFocus });
@@ -1068,7 +1003,6 @@ impl QueryBar {
         let paths = self.selectable_paths();
         match nav {
             Nav::CloseDropdown => {
-                self.cancel_text_edit();
                 let dismissed = self.end_segment_edit();
                 self.dropdown_open = false;
                 self.highlighted = None;
@@ -1076,7 +1010,6 @@ impl QueryBar {
             }
             Nav::ReleaseFocus => {
                 ui.memory_mut(|m| m.surrender_focus(caret_id));
-                self.cancel_text_edit();
                 let dismissed = self.end_segment_edit();
                 self.selection.clear();
                 dismissed.restored
@@ -1164,42 +1097,14 @@ impl QueryBar {
     /// whatever editor was open first: the pointer has moved on to another pill,
     /// and a forced editor's snapshot predates this command, so restoring it
     /// afterwards would undo the very edit that was just asked for.
-    ///
-    /// A text edit is committed rather than discarded, since the pointer moving
-    /// on is the blur it commits on. That commit swaps one node for another at
-    /// one path, which moves no sibling, so the path this command carries still
-    /// names what it named when the pointer landed on it.
     fn apply_command(&mut self, command: Command, ui: &Ui, caret_id: egui::Id) -> bool {
         match command {
             Command::EditSegment(pill, role) => {
-                let committed = self.commit_text_edit();
                 let dismissed = self.end_segment_edit();
                 if dismissed.withdrew.as_deref() != Some(pill.as_slice()) {
                     self.open_clicked_segment(&pill, role, &dismissed, ui, caret_id);
                 }
-                committed || dismissed.restored
-            }
-            Command::EditText(pill) => {
-                // A second double-click on the pill already being edited is not a
-                // new edit, and committing to reopen would throw away the text
-                // typed so far.
-                if self.text_edit_path() == Some(&pill) {
-                    return false;
-                }
-                let committed = self.commit_text_edit();
-                let dismissed = self.end_segment_edit();
-                // The same identity gate `EditSegment` uses, and needed for the
-                // same reason. A withdrawn placeholder's path does not reliably
-                // name nothing afterwards: `append_top_level` wraps a root that
-                // is not already an `All`, so minting onto `Any([a, b])` gives
-                // `All([Any([a, b]), placeholder])` with the placeholder at [1] --
-                // and withdrawing it unwraps the root, leaving `b` under that
-                // very path. `replace_node`'s seed check cannot help there, since
-                // the seed genuinely is `b`.
-                if dismissed.withdrew.as_deref() != Some(pill.as_slice()) {
-                    self.begin_text_edit(&pill, ui, caret_id);
-                }
-                committed || dismissed.restored
+                dismissed.restored
             }
             Command::SelectOnly(path) => {
                 self.select_single(path);
@@ -1220,27 +1125,23 @@ impl QueryBar {
                 false
             }
             Command::Negate(path) => {
-                self.commit_text_edit();
                 self.end_segment_edit();
                 select::negate(&mut self.expr, &path);
                 true
             }
             Command::Delete(path) => {
-                self.commit_text_edit();
                 self.end_segment_edit();
                 select::delete(&mut self.expr, &Selection { nodes: vec![path] });
                 true
             }
             Command::SetConnector(path, is_or) => {
-                self.commit_text_edit();
                 self.end_segment_edit();
                 select::set_connector(&mut self.expr, &path, is_or);
                 true
             }
             Command::Ungroup(path) => {
-                let committed = self.commit_text_edit();
                 let dismissed = self.end_segment_edit();
-                select::ungroup(&mut self.expr, &path) || committed || dismissed.restored
+                select::ungroup(&mut self.expr, &path) || dismissed.restored
             }
         }
     }
@@ -1284,91 +1185,6 @@ impl QueryBar {
         }
     }
 
-    /// The pill a text edit is open on.
-    fn text_edit_path(&self) -> Option<&NodePath> {
-        self.text_edit.as_ref().map(|edit| &edit.path)
-    }
-
-    /// Opens the whole term at `pill` as editable text, seeded with its own
-    /// printed form, reporting whether it opened.
-    ///
-    /// A node that prints as nothing is refused: the editor would open empty and
-    /// its commit would delete the node, which is not what a double-click asked
-    /// for.
-    ///
-    /// Any segment editor open at the time ends first, exactly as opening another
-    /// segment editor ends it, so a placeholder a mint forced open is withdrawn
-    /// rather than left behind. The path is resolved afterwards, against the tree
-    /// that dismissal left.
-    fn begin_text_edit(&mut self, pill: &NodePath, ui: &Ui, caret_id: egui::Id) -> bool {
-        if self.text_edit_path() == Some(pill) {
-            return false;
-        }
-        self.end_segment_edit();
-        let Some(seed) = select::node_at(&self.expr, pill).cloned() else {
-            return false;
-        };
-        let text = query_text::print_query(&seed);
-        if text.trim().is_empty() {
-            return false;
-        }
-        self.clear_pending();
-        self.selection.clear();
-        self.anchor = None;
-        self.focus = None;
-        self.pending = text;
-        self.parsed_text.clone_from(&self.pending);
-        self.text_edit = Some(TextEdit { path: pill.clone(), seed });
-        park_caret(ui, caret_id, self.pending.chars().count());
-        true
-    }
-
-    /// Commits the open text edit, reporting whether the tree changed.
-    ///
-    /// Text the grammar cannot read leaves the tree and the editor alone with its
-    /// span marked, the way the typed path leaves one; `reparse_pending` clears
-    /// the mark on the next keystroke.
-    ///
-    /// The reparsed node is written where the edit began and nowhere else, so a
-    /// `not`, a group, or a connector standing around the term is untouched by
-    /// construction rather than by care. `replace_node` refuses a path that no
-    /// longer names the node the edit opened on, which is what keeps the write
-    /// off whatever else may have moved into that position.
-    ///
-    /// Deliberately not canonicalised here: swapping one node for another moves
-    /// no sibling, so every path taken this frame still names what it named.
-    /// `finish_edit` canonicalises once the frame's edits are in.
-    fn commit_text_edit(&mut self) -> bool {
-        let Some(edit) = self.text_edit.clone() else {
-            return false;
-        };
-        let parsed = match parse_query(&self.pending) {
-            Ok(parsed) => parsed,
-            Err(error) => {
-                self.pending_error = Some(error);
-                return false;
-            }
-        };
-        // A double-click the user thought better of leaves the term spelled the
-        // way it already was, and a reported change re-runs the search and
-        // rewrites the saved query.
-        let same = parsed == edit.seed;
-        let written = select::replace_node(&mut self.expr, &edit.path, &edit.seed, parsed);
-        // Either way the editor closes: an anchor the tree no longer holds can
-        // never be committed to, so leaving it open would leave text that has
-        // nowhere to go.
-        self.clear_pending();
-        written && !same
-    }
-
-    /// Discards the text edit, leaving its term as it was. Escape, which is the
-    /// one dismissal that is not a commit.
-    fn cancel_text_edit(&mut self) {
-        if self.text_edit.is_some() {
-            self.clear_pending();
-        }
-    }
-
     /// Opens one segment's editor because the user clicked that segment. The
     /// value it holds is one they chose, so dismissing the editor keeps it.
     fn begin_segment_edit(&mut self, path: NodePath, role: SegmentRole, ui: &Ui, caret_id: egui::Id) -> bool {
@@ -1400,10 +1216,6 @@ impl QueryBar {
         caret_id: egui::Id,
     ) -> bool {
         self.end_segment_edit();
-        // The caret's buffer belongs to one editor at a time. Every route that
-        // reaches here commits an open text edit first and reports what that
-        // changed, so this enforces the invariant rather than discarding work.
-        self.text_edit = None;
         let Some((field, op, value)) = select::term_at(&self.expr, &path).map(|(f, o, v)| (f, o, v.clone())) else {
             return false;
         };
@@ -1597,9 +1409,6 @@ impl QueryBar {
     /// caret's query text; with one open it takes the list's best row, which is
     /// what a narrowed list is for, and an empty list has nothing to take.
     fn commit_typed(&mut self, rows: &[Row], ui: &Ui, caret_id: egui::Id) -> bool {
-        if self.text_edit.is_some() {
-            return self.commit_text_edit();
-        }
         if self.editing.is_none() {
             return self.commit_pending(ui, caret_id);
         }
@@ -1730,7 +1539,6 @@ impl QueryBar {
         self.value_options.clear();
         self.active_request = None;
         self.editing = None;
-        self.text_edit = None;
         self.dropdown_open = false;
         self.highlighted = None;
         self.history_cursor = None;
@@ -1748,14 +1556,6 @@ impl QueryBar {
         // which would leave the editor pointing at a term that is gone.
         if self.editing.as_ref().is_some_and(|edit| select::term_at(&self.expr, &edit.path).is_none()) {
             self.end_segment_edit();
-        }
-        // The same for a text edit, against the node it opened on rather than
-        // against the path alone: canonicalising can move a different node under
-        // that path as easily as it can drop the node entirely, and only the seed
-        // tells the two apart. An anchor that no longer names it is dropped, so
-        // nothing is left to write into the wrong term later.
-        if self.text_edit.as_ref().is_some_and(|edit| select::node_at(&self.expr, &edit.path) != Some(&edit.seed)) {
-            self.cancel_text_edit();
         }
     }
 
@@ -1778,10 +1578,7 @@ impl QueryBar {
             return;
         }
         self.pending_error = parse_query(&self.pending).err();
-        // A text edit is query text and marks its span the same way, but it shows
-        // no list, so a lookup nothing would display is not worth the round trip.
-        let request = if self.text_edit.is_some() { None } else { value_request_for(&self.pending) };
-        self.refresh_request(request);
+        self.refresh_request(value_request_for(&self.pending));
     }
 
     /// The lookup the open value segment calls for, read off the field rather
@@ -3329,103 +3126,16 @@ mod tests {
         path
     }
 
-    /// Every pill path in stream order, for a fixture with more than one.
-    fn pill_paths(bar: &QueryBar) -> Vec<NodePath> {
-        select::pill_paths(&tokenize(&bar.expr, &bar.names))
-    }
-
     fn bar_holding(query: &str) -> QueryBar {
         let mut bar = QueryBar::default();
         bar.set_expr(parse_query(query).expect("parse"));
         bar
     }
 
-    /// Opens a text edit through the same call `Command::EditText` makes.
-    fn open_text_edit(bar: &mut QueryBar, path: &NodePath) -> bool {
-        with_ui(|ui, caret_id| bar.begin_text_edit(path, ui, caret_id))
-    }
-
+    /// A single click opens the clicked segment's own dropdown, over that
+    /// segment's rows.
     #[test]
-    fn double_clicking_a_pill_seeds_an_editor_with_its_own_text() {
-        let mut bar = bar_holding("anyone.tier>=8");
-        let path = only_pill_path(&bar);
-        assert!(open_text_edit(&mut bar, &path), "the editor must open");
-        assert_eq!(bar.pending.trim(), "anyone.tier>=8");
-        assert_eq!(bar.text_edit_path(), Some(&path));
-        assert!(bar.editing.is_none(), "a text edit is not a segment edit");
-    }
-
-    #[test]
-    fn committing_a_text_edit_replaces_only_that_term() {
-        let mut bar = bar_holding("outcome:win and anyone.tier>=8");
-        let paths = pill_paths(&bar);
-        assert_eq!(paths, vec![vec![0], vec![1]], "the fixture must draw two pills");
-
-        assert!(open_text_edit(&mut bar, &paths[1]));
-        bar.pending = "anyone.tier>=10".to_owned();
-        assert!(bar.commit_text_edit(), "commit");
-        bar.finish_edit();
-        assert_eq!(bar.expr, parse_query("outcome:win and anyone.tier>=10").expect("parse"));
-    }
-
-    /// The retired `edit_as_text` lost the `not` here: it lifted the bare term
-    /// out from under it. Pinned so it cannot come back.
-    #[test]
-    fn a_text_edit_under_a_not_keeps_the_negation() {
-        let mut bar = bar_holding("not anyone.tier>=8");
-        let path = only_pill_path(&bar);
-        assert_eq!(path, vec![0], "the fixture must sit the pill under the negation");
-
-        assert!(open_text_edit(&mut bar, &path));
-        assert_eq!(bar.pending, "anyone.tier>=8", "the negation is not the term's own text");
-        bar.pending = "anyone.tier>=10".to_owned();
-        assert!(bar.commit_text_edit(), "commit");
-        bar.finish_edit();
-        assert_eq!(bar.expr, parse_query("not anyone.tier>=10").expect("parse"));
-    }
-
-    /// The other shape the surrounding tree takes: a bracketed OR group beside a
-    /// sibling. Editing one term inside it must leave the group, its connector,
-    /// and the sibling exactly where they were.
-    #[test]
-    fn a_text_edit_inside_a_group_keeps_the_group_and_its_connector() {
-        let mut bar = bar_holding("outcome:win and (map:ocean or map:north)");
-        let paths = pill_paths(&bar);
-        assert_eq!(paths, vec![vec![0], vec![1, 0], vec![1, 1]], "the fixture must nest two pills in a group");
-
-        assert!(open_text_edit(&mut bar, &paths[2]));
-        assert_eq!(bar.pending, "map:north");
-        bar.pending = "map:tears".to_owned();
-        assert!(bar.commit_text_edit(), "commit");
-        bar.finish_edit();
-        assert_eq!(bar.expr, parse_query("outcome:win and (map:ocean or map:tears)").expect("parse"));
-    }
-
-    #[test]
-    fn an_unparseable_text_edit_keeps_the_term_and_reports_the_error() {
-        let mut bar = bar_holding("anyone.tier>=8");
-        let path = only_pill_path(&bar);
-        assert!(open_text_edit(&mut bar, &path));
-        bar.pending = "anyone.tier>=nonsense".to_owned();
-
-        // The same underline the typed path draws, per keystroke rather than only
-        // on the attempt to commit.
-        bar.reparse_pending();
-        assert!(bar.pending_error.is_some(), "the span is not marked while it is being typed");
-        bar.pending_error = None;
-
-        assert!(!bar.commit_text_edit(), "an unparseable edit must not commit");
-        assert_eq!(bar.expr, parse_query("anyone.tier>=8").expect("parse"), "the term was destroyed");
-        assert!(bar.pending_error.is_some(), "no error was reported");
-        assert_eq!(bar.text_edit_path(), Some(&path), "the editor must stay open to be corrected");
-        assert_eq!(bar.pending, "anyone.tier>=nonsense", "the text the user typed was thrown away");
-    }
-
-    /// The new gesture must not steal the old one. A single click still opens the
-    /// clicked segment's own dropdown, over that segment's rows, and starts no
-    /// text edit.
-    #[test]
-    fn a_single_click_still_opens_the_segment_dropdown() {
+    fn a_single_click_opens_the_segment_dropdown() {
         let mut bar = bar_holding("outcome:win");
         let path = only_pill_path(&bar);
         let click = Command::EditSegment(path.clone(), SegmentRole::Value);
@@ -3434,7 +3144,6 @@ mod tests {
         let edit = bar.editing.as_ref().expect("a single click opens the segment editor");
         assert_eq!(edit.path, path);
         assert_eq!(edit.role, SegmentRole::Value);
-        assert!(bar.text_edit_path().is_none(), "a single click started a text edit");
         let rows = bar.dropdown_rows();
         assert!(!rows.is_empty(), "the segment editor opened over an empty list");
         assert!(
@@ -3443,601 +3152,55 @@ mod tests {
         );
     }
 
-    /// The gesture as the pointer delivers it: a double-click on a pill segment,
-    /// which the first click of that same gesture has already opened a segment
-    /// editor on.
+    /// `caret_rect` has to find the caret wherever it stands, not assume it is
+    /// the last placed token: `move_caret_to` can put it in the middle of the
+    /// stream, and a lookup that fell back to "whatever is last" would measure
+    /// the wrong token's rect.
     #[test]
-    fn a_double_click_replaces_the_segment_editor_with_a_text_edit() {
-        let mut bar = bar_holding("outcome:win and anyone.tier>=8");
-        let path = pill_paths(&bar)[1].clone();
-        with_ui(|ui, caret_id| {
-            bar.apply_command(Command::EditSegment(path.clone(), SegmentRole::Value), ui, caret_id);
-            bar.apply_command(Command::EditText(path.clone()), ui, caret_id)
-        });
+    fn caret_rect_finds_the_caret_by_kind_rather_than_by_last_placement() {
+        use crate::ui::query_bar::tokens::move_caret_to;
 
-        assert!(bar.editing.is_none(), "the segment editor must give way to the text edit");
-        assert_eq!(bar.text_edit_path(), Some(&path));
-        assert_eq!(bar.pending, "anyone.tier>=8");
+        let expr = Expr::All(vec![win(), roster_pill(RosterField::Tier, Op::Eq, Value::Int(10))]);
+        let mut toks = tokenize(&expr, &NameCache::default());
+        move_caret_to(&mut toks, &vec![0]).expect("the first pill must be replaced");
+        let caret_index =
+            toks.iter().position(|t| matches!(t.kind, TokenKind::Caret)).expect("the stream must still hold a caret");
+        assert_ne!(caret_index, toks.len() - 1, "the fixture must leave the caret somewhere other than last");
+
+        let cfg = LayoutCfg {
+            row_height: 20.0,
+            gap: 4.0,
+            indent: 8.0,
+            max_rows: 6,
+            min_segment_width: 0.0,
+            segment_gap: 4.0,
+        };
+        let widths = vec![50.0; toks.len()];
+        let laid = lay_out(&toks, &widths, 500.0, &cfg);
+
+        let rect = caret_rect(&toks, &laid, egui::Vec2::ZERO);
+        let expected = laid.placed[caret_index].rect.shrink2(egui::vec2(0.0, ROW_PAD_Y));
+        assert_eq!(rect, expected, "caret_rect did not find the caret standing in the pill's slot");
+
+        let last_rect = laid.placed.last().expect("a placed token").rect.shrink2(egui::vec2(0.0, ROW_PAD_Y));
+        assert_ne!(rect, last_rect, "caret_rect fell back to whatever was placed last");
     }
 
-    /// Opening a text edit is a dismissal like any other, so a placeholder a mint
-    /// forced an editor open on is withdrawn rather than left committed, and the
-    /// withdrawal is reported so the results and the saved query follow it.
+    /// `end_segment_edit`'s third gate: a forced editor's snapshot is put back
+    /// only when doing so would actually change the tree. A snapshot that
+    /// already matches the current expression must close the editor without
+    /// reporting a change or touching `expr`.
     #[test]
-    fn opening_a_text_edit_withdraws_a_minted_placeholder() {
-        let mut bar = caret_bar();
-        bar.set_expr(parse_query("outcome:win and map:ocean").expect("parse"));
-        let before = mint_from_caret(&mut bar, TermField::Roster(RosterField::Ship), Some(Scope::Enemy));
-        assert_eq!(query_text::print_query(&bar.expr), "outcome=win and map:ocean and enemy.ship=0");
-
-        let changed = with_ui(|ui, caret_id| bar.apply_command(Command::EditText(vec![0]), ui, caret_id));
-
-        assert!(changed, "the withdrawal has to be reported, or the results stay stale");
-        assert_eq!(bar.expr, before, "the placeholder outlived the double-click that dismissed it");
-        assert!(bar.editing.is_none());
-        assert_eq!(bar.pending, "outcome=win", "the double-click must still open the pill it named");
-    }
-
-    /// The same withdrawal from a direct call, which is what makes the dismissal
-    /// belong to opening a text edit rather than to the command that routes to
-    /// it.
-    #[test]
-    fn opening_a_text_edit_directly_still_withdraws_the_placeholder() {
-        let mut bar = caret_bar();
-        bar.set_expr(parse_query("outcome:win and map:ocean").expect("parse"));
-        let before = mint_from_caret(&mut bar, TermField::Roster(RosterField::Ship), Some(Scope::Enemy));
-
-        assert!(open_text_edit(&mut bar, &vec![0]));
-        assert_eq!(bar.expr, before, "the placeholder is still in the tree behind the text edit");
-        assert!(bar.editing.is_none(), "both editors were left holding the caret");
-    }
-
-    /// Double-clicking the placeholder its own withdrawal takes away must not
-    /// open an editor on whichever pill inherited that position. A numeric path
-    /// names a position rather than a pill, so the gate has to be identity.
-    ///
-    /// The root is an `Any`, which is the shape that makes the gate load-bearing
-    /// and the only one that does. `append_top_level` pushes into an `All` root
-    /// but *wraps* any other, so minting onto `Any([a, b])` gives
-    /// `All([Any([a, b]), placeholder])` with the placeholder at `[1]` -- and
-    /// withdrawing it unwraps the root, leaving `b` under that same path. Over a
-    /// `Leaf`, `Not`, or `Roster` root the path names nothing afterwards and
-    /// every route refuses for its own reasons, which is why an earlier fixture
-    /// over a `Leaf` root passed with no gate at all.
-    ///
-    /// `replace_node`'s seed check cannot stand in for this: the node under that
-    /// path genuinely is `b`, so the write would be accepted.
-    #[test]
-    fn double_clicking_the_withdrawn_placeholder_opens_nothing() {
-        let mut bar = caret_bar();
-        bar.set_expr(parse_query("outcome:win or map:ocean").expect("parse"));
-        let before = mint_from_caret(&mut bar, TermField::Roster(RosterField::Ship), Some(Scope::Enemy));
-        assert_eq!(query_text::print_query(&bar.expr), "(outcome=win or map:ocean) and enemy.ship=0");
-        let placeholder = select::last_appended_path(&bar.expr);
-        assert_eq!(placeholder, vec![1], "the fixture must sit the placeholder beside the wrapped root");
-
-        let changed = with_ui(|ui, caret_id| bar.apply_command(Command::EditText(placeholder.clone()), ui, caret_id));
-
-        assert!(changed, "the withdrawal still has to be reported");
-        assert_eq!(bar.expr, before);
-        assert_eq!(
-            select::node_at(&bar.expr, &placeholder),
-            Some(&parse_query("map:ocean").expect("parse")),
-            "the fixture must leave a different, resolvable term under the placeholder's path"
-        );
-        assert!(bar.text_edit_path().is_none(), "a text edit opened on a pill the user never clicked");
-        assert!(bar.pending.is_empty(), "the caret was seeded from a term the user never double-clicked");
-    }
-
-    /// A node that prints as nothing has no text to seed an editor with, and
-    /// committing an empty editor would delete it.
-    #[test]
-    fn a_term_that_prints_as_nothing_opens_no_text_edit() {
+    fn dismissing_an_editor_whose_snapshot_already_matches_reports_no_change() {
         let mut bar = QueryBar::default();
-        assert!(bar.expr.is_empty_all(), "the empty root is the node that prints as nothing");
-        assert!(query_text::print_query(&bar.expr).is_empty());
+        bar.set_expr(win());
+        let restore = Restore { before: bar.expr.clone(), minted: None };
+        bar.editing = Some(SegmentEdit { path: vec![], role: SegmentRole::Value, restore: Some(restore) });
 
-        assert!(!open_text_edit(&mut bar, &vec![]), "an editor opened on a node with nothing to edit");
-        assert!(bar.text_edit_path().is_none());
-        assert!(bar.pending.is_empty());
-    }
+        let dismissed = bar.end_segment_edit();
 
-    /// The staleness this task's write-back is built against. A path names a
-    /// position, so a tree rewrite between opening the editor and committing it
-    /// can move a different term under the path the edit began on. The write must
-    /// land on the term the user opened, or on nothing.
-    #[test]
-    fn a_text_edit_whose_term_moved_is_not_written_back() {
-        let mut bar = bar_holding("outcome:win and anyone.tier>=8 and map:ocean and map:north");
-        let paths = pill_paths(&bar);
-        assert_eq!(paths, vec![vec![0], vec![1], vec![2], vec![3]]);
-
-        assert!(open_text_edit(&mut bar, &paths[2]));
-        assert_eq!(bar.pending, "map:ocean");
-        bar.pending = "map:tears".to_owned();
-        // The pill in front of the edited one goes away, which slides every term
-        // after it up one. The path the edit began on is still a path this tree
-        // has -- it now names `map:north`, a term the user never opened.
-        select::delete(&mut bar.expr, &Selection { nodes: vec![vec![0]] });
-        select::canonicalise(&mut bar.expr);
-        assert!(select::node_at(&bar.expr, &paths[2]).is_some(), "the fixture must leave the path resolvable");
-
-        assert!(!bar.commit_text_edit(), "the write landed on a term the edit never opened");
-        assert_eq!(bar.expr, parse_query("anyone.tier>=8 and map:ocean and map:north").expect("parse"));
-        assert!(bar.text_edit_path().is_none(), "an anchor the tree no longer holds must not stay open");
-    }
-
-    /// The same rewrite arriving through `finish_edit`, which is where
-    /// canonicalising actually happens. The editor is dropped rather than left
-    /// aimed at whatever now occupies its path.
-    ///
-    /// Four pills, so the path the edit began on is still a path this tree has
-    /// and names a *different* term. A shorter fixture collapses to a bare
-    /// `Leaf` where the path resolves to nothing, and a check on the path alone
-    /// would pass over it -- the seed-versus-path distinction is the whole point
-    /// of the guard, so the fixture has to be able to tell them apart.
-    #[test]
-    fn canonicalising_a_different_term_under_a_text_edit_drops_the_editor() {
-        let mut bar = bar_holding("outcome:win and anyone.tier>=8 and map:ocean and map:north");
-        let paths = pill_paths(&bar);
-        assert!(open_text_edit(&mut bar, &paths[2]));
-        assert_eq!(bar.pending, "map:ocean");
-
-        select::delete(&mut bar.expr, &Selection { nodes: vec![vec![0]] });
-        bar.finish_edit();
-
-        assert_eq!(
-            select::node_at(&bar.expr, &paths[2]),
-            Some(&parse_query("map:north").expect("parse")),
-            "the fixture must leave a different, resolvable term under the edit's own path"
-        );
-        assert!(bar.text_edit_path().is_none(), "the editor stayed aimed at a term the user never opened");
-        assert_eq!(bar.expr, parse_query("anyone.tier>=8 and map:ocean and map:north").expect("parse"));
-    }
-
-    /// Why `commit_text_edit` does not canonicalise. A command that rewrites the
-    /// tree commits the open text edit first and then acts on a path taken
-    /// before that commit; canonicalising in between collapses the emptied node
-    /// away and renumbers every sibling after it, so the command lands
-    /// somewhere else or nowhere.
-    #[test]
-    fn committing_a_text_edit_does_not_renumber_the_command_that_forced_it() {
-        let mut bar = bar_holding("outcome:win and anyone.tier>=8 and map:ocean");
-        let paths = pill_paths(&bar);
-        assert_eq!(paths, vec![vec![0], vec![1], vec![2]]);
-        assert!(open_text_edit(&mut bar, &paths[0]));
-        // Cleared to whitespace, so the commit leaves an empty node in the slot
-        // -- exactly the shape canonicalising would drop.
-        bar.pending = "   ".to_owned();
-
-        with_ui(|ui, caret_id| bar.apply_command(Command::Delete(paths[2].clone()), ui, caret_id));
-        bar.finish_edit();
-
-        assert_eq!(
-            bar.expr,
-            parse_query("anyone.tier>=8").expect("parse"),
-            "the delete missed the pill it named, because the commit before it renumbered the tree"
-        );
-    }
-
-    /// Escape is the one dismissal that is not a commit.
-    #[test]
-    fn escape_discards_a_text_edit_and_keeps_the_term() {
-        let mut bar = bar_holding("anyone.tier>=8");
-        let path = only_pill_path(&bar);
-        assert!(open_text_edit(&mut bar, &path));
-        bar.pending = "anyone.tier>=10".to_owned();
-
-        assert!(!press_escape(&mut bar), "discarding an edit is not a query change");
-        assert!(bar.text_edit_path().is_none());
-        assert_eq!(bar.expr, parse_query("anyone.tier>=8").expect("parse"));
-        assert!(bar.pending.is_empty(), "the discarded text was left in the caret");
-    }
-
-    /// Enter commits, through the same routing the key does.
-    #[test]
-    fn enter_commits_a_text_edit_rather_than_appending_a_second_term() {
-        let mut bar = bar_holding("anyone.tier>=8");
-        let path = only_pill_path(&bar);
-        assert!(open_text_edit(&mut bar, &path));
-        bar.pending = "anyone.tier>=10".to_owned();
-
-        let deps = Deps { history: &[] };
-        let changed = with_ui(|ui, caret_id| bar.apply_nav(Nav::CommitTyped, &[], &deps, ui, caret_id));
-
-        assert!(changed);
-        bar.finish_edit();
-        assert_eq!(bar.expr, parse_query("anyone.tier>=10").expect("parse"), "Enter appended instead of replacing");
-    }
-
-    /// The other commit the spec names: focus leaving the bar. Driven through
-    /// real frames, because the route is `show`'s own unfocused branch.
-    #[test]
-    fn a_text_edit_commits_when_focus_leaves_the_bar() {
-        const WIDTH: f32 = 800.0;
-        let mut harness = Harness::new(parse_query("outcome:win and anyone.tier>=8").expect("parse"), WIDTH);
-        let caret_id = harness.caret_id();
-        harness.ctx.memory_mut(|m| m.request_focus(caret_id));
-        harness.frame(frame_input(WIDTH));
-
-        let path = pill_paths(&harness.bar)[1].clone();
-        assert!(with_ui(|ui, id| harness.bar.begin_text_edit(&path, ui, id)));
-        harness.bar.pending = "anyone.tier>=10".to_owned();
-
-        harness.ctx.memory_mut(egui::Memory::stop_text_input);
-        harness.frame(frame_input(WIDTH));
-
-        assert_eq!(
-            harness.bar.expr,
-            parse_query("outcome:win and anyone.tier>=10").expect("parse"),
-            "blur left the edit uncommitted"
-        );
-        assert!(harness.bar.text_edit_path().is_none());
-    }
-
-    /// The two editors share the caret, so exactly one of them can own it.
-    #[test]
-    fn opening_a_segment_editor_ends_an_open_text_edit() {
-        let mut bar = bar_holding("outcome:win and anyone.tier>=8");
-        let paths = pill_paths(&bar);
-        assert!(open_text_edit(&mut bar, &paths[1]));
-        bar.pending = "anyone.tier>=10".to_owned();
-
-        let click = Command::EditSegment(paths[0].clone(), SegmentRole::Value);
-        let changed = with_ui(|ui, caret_id| bar.apply_command(click, ui, caret_id));
-
-        assert!(changed, "the commit the click forced went unreported");
-        assert!(bar.text_edit_path().is_none(), "both editors were left holding the caret");
-        assert!(bar.editing.is_some(), "the clicked segment must still open");
-        bar.finish_edit();
-        assert_eq!(bar.expr, parse_query("outcome:win and anyone.tier>=10").expect("parse"));
-    }
-
-    /// A double-click the user thought better of leaves the term as it was, and a
-    /// reported change re-runs the search and rewrites the saved query.
-    #[test]
-    fn committing_an_untouched_text_edit_reports_no_change() {
-        let mut bar = bar_holding("outcome:win and anyone.tier>=8");
-        let paths = pill_paths(&bar);
-        assert!(open_text_edit(&mut bar, &paths[1]));
-
-        assert!(!bar.commit_text_edit(), "opening and closing an editor is not a query change");
-        assert_eq!(bar.expr, parse_query("outcome:win and anyone.tier>=8").expect("parse"));
-    }
-
-    /// The dropdown's rows all commit by adding to the tree, which beside the
-    /// term already being edited would leave that term duplicated. Empty rather
-    /// than only hidden, so the keyboard cannot reach one either.
-    #[test]
-    fn a_text_edit_offers_no_dropdown_rows() {
-        let mut bar = caret_bar();
-        bar.set_expr(parse_query("outcome:win").expect("parse"));
-        let path = only_pill_path(&bar);
-        assert!(open_text_edit(&mut bar, &path));
-
-        // Text a caret would rank a list against, so the emptiness is the text
-        // edit's doing and not the needle's.
-        bar.pending = "map".to_owned();
-        bar.reparse_pending();
-        assert!(bar.dropdown_rows().is_empty(), "a row picked here would duplicate the term being edited");
-        assert_eq!(bar.step_highlight(&bar.dropdown_rows(), false), None, "the keyboard reached a row anyway");
-
-        bar.cancel_text_edit();
-        bar.pending = "map".to_owned();
-        bar.reparse_pending();
-        assert!(!bar.dropdown_rows().is_empty(), "the same needle must rank rows once the edit is gone");
-    }
-
-    /// Two clicks on one spot, close enough together that egui reads them as one
-    /// double-click. `predicted_dt` advances a frame by well under the click
-    /// interval, so consecutive frames are within it.
-    fn double_click_input(pos: Pos2, width: f32) -> [egui::RawInput; 2] {
-        [click_input(pos, width), click_input(pos, width)]
-    }
-
-    /// The gesture itself, over a pill whose segments are the click targets, so
-    /// the second click of the double-click lands on the segment the first one
-    /// opened an editor on.
-    #[test]
-    fn double_clicking_a_pills_segment_opens_the_whole_term_as_text() {
-        const WIDTH: f32 = 800.0;
-        let mut harness = Harness::new(parse_query("outcome:win and map:ocean").expect("parse"), WIDTH);
-        harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
-        harness.frame(frame_input(WIDTH));
-
-        // The second pill's own rect. Its centre lies on one of its segments,
-        // which is what makes this the segment route rather than the pill one.
-        let pill = harness.rect_of(harness.id.with(2));
-        assert!(pill.height() > 0.0, "a degenerate pill rect would put the click outside the token it names");
-        for input in double_click_input(pill.center(), WIDTH) {
-            harness.frame(input);
-        }
-
-        assert_eq!(harness.bar.pending, "map:ocean", "the double-click did not seed the term's own text");
-        assert!(harness.bar.text_edit_path().is_some(), "the editor it opened was closed by the same click");
-        assert!(harness.bar.editing.is_none(), "the first click's segment editor was left open behind it");
-    }
-
-    /// The other route to the same gesture: a pill that registers no segments at
-    /// all, so the double-click reaches the pill itself. Free text carries no
-    /// field or operator to click on, and editing it as text is the only way to
-    /// change it.
-    #[test]
-    fn double_clicking_a_pill_with_no_segments_opens_it_as_text() {
-        const WIDTH: f32 = 800.0;
-        let mut harness = Harness::new(parse_query("yamato").expect("parse"), WIDTH);
-        assert!(
-            matches!(harness.bar.expr, Expr::Leaf(MatchTerm::FreeText(_))),
-            "the fixture must be the pill that registers no segments: {:?}",
-            harness.bar.expr
-        );
-        harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
-        harness.frame(frame_input(WIDTH));
-
-        let pill = harness.rect_of(harness.id.with(0));
-        for input in double_click_input(pill.center(), WIDTH) {
-            harness.frame(input);
-        }
-
-        assert_eq!(harness.bar.pending, "yamato");
-        assert!(harness.bar.text_edit_path().is_some(), "the click that opened the editor also closed it");
-    }
-
-    /// The edit happens where the pill is. Left at the end of the bar, the text
-    /// appears hundreds of pixels from the pill it came from, the pill is still
-    /// drawn unchanged beside it, the selection is cleared and no popup opens --
-    /// every channel that could say "this pill is being edited" is off at once,
-    /// and the reading left is that the double-click did nothing.
-    #[test]
-    fn a_text_edit_is_typed_where_its_pill_was() {
-        const WIDTH: f32 = 800.0;
-        let mut harness = Harness::new(parse_query("outcome:win and map:ocean and map:north").expect("parse"), WIDTH);
-        harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
-        harness.frame(frame_input(WIDTH));
-
-        // The middle pill: something is drawn on either side of it, so a caret
-        // that took its slot is neither the first token nor the last.
-        let pill = harness.rect_of(harness.id.with(2));
-        let trailing = harness.rect_of(harness.caret_id());
-        assert!(
-            trailing.left() > pill.right(),
-            "the fixture must start with the caret after the last pill: caret {trailing:?}, pill {pill:?}"
-        );
-
-        for input in double_click_input(pill.center(), WIDTH) {
-            harness.frame(input);
-        }
-        assert_eq!(harness.bar.pending, "map:ocean");
-        // Two quiet frames: the editor opens while the frame that opened it is
-        // already laid out, so the caret takes the pill's slot on the frame
-        // after, and `read_response` reports the pass before the last one.
-        harness.frame(frame_input(WIDTH));
-        harness.frame(frame_input(WIDTH));
-
-        let caret = harness.rect_of(harness.caret_id());
-        assert!(
-            caret.left() < pill.right(),
-            "the caret stayed at the end of the bar, {} px right of the pill it is editing",
-            caret.left() - pill.right()
-        );
-        assert!(
-            (caret.left() - pill.left()).abs() < 2.0,
-            "the caret did not take the pill's own slot: caret {caret:?}, pill {pill:?}"
-        );
-
-        let (stream, _) = harness.bar.stream();
-        assert!(
-            !stream.iter().any(|token| matches!(token.kind, TokenKind::Pill { .. }) && token.path == vec![1]),
-            "the pill is still drawn beside the editor for it: {stream:#?}"
-        );
-        assert_eq!(
-            stream.iter().filter(|token| matches!(token.kind, TokenKind::Caret)).count(),
-            1,
-            "the bar was left with two text fields: {stream:#?}"
-        );
-        // The pills either side are still drawn, so the term is edited in place
-        // rather than the rest of the query being displaced around it. The tree
-        // still holds all three; only the one being edited stops being painted.
-        assert_eq!(select::pill_paths(&stream), vec![vec![0], vec![2]]);
-        assert_eq!(pill_paths(&harness.bar), vec![vec![0], vec![1], vec![2]], "the tree must be untouched");
-    }
-
-    /// A term longer than the caret's own floor still has to be readable where
-    /// its pill was. A fixed-width caret would show a slice of it and scroll the
-    /// rest out of the slot the pill used to fill.
-    ///
-    /// Driven through the harness rather than `with_ui`: `__run_test_ui` lays
-    /// every galley out at zero size, so a width measured there is the floor
-    /// whatever the text says.
-    #[test]
-    fn a_caret_standing_in_for_a_pill_is_as_wide_as_the_term_it_holds() {
-        const WIDTH: f32 = 800.0;
-        let term = "map:averylongmapnamethatneedsitsownroom";
-        let query = format!("outcome:win and {term} and map:north");
-        let mut harness = Harness::new(parse_query(&query).expect("parse"), WIDTH);
-        harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
-        harness.frame(frame_input(WIDTH));
-
-        let pill = harness.rect_of(harness.id.with(2));
-        assert!(pill.width() > MIN_CARET_WIDTH, "the fixture's term must be wider than the caret's floor: {pill:?}");
-        for input in double_click_input(pill.center(), WIDTH) {
-            harness.frame(input);
-        }
-        harness.frame(frame_input(WIDTH));
-        harness.frame(frame_input(WIDTH));
-        assert_eq!(harness.bar.pending, term);
-
-        let caret = harness.rect_of(harness.caret_id());
-        assert!(caret.width() > MIN_CARET_WIDTH, "the caret was clipped to its floor: {caret:?}, pill {pill:?}");
-    }
-
-    /// The cell the caret is given is what the `TextEdit` scrolls its text
-    /// inside. A cell past the bar's right edge is clipped by the panel around
-    /// the bar instead, so a term longer than the bar would be typed blind.
-    #[test]
-    fn a_text_edit_longer_than_the_bar_stays_inside_it() {
-        const WIDTH: f32 = 300.0;
-        let mut harness = Harness::new(parse_query("outcome:win and map:ocean and map:north").expect("parse"), WIDTH);
-        harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
-        harness.frame(frame_input(WIDTH));
-
-        let bar = harness.rect_of(harness.id.with("background"));
-        let pill = harness.rect_of(harness.id.with(2));
-        for input in double_click_input(pill.center(), WIDTH) {
-            harness.frame(input);
-        }
-        harness.bar.pending = "map:areplacementnamefarlongerthanthebaritselfcanshow".to_owned();
-        harness.frame(frame_input(WIDTH));
-        harness.frame(frame_input(WIDTH));
-
-        let caret = harness.rect_of(harness.caret_id());
-        assert!(
-            caret.right() <= bar.right() + 1.0,
-            "the caret ran {} px past the bar's right edge: caret {caret:?}, bar {bar:?}",
-            caret.right() - bar.right()
-        );
-        assert!(caret.width() > 0.0, "the caret was clamped away entirely: {caret:?}");
-    }
-
-    /// Opening an editor must not shuffle the rest of the query. A pill's width
-    /// includes per-segment widening and the gaps between segments, so a caret
-    /// measured against the plain text alone is narrower than the pill it
-    /// replaced and everything after it slides left, then back again on commit.
-    #[test]
-    fn opening_a_text_edit_does_not_move_the_tokens_after_it() {
-        const WIDTH: f32 = 800.0;
-        let mut harness = Harness::new(parse_query("outcome:win and map:ocean and map:north").expect("parse"), WIDTH);
-        harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
-        // Two frames, so both measurements are taken with the bar already
-        // focused: the focused frame is drawn differently and would otherwise
-        // account for part of the difference.
-        harness.frame(frame_input(WIDTH));
-        harness.frame(frame_input(WIDTH));
-
-        let pill = harness.rect_of(harness.id.with(2));
-        let after = harness.rect_of(harness.id.with(4));
-        assert!(after.left() > pill.right(), "the fixture must draw a pill after the one being edited");
-
-        for input in double_click_input(pill.center(), WIDTH) {
-            harness.frame(input);
-        }
-        harness.frame(frame_input(WIDTH));
-        harness.frame(frame_input(WIDTH));
-        assert_eq!(harness.bar.pending, "map:ocean");
-
-        let moved = harness.rect_of(harness.id.with(4));
-        assert!(
-            (moved.left() - after.left()).abs() < 1.0,
-            "the query jumped {} px sideways when the editor opened: {after:?} -> {moved:?}",
-            moved.left() - after.left()
-        );
-    }
-
-    /// Selection spans the whole query. The drawn stream omits the pill under a
-    /// text edit, so a range taken off it silently drops that term -- and the
-    /// group or delete the user reaches for next then acts on fewer terms than
-    /// they highlighted.
-    #[test]
-    fn a_range_selection_spans_a_term_being_edited_as_text() {
-        let mut bar = bar_holding("outcome:win and map:ocean and map:north");
-        let paths = pill_paths(&bar);
-        assert_eq!(paths, vec![vec![0], vec![1], vec![2]]);
-        assert!(open_text_edit(&mut bar, &paths[1]));
-
-        with_ui(|ui, caret_id| {
-            bar.apply_command(Command::SelectOnly(paths[0].clone()), ui, caret_id);
-            bar.apply_command(Command::SelectRange(paths[2].clone()), ui, caret_id);
-        });
-
-        assert_eq!(bar.selection.nodes, paths, "the term being edited was dropped out of the range");
-        assert!(select::can_group(&bar.expr, &bar.selection), "the selection the user made must still be groupable");
-    }
-
-    /// A caret that moved into a pill's slot has to be the caret the `on_caret`
-    /// test asks about, or clicking inside it reads as a click on the background
-    /// and commits the edit.
-    ///
-    /// The click lands in the caret's row band but **below** the `TextEdit`
-    /// itself. A point the widget covers proves nothing here: the widget is
-    /// registered after `background` and wins the hit test, so `background`
-    /// never reports a click and the guard is never reached. The band is the
-    /// caret's laid-out cell undone by `ROW_PAD_Y`, which is exactly the strip
-    /// that does reach `background`.
-    #[test]
-    fn clicking_into_a_text_edit_does_not_commit_it() {
-        const WIDTH: f32 = 800.0;
-        let mut harness = Harness::new(parse_query("outcome:win and map:ocean and map:north").expect("parse"), WIDTH);
-        harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
-        harness.frame(frame_input(WIDTH));
-
-        let pill = harness.rect_of(harness.id.with(2));
-        for input in double_click_input(pill.center(), WIDTH) {
-            harness.frame(input);
-        }
-        harness.bar.pending = "map:tears".to_owned();
-        // As above: one frame to lay the caret out in the pill's slot, one
-        // because `read_response` reports the pass before the last.
-        harness.frame(frame_input(WIDTH));
-        harness.frame(frame_input(WIDTH));
-
-        let caret = harness.rect_of(harness.caret_id());
-        assert!(caret.height() > 0.0, "a degenerate caret rect would put the click outside the row it names");
-        harness.frame(click_input(Pos2::new(caret.center().x, caret.max.y + 1.0), WIDTH));
-
-        assert_eq!(harness.bar.pending, "map:tears", "the text being edited was thrown away by a click into it");
-        assert!(harness.bar.text_edit_path().is_some(), "clicking the text closed the editor it belongs to");
-    }
-
-    /// Runs `consume_navigation` over one key press, through a real context so
-    /// the key is read the way a frame reads it.
-    fn nav_for_key(bar: &QueryBar, key: Key) -> Option<Nav> {
-        let ctx = egui::Context::default();
-        let mut input = frame_input(800.0);
-        input.events.push(egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: Modifiers::NONE,
-        });
-        let mut out = None;
-        let _ = ctx.run_ui(input, |ui| out = bar.consume_navigation(ui));
-        out
-    }
-
-    /// While a text edit owns the caret, the keys that navigate the pill stream
-    /// have to leave it alone: the caret is that editor's buffer, not a place in
-    /// a query being typed.
-    #[test]
-    fn a_text_edit_keeps_the_arrow_keys_off_the_pill_stream() {
-        let mut bar = bar_holding("outcome:win and anyone.tier>=8");
-        bar.caret_at_start = true;
-        assert!(
-            matches!(nav_for_key(&bar, Key::ArrowLeft), Some(Nav::Step { back: true, .. })),
-            "the fixture must be a caret the key would step from"
-        );
-
-        let paths = pill_paths(&bar);
-        assert!(open_text_edit(&mut bar, &paths[1]));
-        bar.caret_at_start = true;
-        let nav = nav_for_key(&bar, Key::ArrowLeft);
-        assert!(nav.is_none(), "an arrow inside a text edit moved the pill selection: {nav:?}");
-    }
-
-    /// The rows a text edit does not show are also rows nothing should fetch.
-    #[test]
-    fn a_text_edit_asks_for_no_value_lookups() {
-        let mut plain = caret_bar();
-        plain.pending = "enemy.ship=yam".to_owned();
-        plain.reparse_pending();
-        let wanted = plain.pending_request.take().expect("the fixture text must be text that would fetch");
-
-        let mut bar = bar_holding("enemy.ship=0");
-        let path = only_pill_path(&bar);
-        assert!(open_text_edit(&mut bar, &path));
-        bar.pending = "enemy.ship=yam".to_owned();
-        bar.reparse_pending();
-
-        assert!(bar.pending_request.is_none(), "a text edit asked for {wanted:?}, which it shows nowhere");
+        assert_eq!(dismissed, Dismissal::default(), "a snapshot already matching the tree must report nothing");
+        assert_eq!(bar.expr, win(), "the tree must be untouched");
+        assert!(bar.editing.is_none(), "the editor still closes");
     }
 }
