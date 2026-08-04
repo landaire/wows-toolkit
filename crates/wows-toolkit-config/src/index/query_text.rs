@@ -592,7 +592,7 @@ fn parse_roster_value(kind: ValueKind, raw: &str) -> Option<Value> {
     }
 }
 
-fn enumerable_roster_values(kind: ValueKind) -> Option<Vec<String>> {
+pub fn enumerable_roster_values(kind: ValueKind) -> Option<Vec<String>> {
     match kind {
         ValueKind::Relation => Some(vec!["self".into(), "ally".into(), "enemy".into()]),
         ValueKind::Division => Some(DivisionScope::ALL.iter().map(|d| d.as_token().to_string()).collect()),
@@ -902,7 +902,7 @@ fn unquote(s: &str) -> String {
 
 /// The accepted values for an enum-valued kind, so a `BadValue` error can tell
 /// the user what would have worked. `None` for open kinds like text.
-fn enumerable_values(kind: ValueKind) -> Option<Vec<String>> {
+pub fn enumerable_values(kind: ValueKind) -> Option<Vec<String>> {
     match kind {
         ValueKind::Outcome => Some(
             [MatchOutcome::Win, MatchOutcome::Loss, MatchOutcome::Draw, MatchOutcome::Unknown]

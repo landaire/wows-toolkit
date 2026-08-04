@@ -15,8 +15,16 @@ use crate::db::index::query_ast::RosterTerm;
 use crate::db::index::query_ast::ShipClass;
 use crate::db::index::query_ast::Value;
 use crate::db::index::query_ast::ValueKind;
+use crate::db::index::query_text;
+use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::VehicleRelation;
+use crate::ui::query_bar::label::bool_label;
+use crate::ui::query_bar::label::class_label;
+use crate::ui::query_bar::label::division_label;
 use crate::ui::query_bar::label::match_field_label;
+use crate::ui::query_bar::label::op_label;
+use crate::ui::query_bar::label::outcome_label;
+use crate::ui::query_bar::label::relation_label;
 use crate::ui::query_bar::label::roster_field_label;
 
 #[derive(Debug, Clone)]
@@ -538,6 +546,89 @@ pub struct ValueOption {
     pub token: String,
 }
 
+/// Distinguishes a match-level field from a roster field so one function can
+/// serve both without the caller unpacking which kind it has.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TermField {
+    Match(MatchField),
+    Roster(RosterField),
+}
+
+/// One row of the operator segment's dropdown: an operator the field's
+/// grammar accepts, paired with the same label a committed pill shows for it.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, PartialEq)]
+pub struct OperatorOption {
+    pub op: Op,
+    pub label: String,
+}
+
+/// The operators a segment's operator dropdown may offer, in the field's own
+/// `allowed_ops` order. Never a superset: an operator absent here is
+/// unreachable by clicking, which is what keeps the grammar's per-field
+/// restrictions enforced at the UI boundary rather than only at parse time.
+///
+/// No production caller yet: the segmented pill UI that wires this up is a
+/// later task.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn operator_options(field: TermField) -> Vec<OperatorOption> {
+    let allowed = match field {
+        TermField::Match(f) => f.allowed_ops(),
+        TermField::Roster(f) => f.allowed_ops(),
+    };
+    allowed.iter().map(|&op| OperatorOption { op, label: op_label(op) }).collect()
+}
+
+/// Every suggestion the filter segment's dropdown can show: presets and both
+/// field levels. Reuses `static_suggestions` rather than a second table, so a
+/// field added there reaches this dropdown too.
+///
+/// No production caller yet: the segmented pill UI that wires this up is a
+/// later task.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn filter_options() -> Vec<Suggestion> {
+    static_suggestions()
+}
+
+/// The value segment's autocomplete list for an enum-like kind: every literal
+/// the grammar accepts, with the label shown as a committed pill's value.
+/// `None` for a kind whose values are not a closed set (numbers, text,
+/// timestamps) and for the DB-backed kinds (`Ship`, `Account`, `Source`),
+/// which the value segment resolves through `ValueRequest` instead.
+///
+/// Draws on `enumerable_roster_values` rather than `enumerable_values`: the
+/// roster-only kinds `Relation`, `Division`, and `Class` only appear there.
+///
+/// No production caller yet: the segmented pill UI that wires this up is a
+/// later task.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn enum_values(kind: ValueKind) -> Option<Vec<ValueOption>> {
+    let tokens = query_text::enumerable_roster_values(kind)?;
+    Some(tokens.into_iter().map(|token| ValueOption { label: enum_value_label(kind, &token), token }).collect())
+}
+
+/// The label a value token reads as once committed, matching `label.rs`'s
+/// rendering of the typed `Value` the token parses into. Falls back to the
+/// raw token for a kind `enum_values` never emits, which keeps this total
+/// without a matching arm per future enum kind.
+#[cfg_attr(not(test), allow(dead_code))]
+fn enum_value_label(kind: ValueKind, token: &str) -> String {
+    match kind {
+        ValueKind::Outcome => MatchOutcome::from_db_str(token).map(outcome_label),
+        ValueKind::Bool => match token {
+            "true" => Some(bool_label(true)),
+            "false" => Some(bool_label(false)),
+            _ => None,
+        },
+        ValueKind::Relation => VehicleRelation::from_db_str(token).map(relation_label),
+        ValueKind::Division => DivisionScope::from_token(token).map(division_label),
+        ValueKind::Class => ShipClass::from_token(token).map(class_label),
+        _ => None,
+    }
+    .unwrap_or_else(|| token.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -982,6 +1073,109 @@ mod tests {
             Value::Ship(id) => assert_ne!(id.raw(), 0, "preset {preset_key} carries a placeholder ship id"),
             Value::Account(a) => assert_ne!(a.raw(), 0, "preset {preset_key} carries a placeholder account id"),
             _ => {}
+        }
+    }
+
+    impl Suggestion {
+        fn names_match_field(&self, f: MatchField) -> bool {
+            matches!(self.kind, SuggestionKind::MatchField(field) if field == f)
+        }
+
+        fn names_roster_field(&self, f: RosterField) -> bool {
+            matches!(self.kind, SuggestionKind::RosterField { field, .. } if field == f)
+        }
+
+        fn names_preset(&self, key: &str) -> bool {
+            matches!(self.kind, SuggestionKind::Preset(k) if k == key)
+        }
+    }
+
+    #[test]
+    fn the_operator_source_is_exactly_the_fields_allowed_ops() {
+        // This is what makes an illegal operator unreachable by clicking.
+        for f in MatchField::ALL {
+            let ops = operator_options(TermField::Match(f));
+            let expected: Vec<Op> = f.allowed_ops().to_vec();
+            assert_eq!(ops.iter().map(|o| o.op).collect::<Vec<_>>(), expected, "{f:?}");
+        }
+        for f in RosterField::ALL {
+            let ops = operator_options(TermField::Roster(f));
+            assert_eq!(ops.iter().map(|o| o.op).collect::<Vec<_>>(), f.allowed_ops().to_vec(), "{f:?}");
+        }
+    }
+
+    #[test]
+    fn no_operator_option_is_outside_its_fields_allowed_set() {
+        for f in MatchField::ALL {
+            for o in operator_options(TermField::Match(f)) {
+                assert!(f.allowed_ops().contains(&o.op), "{f:?} offered {:?}", o.op);
+            }
+        }
+        for f in RosterField::ALL {
+            for o in operator_options(TermField::Roster(f)) {
+                assert!(f.allowed_ops().contains(&o.op), "{f:?} offered {:?}", o.op);
+            }
+        }
+    }
+
+    #[test]
+    fn enum_kinds_offer_values_and_scalars_do_not() {
+        for kind in [ValueKind::Outcome, ValueKind::Bool, ValueKind::Relation, ValueKind::Division, ValueKind::Class] {
+            let vs = enum_values(kind).unwrap_or_else(|| panic!("{kind:?} should offer values"));
+            assert!(!vs.is_empty(), "{kind:?} offered an empty list");
+        }
+        for kind in [ValueKind::Int, ValueKind::Float, ValueKind::Timestamp] {
+            assert!(enum_values(kind).is_none(), "{kind:?} must be plain entry");
+        }
+    }
+
+    #[test]
+    fn every_offered_enum_value_parses_back_to_the_same_value() {
+        // A clicked value must be a value the grammar accepts, or committing it
+        // produces text that will not reparse.
+        for f in RosterField::ALL {
+            let Some(options) = enum_values(f.value_kind()) else { continue };
+            for o in options {
+                let src = format!("any({}{}{})", f.name(), leading_op(f.allowed_ops()).unwrap().as_token(), o.token);
+                let parsed = crate::db::index::query_text::parse_query(&src)
+                    .unwrap_or_else(|e| panic!("{src:?} did not parse: {e}"));
+                let printed = crate::db::index::query_text::print_query(&parsed);
+                assert_eq!(
+                    crate::db::index::query_text::parse_query(&printed).unwrap(),
+                    parsed,
+                    "{src:?} printed {printed:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_filter_source_offers_every_field_and_every_preset() {
+        let all = filter_options();
+        for f in MatchField::ALL {
+            assert!(all.iter().any(|s| s.names_match_field(f)), "{f:?} not offered");
+        }
+        for f in RosterField::ALL {
+            assert!(all.iter().any(|s| s.names_roster_field(f)), "{f:?} not offered");
+        }
+        for p in PRESETS {
+            assert!(all.iter().any(|s| s.names_preset(p.key)), "{} not offered", p.key);
+        }
+    }
+
+    /// `enum_values` is keyed on `ValueKind` alone, which is safe only because
+    /// no `MatchField` has a roster-only value kind. If one ever did, a value
+    /// offered for it could be cased for the roster grammar rather than the
+    /// match grammar, and nothing above would catch it: the round-trip test
+    /// iterates `RosterField::ALL` only.
+    #[test]
+    fn no_match_field_has_a_roster_only_value_kind() {
+        for f in MatchField::ALL {
+            let kind = f.value_kind();
+            assert!(
+                !matches!(kind, ValueKind::Relation | ValueKind::Division | ValueKind::Class),
+                "{f:?} has roster-only value kind {kind:?}; enum_values must key on TermField instead"
+            );
         }
     }
 }

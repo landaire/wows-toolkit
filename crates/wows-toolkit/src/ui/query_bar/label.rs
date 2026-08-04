@@ -323,11 +323,11 @@ fn lowercase_first(s: &str) -> String {
     }
 }
 
-fn bool_label(b: bool) -> String {
+pub(crate) fn bool_label(b: bool) -> String {
     if b { t!("ui.search.bool_true") } else { t!("ui.search.bool_false") }.into()
 }
 
-fn outcome_label(o: MatchOutcome) -> String {
+pub(crate) fn outcome_label(o: MatchOutcome) -> String {
     match o {
         MatchOutcome::Win => t!("ui.search.outcome_win"),
         MatchOutcome::Loss => t!("ui.search.outcome_loss"),
@@ -337,7 +337,7 @@ fn outcome_label(o: MatchOutcome) -> String {
     .into()
 }
 
-fn relation_label(r: VehicleRelation) -> String {
+pub(crate) fn relation_label(r: VehicleRelation) -> String {
     match r {
         VehicleRelation::SelfPlayer => t!("ui.search.value.relation_self"),
         VehicleRelation::Ally => t!("ui.search.value.relation_ally"),
@@ -346,7 +346,7 @@ fn relation_label(r: VehicleRelation) -> String {
     .into()
 }
 
-fn division_label(d: DivisionScope) -> String {
+pub(crate) fn division_label(d: DivisionScope) -> String {
     match d {
         DivisionScope::Mine => t!("ui.search.value.division_mine"),
         DivisionScope::Any => t!("ui.search.value.division_any"),
@@ -355,7 +355,7 @@ fn division_label(d: DivisionScope) -> String {
     .into()
 }
 
-fn class_label(c: ShipClass) -> String {
+pub(crate) fn class_label(c: ShipClass) -> String {
     match c {
         ShipClass::AirCarrier => t!("ui.search.value.class_air_carrier"),
         ShipClass::Battleship => t!("ui.search.value.class_battleship"),
