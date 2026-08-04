@@ -17,6 +17,11 @@ pub struct LayoutCfg {
     pub indent: f32,
     /// Rows shown before the bar scrolls internally.
     pub max_rows: usize,
+    /// A segment narrower than this widens to it, so a short label like "="
+    /// is still a clickable target.
+    pub min_segment_width: f32,
+    /// Horizontal gap painted between two adjacent segments of one pill.
+    pub segment_gap: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -123,6 +128,45 @@ pub fn lay_out(tokens: &[Token], widths: &[f32], avail: f32, cfg: &LayoutCfg) ->
     LaidOut { placed, group_spans, rows, height: rows as f32 * cfg.row_height, needs_scroll: rows > cfg.max_rows }
 }
 
+/// A segmented pill's total width: each segment widened to at least
+/// `cfg.min_segment_width`, plus `cfg.segment_gap` between every adjacent
+/// pair (a single segment gets no gap, since there is no pair). `lay_out`
+/// still treats the pill as one placeable unit; this only decides how wide
+/// that unit is.
+///
+/// An empty slice cannot arise from `label::pill_segments` (every match on
+/// `MatchTerm` returns at least one segment), but resolves to `0.0` rather
+/// than panicking, since this runs on every keystroke.
+///
+/// No production caller yet: the segmented pill UI that wires this up is a
+/// later task.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn pill_width(segment_widths: &[f32], cfg: &LayoutCfg) -> f32 {
+    let Some((first, rest)) = segment_widths.split_first() else {
+        return 0.0;
+    };
+    let widened: f32 = rest.iter().fold(first.max(cfg.min_segment_width), |acc, w| acc + w.max(cfg.min_segment_width));
+    widened + rest.len() as f32 * cfg.segment_gap
+}
+
+/// (x offset within the pill, width) per segment, in order. Widens and gaps
+/// the same way `pill_width` sums them, so the two never disagree about where
+/// the pill ends; see `pill_width` for the empty-slice decision.
+///
+/// No production caller yet: the segmented pill UI that wires this up is a
+/// later task.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn segment_offsets(segment_widths: &[f32], cfg: &LayoutCfg) -> Vec<(f32, f32)> {
+    let mut offsets = Vec::with_capacity(segment_widths.len());
+    let mut cursor = 0.0f32;
+    for &w in segment_widths {
+        let width = w.max(cfg.min_segment_width);
+        offsets.push((cursor, width));
+        cursor += width + cfg.segment_gap;
+    }
+    offsets
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,7 +174,7 @@ mod tests {
     use crate::ui::query_bar::tokens::TokenKind;
 
     fn cfg() -> LayoutCfg {
-        LayoutCfg { row_height: 20.0, gap: 4.0, indent: 8.0, max_rows: 6 }
+        LayoutCfg { row_height: 20.0, gap: 4.0, indent: 8.0, max_rows: 6, min_segment_width: 0.0, segment_gap: 4.0 }
     }
     fn tok(kind: TokenKind, depth: usize) -> Token {
         Token { kind, path: vec![], depth }
@@ -305,5 +349,79 @@ mod tests {
         let a = lay_out(&toks, &widths, 200.0, &cfg());
         let b = lay_out(&toks, &widths, 200.0, &cfg());
         assert_eq!(a.placed, b.placed);
+    }
+
+    #[test]
+    fn a_pills_width_is_its_segments_plus_the_gaps() {
+        let c = LayoutCfg { min_segment_width: 0.0, segment_gap: 4.0, ..cfg() };
+        assert!((pill_width(&[30.0, 20.0, 40.0], &c) - (30.0 + 20.0 + 40.0 + 8.0)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn a_narrow_segment_is_widened_to_the_minimum() {
+        // "=" must still be a clickable target.
+        let c = LayoutCfg { min_segment_width: 16.0, segment_gap: 0.0, ..cfg() };
+        assert!((pill_width(&[30.0, 4.0, 40.0], &c) - (30.0 + 16.0 + 40.0)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn segment_offsets_do_not_overlap_and_fill_the_pill() {
+        let c = LayoutCfg { min_segment_width: 16.0, segment_gap: 4.0, ..cfg() };
+        let widths = [30.0, 4.0, 40.0];
+        let offsets = segment_offsets(&widths, &c);
+        assert_eq!(offsets.len(), widths.len());
+        for pair in offsets.windows(2) {
+            assert!(pair[1].0 >= pair[0].0 + pair[0].1, "segments overlap: {offsets:?}");
+        }
+        let last = offsets.last().unwrap();
+        assert!((last.0 + last.1 - pill_width(&widths, &c)).abs() < f32::EPSILON, "offsets do not fill the pill");
+    }
+
+    #[test]
+    fn a_two_segment_pill_is_narrower_than_a_three_segment_one() {
+        let c = LayoutCfg { min_segment_width: 16.0, segment_gap: 4.0, ..cfg() };
+        assert!(pill_width(&[30.0, 20.0], &c) < pill_width(&[30.0, 20.0, 40.0], &c));
+    }
+
+    #[test]
+    fn an_oversized_pill_still_gets_its_own_row() {
+        // The existing rule for any token wider than the bar must survive.
+        let toks = pills(2);
+        let widths = vec![9999.0, 9999.0, 10.0];
+        let out = lay_out(&toks, &widths, 100.0, &cfg());
+        assert_eq!(out.placed.len(), toks.len());
+        assert_eq!(out.placed[0].row, 0);
+    }
+
+    #[test]
+    fn a_lone_segment_has_no_gap_and_takes_its_own_width() {
+        let c = LayoutCfg { min_segment_width: 0.0, segment_gap: 4.0, ..cfg() };
+        assert!((pill_width(&[30.0], &c) - 30.0).abs() < f32::EPSILON);
+        assert_eq!(segment_offsets(&[30.0], &c), vec![(0.0, 30.0)]);
+    }
+
+    #[test]
+    fn an_empty_pill_has_zero_width_and_no_segments_rather_than_panicking() {
+        let c = cfg();
+        assert_eq!(pill_width(&[], &c), 0.0);
+        assert_eq!(segment_offsets(&[], &c), Vec::new());
+    }
+
+    /// The property `segment_offsets` and `pill_width` must never drift apart
+    /// on: the last segment's right edge is exactly the pill's own width.
+    /// Verified to fail if either is changed independently of the other --
+    /// see task-5-report.md for the induced-failure transcript.
+    #[test]
+    fn segment_offsets_and_pill_width_agree_on_where_the_pill_ends() {
+        let c = LayoutCfg { min_segment_width: 12.0, segment_gap: 5.0, ..cfg() };
+        for widths in [vec![30.0], vec![30.0, 4.0], vec![30.0, 4.0, 40.0], vec![5.0, 5.0, 5.0, 5.0]] {
+            let offsets = segment_offsets(&widths, &c);
+            let last = offsets.last().unwrap();
+            assert!(
+                (last.0 + last.1 - pill_width(&widths, &c)).abs() < f32::EPSILON,
+                "segment_offsets and pill_width disagree for {widths:?}: {offsets:?} vs {}",
+                pill_width(&widths, &c)
+            );
+        }
     }
 }

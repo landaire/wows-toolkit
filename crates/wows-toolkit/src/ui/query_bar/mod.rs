@@ -58,6 +58,9 @@ use crate::ui::theme::semantic::SemanticExt;
 const MAX_ROWS: usize = 6;
 const ROW_GAP: f32 = 4.0;
 const DEPTH_INDENT: f32 = 10.0;
+/// Gap painted between two adjacent segments of one pill. Tighter than
+/// `ROW_GAP` because it divides one term rather than separating two.
+const SEGMENT_GAP: f32 = 2.0;
 /// Vertical inset applied to a token inside its layout row, so pills on
 /// adjacent rows do not touch.
 const ROW_PAD_Y: f32 = 2.0;
@@ -249,6 +252,10 @@ impl QueryBar {
             gap: ROW_GAP,
             indent: DEPTH_INDENT,
             max_rows: MAX_ROWS,
+            // Egui's own minimum interactive width, so a one-character
+            // operator segment like "=" is still a clickable target.
+            min_segment_width: ui.spacing().interact_size.x,
+            segment_gap: SEGMENT_GAP,
         };
         let full_width = ui.available_width();
         let mut laid = lay_out(tokens, &widths, full_width, &cfg);
