@@ -220,9 +220,10 @@ fn apply_op(allowed: &[Op], current: &mut Op, value: &mut Value, op: Op) -> bool
 }
 
 /// Changes the field of the term at `path`, re-deriving its operator and
-/// value so the term stays legal for the new field. Reports whether the path
-/// addressed a field term, so a caller does not report an edit that did not
-/// happen.
+/// value so the term stays legal for the new field. Reports whether the field
+/// actually changed: `false` both when `path` does not address a field term
+/// and when it does but `field`'s kind (`Match` vs `Roster`) does not match
+/// what is there, so a caller does not report an edit that did not happen.
 ///
 /// The operator is kept when the new field still allows it; otherwise it is
 /// replaced by that field's own equality spelling, chosen by class through
@@ -236,6 +237,10 @@ fn apply_op(allowed: &[Op], current: &mut Op, value: &mut Value, op: Op) -> bool
 /// read it as "the user has not chosen a value yet". A caller that needs to
 /// know whether the value was reset compares the old and new field's own
 /// `value_kind()` rather than inspecting what landed here.
+///
+/// No production caller yet: the segmented pill UI that wires this up is a
+/// later task.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn set_field(expr: &mut MatchExpr, path: &NodePath, field: TermField) -> bool {
     let Some((term, rest)) = split_at_leaf_mut(expr, path) else {
         return false;
@@ -260,6 +265,7 @@ pub fn set_field(expr: &mut MatchExpr, path: &NodePath, field: TermField) -> boo
 
 /// Brings an operator/value pair back into a field's own rules after the
 /// field itself changed underneath them.
+#[cfg_attr(not(test), allow(dead_code))]
 fn reconcile_term(op: &mut Op, value: &mut Value, allowed: &'static [Op], kind: ValueKind) {
     if !allowed.contains(op) {
         *op = equality_op(allowed);
@@ -275,6 +281,7 @@ fn reconcile_term(op: &mut Op, value: &mut Value, allowed: &'static [Op], kind: 
 /// `seed::seed_op` picks one for its `Wanted::Equality`: the class-correct
 /// spellings are tried first, and the field's own list is the fallback, so a
 /// field this preference list misses still gets something it allows.
+#[cfg_attr(not(test), allow(dead_code))]
 fn equality_op(allowed: &'static [Op]) -> Op {
     const PREFERRED: [Op; 3] = [Op::Is, Op::Equals, Op::Eq];
     PREFERRED
@@ -287,6 +294,7 @@ fn equality_op(allowed: &'static [Op]) -> Op {
 
 /// The `ValueKind` a `Value` carries, or `None` for `NoOperand`, which is not
 /// in any kind's family.
+#[cfg_attr(not(test), allow(dead_code))]
 fn value_kind_of(value: &Value) -> Option<ValueKind> {
     match value {
         Value::Text(_) => Some(ValueKind::Text),
@@ -311,6 +319,16 @@ fn value_kind_of(value: &Value) -> Option<ValueKind> {
 /// for an enum. This is an arbitrary in-kind value, never a sentinel for
 /// "absent" -- `Outcome`'s placeholder is `Win`, a value a user can also
 /// choose on purpose, so nothing may treat it as meaning "unchosen".
+///
+/// `suggest::no_preset_carries_a_placeholder_value` asserts the opposite for
+/// a preset's `Value::Ship`/`Value::Account`: no zero id there. The two do
+/// not contradict. A preset is a complete, shipped tree, so a zero id in one
+/// would be a resting bug the user could commit unchanged. A `Ship` or
+/// `Account` placeholder minted here exists only inside a live edit: changing
+/// to an entity-kind field always changes `value_kind()`, which is Task 7's
+/// signal to open the value editor immediately, so the zero id is never a
+/// resting state a query can be committed or saved with.
+#[cfg_attr(not(test), allow(dead_code))]
 fn placeholder_value(kind: ValueKind) -> Value {
     match kind {
         ValueKind::Text => Value::Text(String::new()),
@@ -1258,15 +1276,118 @@ mod tests {
                 let op = from.allowed_ops()[0];
                 let value = if op.is_nullary() { Value::NoOperand } else { sample_value(from.value_kind()) };
                 let mut e: MatchExpr = Expr::Leaf(MatchTerm::Field(from, op, value));
-                set_field(&mut e, &vec![], TermField::Match(to));
+                assert!(set_field(&mut e, &vec![], TermField::Match(to)), "{from:?} -> {to:?} did not report a change");
                 match &e {
                     Expr::Leaf(MatchTerm::Field(f, op, _)) => {
+                        assert_eq!(*f, to, "{from:?} -> {to:?} did not change the field");
                         assert!(f.allowed_ops().contains(op), "{from:?} -> {to:?} gave illegal {op:?}");
                     }
                     other => panic!("{from:?} -> {to:?} gave {other:?}"),
                 }
                 let printed = print_query(&e);
                 assert_eq!(parse_query(&printed).unwrap(), e, "{from:?} -> {to:?} printed {printed:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_roster_field_pair_leaves_a_legal_term_that_round_trips() {
+        // The roster-level mirror of the exhaustive match-field test above:
+        // `TermField::Roster` is the other half of `set_field` and the only
+        // route to `ValueKind::Float`, `Relation`, `Division`, `Class`,
+        // `Ship`, and `Account`. Covers both a root-path roster pill (the
+        // roster analogue of the match-level root-leaf trap: the whole tree
+        // is one `Leaf(MatchTerm::Roster { .. })` with no parent to look up)
+        // and a nested one, addressed one step into a compound predicate
+        // alongside a sibling that must survive untouched.
+        use crate::db::index::query_ast::RosterField;
+        use crate::db::index::query_ast::RosterTerm;
+        use crate::db::index::query_text::parse_query;
+        use crate::db::index::query_text::print_query;
+
+        for from in RosterField::ALL {
+            for to in RosterField::ALL {
+                let op = from.allowed_ops()[0];
+                let value = if op.is_nullary() { Value::NoOperand } else { sample_value(from.value_kind()) };
+
+                let mut root: MatchExpr = Expr::Leaf(MatchTerm::Roster {
+                    quant: Quant::Any,
+                    pred: Expr::Leaf(RosterTerm { field: from, op, value: value.clone() }),
+                });
+                assert!(
+                    set_field(&mut root, &vec![], TermField::Roster(to)),
+                    "{from:?} -> {to:?} at the root did not report a change"
+                );
+                match &root {
+                    Expr::Leaf(MatchTerm::Roster { pred: Expr::Leaf(term), .. }) => {
+                        assert_eq!(term.field, to, "{from:?} -> {to:?} at the root did not change the field");
+                        assert!(
+                            term.field.allowed_ops().contains(&term.op),
+                            "{from:?} -> {to:?} at the root gave illegal {:?}",
+                            term.op
+                        );
+                    }
+                    other => panic!("{from:?} -> {to:?} at the root gave {other:?}"),
+                }
+                let printed = print_query(&root);
+                assert_eq!(parse_query(&printed).unwrap(), root, "{from:?} -> {to:?} at the root printed {printed:?}");
+
+                let sibling = RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) };
+                let mut nested: MatchExpr = Expr::Leaf(MatchTerm::Roster {
+                    quant: Quant::Any,
+                    pred: Expr::All(vec![
+                        Expr::Leaf(sibling.clone()),
+                        Expr::Leaf(RosterTerm { field: from, op, value }),
+                    ]),
+                });
+                assert!(
+                    set_field(&mut nested, &vec![1], TermField::Roster(to)),
+                    "{from:?} -> {to:?} nested did not report a change"
+                );
+                match &nested {
+                    Expr::Leaf(MatchTerm::Roster { pred: Expr::All(cs), .. }) => {
+                        assert_eq!(cs[0], Expr::Leaf(sibling), "{from:?} -> {to:?} nested changed its sibling");
+                        match &cs[1] {
+                            Expr::Leaf(term) => {
+                                assert_eq!(term.field, to, "{from:?} -> {to:?} nested did not change the field");
+                                assert!(
+                                    term.field.allowed_ops().contains(&term.op),
+                                    "{from:?} -> {to:?} nested gave illegal {:?}",
+                                    term.op
+                                );
+                            }
+                            other => panic!("{from:?} -> {to:?} nested gave {other:?}"),
+                        }
+                    }
+                    other => panic!("{from:?} -> {to:?} nested gave {other:?}"),
+                }
+                let printed = print_query(&nested);
+                assert_eq!(parse_query(&printed).unwrap(), nested, "{from:?} -> {to:?} nested printed {printed:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn changing_the_field_off_a_nullary_operator_keeps_the_nullary_invariant() {
+        // Build's IsSet is the only nullary operator any MatchField allows.
+        // Every other field forbids it, so the operator is replaced and the
+        // value must stop being NoOperand; retargeting to Build itself keeps
+        // both. Looping over every field pins the invariant both ways:
+        // nullary implies NoOperand, non-nullary must not carry it.
+        for to in MatchField::ALL {
+            let mut e: MatchExpr = Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::IsSet, Value::NoOperand));
+            assert!(set_field(&mut e, &vec![], TermField::Match(to)), "Build -> {to:?} did not report a change");
+            match &e {
+                Expr::Leaf(MatchTerm::Field(f, op, v)) => {
+                    assert_eq!(*f, to);
+                    assert!(f.allowed_ops().contains(op), "{to:?} does not allow {op:?}");
+                    if op.is_nullary() {
+                        assert_eq!(*v, Value::NoOperand, "{to:?}: a nullary operator must carry NoOperand");
+                    } else {
+                        assert_ne!(*v, Value::NoOperand, "{to:?}: {op:?} is not nullary but kept NoOperand");
+                    }
+                }
+                other => panic!("got {other:?}"),
             }
         }
     }
