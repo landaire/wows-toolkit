@@ -702,8 +702,10 @@ impl QueryBar {
     /// pill and selects it, rather than landing on a target that could not act.
     ///
     /// `boxed` names the segment an inline box has taken over, which registers
-    /// nothing: the `TextEdit` filling it is the target there, and a second one
-    /// under it would be a click on the text reading as a click on the pill.
+    /// nothing. Insurance rather than a live guard: the box's `TextEdit` is
+    /// built after this and wins the hit test either way, so removing the skip
+    /// changes nothing the suite can see. It is kept so the box's target stays
+    /// the box's alone rather than resting on widget ordering elsewhere.
     fn segment_interaction(
         &self,
         ui: &Ui,
@@ -1580,11 +1582,15 @@ impl QueryBar {
         let Some(inline) = edit.inline else {
             return false;
         };
+        // A box the user left spelled the way they found it changed nothing, and
+        // a reported change re-runs the search, rewrites the saved query, and
+        // clears whatever the same click selected.
+        let same = select::term_at(&self.expr, &edit.path).is_some_and(|(_, _, current)| *current == value);
         if !select::commit_value(&mut self.expr, &inline.leaf, &inline.seed, &inline.tail, value) {
             return self.end_segment_edit().restored;
         }
         self.commit_segment_edit();
-        true
+        !same
     }
 
     /// Marks a literal the field cannot read, spanning that literal rather than
@@ -3583,20 +3589,27 @@ mod tests {
             self.rect_of(self.caret_id())
         }
 
-        /// How wide the mark under an open box was painted this frame, if it
-        /// was painted at all. Identified by the accent colour on a horizontal
-        /// run, which nothing else in the bar draws: the separator and the
-        /// bracket strokes carry their own colours, and the bar's own focus
-        /// stroke is a frame rather than a line.
-        fn box_rule_width(&self) -> Option<f32> {
-            let accent = self.ctx.options(|options| options.dark_style.visuals.selection.stroke.color);
-            self.shapes.iter().find_map(|clipped| match &clipped.shape {
-                egui::Shape::LineSegment { points: [a, b], stroke }
-                    if stroke.color == accent && (a.y - b.y).abs() < 0.5 =>
-                {
-                    Some((b.x - a.x).abs())
+        /// Whether a frame in the engaged accent was painted around `rect` this
+        /// frame. Matched on the horizontal span, which is what tells the box's
+        /// own frame from the bar's focus border and from a selected pill's
+        /// outline: all three carry the same stroke, and only this one spans one
+        /// segment.
+        ///
+        /// The accent is read off the style actually in force, not off
+        /// `dark_style`. They agree in a default `Context` and part company the
+        /// moment the app installs its own theme, which would make this read a
+        /// colour nothing on screen uses and quietly answer `false` forever.
+        fn is_framed(&self, rect: Rect) -> bool {
+            let theme = self.ctx.theme();
+            let accent = self.ctx.style_of(theme).visuals.selection.stroke.color;
+            self.shapes.iter().any(|clipped| match &clipped.shape {
+                egui::Shape::Rect(shape) => {
+                    shape.stroke.color == accent
+                        && shape.stroke.width > 0.0
+                        && (shape.rect.left() - rect.left()).abs() < 1.0
+                        && (shape.rect.right() - rect.right()).abs() < 1.0
                 }
-                _ => None,
+                _ => false,
             })
         }
 
@@ -3790,16 +3803,27 @@ mod tests {
     /// not merely exist as a function: without it the box is the pill's own fill
     /// with a cursor on it -- `(FIELD|OP|text)` -- which is the state the user
     /// said was not what they asked for.
+    /// Both themes, driven through the project's own styles rather than egui's
+    /// defaults. The accent parts company between the two, so a reader that goes
+    /// to `dark_style` instead of the style in force answers for a colour
+    /// nothing on screen uses -- and answers `false` forever in the light theme
+    /// without ever failing in the dark one.
     #[test]
     fn an_open_box_is_marked_and_a_settled_pill_is_not() {
-        let mut h = bar_with("anyone.tier>=8");
-        assert!(h.box_rule_width().is_none(), "nothing is being typed into, so nothing must be marked");
+        for theme in [egui::Theme::Dark, egui::Theme::Light] {
+            let mut h = bar_with("anyone.tier>=8");
+            crate::ui::theme::install(&h.ctx);
+            h.ctx.set_theme(theme);
+            h.settle();
 
-        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+            let value = h.segment_rect(&vec![], SegmentRole::Value);
+            assert!(!h.is_framed(value), "{theme:?}: nothing is being typed into, so no segment must be framed");
 
-        let rule = h.box_rule_width().expect("an open box must be marked");
-        let width = h.caret_rect().width();
-        assert!(rule >= width - 0.5, "the mark is {rule} wide against a {width}-wide box");
+            h.click(value.center());
+
+            let caret = h.caret_rect();
+            assert!(h.is_framed(caret), "{theme:?}: an open box must be framed: {caret:?}");
+        }
     }
 
     /// A segment beside the box is painted and washed on hover, so it advertises
@@ -3822,6 +3846,33 @@ mod tests {
             "the operator segment beside the box opened no editor"
         );
         assert!(h.bar.dropdown_rows().iter().all(|row| matches!(row, Row::Operator(_))), "not the operator's list");
+    }
+
+    /// The pill keeps its own controls while its box is open, which is the third
+    /// of the three things registering the boxed pill's targets restores -- the
+    /// segments beside the box, the pill's menu, and this.
+    ///
+    /// A click on the gap between two segments belongs to neither of them and is
+    /// where the separator is drawn, so on a settled pill it selects the pill.
+    /// It has to do the same while a box is open, or the pill silently loses its
+    /// selection, and with it the toolbar's group, negate, and delete.
+    #[test]
+    fn the_pill_holding_the_box_is_still_selectable() {
+        let mut h = bar_with("anyone.tier>=8");
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+        assert!(h.inline_edit_open(), "the fixture must start with the box open");
+
+        let filter = h.segment_rect(&vec![], SegmentRole::Filter);
+        let operator = h.segment_rect(&vec![], SegmentRole::Operator);
+        let gap = Pos2::new(filter.right().midpoint(operator.left()), filter.center().y);
+        assert!(
+            !filter.contains(gap) && !operator.contains(gap),
+            "the click must land in the gap, which belongs to the pill: {gap:?} between {filter:?} and {operator:?}"
+        );
+
+        h.click(gap);
+
+        assert_eq!(h.bar.selection.nodes, vec![Vec::<usize>::new()], "the gap click did not reach the pill");
     }
 
     /// Moving from the box to another segment of the same pill is still moving

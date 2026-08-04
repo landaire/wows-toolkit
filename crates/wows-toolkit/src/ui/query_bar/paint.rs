@@ -40,11 +40,6 @@ const SEGMENT_HOVER_ALPHA: f32 = 0.14;
 /// How thick the line dividing two settled segments of one pill is drawn.
 const SEGMENT_SEPARATOR_WIDTH: f32 = 1.0;
 
-/// How thick the rule under an inline box is drawn. Derived from the separator
-/// rather than stated beside it, so the segment being typed into cannot end up
-/// reading as merely divided from its neighbour.
-const INLINE_BOX_RULE_WIDTH: f32 = 2.0 * SEGMENT_SEPARATOR_WIDTH;
-
 /// How a token reads under the pointer and the current selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenState {
@@ -152,35 +147,38 @@ pub fn pill_surface(cell: Rect, segments: &[Rect]) -> Rect {
     segments.last().map_or(cell, |last| cell.with_max_x(last.right()))
 }
 
-/// The mark that says one segment of a pill is open for typing: the accent rule
-/// a focused control carries, under the segment the box occupies.
+/// The mark that says one segment of a pill is open for typing: a frame around
+/// that segment, in the accent stroke a focused bar and a selected pill already
+/// carry, so "this is the control being engaged" is stated one way throughout.
 ///
 /// Without it the box is the pill's own fill with a cursor blinking on it, which
 /// reads as the committed value rather than as a field -- `(FIELD|OP|text)`
-/// where the whole point of the gesture is `(FIELD|OP|[text])`.
+/// where the whole point of the gesture is `(FIELD|OP|[text])`. A frame is the
+/// closest thing to the brackets that notation draws, and it is what a desktop
+/// text box looks like; an underline alone is the Material idiom.
 ///
-/// A rule rather than a fill, and that is not a stylistic preference. The three
-/// fills a pill can carry span most of the tonal room the theme has for a
-/// surface, in both directions in the light theme, so no single flat tone clears
-/// `SURFACE_CONTRAST_FLOOR` against all of them -- the closest candidate reaches
-/// 1.273 against an idle pill in the dark theme and 1.172 in the light. A fill
-/// nobody can tell from the pill it sits in is no affordance at all, and a
-/// chrome line has room the fill does not:
-/// `the_inline_box_rule_clears_every_pill_fill` measures it.
+/// A frame rather than a fill, for one reason and not the other. The *flat*
+/// tones the palette offers cannot do it: a pill carries three fills, they
+/// straddle any candidate from both sides in the light theme, and the closest
+/// reaches 1.273 against an idle pill in the dark theme and 1.172 in the light
+/// against a floor of 1.3, which
+/// `no_flat_palette_tone_is_tellable_from_every_pill_fill` measures. A
+/// *composited* wash is a different matter and does clear the floor -- the hover
+/// wash beside it is the standing proof -- so it is ruled out on meaning rather
+/// than on contrast: at any strength that reads, a wash over the boxed segment
+/// is the mark that already means "the pointer is over this segment".
 ///
-/// Heavier than `pill_separator`, which divides two settled segments; this one
-/// marks the segment being typed into and has to win against it.
+/// Inside the segment's rect, so the frame lands within the pill rather than
+/// straddling its outer edge, where the corner radius would clip it.
 pub fn inline_box(ui: &Ui, rect: Rect) {
-    let stroke = Stroke::new(INLINE_BOX_RULE_WIDTH, inline_box_rule(ui.visuals()));
-    // Inset by the stroke's own width so the rule sits inside the segment rather
-    // than straddling the pill's lower edge, where the corner radius clips it.
-    let y = rect.bottom() - INLINE_BOX_RULE_WIDTH;
-    ui.painter().line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], stroke);
+    let visuals = ui.visuals();
+    let stroke = Stroke::new(visuals.selection.stroke.width, inline_box_stroke(visuals));
+    ui.painter().rect_stroke(rect, CornerRadius::same(RADIUS), stroke, StrokeKind::Inside);
 }
 
-/// The rule's colour: the same accent a focused bar takes for its own border, so
-/// "this is the control being typed into" is stated one way throughout.
-fn inline_box_rule(visuals: &egui::Visuals) -> Color32 {
+/// The frame's colour, routed through one function so the contrast test measures
+/// what is painted rather than a copy of it.
+fn inline_box_stroke(visuals: &egui::Visuals) -> Color32 {
     visuals.selection.stroke.color
 }
 
@@ -434,15 +432,15 @@ mod tests {
         }
     }
 
-    /// The mark that says a segment is open for typing is drawn on the pill's
-    /// own fill, so like `pill_separator` it has to clear every fill a pill can
-    /// carry. Without it the box was the pill's fill with a cursor on it, which
-    /// is the state the review found and the state the user complained about.
+    /// The frame around an open box is drawn on the pill's own fill, so like
+    /// `pill_separator` it has to clear every fill a pill can carry. Without a
+    /// mark at all the box was the pill's fill with a cursor on it, which is the
+    /// state the review found and the state the user complained about.
     ///
     /// It also has to out-read the separator beside it, or the segment being
     /// typed into looks exactly like the boundary between two settled ones.
     #[test]
-    fn the_inline_box_rule_clears_every_pill_fill() {
+    fn the_inline_box_frame_clears_every_pill_fill() {
         use crate::ui::theme::contrast::CHROME_LINE_FLOOR;
         use crate::ui::theme::contrast::contrast_ratio;
 
@@ -450,31 +448,40 @@ mod tests {
             ("dark", crate::ui::theme::style::dark_style().visuals),
             ("light", crate::ui::theme::style::light_style().visuals),
         ] {
-            let rule = inline_box_rule(&visuals);
+            let frame = inline_box_stroke(&visuals);
             for (fill_name, fill) in [
                 ("inactive", visuals.widgets.inactive.bg_fill),
                 ("hovered", visuals.widgets.hovered.bg_fill),
                 ("selected", visuals.selection.bg_fill),
             ] {
-                let ratio = contrast_ratio(rule, fill);
+                let ratio = contrast_ratio(frame, fill);
                 assert!(
                     ratio >= CHROME_LINE_FLOOR,
-                    "{theme} inline box rule on {fill_name} pill fill is {ratio:.3}, needs {CHROME_LINE_FLOOR}"
+                    "{theme} inline box frame on {fill_name} pill fill is {ratio:.3}, needs {CHROME_LINE_FLOOR}"
                 );
                 assert!(
                     ratio > contrast_ratio(visuals.sem().pill_separator, fill),
-                    "{theme} the rule must out-read the separator on {fill_name} pill fill"
+                    "{theme} the frame must out-read the separator on {fill_name} pill fill"
                 );
             }
         }
     }
 
-    /// Why the mark is a rule and not a fill, recorded as a measurement rather
-    /// than as a claim: a pill's three fills span so much of the theme's tonal
-    /// room -- in both directions in the light theme -- that no flat tone the
-    /// palette offers is tellable from all of them. This walks the candidates
-    /// and asserts the conclusion, so a later attempt to "just fill it" finds
-    /// the reason already stated.
+    /// Half the reason the mark is a frame and not a fill, recorded as a
+    /// measurement rather than as a claim: a pill's three fills span so much of
+    /// the theme's tonal room -- in both directions in the light theme -- that
+    /// no *flat* tone the palette offers is tellable from all of them.
+    ///
+    /// **This is a sweep of flat surfaces and nothing else, and it is not an
+    /// impossibility proof.** A composited wash adapts to the fill it lands on
+    /// and does clear the floor: `segment_hover_wash_clears_every_pill_fill`,
+    /// forty lines above, is a standing existence proof of exactly that, and the
+    /// same alpha over the box measures 1.476/1.463/1.465 in the dark theme and
+    /// 1.361/1.355/1.350 in the light. A wash is ruled out because at any
+    /// strength that reads it is pixel-identical to the mark that already means
+    /// "the pointer is over this segment" -- a collision of meaning, not a wall
+    /// of contrast. An accent frame is a chrome line at the same colour budget
+    /// and clears its own floor comfortably, which is what ships.
     #[test]
     fn no_flat_palette_tone_is_tellable_from_every_pill_fill() {
         use crate::ui::theme::contrast::SURFACE_CONTRAST_FLOOR;
