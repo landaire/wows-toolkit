@@ -233,6 +233,34 @@ pub fn term_at<'a>(expr: &'a MatchExpr, path: &[usize]) -> Option<(TermField, Op
     }
 }
 
+/// The node a path names, over the match tree alone. `None` for a path that
+/// walks past a `Roster` leaf into its predicate, which is a different tree and
+/// carries no `MatchExpr` to hand back.
+pub fn node_at<'a>(expr: &'a MatchExpr, path: &[usize]) -> Option<&'a MatchExpr> {
+    expr_at(expr, path)
+}
+
+/// Replaces the node at `path` with `node`, but only while `expected` is still
+/// what sits there. Reports whether the write took.
+///
+/// A numeric path names a position, not a node, so any rewrite between the
+/// moment a path is taken and the moment it is used can move a different node
+/// under it. Matching against the node the caller started from is what makes the
+/// write land on that node or on nothing at all.
+///
+/// The root is a node like any other here: an empty `path` replaces the whole
+/// tree, with no parent lookup to be absent at.
+pub fn replace_node(expr: &mut MatchExpr, path: &[usize], expected: &MatchExpr, node: MatchExpr) -> bool {
+    let Some(slot) = node_at_mut(expr, path) else {
+        return false;
+    };
+    if slot != expected {
+        return false;
+    }
+    *slot = node;
+    true
+}
+
 /// The path a segment edit acts on, given the path of the pill that was
 /// clicked. `None` for a pill whose segments address no editable term.
 ///
