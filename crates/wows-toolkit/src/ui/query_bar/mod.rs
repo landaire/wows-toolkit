@@ -875,17 +875,19 @@ impl QueryBar {
             return false;
         }
         let rows = self.dropdown_rows();
-        let prompt = self.plain_value_field().map(TermField::label);
+        // A plain value -- a number, a date, free text -- is drawn from no set
+        // the bar could list, so its editor is the box in the pill and nothing
+        // hangs under it. The field it belongs to is named by the segment drawn
+        // beside that box, so a popup here would be a frame under the pill
+        // repeating what the pill already says.
+        if self.plain_value_field().is_some() {
+            return false;
+        }
         // A bar with nothing typed into its active fragment says nothing by
         // staying shut, rather than by reporting that nothing matches an empty
-        // needle. An open segment edit always has something to say -- its own
-        // list, or the name of the field whose value the caret is holding -- so
-        // it never falls into that case.
-        if rows.is_empty()
-            && prompt.is_none()
-            && self.editing.is_none()
-            && suggest::active_fragment(&self.pending).trim().is_empty()
-        {
+        // needle. An open segment edit has a list of its own to show, so it
+        // never falls into that case.
+        if rows.is_empty() && self.editing.is_none() && suggest::active_fragment(&self.pending).trim().is_empty() {
             return false;
         }
         // Typing narrows the list under a highlight that was set against the
@@ -930,16 +932,10 @@ impl QueryBar {
                 let max_width = (bar_rect.width() - overhead).max(0.0);
                 let min_width = anchor.width().max(MIN_CARET_WIDTH).min(max_width);
                 ui.set_width_range(min_width..=max_width);
-                if let Some(prompt) = &prompt {
-                    ui.label(egui::RichText::new(prompt.clone()).color(ui.sem().text_dim));
-                }
                 if rows.is_empty() {
-                    if prompt.is_none() {
-                        ui.label(
-                            egui::RichText::new(t!("ui.search.bar.no_suggestions").into_owned())
-                                .color(ui.sem().text_dim),
-                        );
-                    }
+                    ui.label(
+                        egui::RichText::new(t!("ui.search.bar.no_suggestions").into_owned()).color(ui.sem().text_dim),
+                    );
                     return;
                 }
                 egui::ScrollArea::vertical().max_height(MAX_DROPDOWN_HEIGHT).show(ui, |ui| {
@@ -2256,9 +2252,9 @@ mod tests {
     }
 
     /// A number has no closed set of values, so its segment offers no rows at
-    /// all and the caret becomes plain entry for the literal.
+    /// all and the box becomes plain entry for the literal.
     #[test]
-    fn a_plain_value_segment_offers_no_rows_and_names_its_field() {
+    fn a_plain_value_segment_offers_no_rows_and_takes_a_typed_literal() {
         let bar = bar_editing(roster_pill(RosterField::Damage, Op::Ge, Value::Int(50_000)), SegmentRole::Value);
         assert!(bar.dropdown_rows().is_empty(), "{:?}", bar.dropdown_rows());
         assert_eq!(bar.plain_value_field(), Some(TermField::Roster(RosterField::Damage)));
@@ -3629,6 +3625,44 @@ mod tests {
             self.bar.dropdown_open && !self.bar.dropdown_rows().is_empty()
         }
 
+        fn dropdown_row_count(&self) -> usize {
+            self.bar.dropdown_rows().len()
+        }
+
+        /// The rect the dropdown's own `Area` was drawn at. `Popup` builds that
+        /// area under the popup's own id, so the response registered for it is
+        /// the popup's painted box, frame included.
+        fn popup_rect(&self) -> Rect {
+            self.rect_of(self.id.with("dropdown"))
+        }
+
+        /// Whether the dropdown reached the screen at all. `read_response`
+        /// answers out of the last two passes, so this only reads false after
+        /// `settle`, which is where every caller of it drives from.
+        fn popup_shown(&self) -> bool {
+            self.ctx.read_response(self.id.with("dropdown")).is_some()
+        }
+
+        /// Clicks the dropdown row reading `name`, found by the text the popup
+        /// actually painted rather than by an index into `dropdown_rows`. An
+        /// index would be satisfied by rows the popup never drew, and the
+        /// pointer has to reach the popup's own layer for the pick to be the
+        /// gesture a user makes.
+        fn click_dropdown_row_named(&mut self, name: &str) {
+            let popup = self.popup_rect();
+            let hit = self
+                .shapes
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) if text.galley.job.text == name && popup.contains(text.pos) => {
+                        Some(text.pos + text.galley.size() / 2.0)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("the dropdown painted no row reading {name:?} inside {popup:?}"));
+            self.click(hit);
+        }
+
         fn has_error_mark(&self) -> bool {
             self.bar.pending_error.is_some()
         }
@@ -3641,7 +3675,7 @@ mod tests {
         /// Replaces what the box holds with `text`. The box opens with its
         /// cursor at the end of the value it was seeded with, so the seed is
         /// erased key by key first, which is the gesture a user makes.
-        fn type_text(&mut self, text: &str) {
+        fn set_caret_text(&mut self, text: &str) {
             let mut input = frame_input(self.width);
             for _ in 0..self.caret_text().chars().count() {
                 push_key(&mut input, Key::Backspace);
@@ -3703,7 +3737,7 @@ mod tests {
     fn committing_an_inline_edit_changes_only_that_value() {
         let mut h = bar_with("outcome:win and anyone.tier>=8");
         h.click(h.segment_rect(&vec![1], SegmentRole::Value).center());
-        h.type_text("10");
+        h.set_caret_text("10");
         h.press_enter();
         assert_eq!(h.query(), parse_query("outcome:win and anyone.tier>=10").expect("parse"));
     }
@@ -3712,7 +3746,7 @@ mod tests {
     fn escape_reverts_an_inline_edit() {
         let mut h = bar_with("anyone.tier>=8");
         h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
-        h.type_text("999");
+        h.set_caret_text("999");
         h.press_escape();
         assert_eq!(h.query(), parse_query("anyone.tier>=8").expect("parse"));
     }
@@ -3722,7 +3756,7 @@ mod tests {
         let _zone = pinned_utc();
         let mut h = bar_with("date>=2026-07-23");
         h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
-        h.type_text("not-a-date");
+        h.set_caret_text("not-a-date");
         h.press_enter();
         assert_eq!(h.query(), parse_query("date>=2026-07-23").expect("parse"), "the term was destroyed");
         assert!(h.has_error_mark(), "no error was shown");
@@ -3734,7 +3768,7 @@ mod tests {
         // The retired whole-pill editor lost this. Editing in place must not.
         let mut h = bar_with("not anyone.tier>=8");
         h.click(h.only_value_segment_rect().center());
-        h.type_text("10");
+        h.set_caret_text("10");
         h.press_enter();
         assert_eq!(h.query(), parse_query("not anyone.tier>=10").expect("parse"));
     }
@@ -3881,7 +3915,7 @@ mod tests {
     fn moving_from_the_box_to_another_segment_commits_what_was_typed() {
         let mut h = bar_with("anyone.tier>=8");
         h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
-        h.type_text("10");
+        h.set_caret_text("10");
         h.click(h.segment_rect(&vec![], SegmentRole::Operator).center());
         assert_eq!(h.query(), parse_query("anyone.tier>=10").expect("parse"));
     }
@@ -3920,7 +3954,7 @@ mod tests {
     fn a_click_away_from_a_typed_minted_box_keeps_the_pill_and_the_value() {
         let mut h = bar_with("outcome:win");
         mint_forced_box(&mut h, TermField::Match(MatchField::Build));
-        h.type_text("1234");
+        h.set_caret_text("1234");
 
         let bar = h.rect_of(h.id.with("background"));
         let box_rect = h.caret_rect();
@@ -3967,7 +4001,7 @@ mod tests {
     fn a_click_away_from_the_box_commits_what_was_typed() {
         let mut h = bar_with("anyone.tier>=8");
         h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
-        h.type_text("10");
+        h.set_caret_text("10");
 
         let bar = h.rect_of(h.id.with("background"));
         let box_rect = h.caret_rect();
@@ -3977,5 +4011,159 @@ mod tests {
 
         assert_eq!(h.query(), parse_query("anyone.tier>=10").expect("parse"));
         assert!(!h.inline_edit_open(), "the box must close on a click that moved on");
+    }
+
+    #[test]
+    fn an_enum_value_lists_its_options_under_the_box() {
+        let mut h = bar_with("outcome:win");
+        let value = h.segment_rect(&vec![], SegmentRole::Value);
+        h.click(value.center());
+        assert!(h.inline_edit_open(), "no inline box");
+        assert!(h.dropdown_open(), "no list");
+        let popup = h.popup_rect();
+        assert!((popup.left() - value.left()).abs() < 4.0, "list {popup:?} is not under the box {value:?}");
+    }
+
+    #[test]
+    fn typing_narrows_the_list() {
+        let mut h = bar_with("outcome:win");
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+        let all = h.dropdown_row_count();
+        h.set_caret_text("dr");
+        assert!(h.dropdown_row_count() < all, "typing did not narrow {all} rows");
+        assert!(h.dropdown_row_count() > 0, "typing narrowed the list to nothing");
+    }
+
+    #[test]
+    fn a_scalar_value_gets_a_box_and_no_list() {
+        let mut h = bar_with("anyone.tier>=8");
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+        assert!(h.inline_edit_open(), "no inline box");
+        assert!(!h.dropdown_open(), "a scalar field offered a list");
+    }
+
+    #[test]
+    fn picking_a_listed_value_commits_it_and_closes_the_box() {
+        let mut h = bar_with("outcome:win");
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+        h.click_dropdown_row_named("Loss");
+        assert_eq!(h.query(), parse_query("outcome:loss").expect("parse"));
+        assert!(!h.inline_edit_open(), "the box stayed open after a pick");
+    }
+
+    /// The list has to be the value segment's own. `dropdown_open` alone cannot
+    /// say so: the caret's suggestion list is sixty-five rows and is open on
+    /// almost every frame, so it answers for a click that opened no value
+    /// editor at all.
+    #[test]
+    fn the_list_under_the_box_is_the_fields_values_not_the_carets_suggestions() {
+        let mut h = bar_with("outcome:win");
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+
+        let rows = h.bar.dropdown_rows();
+        assert!(
+            rows.iter().all(|row| matches!(row, Row::Literal(_))),
+            "the value segment offered the caret's own list rather than its field's values: {rows:?}"
+        );
+        let labels: Vec<&str> = rows
+            .iter()
+            .filter_map(|row| match row {
+                Row::Literal(option) => Some(option.label.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels, vec!["Win", "Loss", "Draw", "Unknown"], "not the outcomes the field can take");
+    }
+
+    /// Hanging the list under the box is what the anchor buys, and an aligned
+    /// left edge alone does not say it: the pill's own left edge is a different
+    /// x, but a list under the bar, under the row, or under nothing in
+    /// particular can still share an edge with the box.
+    ///
+    /// The relationship alignment cannot satisfy is the vertical one -- the
+    /// list's top sits on the box's bottom -- taken together with the list's
+    /// left edge landing inside the box's own span.
+    #[test]
+    fn the_list_hangs_directly_under_the_box_and_not_under_the_pill() {
+        let mut h = bar_with("outcome:win");
+        let pill = h.rect_of(h.id.with(h.pill(&vec![]).0));
+        let value = h.segment_rect(&vec![], SegmentRole::Value);
+        assert!(
+            value.left() - pill.left() > 20.0,
+            "the fixture must draw the value well clear of the pill's left edge: {value:?} in {pill:?}"
+        );
+
+        h.click(value.center());
+
+        // A pixel of slack on the left edge alone: the popup's area is snapped
+        // to the pixel grid and the segment's own left edge is not.
+        let popup = h.popup_rect();
+        assert!(
+            value.x_range().expand(1.0).contains(popup.left()),
+            "the list {popup:?} starts outside the box {value:?}"
+        );
+        assert!(
+            popup.top() >= value.bottom() - 1.0 && popup.top() - value.bottom() < 24.0,
+            "the list {popup:?} does not hang on the box's bottom edge {value:?}"
+        );
+        assert!(
+            popup.left() - pill.left() > 20.0,
+            "the list hangs under the pill rather than under the box: {popup:?} in {pill:?}"
+        );
+    }
+
+    /// A scalar's box stands alone. Not merely "no rows": with the field named
+    /// by the segment drawn beside the box, a popup carrying only that name is
+    /// a frame hanging under the pill saying what the pill already says.
+    #[test]
+    fn a_scalar_box_draws_no_popup_at_all() {
+        let mut h = bar_with("anyone.tier>=8");
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+        assert!(h.inline_edit_open(), "the fixture must open a box");
+        assert!(!h.popup_shown(), "a scalar value drew a popup under its box: {:?}", h.popup_rect());
+    }
+
+    /// A date is the other scalar editor, and the one whose prompt read as a
+    /// label rather than as a repeat, so it is swept separately.
+    #[test]
+    fn a_date_box_draws_no_popup_either() {
+        let _zone = pinned_utc();
+        let mut h = bar_with("date>=2026-07-23");
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+        assert!(h.inline_edit_open(), "the fixture must open a box");
+        assert!(!h.popup_shown(), "a date value drew a popup under its box: {:?}", h.popup_rect());
+    }
+
+    /// The entity lookups list under the box too, and their rows are not a
+    /// closed set: clicking the value has to ask for them through the same
+    /// `ValueRequest` path the caret uses, then list what came back.
+    #[test]
+    fn a_lookup_value_asks_for_its_rows_and_lists_them_under_the_box() {
+        let mut h = Harness::new(roster_pill(RosterField::Ship, Op::Is, Value::Ship(1u64.into())), INLINE_WIDTH);
+        h.ctx.memory_mut(|m| m.request_focus(h.caret_id()));
+        h.settle();
+        let value = h.only_value_segment_rect();
+
+        h.click(value.center());
+        assert!(h.inline_edit_open(), "no inline box");
+        assert_eq!(
+            h.bar.active_request,
+            Some(ValueRequest::Ships { needle: String::new() }),
+            "clicking a lookup value must ask for the rows it cannot know"
+        );
+
+        h.bar.value_options = vec![ValueOption { label: "Yamato".to_owned(), token: "1".to_owned() }];
+        h.settle();
+
+        assert_eq!(h.bar.dropdown_rows(), vec![Row::Value(0)], "the fetched rows are not what the box lists");
+        let popup = h.popup_rect();
+        assert!(
+            value.x_range().expand(1.0).contains(popup.left()),
+            "the list {popup:?} is not under the box {value:?}"
+        );
+        assert!(
+            popup.top() >= value.bottom() - 1.0 && popup.top() - value.bottom() < 24.0,
+            "the list {popup:?} does not hang on the box's bottom edge {value:?}"
+        );
     }
 }
