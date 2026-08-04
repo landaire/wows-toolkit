@@ -310,9 +310,14 @@ fn apply_op(allowed: &[Op], current: &mut Op, value: &mut Value, op: Op) -> bool
 /// The value is kept when it already matches the new field's `ValueKind`;
 /// otherwise it is replaced by `placeholder_value(kind)`. That placeholder is
 /// an arbitrary in-kind value, not a marker: nothing here or downstream may
-/// read it as "the user has not chosen a value yet". A caller that needs to
-/// know whether the value was reset compares the old and new field's own
-/// `value_kind()` rather than inspecting what landed here.
+/// read it as "the user has not chosen a value yet".
+///
+/// A caller that needs to know whether the value was reset compares the
+/// `Value` itself, before and after. Comparing the two fields' declared
+/// `value_kind()`s is **not** equivalent and misses real cases: a nullary
+/// operator carries `Value::NoOperand`, which belongs to no kind at all, so
+/// retargeting `realm is set` at `name` -- both `Text` -- still replaces the
+/// value here.
 pub fn set_field(expr: &mut MatchExpr, path: &NodePath, field: TermField) -> bool {
     let Some((term, rest)) = split_at_leaf_mut(expr, path) else {
         return false;
@@ -385,11 +390,15 @@ fn value_kind_of(value: &Value) -> Option<ValueKind> {
 /// a preset's `Value::Ship`/`Value::Account`: no zero id there. The two do
 /// not contradict. A preset is a complete, shipped tree, so a zero id in one
 /// would be a resting bug the user could commit unchanged. A `Ship` or
-/// `Account` placeholder minted here exists only inside a live edit, where
-/// changing to an entity-kind field always changes `value_kind()` -- and
-/// `QueryBar::commit_field_change` compares the old and new `value_kind()` and
-/// opens the value segment's editor on the spot when they differ, so a minted
-/// zero id is never a state the user can rest on or commit.
+/// `Account` placeholder minted here exists only inside a live edit, and
+/// `QueryBar::commit_field_change` opens the value segment's editor whenever
+/// the `Value` it snapshotted before the retarget is not the one that came
+/// back, which is exactly when a placeholder was minted.
+///
+/// That caller compares the `Value`, not the two fields' declared
+/// `value_kind()`s. The kind comparison looks equivalent and is not: it misses
+/// every retarget off a nullary operator, whose `Value::NoOperand` belongs to
+/// no kind, and a caller written that way commits a placeholder unseen.
 fn placeholder_value(kind: ValueKind) -> Value {
     match kind {
         ValueKind::Text => Value::Text(String::new()),
@@ -1649,15 +1658,14 @@ mod tests {
     /// there is no segment edit for it to converge with. *Retargeting* an
     /// existing one is expressible, and both halves of it are covered.
     ///
-    /// The scope conjunct is at `[0]` and the term it scopes at `[1]`, and the
-    /// two are reached by different clicks. On a bracketed roster both draw
-    /// their own pill, so `[0]` is what clicking the relation pill's value
-    /// segment edits. On the sugar-collapsed pill there is one pill for the
-    /// pair and `segment_path` sends it to `[1]`, so that is the only path a
-    /// click on *this* shape can reach. The `[0]` case is kept because it is
-    /// the only one exercising the sugar printer's scope round trip, and the
-    /// `[1]` case is here because it is the one a click on the collapsed pill
-    /// actually produces -- neither stands in for the other.
+    /// The scope conjunct is at `[0]` and the term it scopes at `[1]`. Both
+    /// cases below use the sugar-shaped tree, which renders as one collapsed
+    /// pill whose `segment_path` is `[1]`, so no click on *that* tree reaches
+    /// `[0]` at all -- a scope conjunct is only click-reachable on a genuinely
+    /// bracketed roster, which this fixture is not. The `[0]` case is kept
+    /// because it is the only one exercising the sugar printer's scope round
+    /// trip; the `[1]` cases are here because they are what a click on the
+    /// collapsed pill actually produces.
     fn convergence_cases() -> Vec<(&'static str, MatchExpr, NodePath, Edit)> {
         use crate::db::index::query_ast::Quant;
         use crate::db::index::query_ast::RosterField;

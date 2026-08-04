@@ -473,8 +473,15 @@ impl QueryBar {
         // `TextEdit`'s own response rect: the widget sizes itself to its
         // content and can be shorter than the row it sits in, which would leave
         // part of the caret reading as background.
-        let cell = caret_rect(laid, origin);
-        let on_caret = background.interact_pointer_pos().is_some_and(|pos| cell.x_range().contains(pos.x));
+        //
+        // Both axes, and the full row band rather than the inset cell.
+        // Testing x alone would hand the caret every row above it, since
+        // `lay_out` stretches the caret to the bar's right edge and a wrapped
+        // caret starts at x = 0, making its x-range the whole bar. The band
+        // undoes `caret_rect`'s own `ROW_PAD_Y` inset, so the padding between
+        // rows belongs to the row it separates rather than to neither.
+        let band = caret_rect(laid, origin).expand2(egui::vec2(0.0, ROW_PAD_Y));
+        let on_caret = background.interact_pointer_pos().is_some_and(|pos| band.contains(pos));
         clicked_token |= background.clicked() && !on_caret;
 
         let mut edited = false;
@@ -696,8 +703,17 @@ impl QueryBar {
         egui::Popup::new(id.with("dropdown"), ui.ctx().clone(), anchor, ui.layer_id())
             .open(true)
             .align(egui::RectAlign::BOTTOM_START)
-            .width(bar_rect.width())
             .show(|ui| {
+                // The bar's width is imposed here, every frame, rather than
+                // through `Popup::width`. That one reaches `Area::default_size`,
+                // which the area reads inside `state.size.get_or_insert_with(..)`
+                // and then only as the sizing pass's *maximum*, so it caps the
+                // popup without ever widening it: measured at 117.5 for the
+                // filter list against a 790 bar, then 53.6 once an operator
+                // list of `is` and `is not` had been shown, with no way back.
+                // A minimum, not a fixed size: a row longer than the bar is
+                // still free to widen it.
+                ui.set_min_width(bar_rect.width());
                 if let Some(prompt) = &prompt {
                     ui.label(egui::RichText::new(prompt.clone()).color(ui.sem().text_dim));
                 }
@@ -2028,15 +2044,15 @@ mod tests {
         assert!(bar.editing.is_none());
     }
 
-    fn frame_input() -> egui::RawInput {
+    fn frame_input(width: f32) -> egui::RawInput {
         egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0))),
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(width, 600.0))),
             ..Default::default()
         }
     }
 
-    fn click_input(pos: Pos2) -> egui::RawInput {
-        let mut input = frame_input();
+    fn click_input(pos: Pos2, width: f32) -> egui::RawInput {
+        let mut input = frame_input(width);
         input.events.push(egui::Event::PointerMoved(pos));
         for pressed in [true, false] {
             input.events.push(egui::Event::PointerButton {
@@ -2049,53 +2065,203 @@ mod tests {
         input
     }
 
-    /// A click inside the caret is not "the pointer moved on to something
-    /// else": for a plain value editor the caret **is** the editor, holding the
-    /// literal `begin_segment_edit` seeded it with, and for the other two it
-    /// holds the needle. Clicking into that text to correct it must not throw
-    /// it away and close the editor.
+    /// A bar driven through real frames, with the ids the widgets inside it are
+    /// registered under.
     ///
-    /// Driven through real frames rather than by calling the handshake's
-    /// pieces, because the question is whether egui's own `TextEdit` reports a
-    /// click for a press inside it -- which is exactly what no unit-level
-    /// fixture can answer.
-    #[test]
-    fn clicking_inside_the_caret_keeps_the_segment_editor_open() {
-        let ctx = egui::Context::default();
-        ctx.set_fonts(egui::FontDefinitions::empty());
-        let mut bar = QueryBar::default();
-        bar.set_expr(Expr::Leaf(MatchTerm::Field(
+    /// Fonts are left at egui's defaults rather than emptied. An empty font set
+    /// lays every galley out at zero size, which gives the caret's `TextEdit` a
+    /// zero-height response rect -- and a click point derived from that rect
+    /// lands outside the row it is meant to be inside, so the test would be
+    /// aiming somewhere it does not mean to and passing for the wrong reason.
+    struct Harness {
+        ctx: egui::Context,
+        bar: QueryBar,
+        id: egui::Id,
+    }
+
+    impl Harness {
+        /// Builds the bar and runs one frame, which is what registers the
+        /// widgets whose ids and rects the rest of a test reads.
+        fn new(expr: MatchExpr, width: f32) -> Self {
+            let mut bar = QueryBar::default();
+            bar.set_expr(expr);
+            let mut harness = Self { ctx: egui::Context::default(), bar, id: egui::Id::NULL };
+            harness.frame(frame_input(width));
+            harness
+        }
+
+        fn frame(&mut self, input: egui::RawInput) {
+            let bar = &mut self.bar;
+            let deps = Deps { history: &[] };
+            let mut id = None;
+            let _ = self.ctx.run_ui(input, |ui| {
+                id = Some(ui.id().with("query_bar"));
+                bar.show(ui, &deps);
+            });
+            if let Some(id) = id {
+                self.id = id;
+            }
+        }
+
+        fn caret_id(&self) -> egui::Id {
+            self.id.with("caret")
+        }
+
+        fn rect_of(&self, id: egui::Id) -> Rect {
+            self.ctx.read_response(id).unwrap_or_else(|| panic!("no widget registered under {id:?}")).rect
+        }
+
+        /// The size the dropdown's `Area` remembers, which is what it is drawn
+        /// at on every frame after its first.
+        fn popup_width(&self) -> Option<f32> {
+            egui::AreaState::load(&self.ctx, self.id.with("dropdown"))?.size.map(|size| size.x)
+        }
+    }
+
+    fn date_pill() -> MatchExpr {
+        Expr::Leaf(MatchTerm::Field(
             MatchField::Date,
             Op::Ge,
             Value::Timestamp(jiff::Timestamp::from_second(0).expect("the epoch")),
-        )));
-        let deps = Deps { history: &[] };
+        ))
+    }
 
-        // One frame to lay the bar out, which is what gives the caret a rect to
-        // aim at and an id to focus.
-        let mut caret_id = None;
-        let _ = ctx.run_ui(frame_input(), |ui| {
-            caret_id = Some(ui.id().with("query_bar").with("caret"));
-            bar.show(ui, &deps);
-        });
-        let caret_id = caret_id.expect("the frame ran");
-        let caret_rect = ctx.read_response(caret_id).expect("the caret was built").rect;
-
-        // Open the value editor the way a segment click would, and give the
-        // caret the focus that click would have handed it.
-        let opened = with_ui(|ui, _| bar.begin_segment_edit(vec![], SegmentRole::Value, ui, caret_id));
+    /// Opens a value editor the way a segment click would, and hands the caret
+    /// the focus that click would have given it.
+    fn open_value_editor(harness: &mut Harness, path: NodePath, width: f32) {
+        let caret_id = harness.caret_id();
+        let bar = &mut harness.bar;
+        let opened = with_ui(|ui, _| bar.begin_segment_edit(path, SegmentRole::Value, ui, caret_id));
         assert!(opened);
-        ctx.memory_mut(|m| m.request_focus(caret_id));
-        let _ = ctx.run_ui(frame_input(), |ui| {
-            bar.show(ui, &deps);
-        });
-        assert!(bar.editing.is_some(), "a quiet frame must not close the editor");
-        assert_eq!(bar.pending, "1970-01-01");
+        harness.ctx.memory_mut(|m| m.request_focus(caret_id));
+        harness.frame(frame_input(width));
+        assert!(harness.bar.editing.is_some(), "a quiet frame must not close the editor");
+    }
 
-        let _ = ctx.run_ui(click_input(caret_rect.center()), |ui| {
-            bar.show(ui, &deps);
-        });
-        assert_eq!(bar.pending, "1970-01-01", "the literal being edited must survive a click into it");
-        assert!(bar.editing.is_some(), "clicking into the caret must not close the editor it belongs to");
+    /// A click inside the caret is not "the pointer moved on to something
+    /// else": for a plain value editor the caret **is** the editor, holding the
+    /// literal `begin_segment_edit` seeded it with, and for the other two it
+    /// holds the needle. Clicking into it to correct the text must not throw
+    /// that text away and close the editor.
+    ///
+    /// Two points, and the second is the one that needs the gate. The
+    /// `TextEdit` fills its cell horizontally but is inset vertically by
+    /// `ROW_PAD_Y`, so a click on the text lands on the widget and never
+    /// reaches the background at all, while a click on the padding within the
+    /// caret's own row does. Only the row band tells that second point apart
+    /// from a click on another row.
+    ///
+    /// Driven through real frames rather than by calling the handshake's
+    /// pieces, because the carrier is egui's own hit testing: which of two
+    /// overlapping widgets receives a press is not something a unit-level
+    /// fixture can answer.
+    #[test]
+    fn clicking_inside_the_carets_own_row_keeps_the_segment_editor_open() {
+        let mut harness = Harness::new(date_pill(), 800.0);
+        open_value_editor(&mut harness, vec![], 800.0);
+        assert_eq!(harness.bar.pending, "1970-01-01");
+
+        let caret = harness.rect_of(harness.caret_id());
+        assert!(caret.height() > 0.0, "a degenerate caret rect would put the click points outside the row they name");
+
+        harness.frame(click_input(caret.center(), 800.0));
+        assert_eq!(harness.bar.pending, "1970-01-01", "the literal being edited must survive a click into the text");
+        assert!(harness.bar.editing.is_some(), "clicking the text must not close the editor it belongs to");
+
+        // Inside the caret's row, outside the widget: the strip `caret_rect`
+        // insets and the band puts back.
+        let padding = Pos2::new(caret.center().x, caret.top() - 1.0);
+        assert!(!caret.contains(padding), "the second point must be off the widget: {padding:?} in {caret:?}");
+        harness.frame(click_input(padding, 800.0));
+        assert_eq!(harness.bar.pending, "1970-01-01", "the row's own padding is still the caret's row");
+        assert!(harness.bar.editing.is_some(), "clicking beside the text within its row must not close the editor");
+    }
+
+    /// The other half of the same gate, and the one an x-only test cannot
+    /// state. `lay_out` stretches the caret to the bar's right edge, and a
+    /// wrapped caret starts at x = 0, so its x-range is the whole bar: ignoring
+    /// y hands it every background click on every row above it, and the gesture
+    /// that dismisses a segment editor stops working on any bar wide enough to
+    /// wrap.
+    #[test]
+    fn a_background_click_on_a_row_the_caret_is_not_on_ends_the_segment_edit() {
+        const WIDTH: f32 = 260.0;
+        let pills = Expr::All(vec![
+            date_pill(),
+            Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Ge, Value::Int(1234))),
+            Expr::Leaf(MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win))),
+        ]);
+        let mut harness = Harness::new(pills, WIDTH);
+        open_value_editor(&mut harness, vec![0], WIDTH);
+
+        let caret = harness.rect_of(harness.caret_id());
+        let background = harness.rect_of(harness.id.with("background"));
+        // Every token's rect, so the click can be aimed at a point the fixture
+        // proves is empty rather than one that merely looks it.
+        let tokens: Vec<Rect> =
+            (0..8).filter_map(|i| harness.ctx.read_response(harness.id.with(i))).map(|r| r.rect).collect();
+        let first = *tokens.first().expect("the fixture must draw pills");
+        assert!(
+            caret.top() >= first.bottom(),
+            "the caret must not sit on the row being clicked: {caret:?} vs {first:?}"
+        );
+
+        let on_row: Vec<Rect> =
+            tokens.iter().copied().filter(|r| r.top() < first.bottom() && r.bottom() > first.top()).collect();
+        let row_end = on_row.iter().fold(f32::MIN, |acc, r| acc.max(r.right()));
+        let target = Pos2::new(background.right() - 1.0, first.center().y);
+        assert!(
+            target.x > row_end,
+            "the fixture must leave empty space at the end of the row: {target:?} past {row_end}"
+        );
+        assert!(background.contains(target), "the target must be inside the bar: {target:?} in {background:?}");
+        assert!(!tokens.iter().any(|r| r.contains(target)), "the target must be empty space: {target:?} in {tokens:?}");
+        assert!(!caret.contains(target), "and must not be the caret: {target:?} in {caret:?}");
+
+        harness.frame(click_input(target, WIDTH));
+        assert!(
+            harness.bar.editing.is_none(),
+            "a background click away from the caret must end the segment edit, not be swallowed by the caret's x-range"
+        );
+    }
+
+    /// The dropdown must not shrink to whatever its narrowest list measured and
+    /// stay there.
+    ///
+    /// `Popup::width` cannot deliver this: it feeds `Area::default_size`, which
+    /// the area reads inside `state.size.get_or_insert_with(..)`, so it applies
+    /// on the frame the popup is first built and never again. From then on the
+    /// area keeps its own last content size, and an operator list of `is`, `=`,
+    /// `>=` pins it narrow for good -- including for the alignment decision,
+    /// which reads that same stored size when choosing whether to flip near a
+    /// screen edge.
+    ///
+    /// Two lists and several frames, because the bug is invisible on the first
+    /// one: the wide list is what the narrow list then has to fail to shrink.
+    #[test]
+    fn a_narrow_list_does_not_shrink_the_dropdown_for_good() {
+        const WIDTH: f32 = 800.0;
+        let mut harness = Harness::new(win(), WIDTH);
+        let caret_id = harness.caret_id();
+        harness.ctx.memory_mut(|m| m.request_focus(caret_id));
+
+        // The filter list: every match field, under labels wide enough that the
+        // bar's own width is the binding constraint.
+        harness.bar.editing = Some(SegmentEdit { path: vec![], role: SegmentRole::Filter });
+        harness.bar.dropdown_open = true;
+        harness.frame(frame_input(WIDTH));
+        harness.frame(frame_input(WIDTH));
+        let wide = harness.popup_width().expect("the dropdown was built");
+        let bar = harness.rect_of(harness.id.with("background")).width();
+        assert!(wide >= bar, "the filter list must already fill the bar: {wide} against {bar}");
+
+        // The operator list for `Outcome` is `is` and `is not` -- the narrowest
+        // content the dropdown ever holds, and the user's actual path into the
+        // symptom.
+        harness.bar.editing = Some(SegmentEdit { path: vec![], role: SegmentRole::Operator });
+        harness.frame(frame_input(WIDTH));
+        harness.frame(frame_input(WIDTH));
+        let narrow = harness.popup_width().expect("the dropdown is still built");
+        assert!(narrow >= wide, "a narrow list must not shrink the dropdown: {narrow} against {wide} (bar is {bar})");
     }
 }
