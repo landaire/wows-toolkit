@@ -1,12 +1,23 @@
 //! Selection over the token stream's node paths, and the tree edits a selection
 //! authorises. Pure so the boolean-editing rules are testable without egui.
 
+use jiff::Timestamp;
+use wows_replays::types::AccountId;
+use wows_replays::types::GameParamId;
+
+use crate::db::index::query_ast::DivisionScope;
 use crate::db::index::query_ast::Expr;
 use crate::db::index::query_ast::MatchExpr;
 use crate::db::index::query_ast::MatchTerm;
 use crate::db::index::query_ast::Op;
 use crate::db::index::query_ast::Quant;
+use crate::db::index::query_ast::ShipClass;
 use crate::db::index::query_ast::Value;
+use crate::db::index::query_ast::ValueKind;
+use crate::db::index::rows::MatchOutcome;
+use crate::db::index::rows::SourceId;
+use crate::db::index::rows::VehicleRelation;
+use crate::ui::query_bar::suggest::TermField;
 use crate::ui::query_bar::tokens::NodePath;
 use crate::ui::query_bar::tokens::Token;
 use crate::ui::query_bar::tokens::TokenKind;
@@ -206,6 +217,115 @@ fn apply_op(allowed: &[Op], current: &mut Op, value: &mut Value, op: Op) -> bool
     }
     *current = op;
     true
+}
+
+/// Changes the field of the term at `path`, re-deriving its operator and
+/// value so the term stays legal for the new field. Reports whether the path
+/// addressed a field term, so a caller does not report an edit that did not
+/// happen.
+///
+/// The operator is kept when the new field still allows it; otherwise it is
+/// replaced by that field's own equality spelling, chosen by class through
+/// `equality_op` rather than by naming an `Op` literal here -- `Op` spells
+/// equality three ways and all three print identically, so picking the wrong
+/// one silently reparses into a different tree.
+///
+/// The value is kept when it already matches the new field's `ValueKind`;
+/// otherwise it is replaced by `placeholder_value(kind)`. That placeholder is
+/// an arbitrary in-kind value, not a marker: nothing here or downstream may
+/// read it as "the user has not chosen a value yet". A caller that needs to
+/// know whether the value was reset compares the old and new field's own
+/// `value_kind()` rather than inspecting what landed here.
+pub fn set_field(expr: &mut MatchExpr, path: &NodePath, field: TermField) -> bool {
+    let Some((term, rest)) = split_at_leaf_mut(expr, path) else {
+        return false;
+    };
+    match (term, field) {
+        (MatchTerm::Field(current, op, value), TermField::Match(new_field)) if rest.is_empty() => {
+            *current = new_field;
+            reconcile_term(op, value, new_field.allowed_ops(), new_field.value_kind());
+            true
+        }
+        (MatchTerm::Roster { pred, .. }, TermField::Roster(new_field)) => match expr_at_mut(pred, rest) {
+            Some(Expr::Leaf(roster)) => {
+                roster.field = new_field;
+                reconcile_term(&mut roster.op, &mut roster.value, new_field.allowed_ops(), new_field.value_kind());
+                true
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// Brings an operator/value pair back into a field's own rules after the
+/// field itself changed underneath them.
+fn reconcile_term(op: &mut Op, value: &mut Value, allowed: &'static [Op], kind: ValueKind) {
+    if !allowed.contains(op) {
+        *op = equality_op(allowed);
+    }
+    if op.is_nullary() {
+        *value = Value::NoOperand;
+    } else if value_kind_of(value) != Some(kind) {
+        *value = placeholder_value(kind);
+    }
+}
+
+/// The equality operator a field spells its own way, found the same way
+/// `seed::seed_op` picks one for its `Wanted::Equality`: the class-correct
+/// spellings are tried first, and the field's own list is the fallback, so a
+/// field this preference list misses still gets something it allows.
+fn equality_op(allowed: &'static [Op]) -> Op {
+    const PREFERRED: [Op; 3] = [Op::Is, Op::Equals, Op::Eq];
+    PREFERRED
+        .iter()
+        .chain(allowed)
+        .copied()
+        .find(|op| allowed.contains(op))
+        .expect("every field allows at least one operator")
+}
+
+/// The `ValueKind` a `Value` carries, or `None` for `NoOperand`, which is not
+/// in any kind's family.
+fn value_kind_of(value: &Value) -> Option<ValueKind> {
+    match value {
+        Value::Text(_) => Some(ValueKind::Text),
+        Value::Int(_) => Some(ValueKind::Int),
+        Value::Float(_) => Some(ValueKind::Float),
+        Value::Bool(_) => Some(ValueKind::Bool),
+        Value::Outcome(_) => Some(ValueKind::Outcome),
+        Value::Relation(_) => Some(ValueKind::Relation),
+        Value::Division(_) => Some(ValueKind::Division),
+        Value::Class(_) => Some(ValueKind::Class),
+        Value::Ship(_) => Some(ValueKind::Ship),
+        Value::Account(_) => Some(ValueKind::Account),
+        Value::Source(_) => Some(ValueKind::Source),
+        Value::Timestamp(_) => Some(ValueKind::Timestamp),
+        Value::NoOperand => None,
+    }
+}
+
+/// A deterministic placeholder for a value of `kind`, used only to replace a
+/// value whose kind no longer matches its field. Empty text, zero for a
+/// number or an ID, the epoch for a timestamp, and the first declared variant
+/// for an enum. This is an arbitrary in-kind value, never a sentinel for
+/// "absent" -- `Outcome`'s placeholder is `Win`, a value a user can also
+/// choose on purpose, so nothing may treat it as meaning "unchosen".
+fn placeholder_value(kind: ValueKind) -> Value {
+    match kind {
+        ValueKind::Text => Value::Text(String::new()),
+        ValueKind::Int => Value::Int(0),
+        ValueKind::Float => Value::Float(0.0),
+        ValueKind::Bool => Value::Bool(false),
+        ValueKind::Outcome => Value::Outcome(MatchOutcome::Win),
+        ValueKind::Relation => Value::Relation(VehicleRelation::SelfPlayer),
+        ValueKind::Division => Value::Division(DivisionScope::ALL[0]),
+        ValueKind::Class => Value::Class(ShipClass::ALL[0]),
+        ValueKind::Ship => Value::Ship(GameParamId::from(0u64)),
+        ValueKind::Account => Value::Account(AccountId(0)),
+        ValueKind::Source => Value::Source(SourceId(0)),
+        ValueKind::Timestamp => Value::Timestamp(Timestamp::from_second(0).unwrap()),
+    }
 }
 
 /// Resolves the `MatchExpr` part of a token path down to its leaf term, and
@@ -1085,6 +1205,81 @@ mod tests {
         // at once and there is no single operator to offer.
         let e: MatchExpr = Expr::All(vec![leaf(1), Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred })]);
         assert_eq!(term_op_at(&e, &[1]), None);
+    }
+
+    #[test]
+    fn changing_the_field_keeps_a_compatible_operator() {
+        // Map and GameType are both text, so Contains survives.
+        let mut e: MatchExpr = Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("ocean".into())));
+        assert!(set_field(&mut e, &vec![], TermField::Match(MatchField::GameType)));
+        match &e {
+            Expr::Leaf(MatchTerm::Field(f, op, v)) => {
+                assert_eq!(*f, MatchField::GameType);
+                assert_eq!(*op, Op::Contains);
+                assert_eq!(*v, Value::Text("ocean".into()));
+            }
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn changing_the_field_replaces_an_operator_the_new_field_disallows() {
+        let mut e: MatchExpr = Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("ocean".into())));
+        assert!(set_field(&mut e, &vec![], TermField::Match(MatchField::Outcome)));
+        match &e {
+            Expr::Leaf(MatchTerm::Field(f, op, _)) => {
+                assert_eq!(*f, MatchField::Outcome);
+                assert!(f.allowed_ops().contains(op), "{op:?} not allowed for {f:?}");
+            }
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn changing_the_field_clears_a_value_of_the_wrong_kind() {
+        let mut e: MatchExpr = Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("ocean".into())));
+        set_field(&mut e, &vec![], TermField::Match(MatchField::Build));
+        match &e {
+            Expr::Leaf(MatchTerm::Field(_, _, v)) => {
+                assert_ne!(*v, Value::Text("ocean".into()), "a text value must not survive onto an int field");
+            }
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn every_field_pair_leaves_a_legal_term_that_round_trips() {
+        // The exhaustive form of the operator trap: no field change may produce
+        // a term that prints and reparses into something else.
+        use crate::db::index::query_text::parse_query;
+        use crate::db::index::query_text::print_query;
+        for from in MatchField::ALL {
+            for to in MatchField::ALL {
+                let op = from.allowed_ops()[0];
+                let value = if op.is_nullary() { Value::NoOperand } else { sample_value(from.value_kind()) };
+                let mut e: MatchExpr = Expr::Leaf(MatchTerm::Field(from, op, value));
+                set_field(&mut e, &vec![], TermField::Match(to));
+                match &e {
+                    Expr::Leaf(MatchTerm::Field(f, op, _)) => {
+                        assert!(f.allowed_ops().contains(op), "{from:?} -> {to:?} gave illegal {op:?}");
+                    }
+                    other => panic!("{from:?} -> {to:?} gave {other:?}"),
+                }
+                let printed = print_query(&e);
+                assert_eq!(parse_query(&printed).unwrap(), e, "{from:?} -> {to:?} printed {printed:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn changing_the_field_of_a_nested_pill_leaves_its_siblings_alone() {
+        let mut e = Expr::All(vec![
+            Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("ocean".into()))),
+            Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Ge, Value::Int(1234))),
+        ]);
+        let before = e.children()[1].clone();
+        set_field(&mut e, &vec![0], TermField::Match(MatchField::Outcome));
+        assert_eq!(e.children()[1], before);
     }
 
     fn sample_value(kind: crate::db::index::query_ast::ValueKind) -> Value {
