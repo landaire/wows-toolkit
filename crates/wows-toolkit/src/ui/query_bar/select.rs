@@ -1817,7 +1817,13 @@ mod tests {
     /// equivalent text builds the same tree.
     #[test]
     fn editing_a_segment_and_typing_the_text_produce_the_same_tree() {
+        use crate::db::index::query_text::ZoneGuard;
         use crate::db::index::query_text::parse_query;
+        // The `date` case types a bare date, which the parser reads as local
+        // midnight, against the epoch `placeholder_value` mints. The two are
+        // the same instant in UTC alone, so the zone is pinned rather than left
+        // to be whichever one the machine running the test sits in.
+        let _zone = ZoneGuard::set(jiff::tz::TimeZone::UTC);
         for (typed, start, path, edit) in convergence_cases() {
             let mut edited = start;
             assert!(apply_edit(&mut edited, &path, &edit), "the edit {edit:?} was refused");

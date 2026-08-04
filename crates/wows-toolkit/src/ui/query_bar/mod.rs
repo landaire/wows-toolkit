@@ -168,12 +168,21 @@ enum Row {
 }
 
 /// Which segment of which pill the dropdown is editing.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct SegmentEdit {
     /// Already resolved through `select::segment_path`, so it names the term
     /// the segment renders rather than the pill's own node.
     path: NodePath,
     role: SegmentRole,
+    /// The tree as it stood before a placeholder was minted, carried only by an
+    /// editor that mint forced open. Dismissing such an editor puts it back,
+    /// because the placeholder is a value nothing chose: for `outcome` it is
+    /// `win`, which reads as a filter the user set on purpose and silently
+    /// narrows the search.
+    ///
+    /// `None` for an editor the user opened by clicking a segment. There the
+    /// value already on the term was a real choice, so dismissal keeps it.
+    restore: Option<MatchExpr>,
 }
 
 /// A navigation key, read before the caret's `TextEdit` renders and applied
@@ -298,13 +307,13 @@ impl QueryBar {
             // two it holds the needle -- so clicking into that text to correct
             // it must not throw it away.
             if body.clicked_token && !body.clicked_segment {
-                self.end_segment_edit();
+                edited |= self.end_segment_edit();
             }
             if body.clicked_inside || body.caret_changed || body.caret_gained_focus || self.editing.is_some() {
                 self.dropdown_open = true;
             }
         } else {
-            self.end_segment_edit();
+            edited |= self.end_segment_edit();
             self.dropdown_open = false;
             self.highlighted = None;
         }
@@ -923,16 +932,16 @@ impl QueryBar {
         let paths = select::selectable_paths(&self.expr, tokens);
         match nav {
             Nav::CloseDropdown => {
-                self.end_segment_edit();
+                let restored = self.end_segment_edit();
                 self.dropdown_open = false;
                 self.highlighted = None;
-                false
+                restored
             }
             Nav::ReleaseFocus => {
                 ui.memory_mut(|m| m.surrender_focus(caret_id));
-                self.end_segment_edit();
+                let restored = self.end_segment_edit();
                 self.selection.clear();
-                false
+                restored
             }
             Nav::CommitRow(index) => rows.get(index).cloned().is_some_and(|row| self.commit_row(row, ui, caret_id)),
             Nav::CommitTyped => self.commit_typed(rows, ui, caret_id),
@@ -1013,6 +1022,10 @@ impl QueryBar {
         true
     }
 
+    /// Applies one pointer command. A command that rewrites the tree dismisses
+    /// whatever editor was open first: the pointer has moved on to another pill,
+    /// and a forced editor's snapshot predates this command, so restoring it
+    /// afterwards would undo the very edit that was just asked for.
     fn apply_command(&mut self, command: Command, tokens: &[Token], ui: &Ui, caret_id: egui::Id) -> bool {
         match command {
             Command::EditSegment(path, role) => {
@@ -1038,25 +1051,58 @@ impl QueryBar {
                 false
             }
             Command::Negate(path) => {
+                self.end_segment_edit();
                 select::negate(&mut self.expr, &path);
                 true
             }
             Command::Delete(path) => {
+                self.end_segment_edit();
                 select::delete(&mut self.expr, &Selection { nodes: vec![path] });
                 true
             }
             Command::SetConnector(path, is_or) => {
+                self.end_segment_edit();
                 select::set_connector(&mut self.expr, &path, is_or);
                 true
             }
-            Command::Ungroup(path) => select::ungroup(&mut self.expr, &path),
+            Command::Ungroup(path) => {
+                let restored = self.end_segment_edit();
+                select::ungroup(&mut self.expr, &path) || restored
+            }
         }
+    }
+
+    /// Opens one segment's editor because the user clicked that segment. The
+    /// value it holds is one they chose, so dismissing the editor keeps it.
+    fn begin_segment_edit(&mut self, path: NodePath, role: SegmentRole, ui: &Ui, caret_id: egui::Id) -> bool {
+        self.begin_edit(path, role, None, ui, caret_id)
+    }
+
+    /// Opens a value editor that a minted placeholder forced open, carrying the
+    /// tree as it stood before the mint. Dismissing this editor without choosing
+    /// a value puts that tree back.
+    fn begin_forced_value_edit(&mut self, path: NodePath, before: MatchExpr, ui: &Ui, caret_id: egui::Id) -> bool {
+        self.begin_edit(path, SegmentRole::Value, Some(before), ui, caret_id)
     }
 
     /// Opens one segment's editor, reporting whether it opened. A value segment
     /// its term does not draw -- a nullary operator has no right-hand side --
     /// has nothing to edit and is refused rather than opened on nothing.
-    fn begin_segment_edit(&mut self, path: NodePath, role: SegmentRole, ui: &Ui, caret_id: egui::Id) -> bool {
+    ///
+    /// Whatever editor was already open ends first, so a forced one hands its
+    /// placeholder back rather than losing the snapshot to the new edit. A path
+    /// the restored tree no longer names then opens nothing, which is one lost
+    /// click on the pill that outlived a placeholder rather than a placeholder
+    /// left committed.
+    fn begin_edit(
+        &mut self,
+        path: NodePath,
+        role: SegmentRole,
+        restore: Option<MatchExpr>,
+        ui: &Ui,
+        caret_id: egui::Id,
+    ) -> bool {
+        self.end_segment_edit();
         let Some((field, op, value)) = select::term_at(&self.expr, &path).map(|(f, o, v)| (f, o, v.clone())) else {
             return false;
         };
@@ -1079,7 +1125,7 @@ impl QueryBar {
             _ => String::new(),
         };
         self.parsed_text.clone_from(&self.pending);
-        self.editing = Some(SegmentEdit { path, role });
+        self.editing = Some(SegmentEdit { path, role, restore });
         self.dropdown_open = true;
         let request = self.segment_request();
         self.refresh_request(request);
@@ -1087,13 +1133,38 @@ impl QueryBar {
         true
     }
 
-    /// Ends the open segment edit and discards the caret buffer it owned. A
-    /// no-op when nothing is being edited, so it never throws away typed query
+    /// Dismisses the open segment edit and discards the caret buffer it owned.
+    /// A no-op when nothing is being edited, so it never throws away typed query
     /// text.
-    fn end_segment_edit(&mut self) {
-        if self.editing.is_some() {
-            self.clear_pending();
+    ///
+    /// An editor a minted placeholder forced open puts the tree back as it stood
+    /// before the mint, reporting `true` so the caller re-runs the query. The
+    /// placeholder is in-kind and arbitrary, never a marker, so left behind it
+    /// reads as a filter the user chose: `enemy.ship=0` at least renders as an
+    /// unresolvable pill, but `outcome=win` is indistinguishable from a real
+    /// choice and quietly narrows the search.
+    fn end_segment_edit(&mut self) -> bool {
+        let Some(edit) = self.editing.take() else {
+            return false;
+        };
+        self.clear_pending();
+        let Some(before) = edit.restore else {
+            return false;
+        };
+        if self.expr == before {
+            return false;
         }
+        self.expr = before;
+        true
+    }
+
+    /// Ends the open segment edit keeping what it committed, so a value the user
+    /// did choose is not rolled back by the snapshot a forced editor carries.
+    fn commit_segment_edit(&mut self) {
+        if let Some(edit) = self.editing.as_mut() {
+            edit.restore = None;
+        }
+        self.end_segment_edit();
     }
 
     fn commit_row(&mut self, row: Row, ui: &Ui, caret_id: egui::Id) -> bool {
@@ -1144,14 +1215,15 @@ impl QueryBar {
             return false;
         };
         let previous = current.clone();
+        let before = self.expr.clone();
         if !select::set_field(&mut self.expr, &edit.path, field) {
             return false;
         }
         let kept = select::term_at(&self.expr, &edit.path).is_some_and(|(_, _, value)| *value == previous);
-        if !kept && self.begin_segment_edit(edit.path, SegmentRole::Value, ui, caret_id) {
+        if !kept && self.begin_forced_value_edit(edit.path, before, ui, caret_id) {
             return true;
         }
-        self.end_segment_edit();
+        self.commit_segment_edit();
         self.dropdown_open = true;
         park_caret(ui, caret_id, 0);
         true
@@ -1164,7 +1236,7 @@ impl QueryBar {
         if !select::set_op(&mut self.expr, &edit.path, op) {
             return false;
         }
-        self.end_segment_edit();
+        self.commit_segment_edit();
         true
     }
 
@@ -1194,7 +1266,7 @@ impl QueryBar {
         if !select::set_value(&mut self.expr, &edit.path, value) {
             return false;
         }
-        self.end_segment_edit();
+        self.commit_segment_edit();
         true
     }
 
@@ -1228,8 +1300,7 @@ impl QueryBar {
             return self.commit_value_literal(&literal);
         }
         let Some(row) = self.default_row(rows) else {
-            self.end_segment_edit();
-            return false;
+            return self.end_segment_edit();
         };
         self.commit_row(row, ui, caret_id)
     }
@@ -1279,11 +1350,17 @@ impl QueryBar {
         self.parsed_text.clear();
         self.commit_pending(ui, caret_id);
 
+        // Snapshotted after the caret's own text is committed, so dismissing the
+        // editor withdraws the placeholder alone and not the terms the user
+        // typed before picking the row. Canonical when taken, because writing it
+        // back is an assignment rather than an edit.
+        select::canonicalise(&mut self.expr);
+        let before = self.expr.clone();
         select::append_top_level(&mut self.expr, node);
         select::canonicalise(&mut self.expr);
         let path = select::last_appended_path(&self.expr);
         let opened = select::segment_path(&self.expr, &path)
-            .is_some_and(|segment| self.begin_segment_edit(segment, SegmentRole::Value, ui, caret_id));
+            .is_some_and(|segment| self.begin_forced_value_edit(segment, before, ui, caret_id));
         if !opened {
             // A term whose operator takes no right-hand side has no value to
             // choose, so the caret returns to plain typing on an empty buffer.
@@ -1575,6 +1652,7 @@ mod tests {
     use crate::db::index::query_ast::RosterField;
     use crate::db::index::query_ast::RosterTerm;
     use crate::db::index::query_ast::Value;
+    use crate::db::index::query_text::ZoneGuard;
     use crate::db::index::rows::MatchOutcome;
 
     fn win() -> MatchExpr {
@@ -1587,12 +1665,24 @@ mod tests {
         let mut bar = QueryBar::default();
         bar.set_expr(expr);
         let path = select::segment_path(&bar.expr, &vec![]).expect("the fixture pill addresses a term");
-        bar.editing = Some(SegmentEdit { path, role });
+        bar.editing = Some(SegmentEdit { path, role, restore: None });
         bar
     }
 
     fn roster_pill(field: RosterField, op: Op, value: Value) -> MatchExpr {
         Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred: Expr::Leaf(RosterTerm { field, op, value }) })
+    }
+
+    /// Pins the zone the timestamp printer resolves against, so a fixture built
+    /// on the epoch spells itself the same way on every machine.
+    /// `print_timestamp` writes a bare date only for an instant that is local
+    /// midnight, which the epoch is in UTC alone; west of it the same instant is
+    /// the previous day and prints as a full RFC 3339 instant instead. The
+    /// local-day behaviour itself is covered where the printer lives, against
+    /// `America/New_York`.
+    #[must_use]
+    fn pinned_utc() -> ZoneGuard {
+        ZoneGuard::set(jiff::tz::TimeZone::UTC)
     }
 
     /// A bar in the state the caret is in with nothing committed. The
@@ -2086,6 +2176,7 @@ mod tests {
     /// the term, so a date is corrected rather than retyped from nothing.
     #[test]
     fn opening_a_plain_value_editor_seeds_the_caret_with_the_current_literal() {
+        let _zone = pinned_utc();
         let mut bar = QueryBar::default();
         bar.set_expr(Expr::Leaf(MatchTerm::Field(
             MatchField::Date,
@@ -2222,6 +2313,7 @@ mod tests {
     /// fixture can answer.
     #[test]
     fn clicking_inside_the_carets_own_row_keeps_the_segment_editor_open() {
+        let _zone = pinned_utc();
         let mut harness = Harness::new(date_pill(), 800.0);
         open_value_editor(&mut harness, vec![], 800.0);
         assert_eq!(harness.bar.pending, "1970-01-01");
@@ -2312,7 +2404,7 @@ mod tests {
 
         // The filter list: every match field, under labels wide enough that the
         // bar's own width is the binding constraint.
-        harness.bar.editing = Some(SegmentEdit { path: vec![], role: SegmentRole::Filter });
+        harness.bar.editing = Some(SegmentEdit { path: vec![], role: SegmentRole::Filter, restore: None });
         harness.bar.dropdown_open = true;
         harness.frame(frame_input(WIDTH));
         harness.frame(frame_input(WIDTH));
@@ -2323,7 +2415,7 @@ mod tests {
         // The operator list for `Outcome` is `is` and `is not` -- the narrowest
         // content the dropdown ever holds, and the user's actual path into the
         // symptom.
-        harness.bar.editing = Some(SegmentEdit { path: vec![], role: SegmentRole::Operator });
+        harness.bar.editing = Some(SegmentEdit { path: vec![], role: SegmentRole::Operator, restore: None });
         harness.frame(frame_input(WIDTH));
         harness.frame(frame_input(WIDTH));
         let narrow = harness.popup_width().expect("the dropdown is still built");
@@ -2478,6 +2570,149 @@ mod tests {
             let reparsed = parse_query(&printed).unwrap_or_else(|e| panic!("{label} printed {printed:?}: {e}"));
             assert_eq!(reparsed, minted, "{label} printed {printed:?}");
         }
+    }
+
+    /// Mints a term the way picking that field's row does, and hands back the
+    /// query as it stood before, which is what dismissal has to restore.
+    fn mint_from_caret(bar: &mut QueryBar, field: TermField, scope: Option<Scope>) -> MatchExpr {
+        let before = bar.expr.clone();
+        assert!(with_ui(|ui, caret_id| bar.mint_term(field, scope, ui, caret_id)), "the mint must take");
+        assert!(bar.editing.is_some(), "the value editor must open on the placeholder");
+        assert_ne!(bar.expr, before, "the placeholder is in the tree while its editor is open");
+        before
+    }
+
+    /// Escape while the dropdown is open, through the same routing the key does.
+    fn press_escape(bar: &mut QueryBar) -> bool {
+        let deps = Deps { history: &[] };
+        with_ui(|ui, caret_id| bar.apply_nav(Nav::CloseDropdown, &[], &[], &deps, ui, caret_id))
+    }
+
+    /// The case with no visible defect at all, and the reason the earlier
+    /// ruling was wrong. `outcome`'s placeholder is `win` -- a value a user
+    /// picks on purpose -- so a dismissed editor that left it behind would
+    /// narrow every later search to victories, with nothing on screen saying so.
+    #[test]
+    fn dismissing_a_minted_outcome_pill_restores_the_query() {
+        let mut bar = caret_bar();
+        let before = mint_from_caret(&mut bar, TermField::Match(MatchField::Outcome), None);
+        assert_eq!(query_text::print_query(&bar.expr), "outcome=win", "the fixture must mint the silent placeholder");
+
+        assert!(press_escape(&mut bar), "a restore has to be reported, or the results stay stale");
+        assert_eq!(bar.expr, before, "the placeholder outlived its editor");
+        assert!(bar.editing.is_none());
+    }
+
+    /// The visibly broken case: a zero id resolves to no ship, so the pill reads
+    /// as nonsense and the compiled query matches nothing.
+    #[test]
+    fn dismissing_a_minted_ship_pill_restores_the_query() {
+        let mut bar = caret_bar();
+        let before = mint_from_caret(&mut bar, TermField::Roster(RosterField::Ship), Some(Scope::Enemy));
+        assert_eq!(query_text::print_query(&bar.expr), "enemy.ship=0");
+        assert!(pill_text_at(&bar, &vec![]).contains('0'), "the fixture must be the unresolvable pill");
+
+        assert!(press_escape(&mut bar), "a restore has to be reported");
+        assert_eq!(bar.expr, before);
+    }
+
+    /// The case the compiler already forgave: an empty `Contains` is vacuous, so
+    /// `prune_empty` drops it before the query runs. The pill is still on screen
+    /// though, so dismissal has to withdraw it like any other.
+    #[test]
+    fn dismissing_a_minted_map_pill_restores_the_query() {
+        let mut bar = caret_bar();
+        let before = mint_from_caret(&mut bar, TermField::Match(MatchField::Map), None);
+        assert_eq!(query_text::print_query(&bar.expr), "map:\"\"");
+        assert!(select::prune_empty(&bar.expr).is_empty_all(), "the fixture must be the benign placeholder");
+
+        press_escape(&mut bar);
+        assert_eq!(bar.expr, before, "a pill the query ignores is still a pill the user did not ask for");
+    }
+
+    /// Dismissal withdraws the placeholder and nothing else: the terms the caret
+    /// held when the row was picked were committed on purpose.
+    #[test]
+    fn dismissing_a_minted_pill_keeps_the_terms_typed_before_it() {
+        let mut bar = caret_bar();
+        bar.pending = "outcome:win ".to_owned();
+        let before = bar.expr.clone();
+        assert!(with_ui(|ui, caret_id| bar.mint_term(
+            TermField::Roster(RosterField::Ship),
+            Some(Scope::Enemy),
+            ui,
+            caret_id
+        )));
+        assert_ne!(bar.expr, before);
+
+        press_escape(&mut bar);
+        assert_eq!(bar.expr, parse_query("outcome:win").expect("parse"), "the typed term was withdrawn with the pill");
+    }
+
+    /// The snapshot must not outlive the choice it was insurance against.
+    #[test]
+    fn choosing_a_value_for_a_minted_pill_keeps_it() {
+        let mut bar = caret_bar();
+        mint_from_caret(&mut bar, TermField::Match(MatchField::Outcome), None);
+        assert!(bar.commit_value_literal("loss"), "the picked literal must land");
+        assert!(bar.editing.is_none(), "a committed value closes its editor");
+
+        assert!(!press_escape(&mut bar), "nothing is left to restore");
+        assert_eq!(bar.expr, parse_query("outcome=loss").expect("parse"));
+    }
+
+    /// The scope of the whole mechanism. An editor the user opened by clicking a
+    /// segment holds a value they chose earlier, so Escape leaves the term
+    /// alone; only an editor a mint forced open carries a snapshot.
+    #[test]
+    fn dismissing_an_editor_the_user_opened_keeps_its_value() {
+        let mut bar = QueryBar::default();
+        bar.set_expr(win());
+        let opened = with_ui(|ui, caret_id| bar.begin_segment_edit(vec![], SegmentRole::Value, ui, caret_id));
+        assert!(opened);
+        assert!(bar.editing.as_ref().expect("the editor").restore.is_none(), "a clicked segment carries no snapshot");
+
+        assert!(!press_escape(&mut bar), "dismissing a deliberate edit changes nothing");
+        assert_eq!(bar.expr, win());
+    }
+
+    /// The other path that mints a placeholder: retargeting a pill at a field
+    /// its old value cannot serve. Dismissal has to put the whole term back,
+    /// field included, since the new field is half of a term the user never
+    /// finished.
+    #[test]
+    fn dismissing_a_retarget_that_minted_a_placeholder_restores_the_term() {
+        let mut bar = bar_editing(roster_pill(RosterField::Tier, Op::Eq, Value::Int(10)), SegmentRole::Filter);
+        let before = bar.expr.clone();
+        assert!(with_ui(|ui, caret_id| bar.commit_field_change(TermField::Roster(RosterField::Ship), ui, caret_id)));
+        assert_eq!(query_text::print_query(&bar.expr), "anyone.ship=0", "the retarget must mint a placeholder");
+
+        assert!(press_escape(&mut bar), "a restore has to be reported");
+        assert_eq!(bar.expr, before, "the pill was left carrying a field and a value the user never chose");
+    }
+
+    /// The other dismissal the user reaches for: clicking away from the bar
+    /// rather than pressing Escape. Driven through real frames, because the
+    /// route is `show`'s own unfocused branch.
+    #[test]
+    fn a_minted_pill_is_withdrawn_when_focus_leaves_the_bar() {
+        const WIDTH: f32 = 800.0;
+        let mut harness = Harness::new(MatchExpr::default(), WIDTH);
+        let caret_id = harness.caret_id();
+        harness.ctx.memory_mut(|m| m.request_focus(caret_id));
+        harness.frame(frame_input(WIDTH));
+
+        let bar = &mut harness.bar;
+        mint_from_caret(bar, TermField::Match(MatchField::Outcome), None);
+
+        harness.ctx.memory_mut(egui::Memory::stop_text_input);
+        harness.frame(frame_input(WIDTH));
+        assert!(
+            harness.bar.expr.is_empty_all(),
+            "focus leaving the bar left the placeholder behind: {:?}",
+            harness.bar.expr
+        );
+        assert!(harness.bar.editing.is_none());
     }
 
     /// The path a picked row lands on, which decides which term the value

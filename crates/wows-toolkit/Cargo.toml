@@ -112,6 +112,9 @@ mimalloc = { version = "0.1.52", optional = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+# `test-support` for `ZoneGuard`: the query bar's tests assert on text the
+# config crate's timestamp printer produces, which reads the local zone.
+wows-toolkit-config = { workspace = true, features = ["test-support"] }
 
 [build-dependencies]
 winresource = "0.1.31"

@@ -17,6 +17,12 @@ thiserror = { workspace = true }
 jiff = { workspace = true, features = ["serde"] }
 winnow = { workspace = true }
 
+[features]
+# Compiles the timezone override in, so another crate's tests can pin the zone a
+# bare date and the printer's midnight check resolve against. Off in every
+# production build, which is what keeps "the zone" meaning the system's own.
+test-support = []
+
 [dev-dependencies]
 tokio = { version = "1.51", features = ["rt", "macros"] }
 tempfile = "3.27.0"

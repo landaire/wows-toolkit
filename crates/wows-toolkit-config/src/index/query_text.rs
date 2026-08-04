@@ -218,12 +218,12 @@ fn current_now() -> Timestamp {
     NOW.with(|cell| cell.get()).unwrap_or_else(Timestamp::now)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     /// The timezone a bare date, and the printer's midnight check, resolve
     /// against during a test. A thread local for the same reason as `NOW`:
     /// production always means the system's own zone, but a test needs a
-    /// fixed non-UTC zone to see real local-day behaviour regardless of the
+    /// fixed zone to see the same local-day behaviour regardless of the
     /// machine running it.
     static ZONE: std::cell::RefCell<Option<jiff::tz::TimeZone>> = const { std::cell::RefCell::new(None) };
 }
@@ -231,19 +231,24 @@ thread_local! {
 /// Overrides `current_zone()` for the lifetime of the guard. Mirrors
 /// `NowGuard`; test-only because production has no notion of "the zone" other
 /// than the system's.
-#[cfg(test)]
-pub(crate) struct ZoneGuard {
+///
+/// Reachable from another crate's tests through the `test-support` feature,
+/// because the query bar lives in the app crate while the printer whose output
+/// it asserts on lives here: without the override those assertions read the
+/// machine's own zone and pass or fail by where the developer is.
+#[cfg(any(test, feature = "test-support"))]
+pub struct ZoneGuard {
     previous: Option<jiff::tz::TimeZone>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl ZoneGuard {
-    pub(crate) fn set(zone: jiff::tz::TimeZone) -> Self {
+    pub fn set(zone: jiff::tz::TimeZone) -> Self {
         ZoneGuard { previous: ZONE.with(|cell| cell.replace(Some(zone))) }
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl Drop for ZoneGuard {
     fn drop(&mut self) {
         let previous = self.previous.take();
@@ -254,7 +259,7 @@ impl Drop for ZoneGuard {
 /// The timezone a bare date, and the printer's midnight check, resolve
 /// against: the system timezone, unless a `ZoneGuard` in a test overrides it.
 pub(crate) fn current_zone() -> jiff::tz::TimeZone {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         if let Some(zone) = ZONE.with(|cell| cell.borrow().clone()) {
             return zone;
