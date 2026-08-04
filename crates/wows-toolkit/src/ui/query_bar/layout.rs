@@ -397,14 +397,17 @@ mod tests {
     fn a_lone_segment_has_no_gap_and_takes_its_own_width() {
         let c = LayoutCfg { min_segment_width: 0.0, segment_gap: 4.0, ..cfg() };
         assert!((pill_width(&[30.0], &c) - 30.0).abs() < f32::EPSILON);
-        assert_eq!(segment_offsets(&[30.0], &c), vec![(0.0, 30.0)]);
+        let offsets = segment_offsets(&[30.0], &c);
+        assert_eq!(offsets.len(), 1);
+        assert!((offsets[0].0 - 0.0).abs() < f32::EPSILON);
+        assert!((offsets[0].1 - 30.0).abs() < f32::EPSILON);
     }
 
     #[test]
     fn an_empty_pill_has_zero_width_and_no_segments_rather_than_panicking() {
         let c = cfg();
-        assert_eq!(pill_width(&[], &c), 0.0);
-        assert_eq!(segment_offsets(&[], &c), Vec::new());
+        assert!((pill_width(&[], &c) - 0.0).abs() < f32::EPSILON);
+        assert!(segment_offsets(&[], &c).is_empty());
     }
 
     /// The property `segment_offsets` and `pill_width` must never drift apart

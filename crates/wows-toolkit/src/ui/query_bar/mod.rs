@@ -252,9 +252,11 @@ impl QueryBar {
             gap: ROW_GAP,
             indent: DEPTH_INDENT,
             max_rows: MAX_ROWS,
-            // Egui's own minimum interactive width, so a one-character
-            // operator segment like "=" is still a clickable target.
-            min_segment_width: ui.spacing().interact_size.x,
+            // `row_height` above already derives from `interact_size.y`; reusing
+            // it here makes the smallest possible segment roughly square, a
+            // natural click-target floor rather than borrowing the whole
+            // widget's minimum width for a sub-region of an already-wide pill.
+            min_segment_width: ui.spacing().interact_size.y,
             segment_gap: SEGMENT_GAP,
         };
         let full_width = ui.available_width();
