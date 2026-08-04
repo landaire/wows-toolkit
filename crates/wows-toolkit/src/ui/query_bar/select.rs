@@ -261,6 +261,38 @@ pub fn replace_node(expr: &mut MatchExpr, path: &[usize], expected: &MatchExpr, 
     true
 }
 
+/// What a value written back through `commit_value` is anchored to: the path of
+/// the `MatchExpr` leaf carrying the term, the node sitting at that path now,
+/// and the tail addressing the term inside that leaf's roster predicate.
+///
+/// The leaf rather than the term itself, because only a whole `MatchExpr` can be
+/// gated on: `replace_node` compares what it is about to overwrite against the
+/// node the caller started from, and a `RosterTerm` buried in a predicate is not
+/// a node the match tree can name.
+pub fn leaf_seed(expr: &MatchExpr, path: &[usize]) -> Option<(NodePath, MatchExpr, NodePath)> {
+    let (_, rest) = split_at_leaf(expr, path)?;
+    // `split_at_leaf` walks `path` from the front and hands back an unconsumed
+    // suffix of it, so what it consumed is the prefix of that length.
+    let leaf = path[..path.len() - rest.len()].to_vec();
+    let seed = node_at(expr, &leaf)?.clone();
+    Some((leaf, seed, rest.to_vec()))
+}
+
+/// Writes `value` onto the term `tail` names inside `seed`, and writes the
+/// result back only while `seed` is still the node at `leaf`.
+///
+/// The edit is applied to a clone of the seed rather than to a position in the
+/// live tree, so nothing here re-resolves an index that a rewrite could have
+/// moved a different node under; the one index used is `leaf`, and
+/// `replace_node` refuses it unless it still names the node the caller opened.
+pub fn commit_value(expr: &mut MatchExpr, leaf: &[usize], seed: &MatchExpr, tail: &[usize], value: Value) -> bool {
+    let mut updated = seed.clone();
+    if !set_value(&mut updated, tail, value) {
+        return false;
+    }
+    replace_node(expr, leaf, seed, updated)
+}
+
 /// The path a segment edit acts on, given the path of the pill that was
 /// clicked. `None` for a pill whose segments address no editable term.
 ///
@@ -2000,5 +2032,85 @@ mod tests {
         let mut e = leaf(1);
         assert!(replace_node(&mut e, &[], &leaf(1), leaf(2)));
         assert_eq!(e, leaf(2));
+    }
+
+    /// A term inside a roster predicate is not a node the match tree can name,
+    /// so the anchor a value edit writes back through is the leaf carrying it
+    /// plus the tail that reaches the term inside that leaf.
+    #[test]
+    fn leaf_seed_splits_a_roster_term_path_into_the_leaf_and_the_tail_inside_it() {
+        use crate::db::index::query_ast::RosterField;
+        use crate::db::index::query_ast::RosterTerm;
+        let pred = Expr::All(vec![
+            Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) }),
+            Expr::Leaf(RosterTerm { field: RosterField::Kills, op: Op::Ge, value: Value::Int(2) }),
+        ]);
+        let roster: MatchExpr = Expr::Leaf(MatchTerm::Roster { quant: Quant::None, pred });
+        let e: MatchExpr = Expr::All(vec![leaf(1), roster.clone()]);
+
+        let (leaf_path, seed, tail) = leaf_seed(&e, &[1, 1]).expect("the roster term resolves");
+        assert_eq!(leaf_path, vec![1], "the anchor stops at the match-level leaf");
+        assert_eq!(seed, roster, "the seed is the whole leaf, which is what can be gated on");
+        assert_eq!(tail, vec![1], "the tail addresses the term inside the predicate");
+
+        let (leaf_path, seed, tail) = leaf_seed(&e, &[0]).expect("the field term resolves");
+        assert_eq!((leaf_path, seed, tail), (vec![0], leaf(1), Vec::new()), "a field term has no tail");
+    }
+
+    /// `canonicalise` collapses a one-condition tree to a bare leaf, so the term
+    /// a box was opened on can end up at the root path. The anchor has to name
+    /// it there directly rather than through a parent that does not exist.
+    #[test]
+    fn leaf_seed_anchors_a_lone_term_at_the_root() {
+        let e = leaf(7);
+        let (leaf_path, seed, tail) = leaf_seed(&e, &[]).expect("the root term resolves");
+        assert_eq!((leaf_path, seed, tail), (Vec::new(), leaf(7), Vec::new()));
+    }
+
+    /// The two things the write has to get right at once: the term it lands on
+    /// is the one the tail names inside the predicate, and everything standing
+    /// around the leaf -- here a `not` -- is untouched, because the leaf is
+    /// swapped rather than the node the pill reads as.
+    #[test]
+    fn commit_value_writes_a_roster_term_through_its_leaf() {
+        use crate::db::index::query_ast::RosterField;
+        use crate::db::index::query_ast::RosterTerm;
+        let pred = Expr::All(vec![
+            Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Ge, value: Value::Int(8) }),
+            Expr::Leaf(RosterTerm { field: RosterField::Kills, op: Op::Ge, value: Value::Int(2) }),
+        ]);
+        let mut e: MatchExpr = Expr::Not(Box::new(Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred })));
+
+        let (leaf_path, seed, tail) = leaf_seed(&e, &[0, 1]).expect("the second roster term resolves");
+        assert_eq!(tail, vec![1], "the fixture must exercise a non-empty tail");
+        assert!(commit_value(&mut e, &leaf_path, &seed, &tail, Value::Int(5)));
+
+        assert!(matches!(e, Expr::Not(_)), "the negation was replaced rather than written under: {e:?}");
+        assert_eq!(
+            term_at(&e, &[0, 1]).map(|(_, _, value)| value.clone()),
+            Some(Value::Int(5)),
+            "the tail's own term must take the value"
+        );
+        assert_eq!(
+            term_at(&e, &[0, 0]).map(|(_, _, value)| value.clone()),
+            Some(Value::Int(8)),
+            "its sibling in the predicate must be untouched"
+        );
+    }
+
+    /// The same staleness `replace_node` guards, driven the way a value commit
+    /// reaches it: the leaf a box opened over is deleted while the box is open,
+    /// another term slides into its path, and the typed value must land on
+    /// nothing rather than on the term that inherited the position.
+    #[test]
+    fn commit_value_refuses_a_leaf_that_moved_while_the_box_was_open() {
+        let mut e = Expr::All(vec![leaf(1), leaf(2), leaf(3)]);
+        let (leaf_path, seed, tail) = leaf_seed(&e, &[1]).expect("the second term resolves");
+
+        delete(&mut e, &sel(&[&[0]]));
+        assert_eq!(node_at(&e, &leaf_path), Some(&leaf(3)), "the fixture must slide a different term under the path");
+
+        assert!(!commit_value(&mut e, &leaf_path, &seed, &tail, Value::Int(99)), "the write landed on another term");
+        assert_eq!(e, Expr::All(vec![leaf(2), leaf(3)]), "a refused write must leave the tree alone");
     }
 }

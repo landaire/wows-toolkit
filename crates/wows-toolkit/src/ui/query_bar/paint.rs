@@ -62,7 +62,7 @@ pub fn bar_frame(ui: &Ui, focused: bool) -> egui::Frame {
 /// a single run for every other kind.
 pub fn token(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], kind: &TokenKind, state: TokenState, cfg: &LayoutCfg) {
     match kind {
-        TokenKind::Pill { .. } => pill(ui, rect, galleys, state, cfg),
+        TokenKind::Pill { .. } => pill(ui, rect, galleys, state, cfg, None),
         // `galleys` always carries exactly one run for these kinds (`mod.rs`'s
         // `token_galleys` builds it that way); `first()` skips painting rather
         // than trusting that invariant with an index that would panic if it
@@ -92,20 +92,24 @@ pub fn token(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], kind: &TokenKind, sta
 /// `segment_rects` gives it, with a separator between adjacent segments and a
 /// background of its own when the pointer sits over it, which is the click
 /// target `mod.rs` registers over the same rect.
-fn pill(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], state: TokenState, cfg: &LayoutCfg) {
+fn pill(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], state: TokenState, cfg: &LayoutCfg, boxed: Option<usize>) {
     let visuals = ui.visuals();
     let (fill, text) = match state {
         TokenState::Idle => (visuals.widgets.inactive.bg_fill, visuals.text_color()),
         TokenState::Hovered => (visuals.widgets.hovered.bg_fill, visuals.strong_text_color()),
         TokenState::Selected => (visuals.selection.bg_fill, visuals.strong_text_color()),
     };
+    let segments = segment_rects(rect, &segment_widths(galleys), cfg);
+    // The cell a caret stands in can be wider than the segments inside it --
+    // `lay_out` gives a trailing caret the rest of its row -- so the surface is
+    // painted over what the segments actually occupy rather than over the cell.
+    let surface = segments.last().map_or(rect, |last| rect.with_max_x(last.right()));
     let painter = ui.painter();
-    painter.rect_filled(rect, CornerRadius::same(RADIUS), fill);
+    painter.rect_filled(surface, CornerRadius::same(RADIUS), fill);
     if state == TokenState::Selected {
-        painter.rect_stroke(rect, CornerRadius::same(RADIUS), visuals.selection.stroke, StrokeKind::Inside);
+        painter.rect_stroke(surface, CornerRadius::same(RADIUS), visuals.selection.stroke, StrokeKind::Inside);
     }
 
-    let segments = segment_rects(rect, &segment_widths(galleys), cfg);
     let hover_fill = ui.sem().text_strong.gamma_multiply(SEGMENT_HOVER_ALPHA);
     let separator = Stroke::new(1.0, ui.sem().pill_separator);
     let last = segments.len().saturating_sub(1);
@@ -115,11 +119,24 @@ fn pill(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], state: TokenState, cfg: &L
             let sep_x = seg_rect.left() - cfg.segment_gap * 0.5;
             painter.line_segment([Pos2::new(sep_x, rect.top()), Pos2::new(sep_x, rect.bottom())], separator);
         }
+        // The boxed segment is a `TextEdit` drawn over this same rect by the
+        // egui layer, so neither its run nor a hover wash belongs under it.
+        if boxed == Some(i) {
+            continue;
+        }
         if ui.rect_contains_pointer(*seg_rect) {
             painter.rect_filled(*seg_rect, segment_corner_radius(i, last), hover_fill);
         }
         text_run(ui, *seg_rect, galley.clone(), text);
     }
+}
+
+/// The pill a value is being edited inside: the same surface and segments a
+/// committed pill draws, minus the one the inline box occupies. `galleys`
+/// carries that pill's runs with the boxed segment measured from the text being
+/// typed, so the pill is exactly as wide as the box currently needs.
+pub fn inline_pill(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], boxed: usize, cfg: &LayoutCfg) {
+    pill(ui, rect, galleys, TokenState::Idle, cfg, Some(boxed));
 }
 
 /// The hover wash's corners: rounded only where a segment sits on the pill's
