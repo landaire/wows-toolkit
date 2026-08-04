@@ -174,15 +174,35 @@ struct SegmentEdit {
     /// the segment renders rather than the pill's own node.
     path: NodePath,
     role: SegmentRole,
-    /// The tree as it stood before a placeholder was minted, carried only by an
-    /// editor that mint forced open. Dismissing such an editor puts it back,
-    /// because the placeholder is a value nothing chose: for `outcome` it is
-    /// `win`, which reads as a filter the user set on purpose and silently
-    /// narrows the search.
-    ///
-    /// `None` for an editor the user opened by clicking a segment. There the
-    /// value already on the term was a real choice, so dismissal keeps it.
-    restore: Option<MatchExpr>,
+    /// What dismissal has to hand back, carried only by an editor that a minted
+    /// placeholder forced open. `None` for an editor the user opened by clicking
+    /// a segment: the value already on the term was a real choice, so dismissal
+    /// keeps it.
+    restore: Option<Restore>,
+}
+
+/// The undo a forced editor carries. Dismissing it puts `before` back, because
+/// the placeholder it was opened on is a value nothing chose: for `outcome` it
+/// is `win`, which reads as a filter the user set on purpose and silently
+/// narrows the search.
+#[derive(Debug, Clone, PartialEq)]
+struct Restore {
+    before: MatchExpr,
+    /// The pill the mint added, when it added one, by the path it has in the
+    /// tree the mint left behind. `None` when the placeholder replaced a value
+    /// on a pill that already existed, which takes no pill away.
+    minted: Option<NodePath>,
+}
+
+/// What dismissing an edit did, so a caller can both re-run the query and tell
+/// whether the pill a click names survived.
+#[derive(Debug, Default, PartialEq)]
+struct Dismissal {
+    /// The tree changed, so the query has to run again and the saved one has to
+    /// be rewritten.
+    restored: bool,
+    /// The pill the restore took away, by the path it had while it existed.
+    withdrew: Option<NodePath>,
 }
 
 /// A navigation key, read before the caret's `TextEdit` renders and applied
@@ -309,13 +329,13 @@ impl QueryBar {
             // two it holds the needle -- so clicking into that text to correct
             // it must not throw it away.
             if body.clicked_token && !body.clicked_segment {
-                edited |= self.end_segment_edit();
+                edited |= self.end_segment_edit().restored;
             }
             if body.clicked_inside || body.caret_changed || body.caret_gained_focus || self.editing.is_some() {
                 self.dropdown_open = true;
             }
         } else {
-            edited |= self.end_segment_edit();
+            edited |= self.end_segment_edit().restored;
             self.dropdown_open = false;
             self.highlighted = None;
         }
@@ -934,16 +954,16 @@ impl QueryBar {
         let paths = select::selectable_paths(&self.expr, tokens);
         match nav {
             Nav::CloseDropdown => {
-                let restored = self.end_segment_edit();
+                let dismissed = self.end_segment_edit();
                 self.dropdown_open = false;
                 self.highlighted = None;
-                restored
+                dismissed.restored
             }
             Nav::ReleaseFocus => {
                 ui.memory_mut(|m| m.surrender_focus(caret_id));
-                let restored = self.end_segment_edit();
+                let dismissed = self.end_segment_edit();
                 self.selection.clear();
-                restored
+                dismissed.restored
             }
             Nav::CommitRow(index) => rows.get(index).cloned().is_some_and(|row| self.commit_row(row, ui, caret_id)),
             Nav::CommitTyped => self.commit_typed(rows, ui, caret_id),
@@ -1031,21 +1051,11 @@ impl QueryBar {
     fn apply_command(&mut self, command: Command, tokens: &[Token], ui: &Ui, caret_id: egui::Id) -> bool {
         match command {
             Command::EditSegment(pill, role) => {
-                let restored = self.end_segment_edit();
-                // Resolved against the tree the editor opens on, not the one the
-                // click was painted over. A restore that withdrew a placeholder
-                // can leave the query a single condition again, which dissolves
-                // the root's group and renumbers everything under it by one
-                // level -- the click that dismissed the placeholder would
-                // otherwise be eaten by it.
-                let mut path = select::segment_path(&self.expr, &pill);
-                if path.is_none() && restored {
-                    path = pill.split_first().and_then(|(_, tail)| select::segment_path(&self.expr, &tail.to_vec()));
+                let dismissed = self.end_segment_edit();
+                if dismissed.withdrew.as_deref() != Some(pill.as_slice()) {
+                    self.open_clicked_segment(&pill, role, &dismissed, ui, caret_id);
                 }
-                if let Some(path) = path {
-                    self.begin_segment_edit(path, role, ui, caret_id);
-                }
-                restored
+                dismissed.restored
             }
             Command::SelectOnly(path) => {
                 self.select_single(path);
@@ -1081,9 +1091,49 @@ impl QueryBar {
                 true
             }
             Command::Ungroup(path) => {
-                let restored = self.end_segment_edit();
-                select::ungroup(&mut self.expr, &path) || restored
+                let dismissed = self.end_segment_edit();
+                select::ungroup(&mut self.expr, &path) || dismissed.restored
             }
+        }
+    }
+
+    /// Opens the segment a click named, against the tree the click's own
+    /// dismissal left rather than the one it was painted over.
+    ///
+    /// Withdrawing a minted pill can leave the query a single condition again,
+    /// which dissolves the root's group and moves every path under it up one
+    /// level. The pill the user aimed at is then one level shallower, and
+    /// resolving the click as painted would open nothing.
+    ///
+    /// Only ever one level, and only for a withdrawal: `mint_term` canonicalises
+    /// before snapshotting, so the tree the editor opened over differs from the
+    /// snapshot by exactly one appended top-level node. Taking that node away
+    /// either leaves the root's arity alone or collapses a one-child root into
+    /// its child. A retarget's snapshot carries no `minted` path at all, so this
+    /// never runs against one -- which is what makes the claim above hold for
+    /// every snapshot it does run against.
+    ///
+    /// The retry is a path fix, not an identity test: a numeric path names a
+    /// position rather than a pill, so a different pill can inherit the one that
+    /// was clicked. `apply_command` refuses the withdrawn pill's own path before
+    /// calling this, which is the case a mint creates. Other shapes, where a
+    /// deeper sibling path stays legal after a restore, resolve onto a pill the
+    /// user did not click; that predates the snapshot mechanism and is recorded
+    /// as a follow-up.
+    fn open_clicked_segment(
+        &mut self,
+        pill: &NodePath,
+        role: SegmentRole,
+        dismissed: &Dismissal,
+        ui: &Ui,
+        caret_id: egui::Id,
+    ) {
+        let mut path = select::segment_path(&self.expr, pill);
+        if path.is_none() && dismissed.withdrew.is_some() {
+            path = pill.split_first().and_then(|(_, tail)| select::segment_path(&self.expr, &tail.to_vec()));
+        }
+        if let Some(path) = path {
+            self.begin_segment_edit(path, role, ui, caret_id);
         }
     }
 
@@ -1093,11 +1143,10 @@ impl QueryBar {
         self.begin_edit(path, role, None, ui, caret_id)
     }
 
-    /// Opens a value editor that a minted placeholder forced open, carrying the
-    /// tree as it stood before the mint. Dismissing this editor without choosing
-    /// a value puts that tree back.
-    fn begin_forced_value_edit(&mut self, path: NodePath, before: MatchExpr, ui: &Ui, caret_id: egui::Id) -> bool {
-        self.begin_edit(path, SegmentRole::Value, Some(before), ui, caret_id)
+    /// Opens a value editor that a minted placeholder forced open, carrying what
+    /// dismissing it has to hand back.
+    fn begin_forced_value_edit(&mut self, path: NodePath, restore: Restore, ui: &Ui, caret_id: egui::Id) -> bool {
+        self.begin_edit(path, SegmentRole::Value, Some(restore), ui, caret_id)
     }
 
     /// Opens one segment's editor, reporting whether it opened. A value segment
@@ -1105,15 +1154,16 @@ impl QueryBar {
     /// has nothing to edit and is refused rather than opened on nothing.
     ///
     /// Whatever editor was already open ends first, so a forced one hands its
-    /// placeholder back rather than losing the snapshot to the new edit. A path
-    /// the restored tree no longer names then opens nothing, which is one lost
-    /// click on the pill that outlived a placeholder rather than a placeholder
-    /// left committed.
+    /// placeholder back rather than losing the snapshot to the new edit. The
+    /// path is resolved after that, against the tree the restore left; a path
+    /// that tree does not name opens nothing. `apply_command` is what keeps a
+    /// click from landing there, by re-resolving a pill the restore only
+    /// renumbered.
     fn begin_edit(
         &mut self,
         path: NodePath,
         role: SegmentRole,
-        restore: Option<MatchExpr>,
+        restore: Option<Restore>,
         ui: &Ui,
         caret_id: egui::Id,
     ) -> bool {
@@ -1153,24 +1203,24 @@ impl QueryBar {
     /// text.
     ///
     /// An editor a minted placeholder forced open puts the tree back as it stood
-    /// before the mint, reporting `true` so the caller re-runs the query. The
-    /// placeholder is in-kind and arbitrary, never a marker, so left behind it
-    /// reads as a filter the user chose: `enemy.ship=0` at least renders as an
-    /// unresolvable pill, but `outcome=win` is indistinguishable from a real
+    /// before the mint, reporting the change so the caller re-runs the query.
+    /// The placeholder is in-kind and arbitrary, never a marker, so left behind
+    /// it reads as a filter the user chose: `enemy.ship=0` at least renders as
+    /// an unresolvable pill, but `outcome=win` is indistinguishable from a real
     /// choice and quietly narrows the search.
-    fn end_segment_edit(&mut self) -> bool {
+    fn end_segment_edit(&mut self) -> Dismissal {
         let Some(edit) = self.editing.take() else {
-            return false;
+            return Dismissal::default();
         };
         self.clear_pending();
-        let Some(before) = edit.restore else {
-            return false;
+        let Some(restore) = edit.restore else {
+            return Dismissal::default();
         };
-        if self.expr == before {
-            return false;
+        if self.expr == restore.before {
+            return Dismissal::default();
         }
-        self.expr = before;
-        true
+        self.expr = restore.before;
+        Dismissal { restored: true, withdrew: restore.minted }
     }
 
     /// Ends the open segment edit keeping what it committed, so a value the user
@@ -1235,7 +1285,11 @@ impl QueryBar {
             return false;
         }
         let kept = select::term_at(&self.expr, &edit.path).is_some_and(|(_, _, value)| *value == previous);
-        if !kept && self.begin_forced_value_edit(edit.path, before, ui, caret_id) {
+        // No `minted` path: a retarget replaces a value on a pill that already
+        // exists, so the restore puts a term back rather than taking one away and
+        // no path moves.
+        let restore = Restore { before, minted: None };
+        if !kept && self.begin_forced_value_edit(edit.path, restore, ui, caret_id) {
             return true;
         }
         self.commit_segment_edit();
@@ -1315,7 +1369,7 @@ impl QueryBar {
             return self.commit_value_literal(&literal);
         }
         let Some(row) = self.default_row(rows) else {
-            return self.end_segment_edit();
+            return self.end_segment_edit().restored;
         };
         self.commit_row(row, ui, caret_id)
     }
@@ -1374,8 +1428,9 @@ impl QueryBar {
         select::append_top_level(&mut self.expr, node);
         select::canonicalise(&mut self.expr);
         let path = select::last_appended_path(&self.expr);
+        let restore = Restore { before: before.clone(), minted: Some(path.clone()) };
         let opened = select::segment_path(&self.expr, &path)
-            .is_some_and(|segment| self.begin_forced_value_edit(segment, before.clone(), ui, caret_id));
+            .is_some_and(|segment| self.begin_forced_value_edit(segment, restore, ui, caret_id));
         if opened {
             return true;
         }
@@ -2603,7 +2658,7 @@ mod tests {
             assert_eq!(reparsed, minted, "{label} printed {printed:?}");
             checked += 1;
         }
-        assert!(checked > 20, "the caret offered {checked} fields, so this asserted almost nothing");
+        assert!(checked >= 50, "the caret offers 58 field rows, so {checked} means most of them vanished");
     }
 
     /// The obligation `mint_term` carries: a placeholder reaches the tree, so an
@@ -2628,15 +2683,20 @@ mod tests {
 
                 let edit = bar.editing.as_ref().unwrap_or_else(|| panic!("{label} opened no editor"));
                 assert_eq!(edit.role, SegmentRole::Value, "{label}");
-                let snapshot = edit.restore.as_ref().unwrap_or_else(|| panic!("{label} carries no snapshot"));
-                assert!(snapshot.is_empty_all(), "{label} snapshotted {snapshot:?} rather than the empty query");
+                let restore = edit.restore.as_ref().unwrap_or_else(|| panic!("{label} carries no snapshot"));
+                assert!(
+                    restore.before.is_empty_all(),
+                    "{label} snapshotted {:?} rather than the empty query",
+                    restore.before
+                );
+                assert_eq!(restore.minted.as_deref(), Some([].as_slice()), "{label} named the wrong minted pill");
                 let (addressed, _, _) =
                     select::term_at(&bar.expr, &edit.path).unwrap_or_else(|| panic!("{label} addresses no term"));
                 assert_eq!(addressed, field, "{label} opened its editor on the wrong term");
                 checked += 1;
             }
         });
-        assert!(checked > 20, "the caret offered {checked} fields, so this asserted almost nothing");
+        assert!(checked >= 50, "the caret offers 58 field rows, so {checked} means most of them vanished");
     }
 
     /// Mints a term the way picking that field's row does, and hands back the
@@ -2794,6 +2854,52 @@ mod tests {
             Some(TermField::Match(MatchField::Outcome)),
             "the click opened an editor on the wrong term"
         );
+    }
+
+    /// The click a path-shaped retry makes dangerous: the placeholder's own
+    /// segment, which is the natural "wrong field, let me fix it" move. The
+    /// restore takes that pill away, so the path the click carries now names
+    /// whichever pill inherited it -- and a retarget editor opened there would
+    /// rewrite a filter the user never touched, while a value editor would offer
+    /// that other pill's literals in a list opened expecting ships. A numeric
+    /// path names a position, not a pill, so the gate is identity.
+    #[test]
+    fn clicking_the_withdrawn_placeholders_own_segment_opens_nothing() {
+        for role in [SegmentRole::Filter, SegmentRole::Operator, SegmentRole::Value] {
+            let mut bar = caret_bar();
+            bar.set_expr(parse_query("outcome:win").expect("parse"));
+            let before = mint_from_caret(&mut bar, TermField::Roster(RosterField::Ship), Some(Scope::Enemy));
+            let placeholder = select::last_appended_path(&bar.expr);
+            assert_eq!(placeholder, vec![1], "the fixture must sit the placeholder after the surviving pill");
+
+            let click = Command::EditSegment(placeholder, role);
+            let tokens = tokenize(&bar.expr, &bar.names);
+            let changed = with_ui(|ui, caret_id| bar.apply_command(click, &tokens, ui, caret_id));
+
+            assert!(changed, "{role:?}: the withdrawal still has to be reported");
+            assert_eq!(bar.expr, before, "{role:?}");
+            assert!(bar.editing.is_none(), "{role:?} opened an editor on a pill the user never clicked");
+        }
+    }
+
+    /// Opening an editor is not a change to the query. A reported change re-runs
+    /// the search and rewrites the saved query, so the report is pinned in both
+    /// directions rather than only where it must fire.
+    #[test]
+    fn clicking_a_segment_with_nothing_to_restore_reports_no_change() {
+        let mut bar = caret_bar();
+        bar.set_expr(parse_query("outcome:win and anyone.tier=10").expect("parse"));
+        let query = bar.expr.clone();
+
+        for role in [SegmentRole::Value, SegmentRole::Operator, SegmentRole::Filter] {
+            let click = Command::EditSegment(first_pill_path(&bar), role);
+            let tokens = tokenize(&bar.expr, &bar.names);
+            let changed = with_ui(|ui, caret_id| bar.apply_command(click, &tokens, ui, caret_id));
+
+            assert!(!changed, "{role:?} reported a query change for opening an editor");
+            assert_eq!(bar.expr, query, "{role:?}");
+            assert!(bar.editing.is_some(), "{role:?} must still open its editor");
+        }
     }
 
     /// The renumbering that same restore can cause. Withdrawing the placeholder
