@@ -29,9 +29,12 @@ pub const RADIUS: u8 = 4;
 pub const PAD_X: f32 = 6.0;
 
 /// How strongly the hovered segment's background stands out from the base
-/// pill fill it sits on. Kept low: the base fill already carries the pill's
-/// idle/hovered/selected state, so this only has to mark which segment the
-/// pointer is over, not repeat that state.
+/// pill fill it sits on. Composited over any fill a pill can have (idle,
+/// hovered, or selected) this clears `contrast::SURFACE_CONTRAST_FLOOR`
+/// against that fill -- `segment_hover_wash_clears_every_pill_fill` pins it --
+/// and is kept no higher than that: the base fill already carries the pill's
+/// own state, so this only has to mark which segment the pointer is over, not
+/// repeat that state.
 const SEGMENT_HOVER_ALPHA: f32 = 0.14;
 
 /// How a token reads under the pointer and the current selection.
@@ -60,12 +63,24 @@ pub fn bar_frame(ui: &Ui, focused: bool) -> egui::Frame {
 pub fn token(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], kind: &TokenKind, state: TokenState, cfg: &LayoutCfg) {
     match kind {
         TokenKind::Pill { .. } => pill(ui, rect, galleys, state, cfg),
-        TokenKind::NotPrefix => text_run(ui, rect, galleys[0].clone(), ui.sem().notice),
+        // `galleys` always carries exactly one run for these kinds (`mod.rs`'s
+        // `token_galleys` builds it that way); `first()` skips painting rather
+        // than trusting that invariant with an index that would panic if it
+        // were ever violated.
+        TokenKind::NotPrefix => {
+            if let Some(galley) = galleys.first() {
+                text_run(ui, rect, galley.clone(), ui.sem().notice);
+            }
+        }
         TokenKind::Connector { .. }
         | TokenKind::GroupOpen { .. }
         | TokenKind::GroupClose
         | TokenKind::QuantOpen { .. }
-        | TokenKind::QuantClose => text_run(ui, rect, galleys[0].clone(), chrome_color(ui, state)),
+        | TokenKind::QuantClose => {
+            if let Some(galley) = galleys.first() {
+                text_run(ui, rect, galley.clone(), chrome_color(ui, state));
+            }
+        }
         // The caret is a real `TextEdit`, which draws itself.
         TokenKind::Caret => {}
     }
@@ -93,7 +108,8 @@ fn pill(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], state: TokenState, cfg: &L
     let segment_widths: Vec<f32> = galleys.iter().map(|g| g.size().x + 2.0 * PAD_X).collect();
     let segments = segment_rects(rect, &segment_widths, cfg);
     let hover_fill = ui.sem().text_strong.gamma_multiply(SEGMENT_HOVER_ALPHA);
-    let separator = Stroke::new(1.0, ui.sem().bracket.deep);
+    let separator = Stroke::new(1.0, ui.sem().pill_separator);
+    let last = segments.len().saturating_sub(1);
 
     for (i, (seg_rect, galley)) in segments.iter().zip(galleys).enumerate() {
         if i > 0 {
@@ -101,9 +117,25 @@ fn pill(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], state: TokenState, cfg: &L
             painter.line_segment([Pos2::new(sep_x, rect.top()), Pos2::new(sep_x, rect.bottom())], separator);
         }
         if ui.rect_contains_pointer(*seg_rect) {
-            painter.rect_filled(*seg_rect, CornerRadius::same(RADIUS), hover_fill);
+            painter.rect_filled(*seg_rect, segment_corner_radius(i, last), hover_fill);
         }
         text_run(ui, *seg_rect, galley.clone(), text);
+    }
+}
+
+/// The hover wash's corners: rounded only where a segment sits on the pill's
+/// own outer boundary, so an interior segment reads as a straight-edged slice
+/// of the pill rather than a chip floating mid-pill. `last` is the index of
+/// the final segment (`segments.len() - 1`), so a single-segment pill rounds
+/// every corner, matching the pill's own outline.
+fn segment_corner_radius(index: usize, last: usize) -> CornerRadius {
+    let round_left = index == 0;
+    let round_right = index == last;
+    CornerRadius {
+        nw: if round_left { RADIUS } else { 0 },
+        sw: if round_left { RADIUS } else { 0 },
+        ne: if round_right { RADIUS } else { 0 },
+        se: if round_right { RADIUS } else { 0 },
     }
 }
 
@@ -269,6 +301,70 @@ mod tests {
         }
     }
 
+    /// The separator is drawn on a pill's own fill, not on the bar, so it
+    /// cannot rely on `depth_stroke_clears_its_floors`' guarantee (that one
+    /// measures against `extreme_bg_color`, the bar). Walks every fill a pill
+    /// can actually have.
+    #[test]
+    fn pill_separator_clears_every_pill_fill() {
+        use crate::ui::theme::contrast::CHROME_LINE_FLOOR;
+        use crate::ui::theme::contrast::contrast_ratio;
+
+        for (theme, visuals) in [
+            ("dark", crate::ui::theme::style::dark_style().visuals),
+            ("light", crate::ui::theme::style::light_style().visuals),
+        ] {
+            let sem = visuals.sem();
+            for (fill_name, fill) in [
+                ("inactive", visuals.widgets.inactive.bg_fill),
+                ("hovered", visuals.widgets.hovered.bg_fill),
+                ("selected", visuals.selection.bg_fill),
+            ] {
+                let ratio = contrast_ratio(sem.pill_separator, fill);
+                assert!(
+                    ratio >= CHROME_LINE_FLOOR,
+                    "{theme} pill separator on {fill_name} pill fill is {ratio:.3}, needs {CHROME_LINE_FLOOR}"
+                );
+            }
+        }
+    }
+
+    /// The hover wash is translucent, so it must be composited over the fill
+    /// it actually lands on before its contrast means anything -- `Color32` is
+    /// not premultiplied, but `gamma_multiply` on an opaque colour produces
+    /// exactly the premultiplied form `over` expects, so the addition alone
+    /// reproduces what the painter draws.
+    #[test]
+    fn segment_hover_wash_clears_every_pill_fill() {
+        use crate::ui::theme::contrast::SURFACE_CONTRAST_FLOOR;
+        use crate::ui::theme::contrast::contrast_ratio;
+
+        fn over(fg: Color32, bg: Color32) -> Color32 {
+            let inv = 1.0 - (f32::from(fg.a()) / 255.0);
+            let mix = |f: u8, b: u8| (f32::from(f) + f32::from(b) * inv).round() as u8;
+            Color32::from_rgb(mix(fg.r(), bg.r()), mix(fg.g(), bg.g()), mix(fg.b(), bg.b()))
+        }
+
+        for (theme, visuals) in [
+            ("dark", crate::ui::theme::style::dark_style().visuals),
+            ("light", crate::ui::theme::style::light_style().visuals),
+        ] {
+            let wash = visuals.sem().text_strong.gamma_multiply(SEGMENT_HOVER_ALPHA);
+            for (fill_name, fill) in [
+                ("inactive", visuals.widgets.inactive.bg_fill),
+                ("hovered", visuals.widgets.hovered.bg_fill),
+                ("selected", visuals.selection.bg_fill),
+            ] {
+                let composited = over(wash, fill);
+                let ratio = contrast_ratio(composited, fill);
+                assert!(
+                    ratio >= SURFACE_CONTRAST_FLOOR,
+                    "{theme} hover wash on {fill_name} pill fill is {ratio:.3}, needs {SURFACE_CONTRAST_FLOOR}"
+                );
+            }
+        }
+    }
+
     /// The crowding decision, pinned so it is a choice rather than a drift:
     /// past depth two the ramp clamps to its dimmest step. Cycling would draw
     /// the bright, heavy outermost stroke inside a dim one and state the
@@ -330,20 +426,26 @@ mod tests {
         Rect::from_min_size(Pos2::new(137.0, 41.0), egui::vec2(layout::pill_width(widths, cfg), 20.0))
     }
 
+    /// The middle width (4.0) is below `segment_rects_cfg`'s
+    /// `min_segment_width` (16.0), so every test built on this fixture
+    /// exercises widening together with translation, not translation alone.
+    const SEGMENT_WIDTHS: [f32; 3] = [30.0, 4.0, 40.0];
+
     #[test]
-    fn one_rect_per_segment_in_order() {
+    fn one_rect_per_segment_in_left_to_right_order() {
         let cfg = segment_rects_cfg();
-        let widths = [30.0, 20.0, 40.0];
-        let rects = segment_rects(pill_rect_for(&widths, &cfg), &widths, &cfg);
-        assert_eq!(rects.len(), widths.len(), "got {rects:?}");
+        let rects = segment_rects(pill_rect_for(&SEGMENT_WIDTHS, &cfg), &SEGMENT_WIDTHS, &cfg);
+        assert_eq!(rects.len(), SEGMENT_WIDTHS.len(), "got {rects:?}");
+        for pair in rects.windows(2) {
+            assert!(pair[1].left() > pair[0].left(), "segments out of order: {rects:?}");
+        }
     }
 
     #[test]
     fn every_segment_rect_is_contained_in_the_pill_rect() {
         let cfg = segment_rects_cfg();
-        let widths = [30.0, 20.0, 40.0];
-        let pill_rect = pill_rect_for(&widths, &cfg);
-        let rects = segment_rects(pill_rect, &widths, &cfg);
+        let pill_rect = pill_rect_for(&SEGMENT_WIDTHS, &cfg);
+        let rects = segment_rects(pill_rect, &SEGMENT_WIDTHS, &cfg);
         for r in &rects {
             assert!(pill_rect.contains_rect(*r), "segment {r:?} escapes the pill {pill_rect:?}");
         }
@@ -352,8 +454,7 @@ mod tests {
     #[test]
     fn segment_rects_do_not_overlap() {
         let cfg = segment_rects_cfg();
-        let widths = [30.0, 20.0, 40.0];
-        let rects = segment_rects(pill_rect_for(&widths, &cfg), &widths, &cfg);
+        let rects = segment_rects(pill_rect_for(&SEGMENT_WIDTHS, &cfg), &SEGMENT_WIDTHS, &cfg);
         for pair in rects.windows(2) {
             assert!(pair[1].left() + f32::EPSILON >= pair[0].right(), "segments overlap: {rects:?}");
         }
@@ -362,9 +463,8 @@ mod tests {
     #[test]
     fn segment_rects_span_the_pill_edge_to_edge() {
         let cfg = segment_rects_cfg();
-        let widths = [30.0, 20.0, 40.0];
-        let pill_rect = pill_rect_for(&widths, &cfg);
-        let rects = segment_rects(pill_rect, &widths, &cfg);
+        let pill_rect = pill_rect_for(&SEGMENT_WIDTHS, &cfg);
+        let rects = segment_rects(pill_rect, &SEGMENT_WIDTHS, &cfg);
         let first = rects.first().expect("at least one segment");
         let last = rects.last().expect("at least one segment");
         assert!((first.left() - pill_rect.left()).abs() < f32::EPSILON, "first segment {first:?} vs {pill_rect:?}");

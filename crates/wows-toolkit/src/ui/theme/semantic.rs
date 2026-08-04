@@ -109,6 +109,21 @@ pub struct SemanticColors {
     pub chat: ChatColors,
     pub armor: ArmorColors,
     pub bracket: BracketColors,
+    /// Divider between two segments of one query-bar pill.
+    ///
+    /// A pill's segments sit on the pill's own fill (idle, hovered, or
+    /// selected), not on the bar, so this cannot borrow `bracket`'s tones: a
+    /// `BracketColors` guarantee is contrast against the bar, and neither
+    /// bracket tone means "divider inside a filled pill". Kept as its own
+    /// field so retuning bracket depth cannot silently starve this of
+    /// contrast, and vice versa.
+    ///
+    /// Like `bracket`, this is chrome rather than text on a surface, so it is
+    /// deliberately absent from the `roles()` list the contrast tests walk.
+    /// What it must clear instead is `contrast::CHROME_LINE_FLOOR` against
+    /// every fill a pill can have, which `query_bar::paint`'s
+    /// `pill_separator_clears_every_pill_fill` pins.
+    pub pill_separator: Color32,
     /// Fill for a dock tab flagging that it needs attention: `error` blended a
     /// tenth of the way over `SURFACE`. The tab is tinted rather than filled so
     /// the active tab keeps the only full-strength fill in the strip.
@@ -147,6 +162,7 @@ pub const DARK: SemanticColors = SemanticColors {
         other: Color32::from_rgb(0xE8, 0xA5, 0x4A),
     },
     bracket: BracketColors { shallow: palette::dark::BORDER_BRIGHT, deep: palette::dark::BORDER },
+    pill_separator: palette::dark::BORDER_BRIGHT,
     armor: ArmorColors {
         angle_good: Color32::from_rgb(0x64, 0xD9, 0x8A),
         angle_mid: Color32::from_rgb(0xE0, 0xBE, 0x64),
@@ -184,6 +200,7 @@ pub const LIGHT: SemanticColors = SemanticColors {
         other: Color32::from_rgb(0x8A, 0x4B, 0x00),
     },
     bracket: BracketColors { shallow: palette::light::BORDER_BRIGHT, deep: palette::light::BORDER },
+    pill_separator: palette::light::BORDER_BRIGHT,
     armor: ArmorColors {
         angle_good: Color32::from_rgb(0x11, 0x6B, 0x34),
         angle_mid: Color32::from_rgb(0x78, 0x58, 0x08),

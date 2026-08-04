@@ -962,38 +962,35 @@ fn request_source(request: Option<&ValueRequest>) -> Option<std::mem::Discrimina
     request.map(std::mem::discriminant)
 }
 
-fn token_text(token: &Token) -> String {
-    match &token.kind {
-        // `token_galleys` lays a `Pill`'s segments out individually rather
-        // than calling this; kept total (and agreeing with
-        // `label::join_segments`) so the function still has one meaning for
-        // every `TokenKind`, not one arm quietly unreachable from the caller.
-        TokenKind::Pill { segments } => segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" "),
-        TokenKind::Connector { is_or } => {
-            if *is_or { t!("ui.search.bar.or_word") } else { t!("ui.search.bar.and_word") }.into_owned()
-        }
-        TokenKind::NotPrefix => t!("ui.search.bar.not_word").into_owned(),
-        TokenKind::GroupOpen { .. } => "(".to_owned(),
-        // The closing bracket of an editable group is its dissolve control, so
-        // it reads as a close button rather than as punctuation.
-        TokenKind::GroupClose => crate::icons::X.to_owned(),
-        TokenKind::QuantClose => ")".to_owned(),
-        TokenKind::QuantOpen { prefix } => format!("{prefix} ("),
-        TokenKind::Caret => String::new(),
-    }
-}
-
 /// One measured run per segment for a `Pill`, one run for every other kind.
 /// `paint::token` needs a galley per segment so it can lay each one out with
 /// `paint::segment_rects`; nothing else here decides where a segment goes.
+///
+/// A single match over `token.kind`, rather than a `Pill` special case
+/// falling back to a separate whole-token-text function: the old split left a
+/// `Pill` arm in that other function that duplicated `label::join_segments`
+/// byte for byte while never actually running, since `token_galleys` always
+/// intercepted `Pill` first. One match makes that shape impossible to
+/// reintroduce rather than merely unused.
 fn token_galleys(ui: &Ui, token: &Token, font: &egui::FontId) -> Vec<Arc<Galley>> {
-    let TokenKind::Pill { segments } = &token.kind else {
-        return vec![ui.painter().layout_no_wrap(token_text(token), font.clone(), egui::Color32::PLACEHOLDER)];
-    };
-    segments
-        .iter()
-        .map(|segment| ui.painter().layout_no_wrap(segment.text.clone(), font.clone(), egui::Color32::PLACEHOLDER))
-        .collect()
+    let run = |text: String| vec![ui.painter().layout_no_wrap(text, font.clone(), egui::Color32::PLACEHOLDER)];
+    match &token.kind {
+        TokenKind::Pill { segments } => segments
+            .iter()
+            .map(|segment| ui.painter().layout_no_wrap(segment.text.clone(), font.clone(), egui::Color32::PLACEHOLDER))
+            .collect(),
+        TokenKind::Connector { is_or } => {
+            run(if *is_or { t!("ui.search.bar.or_word") } else { t!("ui.search.bar.and_word") }.into_owned())
+        }
+        TokenKind::NotPrefix => run(t!("ui.search.bar.not_word").into_owned()),
+        TokenKind::GroupOpen { .. } => run("(".to_owned()),
+        // The closing bracket of an editable group is its dissolve control, so
+        // it reads as a close button rather than as punctuation.
+        TokenKind::GroupClose => run(crate::icons::X.to_owned()),
+        TokenKind::QuantClose => run(")".to_owned()),
+        TokenKind::QuantOpen { prefix } => run(format!("{prefix} (")),
+        TokenKind::Caret => run(String::new()),
+    }
 }
 
 fn token_width(token: &Token, galleys: &[Arc<Galley>], cfg: &LayoutCfg) -> f32 {
@@ -1006,12 +1003,15 @@ fn token_width(token: &Token, galleys: &[Arc<Galley>], cfg: &LayoutCfg) -> f32 {
             let segment_widths: Vec<f32> = galleys.iter().map(|g| g.size().x + 2.0 * paint::PAD_X).collect();
             layout::pill_width(&segment_widths, cfg)
         }
+        // `token_galleys` always hands back exactly one run for these kinds;
+        // `first()` degrades to zero width instead of trusting that
+        // invariant with an index that would panic if it were ever violated.
         TokenKind::Connector { .. }
         | TokenKind::NotPrefix
         | TokenKind::GroupOpen { .. }
         | TokenKind::GroupClose
         | TokenKind::QuantOpen { .. }
-        | TokenKind::QuantClose => galleys[0].size().x + 2.0 * paint::PAD_X,
+        | TokenKind::QuantClose => galleys.first().map_or(0.0, |g| g.size().x + 2.0 * paint::PAD_X),
     }
 }
 
