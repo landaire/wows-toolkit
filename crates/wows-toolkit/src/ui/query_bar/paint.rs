@@ -15,6 +15,8 @@ use egui::StrokeKind;
 use egui::Ui;
 use egui::text::CCursor;
 
+use crate::ui::query_bar::layout;
+use crate::ui::query_bar::layout::LayoutCfg;
 use crate::ui::query_bar::tokens::TokenKind;
 use crate::ui::theme::semantic::SemanticColors;
 use crate::ui::theme::semantic::SemanticExt;
@@ -25,6 +27,12 @@ pub const RADIUS: u8 = 4;
 /// Horizontal breathing room inside a pill, and the amount `mod.rs` adds to a
 /// measured token when it asks `lay_out` for a width.
 pub const PAD_X: f32 = 6.0;
+
+/// How strongly the hovered segment's background stands out from the base
+/// pill fill it sits on. Kept low: the base fill already carries the pill's
+/// idle/hovered/selected state, so this only has to mark which segment the
+/// pointer is over, not repeat that state.
+const SEGMENT_HOVER_ALPHA: f32 = 0.14;
 
 /// How a token reads under the pointer and the current selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,22 +55,29 @@ pub fn bar_frame(ui: &Ui, focused: bool) -> egui::Frame {
 }
 
 /// Draws one token. Exhaustive over `TokenKind` so a new kind cannot slip
-/// through unpainted.
-pub fn token(ui: &Ui, rect: Rect, galley: Arc<Galley>, kind: &TokenKind, state: TokenState) {
+/// through unpainted. `galleys` carries one run per segment for a `Pill` and
+/// a single run for every other kind.
+pub fn token(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], kind: &TokenKind, state: TokenState, cfg: &LayoutCfg) {
     match kind {
-        TokenKind::Pill { .. } => pill(ui, rect, galley, state),
-        TokenKind::NotPrefix => text_run(ui, rect, galley, ui.sem().notice),
+        TokenKind::Pill { .. } => pill(ui, rect, galleys, state, cfg),
+        TokenKind::NotPrefix => text_run(ui, rect, galleys[0].clone(), ui.sem().notice),
         TokenKind::Connector { .. }
         | TokenKind::GroupOpen { .. }
         | TokenKind::GroupClose
         | TokenKind::QuantOpen { .. }
-        | TokenKind::QuantClose => text_run(ui, rect, galley, chrome_color(ui, state)),
+        | TokenKind::QuantClose => text_run(ui, rect, galleys[0].clone(), chrome_color(ui, state)),
         // The caret is a real `TextEdit`, which draws itself.
         TokenKind::Caret => {}
     }
 }
 
-fn pill(ui: &Ui, rect: Rect, galley: Arc<Galley>, state: TokenState) {
+/// The pill's background and outline are painted once, over the whole rect,
+/// so a pill's selection fill reads as one continuous surface rather than a
+/// strip per segment. Each segment then paints its own run inside the rect
+/// `segment_rects` gives it, with a separator between adjacent segments and a
+/// background of its own when the pointer sits over it -- the click target
+/// `select`'s Task 7 caller will interact, made discoverable ahead of that.
+fn pill(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], state: TokenState, cfg: &LayoutCfg) {
     let visuals = ui.visuals();
     let (fill, text) = match state {
         TokenState::Idle => (visuals.widgets.inactive.bg_fill, visuals.text_color()),
@@ -74,7 +89,41 @@ fn pill(ui: &Ui, rect: Rect, galley: Arc<Galley>, state: TokenState) {
     if state == TokenState::Selected {
         painter.rect_stroke(rect, CornerRadius::same(RADIUS), visuals.selection.stroke, StrokeKind::Inside);
     }
-    text_run(ui, rect, galley, text);
+
+    let segment_widths: Vec<f32> = galleys.iter().map(|g| g.size().x + 2.0 * PAD_X).collect();
+    let segments = segment_rects(rect, &segment_widths, cfg);
+    let hover_fill = ui.sem().text_strong.gamma_multiply(SEGMENT_HOVER_ALPHA);
+    let separator = Stroke::new(1.0, ui.sem().bracket.deep);
+
+    for (i, (seg_rect, galley)) in segments.iter().zip(galleys).enumerate() {
+        if i > 0 {
+            let sep_x = seg_rect.left() - cfg.segment_gap * 0.5;
+            painter.line_segment([Pos2::new(sep_x, rect.top()), Pos2::new(sep_x, rect.bottom())], separator);
+        }
+        if ui.rect_contains_pointer(*seg_rect) {
+            painter.rect_filled(*seg_rect, CornerRadius::same(RADIUS), hover_fill);
+        }
+        text_run(ui, *seg_rect, galley.clone(), text);
+    }
+}
+
+/// One rect per segment, positioned inside `pill_rect` by
+/// `layout::segment_offsets`. `pill_rect`'s own width must already equal
+/// `layout::pill_width(segment_widths, cfg)` -- `mod.rs` sizes a pill token
+/// that way -- so every returned rect lands inside `pill_rect` with nothing
+/// left over. Pure arithmetic: this is the half of segment hit-testing that
+/// does not need a rendered frame to check, and is what Task 7 will
+/// `ui.interact` against.
+pub fn segment_rects(pill_rect: Rect, segment_widths: &[f32], cfg: &LayoutCfg) -> Vec<Rect> {
+    layout::segment_offsets(segment_widths, cfg)
+        .into_iter()
+        .map(|(x, w)| {
+            Rect::from_min_max(
+                Pos2::new(pill_rect.left() + x, pill_rect.top()),
+                Pos2::new(pill_rect.left() + x + w, pill_rect.bottom()),
+            )
+        })
+        .collect()
 }
 
 /// One row-slice of a bracketed group. `opens` and `closes` say whether this
@@ -267,5 +316,75 @@ mod tests {
         let text = "aa\u{e9}b";
         assert_eq!(char_index(text, 3), 3);
         assert_eq!(char_index(text, 999), 4);
+    }
+
+    fn segment_rects_cfg() -> LayoutCfg {
+        LayoutCfg { row_height: 20.0, gap: 4.0, indent: 8.0, max_rows: 6, min_segment_width: 16.0, segment_gap: 4.0 }
+    }
+
+    /// Builds the pill rect the same way `mod.rs` would size the token: wide
+    /// enough for `layout::pill_width(widths, cfg)`, at an origin away from
+    /// `(0, 0)` so a derivation that forgets to add the pill's own offset
+    /// cannot pass by accident.
+    fn pill_rect_for(widths: &[f32], cfg: &LayoutCfg) -> Rect {
+        Rect::from_min_size(Pos2::new(137.0, 41.0), egui::vec2(layout::pill_width(widths, cfg), 20.0))
+    }
+
+    #[test]
+    fn one_rect_per_segment_in_order() {
+        let cfg = segment_rects_cfg();
+        let widths = [30.0, 20.0, 40.0];
+        let rects = segment_rects(pill_rect_for(&widths, &cfg), &widths, &cfg);
+        assert_eq!(rects.len(), widths.len(), "got {rects:?}");
+    }
+
+    #[test]
+    fn every_segment_rect_is_contained_in_the_pill_rect() {
+        let cfg = segment_rects_cfg();
+        let widths = [30.0, 20.0, 40.0];
+        let pill_rect = pill_rect_for(&widths, &cfg);
+        let rects = segment_rects(pill_rect, &widths, &cfg);
+        for r in &rects {
+            assert!(pill_rect.contains_rect(*r), "segment {r:?} escapes the pill {pill_rect:?}");
+        }
+    }
+
+    #[test]
+    fn segment_rects_do_not_overlap() {
+        let cfg = segment_rects_cfg();
+        let widths = [30.0, 20.0, 40.0];
+        let rects = segment_rects(pill_rect_for(&widths, &cfg), &widths, &cfg);
+        for pair in rects.windows(2) {
+            assert!(pair[1].left() + f32::EPSILON >= pair[0].right(), "segments overlap: {rects:?}");
+        }
+    }
+
+    #[test]
+    fn segment_rects_span_the_pill_edge_to_edge() {
+        let cfg = segment_rects_cfg();
+        let widths = [30.0, 20.0, 40.0];
+        let pill_rect = pill_rect_for(&widths, &cfg);
+        let rects = segment_rects(pill_rect, &widths, &cfg);
+        let first = rects.first().expect("at least one segment");
+        let last = rects.last().expect("at least one segment");
+        assert!((first.left() - pill_rect.left()).abs() < f32::EPSILON, "first segment {first:?} vs {pill_rect:?}");
+        assert!((last.right() - pill_rect.right()).abs() < f32::EPSILON, "last segment {last:?} vs {pill_rect:?}");
+    }
+
+    /// `MatchTerm::FreeText` (`label.rs`) always yields exactly one segment,
+    /// so this shape ships and must reduce to the pill rect itself rather than
+    /// a narrower inset copy of it.
+    #[test]
+    fn a_single_segment_pill_yields_one_rect_equal_to_the_pill_rect() {
+        let cfg = segment_rects_cfg();
+        let widths = [30.0];
+        let pill_rect = pill_rect_for(&widths, &cfg);
+        let rects = segment_rects(pill_rect, &widths, &cfg);
+        assert_eq!(rects.len(), 1, "got {rects:?}");
+        let only = rects[0];
+        assert!((only.left() - pill_rect.left()).abs() < f32::EPSILON);
+        assert!((only.right() - pill_rect.right()).abs() < f32::EPSILON);
+        assert!((only.top() - pill_rect.top()).abs() < f32::EPSILON);
+        assert!((only.bottom() - pill_rect.bottom()).abs() < f32::EPSILON);
     }
 }

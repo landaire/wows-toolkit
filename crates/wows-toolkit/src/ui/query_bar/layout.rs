@@ -137,10 +137,6 @@ pub fn lay_out(tokens: &[Token], widths: &[f32], avail: f32, cfg: &LayoutCfg) ->
 /// An empty slice cannot arise from `label::pill_segments` (every match on
 /// `MatchTerm` returns at least one segment), but resolves to `0.0` rather
 /// than panicking, since this runs on every keystroke.
-///
-/// No production caller yet: the segmented pill UI that wires this up is a
-/// later task.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn pill_width(segment_widths: &[f32], cfg: &LayoutCfg) -> f32 {
     let Some((first, rest)) = segment_widths.split_first() else {
         return 0.0;
@@ -152,10 +148,6 @@ pub fn pill_width(segment_widths: &[f32], cfg: &LayoutCfg) -> f32 {
 /// (x offset within the pill, width) per segment, in order. Widens and gaps
 /// the same way `pill_width` sums them, so the two never disagree about where
 /// the pill ends; see `pill_width` for the empty-slice decision.
-///
-/// No production caller yet: the segmented pill UI that wires this up is a
-/// later task.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn segment_offsets(segment_widths: &[f32], cfg: &LayoutCfg) -> Vec<(f32, f32)> {
     let mut offsets = Vec::with_capacity(segment_widths.len());
     let mut cursor = 0.0f32;

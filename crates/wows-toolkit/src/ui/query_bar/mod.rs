@@ -175,6 +175,14 @@ struct Body {
     caret_gained_focus: bool,
 }
 
+/// The bar's own id and its caret's, bundled so `rows` -- which also needs
+/// `cfg` for segment painting -- stays under clippy's argument-count lint
+/// without dropping either id.
+struct BarIds {
+    id: egui::Id,
+    caret_id: egui::Id,
+}
+
 impl QueryBar {
     /// Replaces the query outright, as a seeded search or a restored setting
     /// does. Clears everything that described the old tree, and canonicalises
@@ -241,12 +249,6 @@ impl QueryBar {
     /// what the pointer did.
     fn body(&mut self, ui: &mut Ui, id: egui::Id, caret_id: egui::Id, tokens: &[Token]) -> Body {
         let font = egui::TextStyle::Body.resolve(ui.style());
-        let galleys: Vec<Arc<Galley>> = tokens
-            .iter()
-            .map(|token| ui.painter().layout_no_wrap(token_text(token), font.clone(), egui::Color32::PLACEHOLDER))
-            .collect();
-        let widths: Vec<f32> = tokens.iter().zip(&galleys).map(|(t, g)| token_width(t, g)).collect();
-
         let cfg = LayoutCfg {
             row_height: ui.spacing().interact_size.y + 2.0 * ROW_PAD_Y,
             gap: ROW_GAP,
@@ -259,39 +261,43 @@ impl QueryBar {
             min_segment_width: ui.spacing().interact_size.y,
             segment_gap: SEGMENT_GAP,
         };
+        let galleys: Vec<Vec<Arc<Galley>>> = tokens.iter().map(|token| token_galleys(ui, token, &font)).collect();
+        let widths: Vec<f32> = tokens.iter().zip(&galleys).map(|(t, g)| token_width(t, g, &cfg)).collect();
+
         let full_width = ui.available_width();
         let mut laid = lay_out(tokens, &widths, full_width, &cfg);
         if laid.needs_scroll {
             laid = lay_out(tokens, &widths, (full_width - SCROLLBAR_ALLOWANCE).max(1.0), &cfg);
         }
 
+        let ids = BarIds { id, caret_id };
         if laid.needs_scroll {
             egui::ScrollArea::vertical()
                 .id_salt(id.with("scroll"))
                 .max_height(cfg.max_rows as f32 * cfg.row_height)
                 .auto_shrink([false, false])
-                .show(ui, |ui| self.rows(ui, id, caret_id, tokens, &galleys, &laid))
+                .show(ui, |ui| self.rows(ui, &ids, tokens, &galleys, &laid, &cfg))
                 .inner
         } else {
-            self.rows(ui, id, caret_id, tokens, &galleys, &laid)
+            self.rows(ui, &ids, tokens, &galleys, &laid, &cfg)
         }
     }
 
     fn rows(
         &mut self,
         ui: &mut Ui,
-        id: egui::Id,
-        caret_id: egui::Id,
+        ids: &BarIds,
         tokens: &[Token],
-        galleys: &[Arc<Galley>],
+        galleys: &[Vec<Arc<Galley>>],
         laid: &LaidOut,
+        cfg: &LayoutCfg,
     ) -> Body {
         let (_, area) = ui.allocate_space(egui::vec2(ui.available_width(), laid.height));
         let origin = area.min.to_vec2();
 
         // Registered before the tokens so a click on a pill wins the hit test
         // and only a click on the gaps falls through to focusing the caret.
-        let background = ui.interact(area, id.with("background"), Sense::click());
+        let background = ui.interact(area, ids.id.with("background"), Sense::click());
 
         // A nested group's row rect shares its top and bottom edge with the
         // group containing it, since every token on a row spans the full row
@@ -320,7 +326,7 @@ impl QueryBar {
                 continue;
             }
             let rect = placed.rect.translate(origin).shrink2(egui::vec2(0.0, ROW_PAD_Y));
-            let response = ui.interact(rect, id.with(placed.index), Sense::click());
+            let response = ui.interact(rect, ids.id.with(placed.index), Sense::click());
             // Only recorded here. egui runs its surrender check as each widget
             // is created, so focus requested at this point is taken straight
             // back when the caret is built below; the request has to happen
@@ -333,11 +339,11 @@ impl QueryBar {
             } else {
                 TokenState::Idle
             };
-            paint::token(ui, rect, galleys[placed.index].clone(), &token.kind, state);
+            paint::token(ui, rect, &galleys[placed.index], &token.kind, state, cfg);
             self.token_interaction(&response, token, &mut commands);
         }
 
-        let caret = self.caret(ui, caret_id, laid, origin);
+        let caret = self.caret(ui, ids.caret_id, laid, origin);
         // After the caret, never before: egui surrenders focus from any focused
         // widget the pointer is not over as that widget is created, so a
         // request made earlier in the frame is undone by the caret's own
@@ -346,7 +352,7 @@ impl QueryBar {
         // Backspace-deletes-the-selection and Shift+Arrow-extends unreachable
         // from a selection made with the mouse.
         if refocus {
-            ui.memory_mut(|m| m.request_focus(caret_id));
+            ui.memory_mut(|m| m.request_focus(ids.caret_id));
         }
 
         let mut edited = false;
@@ -958,8 +964,10 @@ fn request_source(request: Option<&ValueRequest>) -> Option<std::mem::Discrimina
 
 fn token_text(token: &Token) -> String {
     match &token.kind {
-        // Segments 5-7 give each part its own click target and paint; for now
-        // this joins them the way `label::join_segments` builds `pill_text`.
+        // `token_galleys` lays a `Pill`'s segments out individually rather
+        // than calling this; kept total (and agreeing with
+        // `label::join_segments`) so the function still has one meaning for
+        // every `TokenKind`, not one arm quietly unreachable from the caller.
         TokenKind::Pill { segments } => segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" "),
         TokenKind::Connector { is_or } => {
             if *is_or { t!("ui.search.bar.or_word") } else { t!("ui.search.bar.and_word") }.into_owned()
@@ -975,16 +983,35 @@ fn token_text(token: &Token) -> String {
     }
 }
 
-fn token_width(token: &Token, galley: &Galley) -> f32 {
+/// One measured run per segment for a `Pill`, one run for every other kind.
+/// `paint::token` needs a galley per segment so it can lay each one out with
+/// `paint::segment_rects`; nothing else here decides where a segment goes.
+fn token_galleys(ui: &Ui, token: &Token, font: &egui::FontId) -> Vec<Arc<Galley>> {
+    let TokenKind::Pill { segments } = &token.kind else {
+        return vec![ui.painter().layout_no_wrap(token_text(token), font.clone(), egui::Color32::PLACEHOLDER)];
+    };
+    segments
+        .iter()
+        .map(|segment| ui.painter().layout_no_wrap(segment.text.clone(), font.clone(), egui::Color32::PLACEHOLDER))
+        .collect()
+}
+
+fn token_width(token: &Token, galleys: &[Arc<Galley>], cfg: &LayoutCfg) -> f32 {
     match &token.kind {
         TokenKind::Caret => MIN_CARET_WIDTH,
-        TokenKind::Pill { .. }
-        | TokenKind::Connector { .. }
+        // A pill's own width is its segments widened and gapped the same way
+        // `paint::segment_rects` will place them, so the rect `lay_out` hands
+        // back is exactly wide enough for every segment to land inside it.
+        TokenKind::Pill { .. } => {
+            let segment_widths: Vec<f32> = galleys.iter().map(|g| g.size().x + 2.0 * paint::PAD_X).collect();
+            layout::pill_width(&segment_widths, cfg)
+        }
+        TokenKind::Connector { .. }
         | TokenKind::NotPrefix
         | TokenKind::GroupOpen { .. }
         | TokenKind::GroupClose
         | TokenKind::QuantOpen { .. }
-        | TokenKind::QuantClose => galley.size().x + 2.0 * paint::PAD_X,
+        | TokenKind::QuantClose => galleys[0].size().x + 2.0 * paint::PAD_X,
     }
 }
 
