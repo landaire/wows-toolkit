@@ -110,6 +110,17 @@ fn push_field(qb: &mut QueryBuilder<'_, Sqlite>, field: MatchField, op: Op, valu
         qb.push(format!("{col} {sql}"));
         return;
     }
+    // A typed date names a whole day, not the single instant of its local
+    // midnight, so equality and inequality widen to a half-open range over
+    // that day. Every other comparison on `Date` already means what it says
+    // (`date>=X` is "at or after this instant") and is left to the numeric
+    // path below.
+    if let (MatchField::Date, Value::Timestamp(t)) = (field, value)
+        && matches!(op, Op::Eq | Op::Ne)
+    {
+        push_date_day_range(qb, col, op, *t);
+        return;
+    }
     // Dispatch on both the field's declared kind and the value's actual
     // variant: a value that does not fit its field is a bug upstream, and
     // must narrow the result set, not widen it.
@@ -123,6 +134,33 @@ fn push_field(qb: &mut QueryBuilder<'_, Sqlite>, field: MatchField, op: Op, valu
         (ValueKind::GameMode, Value::GameMode(m)) => push_game_mode(qb, col, op, m),
         _ => {
             qb.push("1=0");
+        }
+    }
+}
+
+/// Emits the half-open range `[start, end)` of the local day containing `t`
+/// (`Eq`) or its negation (any other operator this is called for), resolved
+/// through `current_zone()` so `date=X` and `date!=X` mean the day the user
+/// typed rather than a single instant. The bounds come from the day's own
+/// start and its own following day rather than a fixed 86400 seconds, so a
+/// DST-transition day (23 or 25 hours) still gets its real boundaries.
+fn push_date_day_range(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, t: jiff::Timestamp) {
+    let zoned = t.to_zoned(super::query_text::current_zone());
+    // `start_of_day`/`tomorrow` disambiguate a local midnight that falls in a
+    // DST gap or fold, rather than assuming the wall clock reads 00:00:00.
+    let start = zoned.start_of_day().unwrap_or(zoned.clone());
+    let end = start.tomorrow().unwrap_or_else(|_| start.clone());
+    let (start, end) = (start.timestamp().as_second(), end.timestamp().as_second());
+    match op {
+        Op::Eq => {
+            qb.push(format!("({col} >= ")).push_bind(start);
+            qb.push(format!(" AND {col} < ")).push_bind(end);
+            qb.push(")");
+        }
+        _ => {
+            qb.push(format!("({col} < ")).push_bind(start);
+            qb.push(format!(" OR {col} >= ")).push_bind(end);
+            qb.push(")");
         }
     }
 }
@@ -379,6 +417,73 @@ mod tests {
         let ts = jiff::Timestamp::from_second(1_700_000_000).unwrap();
         let sql = sql_for(&leaf(MatchField::Date, Op::Ge, Value::Timestamp(ts)));
         assert!(sql.contains("m.timestamp >="), "got {sql}");
+    }
+
+    /// Parses a one-term query and returns the `Timestamp` it carries.
+    fn parse_one_timestamp(input: &str) -> jiff::Timestamp {
+        match crate::index::query_text::parse_query(input).unwrap_or_else(|e| panic!("{input:?}: {e}")) {
+            Expr::Leaf(MatchTerm::Field(_, _, Value::Timestamp(t))) => t,
+            other => panic!("expected a single timestamp term, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_equality_on_a_date_matches_the_whole_day() {
+        let _zone = crate::index::query_text::ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").unwrap());
+        let ts = parse_one_timestamp("date=2026-07-23");
+        let sql = sql_for(&leaf(MatchField::Date, Op::Eq, Value::Timestamp(ts)));
+        assert!(sql.contains(">="), "got {sql}");
+        assert!(sql.contains("<"), "got {sql}");
+        assert!(!sql.contains("m.timestamp ="), "still an instant comparison: {sql}");
+    }
+
+    #[test]
+    fn an_inequality_on_a_date_excludes_the_whole_day() {
+        let _zone = crate::index::query_text::ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").unwrap());
+        let ts = parse_one_timestamp("date!=2026-07-23");
+        let sql = sql_for(&leaf(MatchField::Date, Op::Ne, Value::Timestamp(ts)));
+        assert!(sql.contains("NOT") || sql.contains("<") && sql.contains(">="), "got {sql}");
+    }
+
+    #[test]
+    fn an_ordering_comparison_on_a_date_stays_an_instant() {
+        // `date>=X` already means what the user expects. Only equality changes.
+        let ts = parse_one_timestamp("date>=2026-07-23");
+        let sql = sql_for(&leaf(MatchField::Date, Op::Ge, Value::Timestamp(ts)));
+        assert!(sql.contains("m.timestamp >="), "got {sql}");
+    }
+
+    /// 2026-03-08 is the US spring-forward day in America/New_York: local
+    /// midnight to local midnight is 23 hours (82800s), not the 86400s a
+    /// `start + 86400` implementation would assume. A row sitting in that
+    /// missing hour must not match, and a row at the day's real last second
+    /// must.
+    #[tokio::test]
+    async fn an_equality_on_a_dst_day_uses_that_day_s_own_length() {
+        let _zone = crate::index::query_text::ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").unwrap());
+        let ts = parse_one_timestamp("date=2026-03-08");
+        let real_start = ts.as_second();
+        let real_end = real_start + 23 * 3600;
+        let naive_end = real_start + 24 * 3600;
+        let eq_term = leaf(MatchField::Date, Op::Eq, Value::Timestamp(ts));
+
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE indexed_match (arena_id INTEGER PRIMARY KEY, timestamp INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO indexed_match (arena_id, timestamp) VALUES (1, ?), (2, ?), (3, ?)")
+            .bind(real_end - 1) // the day's real last second: must match
+            .bind(real_end) // the following real day's first second: must not
+            .bind(naive_end - 1) // inside a naive 24h window, outside the real 23h day: must not
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT arena_id FROM indexed_match m WHERE ");
+        push_match_expr(&mut qb, &eq_term, &CompileCtx::default());
+        let matched: Vec<i64> = qb.build_query_scalar().fetch_all(&pool).await.unwrap();
+        assert_eq!(matched, vec![1], "got {matched:?}");
     }
 
     #[test]

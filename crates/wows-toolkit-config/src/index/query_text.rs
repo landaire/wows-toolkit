@@ -218,6 +218,51 @@ fn current_now() -> Timestamp {
     NOW.with(|cell| cell.get()).unwrap_or_else(Timestamp::now)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The timezone a bare date, and the printer's midnight check, resolve
+    /// against during a test. A thread local for the same reason as `NOW`:
+    /// production always means the system's own zone, but a test needs a
+    /// fixed non-UTC zone to see real local-day behaviour regardless of the
+    /// machine running it.
+    static ZONE: std::cell::RefCell<Option<jiff::tz::TimeZone>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Overrides `current_zone()` for the lifetime of the guard. Mirrors
+/// `NowGuard`; test-only because production has no notion of "the zone" other
+/// than the system's.
+#[cfg(test)]
+pub(crate) struct ZoneGuard {
+    previous: Option<jiff::tz::TimeZone>,
+}
+
+#[cfg(test)]
+impl ZoneGuard {
+    pub(crate) fn set(zone: jiff::tz::TimeZone) -> Self {
+        ZoneGuard { previous: ZONE.with(|cell| cell.replace(Some(zone))) }
+    }
+}
+
+#[cfg(test)]
+impl Drop for ZoneGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        ZONE.with(|cell| *cell.borrow_mut() = previous);
+    }
+}
+
+/// The timezone a bare date, and the printer's midnight check, resolve
+/// against: the system timezone, unless a `ZoneGuard` in a test overrides it.
+pub(crate) fn current_zone() -> jiff::tz::TimeZone {
+    #[cfg(test)]
+    {
+        if let Some(zone) = ZONE.with(|cell| cell.borrow().clone()) {
+            return zone;
+        }
+    }
+    jiff::tz::TimeZone::system()
+}
+
 /// Report the position of the paren that has no partner, if any. Checked before
 /// the generic `Unexpected` because "you forgot a bracket" is a far more useful
 /// message than "unexpected input at byte 16".
@@ -873,11 +918,14 @@ fn parse_int(s: &str) -> Option<i64> {
     digits.parse::<f64>().ok().map(|v| (v * mult as f64).round() as i64)
 }
 
-/// `YYYY-MM-DD`, interpreted as midnight UTC, or the full RFC 3339 instant that
-/// `print_timestamp` writes when a timestamp does not land on midnight.
+/// `YYYY-MM-DD`, interpreted as midnight in the local timezone (a user
+/// scanning their own replays means their own day), or the full RFC 3339
+/// instant that `print_timestamp` writes when a timestamp does not land on
+/// local midnight. A full instant states its own offset and is read as-is,
+/// never reinterpreted against the local zone.
 fn parse_date(s: &str) -> Option<Timestamp> {
     if let Ok(date) = s.parse::<jiff::civil::Date>() {
-        return date.to_zoned(jiff::tz::TimeZone::UTC).ok().map(|z| z.timestamp());
+        return date.to_zoned(current_zone()).ok().map(|z| z.timestamp());
     }
     s.parse::<Timestamp>().ok()
 }
@@ -1128,12 +1176,13 @@ pub fn print_value(value: &Value) -> String {
     }
 }
 
-/// A timestamp prints as a bare date when it lands exactly on midnight UTC,
-/// which is both what `date>=2026-01-01` means and what a person would type.
-/// A relative date resolves to whatever second the parse happened at, so
-/// anything else prints the full RFC 3339 instant; `parse_date` reads both.
+/// A timestamp prints as a bare date when it lands exactly on midnight in the
+/// local timezone, which is both what `date=2026-07-23` means and what a
+/// person would type. A relative date resolves to whatever second the parse
+/// happened at, so anything else prints the full RFC 3339 instant;
+/// `parse_date` reads both.
 fn print_timestamp(t: Timestamp) -> String {
-    let zoned = t.to_zoned(jiff::tz::TimeZone::UTC);
+    let zoned = t.to_zoned(current_zone());
     if zoned.time() == jiff::civil::Time::midnight() { zoned.date().to_string() } else { t.to_string() }
 }
 
@@ -2110,5 +2159,66 @@ mod tests {
                 other => panic!("{src:?} gave {other:?}"),
             }
         }
+    }
+
+    /// Parses a one-term query and returns the `Timestamp` it carries.
+    fn parse_one_timestamp(input: &str) -> Timestamp {
+        match parse_query(input).unwrap_or_else(|e| panic!("{input:?}: {e}")) {
+            Expr::Leaf(MatchTerm::Field(_, _, Value::Timestamp(t))) => t,
+            other => panic!("expected a single timestamp term, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_bare_date_is_local_midnight_not_utc_midnight() {
+        // A fixed non-UTC zone, not `TimeZone::system()`: on a machine whose
+        // local zone happens to be UTC, comparing system() against itself
+        // would pass even if `parse_date` were still reading UTC midnight.
+        let _zone = ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").unwrap());
+        let ts = parse_one_timestamp("date=2026-07-23");
+        let zoned = ts.to_zoned(jiff::tz::TimeZone::get("America/New_York").unwrap());
+        assert_eq!(zoned.hour(), 0, "not local midnight");
+        assert_eq!(zoned.minute(), 0);
+        assert_eq!(zoned.day(), 23);
+        // And it must actually differ from UTC midnight, or the assertions
+        // above would hold by coincidence for a fixed-offset zone too.
+        assert_ne!(ts, parse_one_timestamp("date>=2026-07-23T00:00:00Z"));
+    }
+
+    #[test]
+    fn a_full_instant_keeps_its_explicit_offset() {
+        // An RFC 3339 instant states its own zone. Local midnight must not be
+        // imposed on it.
+        let _zone = ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").unwrap());
+        let ts = parse_one_timestamp("date>=2026-07-23T14:32:00Z");
+        assert_eq!(ts.as_second() % 60, 0);
+        assert_eq!(ts.to_zoned(jiff::tz::TimeZone::UTC).hour(), 14);
+    }
+
+    #[test]
+    fn a_date_still_round_trips_through_the_printer() {
+        let _zone = ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").unwrap());
+        for src in ["date=2026-07-23", "date>=2026-07-23", "date>=-30d"] {
+            let e = parse_query(src).unwrap_or_else(|err| panic!("{src:?}: {err}"));
+            let printed = print_query(&e);
+            assert_eq!(parse_query(&printed).expect("reparse"), e, "{src:?} printed {printed:?}");
+        }
+    }
+
+    /// The printer must read back the bare date the user typed, not an
+    /// RFC 3339 instant. On any zone but UTC, printing local midnight
+    /// against `TimeZone::UTC` (the old behaviour) produces exactly that
+    /// wrong instant while still passing a same-tree round trip, since an
+    /// instant reparses to itself. Only comparing the printed text catches it.
+    #[test]
+    fn a_date_prints_back_as_the_bare_date_the_user_typed() {
+        let _zone = ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").unwrap());
+        let e = parse_query("date=2026-07-23").unwrap();
+        assert_eq!(print_query(&e), "date=2026-07-23");
+    }
+
+    #[test]
+    fn with_no_override_the_zone_is_the_system_zone() {
+        assert_eq!(current_zone(), jiff::tz::TimeZone::system());
     }
 }
