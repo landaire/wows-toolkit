@@ -32,6 +32,8 @@ use rust_i18n::t;
 
 use crate::db::index::query_ast::MatchExpr;
 use crate::db::index::query_ast::Op;
+use crate::db::index::query_text;
+use crate::db::index::query_text::ParseErrorKind;
 use crate::db::index::query_text::QueryParseError;
 use crate::db::index::query_text::parse_query;
 use crate::db::index::query_text::parse_roster_value;
@@ -726,6 +728,30 @@ impl QueryBar {
         select::can_set_op(&self.expr, &edit.path, option.op)
     }
 
+    /// Where the keyboard highlight moves, skipping every row the pointer is
+    /// not allowed to click. A greyed row is offered so the field's full
+    /// operator set stays readable, not so Enter can land on it and quietly do
+    /// nothing.
+    ///
+    /// Stepping forward off the last enabled row stays put, the way a clamped
+    /// index always has. Stepping back off the first leaves the list, which is
+    /// what returns the caret to plain typing.
+    fn step_highlight(&self, rows: &[Row], back: bool) -> Option<usize> {
+        let enabled = |i: &usize| rows.get(*i).is_some_and(|row| self.row_enabled(row));
+        match (self.highlighted, back) {
+            (None, false) => (0..rows.len()).find(enabled),
+            (None, true) => (0..rows.len()).rfind(enabled),
+            (Some(current), false) => (current + 1..rows.len()).find(enabled).or(Some(current)),
+            (Some(current), true) => (0..current).rfind(enabled),
+        }
+    }
+
+    /// The row Enter takes with nothing highlighted: the first that would
+    /// actually take, for the same reason `step_highlight` skips the rest.
+    fn default_row(&self, rows: &[Row]) -> Option<Row> {
+        rows.iter().find(|row| self.row_enabled(row)).cloned()
+    }
+
     fn row_text(&self, ui: &Ui, row: &Row) -> egui::text::LayoutJob {
         let font = egui::TextStyle::Body.resolve(ui.style());
         let mut job = egui::text::LayoutJob::default();
@@ -885,17 +911,15 @@ impl QueryBar {
             Nav::CommitTyped => self.commit_typed(rows, ui, caret_id),
             Nav::HighlightNext => {
                 if !rows.is_empty() {
-                    self.highlighted = Some(self.highlighted.map_or(0, |i| (i + 1).min(rows.len() - 1)));
+                    if let Some(next) = self.step_highlight(rows, false) {
+                        self.highlighted = Some(next);
+                    }
                     self.dropdown_open = true;
                 }
                 false
             }
             Nav::HighlightPrev => {
-                self.highlighted = match self.highlighted {
-                    None => rows.len().checked_sub(1),
-                    Some(0) => None,
-                    Some(i) => Some(i - 1),
-                };
+                self.highlighted = self.step_highlight(rows, true);
                 self.dropdown_open = true;
                 false
             }
@@ -1116,6 +1140,11 @@ impl QueryBar {
     /// row or from the caret. The literal goes through the grammar's own parser
     /// rather than a second reader of the same spellings, so a clicked value
     /// and a typed one become the same `Value`.
+    ///
+    /// A literal the field cannot read is reported the way the typed path
+    /// reports one, through `pending_error` and the underline it drives.
+    /// `reparse_pending` clears it on the next keystroke, so the mark follows
+    /// the text rather than outlasting it.
     fn commit_value_literal(&mut self, literal: &str) -> bool {
         let Some(edit) = self.editing.clone() else {
             return false;
@@ -1123,8 +1152,12 @@ impl QueryBar {
         let Some((field, _, _)) = select::term_at(&self.expr, &edit.path) else {
             return false;
         };
-        let Some(value) = parse_roster_value(field.value_kind(), literal.trim()) else {
-            return false;
+        let value = match parse_roster_value(field.value_kind(), literal.trim()) {
+            Some(value) => value,
+            None => {
+                self.pending_error = Some(bad_value(field, &self.pending));
+                return false;
+            }
         };
         if !select::set_value(&mut self.expr, &edit.path, value) {
             return false;
@@ -1144,7 +1177,7 @@ impl QueryBar {
             let literal = self.pending.clone();
             return self.commit_value_literal(&literal);
         }
-        let Some(row) = rows.first().cloned() else {
+        let Some(row) = self.default_row(rows) else {
             self.end_segment_edit();
             return false;
         };
@@ -1322,6 +1355,24 @@ fn completed_text(pending: &str, completion: &Completion) -> (String, usize) {
     };
     let cursor = text.chars().count();
     (text, cursor)
+}
+
+/// The error a value the field cannot read reports, spanning the whole caret
+/// so the underline covers exactly the literal that failed. Built from the
+/// grammar's own error type rather than a second one, so the value editor and
+/// the typed path underline through one mechanism.
+fn bad_value(field: TermField, text: &str) -> QueryParseError {
+    let name = match field {
+        TermField::Match(f) => f.name(),
+        TermField::Roster(f) => f.name(),
+    };
+    QueryParseError {
+        span: 0..text.len(),
+        kind: ParseErrorKind::BadValue {
+            field: name,
+            allowed: query_text::enumerable_roster_values(field.value_kind()),
+        },
+    }
 }
 
 /// Parks the caret at `cursor`, a character index. egui otherwise keeps
@@ -1634,5 +1685,137 @@ mod tests {
         let (field, _, value) = select::term_at(&expr, &[]).expect("the retargeted term");
         assert_eq!(field, TermField::Roster(RosterField::Kills));
         assert_eq!(*value, Value::Int(10), "a value the new field can carry is kept");
+    }
+
+    /// A `build is set` pill: `Build` allows the six comparisons plus the two
+    /// nullary operators, and `set_op` refuses moving off a nullary operator
+    /// onto one that needs a right-hand side the term no longer carries. So the
+    /// first six rows are offered for context and only the last two can take.
+    fn nullary_build_bar() -> QueryBar {
+        bar_editing(Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::IsSet, Value::NoOperand)), SegmentRole::Operator)
+    }
+
+    #[test]
+    fn only_the_operators_that_would_take_are_enabled() {
+        let bar = nullary_build_bar();
+        let rows = bar.dropdown_rows();
+        let enabled: Vec<Op> = rows
+            .iter()
+            .filter(|row| bar.row_enabled(row))
+            .map(|row| match row {
+                Row::Operator(option) => option.op,
+                other => panic!("got {other:?}"),
+            })
+            .collect();
+        assert_eq!(enabled, vec![Op::IsSet, Op::IsNotSet], "of {rows:?}");
+        assert!(rows.len() > enabled.len(), "the greyed rows must still be offered, not hidden");
+
+        // Every other variant is always pickable; only the operator list has
+        // rows the tree can refuse.
+        let bar = bar_editing(win(), SegmentRole::Value);
+        assert!(bar.dropdown_rows().iter().all(|row| bar.row_enabled(row)), "{:?}", bar.dropdown_rows());
+    }
+
+    /// The mouse cannot click a greyed row, so the keyboard must not land on
+    /// one either: an offered option that is reachable and inert is the defect
+    /// class this whole plan exists to close, and arriving at it by Down-arrow
+    /// is no better than arriving by pointer.
+    #[test]
+    fn the_keyboard_skips_a_row_the_pointer_could_not_click() {
+        let mut bar = nullary_build_bar();
+        let rows = bar.dropdown_rows();
+        let first_enabled = rows.iter().position(|row| bar.row_enabled(row)).expect("some row takes");
+        assert!(first_enabled > 0, "the fixture must have a disabled row before the first enabled one");
+
+        assert_eq!(
+            bar.step_highlight(&rows, false),
+            Some(first_enabled),
+            "Down must skip straight past the greyed rows"
+        );
+        bar.highlighted = Some(first_enabled);
+        assert_eq!(bar.step_highlight(&rows, false), Some(rows.len() - 1));
+        bar.highlighted = Some(rows.len() - 1);
+        assert_eq!(bar.step_highlight(&rows, false), Some(rows.len() - 1), "forward off the end stays put");
+
+        assert_eq!(bar.step_highlight(&rows, true), Some(first_enabled), "Up must skip back past them too");
+        bar.highlighted = Some(first_enabled);
+        assert_eq!(bar.step_highlight(&rows, true), None, "back off the first enabled row leaves the list");
+    }
+
+    /// Enter with nothing highlighted took `rows.first()`, which for this pill
+    /// is a greyed `=` and so did nothing at all, silently, with the editor
+    /// left open.
+    #[test]
+    fn enter_with_nothing_highlighted_takes_the_first_row_that_would_take() {
+        let mut bar = nullary_build_bar();
+        let rows = bar.dropdown_rows();
+        assert!(!bar.row_enabled(&rows[0]), "the fixture's first row must be one that cannot take");
+        assert_eq!(
+            bar.default_row(&rows),
+            Some(rows[bar.step_highlight(&rows, false).expect("an enabled row")].clone())
+        );
+
+        let Some(Row::Operator(option)) = bar.default_row(&rows) else {
+            panic!("got {:?}", bar.default_row(&rows));
+        };
+        assert!(bar.commit_operator(option.op), "the row Enter takes must actually take");
+        assert_eq!(select::term_at(&bar.expr, &[]).expect("the term").1, option.op);
+        assert!(bar.editing.is_none(), "a committed operator closes its editor");
+    }
+
+    #[test]
+    fn committing_an_operator_the_field_refuses_changes_nothing() {
+        let mut bar = nullary_build_bar();
+        let before = bar.expr.clone();
+        assert!(!bar.commit_operator(Op::Eq), "Eq needs a right-hand side this term does not have");
+        assert_eq!(bar.expr, before);
+        assert!(bar.editing.is_some(), "a refused operator leaves the editor open rather than closing on nothing");
+    }
+
+    /// Enter runs through the same routing the pointer does, so the fix has to
+    /// hold at the real call site and not only in the helper it delegates to.
+    #[test]
+    fn enter_on_a_nullary_operator_segment_applies_a_legal_operator() {
+        let mut bar = nullary_build_bar();
+        let rows = bar.dropdown_rows();
+        let mut applied = false;
+        egui::__run_test_ui(|ui| {
+            if !applied {
+                applied = bar.commit_typed(&rows, ui, ui.id().with("caret"));
+            }
+        });
+        assert!(applied, "Enter must apply something rather than failing silently");
+        assert_eq!(select::term_at(&bar.expr, &[]).expect("the term").1, Op::IsSet);
+    }
+
+    /// A literal the field cannot read is reported the way the typed path
+    /// reports one, rather than vanishing. `date` takes a plain editor, so the
+    /// caret holds the literal itself.
+    #[test]
+    fn a_value_the_field_cannot_read_is_underlined_rather_than_ignored() {
+        let mut bar = bar_editing(
+            Expr::Leaf(MatchTerm::Field(
+                MatchField::Date,
+                Op::Ge,
+                Value::Timestamp(jiff::Timestamp::from_second(0).expect("the epoch")),
+            )),
+            SegmentRole::Value,
+        );
+        assert_eq!(bar.plain_value_field(), Some(TermField::Match(MatchField::Date)));
+        bar.pending = "not-a-date".to_owned();
+        let before = bar.expr.clone();
+
+        assert!(!bar.commit_value_literal("not-a-date"));
+        assert_eq!(bar.expr, before, "an unreadable literal must not reach the tree");
+        let error = bar.pending_error.as_ref().expect("the failure must be reported");
+        assert_eq!(error.span, 0..bar.pending.len(), "the underline covers the literal that failed");
+        assert!(matches!(error.kind, ParseErrorKind::BadValue { field: "date", .. }), "got {:?}", error.kind);
+
+        // The next keystroke clears it, so the mark follows the text.
+        bar.pending = "2026-01-01".to_owned();
+        bar.reparse_pending();
+        assert!(bar.pending_error.is_none());
+        assert!(bar.commit_value_literal("2026-01-01"));
+        assert!(bar.editing.is_none());
     }
 }

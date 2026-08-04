@@ -311,12 +311,17 @@ fn sugar_shape(quant: Quant, pred: &Expr<RosterTerm>) -> Option<(Option<String>,
 /// two-conjunct scope form renders its second child.
 /// `the_sugar_inner_path_resolves_to_the_term_sugar_shape_renders` pins the
 /// pair against each other.
+///
+/// Arms are named rather than caught: a third shape added to `sugar_shape`
+/// must state its own index here, instead of inheriting the scope form's and
+/// silently retargeting every click on the pill it collapses.
 pub(crate) fn sugar_inner_path(quant: Quant, pred: &Expr<RosterTerm>) -> Option<NodePath> {
     sugar_shape(quant, pred)?;
-    Some(match pred {
-        Expr::Leaf(_) => Vec::new(),
-        _ => vec![1],
-    })
+    match pred {
+        Expr::Leaf(_) => Some(Vec::new()),
+        Expr::All(_) => Some(vec![1]),
+        Expr::Any(_) | Expr::Not(_) => None,
+    }
 }
 
 /// Compact "Enemy ship is Yamato" form for a roster quantifier whose predicate

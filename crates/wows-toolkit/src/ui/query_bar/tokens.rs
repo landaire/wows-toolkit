@@ -14,10 +14,10 @@ use crate::ui::query_bar::label::PillSegment;
 /// An empty path is the root. `Not`'s single operand is index 0.
 ///
 /// A path that continues past a `MatchTerm::Roster` leaf addresses a node
-/// inside the roster predicate, which has no representation in `MatchExpr`;
-/// `node_at` stops at the `Roster` leaf itself for such a path rather than
-/// returning `None`, since the leaf is the closest `MatchExpr` node the path
-/// names.
+/// inside the roster predicate, which has no representation in `MatchExpr`.
+/// `select::split_at_leaf` resolves such a path in two halves -- the match tree
+/// down to the `Roster` leaf, then the remainder over the predicate -- which is
+/// how every edit reaches a term inside a quantifier.
 pub type NodePath = Vec<usize>;
 
 /// Callback that turns one leaf into its token(s) and pushes them to `out`.
@@ -64,26 +64,6 @@ pub fn tokenize(expr: &MatchExpr, cache: &NameCache) -> Vec<Token> {
     });
     out.push(Token { kind: TokenKind::Caret, path: Vec::new(), depth: 0 });
     out
-}
-
-/// Resolve a path back to the node it names. See `NodePath` for what happens
-/// when the path continues past a `Roster` leaf.
-///
-/// Editing resolves paths through `select`'s own `expr_at`, which walks a
-/// roster predicate the same way it walks the match tree; the tests below are
-/// what still ask this level of the question, so it is compiled only for them
-/// rather than shipped as a permanently suppressed warning.
-#[cfg(test)]
-pub fn node_at<'a>(expr: &'a MatchExpr, path: &[usize]) -> Option<&'a MatchExpr> {
-    let Some((&i, rest)) = path.split_first() else {
-        return Some(expr);
-    };
-    match expr {
-        Expr::All(cs) | Expr::Any(cs) => cs.get(i).and_then(|c| node_at(c, rest)),
-        Expr::Not(inner) if i == 0 => node_at(inner, rest),
-        Expr::Leaf(_) => Some(expr),
-        _ => None,
-    }
 }
 
 /// Emits one node's tokens. `top_level` suppresses the bracket an `All`/`Any`
@@ -190,6 +170,7 @@ mod tests {
     use crate::db::index::rows::VehicleRelation;
     use crate::ui::query_bar::label::NameCache;
     use crate::ui::query_bar::label::SegmentRole;
+    use crate::ui::query_bar::select;
 
     fn win() -> MatchExpr {
         Expr::Leaf(MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win)))
@@ -303,74 +284,81 @@ mod tests {
         assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::QuantClose)), "got {toks:#?}");
     }
 
+    /// Asserted through the resolvers editing actually uses -- `segment_path`
+    /// and `term_at` for a pill, `addresses_match_node` for the chrome -- not
+    /// through a second walker of this module's own. A path that resolves under
+    /// one walker and not the other is exactly the failure worth catching, and
+    /// only the production pair can catch it.
     #[test]
-    fn every_token_path_resolves_to_a_node_in_the_tree() {
+    fn every_token_path_resolves_under_the_resolvers_editing_uses() {
         let expr = Expr::All(vec![win(), Expr::Any(vec![build_ge(1), Expr::Not(Box::new(win()))])]);
         let toks = tokenize(&expr, &NameCache::default());
         for t in &toks {
-            if matches!(t.kind, TokenKind::Caret) {
-                continue;
+            match &t.kind {
+                TokenKind::Caret => {}
+                TokenKind::Pill { .. } => {
+                    let path = select::segment_path(&expr, &t.path)
+                        .unwrap_or_else(|| panic!("pill path {:?} addresses no term", t.path));
+                    assert!(select::term_at(&expr, &path).is_some(), "path {path:?} names no term");
+                }
+                _ => assert!(select::addresses_match_node(&expr, &t.path), "path {:?} names no node", t.path),
             }
-            assert!(node_at(&expr, &t.path).is_some(), "path {:?} does not resolve", t.path);
         }
     }
 
     #[test]
-    fn a_sugar_collapsed_pills_path_resolves_to_the_roster_leaf() {
+    fn a_sugar_collapsed_pills_path_resolves_to_the_term_it_draws() {
         // The sugar branch pushes its `Pill` at the quantifier's own
-        // (unextended) path, so `node_at` must walk straight to the `Roster`
-        // leaf just like the bracketed branch does. Task 6 resolves a clicked
-        // pill through this path, so a regression here would silently act on
-        // the wrong node.
+        // (unextended) path, so the segment resolver has to walk on into the
+        // predicate to reach the term the pill actually renders. A regression
+        // here would retarget every click on the pill.
         //
         // The roster term is nested under a sibling (`Expr::All([win(), ..])`)
-        // rather than placed at the tree's root: at the root, `toks[0].path`
-        // is `[]` and `node_at`'s empty-path base case returns `Some(expr)`
-        // without ever inspecting the tree, so the assertion would hold no
-        // matter what path the sugar branch actually computed.
-        let pred = Expr::Leaf(RosterTerm {
-            field: crate::db::index::query_ast::RosterField::Relation,
-            op: Op::Is,
-            value: Value::Relation(crate::db::index::rows::VehicleRelation::Enemy),
-        });
-        let roster_leaf: MatchExpr = Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred });
-        let expr = Expr::All(vec![win(), roster_leaf.clone()]);
+        // rather than placed at the tree's root: at the root the pill's path is
+        // `[]`, and a resolver that ignored the path entirely would still land
+        // on the right node, so the assertion would hold no matter what path
+        // the sugar branch computed.
+        let inner =
+            RosterTerm { field: RosterField::Relation, op: Op::Is, value: Value::Relation(VehicleRelation::Enemy) };
+        let roster_leaf: MatchExpr =
+            Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred: Expr::Leaf(inner.clone()) });
+        let expr = Expr::All(vec![win(), roster_leaf]);
         let toks = tokenize(&expr, &NameCache::default());
         let pill = toks
             .iter()
             .find(|t| matches!(t.kind, TokenKind::Pill { .. }) && t.path == vec![1])
             .unwrap_or_else(|| panic!("expected the roster pill at path [1], got {toks:#?}"));
-        assert_eq!(
-            node_at(&expr, &pill.path),
-            Some(&roster_leaf),
-            "a sugar-collapsed path resolves to the Roster leaf"
-        );
+
+        let path = select::segment_path(&expr, &pill.path).expect("a sugar-collapsed pill addresses a term");
+        let (field, op, value) = select::term_at(&expr, &path).expect("the term the pill draws");
+        assert_eq!(field, crate::ui::query_bar::suggest::TermField::Roster(inner.field));
+        assert_eq!(op, inner.op);
+        assert_eq!(*value, inner.value);
     }
 
+    /// A bracketed quantifier whose predicate is a single leaf draws its one
+    /// inner pill on the quantifier's own path, so the tail is empty exactly as
+    /// it is for a sugar-collapsed pill even though the shape is not sugar.
+    /// That pill must still address the leaf, or every segment on it would be
+    /// inert.
     #[test]
-    fn a_roster_predicate_path_resolves_back_to_the_quantifier_leaf() {
-        // Nested under a sibling for the same reason as the sugar-collapsed
-        // case above: at the tree's root, `node_at`'s `Expr::Leaf(_) =>
-        // Some(expr)` arm fires unconditionally regardless of the path, so a
-        // root-level fixture cannot distinguish a correct path from a wrong one.
-        let pred = Expr::Leaf(RosterTerm {
-            field: crate::db::index::query_ast::RosterField::Tier,
-            op: Op::Eq,
-            value: Value::Int(10),
-        });
+    fn a_bracketed_quantifier_over_one_leaf_still_addresses_that_leaf() {
+        let inner = RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) };
         let roster_leaf: MatchExpr =
-            Expr::Leaf(MatchTerm::Roster { quant: Quant::Count(crate::db::index::query_ast::CmpOp::Ge, 2), pred });
-        let expr = Expr::All(vec![win(), roster_leaf.clone()]);
+            Expr::Leaf(MatchTerm::Roster { quant: Quant::Count(CmpOp::Ge, 2), pred: Expr::Leaf(inner.clone()) });
+        let expr = Expr::All(vec![win(), roster_leaf]);
         let toks = tokenize(&expr, &NameCache::default());
+        assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::QuantOpen { .. })), "the fixture must be bracketed");
         let roster_pill = toks
             .iter()
             .find(|t| matches!(t.kind, TokenKind::Pill { .. }) && t.path.starts_with(&[1]))
             .expect("a roster pill token");
-        assert_eq!(
-            node_at(&expr, &roster_pill.path),
-            Some(&roster_leaf),
-            "a roster-internal path resolves to the Roster leaf"
-        );
+
+        let path = select::segment_path(&expr, &roster_pill.path).expect("the inner pill addresses its own term");
+        let (field, op, value) = select::term_at(&expr, &path).expect("the term the pill draws");
+        assert_eq!(field, crate::ui::query_bar::suggest::TermField::Roster(inner.field));
+        assert_eq!(op, inner.op);
+        assert_eq!(*value, inner.value);
     }
 
     #[test]

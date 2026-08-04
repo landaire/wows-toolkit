@@ -194,9 +194,13 @@ pub fn term_at<'a>(expr: &'a MatchExpr, path: &[usize]) -> Option<(TermField, Op
 /// The path a segment edit acts on, given the path of the pill that was
 /// clicked. `None` for a pill whose segments address no editable term.
 ///
-/// A sugar-collapsed roster pill draws the quantifier's inner term ("Enemy ship
-/// is Yamato") on a path that names the `Roster` leaf, which carries no single
-/// field of its own, so its segments are redirected into the predicate.
+/// Two kinds of pill leave the tail empty while naming a `Roster` leaf, which
+/// carries no single field of its own, and both are redirected into the
+/// predicate. A sugar-collapsed pill draws the quantifier's inner term ("Enemy
+/// ship is Yamato"); a bracketed quantifier over a one-leaf predicate draws its
+/// single inner pill on the quantifier's own path, and that leaf is the
+/// predicate root.
+///
 /// `MatchTerm::FreeText` has no field or operator at all and yields `None`,
 /// which is what keeps its one segment from being a click that does nothing.
 pub fn segment_path(expr: &MatchExpr, path: &NodePath) -> Option<NodePath> {
@@ -204,8 +208,10 @@ pub fn segment_path(expr: &MatchExpr, path: &NodePath) -> Option<NodePath> {
     match term {
         MatchTerm::Field(..) if rest.is_empty() => Some(path.clone()),
         MatchTerm::Roster { quant, pred } if rest.is_empty() => {
+            let inner =
+                label::sugar_inner_path(*quant, pred).or_else(|| matches!(pred, Expr::Leaf(_)).then(Vec::new))?;
             let mut extended = path.clone();
-            extended.extend(label::sugar_inner_path(*quant, pred)?);
+            extended.extend(inner);
             Some(extended)
         }
         MatchTerm::Roster { pred, .. } => matches!(expr_at(pred, rest), Some(Expr::Leaf(_))).then(|| path.clone()),
@@ -297,7 +303,7 @@ fn apply_op(allowed: &[Op], current: &mut Op, value: &mut Value, op: Op) -> bool
 ///
 /// The operator is kept when the new field still allows it; otherwise it is
 /// replaced by that field's own equality spelling, chosen by class through
-/// `equality_op` rather than by naming an `Op` literal here -- `Op` spells
+/// `seed::seed_op` rather than by naming an `Op` literal here -- `Op` spells
 /// equality three ways and all three print identically, so picking the wrong
 /// one silently reparses into a different tree.
 ///
@@ -438,8 +444,10 @@ fn split_at_leaf_mut<'a, 'p>(expr: &'a mut MatchExpr, path: &'p [usize]) -> Opti
     }
 }
 
-/// `tokens::node_at` over either tree level, so a roster predicate resolves the
-/// same way the match level does.
+/// Resolves a node path over either tree level, so a roster predicate resolves
+/// the same way the match level does. The resolver every edit goes through:
+/// `split_at_leaf` stops at the `MatchTerm` and hands the unconsumed tail here,
+/// which is how a path that continues into a roster predicate keeps walking.
 fn expr_at<'a, L>(expr: &'a Expr<L>, path: &[usize]) -> Option<&'a Expr<L>> {
     let Some((&i, rest)) = path.split_first() else {
         return Some(expr);
@@ -1625,19 +1633,35 @@ mod tests {
     /// (query text, starting tree, path, edit) quadruples where the edit must
     /// land on exactly the tree the text parses to.
     ///
-    /// There is no scope-change case. A scope is not a field: in the grammar it
-    /// is a `RosterField::Relation` conjunct beside the term it scopes, so no
-    /// `set_field` call can express one and there is nothing here for a segment
-    /// edit to converge with. What is expressible is covered instead: a
-    /// match-level field change, a roster-level field change, an operator
-    /// change, and a value change.
+    /// A scope is not a field: in the grammar it is a `RosterField::Relation`
+    /// conjunct sitting beside the term it scopes. *Introducing or removing*
+    /// one is therefore a tree-shape change no `set_field` can express, and
+    /// there is no segment edit for it to converge with. *Retargeting* an
+    /// existing one is expressible and is covered: it is a `set_value` on the
+    /// relation conjunct, which is exactly what clicking the value segment of
+    /// the relation pill on a bracketed roster term does, and it is the only
+    /// case here that exercises the sugar printer's scope round trip.
     fn convergence_cases() -> Vec<(&'static str, MatchExpr, NodePath, Edit)> {
         use crate::db::index::query_ast::Quant;
         use crate::db::index::query_ast::RosterField;
         use crate::db::index::query_ast::RosterTerm;
+        use crate::db::index::rows::VehicleRelation;
 
         let roster = |field: RosterField, op: Op, value: Value| -> MatchExpr {
             Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred: Expr::Leaf(RosterTerm { field, op, value }) })
+        };
+        let scoped = |relation: VehicleRelation| -> MatchExpr {
+            Expr::Leaf(MatchTerm::Roster {
+                quant: Quant::Any,
+                pred: Expr::All(vec![
+                    Expr::Leaf(RosterTerm {
+                        field: RosterField::Relation,
+                        op: Op::Is,
+                        value: Value::Relation(relation),
+                    }),
+                    Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) }),
+                ]),
+            })
         };
         vec![
             (
@@ -1663,6 +1687,12 @@ mod tests {
                 Expr::Leaf(MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win))),
                 vec![],
                 Edit::Literal(Value::Outcome(MatchOutcome::Loss)),
+            ),
+            (
+                "ally.tier=10",
+                scoped(VehicleRelation::Enemy),
+                vec![0],
+                Edit::Literal(Value::Relation(VehicleRelation::Ally)),
             ),
         ]
     }
