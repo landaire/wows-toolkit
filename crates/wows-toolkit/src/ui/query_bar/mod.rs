@@ -328,20 +328,20 @@ impl QueryBar {
         let rows = if focused { self.dropdown_rows() } else { Vec::new() };
         let nav = if focused { self.consume_navigation(ui) } else { None };
 
-        let mut tokens = self.stream();
+        let (mut tokens, mut replaced) = self.stream();
         self.selection.retain_present(&tokens);
 
         let mut edited = false;
         if let Some(nav) = nav {
-            edited |= self.apply_nav(nav, &tokens, &rows, deps, ui, caret_id);
+            edited |= self.apply_nav(nav, &rows, deps, ui, caret_id);
         }
         if edited {
             self.finish_edit();
-            tokens = self.stream();
+            (tokens, replaced) = self.stream();
         }
 
         let frame = paint::bar_frame(ui, focused);
-        let framed = frame.show(ui, |ui| self.body(ui, id, caret_id, &tokens));
+        let framed = frame.show(ui, |ui| self.body(ui, id, caret_id, &tokens, replaced.as_ref()));
         let body = framed.inner;
         edited |= body.edited;
 
@@ -386,17 +386,31 @@ impl QueryBar {
     /// The token stream as it is drawn: the committed tree, with the caret moved
     /// into the slot of a pill being edited as text so the term is typed where it
     /// sits.
-    fn stream(&self) -> Vec<Token> {
+    fn stream(&self) -> (Vec<Token>, Option<Token>) {
         let mut tokens = tokenize(&self.expr, &self.names);
-        if let Some(path) = self.text_edit_path() {
-            move_caret_to(&mut tokens, path);
-        }
-        tokens
+        let replaced = self.text_edit_path().and_then(|path| move_caret_to(&mut tokens, path));
+        (tokens, replaced)
+    }
+
+    /// Every pill the selection can address, over the full stream rather than
+    /// the drawn one. A term open in a text editor is still part of the query,
+    /// and its pill is missing from what is painted, so a range taken off the
+    /// drawn stream would silently omit a term the user highlighted and leave a
+    /// later group or delete acting on fewer than they chose.
+    fn selectable_paths(&self) -> Vec<NodePath> {
+        select::selectable_paths(&self.expr, &tokenize(&self.expr, &self.names))
     }
 
     /// Steps 4 through 9: measure, lay out, paint, run the caret, and collect
     /// what the pointer did.
-    fn body(&mut self, ui: &mut Ui, id: egui::Id, caret_id: egui::Id, tokens: &[Token]) -> Body {
+    fn body(
+        &mut self,
+        ui: &mut Ui,
+        id: egui::Id,
+        caret_id: egui::Id,
+        tokens: &[Token],
+        replaced: Option<&Token>,
+    ) -> Body {
         let font = egui::TextStyle::Body.resolve(ui.style());
         let cfg = LayoutCfg {
             row_height: ui.spacing().interact_size.y + 2.0 * ROW_PAD_Y,
@@ -417,7 +431,21 @@ impl QueryBar {
         let caret_text = if self.text_edit.is_some() { self.pending.as_str() } else { "" };
         let galleys: Vec<Vec<Arc<Galley>>> =
             tokens.iter().map(|token| token_galleys(ui, token, &font, caret_text)).collect();
-        let widths: Vec<f32> = tokens.iter().zip(&galleys).map(|(t, g)| token_width(t, g, &cfg)).collect();
+        let mut widths: Vec<f32> = tokens.iter().zip(&galleys).map(|(t, g)| token_width(t, g, &cfg)).collect();
+        // A caret standing in a pill's slot starts exactly as wide as that pill,
+        // so opening an editor moves nothing after it. A pill's own width
+        // includes per-segment widening and the gaps between segments, which a
+        // plain run of text has not, so measuring the term alone would shrink
+        // the slot and slide the rest of the query left and then back again on
+        // commit.
+        if let Some(pill) = replaced {
+            let floor = token_width(pill, &token_galleys(ui, pill, &font, ""), &cfg);
+            for (width, token) in widths.iter_mut().zip(tokens) {
+                if matches!(token.kind, TokenKind::Caret) {
+                    *width = width.max(floor);
+                }
+            }
+        }
 
         let full_width = ui.available_width();
         let mut laid = lay_out(tokens, &widths, full_width, &cfg);
@@ -558,7 +586,7 @@ impl QueryBar {
         let mut opened_text_edit = false;
         for command in commands {
             let opens_text = matches!(command, Command::EditText(_));
-            edited |= self.apply_command(command, tokens, ui, ids.caret_id);
+            edited |= self.apply_command(command, ui, ids.caret_id);
             opened_text_edit |= opens_text && self.text_edit.is_some();
         }
         Body {
@@ -1020,16 +1048,8 @@ impl QueryBar {
         None
     }
 
-    fn apply_nav(
-        &mut self,
-        nav: Nav,
-        tokens: &[Token],
-        rows: &[Row],
-        deps: &Deps<'_>,
-        ui: &mut Ui,
-        caret_id: egui::Id,
-    ) -> bool {
-        let paths = select::selectable_paths(&self.expr, tokens);
+    fn apply_nav(&mut self, nav: Nav, rows: &[Row], deps: &Deps<'_>, ui: &mut Ui, caret_id: egui::Id) -> bool {
+        let paths = self.selectable_paths();
         match nav {
             Nav::CloseDropdown => {
                 self.cancel_text_edit();
@@ -1133,7 +1153,7 @@ impl QueryBar {
     /// on is the blur it commits on. That commit swaps one node for another at
     /// one path, which moves no sibling, so the path this command carries still
     /// names what it named when the pointer landed on it.
-    fn apply_command(&mut self, command: Command, tokens: &[Token], ui: &Ui, caret_id: egui::Id) -> bool {
+    fn apply_command(&mut self, command: Command, ui: &Ui, caret_id: egui::Id) -> bool {
         match command {
             Command::EditSegment(pill, role) => {
                 let committed = self.commit_text_edit();
@@ -1176,7 +1196,7 @@ impl QueryBar {
                 false
             }
             Command::SelectRange(path) => {
-                let paths = select::selectable_paths(&self.expr, tokens);
+                let paths = self.selectable_paths();
                 let anchor = self.anchor.clone().unwrap_or_else(|| path.clone());
                 self.selection.set_many(select::range(&paths, &anchor, &path));
                 self.anchor = Some(anchor);
@@ -2934,7 +2954,7 @@ mod tests {
     /// Escape while the dropdown is open, through the same routing the key does.
     fn press_escape(bar: &mut QueryBar) -> bool {
         let deps = Deps { history: &[] };
-        with_ui(|ui, caret_id| bar.apply_nav(Nav::CloseDropdown, &[], &[], &deps, ui, caret_id))
+        with_ui(|ui, caret_id| bar.apply_nav(Nav::CloseDropdown, &[], &deps, ui, caret_id))
     }
 
     /// The case with no visible defect at all, and the reason the earlier
@@ -3065,8 +3085,7 @@ mod tests {
         let before = mint_from_caret(&mut bar, TermField::Roster(RosterField::Ship), Some(Scope::Enemy));
 
         let click = Command::EditSegment(first_pill_path(&bar), SegmentRole::Value);
-        let tokens = tokenize(&bar.expr, &bar.names);
-        let changed = with_ui(|ui, caret_id| bar.apply_command(click, &tokens, ui, caret_id));
+        let changed = with_ui(|ui, caret_id| bar.apply_command(click, ui, caret_id));
 
         assert!(changed, "the restore was silent, so nothing re-runs the query or rewrites the saved one");
         assert_eq!(bar.expr, before, "the placeholder outlived the click that dismissed it");
@@ -3095,8 +3114,7 @@ mod tests {
             assert_eq!(placeholder, vec![1], "the fixture must sit the placeholder after the surviving pill");
 
             let click = Command::EditSegment(placeholder, role);
-            let tokens = tokenize(&bar.expr, &bar.names);
-            let changed = with_ui(|ui, caret_id| bar.apply_command(click, &tokens, ui, caret_id));
+            let changed = with_ui(|ui, caret_id| bar.apply_command(click, ui, caret_id));
 
             assert!(changed, "{role:?}: the withdrawal still has to be reported");
             assert_eq!(bar.expr, before, "{role:?}");
@@ -3115,8 +3133,7 @@ mod tests {
 
         for role in [SegmentRole::Value, SegmentRole::Operator, SegmentRole::Filter] {
             let click = Command::EditSegment(first_pill_path(&bar), role);
-            let tokens = tokenize(&bar.expr, &bar.names);
-            let changed = with_ui(|ui, caret_id| bar.apply_command(click, &tokens, ui, caret_id));
+            let changed = with_ui(|ui, caret_id| bar.apply_command(click, ui, caret_id));
 
             assert!(!changed, "{role:?} reported a query change for opening an editor");
             assert_eq!(bar.expr, query, "{role:?}");
@@ -3136,10 +3153,7 @@ mod tests {
 
         let click = first_pill_path(&bar);
         assert_eq!(click, vec![0], "the fixture must be the case where the path moves");
-        let tokens = tokenize(&bar.expr, &bar.names);
-        with_ui(|ui, caret_id| {
-            bar.apply_command(Command::EditSegment(click, SegmentRole::Value), &tokens, ui, caret_id)
-        });
+        with_ui(|ui, caret_id| bar.apply_command(Command::EditSegment(click, SegmentRole::Value), ui, caret_id));
 
         assert_eq!(bar.expr, parse_query("outcome:win").expect("parse"));
         let edit = bar.editing.as_ref().expect("the click must not be eaten by the restore it caused");
@@ -3306,9 +3320,8 @@ mod tests {
     fn a_single_click_still_opens_the_segment_dropdown() {
         let mut bar = bar_holding("outcome:win");
         let path = only_pill_path(&bar);
-        let tokens = tokenize(&bar.expr, &bar.names);
         let click = Command::EditSegment(path.clone(), SegmentRole::Value);
-        with_ui(|ui, caret_id| bar.apply_command(click, &tokens, ui, caret_id));
+        with_ui(|ui, caret_id| bar.apply_command(click, ui, caret_id));
 
         let edit = bar.editing.as_ref().expect("a single click opens the segment editor");
         assert_eq!(edit.path, path);
@@ -3329,10 +3342,9 @@ mod tests {
     fn a_double_click_replaces_the_segment_editor_with_a_text_edit() {
         let mut bar = bar_holding("outcome:win and anyone.tier>=8");
         let path = pill_paths(&bar)[1].clone();
-        let tokens = tokenize(&bar.expr, &bar.names);
         with_ui(|ui, caret_id| {
-            bar.apply_command(Command::EditSegment(path.clone(), SegmentRole::Value), &tokens, ui, caret_id);
-            bar.apply_command(Command::EditText(path.clone()), &tokens, ui, caret_id)
+            bar.apply_command(Command::EditSegment(path.clone(), SegmentRole::Value), ui, caret_id);
+            bar.apply_command(Command::EditText(path.clone()), ui, caret_id)
         });
 
         assert!(bar.editing.is_none(), "the segment editor must give way to the text edit");
@@ -3350,8 +3362,7 @@ mod tests {
         let before = mint_from_caret(&mut bar, TermField::Roster(RosterField::Ship), Some(Scope::Enemy));
         assert_eq!(query_text::print_query(&bar.expr), "outcome=win and map:ocean and enemy.ship=0");
 
-        let tokens = tokenize(&bar.expr, &bar.names);
-        let changed = with_ui(|ui, caret_id| bar.apply_command(Command::EditText(vec![0]), &tokens, ui, caret_id));
+        let changed = with_ui(|ui, caret_id| bar.apply_command(Command::EditText(vec![0]), ui, caret_id));
 
         assert!(changed, "the withdrawal has to be reported, or the results stay stale");
         assert_eq!(bar.expr, before, "the placeholder outlived the double-click that dismissed it");
@@ -3397,9 +3408,7 @@ mod tests {
         let placeholder = select::last_appended_path(&bar.expr);
         assert_eq!(placeholder, vec![1], "the fixture must sit the placeholder beside the wrapped root");
 
-        let tokens = tokenize(&bar.expr, &bar.names);
-        let changed =
-            with_ui(|ui, caret_id| bar.apply_command(Command::EditText(placeholder.clone()), &tokens, ui, caret_id));
+        let changed = with_ui(|ui, caret_id| bar.apply_command(Command::EditText(placeholder.clone()), ui, caret_id));
 
         assert!(changed, "the withdrawal still has to be reported");
         assert_eq!(bar.expr, before);
@@ -3493,8 +3502,7 @@ mod tests {
         // -- exactly the shape canonicalising would drop.
         bar.pending = "   ".to_owned();
 
-        let tokens = tokenize(&bar.expr, &bar.names);
-        with_ui(|ui, caret_id| bar.apply_command(Command::Delete(paths[2].clone()), &tokens, ui, caret_id));
+        with_ui(|ui, caret_id| bar.apply_command(Command::Delete(paths[2].clone()), ui, caret_id));
         bar.finish_edit();
 
         assert_eq!(
@@ -3527,7 +3535,7 @@ mod tests {
         bar.pending = "anyone.tier>=10".to_owned();
 
         let deps = Deps { history: &[] };
-        let changed = with_ui(|ui, caret_id| bar.apply_nav(Nav::CommitTyped, &[], &[], &deps, ui, caret_id));
+        let changed = with_ui(|ui, caret_id| bar.apply_nav(Nav::CommitTyped, &[], &deps, ui, caret_id));
 
         assert!(changed);
         bar.finish_edit();
@@ -3567,9 +3575,8 @@ mod tests {
         assert!(open_text_edit(&mut bar, &paths[1]));
         bar.pending = "anyone.tier>=10".to_owned();
 
-        let tokens = tokenize(&bar.expr, &bar.names);
         let click = Command::EditSegment(paths[0].clone(), SegmentRole::Value);
-        let changed = with_ui(|ui, caret_id| bar.apply_command(click, &tokens, ui, caret_id));
+        let changed = with_ui(|ui, caret_id| bar.apply_command(click, ui, caret_id));
 
         assert!(changed, "the commit the click forced went unreported");
         assert!(bar.text_edit_path().is_none(), "both editors were left holding the caret");
@@ -3710,7 +3717,7 @@ mod tests {
             "the caret did not take the pill's own slot: caret {caret:?}, pill {pill:?}"
         );
 
-        let stream = harness.bar.stream();
+        let (stream, _) = harness.bar.stream();
         assert!(
             !stream.iter().any(|token| matches!(token.kind, TokenKind::Pill { .. }) && token.path == vec![1]),
             "the pill is still drawn beside the editor for it: {stream:#?}"
@@ -3756,9 +3763,98 @@ mod tests {
         assert!(caret.width() > MIN_CARET_WIDTH, "the caret was clipped to its floor: {caret:?}, pill {pill:?}");
     }
 
-    /// A caret that moved into a pill's slot has to be the caret the click test
-    /// asks about, or clicking into the text being edited reads as a click on
-    /// the background and commits it.
+    /// The cell the caret is given is what the `TextEdit` scrolls its text
+    /// inside. A cell past the bar's right edge is clipped by the panel around
+    /// the bar instead, so a term longer than the bar would be typed blind.
+    #[test]
+    fn a_text_edit_longer_than_the_bar_stays_inside_it() {
+        const WIDTH: f32 = 300.0;
+        let mut harness = Harness::new(parse_query("outcome:win and map:ocean and map:north").expect("parse"), WIDTH);
+        harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
+        harness.frame(frame_input(WIDTH));
+
+        let bar = harness.rect_of(harness.id.with("background"));
+        let pill = harness.rect_of(harness.id.with(2));
+        for input in double_click_input(pill.center(), WIDTH) {
+            harness.frame(input);
+        }
+        harness.bar.pending = "map:areplacementnamefarlongerthanthebaritselfcanshow".to_owned();
+        harness.frame(frame_input(WIDTH));
+        harness.frame(frame_input(WIDTH));
+
+        let caret = harness.rect_of(harness.caret_id());
+        assert!(
+            caret.right() <= bar.right() + 1.0,
+            "the caret ran {} px past the bar's right edge: caret {caret:?}, bar {bar:?}",
+            caret.right() - bar.right()
+        );
+        assert!(caret.width() > 0.0, "the caret was clamped away entirely: {caret:?}");
+    }
+
+    /// Opening an editor must not shuffle the rest of the query. A pill's width
+    /// includes per-segment widening and the gaps between segments, so a caret
+    /// measured against the plain text alone is narrower than the pill it
+    /// replaced and everything after it slides left, then back again on commit.
+    #[test]
+    fn opening_a_text_edit_does_not_move_the_tokens_after_it() {
+        const WIDTH: f32 = 800.0;
+        let mut harness = Harness::new(parse_query("outcome:win and map:ocean and map:north").expect("parse"), WIDTH);
+        harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
+        // Two frames, so both measurements are taken with the bar already
+        // focused: the focused frame is drawn differently and would otherwise
+        // account for part of the difference.
+        harness.frame(frame_input(WIDTH));
+        harness.frame(frame_input(WIDTH));
+
+        let pill = harness.rect_of(harness.id.with(2));
+        let after = harness.rect_of(harness.id.with(4));
+        assert!(after.left() > pill.right(), "the fixture must draw a pill after the one being edited");
+
+        for input in double_click_input(pill.center(), WIDTH) {
+            harness.frame(input);
+        }
+        harness.frame(frame_input(WIDTH));
+        harness.frame(frame_input(WIDTH));
+        assert_eq!(harness.bar.pending, "map:ocean");
+
+        let moved = harness.rect_of(harness.id.with(4));
+        assert!(
+            (moved.left() - after.left()).abs() < 1.0,
+            "the query jumped {} px sideways when the editor opened: {after:?} -> {moved:?}",
+            moved.left() - after.left()
+        );
+    }
+
+    /// Selection spans the whole query. The drawn stream omits the pill under a
+    /// text edit, so a range taken off it silently drops that term -- and the
+    /// group or delete the user reaches for next then acts on fewer terms than
+    /// they highlighted.
+    #[test]
+    fn a_range_selection_spans_a_term_being_edited_as_text() {
+        let mut bar = bar_holding("outcome:win and map:ocean and map:north");
+        let paths = pill_paths(&bar);
+        assert_eq!(paths, vec![vec![0], vec![1], vec![2]]);
+        assert!(open_text_edit(&mut bar, &paths[1]));
+
+        with_ui(|ui, caret_id| {
+            bar.apply_command(Command::SelectOnly(paths[0].clone()), ui, caret_id);
+            bar.apply_command(Command::SelectRange(paths[2].clone()), ui, caret_id);
+        });
+
+        assert_eq!(bar.selection.nodes, paths, "the term being edited was dropped out of the range");
+        assert!(select::can_group(&bar.expr, &bar.selection), "the selection the user made must still be groupable");
+    }
+
+    /// A caret that moved into a pill's slot has to be the caret the `on_caret`
+    /// test asks about, or clicking inside it reads as a click on the background
+    /// and commits the edit.
+    ///
+    /// The click lands in the caret's row band but **below** the `TextEdit`
+    /// itself. A point the widget covers proves nothing here: the widget is
+    /// registered after `background` and wins the hit test, so `background`
+    /// never reports a click and the guard is never reached. The band is the
+    /// caret's laid-out cell undone by `ROW_PAD_Y`, which is exactly the strip
+    /// that does reach `background`.
     #[test]
     fn clicking_into_a_text_edit_does_not_commit_it() {
         const WIDTH: f32 = 800.0;
@@ -3778,7 +3874,7 @@ mod tests {
 
         let caret = harness.rect_of(harness.caret_id());
         assert!(caret.height() > 0.0, "a degenerate caret rect would put the click outside the row it names");
-        harness.frame(click_input(caret.center(), WIDTH));
+        harness.frame(click_input(Pos2::new(caret.center().x, caret.max.y + 1.0), WIDTH));
 
         assert_eq!(harness.bar.pending, "map:tears", "the text being edited was thrown away by a click into it");
         assert!(harness.bar.text_edit_path().is_some(), "clicking the text closed the editor it belongs to");

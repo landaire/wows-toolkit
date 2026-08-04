@@ -75,19 +75,16 @@ pub fn tokenize(expr: &MatchExpr, cache: &NameCache) -> Vec<Token> {
 ///
 /// A path that names no pill leaves the stream alone, which is what keeps the
 /// caret at the end while an edit's anchor is gone.
-pub fn move_caret_to(tokens: &mut Vec<Token>, path: &NodePath) {
-    let Some(slot) =
-        tokens.iter().position(|token| matches!(token.kind, TokenKind::Pill { .. }) && token.path == *path)
-    else {
-        return;
-    };
-    let Some(caret) = tokens.iter().position(|token| matches!(token.kind, TokenKind::Caret)) else {
-        return;
-    };
+///
+/// Hands back the pill it replaced, so the caller can measure the slot the caret
+/// has to fill.
+pub fn move_caret_to(tokens: &mut Vec<Token>, path: &NodePath) -> Option<Token> {
+    let slot = tokens.iter().position(|token| matches!(token.kind, TokenKind::Pill { .. }) && token.path == *path)?;
+    let caret = tokens.iter().position(|token| matches!(token.kind, TokenKind::Caret))?;
     let depth = tokens[slot].depth;
     // The caret is emitted last, so removing it never shifts the slot.
     tokens.remove(caret);
-    tokens[slot] = Token { kind: TokenKind::Caret, path: path.clone(), depth };
+    Some(std::mem::replace(&mut tokens[slot], Token { kind: TokenKind::Caret, path: path.clone(), depth }))
 }
 
 /// Emits one node's tokens. `top_level` suppresses the bracket an `All`/`Any`

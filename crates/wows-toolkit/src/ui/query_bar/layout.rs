@@ -94,12 +94,21 @@ pub fn lay_out(tokens: &[Token], widths: &[f32], avail: f32, cfg: &LayoutCfg) ->
         };
 
         let mut end_x = start_x + width;
-        // The caret takes the rest of its row only where nothing follows it.
-        // Stretching one that sits mid-stream -- which is where a term being
-        // edited as text puts it -- would push every later token onto a row of
-        // its own.
-        if matches!(token.kind, TokenKind::Caret) && i + 1 == tokens.len() {
-            end_x = end_x.max(avail);
+        if matches!(token.kind, TokenKind::Caret) {
+            // The caret takes the rest of its row only where nothing follows it.
+            // Stretching one that sits mid-stream -- which is where a term being
+            // edited as text puts it -- would push every later token onto a row
+            // of its own.
+            if i + 1 == tokens.len() {
+                end_x = end_x.max(avail);
+            }
+            // Pinned in the other direction too, and for a reason no other token
+            // has: the caret is a `TextEdit`, which scrolls its own text
+            // internally but only within the cell it is given. A cell past the
+            // bar's right edge is clipped by the panel instead, so the text and
+            // the typing cursor leave the bar with no way to scroll them back --
+            // the user types blind.
+            end_x = end_x.min(avail).max(start_x);
         }
 
         let top = row as f32 * cfg.row_height;
@@ -257,6 +266,41 @@ mod tests {
         assert!((out.placed[1].rect.width() - 60.0).abs() < f32::EPSILON, "a mid-stream caret was stretched: {out:#?}");
         assert_eq!(out.rows, 1, "stretching it pushed the pill after it onto a row of its own: {out:#?}");
         assert!(out.placed[2].rect.min.x > out.placed[1].rect.max.x, "the last pill must follow the caret: {out:#?}");
+    }
+
+    /// The caret is a `TextEdit`, which scrolls its own text but only inside the
+    /// cell it is given. A cell wider than the bar is clipped by the panel
+    /// around it instead, so the text and the typing cursor leave the bar with
+    /// no way to scroll them back. Both carets are pinned to the bar's right
+    /// edge; only the trailing one is also stretched out to it.
+    #[test]
+    fn a_caret_wider_than_the_bar_is_pinned_to_its_right_edge() {
+        const AVAIL: f32 = 250.0;
+        for (label, toks, widths) in [
+            (
+                "mid-stream",
+                vec![
+                    tok(TokenKind::Pill { segments: vec![] }, 0),
+                    tok(TokenKind::Caret, 0),
+                    tok(TokenKind::Pill { segments: vec![] }, 0),
+                ],
+                vec![50.0, 9999.0, 50.0],
+            ),
+            (
+                "trailing",
+                vec![tok(TokenKind::Pill { segments: vec![] }, 0), tok(TokenKind::Caret, 0)],
+                vec![50.0, 9999.0],
+            ),
+        ] {
+            let out = lay_out(&toks, &widths, AVAIL, &cfg());
+            let caret = out
+                .placed
+                .iter()
+                .find(|p| matches!(toks[p.index].kind, TokenKind::Caret))
+                .unwrap_or_else(|| panic!("{label}: the caret"));
+            assert!(caret.rect.max.x <= AVAIL + f32::EPSILON, "{label}: the caret ran past the bar: {caret:?}");
+            assert!(caret.rect.width() > 0.0, "{label}: the caret was clamped away entirely: {caret:?}");
+        }
     }
 
     #[test]
