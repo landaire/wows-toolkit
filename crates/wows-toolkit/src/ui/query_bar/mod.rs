@@ -822,16 +822,32 @@ impl QueryBar {
             .open(true)
             .align(egui::RectAlign::BOTTOM_START)
             .show(|ui| {
-                // The bar's width is imposed here, every frame, rather than
+                // The width range is imposed here, every frame, rather than
                 // through `Popup::width`. That one reaches `Area::default_size`,
                 // which the area reads inside `state.size.get_or_insert_with(..)`
                 // and then only as the sizing pass's *maximum*, so it caps the
                 // popup without ever widening it: measured at 117.5 for the
                 // filter list against a 790 bar, then 53.6 once an operator
                 // list of `is` and `is not` had been shown, with no way back.
-                // A minimum, not a fixed size: a row longer than the bar is
-                // still free to widen it.
-                ui.set_min_width(bar_rect.width());
+                // Bounded on both sides instead of pinned to one width: the
+                // bar's width is the ceiling, so the list never reads as wider
+                // than the control it belongs to, and the anchor's own width is
+                // the floor, so the popup reads as belonging to the segment or
+                // fragment it hangs under rather than to the bar as a whole.
+                // `MIN_CARET_WIDTH` covers the anchor collapsing to a point, the
+                // caret's own floor for the same reason.
+                // `ui` here is already the frame's own inner content area, so
+                // capping it at the bar's raw width would still leave the
+                // popup's own frame -- margin and stroke both -- poking past
+                // the bar on the outside. `Frame::popup` is the frame this
+                // popup falls back to (no `.frame()` override is set above),
+                // and `total_margin` is what it actually adds around the
+                // content, so subtracting it is what makes the popup's
+                // painted edge, frame included, land on the bar's.
+                let overhead = egui::Frame::popup(ui.style()).total_margin().sum().x;
+                let max_width = (bar_rect.width() - overhead).max(0.0);
+                let min_width = anchor.width().max(MIN_CARET_WIDTH).min(max_width);
+                ui.set_width_range(min_width..=max_width);
                 if let Some(prompt) = &prompt {
                     ui.label(egui::RichText::new(prompt.clone()).color(ui.sem().text_dim));
                 }
@@ -2602,6 +2618,16 @@ mod tests {
         fn popup_width(&self) -> Option<f32> {
             egui::AreaState::load(&self.ctx, self.id.with("dropdown"))?.size.map(|size| size.x)
         }
+
+        /// The left edge the dropdown's `Area` is pinned to. `BOTTOM_START`
+        /// pivots the area on its own top-left corner, so the pivot position
+        /// the area remembers is that edge directly, with no size or alignment
+        /// arithmetic to get wrong on the read side.
+        fn popup_left(&self) -> Option<f32> {
+            let state = egui::AreaState::load(&self.ctx, self.id.with("dropdown"))?;
+            debug_assert_eq!(state.pivot, egui::Align2::LEFT_TOP, "BOTTOM_START pivots on the child's top-left");
+            state.pivot_pos.map(|pos| pos.x)
+        }
     }
 
     fn date_pill() -> MatchExpr {
@@ -2712,44 +2738,126 @@ mod tests {
         );
     }
 
+    /// A narrow list -- the case that broke first -- must not read as though it
+    /// belonged to the whole bar. `Outcome`'s operator segment is a couple of
+    /// characters wide, and its list is just `is` and `is not`; against an
+    /// 800-wide bar, a popup pinned to the bar's own width is unmistakably the
+    /// bug this guards, not a rounding difference.
+    #[test]
+    fn a_narrow_list_produces_a_narrow_popup_not_a_bar_width_one() {
+        const WIDTH: f32 = 800.0;
+        let mut harness = Harness::new(win(), WIDTH);
+        harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
+
+        harness.bar.editing = Some(SegmentEdit { path: vec![], role: SegmentRole::Operator, restore: None });
+        harness.bar.dropdown_open = true;
+        harness.frame(frame_input(WIDTH));
+        harness.frame(frame_input(WIDTH));
+
+        let narrow = harness.popup_width().expect("the dropdown was built");
+        let bar = harness.rect_of(harness.id.with("background")).width();
+        assert!(narrow < 200.0, "an `is` / `is not` list must not balloon to the bar's width: {narrow} (bar is {bar})");
+    }
+
     /// The dropdown must not shrink to whatever its narrowest list measured and
     /// stay there.
     ///
     /// `Popup::width` cannot deliver this: it feeds `Area::default_size`, which
     /// the area reads inside `state.size.get_or_insert_with(..)`, so it applies
     /// on the frame the popup is first built and never again. From then on the
-    /// area keeps its own last content size, and an operator list of `is`, `=`,
-    /// `>=` pins it narrow for good -- including for the alignment decision,
-    /// which reads that same stored size when choosing whether to flip near a
-    /// screen edge.
+    /// area keeps its own last content size, and a narrow list pins it narrow
+    /// for good -- including for the alignment decision, which reads that same
+    /// stored size when choosing whether to flip near a screen edge.
+    ///
+    /// The value list of an unresolved ship term is the fixture: its anchor is
+    /// the `#<raw>` placeholder, a couple of characters wide either way, so the
+    /// two widths below are content alone, not the anchor moving.
     ///
     /// Two lists and several frames, because the bug is invisible on the first
     /// one: the wide list is what the narrow list then has to fail to shrink.
     #[test]
-    fn a_narrow_list_does_not_shrink_the_dropdown_for_good() {
+    fn a_wide_list_shown_after_a_narrow_one_recovers_its_width() {
         const WIDTH: f32 = 800.0;
-        let mut harness = Harness::new(win(), WIDTH);
-        let caret_id = harness.caret_id();
-        harness.ctx.memory_mut(|m| m.request_focus(caret_id));
-
-        // The filter list: every match field, under labels wide enough that the
-        // bar's own width is the binding constraint.
-        harness.bar.editing = Some(SegmentEdit { path: vec![], role: SegmentRole::Filter, restore: None });
+        let mut harness = Harness::new(roster_pill(RosterField::Ship, Op::Is, Value::Ship(1u64.into())), WIDTH);
+        let path = select::segment_path(&harness.bar.expr, &vec![]).expect("the fixture pill addresses a term");
+        harness.bar.editing = Some(SegmentEdit { path, role: SegmentRole::Value, restore: None });
         harness.bar.dropdown_open = true;
-        harness.frame(frame_input(WIDTH));
-        harness.frame(frame_input(WIDTH));
-        let wide = harness.popup_width().expect("the dropdown was built");
-        let bar = harness.rect_of(harness.id.with("background")).width();
-        assert!(wide >= bar, "the filter list must already fill the bar: {wide} against {bar}");
+        harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
 
-        // The operator list for `Outcome` is `is` and `is not` -- the narrowest
-        // content the dropdown ever holds, and the user's actual path into the
-        // symptom.
-        harness.bar.editing = Some(SegmentEdit { path: vec![], role: SegmentRole::Operator, restore: None });
+        harness.bar.value_options = vec![ValueOption { label: "A".to_owned(), token: "1".to_owned() }];
         harness.frame(frame_input(WIDTH));
         harness.frame(frame_input(WIDTH));
-        let narrow = harness.popup_width().expect("the dropdown is still built");
-        assert!(narrow >= wide, "a narrow list must not shrink the dropdown: {narrow} against {wide} (bar is {bar})");
+        let narrow = harness.popup_width().expect("the dropdown was built");
+
+        harness.bar.value_options = vec![ValueOption { label: "A".repeat(80), token: "1".to_owned() }];
+        harness.frame(frame_input(WIDTH));
+        harness.frame(frame_input(WIDTH));
+        let wide = harness.popup_width().expect("the dropdown is still built");
+
+        assert!(
+            wide > narrow * 2.0,
+            "a wide list shown after a narrow one must recover its own width: {wide} against {narrow}"
+        );
+    }
+
+    /// However wide its content wants to be, the dropdown must not read as
+    /// wider than the control it belongs to. Swept across several bar widths
+    /// against the caret's full suggestion list -- the widest content this
+    /// bar ever shows, so the cap has something to actually resist.
+    #[test]
+    fn the_dropdown_never_grows_past_the_bars_width() {
+        for width in [250.0f32, 300.0, 400.0, 500.0, 800.0] {
+            let mut harness = Harness::new(Expr::default(), width);
+            harness.bar.refresh_suggestions();
+            harness.bar.dropdown_open = true;
+            harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
+            harness.frame(frame_input(width));
+            harness.frame(frame_input(width));
+
+            let popup = harness.popup_width().expect("the dropdown was built");
+            assert!(popup <= width + 0.5, "the dropdown outgrew its {width}-wide bar: {popup}");
+        }
+    }
+
+    /// The dropdown hangs under the segment being edited, not under the bar's
+    /// own left edge -- otherwise a bar-width popup anchored under a mid-bar
+    /// segment runs off the right edge and egui's flip and shift alternatives
+    /// reposition it, which is the second symptom the over-wide popup caused.
+    ///
+    /// Three pills so the segment under test sits well clear of the bar's own
+    /// left edge, which is what tells the two apart.
+    #[test]
+    fn the_dropdowns_left_edge_tracks_the_anchor_not_the_bar() {
+        const WIDTH: f32 = 800.0;
+        let pills = Expr::All(vec![
+            date_pill(),
+            Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Ge, Value::Int(1234))),
+            Expr::Leaf(MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win))),
+        ]);
+        let mut harness = Harness::new(pills, WIDTH);
+        let path = select::segment_path(&harness.bar.expr, &vec![1]).expect("the fixture's second pill");
+        harness.bar.editing = Some(SegmentEdit { path, role: SegmentRole::Operator, restore: None });
+        harness.bar.dropdown_open = true;
+        harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
+        harness.frame(frame_input(WIDTH));
+        harness.frame(frame_input(WIDTH));
+
+        let anchor = harness.bar.popup_anchor.expect("editing a segment anchors the dropdown to it");
+        let bar_left = harness.rect_of(harness.id.with("background")).left();
+        assert!(
+            anchor.left() - bar_left > 50.0,
+            "the fixture must anchor well clear of the bar's own left edge: {anchor:?} vs bar left {bar_left}"
+        );
+
+        let popup_left = harness.popup_left().expect("the dropdown was built");
+        assert!(
+            (popup_left - anchor.left()).abs() < 1.0,
+            "the popup's left edge must track the anchor: {popup_left} vs anchor {anchor:?}"
+        );
+        assert!(
+            (popup_left - bar_left).abs() > 50.0,
+            "the popup must not have fallen back to the bar's own left edge: {popup_left} vs bar left {bar_left}"
+        );
     }
 
     /// The report this change answers: a picked row builds the filter, rather
