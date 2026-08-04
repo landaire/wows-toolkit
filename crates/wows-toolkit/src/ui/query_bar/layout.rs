@@ -94,7 +94,11 @@ pub fn lay_out(tokens: &[Token], widths: &[f32], avail: f32, cfg: &LayoutCfg) ->
         };
 
         let mut end_x = start_x + width;
-        if matches!(token.kind, TokenKind::Caret) {
+        // The caret takes the rest of its row only where nothing follows it.
+        // Stretching one that sits mid-stream -- which is where a term being
+        // edited as text puts it -- would push every later token onto a row of
+        // its own.
+        if matches!(token.kind, TokenKind::Caret) && i + 1 == tokens.len() {
             end_x = end_x.max(avail);
         }
 
@@ -236,6 +240,23 @@ mod tests {
         let out = lay_out(&toks, &widths, 500.0, &cfg());
         let caret = out.placed.last().expect("the caret");
         assert!(caret.rect.width() > 10.0, "the caret should stretch to the row end: {caret:?}");
+    }
+
+    /// A term being edited as text puts the caret in that pill's slot, with the
+    /// rest of the query after it. Stretching it there would give one token the
+    /// whole row and push everything following it onto rows of their own.
+    #[test]
+    fn a_caret_that_is_not_last_does_not_take_the_rest_of_its_row() {
+        let toks = vec![
+            tok(TokenKind::Pill { segments: vec![] }, 0),
+            tok(TokenKind::Caret, 0),
+            tok(TokenKind::Pill { segments: vec![] }, 0),
+        ];
+        let widths = vec![50.0, 60.0, 50.0];
+        let out = lay_out(&toks, &widths, 500.0, &cfg());
+        assert!((out.placed[1].rect.width() - 60.0).abs() < f32::EPSILON, "a mid-stream caret was stretched: {out:#?}");
+        assert_eq!(out.rows, 1, "stretching it pushed the pill after it onto a row of its own: {out:#?}");
+        assert!(out.placed[2].rect.min.x > out.placed[1].rect.max.x, "the last pill must follow the caret: {out:#?}");
     }
 
     #[test]

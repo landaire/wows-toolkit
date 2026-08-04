@@ -66,6 +66,30 @@ pub fn tokenize(expr: &MatchExpr, cache: &NameCache) -> Vec<Token> {
     out
 }
 
+/// Puts the caret in the slot of the pill at `path`, so a term being edited as
+/// text is typed where its pill was rather than at the end of the bar.
+///
+/// The caret is moved, not added: there is exactly one in the stream, before and
+/// after. It inherits the pill's path and depth, so it indents to the same
+/// nesting level and any bracket around the pill still closes over it.
+///
+/// A path that names no pill leaves the stream alone, which is what keeps the
+/// caret at the end while an edit's anchor is gone.
+pub fn move_caret_to(tokens: &mut Vec<Token>, path: &NodePath) {
+    let Some(slot) =
+        tokens.iter().position(|token| matches!(token.kind, TokenKind::Pill { .. }) && token.path == *path)
+    else {
+        return;
+    };
+    let Some(caret) = tokens.iter().position(|token| matches!(token.kind, TokenKind::Caret)) else {
+        return;
+    };
+    let depth = tokens[slot].depth;
+    // The caret is emitted last, so removing it never shifts the slot.
+    tokens.remove(caret);
+    tokens[slot] = Token { kind: TokenKind::Caret, path: path.clone(), depth };
+}
+
 /// Emits one node's tokens. `top_level` suppresses the bracket an `All`/`Any`
 /// would otherwise get: true only for the tree's root and for a roster
 /// predicate directly under its `QuantOpen`/`QuantClose`, both of which are
@@ -177,6 +201,60 @@ mod tests {
     }
     fn build_ge(n: i64) -> MatchExpr {
         Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Ge, Value::Int(n)))
+    }
+
+    /// A term edited as text is typed where its pill was, which means the pill
+    /// stops being drawn and the caret takes its place in the stream. Both
+    /// halves matter: leaving the pill would show the term twice, and adding a
+    /// second caret would give the bar two text fields.
+    #[test]
+    fn moving_the_caret_onto_a_pill_replaces_it_rather_than_joining_it() {
+        let expr = Expr::All(vec![win(), build_ge(3), build_ge(4)]);
+        let mut toks = tokenize(&expr, &NameCache::default());
+        let before = toks.len();
+        move_caret_to(&mut toks, &vec![1]);
+
+        assert_eq!(toks.len(), before - 1, "the caret was added rather than moved: {toks:#?}");
+        assert_eq!(toks.iter().filter(|t| matches!(t.kind, TokenKind::Caret)).count(), 1, "{toks:#?}");
+        let caret = toks.iter().find(|t| matches!(t.kind, TokenKind::Caret)).expect("the caret");
+        assert_eq!(caret.path, vec![1], "the caret must stand where the pill stood");
+        assert!(
+            !toks.iter().any(|t| matches!(t.kind, TokenKind::Pill { .. }) && t.path == vec![1]),
+            "the pill is still drawn beside the editor for it: {toks:#?}"
+        );
+        // The pills on either side are untouched, so the caret really took one
+        // slot rather than the stream being rebuilt around it.
+        assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::Pill { .. }) && t.path == vec![0]));
+        assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::Pill { .. }) && t.path == vec![2]));
+    }
+
+    /// A nested pill's caret has to indent the way the pill did, or the term
+    /// jumps out of the bracket it is being edited inside.
+    #[test]
+    fn a_moved_caret_keeps_the_pills_depth() {
+        let expr = Expr::All(vec![win(), Expr::Any(vec![build_ge(3), build_ge(4)])]);
+        let mut toks = tokenize(&expr, &NameCache::default());
+        let depth = toks
+            .iter()
+            .find(|t| matches!(t.kind, TokenKind::Pill { .. }) && t.path == vec![1, 0])
+            .expect("the nested pill")
+            .depth;
+        assert!(depth > 0, "the fixture must nest the pill");
+
+        move_caret_to(&mut toks, &vec![1, 0]);
+        let caret = toks.iter().find(|t| matches!(t.kind, TokenKind::Caret)).expect("the caret");
+        assert_eq!(caret.depth, depth);
+    }
+
+    /// A path naming no pill leaves the stream alone, so the caret stays where
+    /// it always was rather than disappearing.
+    #[test]
+    fn moving_the_caret_onto_nothing_leaves_the_stream_alone() {
+        let expr = Expr::All(vec![win(), build_ge(3)]);
+        let toks = tokenize(&expr, &NameCache::default());
+        let mut moved = toks.clone();
+        move_caret_to(&mut moved, &vec![9]);
+        assert_eq!(moved, toks);
     }
 
     #[test]
