@@ -753,14 +753,17 @@ impl QueryBar {
         // as another filter rather than as placeholder text.
         let hint = if self.expr.is_empty_all() { t!("ui.search.bar.hint").into_owned() } else { String::new() };
         let output = ui
-            .scope_builder(UiBuilder::new().max_rect(rect), |ui| {
-                egui::TextEdit::singleline(&mut self.pending)
-                    .id(caret_id)
-                    .frame(egui::Frame::NONE)
-                    .desired_width(width)
-                    .hint_text(hint)
-                    .show(ui)
-            })
+            .scope_builder(
+                UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)),
+                |ui| {
+                    egui::TextEdit::singleline(&mut self.pending)
+                        .id(caret_id)
+                        .frame(egui::Frame::NONE)
+                        .desired_width(width)
+                        .hint_text(hint)
+                        .show(ui)
+                },
+            )
             .inner;
 
         let offset = output.cursor_range.map(|range| range.primary.index.0);
@@ -2734,11 +2737,15 @@ mod tests {
     /// that text away and close the editor.
     ///
     /// Two points, and the second is the one that needs the gate. The
-    /// `TextEdit` fills its cell horizontally but is inset vertically by
-    /// `ROW_PAD_Y`, so a click on the text lands on the widget and never
-    /// reaches the background at all, while a click on the padding within the
-    /// caret's own row does. Only the row band tells that second point apart
-    /// from a click on another row.
+    /// `TextEdit` widget is centred inside its cell and so is shorter than the
+    /// row on both edges, while a click above the row entirely reaches the
+    /// background with nothing registered there at all. Only the row band
+    /// tells that second point apart from a click on another row.
+    ///
+    /// The reference for "the row" is a sibling segment's rect (`Operator`),
+    /// not the widget's own: `segment_rects` gives every segment of one pill
+    /// the same top and bottom, but the widget's rect is inset from that by
+    /// centring and is not the row boundary itself.
     ///
     /// Driven through real frames rather than by calling the handshake's
     /// pieces, because the carrier is egui's own hit testing: which of two
@@ -2758,9 +2765,10 @@ mod tests {
         assert_eq!(harness.bar.pending, "1970-01-01", "the literal being edited must survive a click into the text");
         assert!(harness.bar.editing.is_some(), "clicking the text must not close the editor it belongs to");
 
-        // Inside the caret's row, outside the widget: the strip `caret_rect`
-        // insets and the band puts back.
-        let padding = Pos2::new(caret.center().x, caret.top() - 1.0);
+        // Just above the row itself (not the narrower, centred widget): still
+        // this row's own padding, which the band below must still claim.
+        let row = harness.segment_rect(&vec![], SegmentRole::Operator);
+        let padding = Pos2::new(caret.center().x, row.top() - 1.0);
         assert!(!caret.contains(padding), "the second point must be off the widget: {padding:?} in {caret:?}");
         harness.frame(click_input(padding, 800.0));
         assert_eq!(harness.bar.pending, "1970-01-01", "the row's own padding is still the caret's row");
@@ -3757,6 +3765,52 @@ mod tests {
         assert!((caret.left() - value.left()).abs() < 2.0, "caret {caret:?} not in the value slot {value:?}");
         assert!(h.segment_is_drawn(&vec![], SegmentRole::Filter), "the field segment stopped being drawn");
         assert!(h.segment_is_drawn(&vec![], SegmentRole::Operator), "the operator segment stopped being drawn");
+    }
+
+    /// The box's `TextEdit` paints its own galley rather than going through
+    /// `paint::text_run`, so nothing forces it to agree with `text_origin`'s
+    /// vertical centering. It used to lose that agreement: `ui.scope_builder`
+    /// defaults to a top-down, top-aligned layout, so the widget's own
+    /// natural height (shorter than the row) sat flush against the row's top
+    /// edge, leaving the extra slack entirely below the glyph -- text sitting
+    /// high in the frame. Fixed by giving the scope a left-to-right layout
+    /// with `Align::Center`, so egui centers the widget in the row's cross
+    /// axis the same way `text_origin` centers a galley in its rect.
+    ///
+    /// Measured, not eyeballed: before the fix this failed at 8.5 vs 7.0 (a
+    /// 1.5px gap) on a fixture where the neighbouring operator segment's own
+    /// glyph landed exactly on its segment rect's centred position.
+    #[test]
+    fn inline_box_text_is_vertically_centred_like_its_neighbouring_segment() {
+        let mut h = bar_with("type:Arms");
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+
+        let op_text = h
+            .shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.job.text == label::op_label(Op::Contains) => Some(t.clone()),
+                _ => None,
+            })
+            .expect("the operator segment beside the box must be painted");
+
+        let box_text = h
+            .shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.job.text == "Arms" => Some(t.clone()),
+                _ => None,
+            })
+            .expect("the box's own text must be painted");
+
+        // Same row, same font, so a correctly centred box paints its glyph's
+        // top edge at exactly the same y as the neighbouring segment's.
+        assert!(
+            (box_text.pos.y - op_text.pos.y).abs() < 0.1,
+            "box glyph y = {}, neighbouring segment glyph y = {}",
+            box_text.pos.y,
+            op_text.pos.y
+        );
     }
 
     #[test]
