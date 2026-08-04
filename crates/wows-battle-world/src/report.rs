@@ -35,6 +35,7 @@ use wowsunpack::data::Version;
 use wowsunpack::game_types::BattleType;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::ElapsedClock;
+use wowsunpack::game_types::GameMode;
 
 use crate::components::BuildingState;
 use crate::components::Captain;
@@ -69,6 +70,7 @@ pub struct BattleReport {
     version: Version,
     map_name: String,
     game_mode: String,
+    game_mode_id: Recognized<GameMode, i32>,
     game_type: Recognized<BattleType>,
     match_group: String,
     players: Vec<Rc<Player>>,
@@ -118,6 +120,10 @@ impl BattleReport {
 
     pub fn game_mode(&self) -> &str {
         self.game_mode.as_ref()
+    }
+
+    pub fn game_mode_id(&self) -> &Recognized<GameMode, i32> {
+        &self.game_mode_id
     }
 
     pub fn game_type(&self) -> &Recognized<BattleType> {
@@ -474,6 +480,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         let match_group = self.report_match_group();
         let map_name = self.report_map_name();
         let game_mode = self.report_game_mode();
+        let game_mode_id = self.report_game_mode_id();
         let game_type = self.report_game_type();
         let max_duration = self.meta().duration;
         let game_chat = self.world().resource::<ChatLog>().0.clone();
@@ -509,6 +516,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             version,
             map_name,
             game_mode,
+            game_mode_id,
             game_type,
             match_group,
             players,
@@ -598,6 +606,19 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         self.resources()
             .localized_name_from_id(&TranslationKey::new(id))
             .unwrap_or_else(|| self.meta().scenario.clone())
+    }
+
+    /// `ReplayMeta.gameMode` is a `u32` on the wire, but `GameMode::Invalid` is
+    /// `-1`, a value no `u32` can carry -- it is unreachable from a replay.
+    /// Converted with `try_from` rather than `as i32`, which would wrap a value
+    /// above `i32::MAX` into the negative range and could land on `Invalid` by
+    /// accident. A value that does not fit becomes `Unknown` at `i32::MAX`:
+    /// honestly out of range, not a false `Invalid`.
+    fn report_game_mode_id(&self) -> Recognized<GameMode, i32> {
+        match i32::try_from(self.meta().gameMode) {
+            Ok(id) => GameMode::from_id(id),
+            Err(_) => Recognized::Unknown(i32::MAX),
+        }
     }
 
     fn report_game_type(&self) -> Recognized<BattleType> {
@@ -742,5 +763,31 @@ mod tests {
 
         assert_eq!(report.deaths_by_victim().get(&victim), Some(&GameClock(120.0)));
         assert_eq!(report.deaths_by_victim().get(&EntityId::from(11u32)), None);
+    }
+
+    /// Same synthetic-world setup as `report_from_synthetic_world`, but with a
+    /// caller-chosen `gameMode` so `game_mode_id()` can be exercised against
+    /// both a recognized id and one the table does not define.
+    fn report_with_game_mode(game_mode: u32) -> BattleReport {
+        let mut meta = minimal_meta();
+        meta.gameMode = game_mode;
+        let resources = StubResources(fixture_param());
+        let mut world = BattleWorld::new(&meta, &resources, None);
+
+        let (entity_id, player) = self_player(&resources);
+        world.world_mut().resource_mut::<PlayerIndex>().0.insert(entity_id, Rc::new(player));
+
+        world.into_report()
+    }
+
+    #[test]
+    fn game_mode_id_recognizes_a_known_mode_and_flags_an_unrecognized_one() {
+        let arms_race = report_with_game_mode(15);
+        assert_eq!(*arms_race.game_mode_id(), Recognized::Known(GameMode::ArmsRace));
+
+        // 3 is a real gap in the game's own GAME_MODE table (3 through 6 are
+        // unused), not a value this code invents.
+        let gap = report_with_game_mode(3);
+        assert_eq!(*gap.game_mode_id(), Recognized::Unknown(3));
     }
 }

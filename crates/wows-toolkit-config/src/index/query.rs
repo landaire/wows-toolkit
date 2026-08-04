@@ -52,8 +52,8 @@ use super::rows::VehicleRelation;
 /// last, which is not necessarily the record this hit picked. Nor is it keyed on
 /// `self_account_id`, which is absent on a spectator recording -- exactly the
 /// kind of row that most needs naming.
-const MATCH_HIT_COLUMNS: &str = "m.arena_id, m.timestamp, m.map, m.game_mode, m.game_type, m.match_group, \
-     m.version_build, r.source_id, r.outcome, r.self_account_id, r.self_ship_id, \
+const MATCH_HIT_COLUMNS: &str = "m.arena_id, m.timestamp, m.map, m.game_mode, m.game_mode_id, m.game_type, \
+     m.match_group, m.version_build, r.source_id, r.outcome, r.self_account_id, r.self_ship_id, \
      (SELECT v.ship_name FROM indexed_vehicle v \
         WHERE v.arena_id = m.arena_id AND v.ship_id = r.self_ship_id LIMIT 1) AS self_ship_name, \
      r.self_survived, r.self_damage, r.self_kills, r.self_pr, r.results_available, r.replay_path, r.file_mtime";
@@ -318,18 +318,24 @@ pub async fn forget_source(pool: &SqlitePool, source: SourceId) -> Result<(), In
     Ok(())
 }
 
+/// `game_mode_id` is `COALESCE(game_mode_id, ?)`, old-wins, for the same
+/// reason as `indexed_vehicle.pr` (see [`upsert_vehicles`]): the id recorded
+/// for a match is a point-in-time fact about that indexing pass, and a
+/// re-index must not restamp it.
 pub async fn upsert_match(pool: &SqlitePool, m: &ObjectiveMatch) -> Result<(), IndexError> {
     sqlx::query(
         "INSERT INTO indexed_match \
-         (arena_id, timestamp, map, game_mode, game_type, match_group, version_build) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+         (arena_id, timestamp, map, game_mode, game_mode_id, game_type, match_group, version_build) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
          ON CONFLICT(arena_id) DO UPDATE SET \
-           timestamp=?2, map=?3, game_mode=?4, game_type=?5, match_group=?6, version_build=?7",
+           timestamp=?2, map=?3, game_mode=?4, game_mode_id=COALESCE(game_mode_id, ?5), game_type=?6, \
+           match_group=?7, version_build=?8",
     )
     .bind(m.arena_id.raw())
     .bind(m.timestamp.as_second())
     .bind(&m.map)
     .bind(&m.game_mode)
+    .bind(m.game_mode_id)
     .bind(&m.game_type)
     .bind(&m.match_group)
     .bind(m.version_build.map(|v| v as i64))
@@ -658,6 +664,7 @@ fn row_to_match_hit(row: &sqlx::sqlite::SqliteRow) -> Result<MatchHit, IndexErro
             .unwrap_or(jiff::Timestamp::UNIX_EPOCH),
         map: row.try_get("map")?,
         game_mode: row.try_get("game_mode")?,
+        game_mode_id: row.try_get("game_mode_id")?,
         game_type: row.try_get("game_type")?,
         match_group: row.try_get("match_group")?,
         version_build: version_build.map(|v| v as u32),

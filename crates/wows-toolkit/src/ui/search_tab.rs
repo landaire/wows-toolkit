@@ -717,6 +717,7 @@ mod tests {
             timestamp: jiff::Timestamp::UNIX_EPOCH,
             map: "spaces/13_OC_new_dawn".into(),
             game_mode: "Domination".into(),
+            game_mode_id: None,
             game_type: "pvp".into(),
             match_group: "pvp".into(),
             version_build: Some(11_189_791),

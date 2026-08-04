@@ -120,6 +120,11 @@ pub struct ObjectiveMatch {
     pub timestamp: Timestamp,
     pub map: String,
     pub game_mode: String,
+    /// The game's own numeric mode id (`GameMode::id()`), `None` on rows
+    /// indexed before this column existed. Re-indexing repairs a `None` row;
+    /// there is no backfill from the display string, which is derived from
+    /// `scenario`, a different field, and is locale-dependent besides.
+    pub game_mode_id: Option<i32>,
     pub game_type: String,
     pub match_group: String,
     pub version_build: Option<u32>,
@@ -190,6 +195,7 @@ pub struct MatchHit {
     pub timestamp: Timestamp,
     pub map: String,
     pub game_mode: String,
+    pub game_mode_id: Option<i32>,
     pub game_type: String,
     pub match_group: String,
     pub version_build: Option<u32>,

@@ -4610,6 +4610,7 @@ mod replay_tab_search_tests {
             timestamp: now(),
             map: "Ocean".into(),
             game_mode: "Domination".into(),
+            game_mode_id: None,
             game_type: "pvp".into(),
             match_group: "pvp".into(),
             version_build: Some(1234),

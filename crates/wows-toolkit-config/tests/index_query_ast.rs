@@ -50,6 +50,7 @@ fn a_match(arena: i64) -> ObjectiveMatch {
         timestamp: Timestamp::from_second(1_700_000_000 + arena).unwrap(),
         map: DEFAULT_MAP.into(),
         game_mode: "Domination".into(),
+        game_mode_id: None,
         game_type: "pvp".into(),
         match_group: "pvp".into(),
         version_build: Some(1234),
