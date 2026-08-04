@@ -2321,6 +2321,182 @@ impl fmt::Display for BattleType {
     }
 }
 
+/// Game mode, mapped from the `GAME_MODE` class in `shared_constants.py`.
+/// The ids are the game's own and have gaps at 3 through 6; `Invalid` is a
+/// real value the game uses, not an error case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum GameMode {
+    Invalid,
+    Test,
+    Standart,
+    Singlebase,
+    Domination,
+    Tutorial,
+    Megabase,
+    Forts,
+    StandardDomination,
+    Epicenter,
+    AssaultDefense,
+    Pve,
+    ArmsRace,
+    EpicenterRing,
+    AntiStandard,
+    AttackDefense,
+    TorpedoBeat,
+    TeamBattleRoyale,
+    EscapeToPortal,
+    DominationAsymm,
+    KeyBattle,
+    Portal2021,
+    TeamBattleRoyale2021,
+    ConvoyEvent,
+    ConvoyAirship,
+    TwoTeamsBattleRoyale,
+    PinataEvent,
+    Respawns,
+    RespawnsSectors,
+}
+
+impl GameMode {
+    pub const ALL: [GameMode; 29] = [
+        GameMode::Invalid,
+        GameMode::Test,
+        GameMode::Standart,
+        GameMode::Singlebase,
+        GameMode::Domination,
+        GameMode::Tutorial,
+        GameMode::Megabase,
+        GameMode::Forts,
+        GameMode::StandardDomination,
+        GameMode::Epicenter,
+        GameMode::AssaultDefense,
+        GameMode::Pve,
+        GameMode::ArmsRace,
+        GameMode::EpicenterRing,
+        GameMode::AntiStandard,
+        GameMode::AttackDefense,
+        GameMode::TorpedoBeat,
+        GameMode::TeamBattleRoyale,
+        GameMode::EscapeToPortal,
+        GameMode::DominationAsymm,
+        GameMode::KeyBattle,
+        GameMode::Portal2021,
+        GameMode::TeamBattleRoyale2021,
+        GameMode::ConvoyEvent,
+        GameMode::ConvoyAirship,
+        GameMode::TwoTeamsBattleRoyale,
+        GameMode::PinataEvent,
+        GameMode::Respawns,
+        GameMode::RespawnsSectors,
+    ];
+
+    pub const fn id(self) -> i32 {
+        match self {
+            GameMode::Invalid => -1,
+            GameMode::Test => 0,
+            GameMode::Standart => 1,
+            GameMode::Singlebase => 2,
+            GameMode::Domination => 7,
+            GameMode::Tutorial => 8,
+            GameMode::Megabase => 9,
+            GameMode::Forts => 10,
+            GameMode::StandardDomination => 11,
+            GameMode::Epicenter => 12,
+            GameMode::AssaultDefense => 13,
+            GameMode::Pve => 14,
+            GameMode::ArmsRace => 15,
+            GameMode::EpicenterRing => 16,
+            GameMode::AntiStandard => 17,
+            GameMode::AttackDefense => 18,
+            GameMode::TorpedoBeat => 19,
+            GameMode::TeamBattleRoyale => 20,
+            GameMode::EscapeToPortal => 21,
+            GameMode::DominationAsymm => 22,
+            GameMode::KeyBattle => 23,
+            GameMode::Portal2021 => 24,
+            GameMode::TeamBattleRoyale2021 => 25,
+            GameMode::ConvoyEvent => 26,
+            GameMode::ConvoyAirship => 27,
+            GameMode::TwoTeamsBattleRoyale => 28,
+            GameMode::PinataEvent => 29,
+            GameMode::Respawns => 30,
+            GameMode::RespawnsSectors => 31,
+        }
+    }
+
+    pub fn from_id(id: i32) -> Recognized<GameMode, i32> {
+        match id {
+            -1 => Recognized::Known(GameMode::Invalid),
+            0 => Recognized::Known(GameMode::Test),
+            1 => Recognized::Known(GameMode::Standart),
+            2 => Recognized::Known(GameMode::Singlebase),
+            7 => Recognized::Known(GameMode::Domination),
+            8 => Recognized::Known(GameMode::Tutorial),
+            9 => Recognized::Known(GameMode::Megabase),
+            10 => Recognized::Known(GameMode::Forts),
+            11 => Recognized::Known(GameMode::StandardDomination),
+            12 => Recognized::Known(GameMode::Epicenter),
+            13 => Recognized::Known(GameMode::AssaultDefense),
+            14 => Recognized::Known(GameMode::Pve),
+            15 => Recognized::Known(GameMode::ArmsRace),
+            16 => Recognized::Known(GameMode::EpicenterRing),
+            17 => Recognized::Known(GameMode::AntiStandard),
+            18 => Recognized::Known(GameMode::AttackDefense),
+            19 => Recognized::Known(GameMode::TorpedoBeat),
+            20 => Recognized::Known(GameMode::TeamBattleRoyale),
+            21 => Recognized::Known(GameMode::EscapeToPortal),
+            22 => Recognized::Known(GameMode::DominationAsymm),
+            23 => Recognized::Known(GameMode::KeyBattle),
+            24 => Recognized::Known(GameMode::Portal2021),
+            25 => Recognized::Known(GameMode::TeamBattleRoyale2021),
+            26 => Recognized::Known(GameMode::ConvoyEvent),
+            27 => Recognized::Known(GameMode::ConvoyAirship),
+            28 => Recognized::Known(GameMode::TwoTeamsBattleRoyale),
+            29 => Recognized::Known(GameMode::PinataEvent),
+            30 => Recognized::Known(GameMode::Respawns),
+            31 => Recognized::Known(GameMode::RespawnsSectors),
+            other => Recognized::Unknown(other),
+        }
+    }
+
+    /// Lowercase kebab-case token used in the query grammar.
+    pub const fn as_token(self) -> &'static str {
+        match self {
+            GameMode::Invalid => "invalid",
+            GameMode::Test => "test",
+            GameMode::Standart => "standart",
+            GameMode::Singlebase => "singlebase",
+            GameMode::Domination => "domination",
+            GameMode::Tutorial => "tutorial",
+            GameMode::Megabase => "megabase",
+            GameMode::Forts => "forts",
+            GameMode::StandardDomination => "standard-domination",
+            GameMode::Epicenter => "epicenter",
+            GameMode::AssaultDefense => "assault-defense",
+            GameMode::Pve => "pve",
+            GameMode::ArmsRace => "arms-race",
+            GameMode::EpicenterRing => "epicenter-ring",
+            GameMode::AntiStandard => "anti-standard",
+            GameMode::AttackDefense => "attack-defense",
+            GameMode::TorpedoBeat => "torpedo-beat",
+            GameMode::TeamBattleRoyale => "team-battle-royale",
+            GameMode::EscapeToPortal => "escape-to-portal",
+            GameMode::DominationAsymm => "domination-asymm",
+            GameMode::KeyBattle => "key-battle",
+            GameMode::Portal2021 => "portal-2021",
+            GameMode::TeamBattleRoyale2021 => "team-battle-royale-2021",
+            GameMode::ConvoyEvent => "convoy-event",
+            GameMode::ConvoyAirship => "convoy-airship",
+            GameMode::TwoTeamsBattleRoyale => "two-teams-battle-royale",
+            GameMode::PinataEvent => "pinata-event",
+            GameMode::Respawns => "respawns",
+            GameMode::RespawnsSectors => "respawns-sectors",
+        }
+    }
+}
+
 /// What the projectile collided with (from CollisionMath module).
 /// Mapped from `COLLISION_TYPES` in ships.xml.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3089,5 +3265,60 @@ mod tests {
         let future = VisibilityFlags::new(1 | 1 << 20);
         assert_eq!(future.unknown_bits(), 1 << 20);
         assert_eq!(future.to_string(), "BY_SHIP|UNKNOWN(0x100000)");
+    }
+
+    #[test]
+    fn every_documented_game_mode_id_round_trips() {
+        for mode in GameMode::ALL {
+            let back = GameMode::from_id(mode.id());
+            assert_eq!(back.known().copied(), Some(mode), "{mode:?} did not round trip");
+        }
+    }
+
+    #[test]
+    fn the_id_table_matches_the_games_own_values() {
+        // Spot-checked against GAME_MODE in the deobfuscated shared_constants.
+        // The gaps at 3..=6 are the game's, not an omission here.
+        assert_eq!(GameMode::Invalid.id(), -1);
+        assert_eq!(GameMode::Standart.id(), 1);
+        assert_eq!(GameMode::Domination.id(), 7);
+        assert_eq!(GameMode::ArmsRace.id(), 15);
+        assert_eq!(GameMode::RespawnsSectors.id(), 31);
+        for gap in 3..=6 {
+            assert!(GameMode::from_id(gap).known().is_none(), "{gap} is a gap in the game's table");
+        }
+    }
+
+    #[test]
+    fn an_unknown_id_degrades_rather_than_failing() {
+        // A future build can add a mode. It must survive as its raw id, not
+        // collapse onto a neighbouring variant.
+        match GameMode::from_id(9_001) {
+            Recognized::Unknown(raw) => assert_eq!(raw, 9_001),
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tokens_are_unique_and_kebab_case() {
+        let mut seen = std::collections::BTreeSet::new();
+        for mode in GameMode::ALL {
+            let token = mode.as_token();
+            assert!(seen.insert(token), "{token} is offered by two modes");
+            assert!(
+                token.bytes().all(|b| b.is_ascii_lowercase() || b == b'-' || b.is_ascii_digit()),
+                "{token} is not kebab-case"
+            );
+        }
+    }
+
+    #[test]
+    fn all_lists_every_variant() {
+        // ALL is what the query grammar enumerates, so a variant missing from it
+        // is a filter value the user can never pick.
+        assert_eq!(GameMode::ALL.len(), 29);
+        for mode in GameMode::ALL {
+            assert!(GameMode::ALL.contains(&mode));
+        }
     }
 }
