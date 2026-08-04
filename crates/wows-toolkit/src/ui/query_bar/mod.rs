@@ -949,7 +949,9 @@ fn request_source(request: Option<&ValueRequest>) -> Option<std::mem::Discrimina
 
 fn token_text(token: &Token) -> String {
     match &token.kind {
-        TokenKind::Pill { text } => text.clone(),
+        // Segments 5-7 give each part its own click target and paint; for now
+        // this joins them the way `label::join_segments` builds `pill_text`.
+        TokenKind::Pill { segments } => segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" "),
         TokenKind::Connector { is_or } => {
             if *is_or { t!("ui.search.bar.or_word") } else { t!("ui.search.bar.and_word") }.into_owned()
         }

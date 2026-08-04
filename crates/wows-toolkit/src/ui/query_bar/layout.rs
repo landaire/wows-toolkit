@@ -136,7 +136,7 @@ mod tests {
         Token { kind, path: vec![], depth }
     }
     fn pills(n: usize) -> Vec<Token> {
-        let mut v: Vec<Token> = (0..n).map(|_| tok(TokenKind::Pill { text: "x".into() }, 0)).collect();
+        let mut v: Vec<Token> = (0..n).map(|_| tok(TokenKind::Pill { segments: vec![] }, 0)).collect();
         v.push(tok(TokenKind::Caret, 0));
         v
     }
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn a_group_spanning_a_break_is_reported_as_open_ended_on_each_row() {
         let mut toks = vec![tok(TokenKind::GroupOpen { is_or: false }, 0)];
-        toks.extend((0..4).map(|_| tok(TokenKind::Pill { text: "x".into() }, 1)));
+        toks.extend((0..4).map(|_| tok(TokenKind::Pill { segments: vec![] }, 1)));
         toks.push(tok(TokenKind::GroupClose, 0));
         toks.push(tok(TokenKind::Caret, 0));
         let widths = vec![8.0, 100.0, 100.0, 100.0, 100.0, 8.0, 10.0];
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn a_quant_bracket_spanning_a_break_is_reported_as_open_ended_on_each_row() {
         let mut toks = vec![tok(TokenKind::QuantOpen { prefix: "at least 2".into() }, 0)];
-        toks.extend((0..4).map(|_| tok(TokenKind::Pill { text: "x".into() }, 1)));
+        toks.extend((0..4).map(|_| tok(TokenKind::Pill { segments: vec![] }, 1)));
         toks.push(tok(TokenKind::QuantClose, 0));
         toks.push(tok(TokenKind::Caret, 0));
         let widths = vec![8.0, 100.0, 100.0, 100.0, 100.0, 8.0, 10.0];
@@ -243,12 +243,12 @@ mod tests {
     fn an_outer_group_covers_the_one_inside_it_on_every_row_they_share() {
         let mut toks = vec![
             tok(TokenKind::GroupOpen { is_or: false }, 1),
-            tok(TokenKind::Pill { text: "x".into() }, 1),
+            tok(TokenKind::Pill { segments: vec![] }, 1),
             tok(TokenKind::GroupOpen { is_or: true }, 2),
         ];
-        toks.extend((0..3).map(|_| tok(TokenKind::Pill { text: "x".into() }, 2)));
+        toks.extend((0..3).map(|_| tok(TokenKind::Pill { segments: vec![] }, 2)));
         toks.push(tok(TokenKind::GroupClose, 2));
-        toks.push(tok(TokenKind::Pill { text: "x".into() }, 1));
+        toks.push(tok(TokenKind::Pill { segments: vec![] }, 1));
         toks.push(tok(TokenKind::GroupClose, 1));
         toks.push(tok(TokenKind::Caret, 0));
         let widths = vec![8.0, 100.0, 8.0, 100.0, 100.0, 100.0, 8.0, 100.0, 8.0, 10.0];
@@ -275,13 +275,13 @@ mod tests {
     fn nested_depth_indents_the_rows_it_occupies() {
         let c = cfg();
         let shallow = lay_out(
-            &[tok(TokenKind::Pill { text: "x".into() }, 0), tok(TokenKind::Caret, 0)],
+            &[tok(TokenKind::Pill { segments: vec![] }, 0), tok(TokenKind::Caret, 0)],
             &[10.0, 10.0],
             500.0,
             &c,
         );
         let deep = lay_out(
-            &[tok(TokenKind::Pill { text: "x".into() }, 2), tok(TokenKind::Caret, 0)],
+            &[tok(TokenKind::Pill { segments: vec![] }, 2), tok(TokenKind::Caret, 0)],
             &[10.0, 10.0],
             500.0,
             &c,

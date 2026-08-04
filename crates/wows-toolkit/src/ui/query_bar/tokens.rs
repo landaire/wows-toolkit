@@ -8,6 +8,7 @@ use crate::db::index::query_ast::MatchTerm;
 use crate::db::index::query_ast::RosterTerm;
 use crate::ui::query_bar::label;
 use crate::ui::query_bar::label::NameCache;
+use crate::ui::query_bar::label::PillSegment;
 
 /// Where a node sits in the tree: the child index at each level from the root.
 /// An empty path is the root. `Not`'s single operand is index 0.
@@ -34,7 +35,7 @@ pub struct Token {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     Pill {
-        text: String,
+        segments: Vec<PillSegment>,
     },
     /// The `and` / `or` word between two siblings.
     Connector {
@@ -132,11 +133,24 @@ fn emit_conjunction<L>(
 
 fn emit_match_leaf(term: &MatchTerm, path: &NodePath, depth: usize, cache: &NameCache, out: &mut Vec<Token>) {
     let MatchTerm::Roster { quant, pred } = term else {
-        out.push(Token { kind: TokenKind::Pill { text: label::pill_text(term, cache) }, path: path.clone(), depth });
+        out.push(Token {
+            kind: TokenKind::Pill { segments: label::pill_segments(term, cache) },
+            path: path.clone(),
+            depth,
+        });
         return;
     };
-    if let Some(text) = label::roster_sugar_pill_text(*quant, pred, cache) {
-        out.push(Token { kind: TokenKind::Pill { text }, path: path.clone(), depth });
+    // `roster_sugar_pill_text` and `label::sugar_shape` (which it wraps) are
+    // kept in step with `wows-toolkit-config`'s `query_text::try_print_sugar`;
+    // see `sugar_shape`'s doc comment for why that matters. This only asks
+    // whether the shape is sugar; `pill_segments` (which recognises the same
+    // shape) supplies the actual segments for the collapsed pill.
+    if label::roster_sugar_pill_text(*quant, pred, cache).is_some() {
+        out.push(Token {
+            kind: TokenKind::Pill { segments: label::pill_segments(term, cache) },
+            path: path.clone(),
+            depth,
+        });
         return;
     }
     let inner_depth = depth + 1;
@@ -148,7 +162,7 @@ fn emit_match_leaf(term: &MatchTerm, path: &NodePath, depth: usize, cache: &Name
     let mut roster_path = path.clone();
     emit_expr(pred, &mut roster_path, inner_depth, true, out, &mut |rterm: &RosterTerm, p, d, out| {
         out.push(Token {
-            kind: TokenKind::Pill { text: label::roster_pill_text(rterm, cache) },
+            kind: TokenKind::Pill { segments: label::roster_segments(rterm, cache) },
             path: p.clone(),
             depth: d,
         });
@@ -159,13 +173,17 @@ fn emit_match_leaf(term: &MatchTerm, path: &NodePath, depth: usize, cache: &Name
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::index::query_ast::CmpOp;
     use crate::db::index::query_ast::Expr;
     use crate::db::index::query_ast::MatchField;
     use crate::db::index::query_ast::Op;
     use crate::db::index::query_ast::Quant;
+    use crate::db::index::query_ast::RosterField;
     use crate::db::index::query_ast::Value;
     use crate::db::index::rows::MatchOutcome;
+    use crate::db::index::rows::VehicleRelation;
     use crate::ui::query_bar::label::NameCache;
+    use crate::ui::query_bar::label::SegmentRole;
 
     fn win() -> MatchExpr {
         Expr::Leaf(MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win)))
@@ -357,5 +375,53 @@ mod tests {
         let pa: Vec<_> = a.iter().map(|t| t.path.clone()).collect();
         let pb: Vec<_> = b.iter().map(|t| t.path.clone()).collect();
         assert_eq!(pa, pb);
+    }
+
+    #[test]
+    fn a_pill_token_carries_its_segments() {
+        let toks = tokenize(&win(), &NameCache::default());
+        match &toks[0].kind {
+            TokenKind::Pill { segments } => {
+                assert_eq!(segments.len(), 3, "got {segments:?}");
+                assert_eq!(segments[0].role, SegmentRole::Filter);
+                assert_eq!(segments[1].role, SegmentRole::Operator);
+                assert_eq!(segments[2].role, SegmentRole::Value);
+            }
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_sugar_shaped_roster_is_still_one_pill_with_segments() {
+        let pred = Expr::Leaf(RosterTerm {
+            field: RosterField::Relation,
+            op: Op::Is,
+            value: Value::Relation(VehicleRelation::Enemy),
+        });
+        let expr: MatchExpr = Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred });
+        let toks = tokenize(&expr, &NameCache::default());
+        assert!(!toks.iter().any(|t| matches!(t.kind, TokenKind::QuantOpen { .. })), "got {toks:#?}");
+        let pills: Vec<_> = toks.iter().filter(|t| matches!(t.kind, TokenKind::Pill { .. })).collect();
+        assert_eq!(pills.len(), 1);
+    }
+
+    #[test]
+    fn a_non_sugar_roster_still_brackets_and_its_inner_pills_are_segmented() {
+        let pred = Expr::All(vec![
+            Expr::Leaf(RosterTerm {
+                field: RosterField::Relation,
+                op: Op::Is,
+                value: Value::Relation(VehicleRelation::Enemy),
+            }),
+            Expr::Leaf(RosterTerm { field: RosterField::Damage, op: Op::Gt, value: Value::Int(100_000) }),
+        ]);
+        let expr: MatchExpr = Expr::Leaf(MatchTerm::Roster { quant: Quant::Count(CmpOp::Ge, 2), pred });
+        let toks = tokenize(&expr, &NameCache::default());
+        assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::QuantOpen { .. })), "got {toks:#?}");
+        for t in &toks {
+            if let TokenKind::Pill { segments } = &t.kind {
+                assert!(segments.len() >= 2, "inner pill not segmented: {segments:?}");
+            }
+        }
     }
 }

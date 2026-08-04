@@ -56,7 +56,12 @@ pub struct PillSegment {
     pub text: String,
 }
 
-/// Human text for one match-level term, as a join of its segments.
+/// Human text for one match-level term, as a join of its segments. `tokens.rs`
+/// carries `pill_segments` through the token stream directly rather than
+/// calling this, so a non-test build sees it as unread; it stays the pinned
+/// reference `joining_the_segments_reproduces_the_old_pill_text` checks
+/// `pill_segments` against.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn pill_text(term: &MatchTerm, cache: &NameCache) -> String {
     join_segments(&pill_segments(term, cache))
 }
