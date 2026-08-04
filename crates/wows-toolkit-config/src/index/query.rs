@@ -1016,6 +1016,20 @@ pub async fn distinct_maps(pool: &SqlitePool, limit: i64) -> Result<Vec<String>,
     Ok(rows.into_iter().map(|(map, _)| map).collect())
 }
 
+/// How many indexed matches have no numeric game mode recorded.
+///
+/// `game_mode_id` is only ever filled at index time (see [`upsert_match`]), and
+/// the column has no backfill: a match indexed before it existed keeps
+/// `game_mode_id` NULL until that arena is re-indexed. The count exists so the
+/// search UI can tell a user why a `game-mode` filter is missing rows their
+/// old free-text search used to find, rather than let it look like the filter
+/// simply does not work.
+pub async fn matches_missing_game_mode_count(pool: &SqlitePool) -> Result<i64, IndexError> {
+    let row: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM indexed_match WHERE game_mode_id IS NULL").fetch_one(pool).await?;
+    Ok(row.0)
+}
+
 /// Bounded, case-insensitive self-ship search for the cascading palette: ships the
 /// user has played whose name contains `needle`, ranked by match count, capped at `limit`.
 pub async fn search_self_ships(pool: &SqlitePool, needle: &str, limit: i64) -> Result<Vec<ShipFacet>, IndexError> {

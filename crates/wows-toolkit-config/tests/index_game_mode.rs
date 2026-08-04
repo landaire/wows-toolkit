@@ -86,3 +86,25 @@ async fn a_reindex_fills_a_row_that_has_no_game_mode_id() {
     query::upsert_match(&pool, &a_match(1, Some(GameMode::ArmsRace.id()))).await.unwrap();
     assert_eq!(stored_game_mode_id(&pool, 1).await, Some(GameMode::ArmsRace.id()));
 }
+
+/// The count the search UI surfaces as a re-index hint: only rows the
+/// migration left NULL, not the whole table.
+#[tokio::test]
+async fn missing_game_mode_count_counts_only_null_rows() {
+    let pool = mem_pool().await;
+    query::upsert_match(&pool, &a_match(1, None)).await.unwrap();
+    query::upsert_match(&pool, &a_match(2, Some(GameMode::ArmsRace.id()))).await.unwrap();
+    query::upsert_match(&pool, &a_match(3, None)).await.unwrap();
+    assert_eq!(query::matches_missing_game_mode_count(&pool).await.unwrap(), 2);
+}
+
+/// Once every row has been re-indexed the count must read zero, not merely
+/// fall to some smaller nonzero number: a real zero is what tells the search
+/// UI the hint can stop showing.
+#[tokio::test]
+async fn missing_game_mode_count_is_zero_once_every_row_has_one() {
+    let pool = mem_pool().await;
+    query::upsert_match(&pool, &a_match(1, Some(GameMode::ArmsRace.id()))).await.unwrap();
+    query::upsert_match(&pool, &a_match(2, Some(GameMode::Domination.id()))).await.unwrap();
+    assert_eq!(query::matches_missing_game_mode_count(&pool).await.unwrap(), 0);
+}

@@ -19,6 +19,7 @@ use crate::db::index::query;
 use crate::db::index::query_ast::Expr;
 use crate::db::index::query_ast::MapCatalog;
 use crate::db::index::query_ast::MatchExpr;
+use crate::db::index::query_ast::MatchField;
 use crate::db::index::query_ast::MatchTerm;
 use crate::db::index::query_ast::RosterExpr;
 use crate::db::index::query_ast::Value;
@@ -34,6 +35,7 @@ use crate::ui::query_bar::QueryBar;
 use crate::ui::query_bar::select::prune_empty;
 use crate::ui::query_bar::suggest::ValueOption;
 use crate::ui::query_bar::suggest::ValueRequest;
+use crate::ui::theme::semantic::SemanticExt;
 
 /// Rows a single search reads. `search_by_ast` fetches one more so the count can
 /// say "at least this many" rather than reporting a truncated total.
@@ -68,6 +70,9 @@ enum SearchMsg {
         ships: Vec<(GameParamId, String)>,
         players: Vec<(AccountId, String)>,
     },
+    /// How many indexed matches have `game_mode_id IS NULL`, refreshed
+    /// alongside every search so it reads zero again once the user re-indexes.
+    GameModeGap(i64),
 }
 
 pub struct SearchTabState {
@@ -77,6 +82,11 @@ pub struct SearchTabState {
     /// True when the last query returned `limit + 1` rows.
     pub truncated: bool,
     pub sources: Vec<IndexSource>,
+    /// How many indexed matches have no numeric game mode recorded, or `None`
+    /// before the first search has returned one. A fetched zero and an
+    /// unfetched count both have to render as "say nothing", but they are not
+    /// the same fact, so this is never defaulted to `0`.
+    pub game_mode_gap: Option<i64>,
     /// Display-name to raw-space-name resolution for a `map` term.
     ///
     /// Empty, and correct empty: `indexed_match.map` already stores the
@@ -124,6 +134,7 @@ impl Default for SearchTabState {
             dirty: true,
             truncated: false,
             sources: Vec::new(),
+            game_mode_gap: None,
             maps: MapCatalog::default(),
             tx,
             rx,
@@ -184,6 +195,7 @@ impl SearchTabState {
                     self.bar.names.ships.extend(ships);
                     self.bar.names.players.extend(players);
                 }
+                SearchMsg::GameModeGap(count) => self.game_mode_gap = Some(count),
             }
         }
     }
@@ -217,10 +229,10 @@ impl SearchTabState {
         // `LIKE '%'` and would widen the search instead of narrowing it.
         let expr = prune_empty(&self.bar.expr);
         let maps = self.maps.clone();
-        let pool = pool.clone();
+        let search_pool = pool.clone();
         self.spawn(rt, async move {
             let ctx = CompileCtx { maps: &maps };
-            match query::search_by_ast(&pool, &expr, &ctx, RESULT_LIMIT).await {
+            match query::search_by_ast(&search_pool, &expr, &ctx, RESULT_LIMIT).await {
                 Ok(mut hits) => {
                     let truncated = hits.len() as i64 > RESULT_LIMIT;
                     hits.truncate(RESULT_LIMIT as usize);
@@ -228,6 +240,21 @@ impl SearchTabState {
                 }
                 Err(e) => {
                     tracing::warn!("search: query failed: {e}");
+                    None
+                }
+            }
+        });
+
+        // Refreshed on every search rather than fetched once, so the hint
+        // below actually clears once the user re-indexes: a "requested once"
+        // flag like the source/map catalogues' would leave a stale nonzero
+        // count on screen for the rest of the session.
+        let gap_pool = pool.clone();
+        self.spawn(rt, async move {
+            match query::matches_missing_game_mode_count(&gap_pool).await {
+                Ok(count) => Some(SearchMsg::GameModeGap(count)),
+                Err(e) => {
+                    tracing::warn!("search: matches_missing_game_mode_count failed: {e}");
                     None
                 }
             }
@@ -382,6 +409,28 @@ fn collect_ids(expr: &MatchExpr, ships: &mut Vec<GameParamId>, players: &mut Vec
     }
 }
 
+/// True when the tree names `MatchField::GameMode` anywhere, structurally --
+/// a walk over the AST, not a substring search over the printed query -- so a
+/// free-text term that happens to contain the literal word "game-mode" does
+/// not count. `GameMode` is a match-level field, not a roster one, so this
+/// only has to descend through `MatchTerm::Roster` far enough to say it holds
+/// none, never into the `RosterExpr` itself.
+fn references_game_mode(expr: &MatchExpr) -> bool {
+    match expr {
+        Expr::Leaf(MatchTerm::Field(MatchField::GameMode, ..)) => true,
+        Expr::Leaf(_) => false,
+        other => other.children().iter().any(references_game_mode),
+    }
+}
+
+/// Whether the re-index hint belongs on screen: some indexed match is
+/// missing its game mode, *and* the query on screen actually filters on it.
+/// A nonzero gap the current query never asked about is not this user's
+/// problem right now, so it stays quiet.
+fn game_mode_gap_hint_relevant(missing_count: i64, expr: &MatchExpr) -> bool {
+    missing_count > 0 && references_game_mode(expr)
+}
+
 fn collect_roster_ids(expr: &RosterExpr, ships: &mut Vec<GameParamId>, players: &mut Vec<AccountId>) {
     match expr {
         Expr::Leaf(term) => match &term.value {
@@ -516,6 +565,15 @@ impl ToolkitTabViewer<'_> {
         }
 
         ui.separator();
+
+        // Only shown when it is relevant to what the user is looking at: a
+        // gap in a filter they are not using is noise, and it goes away on its
+        // own once every affected match is re-indexed (the count reads 0).
+        if let Some(missing) = self.tab_state.search_tab.game_mode_gap
+            && game_mode_gap_hint_relevant(missing, &self.tab_state.search_tab.bar.expr)
+        {
+            ui.colored_label(ui.sem().warn, t!("ui.search.game_mode_gap_hint", count = missing));
+        }
 
         let count = self.tab_state.search_tab.results.len();
         ui.label(if self.tab_state.search_tab.truncated {
@@ -780,5 +838,79 @@ mod tests {
     fn a_hit_with_no_self_ship_names_nothing() {
         let hit = a_hit(None, Some("Smaland"));
         assert_eq!(ship_display_name(&hit, None), None);
+    }
+
+    /// The structural walk, not a substring search: a query that filters on
+    /// `game-mode` is found regardless of where in the tree it sits.
+    #[test]
+    fn references_game_mode_finds_a_direct_term() {
+        let expr = crate::db::index::query_text::parse_query("game-mode=arms-race").expect("parse");
+        assert!(references_game_mode(&expr));
+    }
+
+    /// A field the query never mentions must not trip the detector; otherwise
+    /// every query would show the hint.
+    #[test]
+    fn references_game_mode_is_false_when_the_query_names_no_such_field() {
+        let expr = crate::db::index::query_text::parse_query("outcome=win").expect("parse");
+        assert!(!references_game_mode(&expr));
+    }
+
+    /// The literal word "game-mode" typed as free text (no operator, so it
+    /// parses as `FreeText`) must not be confused with the typed filter. This
+    /// is the exact case the brief calls out: string-matching the printed
+    /// query would get this wrong.
+    #[test]
+    fn references_game_mode_ignores_the_words_in_free_text() {
+        let expr = crate::db::index::query_text::parse_query("game-mode").expect("parse");
+        assert!(matches!(&expr, Expr::Leaf(MatchTerm::FreeText(s)) if s == "game-mode"), "got {expr:?}");
+        assert!(!references_game_mode(&expr));
+    }
+
+    /// Reached through every kind of node that is not itself the leaf: `And`,
+    /// `Or`, and `Not` all have to keep walking rather than stop at the first
+    /// level.
+    #[test]
+    fn references_game_mode_is_found_however_deep_it_is_nested() {
+        let and = crate::db::index::query_text::parse_query("outcome=win and game-mode=domination").expect("parse");
+        assert!(references_game_mode(&and));
+
+        let or = crate::db::index::query_text::parse_query("map:ocean or game-mode=domination").expect("parse");
+        assert!(references_game_mode(&or));
+
+        let not = crate::db::index::query_text::parse_query("not game-mode=domination").expect("parse");
+        assert!(references_game_mode(&not));
+    }
+
+    /// `GameMode` is a match-level field. A roster predicate naming an
+    /// unrelated field must not be mistaken for it just because it sits inside
+    /// a quantifier the walk also has to cross.
+    #[test]
+    fn references_game_mode_is_false_for_an_unrelated_roster_predicate() {
+        let expr = crate::db::index::query_text::parse_query("anyone.tier>=8").expect("parse");
+        assert!(!references_game_mode(&expr));
+    }
+
+    /// The three properties the hint's gate has to hold, proven directly
+    /// against the function the render call site uses. `missing_count` and
+    /// "the query uses game mode" are independent conditions; each must be
+    /// able to veto the hint on its own.
+    #[test]
+    fn the_hint_is_relevant_only_with_both_a_gap_and_a_matching_query() {
+        let uses_game_mode = crate::db::index::query_text::parse_query("game-mode=arms-race").expect("parse");
+        let does_not = crate::db::index::query_text::parse_query("outcome=win").expect("parse");
+
+        assert!(
+            game_mode_gap_hint_relevant(3, &uses_game_mode),
+            "a nonzero gap plus a query that filters on game mode must show the hint"
+        );
+        assert!(
+            !game_mode_gap_hint_relevant(0, &uses_game_mode),
+            "a count of exactly zero must not show the hint, even though the query filters on game mode"
+        );
+        assert!(
+            !game_mode_gap_hint_relevant(3, &does_not),
+            "a nonzero gap must not show the hint when the query never asked about game mode"
+        );
     }
 }
