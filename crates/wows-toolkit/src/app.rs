@@ -1909,6 +1909,11 @@ impl WowsToolkitApp {
                     self.start_pr_repair();
                 }
                 BackgroundTaskCompletion::ReconcileIndexComplete { indexed, total } => {
+                    // A re-index can fill `game_mode_id` on rows that had
+                    // none, so the Search tab's results and its stale-gap
+                    // count both need to be asked for again; nothing else
+                    // marks it dirty when indexing finishes off-tab.
+                    self.tab_state.search_tab.note_reindex_completed(indexed);
                     if indexed > 0 {
                         self.tab_state.toasts.lock().success(t!(
                             "ui.messages.replays_indexed",

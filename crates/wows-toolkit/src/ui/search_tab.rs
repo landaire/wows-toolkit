@@ -158,6 +158,25 @@ impl SearchTabState {
         self.dirty = true;
     }
 
+    /// Called when a background re-index finishes with `indexed` rows
+    /// actually written. `dispatch_search` only ever runs again when
+    /// something else marks the tab dirty (a typed edit, a seeded query, a
+    /// restored setting) -- none of which fire on their own when indexing
+    /// completes elsewhere in the app. Without this, the results table and
+    /// the game-mode gap count both go stale the moment a re-index the search
+    /// UI itself told the user to run actually finishes: the same query
+    /// keeps returning the same rows, and `game_mode_gap` keeps reporting the
+    /// pre-reindex count, against a table that has already changed.
+    ///
+    /// `indexed == 0` means nothing was written (every file was already
+    /// indexed and a plain, non-forced pass skipped them all), so there is
+    /// nothing for a re-query to find that the last one did not already see.
+    pub(crate) fn note_reindex_completed(&mut self, indexed: usize) {
+        if indexed > 0 {
+            self.dirty = true;
+        }
+    }
+
     /// Applies every reply that has arrived since the last frame.
     fn drain_replies(&mut self) {
         loop {
@@ -431,6 +450,19 @@ fn game_mode_gap_hint_relevant(missing_count: i64, expr: &MatchExpr) -> bool {
     missing_count > 0 && references_game_mode(expr)
 }
 
+/// The hint's text, singular at exactly one so it never reads "1 indexed
+/// matches". Follows the same `count == 1` split the rest of the app uses
+/// (see `set_session_stats_one` / `set_session_stats_many` in
+/// `ui/replay_parser/mod.rs`); `rust_i18n`'s own key lookup has no built-in
+/// pluralisation, so the split has to happen here.
+fn game_mode_gap_hint_text(missing_count: i64) -> std::borrow::Cow<'static, str> {
+    if missing_count == 1 {
+        t!("ui.search.game_mode_gap_hint_one")
+    } else {
+        t!("ui.search.game_mode_gap_hint", count = missing_count)
+    }
+}
+
 fn collect_roster_ids(expr: &RosterExpr, ships: &mut Vec<GameParamId>, players: &mut Vec<AccountId>) {
     match expr {
         Expr::Leaf(term) => match &term.value {
@@ -572,7 +604,7 @@ impl ToolkitTabViewer<'_> {
         if let Some(missing) = self.tab_state.search_tab.game_mode_gap
             && game_mode_gap_hint_relevant(missing, &self.tab_state.search_tab.bar.expr)
         {
-            ui.colored_label(ui.sem().warn, t!("ui.search.game_mode_gap_hint", count = missing));
+            ui.colored_label(ui.sem().warn, game_mode_gap_hint_text(missing));
         }
 
         let count = self.tab_state.search_tab.results.len();
@@ -912,5 +944,93 @@ mod tests {
             !game_mode_gap_hint_relevant(3, &does_not),
             "a nonzero gap must not show the hint when the query never asked about game mode"
         );
+    }
+
+    /// The exact wording at exactly one, so it reads "1 ... match has", not
+    /// "1 ... matches".
+    #[test]
+    fn the_gap_hint_is_singular_at_exactly_one() {
+        assert_eq!(
+            game_mode_gap_hint_text(1).as_ref(),
+            "1 indexed match has no game mode recorded. Re-index All Replays in Settings to fill it in."
+        );
+    }
+
+    /// The plural form above one, with the count substituted rather than
+    /// hardcoded.
+    #[test]
+    fn the_gap_hint_is_plural_above_one() {
+        assert_eq!(
+            game_mode_gap_hint_text(2).as_ref(),
+            "2 indexed matches have no game mode recorded. Re-index All Replays in Settings to fill them in."
+        );
+    }
+
+    /// `dispatch_search` is what the previously-shipped code refreshed
+    /// `game_mode_gap` from; nothing exercised the whole path from a
+    /// dispatched query through to the field a re-render reads. Run against a
+    /// real database, since the property under test is that the SQL result
+    /// actually lands in `SearchTabState`, not merely that the query
+    /// compiles (that is `matches_missing_game_mode_count`'s own job in
+    /// `wows-toolkit-config`).
+    #[test]
+    fn dispatch_search_populates_the_game_mode_gap_from_the_database() {
+        let rt = tokio::runtime::Runtime::new().expect("failed to build test runtime");
+        let pool = rt.block_on(async {
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .expect("open in-memory db");
+            sqlx::migrate!("../wows-toolkit-config/migrations").run(&pool).await.expect("run migrations");
+            let objective = |arena: i64, game_mode_id: Option<i32>| crate::db::index::rows::ObjectiveMatch {
+                arena_id: wows_replays::types::ArenaId::new(arena),
+                timestamp: jiff::Timestamp::from_second(1_700_000_000 + arena).unwrap(),
+                map: "spaces/13_OC_new_dawn".into(),
+                game_mode: "Domination".into(),
+                game_mode_id,
+                game_type: "pvp".into(),
+                match_group: "pvp".into(),
+                version_build: Some(1234),
+            };
+            crate::db::index::query::upsert_match(&pool, &objective(1, None)).await.unwrap();
+            crate::db::index::query::upsert_match(&pool, &objective(2, Some(15))).await.unwrap();
+            crate::db::index::query::upsert_match(&pool, &objective(3, None)).await.unwrap();
+            pool
+        });
+
+        let mut tab = SearchTabState::default();
+        assert_eq!(tab.game_mode_gap, None, "unfetched until a search has actually returned one");
+        tab.dispatch_search(&pool, &rt);
+
+        // Mirrors how the UI thread waits: poll drain_replies until the
+        // background task's reply lands, or give up rather than hang.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while tab.game_mode_gap.is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            tab.drain_replies();
+        }
+        assert_eq!(tab.game_mode_gap, Some(2), "two of the three seeded rows have no recorded game mode");
+    }
+
+    /// The wiring gap the review found: nothing marked the tab dirty when a
+    /// background re-index completed, so a user who did exactly what the
+    /// hint told them to do saw the identical stale count and results until
+    /// they happened to edit the query by hand.
+    #[test]
+    fn a_completed_reindex_that_wrote_rows_marks_the_tab_dirty() {
+        let mut tab = SearchTabState { dirty: false, ..Default::default() };
+        tab.note_reindex_completed(5);
+        assert!(tab.dirty, "a re-index that wrote rows must force the results and the gap count to refresh");
+    }
+
+    /// `indexed == 0` means the pass wrote nothing (every file was already
+    /// indexed and a non-forced pass skipped them all), so there is nothing a
+    /// refresh would find that the last one did not already see.
+    #[test]
+    fn a_completed_reindex_that_wrote_nothing_does_not_force_a_refresh() {
+        let mut tab = SearchTabState { dirty: false, ..Default::default() };
+        tab.note_reindex_completed(0);
+        assert!(!tab.dirty);
     }
 }

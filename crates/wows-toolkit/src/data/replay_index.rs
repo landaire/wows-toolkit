@@ -76,12 +76,28 @@ pub fn map_rows(replay: &Replay, source_id: SourceId, indexed_at: Timestamp) -> 
 
     let arena_id = battle_report.arena_id();
     let version = battle_report.version();
+
+    // `game_mode_id()` widens to `Recognized<GameMode, u32>` specifically so an
+    // id the table does not cover still carries its true value (see
+    // `report_game_mode_id`'s doc comment). `.known()` below throws that value
+    // away the moment it turns `Unknown(raw)` into `None`, and the resulting
+    // NULL is then indistinguishable from "indexed before this column
+    // existed" -- exactly what `matches_missing_game_mode_count` counts, and
+    // exactly what the search UI's re-index hint tells the user to fix by
+    // re-indexing. A raw id nothing here logs would keep the hint pointing at
+    // a repair that can never move the count. This does not change the NULL
+    // outcome itself: storing the raw id would defeat the typed column.
+    let game_mode = battle_report.game_mode_id();
+    if let Some(raw) = game_mode.unknown() {
+        warn!("replay for arena {arena_id:?}: unrecognised game mode id {raw}; game_mode_id will stay unset");
+    }
+
     let objective = ObjectiveMatch {
         arena_id,
         timestamp: ui_report.match_timestamp(),
         map: battle_report.map_name().to_string(),
         game_mode: battle_report.game_mode().to_string(),
-        game_mode_id: battle_report.game_mode_id().known().map(|mode| mode.id()),
+        game_mode_id: game_mode.known().map(|mode| mode.id()),
         game_type: battle_report.game_type().to_string(),
         match_group: battle_report.match_group().to_string(),
         version_build: version.build_number(),
