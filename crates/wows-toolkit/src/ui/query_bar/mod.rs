@@ -209,7 +209,9 @@ enum Command {
     SelectOnly(NodePath),
     SelectToggle(NodePath),
     SelectRange(NodePath),
-    /// Open one segment's editor. The path is already `segment_path`-resolved.
+    /// Open one segment's editor. Carries the pill's own path rather than a
+    /// `segment_path`-resolved one, because the command is applied after a
+    /// dismissal that can rewrite the tree the resolution has to hold against.
     EditSegment(NodePath, SegmentRole),
     Negate(NodePath),
     Delete(NodePath),
@@ -526,7 +528,7 @@ impl QueryBar {
             response.context_menu(|ui| pill_menu(ui, expr, pill_path, commands));
             if response.clicked() {
                 hit.clicked = true;
-                commands.push(Command::EditSegment(path.clone(), segment.role));
+                commands.push(Command::EditSegment(token.path.clone(), segment.role));
             }
             if self.editing.as_ref().is_some_and(|edit| edit.path == path && edit.role == segment.role) {
                 hit.anchor = Some(*rect);
@@ -1028,9 +1030,22 @@ impl QueryBar {
     /// afterwards would undo the very edit that was just asked for.
     fn apply_command(&mut self, command: Command, tokens: &[Token], ui: &Ui, caret_id: egui::Id) -> bool {
         match command {
-            Command::EditSegment(path, role) => {
-                self.begin_segment_edit(path, role, ui, caret_id);
-                false
+            Command::EditSegment(pill, role) => {
+                let restored = self.end_segment_edit();
+                // Resolved against the tree the editor opens on, not the one the
+                // click was painted over. A restore that withdrew a placeholder
+                // can leave the query a single condition again, which dissolves
+                // the root's group and renumbers everything under it by one
+                // level -- the click that dismissed the placeholder would
+                // otherwise be eaten by it.
+                let mut path = select::segment_path(&self.expr, &pill);
+                if path.is_none() && restored {
+                    path = pill.split_first().and_then(|(_, tail)| select::segment_path(&self.expr, &tail.to_vec()));
+                }
+                if let Some(path) = path {
+                    self.begin_segment_edit(path, role, ui, caret_id);
+                }
+                restored
             }
             Command::SelectOnly(path) => {
                 self.select_single(path);
@@ -1348,7 +1363,7 @@ impl QueryBar {
         };
         self.pending = suggest::replace_active_fragment(&self.pending, "");
         self.parsed_text.clear();
-        self.commit_pending(ui, caret_id);
+        let typed = self.commit_pending(ui, caret_id);
 
         // Snapshotted after the caret's own text is committed, so dismissing the
         // editor withdraws the placeholder alone and not the terms the user
@@ -1360,15 +1375,20 @@ impl QueryBar {
         select::canonicalise(&mut self.expr);
         let path = select::last_appended_path(&self.expr);
         let opened = select::segment_path(&self.expr, &path)
-            .is_some_and(|segment| self.begin_forced_value_edit(segment, before, ui, caret_id));
-        if !opened {
-            // A term whose operator takes no right-hand side has no value to
-            // choose, so the caret returns to plain typing on an empty buffer.
-            self.clear_pending();
-            self.dropdown_open = true;
-            park_caret(ui, caret_id, 0);
+            .is_some_and(|segment| self.begin_forced_value_edit(segment, before.clone(), ui, caret_id));
+        if opened {
+            return true;
         }
-        true
+        // No editor means nothing carries a snapshot, so nothing would ever
+        // withdraw the placeholder and it would rest in the query as a value
+        // nobody chose. Every field the caret offers does open one, so this
+        // guards a field whose leading allowed operator is nullary rather than a
+        // path anything reaches today.
+        self.expr = before;
+        self.clear_pending();
+        self.dropdown_open = true;
+        park_caret(ui, caret_id, 0);
+        typed
     }
 
     /// Applies a value row picked from the caret's own list. The row finishes
@@ -1694,21 +1714,34 @@ mod tests {
         bar
     }
 
+    /// The field a caret row names, or `None` for a preset row.
+    fn row_field(bar: &QueryBar, row: &Row) -> Option<TermField> {
+        let Row::Suggestion(index) = row else {
+            return None;
+        };
+        match bar.suggestions.get(*index)?.kind {
+            SuggestionKind::MatchField(field) => Some(TermField::Match(field)),
+            SuggestionKind::RosterField { field, .. } => Some(TermField::Roster(field)),
+            SuggestionKind::Preset(_) => None,
+        }
+    }
+
     /// The first caret row that names a field rather than a preset, with the
     /// field it names.
     fn first_field_row(bar: &QueryBar) -> (usize, TermField) {
         bar.dropdown_rows()
             .iter()
             .enumerate()
-            .find_map(|(index, row)| match row {
-                Row::Suggestion(i) => match bar.suggestions.get(*i)?.kind {
-                    SuggestionKind::MatchField(field) => Some((index, TermField::Match(field))),
-                    SuggestionKind::RosterField { field, .. } => Some((index, TermField::Roster(field))),
-                    SuggestionKind::Preset(_) => None,
-                },
-                _ => None,
-            })
+            .find_map(|(index, row)| row_field(bar, row).map(|field| (index, field)))
             .expect("the caret offers a field row")
+    }
+
+    /// The caret row that offers `field`.
+    fn field_row(bar: &QueryBar, field: TermField) -> Row {
+        bar.dropdown_rows()
+            .into_iter()
+            .find(|row| row_field(bar, row) == Some(field))
+            .unwrap_or_else(|| panic!("{field:?} is not offered"))
     }
 
     /// The text one pill renders, joined the way `label::pill_text` joins it.
@@ -2444,16 +2477,23 @@ mod tests {
 
     /// The minted value is a placeholder, not a choice. If the editor does not
     /// open, the user commits a value they never picked.
+    ///
+    /// Minted into a query that already holds a term, and of a different field,
+    /// so "the editor is open on *a* term" cannot pass for "the editor is open
+    /// on the one just minted". Against an empty bar there is only one term and
+    /// the assertion cannot discriminate even in principle.
     #[test]
     fn picking_a_field_opens_the_value_editor_on_the_new_pill() {
         let mut bar = caret_bar();
-        let (index, _) = first_field_row(&bar);
-        let row = bar.dropdown_rows()[index].clone();
+        bar.set_expr(parse_query("outcome:win").expect("parse"));
+        let minted = TermField::Match(MatchField::Map);
+        let row = field_row(&bar, minted);
         with_ui(|ui, caret_id| bar.commit_row(row, ui, caret_id));
 
         let edit = bar.editing.as_ref().expect("no value editor opened");
         assert_eq!(edit.role, SegmentRole::Value);
-        assert!(select::term_at(&bar.expr, &edit.path).is_some(), "the editor must address the term just appended");
+        let (addressed, _, _) = select::term_at(&bar.expr, &edit.path).expect("the editor must address a term");
+        assert_eq!(addressed, minted, "the editor opened on a term other than the one just minted");
     }
 
     /// The caret path wrote `enemy.ship=1234` and waited. A pill resolves the
@@ -2498,18 +2538,9 @@ mod tests {
     fn picking_a_field_keeps_the_terms_already_typed() {
         let mut bar = caret_bar();
         bar.pending = "outcome:win ma".to_owned();
-        let rows = bar.dropdown_rows();
-        let index = rows
-            .iter()
-            .position(|row| match row {
-                Row::Suggestion(i) => {
-                    matches!(bar.suggestions[*i].kind, SuggestionKind::MatchField(MatchField::Map))
-                }
-                _ => false,
-            })
-            .expect("Map ranks against `ma`");
+        let row = field_row(&bar, TermField::Match(MatchField::Map));
 
-        assert!(with_ui(|ui, caret_id| bar.commit_row(rows[index].clone(), ui, caret_id)));
+        assert!(with_ui(|ui, caret_id| bar.commit_row(row, ui, caret_id)));
         bar.finish_edit();
 
         let Expr::All(children) = &bar.expr else {
@@ -2548,6 +2579,7 @@ mod tests {
     /// it would do nothing at all.
     #[test]
     fn every_field_the_caret_offers_mints_a_term_the_grammar_reads_back() {
+        let mut checked = 0;
         for suggestion in filter_options() {
             let (field, scope) = match suggestion.kind {
                 SuggestionKind::MatchField(field) => (TermField::Match(field), None),
@@ -2569,7 +2601,42 @@ mod tests {
             let printed = query_text::print_query(&minted);
             let reparsed = parse_query(&printed).unwrap_or_else(|e| panic!("{label} printed {printed:?}: {e}"));
             assert_eq!(reparsed, minted, "{label} printed {printed:?}");
+            checked += 1;
         }
+        assert!(checked > 20, "the caret offered {checked} fields, so this asserted almost nothing");
+    }
+
+    /// The obligation `mint_term` carries: a placeholder reaches the tree, so an
+    /// editor that can withdraw it has to open on every field the caret offers.
+    /// A field with no editor would leave one resting in the query, which is the
+    /// state the snapshot exists to make unreachable.
+    #[test]
+    fn every_field_the_caret_offers_opens_an_editor_that_can_withdraw_it() {
+        let mut checked = 0;
+        with_ui(|ui, caret_id| {
+            for suggestion in filter_options() {
+                let (field, scope) = match suggestion.kind {
+                    SuggestionKind::MatchField(field) => (TermField::Match(field), None),
+                    SuggestionKind::RosterField { field, scope } => {
+                        (TermField::Roster(field), Some(scope.unwrap_or(Scope::Anyone)))
+                    }
+                    SuggestionKind::Preset(_) => continue,
+                };
+                let label = &suggestion.label;
+                let mut bar = QueryBar::default();
+                assert!(bar.mint_term(field, scope, ui, caret_id), "{label} minted nothing");
+
+                let edit = bar.editing.as_ref().unwrap_or_else(|| panic!("{label} opened no editor"));
+                assert_eq!(edit.role, SegmentRole::Value, "{label}");
+                let snapshot = edit.restore.as_ref().unwrap_or_else(|| panic!("{label} carries no snapshot"));
+                assert!(snapshot.is_empty_all(), "{label} snapshotted {snapshot:?} rather than the empty query");
+                let (addressed, _, _) =
+                    select::term_at(&bar.expr, &edit.path).unwrap_or_else(|| panic!("{label} addresses no term"));
+                assert_eq!(addressed, field, "{label} opened its editor on the wrong term");
+                checked += 1;
+            }
+        });
+        assert!(checked > 20, "the caret offered {checked} fields, so this asserted almost nothing");
     }
 
     /// Mints a term the way picking that field's row does, and hands back the
@@ -2689,6 +2756,70 @@ mod tests {
 
         assert!(press_escape(&mut bar), "a restore has to be reported");
         assert_eq!(bar.expr, before, "the pill was left carrying a field and a value the user never chose");
+    }
+
+    /// The path a click on the first pill carries. `segment_interaction` pushes
+    /// the pill's own path, so this reads it off the token stream rather than
+    /// assuming what it is.
+    fn first_pill_path(bar: &QueryBar) -> NodePath {
+        tokenize(&bar.expr, &bar.names)
+            .into_iter()
+            .find(|token| matches!(token.kind, TokenKind::Pill { .. }))
+            .expect("the fixture draws a pill")
+            .path
+    }
+
+    /// The dismissal that cannot self-correct. Escape and focus loss both leave
+    /// the bar, and the frame that follows re-runs the query anyway; clicking
+    /// another pill's segment stays inside it, so a restore that went unreported
+    /// would leave the table showing the placeholder's empty result against a
+    /// query that plainly matches -- and the Search tab mirrors the query into
+    /// settings on that same flag, so the withdrawn placeholder would outlive a
+    /// restart.
+    #[test]
+    fn clicking_another_pills_segment_reports_the_restore_it_performs() {
+        let mut bar = caret_bar();
+        bar.set_expr(parse_query("outcome:win and anyone.tier=10").expect("parse"));
+        let before = mint_from_caret(&mut bar, TermField::Roster(RosterField::Ship), Some(Scope::Enemy));
+
+        let click = Command::EditSegment(first_pill_path(&bar), SegmentRole::Value);
+        let tokens = tokenize(&bar.expr, &bar.names);
+        let changed = with_ui(|ui, caret_id| bar.apply_command(click, &tokens, ui, caret_id));
+
+        assert!(changed, "the restore was silent, so nothing re-runs the query or rewrites the saved one");
+        assert_eq!(bar.expr, before, "the placeholder outlived the click that dismissed it");
+        let edit = bar.editing.as_ref().expect("the clicked segment must still open its editor");
+        assert_eq!(
+            select::term_at(&bar.expr, &edit.path).map(|(field, _, _)| field),
+            Some(TermField::Match(MatchField::Outcome)),
+            "the click opened an editor on the wrong term"
+        );
+    }
+
+    /// The renumbering that same restore can cause. Withdrawing the placeholder
+    /// leaves a single condition, which dissolves the root's group and moves
+    /// every path under it up a level, so the pill the click was painted over is
+    /// no longer where the click says it is.
+    #[test]
+    fn clicking_the_only_other_pill_still_opens_it_after_the_restore() {
+        let mut bar = caret_bar();
+        bar.set_expr(parse_query("outcome:win").expect("parse"));
+        mint_from_caret(&mut bar, TermField::Roster(RosterField::Ship), Some(Scope::Enemy));
+
+        let click = first_pill_path(&bar);
+        assert_eq!(click, vec![0], "the fixture must be the case where the path moves");
+        let tokens = tokenize(&bar.expr, &bar.names);
+        with_ui(|ui, caret_id| {
+            bar.apply_command(Command::EditSegment(click, SegmentRole::Value), &tokens, ui, caret_id)
+        });
+
+        assert_eq!(bar.expr, parse_query("outcome:win").expect("parse"));
+        let edit = bar.editing.as_ref().expect("the click must not be eaten by the restore it caused");
+        assert_eq!(edit.path, Vec::<usize>::new(), "the editor must address the pill where it now is");
+        assert_eq!(
+            select::term_at(&bar.expr, &edit.path).map(|(field, _, _)| field),
+            Some(TermField::Match(MatchField::Outcome))
+        );
     }
 
     /// The other dismissal the user reaches for: clicking away from the bar
