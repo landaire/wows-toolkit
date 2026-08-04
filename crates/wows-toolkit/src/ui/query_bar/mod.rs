@@ -1155,7 +1155,7 @@ impl QueryBar {
         let value = match parse_roster_value(field.value_kind(), literal.trim()) {
             Some(value) => value,
             None => {
-                self.pending_error = Some(bad_value(field, &self.pending));
+                self.report_bad_value(field, literal);
                 return false;
             }
         };
@@ -1164,6 +1164,24 @@ impl QueryBar {
         }
         self.end_segment_edit();
         true
+    }
+
+    /// Marks a literal the field cannot read, spanning that literal rather than
+    /// whatever the caret happens to hold.
+    ///
+    /// A literal picked from a row is not the caret's text, so it is moved there
+    /// first: the underline is drawn over the caret's galley and is suppressed
+    /// outright while the caret is empty, so reporting without moving it would
+    /// leave the refusal invisible -- the silent failure this reporting exists
+    /// to remove. `parsed_text` moves with it so the next keystroke clears the
+    /// mark, rather than the next frame's `reparse_pending` erasing it before it
+    /// is ever seen.
+    fn report_bad_value(&mut self, field: TermField, literal: &str) {
+        if self.pending != literal {
+            self.pending = literal.to_owned();
+        }
+        self.parsed_text.clone_from(&self.pending);
+        self.pending_error = Some(bad_value(field, literal));
     }
 
     /// Enter with nothing highlighted. With no segment open that commits the
@@ -1357,17 +1375,20 @@ fn completed_text(pending: &str, completion: &Completion) -> (String, usize) {
     (text, cursor)
 }
 
-/// The error a value the field cannot read reports, spanning the whole caret
-/// so the underline covers exactly the literal that failed. Built from the
-/// grammar's own error type rather than a second one, so the value editor and
-/// the typed path underline through one mechanism.
-fn bad_value(field: TermField, text: &str) -> QueryParseError {
+/// The error a value the field cannot read reports, spanning `literal` so the
+/// underline covers exactly what failed. Built from the grammar's own error
+/// type rather than a second one, so the value editor and the typed path
+/// underline through one mechanism.
+///
+/// A byte range, which is what `QueryParseError::span` is everywhere else and
+/// what `paint::char_index` converts on the way to the galley.
+fn bad_value(field: TermField, literal: &str) -> QueryParseError {
     let name = match field {
         TermField::Match(f) => f.name(),
         TermField::Roster(f) => f.name(),
     };
     QueryParseError {
-        span: 0..text.len(),
+        span: 0..literal.len(),
         kind: ParseErrorKind::BadValue {
             field: name,
             allowed: query_text::enumerable_roster_values(field.value_kind()),
@@ -1742,6 +1763,32 @@ mod tests {
         assert_eq!(bar.step_highlight(&rows, true), None, "back off the first enabled row leaves the list");
     }
 
+    /// The case that makes `step_highlight`'s forward fallback do real work: a
+    /// disabled row *after* the last enabled one, where staying put is a choice
+    /// rather than the only place left to be. No field produces it -- both
+    /// nullable operator sets put their nullary operators last -- so the rows
+    /// are built directly, which `step_highlight` allows because it is given
+    /// them rather than deriving them.
+    #[test]
+    fn forward_off_the_last_enabled_row_will_not_land_on_a_trailing_disabled_one() {
+        let mut bar = nullary_build_bar();
+        let row = |op: Op| Row::Operator(OperatorOption { op, label: label::op_label(op) });
+        // On a nullary term `IsSet` takes and `Eq` does not, so this is a real
+        // enabled/disabled pair for this bar, not a hand-set flag.
+        let rows = vec![row(Op::IsSet), row(Op::Eq)];
+        assert!(bar.row_enabled(&rows[0]), "the fixture's first row must take");
+        assert!(!bar.row_enabled(&rows[1]), "and its last must not");
+
+        assert_eq!(bar.step_highlight(&rows, false), Some(0), "Down enters on the enabled row");
+        bar.highlighted = Some(0);
+        assert_eq!(bar.step_highlight(&rows, false), Some(0), "forward must stay rather than take the trailing row");
+        assert_eq!(bar.step_highlight(&rows, true), None, "back off the only enabled row still leaves the list");
+
+        bar.highlighted = None;
+        assert_eq!(bar.step_highlight(&rows, true), Some(0), "Up into the list skips the trailing disabled row");
+        assert_eq!(bar.default_row(&rows), Some(rows[0].clone()), "and Enter takes the same row");
+    }
+
     /// Enter with nothing highlighted took `rows.first()`, which for this pill
     /// is a greyed `=` and so did nothing at all, silently, with the editor
     /// left open.
@@ -1817,5 +1864,40 @@ mod tests {
         assert!(bar.pending_error.is_none());
         assert!(bar.commit_value_literal("2026-01-01"));
         assert!(bar.editing.is_none());
+    }
+
+    /// A literal from a dropdown row is not what the caret holds, so reporting
+    /// against the caret would mark the wrong text -- and against an empty
+    /// caret would mark nothing at all, since `caret` suppresses the underline
+    /// while `pending` is empty. That is the silent commit this reporting
+    /// exists to remove, reappearing on the one path it did not cover.
+    ///
+    /// Only reachable if a token the grammar printed fails to reparse, so this
+    /// drives `report_bad_value` with a token the field genuinely cannot read
+    /// rather than waiting for such a mismatch to exist.
+    #[test]
+    fn a_row_token_the_field_cannot_read_is_moved_into_the_caret_to_be_marked() {
+        let mut bar = bar_editing(
+            Expr::Leaf(MatchTerm::Field(
+                MatchField::Date,
+                Op::Ge,
+                Value::Timestamp(jiff::Timestamp::from_second(0).expect("the epoch")),
+            )),
+            SegmentRole::Value,
+        );
+        // The caret opened holding the value already on the term, so clear it:
+        // an empty caret is the case where the old span suppressed the mark.
+        bar.pending.clear();
+        bar.parsed_text.clear();
+
+        assert!(!bar.commit_value_literal("not-a-date"));
+        assert_eq!(bar.pending, "not-a-date", "the failing literal must reach the caret to be underlined");
+        let error = bar.pending_error.as_ref().expect("the failure must be reported");
+        assert_eq!(error.span, 0.."not-a-date".len(), "the span covers the literal, not the caret's old text");
+
+        // `parsed_text` moved with it, so the next frame's reparse leaves the
+        // mark alone rather than erasing it before it is ever drawn.
+        bar.reparse_pending();
+        assert!(bar.pending_error.is_some(), "a frame with no keystroke must not clear the mark");
     }
 }

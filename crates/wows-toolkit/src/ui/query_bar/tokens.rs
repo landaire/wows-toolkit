@@ -284,25 +284,82 @@ mod tests {
         assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::QuantClose)), "got {toks:#?}");
     }
 
+    /// Every tree shape whose pills the resolvers have to reach: the match
+    /// level, then all four quantifiers against four predicate shapes.
+    ///
+    /// The roster half is a cross product rather than hand-picked cases,
+    /// because the failure this sweep exists to catch is shape-specific and one
+    /// instance of it says nothing about the rest. Every roster tree is nested
+    /// under a sibling so its pill paths are non-empty, which is what stops a
+    /// resolver that ignored the path from passing by accident.
+    fn resolver_fixtures() -> Vec<MatchExpr> {
+        let tier = || Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) });
+        let kills = || Expr::Leaf(RosterTerm { field: RosterField::Kills, op: Op::Ge, value: Value::Int(2) });
+        let scope = || {
+            Expr::Leaf(RosterTerm {
+                field: RosterField::Relation,
+                op: Op::Is,
+                value: Value::Relation(VehicleRelation::Enemy),
+            })
+        };
+        // A bare leaf, the scope-conjunct form sugar collapses, a plain `All`
+        // of two, and a negation. The first two are the shapes that leave the
+        // resolver an empty tail; the last two leave it a real one.
+        let preds =
+            [tier(), Expr::All(vec![scope(), tier()]), Expr::All(vec![tier(), kills()]), Expr::Not(Box::new(tier()))];
+        let quants = [Quant::Any, Quant::None, Quant::Count(CmpOp::Ge, 2), Quant::Count(CmpOp::Lt, 1)];
+
+        let mut out = vec![Expr::All(vec![win(), Expr::Any(vec![build_ge(1), Expr::Not(Box::new(win()))])])];
+        for quant in quants {
+            for pred in &preds {
+                out.push(Expr::All(vec![win(), Expr::Leaf(MatchTerm::Roster { quant, pred: pred.clone() })]));
+            }
+        }
+        out
+    }
+
     /// Asserted through the resolvers editing actually uses -- `segment_path`
     /// and `term_at` for a pill, `addresses_match_node` for the chrome -- not
     /// through a second walker of this module's own. A path that resolves under
     /// one walker and not the other is exactly the failure worth catching, and
     /// only the production pair can catch it.
+    ///
+    /// Chrome drawn inside a quantifier's bracket names no match-level node by
+    /// design, which is what keeps the toolbar from offering edits it cannot
+    /// make (`a_roster_internal_pill_is_drawn_but_not_selectable`), so the
+    /// chrome assertion is bounded to the match level. Bracket depth is counted
+    /// off the token stream itself rather than asked of a resolver, so the
+    /// assertion does not answer its own question.
     #[test]
     fn every_token_path_resolves_under_the_resolvers_editing_uses() {
-        let expr = Expr::All(vec![win(), Expr::Any(vec![build_ge(1), Expr::Not(Box::new(win()))])]);
-        let toks = tokenize(&expr, &NameCache::default());
-        for t in &toks {
-            match &t.kind {
-                TokenKind::Caret => {}
-                TokenKind::Pill { .. } => {
-                    let path = select::segment_path(&expr, &t.path)
-                        .unwrap_or_else(|| panic!("pill path {:?} addresses no term", t.path));
-                    assert!(select::term_at(&expr, &path).is_some(), "path {path:?} names no term");
+        for expr in resolver_fixtures() {
+            let toks = tokenize(&expr, &NameCache::default());
+            let mut pills = 0;
+            let mut depth = 0usize;
+            for t in &toks {
+                if matches!(t.kind, TokenKind::QuantClose) {
+                    depth -= 1;
                 }
-                _ => assert!(select::addresses_match_node(&expr, &t.path), "path {:?} names no node", t.path),
+                match &t.kind {
+                    TokenKind::Caret => {}
+                    TokenKind::Pill { .. } => {
+                        pills += 1;
+                        let path = select::segment_path(&expr, &t.path)
+                            .unwrap_or_else(|| panic!("pill path {:?} addresses no term in {expr:?}", t.path));
+                        assert!(select::term_at(&expr, &path).is_some(), "path {path:?} names no term in {expr:?}");
+                    }
+                    _ if depth > 0 => {}
+                    _ => assert!(
+                        select::addresses_match_node(&expr, &t.path),
+                        "path {:?} names no node in {expr:?}",
+                        t.path
+                    ),
+                }
+                if matches!(t.kind, TokenKind::QuantOpen { .. }) {
+                    depth += 1;
+                }
             }
+            assert!(pills > 0, "a fixture with no pill proves nothing: {expr:?}");
         }
     }
 

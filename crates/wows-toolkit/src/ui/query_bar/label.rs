@@ -130,7 +130,7 @@ fn field_op_value_segments(field_label: String, op: Op, value: &Value, cache: &N
 /// for it.
 fn roster_term_segments(quant: Quant, pred: &Expr<RosterTerm>, cache: &NameCache) -> Vec<PillSegment> {
     match sugar_shape(quant, pred) {
-        Some((scope_label, inner)) => {
+        Some((scope_label, _, inner)) => {
             let field_label = roster_field_label(inner.field);
             let filter_text = match scope_label {
                 Some(scope) => format!("{scope} {}", lowercase_first(&field_label)),
@@ -261,17 +261,21 @@ fn value_text(value: &Value, cache: &NameCache) -> String {
 }
 
 /// Recognises the shapes `query_text::try_print_sugar` treats as sugar: `Any`
-/// over a bare `Leaf` (returned as `(None, leaf)`), or an `All` of exactly two
-/// where the first is a scope conjunct (self/ally/enemy relation, or
-/// division-mine, each via `Op::Is`) and the second is a single `Leaf`
-/// (returned as `(Some(scope_label), leaf)`). Returns `None` for any other
-/// shape; callers render those as a bracketed `QuantOpen`/tokens/`QuantClose`
-/// group instead.
+/// over a bare `Leaf`, or an `All` of exactly two where the first is a scope
+/// conjunct (self/ally/enemy relation, or division-mine, each via `Op::Is`) and
+/// the second is a single `Leaf`. Returns `None` for any other shape; callers
+/// render those as a bracketed `QuantOpen`/tokens/`QuantClose` group instead.
+///
+/// Each accepting arm yields the scope label, **the path to the term it
+/// collapses**, and that term. The path travels with the term rather than being
+/// recomputed beside it, so a new accepting arm cannot compile without stating
+/// where its own inner term lives -- an arm that inherited another's index
+/// would retarget every click on the pill it collapses, silently.
 ///
 /// Keep this in sync with `wows-toolkit-config`'s `query_text::try_print_sugar`:
 /// any shape that prints as sugar there must render compactly here, or a
 /// bracketed group would show text whose one-line form the user never sees.
-fn sugar_shape(quant: Quant, pred: &Expr<RosterTerm>) -> Option<(Option<String>, &RosterTerm)> {
+fn sugar_shape(quant: Quant, pred: &Expr<RosterTerm>) -> Option<(Option<String>, NodePath, &RosterTerm)> {
     if quant != Quant::Any {
         return None;
     }
@@ -294,9 +298,9 @@ fn sugar_shape(quant: Quant, pred: &Expr<RosterTerm>) -> Option<(Option<String>,
                 }
                 _ => return None,
             };
-            Some((Some(scope_label), inner))
+            Some((Some(scope_label), vec![1], inner))
         }
-        Expr::Leaf(inner) => Some((None, inner)),
+        Expr::Leaf(inner) => Some((None, Vec::new(), inner)),
         _ => None,
     }
 }
@@ -305,23 +309,11 @@ fn sugar_shape(quant: Quant, pred: &Expr<RosterTerm>) -> Option<(Option<String>,
 /// lives, as a path relative to the predicate root. `None` for a shape that
 /// does not collapse.
 ///
-/// Gated on `sugar_shape` so the two cannot disagree about which shapes
-/// collapse at all, and the index then follows from that function's two
-/// accepting arms: a bare leaf is the predicate root itself, and the
-/// two-conjunct scope form renders its second child.
-/// `the_sugar_inner_path_resolves_to_the_term_sugar_shape_renders` pins the
-/// pair against each other.
-///
-/// Arms are named rather than caught: a third shape added to `sugar_shape`
-/// must state its own index here, instead of inheriting the scope form's and
-/// silently retargeting every click on the pill it collapses.
+/// Reads the path `sugar_shape` returns rather than restating it, so there is
+/// no second statement of the index to drift, and no shape can be recognised
+/// here that is not recognised there.
 pub(crate) fn sugar_inner_path(quant: Quant, pred: &Expr<RosterTerm>) -> Option<NodePath> {
-    sugar_shape(quant, pred)?;
-    match pred {
-        Expr::Leaf(_) => Some(Vec::new()),
-        Expr::All(_) => Some(vec![1]),
-        Expr::Any(_) | Expr::Not(_) => None,
-    }
+    sugar_shape(quant, pred).map(|(_, path, _)| path)
 }
 
 /// Compact "Enemy ship is Yamato" form for a roster quantifier whose predicate
@@ -329,7 +321,7 @@ pub(crate) fn sugar_inner_path(quant: Quant, pred: &Expr<RosterTerm>) -> Option<
 /// the caller renders those as a bracketed `QuantOpen`/tokens/`QuantClose`
 /// group instead.
 pub fn roster_sugar_pill_text(quant: Quant, pred: &Expr<RosterTerm>, cache: &NameCache) -> Option<String> {
-    let (scope_label, inner) = sugar_shape(quant, pred)?;
+    let (scope_label, _, inner) = sugar_shape(quant, pred)?;
     match scope_label {
         Some(scope_label) => Some(format!("{scope_label} {}", lowercase_first(&roster_pill_text(inner, cache)))),
         None => Some(format!("{} {}", quant_prefix(Quant::Any), roster_pill_text(inner, cache))),
@@ -812,7 +804,7 @@ mod tests {
         }
 
         for pred in &preds {
-            let (_, inner) = sugar_shape(Quant::Any, pred).expect("the fixture is sugar-shaped");
+            let (_, _, inner) = sugar_shape(Quant::Any, pred).expect("the fixture is sugar-shaped");
             let path = sugar_inner_path(Quant::Any, pred).expect("a sugar shape has an inner path");
             let mut reached = pred;
             for step in &path {
