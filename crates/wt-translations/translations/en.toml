@@ -809,43 +809,46 @@ class_cruiser = "Cruiser"
 class_destroyer = "Destroyer"
 class_submarine = "Submarine"
 class_auxiliary = "Auxiliary"
-# Most of these are the mode's own constant name (from the GAME_MODE table),
-# not an invented descriptive phrase: there is no IDS_ source anywhere in the
-# deobfuscated scripts to confirm a player-facing name against, and an
-# invented phrase would assert a mechanic nobody verified. Standard,
-# Domination, Epicenter, Arms Race, Convoy, Tutorial, and Test are the
-# exceptions -- names confirmed unambiguous and genuinely WoWs-facing. Each
-# value is independent, so a confirmed name can replace one without touching
-# any other line or any code.
-game_mode_invalid = "INVALID"
+# Most of these are the mode's own name from the GAME_MODE table, typeset for
+# reading (underscores to spaces, words capitalised) rather than an invented
+# descriptive phrase: there is no IDS_ source anywhere in the deobfuscated
+# scripts to confirm a player-facing name against, and an invented phrase
+# would assert a mechanic nobody verified. Typesetting the table's own name
+# does not invent anything -- MEGABASE and Megabase are the same identifier.
+# Standard, Domination, Epicenter, Arms Race, Convoy, Tutorial, and Test are
+# the exceptions -- names confirmed unambiguous and genuinely WoWs-facing.
+# PVE stays an acronym and Anti-Standard keeps its hyphen; both read better
+# that way than a mechanical space would. Each value is independent, so a
+# confirmed name can replace one without touching any other line or any code.
+game_mode_invalid = "Invalid"
 game_mode_test = "Test"
 game_mode_standard = "Standard"
-game_mode_singlebase = "SINGLEBASE"
+game_mode_singlebase = "Singlebase"
 game_mode_domination = "Domination"
 game_mode_tutorial = "Tutorial"
-game_mode_megabase = "MEGABASE"
-game_mode_forts = "FORTS"
-game_mode_standard_domination = "STANDARD_DOMINATION"
+game_mode_megabase = "Megabase"
+game_mode_forts = "Forts"
+game_mode_standard_domination = "Standard Domination"
 game_mode_epicenter = "Epicenter"
-game_mode_assault_defense = "ASSAULT_DEFENSE"
+game_mode_assault_defense = "Assault Defense"
 game_mode_pve = "PVE"
 game_mode_arms_race = "Arms Race"
-game_mode_epicenter_ring = "EPICENTER_RING"
-game_mode_anti_standard = "ANTI_STANDARD"
-game_mode_attack_defense = "ATTACK_DEFENSE"
-game_mode_torpedo_beat = "TORPEDO_BEAT"
-game_mode_team_battle_royale = "TEAM_BATTLE_ROYALE"
-game_mode_escape_to_portal = "ESCAPE_TO_PORTAL"
-game_mode_domination_asymm = "DOMINATION_ASYMM"
-game_mode_key_battle = "KEY_BATTLE"
-game_mode_portal_2021 = "PORTAL_2021"
-game_mode_team_battle_royale_2021 = "TEAM_BATTLE_ROYALE_2021"
+game_mode_epicenter_ring = "Epicenter Ring"
+game_mode_anti_standard = "Anti-Standard"
+game_mode_attack_defense = "Attack Defense"
+game_mode_torpedo_beat = "Torpedo Beat"
+game_mode_team_battle_royale = "Team Battle Royale"
+game_mode_escape_to_portal = "Escape To Portal"
+game_mode_domination_asymm = "Domination Asymm"
+game_mode_key_battle = "Key Battle"
+game_mode_portal_2021 = "Portal 2021"
+game_mode_team_battle_royale_2021 = "Team Battle Royale 2021"
 game_mode_convoy_event = "Convoy"
-game_mode_convoy_airship = "CONVOY_AIRSHIP"
-game_mode_two_teams_battle_royale = "TWO_TEAMS_BATTLE_ROYALE"
-game_mode_pinata_event = "PINATA_EVENT"
-game_mode_respawns = "RESPAWNS"
-game_mode_respawns_sectors = "RESPAWNS_SECTORS"
+game_mode_convoy_airship = "Convoy Airship"
+game_mode_two_teams_battle_royale = "Two Teams Battle Royale"
+game_mode_pinata_event = "Pinata Event"
+game_mode_respawns = "Respawns"
+game_mode_respawns_sectors = "Respawns Sectors"
 
 [ui.search.column]
 date = "Date"

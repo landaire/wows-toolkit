@@ -392,11 +392,14 @@ pub(crate) fn game_mode_label(mode: GameMode) -> String {
 ///
 /// Where the game's own player-facing name for a mode has not been confirmed
 /// (there is no `IDS_` source for `GAME_MODE` anywhere in the deobfuscated
-/// scripts), the label is the mode's own constant name rather than an
-/// invented descriptive phrase: an invented phrase asserts a mechanic nobody
-/// verified, where the constant name asserts only what the id table says.
-/// Each of those is one line in `en.toml`, so a confirmed name can replace one
-/// without touching this match or anything else.
+/// scripts), `en.toml`'s value is the mode's own name from the id table,
+/// typeset for reading (underscores to spaces, words capitalised) rather than
+/// an invented descriptive phrase: an invented phrase asserts a mechanic
+/// nobody verified, where typesetting the table's own name asserts nothing
+/// beyond what the table says -- `MEGABASE` and "Megabase" are the same
+/// identifier, one of them just readable. Each mode's value is one line in
+/// `en.toml`, so a confirmed name can replace one without touching this match
+/// or anything else.
 fn game_mode_key(mode: GameMode) -> &'static str {
     match mode {
         GameMode::Invalid => "ui.search.value.game_mode_invalid",
