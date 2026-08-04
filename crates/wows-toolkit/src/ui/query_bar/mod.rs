@@ -906,20 +906,24 @@ impl QueryBar {
             .open(true)
             .align(egui::RectAlign::BOTTOM_START)
             .show(|ui| {
-                // The width range is imposed here, every frame, rather than
+                // The max width is imposed here, every frame, rather than
                 // through `Popup::width`. That one reaches `Area::default_size`,
                 // which the area reads inside `state.size.get_or_insert_with(..)`
                 // and then only as the sizing pass's *maximum*, so it caps the
                 // popup without ever widening it: measured at 117.5 for the
                 // filter list against a 790 bar, then 53.6 once an operator
                 // list of `is` and `is not` had been shown, with no way back.
-                // Bounded on both sides instead of pinned to one width: the
-                // bar's width is the ceiling, so the list never reads as wider
-                // than the control it belongs to, and the anchor's own width is
-                // the floor, so the popup reads as belonging to the segment or
-                // fragment it hangs under rather than to the bar as a whole.
-                // `MIN_CARET_WIDTH` covers the anchor collapsing to a point, the
-                // caret's own floor for the same reason.
+                // Imposed every frame instead, the content is free to shrink
+                // back down the next time a narrow list is what is shown.
+                //
+                // Capped, not floored. A floor tied to the anchor's width made
+                // the popup as wide as whatever it hangs under -- a value
+                // segment inside a wide pill, or the bar itself when nothing
+                // narrower was on offer -- which is the report this answers: a
+                // two-row operator list read as bar-wide because the segment it
+                // was anchored to was. The inner `ScrollArea` already sizes to
+                // its rows; nothing here should widen past that.
+                //
                 // `ui` here is already the frame's own inner content area, so
                 // capping it at the bar's raw width would still leave the
                 // popup's own frame -- margin and stroke both -- poking past
@@ -930,8 +934,7 @@ impl QueryBar {
                 // painted edge, frame included, land on the bar's.
                 let overhead = egui::Frame::popup(ui.style()).total_margin().sum().x;
                 let max_width = (bar_rect.width() - overhead).max(0.0);
-                let min_width = anchor.width().max(MIN_CARET_WIDTH).min(max_width);
-                ui.set_width_range(min_width..=max_width);
+                ui.set_max_width(max_width);
                 if rows.is_empty() {
                     ui.label(
                         egui::RichText::new(t!("ui.search.bar.no_suggestions").into_owned()).color(ui.sem().text_dim),
@@ -2835,6 +2838,36 @@ mod tests {
         let narrow = harness.popup_width().expect("the dropdown was built");
         let bar = harness.rect_of(harness.id.with("background")).width();
         assert!(narrow < 200.0, "an `is` / `is not` list must not balloon to the bar's width: {narrow} (bar is {bar})");
+    }
+
+    /// The case the report is about, and the one none of the width tests above
+    /// cover: they open the dropdown from the caret or from a segment whose own
+    /// text is short. Here the segment being edited is the wide thing -- a
+    /// resolved ship name -- and the list under it is a short one, unrelated to
+    /// how wide the segment it hangs under happens to be. The popup must read
+    /// as its own list, not as though it belonged to the pill.
+    #[test]
+    fn a_narrow_list_under_a_wide_anchor_is_narrow() {
+        const WIDTH: f32 = 800.0;
+        let ship = GameParamId::from(1234u64);
+        let expr = roster_pill(RosterField::Ship, Op::Is, Value::Ship(ship));
+        let mut harness = Harness::new(expr, WIDTH);
+        harness.bar.names.ships.insert(ship, "A".repeat(40));
+        harness.settle();
+
+        open_value_editor(&mut harness, vec![], WIDTH);
+        let anchor = harness.bar.popup_anchor.expect("editing a segment anchors the dropdown to it");
+        assert!(anchor.width() > 200.0, "the fixture must anchor to a genuinely wide segment: {anchor:?}");
+
+        harness.bar.value_options = vec![ValueOption { label: "A".to_owned(), token: "1".to_owned() }];
+        harness.frame(frame_input(WIDTH));
+        harness.frame(frame_input(WIDTH));
+
+        let popup = harness.popup_width().expect("the dropdown was built");
+        assert!(
+            popup < anchor.width() / 2.0,
+            "a short value list must not inherit the width of the wide segment it hangs under: popup {popup} vs anchor {anchor:?}"
+        );
     }
 
     /// The dropdown must not shrink to whatever its narrowest list measured and
